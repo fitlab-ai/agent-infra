@@ -35,6 +35,11 @@ assigned_to: claude
 
 <!-- review artifacts -->
 
+## Review Disagreement Ledger
+
+| id | stage | round | severity | status | evidence |
+|----|-------|-------|----------|--------|----------|
+
 ## 活动日志
 
 - 2026-01-01 00:00:00+08:00 — **Plan Task** by claude — plan done

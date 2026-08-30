@@ -17,7 +17,7 @@ function fixture() {
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ntype: feature\nissue_number: 7\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ntype: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\nissue_number: 7\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const commentsPath = path.join(root, 'comments.json');
   fs.writeFileSync(commentsPath, '[]');
   const fakeGhPath = path.join(root, 'fake-gh.cjs');
@@ -130,8 +130,10 @@ test('platform-comment backfill syncs only completion artifacts and resolves onl
   try {
     const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
     fs.writeFileSync(taskMd, [
-      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'issue_number: 7', '---', '',
-      '# Task', '', '## Workflow Warnings', '',
+      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'agent_infra_version: v0.9.11-alpha.0', 'issue_number: 7', '---', '',
+      '# Task', '', '## Review Disagreement Ledger', '',
+      '| id | stage | round | severity | status | evidence |',
+      '|----|-------|-------|----------|--------|----------|', '', '## Workflow Warnings', '',
       '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
       '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
       "| WW-1 | 2026-08-07 09:00:00+08:00 | complete-task | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | COMMENT_PAYLOAD_INVALID: unsupported artifact 'pr-review.md' | retry |  |  |",
@@ -170,8 +172,10 @@ test('platform-comment backfill leaves warnings open when an artifact comment fa
   try {
     const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
     fs.writeFileSync(taskMd, [
-      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'issue_number: 7', '---', '',
-      '# Task', '', '## Workflow Warnings', '',
+      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'agent_infra_version: v0.9.11-alpha.0', 'issue_number: 7', '---', '',
+      '# Task', '', '## Review Disagreement Ledger', '',
+      '| id | stage | round | severity | status | evidence |',
+      '|----|-------|-------|----------|--------|----------|', '', '## Workflow Warnings', '',
       '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
       '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
       "| WW-1 | 2026-08-07 09:00:00+08:00 | complete-task | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | unsupported artifact 'pr-review.md' | retry |  |  |",

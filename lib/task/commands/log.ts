@@ -3,7 +3,7 @@ import { classifyAgent } from '../../agent-clients/tokens.ts';
 import { formatTable } from '../../table.ts';
 import { parseTaskScope } from '../command-options.ts';
 import { resolveTaskContext } from '../resolve-ref.ts';
-import { isReviewStage, parseLedger, type LedgerRow, type ReviewStage } from '../ledger.ts';
+import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, isReviewStage, parseLedgerDocument, type LedgerRow, type ReviewStage } from '../ledger.ts';
 import { parseActivityLog, pairEntries } from '../activity-log.ts';
 
 const USAGE = `Usage: ai task log [<N | TASK-id> | --task <ref> | -t <ref>]
@@ -146,7 +146,15 @@ function log(args: string[] = []): void {
     return;
   }
   const steps = pairEntries(entries);
-  const humanDecisionCounts = countHumanDecisionsByStage(parseLedger(content));
+  let humanDecisionCounts = new Map<ReviewStage, number>();
+  let ledgerDiagnostic: string | null = null;
+  try {
+    const ledger = parseLedgerDocument(content);
+    if (ledger.present) humanDecisionCounts = countHumanDecisionsByStage(ledger.rows as LedgerRow[]);
+    else ledgerDiagnostic = `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`;
+  } catch (error) {
+    ledgerDiagnostic = `LEDGER_DOCUMENT_INVALID: ${error instanceof Error ? error.message : String(error)}`;
+  }
   const rows = steps.map((s, idx) => {
     const stage = reviewStageForStep(s.step);
     const note = stage
@@ -160,6 +168,10 @@ function log(args: string[] = []): void {
   });
   for (const line of formatTable(TABLE_HEADERS, rows, { zebra: Boolean(process.stdout.isTTY) })) {
     process.stdout.write(`${line}\n`);
+  }
+  if (ledgerDiagnostic) {
+    process.stdout.write(`Ledger: unavailable [${ledgerDiagnostic}]\n`);
+    process.exitCode = 1;
   }
   process.stdout.write(`Total: ${steps.length} steps\n`);
 }

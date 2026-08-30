@@ -126,7 +126,7 @@ test('task-bound push-only retry ignores review artifacts and only follows Git f
   try {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\n---\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
     fs.writeFileSync(path.join(taskDir, 'review-code.md'), 'this review is intentionally not a commit gate\n');
     git(root, ['remote', 'add', 'origin', missingRemote]);
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
@@ -220,7 +220,7 @@ test('task-bound direct commit validates the task branch through the same core',
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\n---\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
 
     const result = executeCommitOperation(input(root, { taskRef: taskId, agent: 'codex' }));
@@ -245,7 +245,7 @@ test('task-bound commit from a repository subdirectory resolves the canonical re
   try {
     fs.mkdirSync(subdirectory, { recursive: true });
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\n---\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
     fs.writeFileSync(path.join(subdirectory, 'change.txt'), 'nested change\n');
     const expectedHead = git(root, ['rev-parse', 'HEAD']);
     git(root, ['add', '--', 'sub/change.txt']);
@@ -276,7 +276,7 @@ test('no-op task retry repairs a task sync warning and records the commit activi
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\n---\n`);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
 
     const first = executeCommitOperation(input(root, { taskRef: taskId, agent: 'codex' }));
@@ -301,7 +301,7 @@ test('no-op task retry does not duplicate a Commit activity after an intervening
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\n---\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
 
     const first = executeCommitOperation(input(root, { taskRef: taskId, agent: 'codex' }));
@@ -327,7 +327,7 @@ test('orchestrated commit accepts only an activated commit delegation for the bo
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\n---\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
     const begun = beginOrResumeOrchestration(taskId, {
       repoRoot: root,
       client: 'claude-code',

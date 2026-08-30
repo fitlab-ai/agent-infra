@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { VERSION } from '../version.ts';
+import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import {
   parseTypedTaskFrontmatter,
   updateTaskFrontmatter
@@ -15,6 +15,7 @@ import type {
 import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
+import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, validateLedgerRows } from './ledger.ts';
 import type {
   TableRowDeleteMutation,
   TableRowUpsertMutation
@@ -84,6 +85,7 @@ type TaskWriteMetadata = {
 type TaskWriteErrorCode =
   | ResolveTaskRefErrorCode
   | 'TASK_STATE_MISMATCH'
+  | 'TASK_CURRENT_CONTRACT_INVALID'
   | 'TASK_READ_FAILED'
   | 'TASK_DOCUMENT_INVALID'
   | 'MUTATION_INVALID'
@@ -220,6 +222,27 @@ function errorDetails(error: unknown, fallback: TaskWriteErrorCode): TaskWriteEr
   };
 }
 
+function validateCurrentTaskContract(content: string): { code: 'TASK_DOCUMENT_INVALID' | 'TASK_CURRENT_CONTRACT_INVALID'; message: string } | null {
+  let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
+  try {
+    frontmatter = parseTypedTaskFrontmatter(content);
+  } catch (error) {
+    return { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) };
+  }
+  if (!isValidAgentInfraVersion(frontmatter.agent_infra_version)) {
+    return { code: 'TASK_CURRENT_CONTRACT_INVALID', message: `agent_infra_version must be a valid v-prefixed semver (received ${String(frontmatter.agent_infra_version ?? 'missing')})` };
+  }
+  let ledger;
+  try {
+    ledger = parseLedgerDocument(content);
+  } catch (error) {
+    return { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) };
+  }
+  if (!ledger.present) return { code: 'TASK_CURRENT_CONTRACT_INVALID', message: `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}` };
+  const invalid = validateLedgerRows(ledger.rows);
+  return invalid ? { code: 'TASK_CURRENT_CONTRACT_INVALID', message: `${invalid.code}: ${invalid.message}` } : null;
+}
+
 function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
   const resolved = options.taskLocation
     ? {
@@ -266,6 +289,13 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
       'TASK_READ_FAILED',
       error instanceof Error ? error.message : String(error)
     );
+  }
+
+  if (resolved.state === 'active') {
+    const contractError = validateCurrentTaskContract(original);
+    if (contractError) {
+      return failure(request, identity, contractError.code, contractError.message);
+    }
   }
 
   let candidate = original;
@@ -340,6 +370,16 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
       'METADATA_CAPTURE_FAILED',
       error instanceof Error ? error.message : String(error),
       operations
+    );
+  }
+  if (resolved.state === 'active' && !isValidAgentInfraVersion(metadata.agentInfraVersion)) {
+    return failure(
+      request,
+      identity,
+      'TASK_CURRENT_CONTRACT_INVALID',
+      `metadata agentInfraVersion must be a valid v-prefixed semver (received ${metadata.agentInfraVersion})`,
+      operations,
+      metadata
     );
   }
 
@@ -444,7 +484,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
   return { ...successBase, status: 'applied', changed: true };
 }
 
-export { writeTask, captureTaskWriteMetadata, canonicalTimestamp };
+export { writeTask, captureTaskWriteMetadata, canonicalTimestamp, validateCurrentTaskContract };
 export type {
   FrontmatterMutation,
   SectionMutation,

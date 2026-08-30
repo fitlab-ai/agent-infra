@@ -23,7 +23,7 @@ function fixture(state: FixtureState = 'active') {
   const taskMdPath = path.join(taskDir, 'task.md');
   fs.writeFileSync(
     taskMdPath,
-    `---\nid: ${TASK_ID}\nstatus: ${state}\nupdated_at: old\nagent_infra_version: v0.0.1\n---\n# Task\n\n## Notes\n\nold\n`
+    `---\nid: ${TASK_ID}\nstatus: ${state}\nupdated_at: old\nagent_infra_version: v0.0.1\n---\n# Task\n\n${state === 'active' ? '## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n' : ''}## Notes\n\nold\n`
   );
   if (state === 'active') {
     fs.writeFileSync(
@@ -466,4 +466,44 @@ test('writeTask maps read and document validation failures before metadata sampl
   assert.equal(documentFailure.status, 'failed');
   assert.equal(documentFailure.error?.code, 'TASK_DOCUMENT_INVALID');
   assert.equal(calls, 0);
+});
+
+test('writeTask rejects an active task with a missing current contract before mutation or metadata capture', () => {
+  const { repoRoot, taskMdPath } = fixture();
+  const before = fs.readFileSync(taskMdPath);
+  fs.writeFileSync(taskMdPath, before.toString().replace('agent_infra_version: v0.0.1\n', ''));
+  let metadataCalls = 0;
+  const result = writeTask(
+    {
+      taskRef: TASK_ID,
+      expectedState: 'active',
+      mutations: [{ kind: 'frontmatter', set: { status: 'changed' } }]
+    },
+    { repoRoot, metadataProvider: () => { metadataCalls += 1; return METADATA; } }
+  );
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'TASK_CURRENT_CONTRACT_INVALID');
+  assert.match(result.error?.message ?? '', /agent_infra_version/);
+  assert.equal(metadataCalls, 0);
+  assert.equal(fs.readFileSync(taskMdPath, 'utf8'), before.toString().replace('agent_infra_version: v0.0.1\n', ''));
+});
+
+test('writeTask rejects an active task with a missing ledger before mutation or metadata capture', () => {
+  const { repoRoot, taskMdPath } = fixture();
+  const before = fs.readFileSync(taskMdPath, 'utf8');
+  fs.writeFileSync(taskMdPath, before.replace(/## Review Disagreement Ledger[\s\S]*?## Notes\n/, '## Notes\n'));
+  let metadataCalls = 0;
+  const result = writeTask(
+    {
+      taskRef: TASK_ID,
+      expectedState: 'active',
+      mutations: [{ kind: 'frontmatter', set: { status: 'changed' } }]
+    },
+    { repoRoot, metadataProvider: () => { metadataCalls += 1; return METADATA; } }
+  );
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'TASK_CURRENT_CONTRACT_INVALID');
+  assert.match(result.error?.message ?? '', /ledger/);
+  assert.equal(metadataCalls, 0);
+  assert.equal(fs.readFileSync(taskMdPath, 'utf8'), before.replace(/## Review Disagreement Ledger[\s\S]*?## Notes\n/, '## Notes\n'));
 });

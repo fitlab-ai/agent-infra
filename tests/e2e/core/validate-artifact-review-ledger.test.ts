@@ -42,14 +42,15 @@ function runLedger(skill: string, taskDir: string, repositoryRoot?: string) {
   return { result, payload: parseValidatorPayload(result.stdout) };
 }
 
-test("review-ledger passes when no ledger section exists (backward compatible)", async () => {
+test("review-ledger fails when no ledger section exists", async () => {
   await withTempRoot("agent-infra-ledger-none-", (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([], { withSection: false }));
 
     const { result, payload } = runLedger("complete-task", taskDir);
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(payload.status, "pass");
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(payload.status, "fail");
+    assert.match(payload.message, /LEDGER_SECTION_MISSING/);
   });
 });
 

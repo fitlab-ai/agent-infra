@@ -11,5 +11,10 @@ if (!packageJsonUrl) {
 
 const { version } = JSON.parse(readFileSync(packageJsonUrl, 'utf8'));
 const VERSION = `v${version}`;
+const AGENT_INFRA_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
-export { VERSION };
+function isValidAgentInfraVersion(value: unknown): value is string {
+  return typeof value === 'string' && AGENT_INFRA_VERSION_PATTERN.test(value);
+}
+
+export { VERSION, isValidAgentInfraVersion };

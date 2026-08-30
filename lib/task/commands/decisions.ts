@@ -3,7 +3,7 @@ import path from 'node:path';
 import { formatTable } from '../../table.ts';
 import { parseTaskScope } from '../command-options.ts';
 import { resolveTaskContext } from '../resolve-ref.ts';
-import { isReviewStage, parseLedger, type LedgerRow, type ReviewStage } from '../ledger.ts';
+import { isReviewStage, parseLedgerDocument, type LedgerRow, type ReviewStage } from '../ledger.ts';
 import { listDecisionItems, selectDecisionItem } from '../decision-items.ts';
 import { extractSubSection } from '../sections.ts';
 
@@ -291,8 +291,20 @@ function decisions(args: string[] = []): void {
     return;
   }
 
-  const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const rows = listDecisionItems(parseLedger(content), {
+  let content: string;
+  let ledger;
+  try {
+    content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    ledger = parseLedgerDocument(content);
+  } catch (error) {
+    fail(`ledger unavailable [LEDGER_DOCUMENT_INVALID]: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  if (!ledger.present) {
+    fail('ledger unavailable [LEDGER_SECTION_MISSING]: review disagreement ledger section is missing');
+    return;
+  }
+  const rows = listDecisionItems(ledger.rows as LedgerRow[], {
     includeDecided: parsed.all,
     stage: parsed.stage as ReviewStage | undefined
   });

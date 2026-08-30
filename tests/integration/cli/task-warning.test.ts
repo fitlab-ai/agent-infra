@@ -13,7 +13,7 @@ function fixture() {
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nupdated_at: old\nagent_infra_version: old\n---\n# Task\n\n## Activity Log\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
   return { root, id, file: path.join(dir, 'task.md') };
 }
 

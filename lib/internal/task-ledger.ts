@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { applyLedgerIntent } from '../task/ledger-intents.ts';
 import type { LedgerIntent } from '../task/ledger-intents.ts';
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
-import { isReviewStage, parseLedger, summarizeLedgerStage, validateLedgerRows } from '../task/ledger.ts';
+import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, isReviewStage, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from '../task/ledger.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 
@@ -81,7 +81,13 @@ function taskLedger(args: string[] = []): void {
       return;
     }
     try {
-      const rows = parseLedger(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+      const ledger = parseLedgerDocument(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+      if (!ledger.present) {
+        process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, taskId: resolved.taskId, error: { code: LEDGER_SECTION_MISSING_CODE, message: LEDGER_SECTION_MISSING_MESSAGE } })}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      const rows = ledger.rows;
       const invalid = validateLedgerRows(rows);
       if (invalid) {
         process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, taskId: resolved.taskId, error: invalid })}\n`);

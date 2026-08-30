@@ -15,7 +15,7 @@ function fixture() {
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: requirement-analysis\n---\n\n# Task\n\n## Activity Log\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\ncurrent_step: requirement-analysis\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   spawnSync('git', ['add', '.'], { cwd: root });
@@ -54,7 +54,7 @@ function approvedRouteFixture(prFlow: 'required' | 'disabled' | undefined) {
   spawnSync('git', ['add', '.'], { cwd: root });
   spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: root });
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: code-review\npr_number: 42\nlast_reviewed_commit: ${head}\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\ncurrent_step: code-review\npr_number: 42\nlast_reviewed_commit: ${head}\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
   fs.writeFileSync(path.join(dir, 'review-analysis.md'), '# Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(dir, 'plan.md'), '# Plan\n');

@@ -16,7 +16,7 @@ function fixture() {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(active, '.short-ids.json'), JSON.stringify({ version: 1, ids: { '07': id } }));
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nupdated_at: old\nagent_infra_version: old\n---\n# Task\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\n---\n# Task\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   return { root, id, file: path.join(dir, 'task.md') };
 }
 

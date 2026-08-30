@@ -3,9 +3,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
-import { parseReviewSummary } from './review-artifacts.ts';
+import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.ts';
+import { isValidAgentInfraVersion } from '../version.ts';
 import { inspectArtifactDirectory } from './artifact-lifecycle.ts';
-import { parseLedger, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
+import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import {
   activateDelegation,
@@ -530,14 +531,20 @@ function hasReviewAfterArtifact(taskDir: string, family: string, reviewFamily: s
     && review.reviewedInput?.name === artifact.latest.name;
 }
 
-function latestReviewApproved(taskDir: string, family: 'review-analysis' | 'review-plan' | 'review-code'): boolean {
+function latestReviewApproved(taskDir: string, family: 'review-analysis' | 'review-plan' | 'review-code'): { approved: boolean; error: string | null } {
   const round = highestRound(taskDir, family);
-  if (round === 0) return false;
-  const parsed = parseReviewSummary(fs.readFileSync(path.join(taskDir, artifactName(family, round)), 'utf8'));
-  return parsed.ok && parsed.summary.verdict === 'Approved' && parsed.summary.counts !== null;
+  if (round === 0) return { approved: false, error: null };
+  let content: string;
+  try { content = fs.readFileSync(path.join(taskDir, artifactName(family, round)), 'utf8'); }
+  catch (error) { return { approved: false, error: String(error) }; }
+  const parsed = parseReviewSummary(content);
+  if (!parsed.ok) return { approved: false, error: `${parsed.code}: ${parsed.message}` };
+  const verdict = resolveCanonicalVerdict(parsed.summary);
+  if (!verdict.ok) return { approved: false, error: `${verdict.code}: ${verdict.message}` };
+  return { approved: verdict.verdict === 'Approved', error: null };
 }
 
-function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | null {
+function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | { error: string } | null {
   const analysisRound = highestRound(taskDir, 'analysis');
   const analysisReviewRound = highestRound(taskDir, 'review-analysis');
   const planRound = highestRound(taskDir, 'plan');
@@ -552,7 +559,9 @@ function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedMode
     const round = analysisReviewRound + 1;
     return { action: 'review-analysis', role: 'reviewer', stage: 'review-analysis', round, artifact: artifactName('review-analysis', round) };
   }
-  if (!latestReviewApproved(taskDir, 'review-analysis')) {
+  const analysisVerdict = latestReviewApproved(taskDir, 'review-analysis');
+  if (analysisVerdict.error) return { error: analysisVerdict.error };
+  if (!analysisVerdict.approved) {
     const round = analysisRound + 1;
     return { action: 'analyze-task', role: 'executor', stage: 'analysis', round, artifact: artifactName('analysis', round) };
   }
@@ -564,7 +573,9 @@ function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedMode
     const round = planReviewRound + 1;
     return { action: 'review-plan', role: 'reviewer', stage: 'review-plan', round, artifact: artifactName('review-plan', round) };
   }
-  if (!latestReviewApproved(taskDir, 'review-plan')) {
+  const planVerdict = latestReviewApproved(taskDir, 'review-plan');
+  if (planVerdict.error) return { error: planVerdict.error };
+  if (!planVerdict.approved) {
     const round = planRound + 1;
     return { action: 'plan-task', role: 'executor', stage: 'plan', round, artifact: artifactName('plan', round) };
   }
@@ -576,7 +587,9 @@ function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedMode
     const round = codeReviewRound + 1;
     return { action: 'review-code', role: 'reviewer', stage: 'review-code', round, artifact: artifactName('review-code', round) };
   }
-  if (!latestReviewApproved(taskDir, 'review-code')) {
+  const codeVerdict = latestReviewApproved(taskDir, 'review-code');
+  if (codeVerdict.error) return { error: codeVerdict.error };
+  if (!codeVerdict.approved) {
     const round = codeRound + 1;
     return { action: 'code-task', role: 'executor', stage: 'code', round, artifact: artifactName('code', round) };
   }
@@ -604,7 +617,19 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   } catch (error) {
     return failed('ORCHESTRATION_TASK_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
+  if (resolved.state === 'active') {
+    if (!isValidAgentInfraVersion(metadata.agent_infra_version)) {
+      return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', 'agent_infra_version must be a valid v-prefixed semver', resolved.taskId);
+    }
+    let ledger;
+    try { ledger = parseLedgerDocument(content); }
+    catch (error) { return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId); }
+    if (!ledger.present) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`, resolved.taskId);
+    const ledgerError = validateLedgerRows(ledger.rows);
+    if (ledgerError) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', `${ledgerError.code}: ${ledgerError.message}`, resolved.taskId);
+  }
   const routed = routeFromFacts(resolved.taskDir);
+  if (routed && 'error' in routed) return failed('ORCHESTRATION_REVIEW_INVALID', routed.error, resolved.taskId);
   if (!routed) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
   const run = readRun(resolved.taskDir);
   const policy = run ? rolePolicy(run, routed.role) : null;
@@ -622,7 +647,9 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     if (!review.ok || review.summary.manualValidation === null) {
       return failed('ORCHESTRATION_REVIEW_INVALID', 'latest code review has no numeric manual-validation count', resolved.taskId);
     }
-    const rows = parseLedger(content);
+    const ledger = parseLedgerDocument(content);
+    if (!ledger.present) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`, resolved.taskId);
+    const rows = ledger.rows;
     const ledgerError = validateLedgerRows(rows);
     if (ledgerError) return failed('ORCHESTRATION_LEDGER_INVALID', ledgerError.message, resolved.taskId);
     if (!summarizeLedgerStage(rows, 'code').canAdvance) {

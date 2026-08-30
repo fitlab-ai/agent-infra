@@ -26,8 +26,10 @@ function fixture(): { repoRoot: string; taskDir: string } {
   fs.writeFileSync(path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
     '---', `id: ${TASK_ID}`, 'issue_number: 42', 'status: active', 'current_step: code-review',
-    'assigned_to: codex', 'updated_at: old', 'agent_infra_version: old', 'target_date:', '---',
-    '', '# Task', '', '## Activity Log', ''
+    'assigned_to: codex', 'updated_at: old', 'agent_infra_version: v0.9.9', 'target_date:', '---',
+    '', '# Task', '', '## Review Disagreement Ledger', '',
+    '| id | stage | round | severity | status | evidence |',
+    '|----|-------|-------|----------|--------|----------|', '', '## Activity Log', ''
   ].join('\n'));
   return { repoRoot, taskDir };
 }

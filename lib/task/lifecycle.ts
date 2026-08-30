@@ -10,8 +10,9 @@ import {
   configuredShortIdLength, executeShortIdCommand, loadShortIdByTaskId,
   mutateShortIdRegistry
 } from './short-id.ts';
-import { captureTaskWriteMetadata, writeTask } from './write.ts';
+import { captureTaskWriteMetadata, validateCurrentTaskContract, writeTask } from './write.ts';
 import type { TaskFileSystem, TaskMutation, TaskOperationSummary, TaskWriteMetadata } from './write.ts';
+import { isValidAgentInfraVersion } from '../version.ts';
 
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'
@@ -393,6 +394,10 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   catch (error) { return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
   if (frontmatter.id !== taskId) return failed(request, { code: 'LIFECYCLE_IDENTITY_INVALID', message: 'task.md id does not match its lifecycle task id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   if (!locateActivityLog(content) && !allowsManualOverride(options, 'LIFECYCLE_LOG_MISSING')) return failed(request, { code: 'LIFECYCLE_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+  if (spec.target === 'active') {
+    const contractError = validateCurrentTaskContract(content);
+    if (contractError) return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: contractError.message }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+  }
   const registryRequest = executeShortIdCommand({
     operation: 'list', activeDir: path.join(repoRoot, '.agents', 'workspace', 'active'),
     shortIdLength: configuredShortIdLength(repoRoot)
@@ -416,6 +421,9 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     try { journal = parseJournal(io.readFileSync(initialJournalPath)); }
     catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_INVALID', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath }); }
     if (journal.taskId !== taskId || journal.intent !== request.intent) return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: 'an in-progress lifecycle journal belongs to a different request' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+    if (spec.target === 'active' && !isValidAgentInfraVersion(journal.metadata.agentInfraVersion)) {
+      return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: `journal metadata agentInfraVersion must be a valid v-prefixed semver (received ${journal.metadata.agentInfraVersion})` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+    }
     if (request.dryRun) {
       if (!journal.failure) return failed(request, { code: 'LIFECYCLE_JOURNAL_INVALID', message: 'existing lifecycle journal has no durable failure evidence for a read-only probe' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
       return failed(request, journal.failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath, completedSteps: journal.completedSteps, pendingSteps: STEPS.filter((step) => !journal.completedSteps.includes(step)) });
@@ -426,6 +434,9 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     let metadata: TaskWriteMetadata;
     try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
     catch (error) { return failed(request, { code: 'LIFECYCLE_METADATA_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
+    if (spec.target === 'active' && !isValidAgentInfraVersion(metadata.agentInfraVersion)) {
+      return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: `metadata agentInfraVersion must be a valid v-prefixed semver (received ${metadata.agentInfraVersion})` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+    }
     journal = { version: 1, taskId, intent: request.intent, intentDigest: digest, sourceState, targetState: spec.target, metadata, completedSteps: [] };
     if (request.dryRun) {
       const plannedMutations = mutationsFor(request, content, metadata, restoredFiles, allowsManualOverride(options, 'LIFECYCLE_LOG_MISSING'));

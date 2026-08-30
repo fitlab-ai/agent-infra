@@ -46,7 +46,8 @@ type ArtifactErrorCode =
   | 'ARTIFACT_TOPOLOGY_CONFLICT' | 'ARTIFACT_INPUT_MISSING'
   | 'ARTIFACT_REFERENCE_INVALID' | 'ARTIFACT_PATH_INVALID'
   | 'ARTIFACT_IDENTITY_INVALID' | 'ARTIFACT_NOT_FOUND'
-  | 'ARTIFACT_NOT_REGULAR' | 'ARTIFACT_NOT_READABLE' | 'ARTIFACT_MODE_REFUSED';
+  | 'ARTIFACT_NOT_REGULAR' | 'ARTIFACT_NOT_READABLE' | 'ARTIFACT_VERDICT_INVALID'
+  | 'ARTIFACT_MODE_REFUSED';
 type ArtifactError = { code: ArtifactErrorCode; message: string };
 type ArtifactInventoryResult = {
   status: 'ready' | 'failed';
@@ -357,7 +358,7 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
       return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `latest plan '${plan.latest.name}' requires a matching approved review-plan`);
     }
     const verdict = parseVerdict(reviewPlan.latest.path);
-    if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', verdict.message, reviewPlan.latest.name);
+    if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, reviewPlan.latest.name);
     if (verdict.verdict !== 'Approved') {
       return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', `latest ${reviewPlan.latest.name} is not approved`, reviewPlan.latest.name);
     }
@@ -373,6 +374,7 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   }
   if (reviewPlan.latest && reviewPlan.reviewedInput?.name === plan.latest.name) {
     const verdict = parseVerdict(reviewPlan.latest.path);
+    if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, reviewPlan.latest.name);
     const reviewedPlanSha256 = sha256File(reviewPlan.reviewedInput.path);
     if (verdict.ok && verdict.verdict === 'Approved' && (
       codePlanInput.input.name !== plan.latest.name || codePlanInput.inputSha256 !== reviewedPlanSha256
@@ -388,7 +390,7 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   const review = reviewCode.latest;
   if (!review) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', 'latest review-code artifact is required');
   const verdict = parseVerdict(review.path);
-  if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', verdict.message);
+  if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, review.name);
   if (verdict.verdict === 'Approved') {
     const decision = resolveDecisionImplementationInput(inventory, review);
     if ('error' in decision) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', decision.error, review.name);

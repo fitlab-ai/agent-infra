@@ -8,4 +8,4 @@ export {
   parseReviewVerdict,
   resolvePostReviewGlobs
 } from './review-fingerprint.ts';
-export { parseLedger, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
+export { parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';

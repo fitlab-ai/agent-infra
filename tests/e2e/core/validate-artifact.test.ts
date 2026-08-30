@@ -165,18 +165,14 @@ const taskMetaCases: TaskMetaCase[] = [
     }
   },
   {
-    name: "validate-artifact task-meta warns without blocking when agent_infra_version is missing",
+    name: "validate-artifact task-meta rejects a current task when agent_infra_version is missing",
     skill: "code-task",
     content() {
-      return buildTaskContent();
+      return buildTaskContent().replace(/^agent_infra_version: .*$/m, "agent_infra_version:");
     },
     assertResult(result) {
-      assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout, /agent_infra_version.*missing/);
-      const payload = parseValidatorPayload(result.stdout);
-      assert.deepEqual(payload.warnings, [
-        "field 'agent_infra_version' missing — historical task or skipped version stamp"
-      ]);
+      assert.equal(result.status, 1);
+      assert.match(result.stdout, /Missing required fields: agent_infra_version/);
     }
   },
   {
@@ -191,14 +187,14 @@ const taskMetaCases: TaskMetaCase[] = [
     }
   },
   {
-    name: "validate-artifact task-meta accepts unknown agent_infra_version fallback",
+    name: "validate-artifact task-meta rejects unknown agent_infra_version",
     skill: "code-task",
     content() {
       return buildTaskContent({ agent_infra_version: "unknown" });
     },
     assertResult(result) {
-      assert.equal(result.status, 0, result.stderr);
-      assert.doesNotMatch(result.stdout, /agent_infra_version.*missing/);
+      assert.equal(result.status, 1);
+      assert.match(result.stdout, /Invalid agent_infra_version/);
     }
   },
   {

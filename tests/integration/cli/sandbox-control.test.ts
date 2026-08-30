@@ -983,7 +983,9 @@ test('task-bound finalization compensates an accepted response loss through the 
       '---', `id: ${taskId}`, 'type: bugfix', 'workflow: bug-fix', 'status: active',
       'created_at: 2026-08-09 01:02:03+00:00', 'updated_at: 2026-08-09 01:02:03+00:00',
       'agent_infra_version: v0.9.9', 'current_step: code-review', 'assigned_to: codex',
-      'target_date:', '---', '', '# Task', '', '## Activity Log', ''
+      'target_date:', '---', '', '# Task', '', '## Review Disagreement Ledger', '',
+      '| id | stage | round | severity | status | evidence |',
+      '|----|-------|-------|----------|--------|----------|', '', '## Activity Log', ''
     ].join('\n'));
 
     const statusDir = path.join(root, 'public');

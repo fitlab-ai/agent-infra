@@ -20,6 +20,10 @@ type LedgerRow = {
   /** Zero-based line within the normalized ledger section body. */
   sourceLine: number;
 };
+type LedgerDocument = {
+  present: boolean;
+  rows: readonly LedgerRow[];
+};
 
 type ReviewStage = 'analysis' | 'plan' | 'code';
 type ReviewSeverity = 'blocker' | 'major' | 'minor';
@@ -40,6 +44,8 @@ const LEDGER_TERMINAL = new Set(['confirmed', 'closed', 'human-decided']);
 // Statuses that represent a decision row awaiting or carrying a human ruling.
 const HUMAN_DECISION_STATUSES = new Set(['needs-human-decision', 'human-decided']);
 const FINDING_STATUSES = new Set(['open', 'accepted', 'adjusted', 'refuted', 'cannot-judge', 'confirmed', 'needs-human-decision', 'closed', 'human-decided']);
+const LEDGER_SECTION_MISSING_CODE = 'LEDGER_SECTION_MISSING';
+const LEDGER_SECTION_MISSING_MESSAGE = 'review disagreement ledger section is missing';
 
 function isReviewStage(stage: string): stage is ReviewStage {
   return stage === 'analysis' || stage === 'plan' || stage === 'code';
@@ -48,12 +54,16 @@ function isReviewStage(stage: string): stage is ReviewStage {
 // Parse all rows of the disagreement ledger table. Skips the heading, the
 // header row (`| id | ... |`) and the `|---|` separator; ignores non-`|` lines.
 // Rows with fewer than 6 columns are skipped (mirrors the JS gate parser).
-function parseLedger(content: string): LedgerRow[] {
+function parseLedgerDocument(content: string): LedgerDocument {
   const table = parseTable(content, { sectionAliases: LEDGER_HEADINGS, columns: LEDGER_COLUMNS });
-  return table?.rows.map(({ values, sourceLine }) => ({
-    id: values.id!, stage: values.stage!, round: values.round!, severity: values.severity!,
-    status: values.status!, evidence: values.evidence!, sourceLine
-  })) ?? [];
+  if (!table) return { present: false, rows: [] };
+  return {
+    present: true,
+    rows: table.rows.map(({ values, sourceLine }) => ({
+      id: values.id!, stage: values.stage!, round: values.round!, severity: values.severity!,
+      status: values.status!, evidence: values.evidence!, sourceLine
+    }))
+  };
 }
 
 function validateLedgerRows(rows: readonly LedgerRow[]): LedgerValidationError | null {
@@ -130,5 +140,5 @@ function nextHdId(rows: readonly LedgerRow[]): string {
   return `HD-${max + 1}`;
 }
 
-export { LEDGER_HEADINGS, LEDGER_COLUMNS, parseLedger, nextHdId, isReviewStage, validateLedgerRows, summarizeLedgerStage, LEDGER_TERMINAL, HUMAN_DECISION_STATUSES };
-export type { LedgerRow, ReviewStage, ReviewSeverity, LedgerValidationError, LedgerStageStatus };
+export { LEDGER_HEADINGS, LEDGER_COLUMNS, parseLedgerDocument, nextHdId, isReviewStage, validateLedgerRows, summarizeLedgerStage, LEDGER_TERMINAL, HUMAN_DECISION_STATUSES, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE };
+export type { LedgerRow, LedgerDocument, ReviewStage, ReviewSeverity, LedgerValidationError, LedgerStageStatus };

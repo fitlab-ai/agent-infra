@@ -20,7 +20,7 @@ function fixture(issueNumber = '') {
   const dir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: TASK-20260101-000001\ntype: feature\nissue_number: ${issueNumber}\n---\n\n# 任务：Add safe sync\n\n## 描述\n\nKeep | shell characters.\n\n## 需求\n\n- [x] first\n- [ ] second\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: TASK-20260101-000001\ntype: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\nissue_number: ${issueNumber}\n---\n\n# 任务：Add safe sync\n\n## 描述\n\nKeep | shell characters.\n\n## 需求\n\n- [x] first\n- [ ] second\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   return root;
 }
 

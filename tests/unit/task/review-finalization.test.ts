@@ -8,7 +8,9 @@ import { spawnSync } from 'node:child_process';
 import { finalizeReviewSummary } from '../../../lib/task/review-finalization.ts';
 import {
   finalizeReviewSummaryContent,
-  parseReviewSummary
+  parseReviewSummary,
+  parseVerdict,
+  resolveCanonicalVerdict
 } from '../../../lib/task/review-artifacts.ts';
 
 const counts = { blocker: 1, major: 2, minor: 3 };
@@ -72,6 +74,41 @@ test('review summary parser distinguishes canonical placeholders and numeric cou
     assert.deepEqual(numeric.summary.counts, counts);
     assert.equal(numeric.summary.verdict, 'Changes Requested');
     assert.equal(numeric.summary.manualValidation, 0);
+  }
+});
+
+test('canonical verdict rejects approved non-zero findings and unresolved placeholders', () => {
+  assert.deepEqual(
+    resolveCanonicalVerdict({ verdict: 'Approved', counts: { blocker: 1, major: 0, minor: 0 }, manualValidation: 0, countState: 'numeric' }),
+    {
+      ok: false,
+      verdict: null,
+      code: 'REVIEW_VERDICT_FINDING_MISMATCH',
+      message: 'Approved verdict requires zero finalized findings'
+    }
+  );
+  const pending = resolveCanonicalVerdict({ verdict: 'Approved', counts: null, manualValidation: 0, countState: 'placeholders' });
+  assert.equal(pending.ok, false);
+  if (!pending.ok) assert.equal(pending.code, 'REVIEW_FINDING_COUNTS_NOT_FINALIZED');
+});
+
+test('path verdict resolver preserves artifact and summary diagnostics', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-verdict-'));
+  try {
+    const missing = parseVerdict(path.join(root, 'missing.md'));
+    assert.equal(missing.ok, false);
+    if (!missing.ok) assert.equal(missing.code, 'REVIEW_ARTIFACT_NOT_FOUND');
+    const artifact = path.join(root, 'review.md');
+    fs.writeFileSync(artifact, '## Review Summary\n\n- **Overall Verdict**: Approved\n- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors\n');
+    const placeholder = parseVerdict(artifact);
+    assert.equal(placeholder.ok, false);
+    if (!placeholder.ok) assert.equal(placeholder.code, 'REVIEW_FINDING_COUNTS_NOT_FINALIZED');
+    fs.writeFileSync(artifact, '## Review Summary\n\n- **Overall Verdict**: Approved\n- **Findings (AI-actionable)**: 1 blocker, 0 majors, 0 minors\n');
+    const mismatch = parseVerdict(artifact);
+    assert.equal(mismatch.ok, false);
+    if (!mismatch.ok) assert.equal(mismatch.code, 'REVIEW_VERDICT_FINDING_MISMATCH');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

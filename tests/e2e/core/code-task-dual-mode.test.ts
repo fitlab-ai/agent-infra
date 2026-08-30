@@ -16,7 +16,7 @@ function makeFixture(files: Record<string, string>) {
   spawnSync("git", ["init", "-q"], { cwd: root });
   const taskDir = path.join(root, ".agents", "workspace", "active", TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${TASK_ID}\ncurrent_step: technical-design-review\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: technical-design-review\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const withPlan = files["plan.md"] ? files : { "plan.md": "# plan", ...files };
   for (const [name, content] of Object.entries(withPlan)) fs.writeFileSync(path.join(taskDir, name), content);
   seedLifecycleReceipts(taskDir);
@@ -83,10 +83,17 @@ function decisionTask(rows: string[], reviewTime = "2026-07-18 10:00:00+08:00", 
     : `- ${reviewTime} — **Review Code (Round 1) [started]** by claude — started`;
   return `---
 id: ${TASK_ID}
+status: active
 current_step: code-review
+agent_infra_version: v0.9.11-alpha.0
 ---
 
 # Task
+
+## Review Disagreement Ledger
+
+| id | stage | round | severity | status | evidence |
+|----|-------|-------|----------|--------|----------|
 
 ## 实现输入
 
@@ -167,18 +174,17 @@ test("code-task dual-mode: human-supplemented review (Changes Requested) enters 
   assert.equal(result.output.review_artifact, "review-code-r2.md");
 });
 
-test("code-task dual-mode: human-supplemented review (Approved-with-issues) enters optional fix mode", () => {
+test("code-task dual-mode: human-supplemented review (Approved with findings) fails closed", () => {
   const result = runDetect({
     "code.md": "# code",
     "review-code.md": zhReview("通过"),
     "review-code-r2.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **人工校验**：0")
   });
 
-  assert.equal(result.status, 0);
-  assert.equal(result.output.mode, "fix");
-  assert.equal(result.output.verdict, "Approved-with-issues");
-  assert.equal(result.output.next_artifact, "code-r2.md");
-  assert.equal(result.output.review_artifact, "review-code-r2.md");
+  assert.equal(result.status, 2);
+  assert.equal(result.output.mode, "error");
+  assert.equal(result.output.verdict, null);
+  assert.match(result.output.message, /REVIEW_VERDICT_FINDING_MISMATCH/);
 });
 
 test("code-task dual-mode: human-supplemented review (Rejected) refuses local fix mode", () => {
@@ -272,29 +278,28 @@ test("code-task decision mode requires a completed approved review identity", ()
   assert.match(result.output.message, /completed Activity Log identity/i);
 });
 
-test("code-task dual-mode: branch 5 - Approved with findings enters optional fix mode (zh-CN review fixture)", () => {
+test("code-task dual-mode: branch 5 - Approved with findings fails closed (zh-CN review fixture)", () => {
   const result = runDetect({
     "code.md": "# code",
     "review-code.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **人工校验**：0")
   });
 
-  assert.equal(result.status, 0);
-  assert.equal(result.output.mode, "fix");
-  assert.equal(result.output.verdict, "Approved-with-issues");
-  assert.equal(result.output.review_artifact, "review-code.md");
-  assert.equal(result.output.next_artifact, "code-r2.md");
+  assert.equal(result.status, 2);
+  assert.equal(result.output.mode, "error");
+  assert.equal(result.output.verdict, null);
+  assert.match(result.output.message, /REVIEW_VERDICT_FINDING_MISMATCH/);
 });
 
-test("code-task dual-mode: branch 5 - Approved with findings enters optional fix mode (en review fixture)", () => {
+test("code-task dual-mode: branch 5 - Approved with findings fails closed (en review fixture)", () => {
   const result = runDetect({
     "code.md": "# code",
     "review-code.md": enReview("Approved", "0 blockers, 1 major, 2 minors / **Manual validation**: 0")
   });
 
-  assert.equal(result.status, 0);
-  assert.equal(result.output.mode, "fix");
-  assert.equal(result.output.verdict, "Approved-with-issues");
-  assert.equal(result.output.review_artifact, "review-code.md");
+  assert.equal(result.status, 2);
+  assert.equal(result.output.mode, "error");
+  assert.equal(result.output.verdict, null);
+  assert.match(result.output.message, /REVIEW_VERDICT_FINDING_MISMATCH/);
 });
 
 test("code-task dual-mode: branch 6 - Changes Requested triggers fix mode (zh-CN review fixture)", () => {
@@ -474,7 +479,7 @@ test("code-task dual-mode: branch 2 (replan) - precedes unreviewed-code error", 
   assert.equal(result.output.review_artifact, "review-plan-r2.md");
 });
 
-test("code-task dual-mode: branch 2 (replan) - review-plan Approved-with-issues does not trigger init", () => {
+test("code-task dual-mode: branch 2 (replan) - review-plan Approved with findings fails closed", () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // review-plan-r2 has Approved + 1 major → normalizes to Approved-with-issues.
   const result = runDetectWithTransportTimes(
@@ -496,10 +501,10 @@ test("code-task dual-mode: branch 2 (replan) - review-plan Approved-with-issues 
     }
   );
 
-  assert.equal(result.status, 1);
-  assert.equal(result.output.mode, "refused");
-  assert.equal(result.output.verdict, "Approved");
-  assert.equal(result.output.review_artifact, "review-code.md");
+  assert.equal(result.status, 2);
+  assert.equal(result.output.mode, "error");
+  assert.equal(result.output.verdict, null);
+  assert.match(result.output.message, /REVIEW_VERDICT_FINDING_MISMATCH/);
 });
 
 test("code-task dual-mode: branch 2 (replan) - off-number plan/review-plan linked via 审查输入", () => {
