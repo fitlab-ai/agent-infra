@@ -835,12 +835,13 @@ test('sandbox control client tolerates a transient torn response but rejects sta
   const requestsDir = path.join(channelDir, 'requests');
   const responsesDir = path.join(channelDir, 'responses');
   const statusDir = path.join(root, 'public');
+  const statusPath = path.join(statusDir, 'status.json');
   fs.mkdirSync(requestsDir, { recursive: true });
   fs.mkdirSync(responsesDir);
   fs.mkdirSync(statusDir);
   const responseBrokerStartTime = getProcessStartTime(process.pid);
   assert.ok(responseBrokerStartTime);
-  fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
+  fs.writeFileSync(statusPath, `${JSON.stringify({
     version: 2,
     generation: 'response-generation',
     broker: { pid: process.pid, startTime: responseBrokerStartTime, brokerId: 'test-broker' },
@@ -895,6 +896,9 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     assert.equal(transient.exitCode, 0, transient.stderr || transient.stdout);
     assert.equal(JSON.parse(transient.stdout).response.error.code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
 
+    const status = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as Record<string, unknown>;
+    status.updatedAt = Date.now();
+    fs.writeFileSync(statusPath, `${JSON.stringify(status)}\n`);
     stableClient = runClient();
     const stableName = await waitForRequestAsync(requestsDir, 2_000, {
       client: stableClient,
