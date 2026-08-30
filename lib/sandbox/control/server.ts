@@ -228,6 +228,7 @@ export async function serveSandboxControl(
     appendSandboxControlAudit(manifest, 'broker-start', { pid: broker.pid });
     if (!recoverProcessing(manifest, brokerOwns)) return;
     while (!signal.aborted) {
+      let settledExecution: ActiveExecution | null = null;
       if (!brokerOwns()) break;
       let current: SandboxControlManifest;
       try {
@@ -277,18 +278,7 @@ export async function serveSandboxControl(
 
       if (active?.settled) {
         if (!brokerOwns()) break;
-        if (active.result) {
-          if (!brokerOwns()) break;
-          writeResponse(manifest, {
-            version: 2, id: active.request.id, phase: 'completed', exitCode: active.result.exitCode,
-            stdout: active.result.stdout, stderr: active.result.stderr, error: null
-          });
-        } else {
-          if (!brokerOwns()) break;
-          writeResponse(manifest, unknown(active.request.id));
-        }
-        if (!brokerOwns()) break;
-        fs.rmSync(path.join(manifest.processingDir, active.request.id), { recursive: true, force: true });
+        settledExecution = active;
         active = null;
       }
 
@@ -326,6 +316,19 @@ export async function serveSandboxControl(
       if (brokerOwns() && stateKey !== lastState) {
         appendSandboxControlAudit(manifest, 'broker-state', { state, reasonCode, requestId: active?.request.id ?? null });
         lastState = stateKey;
+      }
+      if (settledExecution) {
+        if (!brokerOwns()) break;
+        if (settledExecution.result) {
+          writeResponse(manifest, {
+            version: 2, id: settledExecution.request.id, phase: 'completed', exitCode: settledExecution.result.exitCode,
+            stdout: settledExecution.result.stdout, stderr: settledExecution.result.stderr, error: null
+          });
+        } else {
+          writeResponse(manifest, unknown(settledExecution.request.id));
+        }
+        if (!brokerOwns()) break;
+        fs.rmSync(path.join(manifest.processingDir, settledExecution.request.id), { recursive: true, force: true });
       }
 
       let retiring = false;
