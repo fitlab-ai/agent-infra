@@ -31,7 +31,7 @@ function makeProject(tmpDir: string, config: Record<string, unknown>) {
   );
 }
 
-test("agent-infra update with canonical state refreshes all built-in client seeds", () => {
+test("agent-infra sync with canonical state refreshes all built-in client seeds", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-default-"));
   try {
     makeProject(tmpDir, {
@@ -43,7 +43,7 @@ test("agent-infra update with canonical state refreshes all built-in client seed
       files: { managed: [], merged: [], ejected: [] }
     });
 
-    execFileSync(process.execPath, cliArgs("update"), {
+    execFileSync(process.execPath, cliArgs("sync"), {
       cwd: tmpDir,
       stdio: "pipe",
       encoding: "utf8"
@@ -63,7 +63,7 @@ test("agent-infra update with canonical state refreshes all built-in client seed
   }
 });
 
-test("agent-infra update with canonical subset only refreshes enabled client seeds", () => {
+test("agent-infra sync with canonical subset only refreshes enabled client seeds", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-subset-"));
   try {
     makeProject(tmpDir, {
@@ -75,7 +75,7 @@ test("agent-infra update with canonical subset only refreshes enabled client see
       files: { managed: [], merged: [], ejected: [] }
     });
 
-    execFileSync(process.execPath, cliArgs("update"), {
+    execFileSync(process.execPath, cliArgs("sync"), {
       cwd: tmpDir,
       stdio: "pipe",
       encoding: "utf8"
@@ -96,7 +96,7 @@ test("agent-infra update with canonical subset only refreshes enabled client see
   }
 });
 
-test("agent-infra update with empty canonical state installs no built-in seeds", () => {
+test("agent-infra sync with empty canonical state installs no built-in seeds", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-empty-"));
   try {
     makeProject(tmpDir, {
@@ -108,7 +108,7 @@ test("agent-infra update with empty canonical state installs no built-in seeds",
       files: { managed: [], merged: [], ejected: [] }
     });
 
-    const output = execFileSync(process.execPath, cliArgs("update"), {
+    const output = execFileSync(process.execPath, cliArgs("sync"), {
       cwd: tmpDir,
       stdio: "pipe",
       encoding: "utf8"
@@ -132,7 +132,7 @@ test("agent-infra update with empty canonical state installs no built-in seeds",
   }
 });
 
-test("agent-infra update is idempotent: second run does not change canonical state or duplicate entries", () => {
+test("agent-infra sync is idempotent: second run does not change canonical state or duplicate entries", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-idempotent-"));
   try {
     makeProject(tmpDir, {
@@ -144,10 +144,10 @@ test("agent-infra update is idempotent: second run does not change canonical sta
       files: { managed: [], merged: [], ejected: [] }
     });
 
-    execFileSync(process.execPath, cliArgs("update"), { cwd: tmpDir, stdio: "pipe", encoding: "utf8" });
+    execFileSync(process.execPath, cliArgs("sync"), { cwd: tmpDir, stdio: "pipe", encoding: "utf8" });
     const afterFirst = fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8");
 
-    execFileSync(process.execPath, cliArgs("update"), { cwd: tmpDir, stdio: "pipe", encoding: "utf8" });
+    execFileSync(process.execPath, cliArgs("sync"), { cwd: tmpDir, stdio: "pipe", encoding: "utf8" });
     const afterSecond = fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8");
 
     assert.equal(afterFirst, afterSecond, "second update must be a no-op");

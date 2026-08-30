@@ -9,27 +9,74 @@ export type RunProcessResult = {
   stderr?: string;
 };
 
-function resolveCommand(file: string): string {
-  if (process.platform !== 'win32' || path.extname(file)) {
-    return file;
-  }
+type CommandResolution = Readonly<{
+  path: string;
+  source: 'absolute' | 'path' | 'current-directory' | 'unresolved';
+  pathEntry?: string;
+}>;
 
-  const pathValue = process.env.Path || process.env.PATH || '';
-  const extensions = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
-  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+function resolveCommandDetails(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): CommandResolution {
+  if (path.isAbsolute(file)) return { path: file, source: 'absolute' };
+
+  const pathValue = platform === 'win32'
+    ? env.Path || env.PATH || ''
+    : env.PATH || '';
+  const extensions = platform === 'win32'
+    ? (path.extname(file)
+      ? ['']
+      : (env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean))
+    : [''];
+  for (const dir of pathValue.split(path.delimiter)) {
     for (const extension of extensions) {
-      const lowerCandidate = path.join(dir, `${file}${extension.toLowerCase()}`);
-      if (fs.existsSync(lowerCandidate)) return lowerCandidate;
-      const upperCandidate = path.join(dir, `${file}${extension.toUpperCase()}`);
-      if (fs.existsSync(upperCandidate)) return upperCandidate;
+      const candidates = extension
+        ? [`${file}${extension.toLowerCase()}`, `${file}${extension.toUpperCase()}`]
+        : [file];
+      for (const candidateName of candidates) {
+        const candidate = path.resolve(dir || '.', candidateName);
+        try {
+          const stat = fs.statSync(candidate);
+          if (!stat.isFile()) continue;
+          if (platform !== 'win32' && (stat.mode & 0o111) === 0) continue;
+          return {
+            path: candidate,
+            source: dir ? 'path' : 'current-directory',
+            pathEntry: dir
+          };
+        } catch {
+          // Keep searching the remaining PATH entries.
+        }
+      }
     }
   }
 
-  return file;
+  return { path: file, source: 'unresolved' };
 }
 
-function needsShell(file: string): boolean {
-  return process.platform === 'win32' && /\.(?:bat|cmd)$/i.test(file);
+function resolveCommand(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  return resolveCommandDetails(file, platform, env).path;
+}
+
+function resolveCommandFromAbsolutePath(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): string | null {
+  const resolution = resolveCommandDetails(file, platform, env);
+  return resolution.source === 'path' && resolution.pathEntry && path.isAbsolute(resolution.pathEntry)
+    ? resolution.path
+    : null;
+}
+
+function needsShell(file: string, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'win32' && /\.(?:bat|cmd)$/i.test(file);
 }
 
 export async function runHostCommand(command: string[]): Promise<RunProcessResult> {
@@ -45,3 +92,5 @@ export async function runHostCommand(command: string[]): Promise<RunProcessResul
     child.on('close', (exitCode, signal) => resolve({ exitCode, signal }));
   });
 }
+
+export { needsShell, resolveCommand, resolveCommandFromAbsolutePath };

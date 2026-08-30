@@ -116,7 +116,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 
 > **原因**：本次执行使用的是旧版技能逻辑，新版技能可能包含额外的处理步骤。
 > 再次执行可确保新逻辑完整应用。
-> 用户也可以在执行前先运行 `ai update` 来预先更新技能文件，避免需要两次执行。
+> 用户也可以在执行前先运行 `ai sync` 来预先更新技能文件，避免需要两次执行。
 
 ### 输出报告
 

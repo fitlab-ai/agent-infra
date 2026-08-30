@@ -20,7 +20,6 @@ type UpdateConfig = {
   org: string;
   language: string;
   platform?: { type?: string };
-  requiresPullRequest?: boolean;       // legacy field; read-only, migrated to prFlow then removed
   prFlow?: 'required' | 'disabled';
   sandbox?: Record<string, unknown>;
   task?: { shortIdLength: number };
@@ -45,28 +44,9 @@ const defaults = JSON.parse(
 const CONFIG_DIR = '.agents';
 const CONFIG_PATH = path.join(CONFIG_DIR, '.airc.json');
 
-// One-time migration of the legacy project-level PR switch to the three-state
-// `prFlow` preference. `true` (the old default / "PR flow on") maps to the
-// strong constraint `required`; `false` maps to `disabled`. A missing or
-// already-migrated config is left untouched (idempotent). Returns the new
-// prFlow value when a migration happened, otherwise null.
-function migratePrFlow(config: UpdateConfig): 'required' | 'disabled' | null {
-  if (config.requiresPullRequest === true) {
-    delete config.requiresPullRequest;
-    config.prFlow = 'required';
-    return 'required';
-  }
-  if (config.requiresPullRequest === false) {
-    delete config.requiresPullRequest;
-    config.prFlow = 'disabled';
-    return 'disabled';
-  }
-  return null;
-}
-
-async function cmdUpdate(): Promise<void> {
+async function cmdSync(): Promise<void> {
   console.log('');
-  console.log('  ai update');
+  console.log('  ai sync');
   console.log('  ==================================');
   console.log('');
 
@@ -103,7 +83,6 @@ async function cmdUpdate(): Promise<void> {
   const sandboxAdded = !config.sandbox;
   const taskAdded = !config.task;
   const labelsAdded = !config.labels;
-  const prFlowMigrated = migratePrFlow(config);
   if (platformAdded) config.platform = structuredClone(defaults.platform);
   if (sandboxAdded) config.sandbox = structuredClone(defaults.sandbox);
   if (taskAdded) config.task = structuredClone(defaults.task);
@@ -118,7 +97,7 @@ async function cmdUpdate(): Promise<void> {
     language
   });
 
-  info(`Updating seed files for: ${project}`);
+  info(`Syncing seed files for: ${project}`);
   console.log('');
 
   // update skill
@@ -136,12 +115,6 @@ async function cmdUpdate(): Promise<void> {
     replacements
   );
   ok('Updated .agents/scripts/lib/agent-infra-package.js');
-  try {
-    fs.unlinkSync(path.join('.agents', 'skills', 'update-agent-infra', 'scripts', 'sync-templates.cjs'));
-  } catch {
-    // Ignore missing legacy script from pre-ESM installs.
-  }
-
   const added = {
     managed: workflowPlan.projectAssets.registry.managed.filter(
       (entry) => !currentRegistry.managed.includes(entry)
@@ -164,7 +137,7 @@ async function cmdUpdate(): Promise<void> {
       for (const entry of added.merged) {
         ok(`  merged: ${entry}`);
       }
-    } else if (platformAdded || sandboxAdded || taskAdded || labelsAdded || prFlowMigrated) {
+    } else if (platformAdded || sandboxAdded || taskAdded || labelsAdded) {
       if (platformAdded) {
         info(`Default platform config added to ${CONFIG_PATH}.`);
       }
@@ -176,9 +149,6 @@ async function cmdUpdate(): Promise<void> {
       }
       if (labelsAdded) {
         info(`Default labels.in config added to ${CONFIG_PATH}.`);
-      }
-      if (prFlowMigrated) {
-        info(`Migrated legacy requiresPullRequest to prFlow="${prFlowMigrated}" in ${CONFIG_PATH}.`);
       }
     } else {
       info(`File registry changed in ${CONFIG_PATH}.`);
@@ -195,15 +165,12 @@ async function cmdUpdate(): Promise<void> {
     if (hasNewEntries && platformAdded) {
       info(`Default platform config added to ${CONFIG_PATH}.`);
     }
-    if (hasNewEntries && prFlowMigrated) {
-      info(`Migrated legacy requiresPullRequest to prFlow="${prFlowMigrated}" in ${CONFIG_PATH}.`);
-    }
     ok(`Updated ${CONFIG_PATH}`);
   }
 
   // done
   console.log('');
-  ok('Seed files updated successfully!');
+  ok('Seed files synced successfully!');
   console.log('');
   if (workflowPlan.nextSteps.length === 0) {
     console.log('  No Agent Client project integration enabled.');
@@ -219,4 +186,4 @@ async function cmdUpdate(): Promise<void> {
   }
 }
 
-export { cmdUpdate };
+export { cmdSync };

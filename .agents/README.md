@@ -122,7 +122,7 @@
 
 1. 在 `.agents/.airc.json` 中把 `platform.type` 设为稳定标识，例如 `my-platform`。
 2. 以 `.agents/rules/` 下已生成的规则文件为起点，改写为你的平台 CLI 或 API 调用，同时保持运行时文件名不变。
-3. 将这些自定义规则文件加入 `.agents/.airc.json` 的 `files.ejected`，避免后续执行 `agent-infra update` 时被覆盖。
+3. 将这些自定义规则文件加入 `.agents/.airc.json` 的 `files.ejected`，避免后续执行 `ai sync` 时被覆盖。
 4. 如果你维护的是模板源码分支或私有 fork，需要先补齐对应的 `.{platform}.` 模板变体，再把该平台标识加入模板同步逻辑。
 5. 在正式推广前，先用一个测试任务完整验证工作流和 gate 校验。
 
