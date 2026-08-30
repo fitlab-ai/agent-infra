@@ -124,7 +124,7 @@ To adapt agent-infra to a private code-hosting platform:
 
 1. Set `.agents/.airc.json` `platform.type` to a stable identifier such as `my-platform`.
 2. Copy the generated rule files in `.agents/rules/` and adapt them to your platform's CLI or API while keeping the runtime filenames unchanged.
-3. Add the customized rule files to `.agents/.airc.json` `files.ejected` so future `agent-infra update` runs do not overwrite them.
+3. Add the customized rule files to `.agents/.airc.json` `files.ejected` so future `ai sync` runs do not overwrite them.
 4. If you maintain a fork of the template source, add matching `.{platform}.` template variants before adding that platform identifier to the sync logic.
 5. Validate the customized workflow on a test task before rolling it out broadly.
 

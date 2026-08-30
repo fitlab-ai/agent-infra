@@ -113,7 +113,7 @@ test("cli usage keeps alias command descriptions aligned", () => {
     ["merge", "Merge tasks"],
     ["sandbox, s", "Manage Docker-based AI sandboxes"],
     ["task, t", "Read-only views"],
-    ["update", "Update seed files"]
+    ["sync", "Update seed files"]
   ] as const;
   const descriptionColumns = rows.map(([command, description]) => {
     const line = output.split("\n").find((candidate) => candidate.trimStart().startsWith(command));
@@ -652,7 +652,7 @@ test("agent-infra init rejects invalid input", () => {
   });
 });
 
-test("agent-infra update refreshes seed files and syncs file registry", async () => {
+test("agent-infra sync refreshes seed files and syncs file registry", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
   const cli = CLI_PATH;
   const config = {
@@ -693,13 +693,13 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
       "utf8"
     );
 
-    const output = execFileSync(process.execPath, cliArgs("update"), {
+    const output = execFileSync(process.execPath, cliArgs("sync"), {
       cwd: tmpDir,
       stdio: "pipe",
       encoding: "utf8"
     });
 
-    assert.match(output, /Seed files updated successfully!/);
+    assert.match(output, /Seed files synced successfully!/);
 
     const updated = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
@@ -724,14 +724,14 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
       "utf8"
     );
     assert.notEqual(skill, "stale skill\n");
-    assert.match(skill, /ai update/);
+    assert.match(skill, /ai sync/);
     assert.doesNotMatch(skill, /\{\{project\}\}/);
     assert.doesNotMatch(skill, /\{\{org\}\}/);
     assert.ok(
       fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.js"))
     );
     assert.ok(
-      !fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.cjs"))
+      fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.cjs"))
     );
 
     assert.ok(
@@ -756,7 +756,7 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
   }
 });
 
-test("agent-infra update rejects legacy sandbox client tools without rewriting config", () => {
+test("agent-infra sync rejects legacy sandbox client tools without rewriting config", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-sandbox-tools-"));
   const config = {
     project: "seedproj",
@@ -787,7 +787,7 @@ test("agent-infra update rejects legacy sandbox client tools without rewriting c
     );
 
     const before = JSON.stringify(config, null, 2) + "\n";
-    const result = spawnSync(process.execPath, cliArgs("update"), {
+    const result = spawnSync(process.execPath, cliArgs("sync"), {
       cwd: tmpDir,
       encoding: "utf8"
     });
@@ -799,13 +799,13 @@ test("agent-infra update rejects legacy sandbox client tools without rewriting c
   }
 });
 
-test("agent-infra update requires .agents/.airc.json", () => {
+test("agent-infra sync requires .agents/.airc.json", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
   const cli = CLI_PATH;
 
   try {
     assert.throws(() => {
-      execFileSync(process.execPath, cliArgs("update"), {
+      execFileSync(process.execPath, cliArgs("sync"), {
         cwd: tmpDir,
         stdio: "pipe"
       });

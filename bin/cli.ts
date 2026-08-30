@@ -26,7 +26,8 @@ Commands:
   sandbox, s      Manage Docker-based AI sandboxes
   server          Run the local AI collaboration daemon (start/stop/status/logs)
   task, t         Read-only views of .agents/workspace tasks
-  update          Update seed files and sync file registry for an existing project
+  sync            Update seed files and sync file registry for an existing project
+  update          Update the agent-infra CLI itself
   version         Show version
 
 'ai' and 'agent-infra' are interchangeable; 'ai' is the shorter form.
@@ -171,10 +172,22 @@ switch (command) {
     break;
   }
   case 'update': {
-    const imported = await importCommand('../lib/update.ts');
+    const imported = await importCommand('../lib/self-update.ts');
     if (!imported) break;
     const { cmdUpdate } = imported;
-    await cmdUpdate().catch((e: unknown) => {
+    const code = await cmdUpdate().catch((e: unknown) => {
+      process.stderr.write(`Error: ${errorMessage(e)}\n`);
+      process.exitCode = 1;
+      return 1;
+    });
+    if (code !== 0) process.exitCode = code;
+    break;
+  }
+  case 'sync': {
+    const imported = await importCommand('../lib/update.ts');
+    if (!imported) break;
+    const { cmdSync } = imported;
+    await cmdSync().catch((e: unknown) => {
       process.stderr.write(`Error: ${errorMessage(e)}\n`);
       process.exitCode = 1;
     });

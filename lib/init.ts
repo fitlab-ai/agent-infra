@@ -117,7 +117,7 @@ async function cmdInit(): Promise<void> {
   // check existing config
   if (fs.existsSync(configPath)) {
     err('This project already has agent-infra configuration.');
-    err('Use /update-agent-infra in your AI TUI to update.');
+    err('Use /update-agent-infra in your AI TUI to sync project files.');
     process.exitCode = 1;
     return;
   }
@@ -294,7 +294,7 @@ async function cmdInit(): Promise<void> {
   console.log('');
   ok('Project initialized successfully!');
   console.log('');
-  console.log('  If this init used npx, install agent-infra persistently before update or validation:');
+  console.log('  If this init used npx, install agent-infra persistently before ai update or validation:');
   console.log('    npm install -g @fitlab-ai/agent-infra');
   console.log('');
   if (workflowPlan.nextSteps.length === 0) {

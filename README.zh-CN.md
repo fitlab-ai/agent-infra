@@ -121,6 +121,15 @@ brew install fitlab-ai/tap/agent-infra
 ### 更新 agent-infra
 
 ```bash
+ai update
+```
+
+`ai update` 用于更新已安装的 agent-infra CLI。在已初始化项目中，使用
+`ai sync` 刷新项目 seed files 和文件注册表。
+
+对应的包管理器命令仍然是：
+
+```bash
 npm update -g @fitlab-ai/agent-infra
 # 或者通过 Homebrew 安装时：
 brew upgrade agent-infra

@@ -131,7 +131,7 @@ warning to the end of the report:
 > **Rationale**: The current execution used the old skill logic; the new version
 > may contain additional processing steps. Running again ensures the new logic
 > is fully applied.
-> Alternatively, users can run `ai update` before executing the skill to
+> Alternatively, users can run `ai sync` before executing the skill to
 > pre-update the seed files and avoid the need for a second run.
 
 ### Output report

@@ -48,6 +48,24 @@ function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
   throw new Error(`Timed out waiting for healthy status in ${statusDir}`);
 }
 
+function waitForAuditEvent(auditPath: string, event: string, generation: string, timeoutMs: number): void {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const found = fs.readFileSync(auditPath, 'utf8')
+        .trim().split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { event?: string; generation?: string })
+        .some((entry) => entry.event === event && entry.generation === generation);
+      if (found) return;
+    } catch {
+      // The audit file may still be between append operations.
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  throw new Error(`Timed out waiting for ${event} audit event in ${auditPath}`);
+}
+
 async function waitForStatusStateAsync(statusDir: string, state: string, timeoutMs: number): Promise<void> {
   const statusPath = path.join(statusDir, 'status.json');
   const deadline = Date.now() + timeoutMs;
@@ -791,6 +809,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     const status = JSON.parse(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'));
     assert.equal(status.generation, 'rotated-generation');
     assert.equal(status.broker.pid, rotated.pid);
+    waitForAuditEvent(path.join(root, 'audit.ndjson'), 'broker-state', 'rotated-generation', 2_000);
     const oldOwnerDeadline = Date.now() + 2_000;
     while (isProcessAlive(first.pid) && Date.now() < oldOwnerDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -816,12 +835,13 @@ test('sandbox control client tolerates a transient torn response but rejects sta
   const requestsDir = path.join(channelDir, 'requests');
   const responsesDir = path.join(channelDir, 'responses');
   const statusDir = path.join(root, 'public');
+  const statusPath = path.join(statusDir, 'status.json');
   fs.mkdirSync(requestsDir, { recursive: true });
   fs.mkdirSync(responsesDir);
   fs.mkdirSync(statusDir);
   const responseBrokerStartTime = getProcessStartTime(process.pid);
   assert.ok(responseBrokerStartTime);
-  fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
+  fs.writeFileSync(statusPath, `${JSON.stringify({
     version: 2,
     generation: 'response-generation',
     broker: { pid: process.pid, startTime: responseBrokerStartTime, brokerId: 'test-broker' },
@@ -876,6 +896,9 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     assert.equal(transient.exitCode, 0, transient.stderr || transient.stdout);
     assert.equal(JSON.parse(transient.stdout).response.error.code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
 
+    const status = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as Record<string, unknown>;
+    status.updatedAt = Date.now();
+    fs.writeFileSync(statusPath, `${JSON.stringify(status)}\n`);
     stableClient = runClient();
     const stableName = await waitForRequestAsync(requestsDir, 2_000, {
       client: stableClient,
