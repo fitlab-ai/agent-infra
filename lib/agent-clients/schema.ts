@@ -15,14 +15,15 @@ const AGENT_CLIENTS_SCHEMA = {
       maxItems: AGENT_CLIENT_IDS.length,
       uniqueItems: true,
       description: 'Canonical Agent Client configuration. Object ID completeness and uniqueness are enforced by the runtime normalizer.',
-      items: {
+      additionalItems: false,
+      items: AGENT_CLIENT_IDS.map((id) => ({
         type: 'object',
         additionalProperties: false,
         required: ['id', 'enabled', 'installInSandbox'],
         properties: {
           id: {
-            type: 'string',
-            enum: [...AGENT_CLIENT_IDS]
+            const: id,
+            type: 'string'
           },
           enabled: {
             type: 'boolean'
@@ -40,7 +41,7 @@ const AGENT_CLIENTS_SCHEMA = {
             }
           }
         }
-      }
+      }))
     },
     customTUIs: {
       type: 'array',

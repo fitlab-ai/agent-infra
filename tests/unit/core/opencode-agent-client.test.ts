@@ -47,7 +47,7 @@ test('OpenCode adapter declares its single-volume XDG, install, credential, and 
   );
 });
 
-test('OpenCode hook uses host XDG config and fills only missing model strings', async () => {
+test('OpenCode hook uses host XDG config and ignores the tool root config', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-adapter-'));
   const home = path.join(root, 'home');
   const toolDir = path.join(root, 'tool');
@@ -67,7 +67,7 @@ test('OpenCode hook uses host XDG config and fills only missing model strings', 
   assert.equal(result.status, 'ready');
   const canonical = path.join(toolDir, '.xdg', 'config', 'opencode', 'opencode.json');
   assert.deepEqual(JSON.parse(fs.readFileSync(canonical, 'utf8')), {
-    model: 'legacy/main',
+    model: 'provider/main',
     small_model: 'provider/small'
   });
   assert.ok(fs.existsSync(path.join(toolDir, 'opencode.json')));

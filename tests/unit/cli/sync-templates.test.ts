@@ -17,7 +17,24 @@ function writeFile(root: string, relativePath: string, content: string) {
 }
 
 function writeJson(root: string, relativePath: string, value: unknown) {
-  writeFile(root, relativePath, `${JSON.stringify(value, null, 2)}\n`);
+  const normalized = relativePath === ".agents/.airc.json"
+    && typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && !("agentClients" in value)
+    && !("tuis" in value)
+    ? {
+      agentClients: [
+        { id: "claude-code", enabled: true, installInSandbox: true },
+        { id: "codex", enabled: true, installInSandbox: true },
+        { id: "antigravity-cli", enabled: true, installInSandbox: true },
+        { id: "opencode", enabled: true, installInSandbox: true },
+        { id: "traecli", enabled: true, installInSandbox: true }
+      ],
+      ...(value as Record<string, unknown>)
+    }
+    : value;
+  writeFile(root, relativePath, `${JSON.stringify(normalized, null, 2)}\n`);
 }
 
 function normalize(targetPath: string) {
@@ -555,7 +572,7 @@ test("syncTemplates persists the exact prerelease template version idempotently"
   }
 });
 
-test("syncTemplates migrates legacy client tools to canonical agent-infra tooling", async () => {
+test("syncTemplates rejects client ids in sandbox.tools without rewriting config", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-tools-"));
 
   try {
@@ -571,7 +588,7 @@ test("syncTemplates migrates legacy client tools to canonical agent-infra toolin
       sandbox: {
         engine: null,
         runtimes: ["node22"],
-        tools: ["claude-code", "opencode", "codex", "antigravity-cli", "traecli"],
+        tools: ["claude-code"],
         dockerfile: null,
         vm: { cpu: null, memory: null, disk: null }
       },
@@ -582,24 +599,14 @@ test("syncTemplates migrates legacy client tools to canonical agent-infra toolin
     const report = syncTemplates(projectRoot, templateRoot);
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
 
-    assert.equal(report.configUpdated, true);
-    assert.deepEqual(cfg.sandbox.tools, ["agent-infra"]);
-    assert.deepEqual(
-      cfg.agentClients.map((entry: { id: string; installInSandbox: boolean }) => [entry.id, entry.installInSandbox]),
-      [
-        ["claude-code", true],
-        ["codex", true],
-        ["antigravity-cli", true],
-        ["opencode", true],
-        ["traecli", true]
-      ]
-    );
+    assert.equal(report.error, "INVALID_AGENT_CLIENTS at sandbox.tools[0]");
+    assert.deepEqual(cfg.sandbox.tools, ["claude-code"]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("syncTemplates migrates customized legacy client selection into canonical state", async () => {
+test("syncTemplates preserves canonical client selection and non-client sandbox tools", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-custom-tools-"));
 
   try {
@@ -612,10 +619,17 @@ test("syncTemplates migrates customized legacy client selection into canonical s
       org: "acme",
       language: "en",
       platform: { type: "github" },
+      agentClients: [
+        { id: "claude-code", enabled: false, installInSandbox: false },
+        { id: "codex", enabled: true, installInSandbox: true },
+        { id: "antigravity-cli", enabled: false, installInSandbox: false },
+        { id: "opencode", enabled: false, installInSandbox: false },
+        { id: "traecli", enabled: false, installInSandbox: false }
+      ],
       sandbox: {
         engine: null,
         runtimes: ["node22"],
-        tools: ["codex"],
+        tools: ["agent-infra"],
         dockerfile: null,
         vm: { cpu: null, memory: null, disk: null }
       },
@@ -623,9 +637,10 @@ test("syncTemplates migrates customized legacy client selection into canonical s
     });
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    syncTemplates(projectRoot, templateRoot);
+    const report = syncTemplates(projectRoot, templateRoot);
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
 
+    assert.equal(report.error, undefined);
     assert.deepEqual(cfg.sandbox.tools, ["agent-infra"]);
     assert.equal(
       cfg.agentClients.find((entry: { id: string }) => entry.id === "codex").installInSandbox,

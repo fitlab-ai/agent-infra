@@ -774,13 +774,7 @@ function expectedMounts(params: {
     })
   );
   const persistentTools = tools
-    .filter((tool) =>
-      !tool.tmpfs
-      && (
-        config.agentClientSource === 'canonical'
-        || actualMounts.has(tool.containerMount)
-      )
-    )
+    .filter((tool) => !tool.tmpfs)
     .map((tool) => ({
       path: tool.containerMount,
       expectedType: 'bind' as const,
@@ -934,13 +928,10 @@ export function collectSandboxRecoverySnapshot(params: {
     taskId: sandboxTaskIdLabel(params.config)
   });
   const selectedToolIds = new Set(tools.map((tool) => tool.id));
-  const enforceCanonicalPlan = params.config.agentClientSource === 'canonical';
-  const unexpectedCapabilityMounts = enforceCanonicalPlan
-    ? capabilityPlan.cleanupInventory
-      .filter((tool) => isAgentClientId(tool.id) && !selectedToolIds.has(tool.id))
-      .map((tool) => tool.containerMount)
-      .filter((mountPath) => mountsByDestination.has(mountPath))
-    : [];
+  const unexpectedCapabilityMounts = capabilityPlan.cleanupInventory
+    .filter((tool) => isAgentClientId(tool.id) && !selectedToolIds.has(tool.id))
+    .map((tool) => tool.containerMount)
+    .filter((mountPath) => mountsByDestination.has(mountPath));
   const mountSnapshots = expectedMounts({
     config: params.config,
     branch: params.branch,
@@ -1007,9 +998,7 @@ export function collectSandboxRecoverySnapshot(params: {
     identityOk: typeof inspection.Id === 'string' && inspection.Id.length > 0
       && branchLabel === params.branch
       && sameSandboxWorkspaceIdentity(containerWorkspace, workspace),
-    runtimeCapabilityOk: enforceCanonicalPlan
-      ? labels[sandboxRuntimeCapabilityLabel(params.config)] === capabilityPlan.runtimeSignature
-      : undefined,
+    runtimeCapabilityOk: labels[sandboxRuntimeCapabilityLabel(params.config)] === capabilityPlan.runtimeSignature,
     unexpectedCapabilityMounts,
     mounts: mountSnapshots,
     tmpfs,

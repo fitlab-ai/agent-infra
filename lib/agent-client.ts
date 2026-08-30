@@ -128,7 +128,6 @@ async function cmdAgentClient(args: string[]): Promise<number> {
         throw new AgentClientCommandError('AGENT_CLIENT_ARGUMENT_INVALID', 'status accepts no arguments');
       }
       const plan = workflowPlan(projectRoot, config, { type: 'none' });
-      process.stdout.write(`source: ${plan.source}\n`);
       printState(plan.desired);
       for (const seed of plan.seedOperations) {
         process.stdout.write(`  seed ${seed.target}: ${seed.kind}\n`);

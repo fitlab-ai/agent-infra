@@ -59,6 +59,7 @@ function makeProject(projectRoot: string, overrides: Record<string, unknown> = {
     org: "acme",
     language: "en",
     platform: { type: "github" },
+    agentClients: canonicalAgentClients(["claude-code", "codex", "antigravity-cli", "opencode", "traecli"]),
     files: {
       managed: baseManaged,
       merged: [],
@@ -88,7 +89,7 @@ function canonicalAgentClients(enabled: readonly string[]) {
   }));
 }
 
-test("syncTemplates: missing tuis field keeps full built-in TUI behavior (regression)", async () => {
+test("syncTemplates: canonical agentClients keep full built-in client behavior", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-default-"));
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -109,12 +110,12 @@ test("syncTemplates: missing tuis field keeps full built-in TUI behavior (regres
   }
 });
 
-test("syncTemplates: tuis subset skips owned managed/merged entries", async () => {
+test("syncTemplates: canonical client subset skips owned managed/merged entries", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-subset-"));
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, { tuis: ["claude-code"] });
+    makeProject(projectRoot, { agentClients: canonicalAgentClients(["claude-code"]) });
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
@@ -169,7 +170,7 @@ test("syncTemplates: Antigravity uses shared skills without client-owned project
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, { tuis: ["claude-code", "antigravity-cli"] });
+    makeProject(projectRoot, { agentClients: canonicalAgentClients(["claude-code", "antigravity-cli"]) });
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
@@ -197,7 +198,7 @@ test("syncTemplates: independent customTUI dir is unaffected by disabled built-i
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      tuis: ["claude-code"],
+      agentClients: canonicalAgentClients(["claude-code"]),
       customTUIs: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }]
     });
     // Seed an existing custom command file referencing analyze-task so the
@@ -228,7 +229,7 @@ test("syncTemplates: customTUI dir under disabled built-in TUI owned prefix is p
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      tuis: ["claude-code"],
+      agentClients: canonicalAgentClients(["claude-code"]),
       customTUIs: [{ name: "My Codex", dir: ".codex/commands", invoke: "codex ${skillName}" }]
     });
     // Seed a customTUI reference file under the disabled-TUI owned prefix.
@@ -259,12 +260,12 @@ test("syncTemplates: customTUI dir under disabled built-in TUI owned prefix is p
   }
 });
 
-test("syncTemplates: tuis: [] disables every built-in TUI and skips all owned defaults", async () => {
+test("syncTemplates: empty canonical state disables every built-in client", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-empty-"));
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, { tuis: [] });
+    makeProject(projectRoot, { agentClients: canonicalAgentClients([]) });
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
@@ -291,7 +292,7 @@ test("syncTemplates: ejected entries owned by disabled TUIs are preserved and no
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      tuis: ["claude-code"],
+      agentClients: canonicalAgentClients(["claude-code"]),
       files: {
         managed: [
           ".agents/skills/",
@@ -326,7 +327,6 @@ test("syncTemplates: canonical agentClients controls assets and rejects incomple
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      tuis: ["claude-code", "codex", "antigravity-cli", "opencode", "traecli"],
       agentClients: canonicalAgentClients([])
     });
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
@@ -353,7 +353,7 @@ test("syncTemplates: disabling Antigravity leaves shared skills untouched", asyn
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, { tuis: ["antigravity-cli"] });
+    makeProject(projectRoot, { agentClients: canonicalAgentClients(["antigravity-cli"]) });
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
     );
@@ -384,7 +384,7 @@ test("syncTemplates: every built-in client subset converges idempotently", async
       const projectRoot = path.join(tmpDir, "project");
       const templateRoot = makeTemplateRoot(tmpDir);
       const enabled = ids.filter((_, index) => (mask & (1 << index)) !== 0);
-      makeProject(projectRoot, { tuis: [...enabled].reverse() });
+      makeProject(projectRoot, { agentClients: canonicalAgentClients(enabled) });
 
       syncTemplates(projectRoot, templateRoot);
       const cfgPath = path.join(projectRoot, ".agents/.airc.json");

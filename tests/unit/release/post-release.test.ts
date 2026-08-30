@@ -23,7 +23,7 @@ function result(status: number, stdout = '', stderr = '') {
 const recordingInputs = [
   'assets/demo-init.tape', 'scripts/demo-regen.sh', 'scripts/normalize-gif-duration.py',
   'bin/cli.ts', 'lib/log.ts', 'lib/prompt.ts', 'lib/paths.ts',
-  'lib/render.ts', 'lib/builtin-tuis.ts', 'lib/sandbox/engines/index.ts'
+  'lib/render.ts', 'lib/sandbox/engines/index.ts'
 ];
 
 const unrelatedInputs = [

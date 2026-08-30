@@ -8,6 +8,7 @@ import path from "node:path";
 import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycle.ts";
 import { sandboxManagedPathKey } from "../../../lib/sandbox/commands/rm.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
 import {
   cliArgs,
@@ -45,6 +46,12 @@ type ExecFn = (cmd: string, args: string[], options?: CommandOptions) => string 
 type EngineExecFn = (engine: string, cmd: string, args: string[], options?: CommandOptions) => string | Buffer | void;
 type RunSafeFn = (cmd: string, args: string[]) => string;
 type EngineRunSafeFn = (engine: string, cmd: string, args: string[]) => string;
+
+const CANONICAL_AGENT_CLIENTS = AGENT_CLIENT_IDS.map((id) => ({
+  id,
+  enabled: true,
+  installInSandbox: true
+}));
 
 function isReadOnlyMountFor(arg: string, containerPath: string): boolean {
   const separator = arg.lastIndexOf(":");
@@ -2082,7 +2089,7 @@ test("sandbox start resolves a task short id to its branch container", onPlatfor
     // while keeping the engine the fixture relies on for detectEngine.
     fs.writeFileSync(
       path.join(fixture.repoDir, ".agents", ".airc.json"),
-      `${JSON.stringify({ project: "demo", org: "fitlab-ai", sandbox: { engine: "docker-desktop" }, task: { shortIdLength: 1 } }, null, 2)}\n`,
+      `${JSON.stringify({ project: "demo", org: "fitlab-ai", agentClients: CANONICAL_AGENT_CLIENTS, sandbox: { engine: "docker-desktop" }, task: { shortIdLength: 1 } }, null, 2)}\n`,
       "utf8"
     );
 

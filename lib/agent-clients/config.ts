@@ -10,20 +10,13 @@ import type {
   OrchestrationModelPolicy
 } from './types.ts';
 
-type AgentClientConfigInput = Readonly<{
-  agentClients?: unknown;
-  tuis?: unknown;
-  sandbox?: unknown;
-  customTUIs?: unknown;
-}>;
+type AgentClientConfigInput = Readonly<Record<string, unknown>>;
 
 type AgentClientDiagnosticCode =
   | 'INVALID_AGENT_CLIENTS'
   | 'DUPLICATE_AGENT_CLIENT'
   | 'MISSING_AGENT_CLIENT'
-  | 'UNKNOWN_AGENT_CLIENT'
-  | 'LEGACY_CONFLICT'
-  | 'LEGACY_VALUE_IGNORED';
+  | 'UNKNOWN_AGENT_CLIENT';
 
 type AgentClientDiagnostic = Readonly<{
   code: AgentClientDiagnosticCode;
@@ -31,13 +24,8 @@ type AgentClientDiagnostic = Readonly<{
 }>;
 
 type NormalizeAgentClientsResult = Readonly<{
-  source: 'canonical' | 'legacy';
   state: AgentClientState;
   canonical: AgentClientsConfig;
-  remainingSandboxTools: readonly string[] | undefined;
-  removeLegacyTuis: boolean;
-  changed: boolean;
-  diagnostics: readonly AgentClientDiagnostic[];
 }>;
 
 class AgentClientConfigError extends Error {
@@ -166,147 +154,29 @@ function serializeAgentClients(state: AgentClientState): AgentClientsConfig {
   }));
 }
 
-function projectLegacyTuis(
-  value: unknown,
-  diagnostics: AgentClientDiagnostic[]
-): Readonly<Record<AgentClientId, boolean>> {
-  if (!Array.isArray(value)) {
-    return Object.fromEntries(
-      AGENT_CLIENT_IDS.map((id) => [id, true])
-    ) as Readonly<Record<AgentClientId, boolean>>;
-  }
-
-  const enabled = new Set<AgentClientId>();
-  for (const [index, candidate] of value.entries()) {
-    if (isAgentClientId(candidate)) {
-      enabled.add(candidate);
-    } else {
-      diagnostics.push({
-        code: 'LEGACY_VALUE_IGNORED',
-        path: `tuis[${index}]`
-      });
-    }
-  }
-  return Object.fromEntries(
-    AGENT_CLIENT_IDS.map((id) => [id, enabled.has(id)])
-  ) as Readonly<Record<AgentClientId, boolean>>;
-}
-
-type SandboxProjection = Readonly<{
-  installed: Readonly<Record<AgentClientId, boolean>>;
-  clientSignals: ReadonlySet<AgentClientId>;
-  remainingTools: readonly string[] | undefined;
-}>;
-
-function projectLegacySandbox(
-  value: unknown,
-  diagnostics: AgentClientDiagnostic[]
-): SandboxProjection {
-  if (!Array.isArray(value) || value.length === 0) {
-    return {
-      installed: Object.fromEntries(
-        AGENT_CLIENT_IDS.map((id) => [id, true])
-      ) as Readonly<Record<AgentClientId, boolean>>,
-      clientSignals: new Set<AgentClientId>(),
-      remainingTools: Array.isArray(value) ? [] : undefined
-    };
-  }
-
-  const installed = new Set<AgentClientId>();
-  const remainingTools: string[] = [];
-  for (const [index, candidate] of value.entries()) {
-    if (isAgentClientId(candidate)) {
-      installed.add(candidate);
-    } else if (typeof candidate === 'string') {
-      remainingTools.push(candidate);
-    } else {
-      diagnostics.push({
-        code: 'LEGACY_VALUE_IGNORED',
-        path: `sandbox.tools[${index}]`
-      });
-    }
-  }
-  return {
-    installed: Object.fromEntries(
-      AGENT_CLIENT_IDS.map((id) => [id, installed.has(id)])
-    ) as Readonly<Record<AgentClientId, boolean>>,
-    clientSignals: installed,
-    remainingTools
-  };
-}
-
-function stateFromLegacy(
-  enabled: Readonly<Record<AgentClientId, boolean>>,
-  installed: Readonly<Record<AgentClientId, boolean>>
-): AgentClientState {
-  return Object.fromEntries(
-    AGENT_CLIENT_IDS.map((id) => [
-      id,
-      {
-        enabled: enabled[id],
-        installInSandbox: installed[id]
-      }
-    ])
-  ) as AgentClientState;
-}
-
-function sameCanonicalOrder(value: unknown): boolean {
-  return Array.isArray(value)
-    && value.every((entry, index) => isRecord(entry) && entry.id === AGENT_CLIENT_IDS[index]);
-}
-
 function normalizeAgentClients(
   input: AgentClientConfigInput
 ): NormalizeAgentClientsResult {
-  const diagnostics: AgentClientDiagnostic[] = [];
-  const hasCanonical = hasOwn(input, 'agentClients');
-  const hasLegacyTuis = hasOwn(input, 'tuis');
-  const sandbox = isRecord(input.sandbox) ? input.sandbox : undefined;
-  const hasLegacySandboxTools = sandbox !== undefined && hasOwn(sandbox, 'tools');
-  const tuiProjection = projectLegacyTuis(input.tuis, diagnostics);
-  const sandboxProjection = projectLegacySandbox(sandbox?.tools, diagnostics);
-
-  if (!hasCanonical) {
-    const state = stateFromLegacy(tuiProjection, sandboxProjection.installed);
-    return {
-      source: 'legacy',
-      state,
-      canonical: serializeAgentClients(state),
-      remainingSandboxTools: sandboxProjection.remainingTools,
-      removeLegacyTuis: hasLegacyTuis,
-      changed: true,
-      diagnostics
-    };
-  }
-
+  if (!hasOwn(input, 'agentClients')) fail('MISSING_AGENT_CLIENT', 'agentClients');
   const state = parseCanonical(input.agentClients);
-  if (hasLegacyTuis) {
-    for (const id of AGENT_CLIENT_IDS) {
-      if (state[id].enabled !== tuiProjection[id]) {
-        fail('LEGACY_CONFLICT', 'tuis');
+  for (const [index, id] of AGENT_CLIENT_IDS.entries()) {
+    const entry = Array.isArray(input.agentClients) ? input.agentClients[index] : undefined;
+    if (!isRecord(entry) || entry.id !== id) {
+      fail('INVALID_AGENT_CLIENTS', `agentClients[${index}].id`);
+    }
+  }
+  if (hasOwn(input, 'tuis')) fail('INVALID_AGENT_CLIENTS', 'tuis');
+  const sandbox = isRecord(input.sandbox) ? input.sandbox : undefined;
+  if (Array.isArray(sandbox?.tools)) {
+    for (const [index, tool] of sandbox.tools.entries()) {
+      if (isAgentClientId(tool)) {
+        fail('INVALID_AGENT_CLIENTS', `sandbox.tools[${index}]`);
       }
     }
   }
-  if (hasLegacySandboxTools) {
-    for (const id of sandboxProjection.clientSignals) {
-      if (!state[id].installInSandbox) {
-        fail('LEGACY_CONFLICT', 'sandbox.tools');
-      }
-    }
-  }
-
   return {
-    source: 'canonical',
     state,
-    canonical: serializeAgentClients(state),
-    remainingSandboxTools: hasLegacySandboxTools
-      ? sandboxProjection.remainingTools
-      : undefined,
-    removeLegacyTuis: hasLegacyTuis,
-    changed: hasLegacyTuis
-      || sandboxProjection.clientSignals.size > 0
-      || !sameCanonicalOrder(input.agentClients),
-    diagnostics
+    canonical: serializeAgentClients(state)
   };
 }
 

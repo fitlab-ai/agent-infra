@@ -39,7 +39,7 @@ test('agent-client list is registry-backed and does not require a project', () =
   }
 });
 
-test('enable migrates legacy state first and changes only enabled', () => {
+test('enable changes only enabled in canonical state', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-enable-'));
   try {
     writeConfig(root, {
@@ -47,8 +47,8 @@ test('enable migrates legacy state first and changes only enabled', () => {
       org: 'acme',
       language: 'en',
       platform: { type: 'github' },
-      tuis: ['codex'],
-      sandbox: { tools: ['agent-infra', 'claude-code'], customTools: [{ id: 'custom' }] },
+      agentClients: canonical(['codex'], ['claude-code']),
+      sandbox: { tools: ['agent-infra', 'custom'], customTools: [{ id: 'custom' }] },
       files: { managed: [], merged: [], ejected: [] }
     });
 
@@ -59,8 +59,7 @@ test('enable migrates legacy state first and changes only enabled', () => {
     const config = JSON.parse(fs.readFileSync(path.join(root, '.agents/.airc.json'), 'utf8'));
 
     assert.deepEqual(config.agentClients, canonical(['codex', 'opencode'], ['claude-code']));
-    assert.equal('tuis' in config, false);
-    assert.deepEqual(config.sandbox.tools, ['agent-infra']);
+    assert.deepEqual(config.sandbox.tools, ['agent-infra', 'custom']);
     assert.deepEqual(config.sandbox.customTools, [{ id: 'custom' }]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -120,7 +119,7 @@ test('status is read-only and configure edits both independent dimensions', () =
       cwd: root,
       encoding: 'utf8'
     });
-    assert.match(status, /source: canonical/);
+    assert.equal(status.includes('source:'), false);
     assert.equal(fs.readFileSync(configPath, 'utf8'), beforeStatus);
 
     execFileSync(process.execPath, cliArgs('agent-client', 'configure'), {

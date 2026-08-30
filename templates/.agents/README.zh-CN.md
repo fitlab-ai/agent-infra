@@ -250,7 +250,7 @@ ai agent-client configure
 
 TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra 仅在 `.traecli/commands/` 下生成轻量 slash-command 包装文件；每个包装文件读取对应的共享 Skill，并在该 Skill 声明参数时转发 `$ARGUMENTS`。它不会把 Skill 包镜像到 `.trae/skills/`；该目录继续由用户所有，仅用于有意添加的 Trae 专属覆盖。
 
-旧 `tuis` 字段和 `sandbox.tools` 中的内建客户端 id 仅作为迁移输入。下一次写配置的命令会将其转换为规范 `agentClients` 数组并移除旧字段。若规范配置与旧配置冲突，命令会在修改文件前停止，要求显式解决冲突。
+`agentClients` 是内建客户端状态的唯一配置来源。顶层数组必须按固定规范顺序包含全部五个内建客户端；`sandbox.tools` 只列出 `agent-infra` 和自定义工具等非客户端工具。旧 `tuis` 字段或 `sandbox.tools` 中的内建客户端 id 会被拒绝，配置不会被自动改写。
 
 ### 取消 Agent Client 的副作用
 

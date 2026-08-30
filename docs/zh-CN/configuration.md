@@ -80,7 +80,7 @@
 
 ## Agent Client 契约
 
-**AI Coding Agent Client**（简称 **Agent Client**）是受支持的编码代理应用，例如 Claude Code、Codex、Antigravity CLI、OpenCode 或 TraeCode CLI。Canonical `agentClients` 数组必须恰好包含每个内建客户端一次。数组顺序没有运行时语义；agent-infra 会按上方示例中的稳定顺序序列化。
+**AI Coding Agent Client**（简称 **Agent Client**）是受支持的编码代理应用，例如 Claude Code、Codex、Antigravity CLI、OpenCode 或 TraeCode CLI。Canonical `agentClients` 数组必须按固定顺序 `claude-code`、`codex`、`antigravity-cli`、`opencode`、`traecli` 恰好包含每个内建客户端一次。
 
 | 字段 | 含义 |
 |------|------|
@@ -131,17 +131,7 @@ Claude Code 的生命周期证据强度弱于 Codex，且如实声明为此：`d
 
 `verification` capability 表示集成领域，`verified` 支持等级表示成熟度，两者不可互换。
 
-### 旧配置迁移
-
-旧的内建 `tuis` 字段和 `sandbox.tools` 中的内建 Agent Client ID 仅作为迁移输入：
-
-- 缺少 `agentClients` 时，有效的 `tuis` 数组按成员关系投影为 `enabled`。字段缺失、为 `null` 或非数组时启用全部五个客户端；空数组禁用全部五个客户端。
-- 非空 `sandbox.tools` 数组按内建客户端成员关系投影为 `installInSandbox`。字段缺失、非数组或空数组时，为保持原有运行行为，安装全部五个客户端。
-- 迁移后的 `sandbox.tools` 会移除内建客户端 ID；`agent-infra`、自定义工具和其他非客户端字符串 ID 保持原有顺序。
-- `customTUIs` 仍是独立扩展机制，不迁移到 `agentClients`。
-- Canonical 与旧字段共存时，投影出的客户端状态必须一致；冲突会使校验失败，而不是静默选择某一来源。
-
-当前规范化与迁移以纯配置契约形式提供；现有 init、update 和 sandbox 工作流将在后续集成阶段接入。
+`agentClients` 是内建客户端状态的唯一配置来源。顶层数组必须按固定规范顺序恰好包含全部五个内建客户端。`sandbox.tools` 只接受 `agent-infra` 和自定义工具等非客户端工具。旧 `tuis` 字段及 `sandbox.tools` 中的内建客户端 ID 会触发带路径的配置错误；agent-infra 不会自动改写这些输入。
 
 ## 外部模板与 skill 源
 

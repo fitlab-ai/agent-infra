@@ -168,7 +168,6 @@ function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpD
       opencode: { enabled: false, installInSandbox: false },
       traecli: { enabled: false, installInSandbox: false }
     },
-    agentClientSource: "canonical",
     refreshIntervalDays: 7,
     dockerfile: null,
     vm: { cpu: null, memory: null, disk: null }

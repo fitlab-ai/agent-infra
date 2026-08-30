@@ -80,7 +80,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 
 ## Agent Client contract
 
-An **AI Coding Agent Client**, or **Agent Client** for short, is a supported coding-agent application such as Claude Code, Codex, Antigravity CLI, OpenCode, or TraeCode CLI. The canonical `agentClients` array contains each built-in client exactly once. Array order has no runtime meaning; agent-infra serializes entries in the stable order shown above.
+An **AI Coding Agent Client**, or **Agent Client** for short, is a supported coding-agent application such as Claude Code, Codex, Antigravity CLI, OpenCode, or TraeCode CLI. The canonical `agentClients` array contains each built-in client exactly once and in the fixed order `claude-code`, `codex`, `antigravity-cli`, `opencode`, `traecli`.
 
 | Field | Meaning |
 |-------|---------|
@@ -131,17 +131,7 @@ Support maturity is recorded per capability as a single closed level:
 
 The `verification` capability names an integration area; the `verified` support level names maturity. They are not interchangeable.
 
-### Legacy migration
-
-The old built-in `tuis` field and built-in Agent Client IDs in `sandbox.tools` are migration inputs only:
-
-- If `agentClients` is absent, a valid `tuis` array maps membership to `enabled`. A missing, `null`, or non-array value enables all five clients; an empty array disables all five.
-- A non-empty `sandbox.tools` array maps built-in client membership to `installInSandbox`. Missing, non-array, and empty arrays preserve the previous runtime behavior by installing all five clients.
-- Built-in client IDs are removed from the migrated `sandbox.tools`. `agent-infra`, custom tools, and other non-client string IDs retain their original order.
-- `customTUIs` remains an independent extension mechanism and is not migrated into `agentClients`.
-- When canonical and legacy fields coexist, their projected client states must agree. A conflict fails validation instead of silently choosing one source.
-
-Normalization and migration are currently exposed as a pure configuration contract. Existing init, update, and sandbox workflows adopt it in a later integration phase.
+`agentClients` is the only source of built-in client state. The top-level array must contain all five built-in clients exactly once and in the fixed canonical order. `sandbox.tools` accepts only non-client tools, including `agent-infra` and custom tools. The legacy `tuis` field and built-in client IDs in `sandbox.tools` are rejected with a path-specific configuration error; agent-infra never rewrites those inputs.
 
 ## External template and skill sources
 

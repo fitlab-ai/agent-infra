@@ -1,12 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { initIsolatedGitRepo } from "./git.ts";
+import { createSandboxCapabilityPlan } from "../../lib/sandbox/agent-client-reconciler.ts";
 import { listAgentClientAdapters } from "../../lib/agent-clients/registry.ts";
+import { AGENT_CLIENT_IDS } from "../../lib/agent-clients/types.ts";
+import type { AgentClientState } from "../../lib/agent-clients/types.ts";
+import { parseCustomTools } from "../../lib/sandbox/tools.ts";
 
 type SandboxFixtureOptions = {
   project?: string;
   org?: string;
   sandbox?: Record<string, unknown>;
+  agentClients?: unknown;
   dockerStdoutForPs?: string;
   dockerLabelsForInspect?: Record<string, string>;
 };
@@ -54,6 +59,7 @@ function writeSandboxEngineFixture(
     project = "demo",
     org = "fitlab-ai",
     sandbox = {},
+    agentClients,
     dockerStdoutForPs = "",
     dockerLabelsForInspect = {}
   }: SandboxFixtureOptions = {}
@@ -82,6 +88,41 @@ function writeSandboxEngineFixture(
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(dockerStatePath, dockerStdoutForPs, "utf8");
   initIsolatedGitRepo(repoDir);
+  const configuredSandbox = Array.isArray(sandbox.tools)
+    ? {
+      ...sandbox,
+      tools: sandbox.tools.filter((tool) =>
+        typeof tool === "string" && !AGENT_CLIENT_IDS.some((id) => id === tool))
+    }
+    : sandbox;
+  const selectedClientIds = new Set(
+    Array.isArray(sandbox.tools)
+      ? sandbox.tools.filter((tool): tool is string =>
+        typeof tool === "string" && AGENT_CLIENT_IDS.some((id) => id === tool))
+      : []
+  );
+  const configuredAgentClients = agentClients ?? AGENT_CLIENT_IDS.map((id) => ({
+    id,
+    enabled: true,
+    installInSandbox: selectedClientIds.size === 0 || selectedClientIds.has(id)
+  }));
+  const configuredAgentClientState = Object.fromEntries(
+    (configuredAgentClients as Array<{ id: string; enabled: boolean; installInSandbox: boolean }>).map((entry) => [
+      entry.id,
+      { enabled: entry.enabled, installInSandbox: entry.installInSandbox }
+    ])
+  ) as AgentClientState;
+  const configuredToolIds = Array.isArray(configuredSandbox.tools)
+    ? configuredSandbox.tools.filter((tool): tool is string => typeof tool === "string")
+    : ["agent-infra"];
+  const configuredCustomTools = parseCustomTools(configuredSandbox.customTools, { home: "/home/devuser" });
+  const runtimeCapabilitySignature = createSandboxCapabilityPlan({
+    home: "/home/devuser",
+    project,
+    tools: configuredToolIds,
+    customTools: configuredCustomTools,
+    agentClientState: configuredAgentClientState
+  }).runtimeSignature;
   // Pick an engine that is (a) valid on every platform via validateSandboxEngine
   // and (b) different from PLATFORM_DEFAULTS[os], so the fixture actually proves
   // that .agents/.airc.json's sandbox.engine reaches detectEngine on each platform
@@ -94,8 +135,9 @@ function writeSandboxEngineFixture(
     `${JSON.stringify({
       project,
       org,
+      agentClients: configuredAgentClients,
       sandbox: {
-        ...sandbox,
+        ...configuredSandbox,
         engine: "docker-desktop"
       }
     }, null, 2)}\n`,
@@ -116,6 +158,7 @@ function writeSandboxEngineFixture(
       `const dockerLabelsForInspect = ${JSON.stringify(dockerLabelsForInspect)};`,
       `const fixtureHome = ${JSON.stringify(fixtureHome)};`,
       `const agentClientFixtures = ${JSON.stringify(agentClientFixtures)};`,
+      `const runtimeCapabilitySignature = ${JSON.stringify(runtimeCapabilitySignature)};`,
       "const rawArgs = process.argv.slice(2);",
       "const args = rawArgs[0] === '--context' && rawArgs.length >= 2 ? rawArgs.slice(2) : rawArgs;",
       "function log() {",
@@ -172,7 +215,7 @@ function writeSandboxEngineFixture(
       "      labels[separator < 0 ? raw : raw.slice(0, separator)] = separator < 0 ? '' : raw.slice(separator + 1);",
       "    }",
       "  }",
-      "  if (Object.keys(labels).length > 0) return labels;",
+      "  if (Object.keys(labels).length > 0) return { ...labels, [`agent-infra.sandbox.runtime-capability.${project}`]: runtimeCapabilitySignature };",
       "  const row = dockerRows().find((candidate) => candidate.split('\\t')[0] === containerName) || dockerRows()[0] || '';",
       "  const columns = row.split('\\t');",
       "  const branchKey = `${project}.sandbox.branch`;",
@@ -180,13 +223,13 @@ function writeSandboxEngineFixture(
       "  const columnLabels = Object.fromEntries(labelColumn.split(',').flatMap((label) => { const separator = label.indexOf('='); return separator < 0 ? [] : [[label.slice(0, separator), label.slice(separator + 1)]]; }));",
       "  const labelledBranch = columnLabels[branchKey];",
       "  const branchOnly = { [`${project}.sandbox.workspace-mode`]: 'branch-only' };",
-      "  if (labelledBranch) return { ...branchOnly, ...columnLabels };",
-      "  if (labelColumn && !labelColumn.includes('=')) return { [branchKey]: labelColumn, ...branchOnly };",
+      "  if (labelledBranch) return { ...branchOnly, ...columnLabels, [`agent-infra.sandbox.runtime-capability.${project}`]: runtimeCapabilitySignature };",
+      "  if (labelColumn && !labelColumn.includes('=')) return { [branchKey]: labelColumn, ...branchOnly, [`agent-infra.sandbox.runtime-capability.${project}`]: runtimeCapabilitySignature };",
       "  const prefix = `${project}-dev-`;",
       "  const name = columns[0] || '';",
       "  if (!name.startsWith(prefix)) return {};",
       "  const branch = name.slice(prefix.length).replace(/\\.\\./g, '/');",
-      "  return { [branchKey]: branch, ...branchOnly };",
+      "  return { [branchKey]: branch, ...branchOnly, [`agent-infra.sandbox.runtime-capability.${project}`]: runtimeCapabilitySignature };",
       "}",
       "function inspectMounts() {",
       "  const calls = loggedCalls();",
@@ -234,8 +277,10 @@ function writeSandboxEngineFixture(
       "      ? sandboxConfig.tools",
       "      : ['agent-infra', ...agentClientFixtures.map(({ id }) => id)];",
       "    for (const toolId of selectedTools) {",
+      "      if (toolId === 'agent-infra') defaults.push({ Type: 'bind', Source: path.join(home, '.agent-infra', 'sandboxes', 'agent-infra', project, branchDir), Destination: '/home/devuser/.agent-infra-cli', RW: true });",
       "      const fixture = agentClientFixtures.find(({ id }) => id === toolId);",
       "      if (!fixture) continue;",
+      "      if (!fixture.tmpfs) defaults.push({ Type: 'bind', Source: path.join(home, '.agent-infra', 'sandboxes', toolId, project, branchDir), Destination: fixture.containerMount, RW: true });",
       "      if (fixture.tmpfs) defaults.push({ Type: 'tmpfs', Source: '', Destination: fixture.containerMount, RW: true });",
       "      for (const live of fixture.hostLiveMounts) {",
       "        const source = live.hostPath.replace(fixtureHome, home);",

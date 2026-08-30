@@ -2,8 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { loadFreshEsm } from "../../helpers.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
+import type { AgentClientState } from "../../../lib/agent-clients/types.ts";
 
 type SandboxToolsModule = typeof import("../../../lib/sandbox/tools.ts");
+
+const NO_AGENT_CLIENTS = Object.fromEntries(AGENT_CLIENT_IDS.map((id) => [id, {
+  enabled: true,
+  installInSandbox: false
+}])) as AgentClientState;
 
 const FAKE_HOST_PATH = "/home/host-user/.acme/auth.json";
 
@@ -39,7 +46,8 @@ test("toolNpmPackagesArg includes the agent-infra builtin package", async () => 
   const [agentInfra] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["agent-infra"]
+    tools: ["agent-infra"],
+    agentClientState: NO_AGENT_CLIENTS
   });
 
   assert.equal(sandboxTools.toolNpmPackagesArg([agentInfra!]), "@fitlab-ai/agent-infra@latest");

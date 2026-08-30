@@ -23,6 +23,10 @@ import {
 } from "../../../lib/sandbox/recovery.ts";
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { tmpfsSeedTargetPath } from "../../../lib/sandbox/tools.ts";
+import { sandboxRuntimeCapabilityLabel } from "../../../lib/sandbox/constants.ts";
+import { createSandboxCapabilityPlan } from "../../../lib/sandbox/agent-client-reconciler.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
+import type { AgentClientState } from "../../../lib/agent-clients/types.ts";
 import {
   materializeSandboxControl,
   materializeSandboxWorkspaceView
@@ -33,6 +37,11 @@ const BRANCH_ONLY_LABELS = {
   "demo.sandbox.workspace-mode": "branch-only"
 };
 
+const CODEX_AGENT_CLIENT_STATE = Object.fromEntries(AGENT_CLIENT_IDS.map((id) => [id, {
+  enabled: true,
+  installInSandbox: id === "codex"
+}])) as AgentClientState;
+
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
     cwd,
@@ -40,6 +49,14 @@ function git(cwd: string, ...args: string[]): string {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   }).trim();
+}
+
+function recoveryLabels(config: SandboxConfig, overrides: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...BRANCH_ONLY_LABELS,
+    ...overrides,
+    [sandboxRuntimeCapabilityLabel(config)]: createSandboxCapabilityPlan(config).runtimeSignature
+  };
 }
 
 function healthyRecoverySnapshot(): SandboxRecoverySnapshot {
@@ -113,7 +130,8 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
     shellConfigBase: path.join(tmpDir, "config", project),
     workspaceViewBase: path.join(tmpDir, "home", ".agent-infra", "workspace-views"),
     controlBase: path.join(tmpDir, "home", ".agent-infra", "sandbox-control"),
-    tools: ["codex"],
+    tools: [],
+    agentClientState: CODEX_AGENT_CLIENT_STATE,
     customTools: []
   } as unknown as SandboxConfig;
 
@@ -245,11 +263,10 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     { Type: "bind", Source: path.join(seedDir, "model-catalogs"), Destination: "/run/agent-infra/tmpfs-seeds/codex/1", RW: false }
   ];
   return {
-    labels: {
-      "demo.sandbox.branch": "feature/demo",
+    labels: recoveryLabels(config, {
       "demo.sandbox.workspace-mode": "task-bound",
       "demo.sandbox.task-id": taskId
-    },
+    }),
     mounts
   };
 }
@@ -387,7 +404,7 @@ test("recovery accepts bind sources that resolve to the same filesystem object",
       deps: {
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: BRANCH_ONLY_LABELS },
+          Config: { Labels: recoveryLabels(config) },
           Mounts: mounts
         }]),
         runOk: () => true
@@ -424,11 +441,10 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
   const taskSource = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
   fs.mkdirSync(taskSource, { recursive: true });
   fs.writeFileSync(path.join(taskSource, "task.md"), `---\nid: ${taskId}\n---\n`, "utf8");
-  const labels = {
-    ...BRANCH_ONLY_LABELS,
+  const labels = recoveryLabels(config, {
     "demo.sandbox.workspace-mode": "task-bound",
     "demo.sandbox.task-id": taskId
-  };
+  });
   const mounts = recoveryFixtureMounts(config).concat({
     Type: "bind",
     Source: taskSource,
@@ -859,7 +875,7 @@ test("recovery recognizes tmpfs declared only through HostConfig on OrbStack", (
     deps: {
       run: () => JSON.stringify([{
         Id: "fixture-container-id",
-        Config: { Labels: BRANCH_ONLY_LABELS },
+        Config: { Labels: recoveryLabels(config) },
         HostConfig: { Tmpfs: { "/home/devuser/.codex": options } },
         Mounts: mounts
       }]),
@@ -913,7 +929,7 @@ test("tmpfs permission probe compares numeric owner, primary group, and mode", (
       deps: {
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: BRANCH_ONLY_LABELS },
+          Config: { Labels: recoveryLabels(config) },
           Mounts: recoveryFixtureMounts(config)
         }]),
         runOk: (_engine, _cmd, args) => {
@@ -976,7 +992,7 @@ test("running permission repair re-assesses seed targets before hydration", asyn
         ensureControlBroker: async () => { brokerChecks += 1; },
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: BRANCH_ONLY_LABELS },
+          Config: { Labels: recoveryLabels(config) },
           Mounts: recoveryFixtureMounts(config)
         }]),
         runOk: (_engine, _cmd, args) => {
@@ -1033,38 +1049,38 @@ test("recovery rejects mount and identity hard failures before writes", async ()
   }> = [
     {
       name: "wrong worktree source",
-      labels: BRANCH_ONLY_LABELS,
+      labels: recoveryLabels(config),
       mounts: baseMounts.map((mount) => mount.Destination === "/workspace"
         ? { ...mount, Source: wrongWorktreeSource }
         : mount)
     },
     {
       name: "read-only worktree",
-      labels: BRANCH_ONLY_LABELS,
+      labels: recoveryLabels(config),
       mounts: baseMounts.map((mount) => mount.Destination === "/workspace"
         ? { ...mount, RW: false }
         : mount)
     },
     {
       name: "inaccessible worktree source",
-      labels: BRANCH_ONLY_LABELS,
+      labels: recoveryLabels(config),
       mounts: baseMounts,
       unavailableSource: worktreeSource
     },
     {
       name: "inaccessible live mount source",
-      labels: BRANCH_ONLY_LABELS,
+      labels: recoveryLabels(config),
       mounts: baseMounts,
       unavailableSource: liveSource
     },
     {
       name: "missing live mount",
-      labels: BRANCH_ONLY_LABELS,
+      labels: recoveryLabels(config),
       mounts: baseMounts.filter((mount) => mount.Destination !== "/home/devuser/.codex/auth.json")
     },
     {
       name: "missing branch label",
-      labels: {},
+      labels: { [sandboxRuntimeCapabilityLabel(config)]: createSandboxCapabilityPlan(config).runtimeSignature },
       mounts: baseMounts
     }
   ];
@@ -1137,7 +1153,7 @@ test("hard recovery failure requires explicit container replacement authorizatio
     });
   const inspect = () => JSON.stringify([{
     Id: "fixture-container-id",
-    Config: { Labels: BRANCH_ONLY_LABELS },
+    Config: { Labels: recoveryLabels(config) },
     Mounts: recreated ? currentMounts : legacyMounts
   }]);
   const deps = {
@@ -1231,7 +1247,7 @@ test("task-bound recovery keeps the branch-only code and recommends the full tas
           ensureControlBroker: async () => {},
           run: () => JSON.stringify([{
             Id: "fixture-container-id",
-            Config: { Labels: BRANCH_ONLY_LABELS },
+            Config: { Labels: recoveryLabels(config) },
             Mounts: recoveryFixtureMounts(config)
           }]),
           runOk: () => true,
@@ -1264,7 +1280,7 @@ test("unauthorized recovery leads with the recreate command and demotes the find
           ensureControlBroker: async () => {},
           run: () => JSON.stringify([{
             Id: "fixture-container-id",
-            Config: { Labels: BRANCH_ONLY_LABELS },
+            Config: { Labels: recoveryLabels(config) },
             Mounts: []
           }]),
           runOk: () => true,
@@ -1293,7 +1309,7 @@ test("container replacement snapshots the worktree before the callback and rejec
   let recreated = false;
   const inspect = () => JSON.stringify([{
     Id: "fixture-container-id",
-    Config: { Labels: BRANCH_ONLY_LABELS },
+    Config: { Labels: recoveryLabels(config) },
     Mounts: recoveryFixtureMounts(config).map((mount) =>
       mount.Destination === "/home/devuser/.codex"
         ? { ...mount, Type: recreated ? "tmpfs" : "bind" }
@@ -1353,7 +1369,7 @@ test("explicit recreation replaces a healthy running container", async () => {
         ensureControlBroker: async () => {},
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: BRANCH_ONLY_LABELS },
+          Config: { Labels: recoveryLabels(config) },
           Mounts: recoveryFixtureMounts(config)
         }]),
         runOk: () => true,
@@ -1424,7 +1440,7 @@ test("container replacement preserves the original failure when the worktree is 
           ensureControlBroker: async () => {},
           run: () => JSON.stringify([{
             Id: "fixture-container-id",
-            Config: { Labels: BRANCH_ONLY_LABELS },
+            Config: { Labels: recoveryLabels(config) },
             Mounts: recoveryFixtureMounts(config).map((mount) =>
               mount.Destination === "/home/devuser/.codex" ? { ...mount, Type: "bind" } : mount
             )
@@ -1549,7 +1565,7 @@ test("control broker readiness failure enters the explicit container replacement
   const config = recoveryFixtureConfig(tmpDir);
   const inspect = () => JSON.stringify([{
     Id: "fixture-container-id",
-    Config: { Labels: BRANCH_ONLY_LABELS },
+    Config: { Labels: recoveryLabels(config) },
     Mounts: recoveryFixtureMounts(config)
   }]);
   const deps = {
@@ -1618,7 +1634,7 @@ test("fresh readiness restarts once when OrbStack workspace mounts are still set
       deps: {
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: BRANCH_ONLY_LABELS },
+          Config: { Labels: recoveryLabels(config) },
           Mounts: recoveryFixtureMounts(config).filter((mount) =>
             restarted || mount.Destination !== settlingDestination
           )
@@ -1655,7 +1671,7 @@ test("fresh readiness remains fail-closed after one workspace mount restart", as
       deps: {
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: BRANCH_ONLY_LABELS },
+          Config: { Labels: recoveryLabels(config) },
           Mounts: recoveryFixtureMounts(config).filter((mount) =>
             mount.Destination !== settlingDestination
           )

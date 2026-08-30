@@ -252,7 +252,7 @@ ai agent-client configure
 
 TraeCode CLI uses `.agents/skills/` as the canonical Skill source. agent-infra generates lightweight slash-command wrappers under `.traecli/commands/`; each wrapper reads the corresponding shared Skill and forwards `$ARGUMENTS` when that Skill declares arguments. It does not mirror Skill packages into `.trae/skills/`, which remains user-owned for intentional Trae-specific overrides.
 
-Legacy `tuis` and built-in client ids in `sandbox.tools` are migration inputs only. The next config-writing command converts them into the canonical `agentClients` array and removes the legacy fields. If canonical and legacy values conflict, the command stops without modifying files so the conflict can be resolved explicitly.
+`agentClients` is the sole source of truth for built-in client state. The top-level array must contain all five built-in clients in the fixed canonical order; `sandbox.tools` lists only non-client tools such as `agent-infra` and custom tools. A legacy `tuis` field or a built-in client id in `sandbox.tools` is rejected, and configuration is never rewritten automatically.
 
 ### Side effects of disabling an Agent Client
 

@@ -4,7 +4,6 @@ import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import pc from 'picocolors';
 import { normalizeAgentClients } from '../agent-clients/config.ts';
-import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientState } from '../agent-clients/types.ts';
 import { validateSandboxEngine } from './engine.ts';
 import type { SandboxEngineInput } from './engine.ts';
@@ -64,7 +63,6 @@ export type SandboxConfig = {
   tools: string[];
   customTools: SandboxTool[];
   agentClientState: AgentClientState;
-  agentClientSource: 'canonical' | 'legacy';
   refreshIntervalDays: number;
   dockerfile: string | null;
   vm: SandboxVmConfig;
@@ -74,7 +72,6 @@ type AircConfig = {
   project?: unknown;
   org?: unknown;
   agentClients?: unknown;
-  tuis?: unknown;
   sandbox?: SandboxConfigInput;
 };
 
@@ -110,17 +107,10 @@ function cloneDefaults(): SandboxConfigInput & { vm: SandboxVmConfig; runtimes: 
 
 function resolveSandboxToolIds(
   sandbox: SandboxConfigInput,
-  agentClients: ReturnType<typeof normalizeAgentClients>,
   defaults: readonly string[]
 ): string[] {
   if (Array.isArray(sandbox.tools)) {
-    const tools = sandbox.tools.filter((tool): tool is string => typeof tool === 'string');
-    return agentClients.source === 'canonical'
-      ? tools.filter((tool) => !isAgentClientId(tool))
-      : tools;
-  }
-  if (agentClients.remainingSandboxTools !== undefined) {
-    return [...agentClients.remainingSandboxTools];
+    return sandbox.tools.filter((tool): tool is string => typeof tool === 'string');
   }
   return [...defaults];
 }
@@ -142,7 +132,6 @@ export function loadConfig({
   }
 
   const airc = JSON.parse(fs.readFileSync(configPath, 'utf8')) as AircConfig;
-  const sandboxInput = airc.sandbox;
   const agentClients = normalizeAgentClients(airc);
   const defaults = cloneDefaults();
   const sandbox = airc.sandbox ?? {};
@@ -178,7 +167,7 @@ export function loadConfig({
   }
 
   const customTools = parseCustomTools(sandbox.customTools, { home });
-  const tools = resolveSandboxToolIds(sandbox, agentClients, defaults.tools);
+  const tools = resolveSandboxToolIds(sandbox, defaults.tools);
 
   return {
     repoRoot,
@@ -199,7 +188,6 @@ export function loadConfig({
     tools,
     customTools,
     agentClientState: agentClients.state,
-    agentClientSource: agentClients.source,
     refreshIntervalDays: asNonNegativeIntegerOrDefault(
       sandbox.refreshIntervalDays,
       defaults.refreshIntervalDays

@@ -7,12 +7,21 @@ import path from "node:path";
 
 import { CLI_PATH, cliArgs } from "../../helpers.ts";
 
+const CANONICAL_AGENT_CLIENTS = [
+  "claude-code",
+  "codex",
+  "antigravity-cli",
+  "opencode",
+  "traecli"
+].map((id) => ({ id, enabled: true, installInSandbox: true }));
+
 function makeStubProject(tmpDir: string, configOverrides: Record<string, unknown>): void {
   const base = {
     project: "seedproj",
     org: "seedorg",
     language: "zh-CN",
     templateVersion: "stale",
+    agentClients: CANONICAL_AGENT_CLIENTS,
     files: {
       managed: [],
       merged: [],

@@ -72,16 +72,15 @@ layer and keeps each branch in one persistent volume at
 `/home/devuser/.local/share/opencode`. Inside that volume, OpenCode uses
 `XDG_CONFIG_HOME=.local/share/opencode/.xdg/config` and
 `XDG_STATE_HOME=.local/share/opencode/.xdg/state`; its normal data root remains
-`/home/devuser/.local/share`. On first creation, a legacy branch-local
-`opencode.json` is copied into the canonical XDG config only when that target
-does not exist. The host config contributes only missing string `model` and
+`/home/devuser/.local/share`. The adapter reads and writes only the canonical XDG
+configuration. The host config contributes only missing string `model` and
 `small_model` values. The host `XDG_DATA_HOME/opencode/auth.json` file is the
 only live credential mount, and it is optional for version/help smoke checks.
 
 Disabling or uninstalling OpenCode removes only adapter-managed project assets
-and selection state. It does not delete the host XDG directories, legacy
-config, branch runtime volume, user-authored commands, or other non-managed
-runtime data. Re-enable the adapter to reuse that preserved state.
+and selection state. It does not delete the host XDG directories, branch runtime
+volume, user-authored commands, or other non-managed runtime data. Re-enable the
+adapter to reuse that preserved state.
 
 Disabling a client never deletes its host credentials, configuration, or
 history. `sandbox show` lists only currently selected tools, even when disabled

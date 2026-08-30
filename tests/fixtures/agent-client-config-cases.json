@@ -1,52 +1,69 @@
 [
   {
-    "name": "legacy independent dimensions",
-    "input": {
-      "tuis": ["codex", "opencode"],
-      "sandbox": { "tools": ["agent-infra", "claude-code", "custom-tool"] }
-    }
-  },
-  {
-    "name": "canonical non-client tools",
+    "name": "canonical complete",
     "input": {
       "agentClients": [
+        { "id": "claude-code", "enabled": false, "installInSandbox": true },
         {
-          "id": "claude-code",
-          "enabled": false,
-          "installInSandbox": true,
+          "id": "codex",
+          "enabled": true,
+          "installInSandbox": false,
           "orchestration": {
             "executor": { "model": "executor-model", "reasoningEffort": "xhigh" },
             "reviewer": { "model": "reviewer-model", "reasoningEffort": "high" }
           }
         },
-        { "id": "codex", "enabled": true, "installInSandbox": false },
         { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
-        { "id": "opencode", "enabled": true, "installInSandbox": false }
+        { "id": "opencode", "enabled": true, "installInSandbox": false },
+        { "id": "traecli", "enabled": false, "installInSandbox": true }
       ],
       "sandbox": { "tools": ["agent-infra", "custom-tool"] }
+    }
+  },
+  {
+    "name": "canonical missing",
+    "input": {
+      "agentClients": [
+        { "id": "claude-code", "enabled": true, "installInSandbox": true }
+      ]
     }
   },
   {
     "name": "canonical reordered",
     "input": {
       "agentClients": [
-        { "id": "opencode", "enabled": true, "installInSandbox": false },
-        { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
+        { "id": "traecli", "enabled": false, "installInSandbox": false },
         { "id": "codex", "enabled": true, "installInSandbox": false },
-        { "id": "claude-code", "enabled": false, "installInSandbox": true }
+        { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
+        { "id": "opencode", "enabled": true, "installInSandbox": false },
+        { "id": "claude-code", "enabled": true, "installInSandbox": true }
       ]
     }
   },
   {
-    "name": "canonical legacy conflict",
+    "name": "canonical legacy field",
     "input": {
       "agentClients": [
-        { "id": "claude-code", "enabled": false, "installInSandbox": false },
-        { "id": "codex", "enabled": true, "installInSandbox": false },
-        { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
-        { "id": "opencode", "enabled": false, "installInSandbox": false }
+        { "id": "claude-code", "enabled": true, "installInSandbox": true },
+        { "id": "codex", "enabled": true, "installInSandbox": true },
+        { "id": "antigravity-cli", "enabled": true, "installInSandbox": true },
+        { "id": "opencode", "enabled": true, "installInSandbox": true },
+        { "id": "traecli", "enabled": true, "installInSandbox": true }
       ],
-      "tuis": ["opencode"]
+      "tuis": ["codex"]
+    }
+  },
+  {
+    "name": "canonical client sandbox tool",
+    "input": {
+      "agentClients": [
+        { "id": "claude-code", "enabled": true, "installInSandbox": true },
+        { "id": "codex", "enabled": true, "installInSandbox": true },
+        { "id": "antigravity-cli", "enabled": true, "installInSandbox": true },
+        { "id": "opencode", "enabled": true, "installInSandbox": true },
+        { "id": "traecli", "enabled": true, "installInSandbox": true }
+      ],
+      "sandbox": { "tools": ["agent-infra", "codex"] }
     }
   },
   {
@@ -56,7 +73,8 @@
         { "id": "claude-code", "enabled": true, "installInSandbox": true },
         { "id": "codex", "enabled": true, "installInSandbox": true },
         { "id": "antigravity-cli", "enabled": true, "installInSandbox": true },
-        { "id": "other", "enabled": true, "installInSandbox": true }
+        { "id": "other", "enabled": true, "installInSandbox": true },
+        { "id": "traecli", "enabled": true, "installInSandbox": true }
       ]
     }
   }

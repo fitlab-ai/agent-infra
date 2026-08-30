@@ -80,11 +80,11 @@ test('agent-client next-steps renders enabled built-ins and custom TUIs in text 
   );
 });
 
-test('agent-client next-steps preserves legacy selection and empty output semantics', () => {
+test('agent-client next-steps fails closed for legacy selection and preserves empty output semantics', () => {
   const legacy = fixture({ project: 'demo', tuis: ['opencode'], sandbox: { tools: [] } });
   const legacyResult = run(legacy, ['--skill', 'commit']);
-  assert.equal(legacyResult.status, 0, legacyResult.stderr);
-  assert.equal(legacyResult.stdout, '  - OpenCode: /commit\n');
+  assert.equal(legacyResult.status, 1);
+  assert.equal(JSON.parse(legacyResult.stdout).error.code, 'MISSING_AGENT_CLIENT');
 
   const empty = fixture({ project: 'demo', agentClients: canonical([]), customTUIs: [] });
   const emptyResult = run(empty, ['--skill', 'commit']);

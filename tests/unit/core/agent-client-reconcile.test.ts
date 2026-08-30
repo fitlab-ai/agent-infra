@@ -34,13 +34,17 @@ function projectConfig(): Record<string, unknown> {
     org: 'acme',
     language: 'en',
     platform: { type: 'github' },
-    tuis: ['codex'],
-    sandbox: { tools: ['agent-infra', 'claude-code'], customTools: [{ id: 'custom' }] },
+    agentClients: AGENT_CLIENT_IDS.map((id) => ({
+      id,
+      enabled: id === 'codex',
+      installInSandbox: id === 'claude-code'
+    })),
+    sandbox: { tools: ['agent-infra', 'custom'], customTools: [{ id: 'custom' }] },
     files: { managed: [], merged: [], ejected: [] }
   };
 }
 
-test('legacy state is normalized before enabled mutation and materialized canonically', () => {
+test('canonical state is normalized before enabled mutation without rewriting sandbox tools', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-reconcile-plan-'));
   try {
     writeTemplates(root);
@@ -56,15 +60,13 @@ test('legacy state is normalized before enabled mutation and materialized canoni
     });
 
     assert.deepEqual(input, before);
-    assert.equal(plan.source, 'legacy');
     assert.equal(plan.before.codex.enabled, true);
     assert.equal(plan.before.opencode.enabled, false);
     assert.equal(plan.desired.opencode.enabled, true);
     assert.equal(plan.desired.opencode.installInSandbox, false);
-    assert.equal('tuis' in plan.nextConfig, false);
     assert.deepEqual(
       (plan.nextConfig.sandbox as { tools: string[] }).tools,
-      ['agent-infra']
+      ['agent-infra', 'custom']
     );
     assert.deepEqual(
       (plan.nextConfig.agentClients as Array<{ id: string }>).map((entry) => entry.id),

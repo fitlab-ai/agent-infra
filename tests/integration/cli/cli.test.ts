@@ -7,6 +7,7 @@ import os from "node:os";
 import { pathToFileURL } from "node:url";
 
 import { CLI_PATH, INTERNAL_CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
 const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
   linux: "native",
@@ -16,6 +17,12 @@ const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
 const CURRENT_PLATFORM = os.platform();
 const DEFAULT_SANDBOX_ENGINE = PLATFORM_DEFAULT_ENGINES[CURRENT_PLATFORM] ?? null;
 const ENGINE_NL = DEFAULT_SANDBOX_ENGINE ? "\n" : "";
+
+const CANONICAL_AGENT_CLIENTS = AGENT_CLIENT_IDS.map((id) => ({
+  id,
+  enabled: true,
+  installInSandbox: true
+}));
 
 test("bootstrap CLI files exist", () => {
   assert.ok(exists("install.sh"), "install.sh should exist");
@@ -653,6 +660,7 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
     project: "seedproj",
     org: "seedorg",
     language: "zh-CN",
+    agentClients: CANONICAL_AGENT_CLIENTS,
     templateVersion: "stale",
     files: {
       managed: [],
@@ -748,13 +756,14 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
   }
 });
 
-test("agent-infra update migrates legacy sandbox client tools to canonical state", () => {
+test("agent-infra update rejects legacy sandbox client tools without rewriting config", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-sandbox-tools-"));
   const config = {
     project: "seedproj",
     org: "seedorg",
     language: "en",
     templateVersion: "stale",
+    agentClients: CANONICAL_AGENT_CLIENTS,
     files: {
       managed: [],
       merged: [],
@@ -763,7 +772,7 @@ test("agent-infra update migrates legacy sandbox client tools to canonical state
     sandbox: {
       engine: null,
       runtimes: ["node22"],
-      tools: ["opencode", "claude-code", "antigravity-cli", "codex"],
+      tools: ["agent-infra", "opencode"],
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
     }
@@ -777,27 +786,14 @@ test("agent-infra update migrates legacy sandbox client tools to canonical state
       "utf8"
     );
 
-    const output = execFileSync(process.execPath, cliArgs("update"), {
+    const before = JSON.stringify(config, null, 2) + "\n";
+    const result = spawnSync(process.execPath, cliArgs("update"), {
       cwd: tmpDir,
-      stdio: "pipe",
       encoding: "utf8"
     });
-
-    const updated = JSON.parse(
-      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
-    );
-
-    assert.match(output, /Updated \.agents[\\/]\.airc\.json/);
-    assert.deepEqual(updated.sandbox.tools, ["agent-infra"]);
-    const legacyClients = ["claude-code", "codex", "antigravity-cli", "opencode"];
-    assert.ok(updated.agentClients
-      .filter((entry: { id: string }) => legacyClients.includes(entry.id))
-      .every((entry: { installInSandbox: boolean }) => entry.installInSandbox)
-    );
-    assert.equal(
-      updated.agentClients.find((entry: { id: string }) => entry.id === "traecli").installInSandbox,
-      false
-    );
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stderr.includes("INVALID_AGENT_CLIENTS"), true);
+    assert.equal(fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8"), before);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

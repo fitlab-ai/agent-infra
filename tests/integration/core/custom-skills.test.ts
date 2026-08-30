@@ -8,6 +8,14 @@ import { parse as parseYaml } from "yaml";
 import { loadFreshEsm } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
+const CANONICAL_AGENT_CLIENTS = [
+  "claude-code",
+  "codex",
+  "antigravity-cli",
+  "opencode",
+  "traecli"
+].map((id) => ({ id, enabled: true, installInSandbox: true }));
+
 function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -51,6 +59,7 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
       project: "demo",
       org: "acme",
       language: "zh-CN",
+      agentClients: CANONICAL_AGENT_CLIENTS,
       platform: { type: "github" },
       skills: {
         sources: [
@@ -165,6 +174,7 @@ test("syncTemplates cleans stale files from sourced skills without touching manu
       project: "demo",
       org: "acme",
       language: "en",
+      agentClients: CANONICAL_AGENT_CLIENTS,
       platform: { type: "github" },
       skills: {
         sources: [
@@ -233,6 +243,7 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
       project: "demo",
       org: "acme",
       language: "en",
+      agentClients: CANONICAL_AGENT_CLIENTS,
       platform: { type: "github" },
       skills: {
         sources: [

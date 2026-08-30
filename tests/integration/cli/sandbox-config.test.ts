@@ -13,6 +13,14 @@ import {
 } from "../../helpers.ts";
 import { resolveTools } from "../../../lib/sandbox/tools.ts";
 
+const CANONICAL_AGENT_CLIENTS = [
+  { id: "claude-code", enabled: true, installInSandbox: true },
+  { id: "codex", enabled: true, installInSandbox: true },
+  { id: "antigravity-cli", enabled: true, installInSandbox: true },
+  { id: "opencode", enabled: true, installInSandbox: true },
+  { id: "traecli", enabled: true, installInSandbox: true }
+];
+
 test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-config-"));
@@ -23,7 +31,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),
-      JSON.stringify({ project: "demo", org: "fitlab-ai" }, null, 2) + "\n",
+      JSON.stringify({ project: "demo", org: "fitlab-ai", agentClients: CANONICAL_AGENT_CLIENTS }, null, 2) + "\n",
       "utf8"
     );
 
@@ -82,7 +90,6 @@ test("loadConfig combines canonical Agent Client state with non-client sandbox t
     process.chdir(tmpDir);
     const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
 
-    assert.equal(config.agentClientSource, "canonical");
     assert.deepEqual(config.tools, ["agent-infra"]);
     assert.deepEqual(
       resolveTools(config).map((tool) => tool.id),
@@ -106,6 +113,7 @@ test("loadConfig parses sandbox refresh interval days", async () => {
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         org: "fitlab-ai",
         sandbox: { refreshIntervalDays: 0 }
       }, null, 2) + "\n",
@@ -119,6 +127,7 @@ test("loadConfig parses sandbox refresh interval days", async () => {
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         org: "fitlab-ai",
         sandbox: { refreshIntervalDays: 3.5 }
       }, null, 2) + "\n",
@@ -130,6 +139,7 @@ test("loadConfig parses sandbox refresh interval days", async () => {
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         org: "fitlab-ai",
         sandbox: { refreshIntervalDays: "7" }
       }, null, 2) + "\n",
@@ -163,6 +173,7 @@ test("loadConfig preserves configured sandbox engine", async () => {
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         org: "fitlab-ai",
         sandbox: { engine: "docker-desktop" }
       }, null, 2) + "\n",
@@ -193,6 +204,7 @@ test("loadConfig preserves configured darwin-only sandbox engine with platform c
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         org: "fitlab-ai",
         sandbox: { engine: "orbstack" }
       }, null, 2) + "\n",
@@ -221,6 +233,7 @@ test("loadConfig resolves per-platform sandbox engine object for the matching pl
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         org: "fitlab-ai",
         sandbox: { engine: { darwin: "orbstack" } }
       }, null, 2) + "\n",
@@ -251,6 +264,7 @@ test("loadConfig rejects unsupported sandbox engine values", async () => {
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         sandbox: { engine: "podman" }
       }, null, 2) + "\n",
       "utf8"
@@ -323,6 +337,7 @@ test("loadConfig warns when sandbox node runtime does not satisfy package engine
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         org: "fitlab-ai",
         sandbox: { runtimes: ["node20"] }
       }, null, 2) + "\n",
@@ -360,6 +375,7 @@ test("loadConfig does not warn when sandbox node runtime satisfies package engin
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         sandbox: { runtimes: ["node22"] }
       }, null, 2) + "\n",
       "utf8"
@@ -392,6 +408,7 @@ test("loadConfig skips runtime engine warnings for invalid package json", async 
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         sandbox: { runtimes: ["node20"] }
       }, null, 2) + "\n",
       "utf8"
@@ -429,6 +446,7 @@ test("loadConfig skips runtime engine warnings when a custom Dockerfile is confi
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         sandbox: {
           dockerfile: "Dockerfile",
           runtimes: ["node20"]
@@ -463,7 +481,7 @@ test("loadConfig uses os.homedir on Windows when HOME is unset", onPlatforms("wi
     fs.mkdirSync(path.join(tmpDir, '.agents'), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, '.agents', '.airc.json'),
-      JSON.stringify({ project: 'test-project' }),
+      JSON.stringify({ project: 'test-project', agentClients: CANONICAL_AGENT_CLIENTS }),
       'utf8'
     );
     process.chdir(tmpDir);

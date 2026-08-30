@@ -233,84 +233,19 @@ const CUSTOM_TUI_CONTRACT = {
 const KNOWN_PLATFORMS = new Set(['github', 'none']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
-const BUILTIN_TUI_IDS = AGENT_CLIENT_MANIFEST.map((entry) => entry.id);
+const AGENT_CLIENT_IDS = AGENT_CLIENT_MANIFEST.map((entry) => entry.id);
 
 function normalizeAgentClientConfig(cfg) {
   const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
-  const diagnostics = [];
   const failure = (code, path) => ({
-    source: null,
     state: null,
     canonical: null,
-    remainingSandboxTools: undefined,
-    removeLegacyTuis: false,
-    changed: false,
-    diagnostics,
     error: `${code} at ${path}`,
     errorCode: code,
     errorPath: path
   });
-  const projectTuis = (value) => {
-    if (!Array.isArray(value)) {
-      return Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, true]));
-    }
-    const enabled = new Set();
-    for (const [index, candidate] of value.entries()) {
-      if (BUILTIN_TUI_IDS.includes(candidate)) enabled.add(candidate);
-      else diagnostics.push({ code: 'LEGACY_VALUE_IGNORED', path: `tuis[${index}]` });
-    }
-    return Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, enabled.has(id)]));
-  };
-  const projectSandbox = (value) => {
-    if (!Array.isArray(value) || value.length === 0) {
-      return {
-        installed: Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, true])),
-        clientSignals: new Set(),
-        remainingTools: Array.isArray(value) ? [] : undefined
-      };
-    }
-    const installed = new Set();
-    const remainingTools = [];
-    for (const [index, candidate] of value.entries()) {
-      if (BUILTIN_TUI_IDS.includes(candidate)) installed.add(candidate);
-      else if (typeof candidate === 'string') remainingTools.push(candidate);
-      else diagnostics.push({ code: 'LEGACY_VALUE_IGNORED', path: `sandbox.tools[${index}]` });
-    }
-    return {
-      installed: Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, installed.has(id)])),
-      clientSignals: installed,
-      remainingTools
-    };
-  };
-  const serialize = (state) => BUILTIN_TUI_IDS.map((id) => ({ id, ...state[id] }));
-  const hasCanonical = own(cfg, 'agentClients');
-  const hasLegacyTuis = own(cfg, 'tuis');
-  const sandbox = cfg.sandbox && typeof cfg.sandbox === 'object' && !Array.isArray(cfg.sandbox)
-    ? cfg.sandbox
-    : undefined;
-  const hasSandboxTools = sandbox !== undefined && own(sandbox, 'tools');
-  const tuiProjection = projectTuis(cfg.tuis);
-  const sandboxProjection = projectSandbox(sandbox?.tools);
-
-  if (!hasCanonical) {
-    const state = Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, {
-      enabled: tuiProjection[id],
-      installInSandbox: sandboxProjection.installed[id]
-    }]));
-    return {
-      source: 'legacy',
-      state,
-      canonical: serialize(state),
-      remainingSandboxTools: sandboxProjection.remainingTools,
-      removeLegacyTuis: hasLegacyTuis,
-      changed: true,
-      diagnostics,
-      error: null,
-      errorCode: null,
-      errorPath: null
-    };
-  }
-
+  const serialize = (state) => AGENT_CLIENT_IDS.map((id) => ({ id, ...state[id] }));
+  if (!own(cfg, 'agentClients')) return failure('MISSING_AGENT_CLIENT', 'agentClients');
   if (!Array.isArray(cfg.agentClients)) return failure('INVALID_AGENT_CLIENTS', 'agentClients');
   const entries = new Map();
   for (const [index, candidate] of cfg.agentClients.entries()) {
@@ -328,7 +263,7 @@ function normalizeAgentClientConfig(cfg) {
     ) {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
-    if (!BUILTIN_TUI_IDS.includes(candidate.id)) {
+    if (!AGENT_CLIENT_IDS.includes(candidate.id)) {
       return failure('UNKNOWN_AGENT_CLIENT', `${entryPath}.id`);
     }
     if (entries.has(candidate.id)) return failure('DUPLICATE_AGENT_CLIENT', `${entryPath}.id`);
@@ -338,24 +273,44 @@ function normalizeAgentClientConfig(cfg) {
     let orchestration;
     if (own(candidate, 'orchestration')) {
       const policy = candidate.orchestration;
-      const exact = (value) => typeof value === 'string' && value.length > 0 && value.trim() === value;
-      const validRole = (role) => role
-        && typeof role === 'object'
-        && !Array.isArray(role)
-        && Object.keys(role).length === 2
-        && exact(role.model)
-        && exact(role.reasoningEffort);
       if (
         !policy
         || typeof policy !== 'object'
         || Array.isArray(policy)
         || Object.keys(policy).length !== 2
-        || !validRole(policy.executor)
-        || !validRole(policy.reviewer)
+        || !own(policy, 'executor')
+        || !own(policy, 'reviewer')
       ) {
         return failure('INVALID_AGENT_CLIENTS', `${entryPath}.orchestration`);
       }
-      orchestration = structuredClone(policy);
+      const parseExact = (value, path) => {
+        if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
+          return failure('INVALID_AGENT_CLIENTS', path);
+        }
+        return value;
+      };
+      const parseRole = (role, rolePath) => {
+        if (
+          !role
+          || typeof role !== 'object'
+          || Array.isArray(role)
+          || Object.keys(role).length !== 2
+          || !own(role, 'model')
+          || !own(role, 'reasoningEffort')
+        ) {
+          return failure('INVALID_AGENT_CLIENTS', rolePath);
+        }
+        const model = parseExact(role.model, `${rolePath}.model`);
+        if (typeof model !== 'string') return model;
+        const reasoningEffort = parseExact(role.reasoningEffort, `${rolePath}.reasoningEffort`);
+        if (typeof reasoningEffort !== 'string') return reasoningEffort;
+        return { model, reasoningEffort };
+      };
+      const executor = parseRole(policy.executor, `${entryPath}.orchestration.executor`);
+      if (executor.errorCode) return executor;
+      const reviewer = parseRole(policy.reviewer, `${entryPath}.orchestration.reviewer`);
+      if (reviewer.errorCode) return reviewer;
+      orchestration = { executor, reviewer };
     }
     entries.set(candidate.id, {
       enabled: candidate.enabled,
@@ -363,25 +318,29 @@ function normalizeAgentClientConfig(cfg) {
       ...(orchestration ? { orchestration } : {})
     });
   }
-  if (BUILTIN_TUI_IDS.some((id) => !entries.has(id))) {
+  if (AGENT_CLIENT_IDS.some((id) => !entries.has(id))) {
     return failure('MISSING_AGENT_CLIENT', 'agentClients');
   }
-  const state = Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, entries.get(id)]));
-  if (hasLegacyTuis && BUILTIN_TUI_IDS.some((id) => state[id].enabled !== tuiProjection[id])) {
-    return failure('LEGACY_CONFLICT', 'tuis');
+  for (const [index, id] of AGENT_CLIENT_IDS.entries()) {
+    if (cfg.agentClients[index]?.id !== id) {
+      return failure('INVALID_AGENT_CLIENTS', `agentClients[${index}].id`);
+    }
   }
-  if ([...sandboxProjection.clientSignals].some((id) => !state[id].installInSandbox)) {
-    return failure('LEGACY_CONFLICT', 'sandbox.tools');
+  if (own(cfg, 'tuis')) return failure('INVALID_AGENT_CLIENTS', 'tuis');
+  const sandbox = cfg.sandbox && typeof cfg.sandbox === 'object' && !Array.isArray(cfg.sandbox)
+    ? cfg.sandbox
+    : undefined;
+  if (Array.isArray(sandbox?.tools)) {
+    for (const [index, tool] of sandbox.tools.entries()) {
+      if (AGENT_CLIENT_IDS.includes(tool)) {
+        return failure('INVALID_AGENT_CLIENTS', `sandbox.tools[${index}]`);
+      }
+    }
   }
-  const sameOrder = cfg.agentClients.every((entry, index) => entry.id === BUILTIN_TUI_IDS[index]);
+  const state = Object.fromEntries(AGENT_CLIENT_IDS.map((id) => [id, entries.get(id)]));
   return {
-    source: 'canonical',
     state,
     canonical: serialize(state),
-    remainingSandboxTools: hasSandboxTools ? sandboxProjection.remainingTools : undefined,
-    removeLegacyTuis: hasLegacyTuis,
-    changed: hasLegacyTuis || sandboxProjection.clientSignals.size > 0 || !sameOrder,
-    diagnostics,
     error: null,
     errorCode: null,
     errorPath: null
@@ -390,16 +349,6 @@ function normalizeAgentClientConfig(cfg) {
 
 function materializeAgentClientConfig(cfg, normalized) {
   cfg.agentClients = normalized.canonical;
-  delete cfg.tuis;
-  if (normalized.remainingSandboxTools !== undefined) {
-    cfg.sandbox = {
-      ...(cfg.sandbox || {}),
-      tools: [
-        'agent-infra',
-        ...normalized.remainingSandboxTools.filter((tool) => tool !== 'agent-infra')
-      ]
-    };
-  }
 }
 
 function assetMatches(entry, target) {
@@ -1324,7 +1273,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
     return { error: enabledResolution.error };
   }
   const enabledTUIs = new Set(
-    BUILTIN_TUI_IDS.filter((id) => enabledResolution.state[id].enabled)
+    AGENT_CLIENT_IDS.filter((id) => enabledResolution.state[id].enabled)
   );
   materializeAgentClientConfig(cfg, enabledResolution);
   const customTUIsConfig = Array.isArray(cfg.customTUIs) ? cfg.customTUIs : [];

@@ -1481,6 +1481,12 @@ test("ensureOpenCodeSandboxState preserves existing sandbox model fields", async
       }),
       "utf8"
     );
+    fs.mkdirSync(path.join(tmpDir, ".xdg", "config", "opencode"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json"),
+      JSON.stringify({ model: "openai/gpt-5.5", small_model: "anthropic/claude-sonnet-4-5" }),
+      "utf8"
+    );
     opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json"), "utf8"));
     assert.equal(data.model, "openai/gpt-5.5");
@@ -1565,7 +1571,7 @@ test("ensureOpenCodeSandboxState ignores malformed host json", async () => {
   }
 });
 
-test("ensureOpenCodeSandboxState leaves malformed sandbox config alone", async () => {
+test("ensureOpenCodeSandboxState ignores malformed tool-root config", async () => {
   const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-malformed-sandbox-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-valid-for-malformed-sandbox-"));
@@ -1577,11 +1583,12 @@ test("ensureOpenCodeSandboxState leaves malformed sandbox config alone", async (
       JSON.stringify({ model: "anthropic/claude-opus-4-7" }),
       "utf8"
     );
-    const legacyConfigPath = path.join(tmpDir, "opencode.json");
     const configPath = path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json");
-    fs.writeFileSync(legacyConfigPath, "{", "utf8");
+    fs.writeFileSync(path.join(tmpDir, "opencode.json"), "{", "utf8");
     assert.doesNotThrow(() => opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome));
-    assert.equal(fs.readFileSync(configPath, "utf8"), "{");
+    assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), {
+      model: "anthropic/claude-opus-4-7"
+    });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(hostHome, { recursive: true, force: true });

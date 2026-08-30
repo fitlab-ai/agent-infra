@@ -8,6 +8,14 @@ import { loadFreshEsm } from "../../helpers.ts";
 import { normalizeCustomTUIs } from "../../../lib/agent-clients/custom-tuis.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
+const CANONICAL_AGENT_CLIENTS = [
+  "claude-code",
+  "codex",
+  "antigravity-cli",
+  "opencode",
+  "traecli"
+].map((id) => ({ id, enabled: true, installInSandbox: true }));
+
 function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -45,6 +53,7 @@ function makeProject(projectRoot: string, overrides: Record<string, unknown> = {
     project: "demo",
     org: "acme",
     language: "en",
+    agentClients: CANONICAL_AGENT_CLIENTS,
     platform: { type: "github" },
     files: {
       managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"],
