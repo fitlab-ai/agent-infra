@@ -126,6 +126,7 @@ steps:
       - Add a regression test that fails without the fix
       - Fix findings from the latest code-review artifact when in fix mode
       - Verify existing tests still pass
+      - Create a local checkpoint commit after tests pass
       - Ensure code follows project conventions
     inputs:
       - Approved fix plan
@@ -177,21 +178,21 @@ steps:
       - Code review report
       - Findings list, if any
 
-  - name: commit
-    description: Finalize the defect fix and create a pull request (the PR portion runs only on the PR path).
+  - name: delivery
+    description: Deliver the approved checkpoint as a pull request, then complete the task after merge and final gates.
     recommended_agents:
       - claude
       - human
     tasks:
-      - Ensure all tests pass
-      - Write a commit message that references the defect or Issue
-      - Move the task to completed
+      - Verify the current HEAD still equals the approved checkpoint
+      - Confirm the task-bound delivery remote and base branch remain valid
+      - Move the task to completed after PR merge and final gates
     pr_tasks:
       - Create a pull request with a defect-fix description
       - Link the PR to the defect report Issue
     inputs:
-      - Final bug-fix branch
+      - Approved local checkpoint
       - Task workspace
     outputs:
-      - Completed task workspace under .agents/workspace/completed/
       - Pull request (only on the PR path)
+      - Completed task workspace under .agents/workspace/completed/ after merge and final gates
