@@ -1,6 +1,6 @@
 ---
 description: "查看任务的当前状态和进度"
-usage: "/check-task [task-ref | --task <ref>]"
+usage: "/check-task [--task <ref> | -t <ref>]"
 disable-model-invocation: true
 ---
 

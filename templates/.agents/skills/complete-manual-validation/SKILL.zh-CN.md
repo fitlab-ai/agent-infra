@@ -31,7 +31,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 任务上下文解析
 
-> 入口允许省略 task ref，也接受旧位置 task ref 或 `--task <ref>` / `-t <ref>`。先从完整参数中分离 task scope 并原样保留其他业务操作数，再调用 `agent-infra-internal task-context resolve {task-scope}`；`{task-scope}` 为空、位置 ref 或 task flag 之一。只读取结构化结果的 `taskId`，后续把 `{task-id}` 绑定为该完整 `TASK-YYYYMMDD-HHMMSS`。解析失败时透传非零退出码，不自行扫描任务。
+> 入口可省略 task ref；显式 task scope 仅接受 `--task <ref>` 或 `-t <ref>`，不再解释位置 task ref。保留其余业务操作数后调用 `agent-infra-internal task-context resolve {task-scope}`；`{task-scope}` 为空或 task flag 之一。只读取结构化结果的 `taskId`，后续把 `{task-id}` 绑定为完整 `TASK-YYYYMMDD-HHMMSS`。解析失败时透传非零退出码，不自行扫描任务。
 
 > 解析任务引用，并确认任务位于本技能支持的状态或目录且存在 `task.md`；无法定位时按未找到任务处理并停止。
 
@@ -46,10 +46,10 @@ agent-infra-internal task-snapshot {task-id} --format text
 输入格式：
 
 ```text
-complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
+complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] {verification-summary}
 ```
 
-- `{task-ref}` 必填。
+- task scope 可省略；显式 scope 只接受 `--task <ref>` 或 `-t <ref>`。
 - `{pr-ref}` 可选，支持 `#NN`、`NN` 或完整 PR URL。
 - `{verification-summary}` 必填。若缺失，立即停止并提示补充验证说明；不写产物、不更新 PR。
 

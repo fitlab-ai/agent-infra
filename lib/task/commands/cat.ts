@@ -5,11 +5,9 @@ import { resolveArtifact } from '../artifacts.ts';
 
 const USAGE = `Usage: ai task cat <artifact | N>
        ai task cat (--task <ref> | -t <ref>) <artifact | N>
-       ai task cat <ref> <artifact | N>
 
 Prints a task artifact's raw content to stdout.
   One positional    Uses current task context and treats the operand as the artifact.
-  <ref>            Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
   <artifact | N>   Artifact filename (with or without '.md'), or the number from 'ai task files'.
 `;
 
@@ -29,8 +27,6 @@ function cat(args: string[] = []): void {
     taskRef = scope.taskRef; artifact = scope.positionals[0];
   } else if (scope.positionals.length === 1) {
     artifact = scope.positionals[0];
-  } else if (scope.positionals.length === 2) {
-    [taskRef, artifact] = scope.positionals;
   } else { process.stdout.write(USAGE); process.exitCode = 1; return; }
   const resolved = resolveTaskContext(taskRef);
   if (!resolved.ok) {

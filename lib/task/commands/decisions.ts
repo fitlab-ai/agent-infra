@@ -8,15 +8,14 @@ import { listDecisionItems, selectDecisionItem } from '../decision-items.ts';
 import { extractSubSection } from '../sections.ts';
 
 const USAGE = `Usage: ai task decisions [--task <ref> | -t <ref>] [--item <selector> | -i <selector>] [options]
-       ai task decisions <ref> [selector] [options]
 
 Shows what still needs a maintainer's decision. Without a selector, it lists
 the choices. With a selector, it shows the explanation and how to respond.
 Read-only.
 
-  Omit <ref>     Resolve the unique active task for the current branch.
-  <ref>          Legacy positional task ref.
-  [selector]     Ordinal (1-based) or ledger id (e.g. 'PL-3') to show one item's detail.
+  Omit the scope  Resolve the unique active task for the current branch.
+  --task/-t <ref> Select a task explicitly.
+  --item/-i <s>   Ordinal (1-based) or ledger id (e.g. 'PL-3') to show one item's detail.
 
 Options:
   -i, --item <s>    Select an item when task scope is implicit or flag-based.
@@ -56,9 +55,8 @@ function parseArgs(args: string[]): ParsedArgs | null {
       if (out.item !== undefined) { fail("duplicate option '--item'"); return null; }
       out.item = v; i += 1;
     } else if (a.startsWith('--item=')) {
-      if (out.item !== undefined) { fail("duplicate option '--item'"); return null; }
-      out.item = a.slice('--item='.length);
-      if (out.item === '') { fail('--item requires a value'); return null; }
+      fail("--item=... is not supported; use --item <selector> or -i <selector>");
+      return null;
     } else if (a === '--stage') {
       const v = args[i + 1];
       if (v === undefined) {
@@ -165,7 +163,7 @@ function trackingOf(row: LedgerRow): string {
   return `stage=${row.stage} · severity=${row.severity} · status=${row.status} · evidence=${row.evidence}`;
 }
 
-function renderList(rows: LedgerRow[], format: string, taskDir: string): void {
+function renderList(rows: LedgerRow[], format: string, taskDir: string, taskId: string): void {
   if (rows.length === 0) {
     process.stdout.write('No pending decisions.\n');
     return;
@@ -184,10 +182,10 @@ function renderList(rows: LedgerRow[], format: string, taskDir: string): void {
       `| ${sep.join(' | ')} |`,
       ...data.map((row) => `| ${row.join(' | ')} |`)
     ];
-    process.stdout.write(`${md.join('\n')}\n\nView one item: ai task decisions <task-ref> <ordinal|ledger-id>\n`);
+    process.stdout.write(`${md.join('\n')}\n\nView one item: ai task decisions --task ${taskId} --item <ordinal|ledger-id>\n`);
     return;
   }
-  process.stdout.write(`${formatTable(headers, data).join('\n')}\n\nView one item: ai task decisions <task-ref> <ordinal|ledger-id>\n`);
+  process.stdout.write(`${formatTable(headers, data).join('\n')}\n\nView one item: ai task decisions --task ${taskId} --item <ordinal|ledger-id>\n`);
 }
 
 function renderTracking(row: LedgerRow, format: string): string[] {
@@ -214,7 +212,8 @@ function renderDetail(
   selector: string,
   format: string,
   taskDir: string,
-  content: string
+  content: string,
+  taskId: string
 ): void {
   const selected = selectDecisionItem(rows, selector);
   if (!selected.ok) {
@@ -229,13 +228,13 @@ function renderDetail(
   if (format === 'markdown') {
     lines.push(`## ${decided ? 'Decision already recorded' : 'Decision needed'}: ${title}`, '');
     if (!decided) {
-      lines.push('**How to record your choice**', `\`ai decide <task-ref> ${r.id} <your choice and rationale>\``, '');
+      lines.push('**How to record your choice**', `\`ai decide --task ${taskId} --item ${r.id} <your choice and rationale>\``, '');
     }
     lines.push('**Original context**', '');
   } else {
     lines.push(`${decided ? 'Decision already recorded' : 'Decision needed'}: ${title}`, '');
     if (!decided) {
-      lines.push('How to record your choice:', `ai decide <task-ref> ${r.id} <your choice and rationale>`, '');
+      lines.push('How to record your choice:', `ai decide --task ${taskId} --item ${r.id} <your choice and rationale>`, '');
     }
     lines.push('Original context:');
   }
@@ -274,16 +273,11 @@ function decisions(args: string[] = []): void {
     return;
   }
 
-  let taskRef = scope.taskRef;
-  let selector = parsed.item;
-  if (parsed.item !== undefined) {
-    if (parsed.positionals.length > 0) { fail('positional task ref/selector cannot be combined with --item'); return; }
-  } else if (scope.explicit) {
-    if (parsed.positionals.length > 0) { fail('positional task ref/selector cannot be combined with --task'); return; }
-  } else {
-    if (parsed.positionals.length > 2) { fail('too many positional arguments'); return; }
-    taskRef = parsed.positionals[0];
-    selector = parsed.positionals[1];
+  const taskRef = scope.taskRef;
+  const selector = parsed.item;
+  if (parsed.positionals.length > 0) {
+    fail('positional task ref/selector is not supported; use --task <ref> or -t <ref>, and --item <selector> or -i <selector>');
+    return;
   }
   const resolved = resolveTaskContext(taskRef);
   if (!resolved.ok) {
@@ -310,9 +304,9 @@ function decisions(args: string[] = []): void {
   });
 
   if (selector === undefined) {
-    renderList(rows, parsed.format, resolved.taskDir);
+    renderList(rows, parsed.format, resolved.taskDir, resolved.taskId);
   } else {
-    renderDetail(rows, selector, parsed.format, resolved.taskDir, content);
+    renderDetail(rows, selector, parsed.format, resolved.taskDir, content, resolved.taskId);
   }
 }
 

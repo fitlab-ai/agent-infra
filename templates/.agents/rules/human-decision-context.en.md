@@ -44,4 +44,4 @@ For the code stage, the author must add `**Implementation required**: yes/no` af
 
 ## Decision Closure
 
-Use `ai task decisions <task-ref> <ordinal|ledger-id>` to inspect full context and `ai decide <task-ref> <ordinal|ledger-id> <decision>` to record the ruling. `ai decide` updates the row to `human-decided`, creates an independent `HDR-N` record, and updates evidence and the activity log; do not manually imitate only part of that transaction.
+Use `ai task decisions [--task <ref> | -t <ref>] [--item <ordinal|ledger-id> | -i <ordinal|ledger-id>]` to inspect full context and `ai decide [--task <ref> | -t <ref>] (--item <ordinal|ledger-id> | -i <ordinal|ledger-id>) <decision>` to record the ruling. `ai decide` updates the row to `human-decided`, creates an independent `HDR-N` record, and updates evidence and the activity log; do not manually imitate only part of that transaction.

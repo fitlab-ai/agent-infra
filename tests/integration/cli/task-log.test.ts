@@ -65,7 +65,7 @@ test('ai task log <ref> renders legacy done-only entries as one row each, sorted
   ]);
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
-  const out = runCli(['task', 'log', '1'], repoRoot);
+  const out = runCli(['task', 'log', '--task', '1'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // Status columns; human counts are folded into NOTE on review rows only.
   assert.match(out.stdout, /#\s+STEP\s+AGENT\s+STARTED\s+DONE\s+NOTE/);
@@ -85,7 +85,7 @@ test('ai task log folds a started+done pair onto one row', () => {
     '- 2026-06-18 14:30:00+08:00 — **Plan Task (Round 1)** by claude — Plan completed → plan.md'
   ]);
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // One row: STARTED and DONE both populated, step base has the suffix stripped.
   assert.match(out.stdout, /^1\s+Plan Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:30:00\+08:00\s+Plan completed → plan\.md/m);
@@ -128,7 +128,7 @@ test('typed task-activity intents produce a compact paired Review PR row', () =>
   assert.equal(completed.status, 0, completed.stderr || completed.stdout);
   assert.equal(JSON.parse(completed.stdout).status, 'applied');
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(
     out.stdout,
@@ -187,7 +187,7 @@ test('typed task-activity terminate intents render paired aborted and superseded
   runTermination('pr-review.md', firstHead, 'superseded', 'head changed before publish');
   runTermination('pr-review-r2.md', secondHead, 'aborted', 'validation failed before publish');
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(
     out.stdout,
@@ -207,7 +207,7 @@ test('ai task log shows a started-only step as in progress', () => {
     '- 2026-06-18 14:00:00+08:00 — **Code Task (Round 1) [started]** by claude — started'
   ]);
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // In-flight row: STARTED time set, DONE rendered as '(in progress)'.
   assert.match(out.stdout, /^2\s+Code Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+\(in progress\)\s+started/m);
@@ -221,7 +221,7 @@ test('ai task log locates an English "## Activity Log" section', () => {
     '- 2026-06-16 15:06:43+08:00 — **Create Task** by codex — created'
   ]);
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /^1\s+Create Task\s+codex\s+2026-06-16 15:06:43\+08:00\s+created/m);
   assert.match(out.stdout, /^Total: 1 steps$/m);
@@ -250,7 +250,7 @@ test('ai task log folds English human counts into the NOTE on canonical review s
     ]
   );
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // Human counts join the verdict count list (comma-separated, after minor, before ->),
   // and the source `Manual-validation: N` field is normalized. Labels are always English
@@ -284,7 +284,7 @@ test('ai task log folds English human counts for an English task', () => {
     '## Review Disagreement Ledger'
   );
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(
     out.stdout,
@@ -305,7 +305,7 @@ test('ai task log replaces pre-existing human counts on canonical review steps',
     ['| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |']
   );
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(
     out.stdout,
@@ -323,7 +323,7 @@ test('ai task log renders a human-executed review row as `human` with a `-` STAR
     '- 2026-06-18 15:32:53+08:00 — **Human Review** by 张三 — Verdict: Changes Requested, blockers: 1, major: 0, minor: 0 → human-review.md'
   ]);
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // AGENT keeps the `human` grouping but gains a visible `(unknown)` marker
   // (HD-3): unknown tokens are no longer silently collapsed to bare `human`.
@@ -344,7 +344,7 @@ test('ai task log keeps an AI agent (cursor) as-is with an empty STARTED on a le
     '- 2026-06-18 14:00:00+08:00 — **Code Task (Round 1)** by cursor — Code implemented → code.md'
   ]);
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // AGENT stays `cursor` (not `human`); STARTED stays empty (not `-`), so the next
   // populated column after the empty STARTED is the DONE timestamp.
@@ -365,7 +365,7 @@ test('ai task log renders legacy long-name agents as their short token', () => {
     '- 2026-06-18 15:00:00+08:00 — **Review Plan (Round 1)** by antigravity-cli — Plan reviewed → review-plan.md'
   ]);
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // Long names classify as AI and render as their short display token; they
   // are NOT given the `(unknown)` marker and keep an empty STARTED on a
@@ -382,7 +382,7 @@ test('ai task log fails when the task has no activity log section', () => {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\nbranch: feat\n---\n# 任务\n\n## 描述\n\nno log\n`);
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /ai task log:/);
   assert.match(out.stderr, /no activity log section/);
@@ -393,7 +393,7 @@ test('ai task log fails when the activity log section has no entries', () => {
   const taskId = 'TASK-20260101-000010';
   writeTask(activeDir, taskId, '## 活动日志', []);
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /no activity log entries/);
 });
@@ -408,7 +408,7 @@ test('ai task log preserves readable activity output and reports a missing ledge
   const before = fs.readFileSync(taskMd);
   const beforeMtime = fs.statSync(taskMd).mtimeMs;
 
-  const out = runCli(['task', 'log', taskId], repoRoot);
+  const out = runCli(['task', 'log', '--task', taskId], repoRoot);
   assert.equal(out.status, 1);
   assert.match(out.stdout, /^1\s+Create Task\s+codex\s+2026-06-18 15:06:43\+08:00\s+Task created/m);
   assert.match(out.stdout, /Ledger: unavailable \[LEDGER_SECTION_MISSING:/);
@@ -420,7 +420,7 @@ test('ai task log preserves readable activity output and reports a missing ledge
 
 test('ai task log rejects an unknown ref', () => {
   const { repoRoot } = mkFixture();
-  const out = runCli(['task', 'log', 'not-a-task'], repoRoot);
+  const out = runCli(['task', 'log', '--task', 'not-a-task'], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /ai task log:/);
 });

@@ -30,7 +30,7 @@ test('real CLI decides a declared code item without an implementation flag', () 
     ['| II-1 | CD-1 | review-code.md#CD-1 | code | true | | declared | |']
   );
   try {
-    const result = run(data.repoRoot, ['decide', data.taskId, 'CD-1', 'use declared choice']);
+    const result = run(data.repoRoot, ['decide', '--task', data.taskId, '--item', 'CD-1', 'use declared choice']);
     assert.equal(result.status, 0, result.stderr);
     const content = fs.readFileSync(data.taskMd, 'utf8');
     assert.match(content, /\| II-1 \| CD-1 \| task\.md#HDR-1 \| code \| true \| .+ \| pending \|/);
@@ -55,10 +55,10 @@ test('real CLI writes AN, PL, CD, and HD targets through full and short task ref
   ]);
   try {
     for (const args of [
-      [data.taskId, 'AN-1', 'analysis choice'],
-      ['1', 'PL-1', 'plan choice'],
-      ['1', '1', '--needs-implementation', 'true', 'code choice'],
-      [data.taskId, 'HD-1', 'executor choice']
+      ['--task', data.taskId, '--item', 'AN-1', 'analysis choice'],
+      ['-t', '1', '-i', 'PL-1', 'plan choice'],
+      ['--task', '1', '--item', '1', '--needs-implementation', 'true', 'code choice'],
+      ['--task', data.taskId, '--item', 'HD-1', 'executor choice']
     ]) {
       const result = run(data.repoRoot, ['decide', ...args]);
       assert.equal(result.status, 0, result.stderr);
@@ -82,12 +82,12 @@ test('real CLI rejects duplicate ids without writes for stable and ordinal selec
   ]);
   try {
     const before = fs.readFileSync(data.taskMd);
-    const ambiguous = run(data.repoRoot, ['decide', data.taskId, 'HD-1', 'x']);
+    const ambiguous = run(data.repoRoot, ['decide', '--task', data.taskId, '--item', 'HD-1', 'x']);
     assert.equal(ambiguous.status, 1);
     assert.match(ambiguous.stderr, /duplicate table key/);
     assert.ok(before.equals(fs.readFileSync(data.taskMd)));
 
-    const selected = run(data.repoRoot, ['decide', data.taskId, '2', 'plan row']);
+    const selected = run(data.repoRoot, ['decide', '--task', data.taskId, '--item', '2', 'plan row']);
     assert.equal(selected.status, 1);
     assert.match(selected.stderr, /duplicate table key/);
     assert.ok(before.equals(fs.readFileSync(data.taskMd)));

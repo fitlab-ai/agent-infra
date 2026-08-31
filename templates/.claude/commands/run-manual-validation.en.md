@@ -1,6 +1,6 @@
 ---
 description: "Run host-side task validation and record sanitized evidence"
-usage: "/run-manual-validation <task-ref> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command...>"
+usage: "/run-manual-validation [--task <ref> | -t <ref>] [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command...>"
 disable-model-invocation: true
 ---
 

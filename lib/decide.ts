@@ -3,7 +3,7 @@ import { parseTaskScope } from './task/command-options.ts';
 import { applyHumanDecision } from './task/decision-intents.ts';
 import { canonicalTimestamp } from './task/write.ts';
 import { consumeHumanOverride, failureId } from './task/human-override.ts';
-import { resolveTaskRef } from './task/resolve-ref.ts';
+import { resolveTaskContext } from './task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task/task-execution-lock.ts';
 
 type DecideOptions = {
@@ -55,44 +55,36 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       item = scope.positionals[++index];
       if (!item) { process.stderr.write(`Error: ${arg} requires a value\n`); return 1; }
     } else if (arg.startsWith('--item=')) {
-      if (item !== undefined) { process.stderr.write("Error: duplicate option '--item'\n"); return 1; }
-      item = arg.slice('--item='.length);
-      if (item === '') { process.stderr.write('Error: --item requires a value\n'); return 1; }
+      process.stderr.write('Error: --item=... is not supported; use --item <selector> or -i <selector>\n'); return 1;
     } else operands.push(arg);
   }
-  let taskRef = scope.taskRef;
-  let selector = item;
-  let decisionParts: string[];
-  if (item !== undefined) {
-    decisionParts = operands;
-  } else if (!scope.explicit) {
-    [taskRef, selector, ...decisionParts] = operands;
-  } else {
-    decisionParts = [];
-  }
+  const taskRef = scope.taskRef;
+  const selector = item;
+  const decisionParts = operands;
   if (!selector || decisionParts.length === 0) {
-    process.stderr.write('Usage: ai decide [--task <ref>] --item <ordinal|ledger-id> [--needs-implementation true|false] <decision>\n       ai decide <task-ref> <ordinal|ledger-id> [--needs-implementation true|false] <decision>\n');
+    process.stderr.write('Usage: ai decide [--task <ref> | -t <ref>] (--item <ordinal|ledger-id> | -i <ordinal|ledger-id>) [--needs-implementation true|false] <decision>\n');
     return 1;
   }
   try {
     const parsedDecision = parseDecisionParts(decisionParts);
     const now = (options.now ?? canonicalTimestamp)();
+    const resolved = resolveTaskContext(taskRef, { repoRoot: options.repoRoot });
+    if (!resolved.ok) throw new Error(resolved.message);
     const request = {
-      taskRef, selector, decision: parsedDecision.decision,
+      taskRef: resolved.taskId, selector, decision: parsedDecision.decision,
       needsImplementation: parsedDecision.needsImplementation
     };
     const writeOptions = {
-      repoRoot: options.repoRoot,
+      repoRoot: resolved.repoRoot,
       metadataProvider: () => ({ timestamp: now, agentInfraVersion: options.version ?? VERSION })
     };
-    const resolved = taskRef ? resolveTaskRef(taskRef, { repoRoot: options.repoRoot }) : null;
     let result;
     const execute = () => {
       let current = applyHumanDecision(request, writeOptions);
       if (current.status !== 'failed' || !parsedDecision.overrideTicket) return current;
       if (!parsedDecision.overrideTarget || !parsedDecision.overrideScope) throw new Error('override ticket requires --override-target and --override-scope');
       const consumed = consumeHumanOverride({
-        taskRef: resolved?.ok ? resolved.taskId : String(taskRef ?? ''),
+        taskRef: resolved.taskId,
         ticketId: parsedDecision.overrideTicket,
         failureId: failureId('decision-intent', current.error?.code ?? 'TASK_STATE_MISMATCH'),
         target: parsedDecision.overrideTarget,
@@ -110,9 +102,7 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       if (consumed.status === 'failed') throw new Error(consumed.error.message);
       return current;
     };
-    result = resolved?.ok
-      ? withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-decision', execute)
-      : execute();
+    result = withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-decision', execute);
     if (result.error) throw new Error(result.error.message);
     return 0;
   } catch (error) {

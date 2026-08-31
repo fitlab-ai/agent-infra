@@ -82,7 +82,7 @@ When an executor judges an item to be a key design decision that needs human rul
 - `severity` is always `decision`.
 - `status` starts as `needs-human-decision`, so the existing gate blocks it.
 - `evidence` points to the stable anchor `<artifact>#HD-N` (e.g. `plan-r2.md#HD-1`), not a drift-prone line number.
-- A human records the ruling with `ai decide <task-ref> <ordinal|ledger-id> <decision>`; the command flips the target row to `human-decided` and points `evidence` to an independent `HDR-N` ruling record.
+- A human records the ruling with `ai decide [--task <ref> | -t <ref>] (--item <ordinal|ledger-id> | -i <ordinal|ledger-id>) <decision>`; the command flips the target row to `human-decided` and points `evidence` to an independent `HDR-N` ruling record.
 
 > Viewing, deciding, and typed verification share the `lib/task/ledger.ts` domain semantics; no second parser is maintained.
 

@@ -77,9 +77,7 @@ test('parseTaskScope extracts one task flag and preserves other operands', () =>
   assert.deepEqual(parseTaskScope(['-t', '#24', '--item', '2']), {
     taskRef: '#24', positionals: ['--item', '2'], explicit: true
   });
-  assert.deepEqual(parseTaskScope(['--task=TASK-20260719-000001']), {
-    taskRef: 'TASK-20260719-000001', positionals: [], explicit: true
-  });
+  assert.throws(() => parseTaskScope(['--task=TASK-20260719-000001']), /use --task <ref> or -t <ref>/);
   assert.throws(() => parseTaskScope(['--task']), /requires a value/);
   assert.throws(() => parseTaskScope(['--task', '--item']), /requires a value/);
   assert.throws(() => parseTaskScope(['-t', '1', '--task', '2']), /duplicate/);

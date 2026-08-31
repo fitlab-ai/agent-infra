@@ -2,23 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { commandSpecs } from '../../helpers/command-specs.ts';
 
-const TASK_CONTEXT_SKILLS = [
-  'analyze-task',
-  'review-analysis',
-  'plan-task',
-  'review-plan',
-  'code-task',
-  'review-code',
-  'commit',
-  'create-pr',
-  'complete-task',
-  'cancel-task',
-  'block-task',
-  'check-task',
-  'complete-manual-validation',
-  'watch-pr'
-];
+const TASK_CONTEXT_SKILL_USAGES: Record<string, string> = {
+  'analyze-task': '[--task <ref> | -t <ref>]',
+  'review-analysis': '[--task <ref> | -t <ref>]',
+  'plan-task': '[--task <ref> | -t <ref>]',
+  'review-plan': '[--task <ref> | -t <ref>]',
+  'code-task': '[--task <ref> | -t <ref>]',
+  'review-code': '[--task <ref> | -t <ref>]',
+  commit: '[--task <ref> | -t <ref>]',
+  'create-pr': '[--task <ref> | -t <ref>] [target-branch]',
+  'complete-task': '[--task <ref> | -t <ref>] [--skip-pr] [--force]',
+  'cancel-task': '[--task <ref> | -t <ref>] <reason>',
+  'block-task': '[--task <ref> | -t <ref>] [reason]',
+  'check-task': '[--task <ref> | -t <ref>]',
+  'complete-manual-validation': '[--task <ref> | -t <ref>] [pr-ref] <verification-summary>',
+  'watch-pr': '[--task <ref> | -t <ref>] | [--pr <number>] | [<pr-url>]',
+  'run-manual-validation': '[--task <ref> | -t <ref>] [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command...>',
+  'run-task': '[--task <ref> | -t <ref>] [--executor-model <model> --executor-reasoning-effort <effort> --reviewer-model <model> --reviewer-reasoning-effort <effort>]'
+};
+
+const TASK_CONTEXT_SKILLS = Object.keys(TASK_CONTEXT_SKILL_USAGES);
 
 const SHORT_ID_ONLY_SKILLS = [
   'restore-task',
@@ -74,6 +79,10 @@ for (const name of SHORT_ID_ONLY_SKILLS) {
 }
 
 for (const name of TASK_CONTEXT_SKILLS) {
+  test(`command spec (${name}) declares the approved public grammar`, () => {
+    assert.equal(commandSpecs[name]?.usage, TASK_CONTEXT_SKILL_USAGES[name]);
+  });
+
   for (const [variant, p] of [
     ['runtime', path.resolve('.agents/skills', name, 'SKILL.md')],
     ['English template', path.resolve('templates/.agents/skills', name, 'SKILL.en.md')],
@@ -82,20 +91,22 @@ for (const name of TASK_CONTEXT_SKILLS) {
     test(`${variant} SKILL.md (${name}) delegates task identity to task-context`, () => {
       const content = read(p);
       assert.ok(content.includes('agent-infra-internal task-context resolve'));
-      assert.ok(content.includes('taskId'));
+      if (name !== 'run-task' && name !== 'run-manual-validation') {
+        assert.ok(content.includes('taskId'));
+      }
     });
   }
 
   test(`TUI wrappers (${name}) preserve full task-scope arguments`, () => {
     const claude = read(path.resolve('.claude/commands', `${name}.md`));
     const opencode = read(path.resolve('.opencode/commands', `${name}.md`));
-    assert.ok(claude.includes('--task <ref>'));
+    assert.ok(claude.includes(`usage: "/${name} ${TASK_CONTEXT_SKILL_USAGES[name]}"`));
     assert.ok(opencode.includes('$ARGUMENTS'));
   });
 
   test(`TUI templates (${name}) preserve platform-specific argument variables`, () => {
     for (const locale of ['en', 'zh-CN']) {
-      assert.ok(read(path.resolve('templates/.claude/commands', `${name}.${locale}.md`)).includes('--task <ref>'));
+      assert.ok(read(path.resolve('templates/.claude/commands', `${name}.${locale}.md`)).includes(`usage: "/${name} ${TASK_CONTEXT_SKILL_USAGES[name]}"`));
       assert.ok(read(path.resolve('templates/.opencode/commands', `${name}.${locale}.md`)).includes('$ARGUMENTS'));
     }
   });

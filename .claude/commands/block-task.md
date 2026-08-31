@@ -1,6 +1,6 @@
 ---
 description: "标记任务为阻塞状态并记录原因"
-usage: "/block-task [task-ref | --task <ref>] [reason]"
+usage: "/block-task [--task <ref> | -t <ref>] [reason]"
 disable-model-invocation: true
 ---
 

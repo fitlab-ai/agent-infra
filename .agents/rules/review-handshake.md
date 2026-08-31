@@ -82,7 +82,7 @@
 - `severity` 固定填 `decision`。
 - `status` 初始填 `needs-human-decision`，因此会被现有 gate 阻塞。
 - `evidence` 指向稳定锚点 `<artifact>#HD-N`（如 `plan-r2.md#HD-1`），不依赖易漂移的行号。
-- 人工使用 `ai decide <task-ref> <序号|账本ID> <裁决内容>` 记录裁定；命令把目标行翻为 `human-decided`，并让 `evidence` 指向独立 `HDR-N` 裁定记录。
+- 人工使用 `ai decide [--task <ref> | -t <ref>] (--item <序号|账本ID> | -i <序号|账本ID>) <裁决内容>` 记录裁定；命令把目标行翻为 `human-decided`，并让 `evidence` 指向独立 `HDR-N` 裁定记录。
 
 > 查看、裁决与 typed verification 共用 `lib/task/ledger.ts` 的领域语义，不维护第二 parser。
 

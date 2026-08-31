@@ -31,7 +31,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## Task Context Resolution
 
-> The entry point may omit the task ref and also accepts a legacy positional ref or `--task <ref>` / `-t <ref>`. Separate task scope from the full arguments while preserving every business operand, then call `agent-infra-internal task-context resolve {task-scope}` where `{task-scope}` is empty, one positional ref, or one task flag. Read only `taskId` from the structured result and bind `{task-id}` to that full `TASK-YYYYMMDD-HHMMSS` for downstream commands. Pass through resolution failures without scanning tasks locally.
+> The entry point may omit the task ref; explicit task scope accepts only `--task <ref>` or `-t <ref>`, and positional task refs are not interpreted. Preserve every other business operand, then call `agent-infra-internal task-context resolve {task-scope}` where `{task-scope}` is empty or one task flag. Read only `taskId` from the structured result and bind `{task-id}` to the full `TASK-YYYYMMDD-HHMMSS` for downstream commands. Pass through resolution failures without scanning tasks locally.
 
 > Resolve the task reference, then confirm that the task is in a state or directory supported by this skill and that `task.md` exists; if it cannot be located, handle it as a missing task and stop.
 
@@ -46,10 +46,10 @@ After resolving the artifact context and before this round's first artifact acti
 Input:
 
 ```text
-complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
+complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] {verification-summary}
 ```
 
-- `{task-ref}` is required.
+- The task scope may be omitted; explicit scope accepts only `--task <ref>` or `-t <ref>`.
 - `{pr-ref}` is optional and accepts `#NN`, `NN`, or a full PR URL.
 - `{verification-summary}` is required. If it is missing, stop and ask for a validation summary; do not write an artifact or update the PR.
 

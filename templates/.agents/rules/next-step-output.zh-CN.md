@@ -110,11 +110,11 @@ Completed at: YYYY-MM-DD HH:mm:ss
   …（task.md `## 审查分歧账本` 中本阶段每个 status=needs-human-decision 行一条）
 
 查看详情：
-  - 全部待裁决项：ai task decisions {task-ref}
-  - 单项完整背景/选项/影响/建议：ai task decisions {task-ref} <序号|账本ID>
+  - 全部待裁决项：ai task decisions --task {task-ref}
+  - 单项完整背景/选项/影响/建议：ai task decisions --task {task-ref} --item <序号|账本ID>
 
 完成裁决：
-  - ai decide {task-ref} <序号|账本ID> <裁决内容与理由>
+  - ai decide --task {task-ref} --item <序号|账本ID> <裁决内容与理由>
 
 该命令原子写入 `HDR-N` 裁定记录、把目标账本行翻为 `human-decided`、更新 evidence 与活动日志；不要手工只修改其中一部分。
 

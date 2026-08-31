@@ -6,13 +6,13 @@ import { resolveTaskContext } from '../resolve-ref.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, isReviewStage, parseLedgerDocument, type LedgerRow, type ReviewStage } from '../ledger.ts';
 import { parseActivityLog, pairEntries } from '../activity-log.ts';
 
-const USAGE = `Usage: ai task log [<N | TASK-id> | --task <ref> | -t <ref>]
+const USAGE = `Usage: ai task log [--task <ref> | -t <ref>]
 
 Renders a task's activity log as a per-step status table. A step's start and
 completion are paired onto one row: STARTED holds the start time, DONE the
 completion time (or '(in progress)' while still running).
-  Omit <ref>   Resolve the unique active task for the current branch.
-  <ref>   Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  Omit the scope   Resolve the unique active task for the current branch.
+  --task/-t <ref> Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
 Columns: # (row) / STEP / AGENT / STARTED / DONE / NOTE
   A human-executed step shows AGENT as 'human' and, when it has no start marker,
@@ -122,10 +122,10 @@ function log(args: string[] = []): void {
   try { scope = parseTaskScope(args); } catch (error) {
     process.stderr.write(`ai task log: ${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; return;
   }
-  if (scope.positionals.length > 1 || (scope.explicit && scope.positionals.length > 0)) {
-    process.stderr.write('ai task log: task ref must be provided once\n'); process.exitCode = 1; return;
+  if (scope.positionals.length > 0) {
+    process.stderr.write('ai task log: positional task ref is not supported; use --task <ref> or -t <ref>\n'); process.exitCode = 1; return;
   }
-  const resolved = resolveTaskContext(scope.taskRef ?? scope.positionals[0]);
+  const resolved = resolveTaskContext(scope.taskRef);
   if (!resolved.ok) {
     process.stderr.write(`ai task log: ${resolved.message}\n`);
     process.exitCode = 1;

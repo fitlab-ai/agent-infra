@@ -7,6 +7,10 @@ description: >
 
 # Run Task Lifecycle
 
+## Task Context Resolution
+
+The entry point may omit the task ref; explicit task scope accepts only `--task <ref>` or `-t <ref>`, and positional task refs are not interpreted. Preserve the four policy options and their values, then call `agent-infra-internal task-context resolve {task-scope}`. Pass through resolution failures without scanning tasks locally. The internal orchestration protocol continues to use a positional task ref.
+
 The orchestrator delegates only and never executes a stage skill itself. First read `.agents/rules/no-mid-flow-questions.md`, `.agents/rules/lifecycle-orchestration.md`, and `reference/host-validation.md`.
 
 1. Resolve the canonical task ID, current Agent Client, and optional atomic policy flags, then run `task-snapshot`. If one explicit role field is present, all four are required.

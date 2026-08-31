@@ -1,6 +1,6 @@
 ---
 description: "监控 PR 的全部 checks 并在失败时自愈"
-usage: "/watch-pr [task-ref | --task <ref> | --pr <number>]"
+usage: "/watch-pr [--task <ref> | -t <ref>] | [--pr <number>] | [<pr-url>]"
 ---
 
 读取并执行 `.agents/skills/watch-pr/SKILL.md` 中的 watch-pr 技能。

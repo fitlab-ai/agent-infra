@@ -8,6 +8,10 @@ description: >
 
 # 运行人工校验
 
+## 任务上下文解析
+
+入口可省略 task ref；显式 task scope 仅接受 `--task <ref>` 或 `-t <ref>`，不再解释位置 task ref。先解析 `--scope`、`--timeout`、`--format`，在 `--` 后原样保留用户命令，再调用 `agent-infra-internal task-context resolve {task-scope}`。解析失败时透传非零退出码，不自行扫描任务。内部 `task-validate` 协议仍使用位置 task ref。
+
 ## 行为边界
 
 - 本技能负责选择校验模式、调用唯一机械入口并记录证据；不把 PR 人工校验标为完成。

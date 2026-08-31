@@ -1,25 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveTaskContext, resolveTaskRef, detectRepoRoot, enumerateTaskDirs } from '../resolve-ref.ts';
+import { resolveTaskContext, resolveTaskRef } from '../resolve-ref.ts';
 import { enumerateArtifacts, resolveArtifact } from '../artifacts.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
 
-const USAGE = `Usage: ai task grep <pattern> [ref] [artifact | N]
-       ai task grep <pattern> (--current | --task <ref> | -t <ref>) [artifact | N]
+const USAGE = `Usage: ai task grep [--current | --task <ref> | -t <ref>] <pattern> [artifact | N]
 
 Literal (non-regex) line search across task artifacts.
   <pattern>          Literal substring to match (NOT a regex). Case-sensitive by default.
-  [ref]              Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
-                     Omit to scan every task under active / blocked / completed
-                     (archive is skipped). With a ref, narrows to that single task
-                     (a TASK-id ref can also resolve an archived task).
-  [artifact | N]     Only valid with <ref>. Artifact filename (with or without '.md')
+  --current          Limit search to the unique active task for the current branch.
+  -t, --task <ref>   Limit search to an explicit task (bare short id or TASK-id).
+  [artifact | N]     Artifact filename (with or without '.md')
                      or the number from 'ai task files'. Narrows to a single artifact.
 
 Options:
   -i, --ignore-case  Case-insensitive matching.
-  --current          Limit search to the current task context.
-  -t, --task <ref>   Limit search to an explicit task.
   --                 Treat the rest as positional (use for patterns starting with '-').
 
 Output: '{taskId} [#short] {fileStem}:{line}: {matched-line}' (short id only for active tasks).
@@ -85,9 +80,7 @@ function grep(args: string[] = []): void {
       continue;
     }
     if (!optsEnded && a.startsWith('--task=')) {
-      if (taskRef !== undefined) { process.stderr.write("ai task grep: duplicate option '--task'\n"); process.exitCode = 1; return; }
-      taskRef = a.slice('--task='.length);
-      if (taskRef === '') { process.stderr.write('ai task grep: --task requires a value\n'); process.exitCode = 1; return; }
+      process.stderr.write('ai task grep: --task=... is not supported; use --task <ref> or -t <ref>\n'); process.exitCode = 1; return;
       continue;
     }
     if (!optsEnded && a.startsWith('-') && a !== '-') {
@@ -106,61 +99,40 @@ function grep(args: string[] = []): void {
   if (current && taskRef !== undefined) {
     process.stderr.write('ai task grep: --current and --task are mutually exclusive\n'); process.exitCode = 1; return;
   }
-  if (positional.length > 3 || ((current || taskRef !== undefined) && positional.length > 2)) {
+  if (positional.length > 2) {
     process.stderr.write('ai task grep: too many arguments\n');
     process.exitCode = 1;
     return;
   }
 
-  let [pattern, ref, artifactOrN] = positional;
-  if (current || taskRef !== undefined) {
-    artifactOrN = ref;
-    ref = taskRef;
-  }
+  const [pattern, artifactOrN] = positional;
   const matcher = makeMatcher(pattern!, ignoreCase);
   const chunks: string[] = [];
   const emit = (line: string) => chunks.push(line);
   let total = 0;
 
-  if (ref === undefined && !current) {
-    // No ref: full scan across active / blocked / completed (no archive).
-    let repoRoot: string;
+  const resolved = current || taskRef === undefined
+    ? resolveTaskContext()
+    : resolveTaskRef(taskRef);
+  if (!resolved.ok) {
+    process.stderr.write(`ai task grep: ${resolved.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const shortToken = loadShortIdByTaskId(resolved.repoRoot).get(resolved.taskId);
+  if (artifactOrN !== undefined) {
+    let artifactPath: string;
     try {
-      repoRoot = detectRepoRoot();
+      artifactPath = resolveArtifact(resolved.taskDir, artifactOrN);
     } catch (e) {
       process.stderr.write(`ai task grep: ${(e as Error).message}\n`);
       process.exitCode = 1;
       return;
     }
-    const shortMap = loadShortIdByTaskId(repoRoot);
-    for (const { taskId, taskDir } of enumerateTaskDirs(repoRoot)) {
-      const shortToken = shortMap.get(taskId);
-      for (const a of enumerateArtifacts(taskDir)) {
-        total += scanArtifact(taskId, shortToken, a.path, matcher, emit);
-      }
-    }
+    total += scanArtifact(resolved.taskId, shortToken, artifactPath, matcher, emit);
   } else {
-    const resolved = current ? resolveTaskContext() : resolveTaskRef(ref!);
-    if (!resolved.ok) {
-      process.stderr.write(`ai task grep: ${resolved.message}\n`);
-      process.exitCode = 1;
-      return;
-    }
-    const shortToken = loadShortIdByTaskId(resolved.repoRoot).get(resolved.taskId);
-    if (artifactOrN !== undefined) {
-      let artifactPath: string;
-      try {
-        artifactPath = resolveArtifact(resolved.taskDir, artifactOrN);
-      } catch (e) {
-        process.stderr.write(`ai task grep: ${(e as Error).message}\n`);
-        process.exitCode = 1;
-        return;
-      }
-      total += scanArtifact(resolved.taskId, shortToken, artifactPath, matcher, emit);
-    } else {
-      for (const a of enumerateArtifacts(resolved.taskDir)) {
-        total += scanArtifact(resolved.taskId, shortToken, a.path, matcher, emit);
-      }
+    for (const a of enumerateArtifacts(resolved.taskDir)) {
+      total += scanArtifact(resolved.taskId, shortToken, a.path, matcher, emit);
     }
   }
 

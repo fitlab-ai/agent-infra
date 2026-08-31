@@ -21,7 +21,7 @@ description: >
 
 ## 任务上下文解析
 
-> 入口允许省略 task ref，也接受旧位置 task ref 或 `--task <ref>` / `-t <ref>`。先从完整参数中分离 task scope 并原样保留其他业务操作数，再调用 `agent-infra-internal task-context resolve {task-scope}`；`{task-scope}` 为空、位置 ref 或 task flag 之一。只读取结构化结果的 `taskId`，后续把 `{task-id}` 绑定为该完整 `TASK-YYYYMMDD-HHMMSS`。解析失败时透传非零退出码，不自行扫描任务。
+> 入口允许省略 task ref，也接受 `--task <ref>` / `-t <ref>`。先从完整参数中分离 task scope 并原样保留其他业务操作数，再调用 `agent-infra-internal task-context resolve {task-scope}`；`{task-scope}` 为空或 task flag 之一。只读取结构化结果的 `taskId`，后续把 `{task-id}` 绑定为该完整 `TASK-YYYYMMDD-HHMMSS`。解析失败时透传非零退出码，不自行扫描任务。
 
 ## 步骤开始：写入 started 标记
 
@@ -40,7 +40,7 @@ description: >
 按以下确定性分支解析出目标 PR 号 `{pr#}` 与可选 `{task-id}`：
 
 - 场景 A（省略入参）：从当前分支反查 active task；定位后读取其 `pr_number`。
-- 场景 B（省略 task ref、旧位置 task ref 或 `--task/-t`，**任务锚定主路径**）：按「任务上下文解析」取得完整 `{task-id}`。读 `.agents/workspace/active/{task-id}/task.md` 取 `pr_number` 作为 `{pr#}`；`pr_number` 为空时按「错误处理」提示先 `create-pr`，停止。
+- 场景 B（省略 task ref 或 `--task/-t`，**任务锚定主路径**）：按「任务上下文解析」取得完整 `{task-id}`。读 `.agents/workspace/active/{task-id}/task.md` 取 `pr_number` 作为 `{pr#}`；`pr_number` 为空时按「错误处理」提示先 `create-pr`，停止。
 - 场景 C（`--pr <number>` 或 PR URL）：直接取该 PR 号为 `{pr#}`；随后按「反查任务」确定 `{task-id}`。
 - 反查任务（场景 A / C）：通过任务上下文/任务查询取得与 `{pr#}` 唯一绑定的 active task。未命中时停止并提示先绑定 PR；typed checks intent 不建立第二套无任务状态机。
 
