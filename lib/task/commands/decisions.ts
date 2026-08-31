@@ -212,7 +212,7 @@ function renderDetail(
   const block = detail.status === 'found' ? detail.content : '';
   const title = block
     ? block.split('\n')[0]!.replace(/^###\s+/, '').replace(/\s*\[needs-human-decision\]\s*$/, '').trim()
-      .replace(new RegExp(`^${r.id}\s*[:：]\s*`, 'i'), '').trim()
+      .replace(new RegExp(`^${r.id}\\s*[:：]\\s*`, 'i'), '').trim()
     : '(explanation unavailable)';
   const lines: string[] = [];
   const decided = r.status === 'human-decided';
