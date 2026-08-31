@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { locateActivityLog, pairEntries } from './activity-log.ts';
+import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import { parseArtifactName, validateCompletedArtifact } from './artifact-lifecycle.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
@@ -106,8 +106,8 @@ function openReviewRound(content: string, action: string, round: number): boolea
   const section = locateActivityLog(content);
   if (!section) return false;
   const expected = `${action} (Round ${round})`;
-  return pairEntries(section.entries).filter((row) => (
-    row.step === expected && Boolean(row.started) && !row.done
+  return startedBackedRows(pairEntries(section.entries)).filter((row) => (
+    row.step === expected && !row.done
   )).length === 1;
 }
 

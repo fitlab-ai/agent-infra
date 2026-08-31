@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseActivityLog, pairEntries } from '../../../lib/task/activity-log.ts';
+import { parseActivityLog, pairEntries, startedBackedRows } from '../../../lib/task/activity-log.ts';
 import { isHumanAgent } from '../../../lib/task/commands/log.ts';
 
 // Separator in real entries is an em-dash (U+2014), not an ASCII hyphen.
@@ -176,6 +176,21 @@ test('pairEntries renders legacy done-only entries as standalone rows', () => {
   });
   assert.equal(rows[1]!.started, '');
   assert.equal(rows[1]!.done, '2026-06-16 10:00:00+08:00');
+});
+
+test('startedBackedRows keeps only rows with current lifecycle start evidence', () => {
+  const rows = pairEntries([
+    entry('2026-06-16 09:00:00+08:00', 'Analyze Task (Round 1)', 'codex', 'legacy done'),
+    entry('2026-06-16 10:00:00+08:00', 'Plan Task (Round 1) [started]', 'codex', 'started'),
+    entry('2026-06-16 10:05:00+08:00', 'Plan Task (Round 1)', 'codex', 'done'),
+    entry('2026-06-16 10:10:00+08:00', 'Human Decision', 'human', 'decided')
+  ]);
+
+  assert.deepEqual(
+    startedBackedRows(rows).map((row) => [row.step, row.started, row.done]),
+    [['Plan Task (Round 1)', '2026-06-16 10:00:00+08:00', '2026-06-16 10:05:00+08:00']]
+  );
+  assert.equal(rows.length, 3);
 });
 
 test('pairEntries keeps a started-only step in flight (no done timestamp)', () => {

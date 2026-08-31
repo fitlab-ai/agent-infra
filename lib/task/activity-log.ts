@@ -89,6 +89,10 @@ function pairEntries(entries: LogEntry[]): StepRow[] {
   return rows;
 }
 
+function startedBackedRows(rows: StepRow[]): StepRow[] {
+  return rows.filter((row) => row.started !== '');
+}
+
 export {
   activityAttempt,
   appendActivityEntry,
@@ -96,6 +100,7 @@ export {
   locateActivityLog,
   pairEntries,
   parseActivityLog,
-  parseCommitAttemptStarted
+  parseCommitAttemptStarted,
+  startedBackedRows
 };
 export type { ActivityLogSection, CommitAttempt, LogEntry, StepRow };

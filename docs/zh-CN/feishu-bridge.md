@@ -74,6 +74,8 @@
 
 `/task log` 和 `/task decisions` 都是只读诊断命令。如果当前任务缺少“审查分歧账本”，`/task log` 仍会展示活动日志，并把账本标记为不可用，随后以非零状态退出；`/task decisions` 会报告同一个结构化缺失账本诊断，但不会展示伪造的空决策列表。两个命令都不会创建或修复 `task.md`；显式空账本是合法状态，会正常显示没有待处理决策。
 
+`ai merge` 只接受包含 `active`、`blocked`、`completed` 或 `archive` 中至少一个目录的当前 workspace。仅有 archive 的历史输入和格式不完整的目录会在修改目标前被拒绝；历史恢复和 AI 对齐不是默认合并行为。
+
 `/task` 命令只提供只读视图。任务推进统一走 `/run`。任务态 skill 会把 `<task-ref>` 解析到任务分支，再查找对应 sandbox；如果 sandbox 不存在，会提示先运行 `ai sandbox create <task-ref>`。`create-task` 是 v1 中唯一不要求已有任务和 sandbox 的 skill runner。沙箱删除仍需要本地交互确认，因此不通过 IM 暴露。
 
 bridge 有意只暴露上表中的 v1 白名单，而不是每一个本地 `ai task` 或 `ai sandbox` 子命令。`/run <skill>` 接受 `ai run` 内置生命周期 skill 白名单；部署时可用 `command.allowedSkills` 进一步收窄。表中所有命令都有本地等价路径，因此可以先用 `ai decide ...`、`ai run ...`、`ai sandbox ...`、`ai task ...` 在本地验证；任务态 `ai run` 命令需要已有匹配 sandbox，并且已安装所选 TUI。本地验证通过后，再通过飞书验证同一组命令白名单。`/sandbox rm`、`/sandbox exec` 这类破坏性或任意执行命令有意不在 IM 中实现。

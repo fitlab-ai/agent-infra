@@ -1,19 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { info, ok } from './log.ts';
 import { removeDirRecursive } from './remove-dir.ts';
+import { validateCurrentTaskContract } from './task/current-contract.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const TITLE_RE = /^# (.+)$/m;
-const DATE_FROM_PATH_RE = /(?:^|[/\\])(\d{4})[/\\](\d{2})[/\\](\d{2})(?:[/\\]|$)/;
 const MUTABLE_SECTIONS = ['active', 'blocked', 'completed'] as const;
 const ALL_SECTIONS = [...MUTABLE_SECTIONS, 'archive'] as const;
 type MutableSection = typeof MUTABLE_SECTIONS[number];
 type Section = typeof ALL_SECTIONS[number];
 type MutableAction = 'copied' | 'updated' | 'moved' | 'skipped';
 type ArchiveAction = 'copied' | 'skipped';
-type SourceMode = 'workspace' | 'legacy-archive';
+type SourceMode = 'workspace';
 type DateParts = {
   year: string;
   month: string;
@@ -129,40 +128,6 @@ function normalizeTaskRecord(taskDir: string, taskFile: string, dateParts: DateP
   };
 }
 
-function fallbackDateParts(taskDir: string, content: string): DateParts | null {
-  const pathMatch = taskDir.match(DATE_FROM_PATH_RE);
-  if (pathMatch) {
-    const [, year, month, day] = pathMatch;
-    if (!year || !month || !day) {
-      return null;
-    }
-    return {
-      year,
-      month,
-      day
-    };
-  }
-
-  const completedAt = extractField(content, 'completed_at');
-  const updatedAt = extractField(content, 'updated_at');
-  const source = completedAt || updatedAt;
-  const dateMatch = source?.match(/^(\d{4})-(\d{2})-(\d{2})/);
-
-  if (dateMatch) {
-    const [, year, month, day] = dateMatch;
-    if (!year || !month || !day) {
-      return null;
-    }
-    return {
-      year,
-      month,
-      day
-    };
-  }
-
-  return null;
-}
-
 function scanSourceTasks(sourceDir: string): TaskRecord[] {
   const tasks: TaskRecord[] = [];
   const years = fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir, { withFileTypes: true }) : [];
@@ -203,44 +168,6 @@ function scanSourceTasks(sourceDir: string): TaskRecord[] {
           }));
         }
       }
-    }
-  }
-
-  if (tasks.length > 0) {
-    return tasks;
-  }
-
-  // Fall back to a deeper scan if the source layout is unusual but still contains archived tasks.
-  const stack = [sourceDir];
-  while (stack.length > 0) {
-    const currentDir = stack.pop();
-    if (!currentDir || !fs.existsSync(currentDir)) {
-      continue;
-    }
-
-    for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
-      const entryPath = path.join(currentDir, entry.name);
-      if (!entry.isDirectory()) {
-        continue;
-      }
-
-      if (TASK_ID_RE.test(entry.name)) {
-        const taskFile = path.join(entryPath, 'task.md');
-        if (!fs.existsSync(taskFile)) {
-          continue;
-        }
-
-        const content = fs.readFileSync(taskFile, 'utf8');
-        const dateParts = fallbackDateParts(entryPath, content);
-        if (!dateParts) {
-          continue;
-        }
-
-        tasks.push(normalizeTaskRecord(entryPath, taskFile, dateParts));
-        continue;
-      }
-
-      stack.push(entryPath);
     }
   }
 
@@ -624,15 +551,230 @@ function copyTaskToSection(sourceTask: WorkspaceRecord, workspaceDir: string): s
   return destinationDir;
 }
 
+function invalidSource(message: string): never {
+  throw new Error(`Invalid merge source: ${message}`);
+}
+
+function sourceRelativePath(sourceRoot: string, targetPath: string): string {
+  return path.relative(sourceRoot, targetPath).split(path.sep).join('/') || '.';
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
+}
+
+function assertSourcePathContained(sourceRoot: string, targetPath: string): void {
+  let sourceRealPath: string;
+  let targetRealPath: string;
+  try {
+    sourceRealPath = fs.realpathSync(sourceRoot);
+    targetRealPath = fs.realpathSync(targetPath);
+  } catch (error) {
+    invalidSource(`${sourceRelativePath(sourceRoot, targetPath)} cannot be resolved: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const relativePath = path.relative(sourceRealPath, targetRealPath);
+  if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+    invalidSource(`${sourceRelativePath(sourceRoot, targetPath)} resolves outside the source workspace`);
+  }
+}
+
+function sourcePathStat(sourceRoot: string, targetPath: string): fs.Stats | null {
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(targetPath);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+    throw error;
+  }
+
+  if (stat.isSymbolicLink()) {
+    invalidSource(`${sourceRelativePath(sourceRoot, targetPath)} must not be a symbolic link`);
+  }
+  assertSourcePathContained(sourceRoot, targetPath);
+  return stat;
+}
+
+function validateTaskTree(sourceRoot: string, taskDir: string): void {
+  for (const entry of fs.readdirSync(taskDir, { withFileTypes: true })) {
+    const entryPath = path.join(taskDir, entry.name);
+    const entryStat = sourcePathStat(sourceRoot, entryPath);
+    if (!entryStat) {
+      invalidSource(`${sourceRelativePath(sourceRoot, entryPath)} disappeared during validation`);
+    }
+    if (entryStat.isDirectory()) {
+      validateTaskTree(sourceRoot, entryPath);
+      continue;
+    }
+    if (!entryStat.isFile()) {
+      invalidSource(`${sourceRelativePath(sourceRoot, entryPath)} must be a regular file or directory`);
+    }
+  }
+}
+
+function validateSourceRoot(sourceRoot: string): void {
+  const stat = sourcePathStat(sourceRoot, sourceRoot);
+  if (!stat || !stat.isDirectory()) {
+    invalidSource('source path must be a real directory');
+  }
+}
+
+function validateTaskDirectory(
+  sourceRoot: string,
+  taskDir: string,
+  seenTaskIds: Map<string, string>
+): void {
+  const taskId = path.basename(taskDir);
+  const taskFile = path.join(taskDir, 'task.md');
+  const taskDirStat = sourcePathStat(sourceRoot, taskDir);
+  if (!taskDirStat || !taskDirStat.isDirectory()) {
+    invalidSource(`${sourceRelativePath(sourceRoot, taskDir)} must be a directory`);
+  }
+  const taskFileStat = sourcePathStat(sourceRoot, taskFile);
+  if (!taskFileStat || !taskFileStat.isFile()) {
+    invalidSource(`${sourceRelativePath(sourceRoot, taskDir)} requires a regular task.md file`);
+  }
+
+  const content = fs.readFileSync(taskFile, 'utf8');
+  const contract = validateCurrentTaskContract(content);
+  if (!contract.ok) {
+    invalidSource(`${sourceRelativePath(sourceRoot, taskFile)} is not a valid current task: ${contract.message}`);
+  }
+  if (contract.metadata.id !== taskId) {
+    invalidSource(`${sourceRelativePath(sourceRoot, taskFile)} id '${String(contract.metadata.id ?? 'missing')}' does not match directory '${taskId}'`);
+  }
+  validateTaskTree(sourceRoot, taskDir);
+
+  const previousPath = seenTaskIds.get(taskId);
+  if (previousPath) {
+    invalidSource(`duplicate task ID ${taskId} at ${previousPath} and ${sourceRelativePath(sourceRoot, taskDir)}`);
+  }
+  seenTaskIds.set(taskId, sourceRelativePath(sourceRoot, taskDir));
+}
+
+function validateMutableSection(
+  sourceRoot: string,
+  section: MutableSection,
+  seenTaskIds: Map<string, string>
+): void {
+  const sectionDir = path.join(sourceRoot, section);
+  const sectionStat = sourcePathStat(sourceRoot, sectionDir);
+  if (!sectionStat) {
+    return;
+  }
+  if (!sectionStat.isDirectory()) {
+    invalidSource(`${section} must be a directory`);
+  }
+
+  for (const entry of fs.readdirSync(sectionDir, { withFileTypes: true })) {
+    const entryPath = path.join(sectionDir, entry.name);
+    const entryStat = sourcePathStat(sourceRoot, entryPath);
+    if (!entryStat) {
+      continue;
+    }
+    if (!entryStat.isDirectory()) {
+      if (TASK_ID_RE.test(entry.name)) {
+        invalidSource(`${sourceRelativePath(sourceRoot, entryPath)} is not a directory`);
+      }
+      continue;
+    }
+    if (!TASK_ID_RE.test(entry.name)) {
+      invalidSource(`${sourceRelativePath(sourceRoot, entryPath)} is not a direct TASK-YYYYMMDD-HHMMSS directory`);
+    }
+    validateTaskDirectory(sourceRoot, entryPath, seenTaskIds);
+  }
+}
+
+function validateArchiveSection(
+  sourceRoot: string,
+  seenTaskIds: Map<string, string>
+): void {
+  const archiveDir = path.join(sourceRoot, 'archive');
+  const archiveStat = sourcePathStat(sourceRoot, archiveDir);
+  if (!archiveStat) {
+    return;
+  }
+  if (!archiveStat.isDirectory()) {
+    invalidSource('archive must be a directory');
+  }
+
+  const allowManifest = (directory: string, entry: fs.Dirent): boolean => {
+    const entryPath = path.join(directory, entry.name);
+    const entryStat = sourcePathStat(sourceRoot, entryPath);
+    return Boolean(entryStat?.isFile() && entry.name === 'manifest.md');
+  };
+  const years = fs.readdirSync(archiveDir, { withFileTypes: true });
+  for (const yearEntry of years) {
+    const yearPath = path.join(archiveDir, yearEntry.name);
+    if (allowManifest(archiveDir, yearEntry)) {
+      continue;
+    }
+    const yearStat = sourcePathStat(sourceRoot, yearPath);
+    if (!yearStat?.isDirectory() || !/^\d{4}$/.test(yearEntry.name)) {
+      invalidSource(`${sourceRelativePath(sourceRoot, yearPath)} is not a YYYY directory or manifest.md`);
+    }
+
+    const yearDir = yearPath;
+    for (const monthEntry of fs.readdirSync(yearDir, { withFileTypes: true })) {
+      const monthPath = path.join(yearDir, monthEntry.name);
+      if (allowManifest(yearDir, monthEntry)) {
+        continue;
+      }
+      const monthStat = sourcePathStat(sourceRoot, monthPath);
+      if (!monthStat?.isDirectory() || !/^\d{2}$/.test(monthEntry.name)) {
+        invalidSource(`${sourceRelativePath(sourceRoot, monthPath)} is not a MM directory or manifest.md`);
+      }
+
+      const monthDir = monthPath;
+      for (const dayEntry of fs.readdirSync(monthDir, { withFileTypes: true })) {
+        const dayPath = path.join(monthDir, dayEntry.name);
+        if (allowManifest(monthDir, dayEntry)) {
+          continue;
+        }
+        const dayStat = sourcePathStat(sourceRoot, dayPath);
+        if (!dayStat?.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) {
+          invalidSource(`${sourceRelativePath(sourceRoot, dayPath)} is not a DD directory or manifest.md`);
+        }
+
+        const dayDir = dayPath;
+        for (const taskEntry of fs.readdirSync(dayDir, { withFileTypes: true })) {
+          const taskPath = path.join(dayDir, taskEntry.name);
+          const taskStat = sourcePathStat(sourceRoot, taskPath);
+          if (!taskStat?.isDirectory() || !TASK_ID_RE.test(taskEntry.name)) {
+            invalidSource(`${sourceRelativePath(sourceRoot, taskPath)} is not a TASK-YYYYMMDD-HHMMSS directory`);
+          }
+          validateTaskDirectory(sourceRoot, taskPath, seenTaskIds);
+        }
+      }
+    }
+  }
+}
+
+function validateSourceWorkspace(sourcePath: string): void {
+  validateSourceRoot(sourcePath);
+  const seenTaskIds = new Map<string, string>();
+  for (const section of MUTABLE_SECTIONS) {
+    validateMutableSection(sourcePath, section, seenTaskIds);
+  }
+  validateArchiveSection(sourcePath, seenTaskIds);
+}
+
 function detectSourceMode(sourcePath: string): SourceMode {
+  validateSourceRoot(sourcePath);
   for (const section of ALL_SECTIONS) {
     const sectionDir = path.join(sourcePath, section);
-    if (fs.existsSync(sectionDir) && fs.statSync(sectionDir).isDirectory()) {
+    const sectionStat = sourcePathStat(sourcePath, sectionDir);
+    if (sectionStat?.isDirectory()) {
       return 'workspace';
+    }
+    if (sectionStat) {
+      invalidSource(`${section} must be a directory`);
     }
   }
 
-  return 'legacy-archive';
+  invalidSource('expected a current workspace containing active, blocked, completed, or archive sections');
 }
 
 function createReport(sourcePath: string, backupRoot: string): MergeReport {
@@ -778,29 +920,6 @@ function mergeArchiveSection(sourceArchive: string, localArchive: string, report
   return sourceTasks.length;
 }
 
-function printLegacyArchiveMessages(report: MergeReport, sourcePath: string): void {
-  const merged = report.sections.archive.copied;
-  const skipped = report.sections.archive.skipped;
-
-  if (merged.length === 0 && skipped.length === 0) {
-    info(`No archived tasks found in ${sourcePath}`);
-  }
-
-  for (const task of merged) {
-    ok(`Merged ${task.taskId} -> ${task.relativePath}`);
-  }
-
-  for (const task of skipped) {
-    info(`Skipped ${task.taskId} (already exists at ${task.relativePath})`);
-  }
-
-  process.stdout.write('\n');
-  info('Merge summary');
-  info(`- Merged: ${merged.length}`);
-  info(`- Skipped: ${skipped.length}`);
-  process.stdout.write('\n');
-}
-
 function printSection(lines: string[], name: MutableSection, counts: MutableCounts): void {
   const title = `${SECTION_LABELS[name].padEnd(9, ' ')} (.agents/workspace/${name}/):`;
   lines.push(title);
@@ -910,7 +1029,11 @@ async function cmdMerge(args: string[]): Promise<void> {
     throw new Error(`Source path does not exist: ${sourcePath}`);
   }
 
-  if (!fs.statSync(resolvedSource).isDirectory()) {
+  if (fs.lstatSync(resolvedSource).isSymbolicLink()) {
+    throw new Error(`Invalid merge source: source path must be a real directory: ${sourcePath}`);
+  }
+
+  if (!fs.lstatSync(resolvedSource).isDirectory()) {
     throw new Error(`Source path is not a directory: ${sourcePath}`);
   }
 
@@ -920,34 +1043,27 @@ async function cmdMerge(args: string[]): Promise<void> {
   const backupRootRelative = `.agents/workspace/.merge-backup/${backupStamp}/`;
   const backupRoot = path.join(workspaceDir, '.merge-backup', backupStamp);
   const report = createReport(resolvedSource, backupRootRelative);
-  const mode = detectSourceMode(resolvedSource);
+  detectSourceMode(resolvedSource);
+  validateSourceWorkspace(resolvedSource);
 
   for (const section of ALL_SECTIONS) {
     fs.mkdirSync(path.join(workspaceDir, section), { recursive: true });
   }
 
-  if (mode === 'legacy-archive') {
-    info('Detected legacy archive source; treating the input as archive-only for backward compatibility.');
-    mergeArchiveSection(resolvedSource, archiveDir, report);
-  } else {
-    mergeMutableSections({
-      sourceWorkspace: resolvedSource,
-      localWorkspace: workspaceDir,
-      backupRoot,
-      report
-    });
+  mergeMutableSections({
+    sourceWorkspace: resolvedSource,
+    localWorkspace: workspaceDir,
+    backupRoot,
+    report
+  });
 
-    const sourceArchive = path.join(resolvedSource, 'archive');
-    if (fs.existsSync(sourceArchive) && fs.statSync(sourceArchive).isDirectory()) {
-      mergeArchiveSection(sourceArchive, archiveDir, report);
-    }
+  const sourceArchive = path.join(resolvedSource, 'archive');
+  const sourceArchiveStat = sourcePathStat(resolvedSource, sourceArchive);
+  if (sourceArchiveStat?.isDirectory()) {
+    mergeArchiveSection(sourceArchive, archiveDir, report);
   }
 
   rebuildManifests(archiveDir);
-
-  if (mode === 'legacy-archive') {
-    printLegacyArchiveMessages(report, sourcePath);
-  }
 
   printReport(report);
 }

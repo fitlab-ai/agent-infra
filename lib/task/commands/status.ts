@@ -8,7 +8,7 @@ import { enumerateArtifacts, type Artifact } from '../artifacts.ts';
 import { parseTaskFrontmatter, extractTitle, type Frontmatter } from '../frontmatter.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
 import { getOpenWorkflowWarnings, formatWorkflowWarningSummary, type WorkflowWarning } from '../workflow-warnings.ts';
-import { parseActivityLog, pairEntries } from '../activity-log.ts';
+import { parseActivityLog, pairEntries, startedBackedRows } from '../activity-log.ts';
 import { readRun, type OrchestrationRun } from '../orchestration.ts';
 import type { DelegationReceipt } from '../delegation-receipts.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
@@ -186,7 +186,7 @@ function collectWorkflow(content: string, now: Date = new Date()): WorkflowInfo 
     return { state: 'unknown', step: DASH, agent: DASH, startedAt: DASH, doneAt: DASH, stale: DASH };
   }
 
-  const rows = pairEntries(parsed.entries);
+  const rows = startedBackedRows(pairEntries(parsed.entries));
   const latest = rows.at(-1);
   if (!latest) {
     return { state: 'unknown', step: DASH, agent: DASH, startedAt: DASH, doneAt: DASH, stale: DASH };

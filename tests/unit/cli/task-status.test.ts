@@ -174,6 +174,21 @@ test('collectWorkflow reports paired completion as idle', () => {
   assert.equal(workflow.stale, '-');
 });
 
+test('collectWorkflow ignores terminal-only and done-only rows after the latest lifecycle row', () => {
+  const workflow = collectWorkflow(
+    taskWithLog([
+      '- 2026-07-02 20:00:00+08:00 — **Plan Task (Round 1) [started]** by codex — started',
+      '- 2026-07-02 20:05:00+08:00 — **Plan Task (Round 1)** by codex — Plan completed → plan.md',
+      '- 2026-07-02 20:06:00+08:00 — **Human Decision** by human — decided',
+      '- 2026-07-02 20:07:00+08:00 — **Analyze Task (Round 1)** by codex — legacy done-only'
+    ]),
+    new Date('2026-07-02T12:30:00Z')
+  );
+  assert.equal(workflow.state, 'idle');
+  assert.equal(workflow.step, 'Plan Task (Round 1)');
+  assert.equal(workflow.doneAt, '2026-07-02 20:05:00+08:00');
+});
+
 test('collectWorkflow marks in-progress rows stale after 60 minutes', () => {
   const workflow = collectWorkflow(
     taskWithLog([

@@ -614,6 +614,19 @@ test('completion without an open start fails without changing the file', () => {
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
+test('historical done-only activity does not suppress a new current start', () => {
+  const f = fixture();
+  fs.appendFileSync(
+    f.file,
+    '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1)** by codex — historical completion\n'
+  );
+
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(JSON.parse(started.stdout).status, 'applied');
+  assert.match(fs.readFileSync(f.file, 'utf8'), /Plan Task \(Round 1\) \[started\]/);
+});
+
 test('analysis can restart from code when task requirements expand', () => {
   const f = fixture('code');
 
