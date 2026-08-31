@@ -64,7 +64,7 @@ Read the PR template through `.agents/rules/issue-pr-commands.md`, review recent
 
 ### 4. Check Remote Branch State
 
-Use `agent-infra-internal git-workflow inspect` for already-delivered upstream/remote facts. `create-pr` never performs the first push; a missing remote branch or a remote SHA that differs from local HEAD fails and points back to `commit`/push-only. Core rechecks the remote branch SHA before and immediately before bind, and requires exact repository/ref, base, and `head.sha` identity. A post-POST race never deletes the created PR or remote branch; the next retry recovers only by resource identity.
+Run `agent-infra-internal task-delivery {task-id} deliver --agent {standard-agent-token}` to deliver the task branch through one core. The core handles first creation, same-SHA no-op, a known-last-delivered SHA update with `--force-with-lease`, and unknown drift fail-closed. After delivery it verifies the remote SHA again and continues only when it equals local `HEAD`. Optional `--remote` / `--base` values must match the task binding. Core still rechecks the remote branch SHA before and immediately before bind, and requires exact repository/ref, base, and `head.sha` identity. A post-POST race never deletes the created PR or remote branch; the next retry recovers only by resource identity.
 
 ### 5. Create or Recover the PR
 

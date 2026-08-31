@@ -93,6 +93,11 @@ if (taskControlCommand) {
     gitWorkflow(process.argv.slice(3));
     break;
   }
+  case 'task-delivery': {
+    const { taskDelivery } = await import('../lib/internal/task-delivery.ts');
+    taskDelivery(process.argv.slice(3));
+    break;
+  }
   case 'release-workflow': {
     const { releaseWorkflow } = await import('../lib/internal/release-workflow.ts');
     await releaseWorkflow(process.argv.slice(3));

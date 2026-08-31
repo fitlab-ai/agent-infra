@@ -69,11 +69,11 @@ agent-infra-internal task-snapshot {task-id} --format text
 ### 4. 执行审查
 
 遵循 `.agents/workflows/feature-development.yaml`，并同时检查完整变更上下文：
-- 一次性记录审查提交 `R=$(git rev-parse HEAD)`；本轮报告、快照树和任务审查事实都复用该 R，禁止稍后重新读取 HEAD 代替
-- 调用 `agent-infra-internal platform-pr inspect {task-id}`：已绑定 PR 且返回 base SHA 时，令差异基线 `D=$(git merge-base "$R" "{base-sha}")`；无 PR 时仅在存在已跟踪或未跟踪工作区变化的前提下令 `D=$R`。无 PR 且工作区干净时无法可靠确定完整提交范围，必须停止并要求先绑定 PR，不得用空 diff 继续审查
+- 在审查开始时解析任务绑定的 delivery remote/base，并一次性读取目标分支 SHA `M=$(git ls-remote --refs {remote} refs/heads/{baseRef})`；随后一次性记录审查提交 `R=$(git rev-parse HEAD)`，计算 `D=$(git merge-base "$R" "$M")`。报告保存 M/D/R，不能用后续实时目标值覆盖本轮历史证据
+- 若 delivery target 无法解析或目标 commit 不可用，停止并记录 target 错误；M/D/R 必须来自同一轮事实采集，不以 PR 是否存在替代 delivery target 证据
 - `git diff --binary "$D" -- <post-review-globs>` 覆盖 `D` 到当前工作区的已提交与未提交跟踪变更
 - `git ls-files -o --exclude-standard -z -- <post-review-globs>` 覆盖未跟踪新文件
-- 把 `mode=worktree`、`baseline=R`、`diffBase=D` 写入临时 JSON，调用 `agent-infra-internal git-workflow snapshot --input {file}` 一次生成覆盖完整提交范围的审查差异指纹 `F` 与当前工作区审查快照树 `T`；把 `R`、`D`、`F`、`T` 全部写入报告
+- 把 `mode=worktree`、`baseline=R`、`diffBase=D` 写入临时 JSON，调用 `agent-infra-internal git-workflow snapshot --input {file}` 一次生成覆盖完整提交范围的审查差异指纹 `F` 与当前工作区审查快照树 `T`；把 M、R、D、F、T 全部写入报告
 
 > 上述事实采集完成后，先读取 `.agents/rules/review-method.md`，以其作为 readiness 证据并按 Pass 2–5 完成追踪、风险镜头、反证和归类；报告必须记录全部五遍覆盖。
 > 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。

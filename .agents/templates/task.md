@@ -14,6 +14,10 @@ target_date:                    # Feature 可选 Issue 字段：YYYY-MM-DD
 current_step: requirement-analysis # requirement-analysis | requirement-analysis-review | technical-design | technical-design-review | code | code-review | completed
 assigned_to:                   # claude | codex | antigravity | opencode | human
 pr_status: pending             # PR 状态：pending（默认）| created（已创建 PR）| skipped（显式跳过）
+delivery_remote: origin        # 任务分支交付使用的 Git remote
+delivery_base_ref: main        # 任务 PR 的目标分支
+checkpoint_commit:             # 最近一次本地 checkpoint commit
+delivery_remote_head:          # 最近一次成功交付到 remote 的任务分支 SHA
 ---
 
 # 任务：[标题]

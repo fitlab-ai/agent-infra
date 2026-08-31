@@ -64,7 +64,7 @@ description: >
 
 ### 4. 检查远程分支状态
 
-调用 `agent-infra-internal git-workflow inspect` 检查已交付的 upstream/remote branch；`create-pr` 不执行首次 push，远端 branch 缺失或 SHA 与本地 HEAD 不一致时直接失败并指向 `commit`/push-only。随后在 locate/create/bind 前后再次读取远端 branch SHA，并要求 PR 的精确 repository/ref、base 和 `head.sha` 全部匹配；POST 后的竞态不自动删除已创建 PR 或远端 branch，下一次只按资源身份恢复。
+调用 `agent-infra-internal task-delivery {task-id} deliver --agent {standard-agent-token}` 统一交付任务分支。该 core 负责首次创建、相同 SHA no-op、已知最近交付 SHA 的 `--force-with-lease` 更新和未知漂移 fail-closed；交付成功后再次复核远端 SHA，并只在远端 branch SHA 等于本地 `HEAD` 时继续。可选的 `--remote` / `--base` 必须与任务已绑定值一致。随后在 locate/create/bind 前后再次读取远端 branch SHA，并要求 PR 的精确 repository/ref、base 和 `head.sha` 全部匹配；POST 后的竞态不自动删除已创建 PR 或远端 branch，下一次只按资源身份恢复。
 
 ### 5. 创建或恢复 PR
 

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { validateBaseRef, validateRemote } from './delivery-target.ts';
 
 const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const;
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
@@ -30,6 +31,8 @@ type TaskCreateCandidateV1 = Readonly<{
   priority: TaskPriority;
   effort: TaskEffort;
   description: string;
+  deliveryRemote?: string;
+  deliveryBaseRef?: string;
   taskInput: Readonly<Record<typeof TASK_INPUT_KEYS[number], readonly string[]>>;
 }>;
 
@@ -49,12 +52,14 @@ function payloadError(message: string): never {
   throw new Error(`TASK_CREATE_PAYLOAD_INVALID: ${message}`);
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
+function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string, optional: readonly string[] = []): void {
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
-  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+  const allowed = new Set([...expected, ...optional]);
+  if (actual.some((key) => !allowed.has(key))) {
     payloadError(`${label} has unknown or missing fields`);
   }
+  if (expected.some((key) => !actual.includes(key))) payloadError(`${label} has unknown or missing fields`);
 }
 
 function cleanString(value: unknown, label: string, maxBytes: number, oneLine = false): string {
@@ -78,7 +83,7 @@ function validateTaskCreateCandidate(value: unknown): TaskCreateCandidateV1 {
   exactKeys(candidate, [
     'version', 'idempotencyKey', 'agent', 'title', 'type', 'branchSlug',
     'priority', 'effort', 'description', 'taskInput'
-  ], 'candidate');
+  ], 'candidate', ['deliveryRemote', 'deliveryBaseRef']);
   if (candidate.version !== 1) payloadError('version must be 1');
   const idempotencyKey = cleanString(candidate.idempotencyKey, 'idempotencyKey', 64, true);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
@@ -91,6 +96,14 @@ function validateTaskCreateCandidate(value: unknown): TaskCreateCandidateV1 {
     payloadError('branchSlug must be lowercase ASCII kebab-case with length 3-64');
   }
   const description = cleanString(candidate.description, 'description', 8 * 1024);
+  const deliveryRemote = candidate.deliveryRemote === undefined
+    ? undefined
+    : cleanString(candidate.deliveryRemote, 'deliveryRemote', 200, true);
+  const deliveryBaseRef = candidate.deliveryBaseRef === undefined
+    ? undefined
+    : cleanString(candidate.deliveryBaseRef, 'deliveryBaseRef', 200, true);
+  if (deliveryRemote !== undefined && !validateRemote(deliveryRemote)) payloadError('deliveryRemote is invalid');
+  if (deliveryBaseRef !== undefined && !validateBaseRef(deliveryBaseRef)) payloadError('deliveryBaseRef is invalid');
   if (!candidate.taskInput || typeof candidate.taskInput !== 'object' || Array.isArray(candidate.taskInput)) {
     payloadError('taskInput must be an object');
   }
@@ -111,6 +124,8 @@ function validateTaskCreateCandidate(value: unknown): TaskCreateCandidateV1 {
     priority: enumValue(candidate.priority, PRIORITIES, 'priority'),
     effort: enumValue(candidate.effort, EFFORTS, 'effort'),
     description,
+    ...(deliveryRemote === undefined ? {} : { deliveryRemote }),
+    ...(deliveryBaseRef === undefined ? {} : { deliveryBaseRef }),
     taskInput
   };
 }
@@ -127,6 +142,8 @@ function canonicalTaskCreateCandidate(candidate: TaskCreateCandidateV1): string 
     priority: valid.priority,
     effort: valid.effort,
     description: valid.description,
+    deliveryRemote: valid.deliveryRemote ?? null,
+    deliveryBaseRef: valid.deliveryBaseRef ?? null,
     taskInput: Object.fromEntries(TASK_INPUT_KEYS.map((key) => [key, valid.taskInput[key]]))
   });
 }
@@ -170,6 +187,7 @@ function renderTask(params: Readonly<{
   candidate: TaskCreateCandidateV1;
   taskId: string;
   project: string;
+  delivery: { remote: string; baseRef: string };
   timestamp: string;
   agentInfraVersion: string;
   keyDigest: string;
@@ -195,6 +213,10 @@ function renderTask(params: Readonly<{
     'current_step: requirement-analysis',
     `assigned_to: ${candidate.agent}`,
     'pr_status: pending',
+    `delivery_remote: ${candidate.deliveryRemote ?? params.delivery.remote}`,
+    `delivery_base_ref: ${candidate.deliveryBaseRef ?? params.delivery.baseRef}`,
+    'checkpoint_commit:',
+    'delivery_remote_head:',
     `task_create_key_digest: ${params.keyDigest}`,
     `task_create_candidate_digest: ${params.candidateDigest}`,
     '---'
@@ -219,12 +241,15 @@ function renderTask(params: Readonly<{
   return `${content.trimEnd()}\n`;
 }
 
-function readProject(repoRoot: string): string {
-  const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { project?: unknown };
+function readProject(repoRoot: string): { project: string; delivery: { remote: string; baseRef: string } } {
+  const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { project?: unknown; delivery?: { remote?: unknown; baseRef?: unknown } };
   if (typeof config.project !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.project)) {
     throw new Error('TASK_CREATE_CONFIG_INVALID: project is missing or invalid');
   }
-  return config.project;
+  const remote = typeof config.delivery?.remote === 'string' ? config.delivery.remote : 'origin';
+  const baseRef = typeof config.delivery?.baseRef === 'string' ? config.delivery.baseRef : 'main';
+  if (!validateRemote(remote) || !validateBaseRef(baseRef)) throw new Error('TASK_CREATE_CONFIG_INVALID: delivery target is invalid');
+  return { project: config.project, delivery: { remote, baseRef } };
 }
 
 function assertRealDirectory(directory: string, code: string): void {
@@ -305,7 +330,7 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
   ensureRealDirectory(path.join(repoRoot, '.agents'), 'TASK_CREATE_WORKSPACE_INVALID');
   ensureRealDirectory(workspaceRoot, 'TASK_CREATE_WORKSPACE_INVALID');
   ensureRealDirectory(activeRoot, 'TASK_CREATE_WORKSPACE_INVALID');
-  const project = readProject(repoRoot);
+  const projectConfig = readProject(repoRoot);
   const canonical = canonicalTaskCreateCandidate(candidate);
   const candidateDigest = sha256(canonical);
   const keyDigest = sha256(candidate.idempotencyKey);
@@ -346,7 +371,7 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
     const templateStat = fs.lstatSync(templatePath);
     if (!templateStat.isFile() || templateStat.isSymbolicLink()) throw new Error('TASK_CREATE_TEMPLATE_INVALID');
     const rendered = renderTask({
-      template: fs.readFileSync(templatePath, 'utf8'), candidate, taskId, project, timestamp,
+      template: fs.readFileSync(templatePath, 'utf8'), candidate, taskId, project: projectConfig.project, delivery: projectConfig.delivery, timestamp,
       agentInfraVersion, keyDigest, candidateDigest
     });
     const temporary = path.join(workspaceRoot, `.task-create.tmp.${process.pid}.${randomUUID()}`);

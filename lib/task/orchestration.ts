@@ -29,7 +29,6 @@ import type {
 } from './delegation-receipts.ts';
 import { normalizeAgentClients } from '../agent-clients/config.ts';
 import { resolveAgentRuntimeStoreRoot } from '../runtime/agent-runtime.ts';
-import { inspectPlatformPullRequest } from '../platform/pull-requests.ts';
 import {
   getAgentClientCapability,
   getAgentClientDelegationEvidence,
@@ -52,6 +51,8 @@ import { assertGitRepositoryBinding } from '../git/worktree-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { hasActiveCodexLifecycleEvidence } from '../agent-clients/adapters/codex-lifecycle/store.ts';
 import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead } from './review-fingerprint.ts';
+import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type ModelPolicySource = Readonly<{
@@ -84,8 +85,8 @@ type CleanCompletionEvidence = Readonly<{
   headTree: string;
   worktreeTree: string;
   lastReviewedCommit: string;
-  prNumber: number;
-  prHead: string;
+  prNumber: number | null;
+  prHead: string | null;
 }>;
 type OrchestrationRun = Readonly<{
   taskId: string;
@@ -273,9 +274,8 @@ function isCompletionEvidence(value: unknown): value is CleanCompletionEvidence 
     && exactText(value.headTree)
     && exactText(value.worktreeTree)
     && exactText(value.lastReviewedCommit)
-    && Number.isSafeInteger(value.prNumber)
-    && (value.prNumber as number) > 0
-    && exactText(value.prHead);
+    && (value.prNumber === null || (Number.isSafeInteger(value.prNumber) && (value.prNumber as number) > 0))
+    && (value.prHead === null || exactText(value.prHead));
 }
 
 const ORCHESTRATION_RUN_KEYS = [
@@ -523,6 +523,44 @@ function artifactName(family: string, round: number): string {
   return round === 1 ? `${family}.md` : `${family}-r${round}.md`;
 }
 
+function validateSavedCurrentDiffBase(
+  repoRoot: string,
+  metadata: ReturnType<typeof parseTypedTaskFrontmatter>,
+  taskDir: string,
+  reviewedHead: string
+): Readonly<{ code: string; message: string }> | null {
+  const reviewRound = highestRound(taskDir, 'review-code');
+  const reviewContent = fs.readFileSync(path.join(taskDir, artifactName('review-code', reviewRound)), 'utf8');
+  const savedTargetHead = extractReviewTargetHead(reviewContent);
+  const savedDiffBase = extractReviewDiffBase(reviewContent);
+  const savedReviewedHead = extractReviewedHead(reviewContent) || extractReviewBaseline(reviewContent);
+  if (!savedTargetHead && !savedDiffBase && !savedReviewedHead) return null;
+  if (savedReviewedHead && savedReviewedHead !== reviewedHead) {
+    return { code: 'ORCHESTRATION_REVIEWED_HEAD_MISMATCH', message: 'review-code saved reviewed head does not match last_reviewed_commit' };
+  }
+  if (!savedTargetHead || !savedDiffBase) {
+    return { code: 'ORCHESTRATION_REVIEW_TARGET_INVALID', message: 'review-code must save target head and diff base together' };
+  }
+  const savedBase = resolveDiffBase(repoRoot, reviewedHead, savedTargetHead);
+  if (!savedBase.ok) return { code: 'ORCHESTRATION_REVIEW_TARGET_INVALID', message: savedBase.message };
+  if (savedBase.diffBase !== savedDiffBase) {
+    return { code: 'ORCHESTRATION_REVIEW_DIFF_BASE_MISMATCH', message: 'saved review diff base does not match reviewed head and saved target head' };
+  }
+  const target = resolveDeliveryTarget(repoRoot, {
+    remote: typeof metadata.delivery_remote === 'string' ? metadata.delivery_remote : undefined,
+    baseRef: typeof metadata.delivery_base_ref === 'string' ? metadata.delivery_base_ref : undefined
+  });
+  if (!target.ok) return { code: target.code, message: target.message };
+  const currentTarget = resolveTargetHead(repoRoot, target.value);
+  if (!currentTarget.ok) return { code: currentTarget.code, message: currentTarget.message };
+  const currentBase = resolveDiffBase(repoRoot, reviewedHead, currentTarget.head!);
+  if (!currentBase.ok) return { code: currentBase.code, message: currentBase.message };
+  if (currentBase.diffBase !== savedDiffBase) {
+    return { code: 'ORCHESTRATION_REVIEW_TARGET_CHANGED', message: 'current delivery target changed the reviewed diff base; re-run review-code' };
+  }
+  return null;
+}
+
 function hasReviewAfterArtifact(taskDir: string, family: string, reviewFamily: string): boolean {
   const artifact = inspectArtifactDirectory(taskDir, family as 'analysis' | 'plan' | 'code');
   const review = inspectArtifactDirectory(taskDir, reviewFamily as 'review-analysis' | 'review-plan' | 'review-code');
@@ -656,29 +694,8 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     if (run?.status === 'completed') {
       return { status: 'completed', changed: false, taskId: resolved.taskId, run, next: null, error: null };
     }
-
-    let config: unknown;
-    try {
-      config = JSON.parse(fs.readFileSync(path.join(resolved.repoRoot, '.agents', '.airc.json'), 'utf8'));
-    } catch (error) {
-      return failed('ORCHESTRATION_CONFIG_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
-    }
-    if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      return failed('ORCHESTRATION_CONFIG_INVALID', 'project configuration must be an object', resolved.taskId);
-    }
-    const projectConfig = config as Record<string, unknown>;
-    if (!Object.hasOwn(projectConfig, 'prFlow') || projectConfig.prFlow === 'disabled') {
-      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
-    }
-    if (projectConfig.prFlow !== 'required') {
-      return failed('ORCHESTRATION_CONFIG_INVALID', "project configuration 'prFlow' must be 'required' or 'disabled'", resolved.taskId);
-    }
-    const prNumber = Number(metadata.pr_number);
-    if (!Number.isInteger(prNumber) || prNumber <= 0) {
-      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
-    }
     if (!run) {
-      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+      return { status: 'running', changed: false, taskId: resolved.taskId, run, next: null, error: null };
     }
     if (run.status !== 'running' || run.pendingDelegation !== null) {
       return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'clean completion requires an idle running orchestration', resolved.taskId);
@@ -692,35 +709,19 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
       return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
     }
     if (before.headTree !== before.worktreeTree) {
-      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+      return { status: 'running', changed: false, taskId: resolved.taskId, run, next: null, error: null };
     }
     const lastReviewedCommit = String(metadata.last_reviewed_commit ?? '');
     if (before.head !== lastReviewedCommit) {
       return failed('ORCHESTRATION_REVIEWED_HEAD_MISMATCH', 'local HEAD does not match last_reviewed_commit', resolved.taskId);
     }
-
-    const inspect: NonNullable<OrchestrationOptions['inspectPullRequest']> =
-      options.inspectPullRequest ?? inspectPlatformPullRequest;
-    let inspection: ReturnType<NonNullable<OrchestrationOptions['inspectPullRequest']>>;
-    try {
-      inspection = inspect(resolved.taskId, { cwd: gitRoot });
-    } catch (error) {
-      return failed('ORCHESTRATION_PR_INSPECTION_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
-    }
-    if (inspection.status === 'blocked') {
-      return failed('ORCHESTRATION_PR_INSPECTION_BLOCKED', inspection.error?.message ?? 'pull request inspection is blocked', resolved.taskId);
-    }
-    if (inspection.status === 'failed') {
-      return failed('ORCHESTRATION_PR_INSPECTION_FAILED', inspection.error?.message ?? 'pull request inspection failed', resolved.taskId);
-    }
-    const inspectedPrNumber = inspection.task?.prNumber ?? inspection.prNumber;
-    const prHead = inspection.pullRequest?.head?.sha;
-    if (typeof prHead !== 'string') {
-      return failed('ORCHESTRATION_PR_INSPECTION_INVALID', 'pull request inspection returned incomplete identity evidence', resolved.taskId);
-    }
-    if (inspectedPrNumber !== prNumber || prHead !== before.head) {
-      return failed('ORCHESTRATION_PR_HEAD_MISMATCH', 'pull request identity does not match the reviewed local HEAD', resolved.taskId);
-    }
+    const diffBaseError = validateSavedCurrentDiffBase(
+      resolved.repoRoot,
+      metadata,
+      resolved.taskDir,
+      lastReviewedCommit
+    );
+    if (diffBaseError) return failed(diffBaseError.code, diffBaseError.message, resolved.taskId);
 
     let after: RepositorySnapshot;
     try {
@@ -729,7 +730,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
       return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
     }
     if (after.headTree !== after.worktreeTree) {
-      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+      return { status: 'running', changed: false, taskId: resolved.taskId, run, next: null, error: null };
     }
     if (after.head !== before.head || after.headTree !== before.headTree) {
       return failed('ORCHESTRATION_REPOSITORY_CHANGED', 'repository changed while clean completion evidence was collected', resolved.taskId);
@@ -743,8 +744,8 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
       headTree: after.headTree,
       worktreeTree: after.worktreeTree,
       lastReviewedCommit,
-      prNumber,
-      prHead
+      prNumber: null,
+      prHead: null
     };
     const completed = withUpdatedRun(run, {
       status: 'completed',
@@ -852,10 +853,7 @@ function prepareOrchestrationDelegationUnlocked(
   }
   const updated = withUpdatedRun(run, {
     nextStage: next.stage,
-    pendingDelegation: receipt,
-    commitAuthorization: next.stage === 'commit' && run.commitAuthorization.issuedAt === null
-      ? { issuedAt: (options.now ?? (() => new Date().toISOString()))(), consumedAt: null }
-      : run.commitAuthorization
+    pendingDelegation: receipt
   });
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next, error: null };
@@ -1460,16 +1458,15 @@ function advanceOrchestration(taskRef: string, options: OrchestrationOptions = {
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
   const result = consumeDelegation(run.pendingDelegation, { now: options.now });
   if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
-  const completed = result.receipt.stage === 'commit';
+  if (result.receipt.stage === 'commit') {
+    return failed('ORCHESTRATED_COMMIT_REMOVED', 'Orchestrated commit is no longer a lifecycle stage; use local checkpoint delivery from code-task', resolved.taskId);
+  }
   const updated = withUpdatedRun(run, {
-    status: completed ? 'completed' : 'running',
+    status: 'running',
     nextStage: null,
     stepCount: run.stepCount + 1,
     pendingDelegation: null,
-    receipts: Object.freeze([...run.receipts, result.receipt]),
-    commitAuthorization: completed
-      ? { ...run.commitAuthorization, consumedAt: (options.now ?? (() => new Date().toISOString()))() }
-      : run.commitAuthorization
+    receipts: Object.freeze([...run.receipts, result.receipt])
   });
   saveRun(resolved.taskDir, updated);
   return { status: updated.status, changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };

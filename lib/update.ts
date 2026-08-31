@@ -23,6 +23,7 @@ type UpdateConfig = {
   prFlow?: 'required' | 'disabled';
   sandbox?: Record<string, unknown>;
   task?: { shortIdLength: number };
+  delivery?: { remote?: string; baseRef?: string };
   labels?: Record<string, unknown>;
   files?: Partial<FileRegistry>;
   agentClients?: unknown;
@@ -33,6 +34,7 @@ type Defaults = {
   platform: { type: string };
   sandbox: Record<string, unknown>;
   task: { shortIdLength: number };
+  delivery: { remote: string; baseRef: string };
   labels: Record<string, unknown>;
   files: FileRegistry;
 };
@@ -83,10 +85,12 @@ async function cmdSync(): Promise<void> {
   const sandboxAdded = !config.sandbox;
   const taskAdded = !config.task;
   const labelsAdded = !config.labels;
+  const deliveryAdded = !config.delivery;
   if (platformAdded) config.platform = structuredClone(defaults.platform);
   if (sandboxAdded) config.sandbox = structuredClone(defaults.sandbox);
   if (taskAdded) config.task = structuredClone(defaults.task);
   if (labelsAdded) config.labels = structuredClone(defaults.labels);
+  if (deliveryAdded) config.delivery = structuredClone(defaults.delivery);
 
   const workflowPlan = planAgentClientReconciliation({
     config: config as unknown as Record<string, unknown>,
@@ -150,6 +154,9 @@ async function cmdSync(): Promise<void> {
       if (labelsAdded) {
         info(`Default labels.in config added to ${CONFIG_PATH}.`);
       }
+      if (deliveryAdded) {
+        info(`Default delivery target added to ${CONFIG_PATH}.`);
+      }
     } else {
       info(`File registry changed in ${CONFIG_PATH}.`);
     }
@@ -164,6 +171,9 @@ async function cmdSync(): Promise<void> {
     }
     if (hasNewEntries && platformAdded) {
       info(`Default platform config added to ${CONFIG_PATH}.`);
+    }
+    if (hasNewEntries && deliveryAdded) {
+      info(`Default delivery target added to ${CONFIG_PATH}.`);
     }
     ok(`Updated ${CONFIG_PATH}`);
   }

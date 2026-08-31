@@ -74,6 +74,10 @@ const DEFAULTS = {
   "task": {
     "shortIdLength": 2
   },
+  "delivery": {
+    "remote": "origin",
+    "baseRef": "main"
+  },
   "labels": {
     "in": {}
   },

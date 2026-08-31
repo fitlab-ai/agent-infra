@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { commitExplicitPaths, inspectGitWorkflow, pushGitRefs, pushRebasedBranch } from '../../../lib/git/workflow.ts';
+import { commitExplicitPaths, inspectGitWorkflow, previewCommitTree, pushGitRefs, pushRebasedBranch } from '../../../lib/git/workflow.ts';
 
 function fixture(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-'));
@@ -51,6 +51,18 @@ test('commitExplicitPaths commits only explicitly selected paths', () => {
   assert.equal(result.status, 'applied');
   assert.deepEqual(execFileSync('git', ['show', '--pretty=', '--name-only', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), 'tracked.txt');
   assert.match(execFileSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' }), /unrelated\.txt/);
+});
+
+test('previewCommitTree computes the checkpoint tree without mutating the real index', () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, 'tracked.txt'), 'two\n');
+  const head = gitOutput(root, ['rev-parse', 'HEAD']);
+  const before = gitOutput(root, ['status', '--porcelain=v1']);
+  const preview = previewCommitTree({ cwd: root, paths: ['tracked.txt'], expectedHead: head });
+  assert.equal(preview.status, 'planned');
+  assert.match(preview.tree ?? '', /^[a-f0-9]{40}$/);
+  assert.equal(gitOutput(root, ['status', '--porcelain=v1']), before);
+  assert.equal(gitOutput(root, ['diff', '--cached', '--quiet']), '');
 });
 
 test('commitExplicitPaths handles clean and modified tracked files under a newly ignored parent', () => {

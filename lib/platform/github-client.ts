@@ -37,8 +37,15 @@ const MINIMUM_GITHUB_CLI_VERSION = '2.72.0';
 const GITHUB_CLI_MAX_BUFFER = 64 * 1024 * 1024;
 const ERROR_DETAIL_LIMIT = 4096;
 
+function redactDiagnostic(value: string): string {
+  return value
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, '[REDACTED_TOKEN]')
+    .replace(/\b(bearer|token)\s+[A-Za-z0-9._~+\/-]+/gi, '$1 [REDACTED_TOKEN]')
+    .replace(/([?&](?:access_token|token|client_secret|password)=)[^&\s]+/gi, '$1[REDACTED]');
+}
+
 function boundedFailureDetail(result: RunResult): string {
-  const diagnostic = `${result.stderr}\n${result.error?.message || ''}`.trim() || result.stdout.trim();
+  const diagnostic = redactDiagnostic(`${result.stderr}\n${result.error?.message || ''}`).trim() || redactDiagnostic(result.stdout.trim());
   return diagnostic.length <= ERROR_DETAIL_LIMIT
     ? diagnostic
     : `${diagnostic.slice(0, ERROR_DETAIL_LIMIT)}… [truncated]`;

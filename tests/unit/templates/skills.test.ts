@@ -99,9 +99,10 @@ test("Git and release consumers keep write commands behind typed workflow intent
   }
   for (const relativePath of skillDocPaths("release")) assert.match(read(relativePath), /release-workflow/);
   for (const relativePath of skillDocPaths("post-release")) assert.match(read(relativePath), /release-workflow/);
-  for (const skill of ["commit", "create-pr", "watch-pr"]) {
+  for (const skill of ["commit", "watch-pr"]) {
     for (const relativePath of skillDocPaths(skill)) assert.match(read(relativePath), /git-workflow/);
   }
+  for (const relativePath of skillDocPaths("create-pr")) assert.match(read(relativePath), /task-delivery/);
 });
 
 test("release skills keep staging, publishing, and versioned follow-up commands ordered", () => {
@@ -923,7 +924,7 @@ test("review-code templates separate reviewed commit from committed-range diff b
     "templates/.agents/skills/review-code/SKILL.en.md"
   ]) {
     const content = read(relativePath);
-    assert.ok(content.includes("platform-pr inspect"), `${relativePath} should inspect a bound PR`);
+    assert.ok(content.includes("delivery target"), `${relativePath} should resolve the delivery target`);
     assert.ok(content.includes("git merge-base"), `${relativePath} should resolve a committed-range base`);
     assert.ok(content.includes("diffBase"), `${relativePath} should pass the independent diff base to snapshot`);
   }
@@ -1886,7 +1887,7 @@ test("commit skill variants preserve the single commit-core structure", () => {
     const gate = skill.indexOf("agent-infra-internal task-verify {task-id} commit.completed");
     assert.ok(navigation >= 0 && navigation < commit, `${skillPath} should load the protocol before commit`);
     assert.ok(gate > commit, `${skillPath} should verify after the core call`);
-    assert.match(skill, /mode=orchestrated/);
+    assert.match(skill, /ORCHESTRATED_COMMIT_REMOVED/);
     assert.match(skill, /commit-operation\.json/);
     assert.match(skill, /--task <ref>/);
     assert.match(skill, /-t <ref>/);

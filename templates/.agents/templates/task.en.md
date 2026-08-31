@@ -14,6 +14,10 @@ target_date:                    # Optional Issue field for Feature: YYYY-MM-DD
 current_step: requirement-analysis # requirement-analysis | requirement-analysis-review | technical-design | technical-design-review | code | code-review | completed
 assigned_to:                   # claude | codex | antigravity | opencode | human
 pr_status: pending             # PR status: pending (default) | created (PR created) | skipped (explicitly skipped)
+delivery_remote: origin        # Git remote used to deliver the task branch
+delivery_base_ref: main        # Target branch for the task PR
+checkpoint_commit:             # Most recent local checkpoint commit
+delivery_remote_head:          # Most recent successfully delivered task branch SHA
 ---
 
 # Task: [Title]
