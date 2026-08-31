@@ -85,6 +85,8 @@ The intent atomically finalizes the report summary and returns the same ledger s
 
 If task.md has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`.
 
+Before writing the summary, the finalization intent checks decision-detail ids; it auto-removes a duplicate only when exactly one formal `[needs-human-decision]` block remains and every other same-id block is clearly short and informal, then reruns the read-only check. Ambiguous duplicates fail closed. If this check or repair fails, stop before the completion event.
+
 ### 7. Run Completion Gate
 
 ```bash

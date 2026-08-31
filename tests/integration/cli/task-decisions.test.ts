@@ -222,7 +222,7 @@ test('A7: --all includes decided rows; --stage filters; --format markdown', () =
 
   const all = runCli(['task', 'd', '--task', taskId, '--all'], repoRoot);
   assert.equal(all.status, 0, all.stderr);
-  assert.match(all.stdout, /HD-2\s+裁定记录放在哪里\s+stage=plan · severity=decision · status=human-decided/);
+  assert.match(all.stdout, /HD-2\s+\(explanation unavailable\)\s+stage=plan · severity=decision · status=human-decided/);
   assert.doesNotMatch(all.stdout, /PRC-1/);
 
   const stage = runCli(['task', 'd', '--task', taskId, '--all', '--stage', 'analysis'], repoRoot);
@@ -297,10 +297,61 @@ test('CD-2: decided detail keeps the original context without asking for another
 
   const out = runCli(['task', 'd', '--task', taskId, '--all', '--item', 'HD-2'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /Decision already recorded: 裁定记录放在哪里/);
-  assert.match(out.stdout, /Original context:\n### HD-2：裁定记录放在哪里/);
+  assert.match(out.stdout, /Decision already recorded: \(explanation unavailable\)/);
+  assert.match(out.stdout, /Original context:\nThis older task does not include a full explanation for HD-2\./);
   assert.match(out.stdout, /Recorded choice:\n- 2026-06-29/);
   assert.match(out.stdout, /Tracking:/);
+});
+
+test('HD-2: an explicit decided id is selectable without --all and does not use historical details', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000023';
+  writeCanonical(activeDir, taskId);
+
+  const out = runCli(['task', 'd', '--task', taskId, '--item', 'HD-2'], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /Decision already recorded: \(explanation unavailable\)/);
+  assert.match(out.stdout, /Recorded choice:\n- 2026-06-29/);
+  assert.doesNotMatch(out.stdout, /裁定记录放在哪里/);
+});
+
+test('evidence resolution fails explicitly for an invalid or ambiguous anchor and degrades for a missing anchor', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000024';
+  writeTask(activeDir, taskId, [
+    '| AN-1 | analysis | 1 | minor | needs-human-decision | analysis.md#missing |',
+    '| AN-2 | analysis | 1 | minor | needs-human-decision | analysis.md#detail#extra |',
+    '| AN-3 | analysis | 1 | minor | needs-human-decision | analysis.md#detail |'
+  ], {
+    artifacts: {
+      'analysis.md': [
+        '# Analysis',
+        '',
+        '### AN-1：真实内容 [needs-human-decision]',
+        '',
+        '### AN-2：真实内容 [needs-human-decision]',
+        '',
+        '<a id="detail"></a>',
+        '### AN-3：第一个 [needs-human-decision]',
+        '',
+        '<a id="detail"></a>',
+        '### AN-3：第二个 [needs-human-decision]',
+        ''
+      ].join('\n')
+    }
+  });
+
+  const missing = runCli(['task', 'd', '--task', taskId, '--item', 'AN-1'], repoRoot);
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.match(missing.stdout, /explanation unavailable/);
+
+  const invalid = runCli(['task', 'd', '--task', taskId, '--item', 'AN-2'], repoRoot);
+  assert.equal(invalid.status, 1);
+  assert.match(invalid.stderr, /invalid evidence/);
+
+  const ambiguous = runCli(['task', 'd', '--task', taskId, '--item', 'AN-3'], repoRoot);
+  assert.equal(ambiguous.status, 1);
+  assert.match(ambiguous.stderr, /cannot resolve AN-3/);
 });
 
 test('B3: missing detail block degrades gracefully and exits 0', () => {

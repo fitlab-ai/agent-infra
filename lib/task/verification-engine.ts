@@ -26,6 +26,7 @@ import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedge
 import type { LedgerRow } from "./ledger.ts";
 import { isValidAgentInfraVersion } from "../version.ts";
 import { equalCounts, parseReviewSummary } from "./review-artifacts.ts";
+import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
@@ -108,6 +109,8 @@ function runCheck(type: any, context: any, shared: any): any {
       return checkTaskMeta(context);
     case "artifact":
       return checkArtifact(context);
+    case "decision-details":
+      return checkDecisionDetails(context);
     case "implementation-input":
       return checkImplementationInput(context);
     case "activity-log":
@@ -617,6 +620,18 @@ function checkArtifact({ taskDir, config, artifactFile }: any): any {
     "artifact",
     `${path.basename(artifactPath)} passed (${requiredSections.length} sections)`
   );
+}
+
+function checkDecisionDetails({ taskDir, artifactFile }: any): any {
+  const resolvedArtifact = resolveArtifactPath(taskDir, "", artifactFile);
+  if (!resolvedArtifact.ok) return failResult("decision-details", resolvedArtifact.message);
+  const artifactPath = resolvedArtifact.path;
+  const stat = safeStat(artifactPath);
+  if (!stat?.isFile()) return failResult("decision-details", `Artifact not found: ${path.basename(artifactPath)}`);
+  if (stat.size === 0) return passResult("decision-details", `${path.basename(artifactPath)} contains no decision details`);
+  const inspection = inspectDecisionDetailDuplicates(fs.readFileSync(artifactPath, "utf8"));
+  if (!inspection.ok) return failResult("decision-details", `${path.basename(artifactPath)}: ${inspection.message}`);
+  return passResult("decision-details", `${path.basename(artifactPath)} has no duplicate decision detail ids`);
 }
 
 function checkReviewSummary({ taskDir, config, artifactFile }: any): any {

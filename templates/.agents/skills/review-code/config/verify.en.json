@@ -41,6 +41,7 @@
         "^- \\*\\*Reviewed Snapshot Tree\\*\\*[:：]\\s*[0-9a-f]{40,64}\\s*$"
       ]
     },
+    "decision-details": {},
     "review-summary": {
       "stage": "code"
     },
