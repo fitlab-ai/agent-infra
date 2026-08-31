@@ -24,7 +24,7 @@ description: >
 
 在加载 workflow / skill / rules 指令之后、做任何任务状态判断或用户可见结论之前，必须先执行状态核对。指令类文件读取不算对外动作或结论。
 
-运行以下命令，并把原文粘贴到回复正文和本轮产物的 `## 状态核对` 段：
+运行以下命令，并把原文粘贴到本轮产物的 `## 状态核对` 段：
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

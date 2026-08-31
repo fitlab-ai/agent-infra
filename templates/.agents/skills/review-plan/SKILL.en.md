@@ -24,7 +24,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first.
 
-Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
+Run these commands and paste the raw output into this round's `## State Check` section:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text
