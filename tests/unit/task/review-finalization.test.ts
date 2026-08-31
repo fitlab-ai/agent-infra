@@ -134,6 +134,30 @@ test('review summary finalization replaces only the canonical summary tokens', (
   }
 });
 
+test('review finalization does not treat a done-only historical row as an open round', () => {
+  const f = domainFixture();
+  const taskPath = path.join(f.dir, 'task.md');
+  const taskContent = fs.readFileSync(taskPath, 'utf8').replace(
+    '**Review Analysis (Round 1) [started]** by codex — started',
+    '**Review Analysis (Round 1)** by codex — completed'
+  );
+  fs.writeFileSync(taskPath, taskContent, 'utf8');
+  const before = fs.readFileSync(f.artifactPath, 'utf8');
+
+  const result = finalizeReviewSummary(
+    {
+      taskRef: TASK_ID,
+      stage: 'analysis',
+      artifact: 'review-analysis.md'
+    },
+    { repoRoot: f.root }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
+  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
+});
+
 test('review summary finalization is idempotent and rejects mismatched numeric counts', () => {
   const content = `## 审查摘要
 

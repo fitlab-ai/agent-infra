@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-import { appendActivityEntry, locateActivityLog, pairEntries } from './activity-log.ts';
+import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import {
   buildArtifactLinkSection,
   artifactName,
@@ -375,7 +375,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   catch (error) { return failed(request, { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
   const section = locateActivityLog(content);
   if (!section) return failed(request, { code: 'EVENT_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-  const rows = pairEntries(section.entries);
+  const rows = startedBackedRows(pairEntries(section.entries));
   let normalized = request;
   let artifactContext: ArtifactContextResult | null = null;
   const initialParts = eventParts(request.event);

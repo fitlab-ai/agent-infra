@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { cliArgs, filePath } from '../../helpers.ts';
+import { cliArgs, filePath, onPlatforms } from '../../helpers.ts';
 import {
   detectSourceMode,
   extractField,
@@ -60,9 +60,15 @@ function writeTask(rootDir: string, relativeDir: string, taskId: string, { title
       `type: ${type}`,
       `updated_at: ${updatedAt || completedAt}`,
       `completed_at: ${completedAt}`,
+      'agent_infra_version: v0.0.0',
       '---',
       '',
       `# 任务：${title}`,
+      '',
+      '## 审查分歧账本',
+      '',
+      '| id | stage | round | severity | status | evidence |',
+      '|----|-------|-------|----------|--------|----------|',
       ''
     ].join('\n'),
     'utf8'
@@ -82,14 +88,20 @@ function writeFlatTask(rootDir: string, section: string, taskId: string, {
   const lines = [
     '---',
     `id: ${taskId}`,
-    `type: ${type}`
+    `type: ${type}`,
+    'agent_infra_version: v0.0.0'
   ];
 
   if (!omitUpdatedAt && updatedAt) {
     lines.push(`updated_at: ${updatedAt}`);
   }
 
-  lines.push('---', '', `# 任务：${title || taskId}`, '', 'workspace task');
+  lines.push(
+    '---', '', `# 任务：${title || taskId}`, '', 'workspace task', '',
+    '## 审查分歧账本', '',
+    '| id | stage | round | severity | status | evidence |',
+    '|----|-------|-------|----------|--------|----------|', ''
+  );
 
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `${lines.join('\n')}\n`, 'utf8');
@@ -129,12 +141,33 @@ function read(relativePath: string) {
   return fs.readFileSync(relativePath, 'utf8');
 }
 
+function snapshotTree(rootDir: string): string[] {
+  const entries: string[] = [];
+  const visit = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      const relativePath = path.relative(rootDir, entryPath).split(path.sep).join('/');
+      if (entry.isDirectory()) {
+        entries.push(`${relativePath}:directory`);
+        visit(entryPath);
+      } else if (entry.isSymbolicLink()) {
+        entries.push(`${relativePath}:symbolic-link:${fs.readlinkSync(entryPath)}`);
+      } else {
+        entries.push(`${relativePath}:file:${read(entryPath)}`);
+      }
+    }
+  };
+
+  visit(rootDir);
+  return entries.sort();
+}
+
 test('merge copies new archived tasks and rebuilds manifests', () => {
   const repoDir = makeTempRepo();
-  const sourceDir = path.join(repoDir, 'incoming-archive');
+  const sourceDir = makeTempWorkspace(repoDir);
 
   try {
-    writeTask(sourceDir, '2026/03/20', 'TASK-20260320-111111', {
+    writeTask(path.join(sourceDir, 'archive'), '2026/03/20', 'TASK-20260320-111111', {
       title: '同步归档',
       type: 'feature',
       completedAt: '2026-03-20 11:11:11'
@@ -148,8 +181,8 @@ test('merge copies new archived tasks and rebuilds manifests', () => {
     const archiveRoot = path.join(repoDir, '.agents', 'workspace', 'archive');
     const taskPath = path.join(archiveRoot, '2026/03/20/TASK-20260320-111111');
     assert.ok(fs.existsSync(taskPath));
-    assert.match(output, /Merged TASK-20260320-111111 -> 2026\/03\/20\/TASK-20260320-111111\//);
-    assert.match(output, /- Merged: 1/);
+    assert.match(output, /✓ TASK-20260320-111111\s+archive\s+copied/);
+    assert.match(output, /Totals: 1 copied, 0 updated, 0 moved, 0 skipped/);
     assert.match(read(path.join(archiveRoot, 'manifest.md')), /\| 2026 \| 1 \| \[2026\/manifest\.md\]\(2026\/manifest\.md\) \|/);
     assert.match(read(path.join(archiveRoot, '2026/03/manifest.md')), /\| TASK-20260320-111111 \| 同步归档 \| feature \| 2026-03-20 11:11:11 \| 2026\/03\/20\/TASK-20260320-111111\/ \|/);
   } finally {
@@ -159,7 +192,7 @@ test('merge copies new archived tasks and rebuilds manifests', () => {
 
 test('merge skips existing task IDs without overwriting local archive', () => {
   const repoDir = makeTempRepo();
-  const sourceDir = path.join(repoDir, 'incoming-archive');
+  const sourceDir = makeTempWorkspace(repoDir);
   const archiveRoot = path.join(repoDir, '.agents', 'workspace', 'archive');
 
   try {
@@ -167,7 +200,7 @@ test('merge skips existing task IDs without overwriting local archive', () => {
       title: '本地版本',
       completedAt: '2026-03-21 10:00:00'
     });
-    writeTask(sourceDir, '2026/03/22', 'TASK-20260321-222222', {
+    writeTask(path.join(sourceDir, 'archive'), '2026/03/22', 'TASK-20260321-222222', {
       title: '远端版本',
       completedAt: '2026-03-22 10:00:00'
     });
@@ -177,9 +210,8 @@ test('merge skips existing task IDs without overwriting local archive', () => {
       encoding: 'utf8'
     });
 
-    assert.match(output, /Skipped TASK-20260321-222222 \(already exists at 2026\/03\/21\/TASK-20260321-222222\/\)/);
-    assert.match(output, /- Merged: 0/);
-    assert.match(output, /- Skipped: 1/);
+    assert.match(output, /⊘ TASK-20260321-222222\s+archive\s+skipped \(already exists at 2026\/03\/21\/TASK-20260321-222222\/\)/);
+    assert.match(output, /Totals: 0 copied, 0 updated, 0 moved, 1 skipped/);
     assert.match(read(path.join(archiveRoot, '2026/03/21/TASK-20260321-222222/task.md')), /本地版本/);
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
@@ -188,7 +220,7 @@ test('merge skips existing task IDs without overwriting local archive', () => {
 
 test('merge reports mixed merged and skipped tasks', () => {
   const repoDir = makeTempRepo();
-  const sourceDir = path.join(repoDir, 'incoming-archive');
+  const sourceDir = makeTempWorkspace(repoDir);
   const archiveRoot = path.join(repoDir, '.agents', 'workspace', 'archive');
 
   try {
@@ -196,11 +228,11 @@ test('merge reports mixed merged and skipped tasks', () => {
       title: '已存在任务',
       completedAt: '2026-03-11 09:00:00'
     });
-    writeTask(sourceDir, '2026/03/11', 'TASK-20260311-000001', {
+    writeTask(path.join(sourceDir, 'archive'), '2026/03/11', 'TASK-20260311-000001', {
       title: '重复任务',
       completedAt: '2026-03-11 10:00:00'
     });
-    writeTask(sourceDir, '2026/03/12', 'TASK-20260312-000002', {
+    writeTask(path.join(sourceDir, 'archive'), '2026/03/12', 'TASK-20260312-000002', {
       title: '新任务',
       completedAt: '2026-03-12 10:00:00'
     });
@@ -210,19 +242,17 @@ test('merge reports mixed merged and skipped tasks', () => {
       encoding: 'utf8'
     });
 
-    assert.match(output, /Merged TASK-20260312-000002 -> 2026\/03\/12\/TASK-20260312-000002\//);
-    assert.match(output, /Skipped TASK-20260311-000001 \(already exists at 2026\/03\/11\/TASK-20260311-000001\/\)/);
-    assert.match(output, /- Merged: 1/);
-    assert.match(output, /- Skipped: 1/);
+    assert.match(output, /✓ TASK-20260312-000002\s+archive\s+copied/);
+    assert.match(output, /⊘ TASK-20260311-000001\s+archive\s+skipped \(already exists at 2026\/03\/11\/TASK-20260311-000001\/\)/);
+    assert.match(output, /Totals: 1 copied, 0 updated, 0 moved, 1 skipped/);
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
 });
 
-test('merge handles an empty source archive without failing', () => {
+test('merge handles an empty current workspace without failing', () => {
   const repoDir = makeTempRepo();
-  const sourceDir = path.join(repoDir, 'incoming-archive');
-  fs.mkdirSync(sourceDir, { recursive: true });
+  const sourceDir = makeTempWorkspace(repoDir);
 
   try {
     const output = execFileSync(process.execPath, cliArgs('merge', sourceDir), {
@@ -230,9 +260,8 @@ test('merge handles an empty source archive without failing', () => {
       encoding: 'utf8'
     });
 
-    assert.match(output, /No archived tasks found in/);
-    assert.match(output, /- Merged: 0/);
-    assert.match(output, /- Skipped: 0/);
+    assert.match(output, /Archive\s+\(.agents\/workspace\/archive\/\):\n  \(no changes\)/);
+    assert.match(output, /Totals: 0 copied, 0 updated, 0 moved, 0 skipped/);
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
@@ -315,19 +344,19 @@ test('rebuildManifests ignores invalid task-like directories', () => {
   }
 });
 
-test('frontmatter helpers and source scanning parse archived task metadata', () => {
+test('frontmatter helpers and source scanning parse current archive metadata', () => {
   const repoDir = makeTempRepo();
-  const sourceDir = path.join(repoDir, 'incoming-archive');
+  const sourceDir = path.join(makeTempWorkspace(repoDir), 'archive');
 
   try {
-    writeTask(sourceDir, 'nested/archive/2026/03/09', 'TASK-20260309-123456', {
+    writeTask(sourceDir, '2026/03/09', 'TASK-20260309-123456', {
       title: 'Task: 管道 | 转义',
       type: 'bug',
       completedAt: '2026-03-09 12:34:56',
       updatedAt: '2026-03-10 09:00:00'
     });
 
-    const content = read(path.join(sourceDir, 'nested/archive/2026/03/09/TASK-20260309-123456/task.md'));
+    const content = read(path.join(sourceDir, '2026/03/09/TASK-20260309-123456/task.md'));
     assert.equal(extractField(content, 'type'), 'bug');
     assert.equal(extractField(content, 'missing'), null);
     assert.equal(extractTitle(content), '管道 \\| 转义');
@@ -342,7 +371,7 @@ test('frontmatter helpers and source scanning parse archived task metadata', () 
   }
 });
 
-test('detectSourceMode distinguishes workspace and legacy archive sources', () => {
+test('detectSourceMode accepts current workspace sources and rejects archive-only sources', () => {
   const repoDir = makeTempRepo();
   const workspaceDir = makeTempWorkspace(repoDir);
   const archiveDir = path.join(repoDir, 'legacy-archive');
@@ -355,7 +384,10 @@ test('detectSourceMode distinguishes workspace and legacy archive sources', () =
     });
 
     assert.equal(detectSourceMode(workspaceDir), 'workspace');
-    assert.equal(detectSourceMode(archiveDir), 'legacy-archive');
+    assert.throws(
+      () => detectSourceMode(archiveDir),
+      /Invalid merge source: expected a current workspace containing active, blocked, completed, or archive sections/
+    );
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
@@ -713,25 +745,216 @@ test('merge workspace treats source frontmatter and local mtime for the same ins
   }
 });
 
-test('merge legacy archive mode remains backward compatible and prints deprecation hint', () => {
+test('merge rejects archive-only sources before changing the target workspace', () => {
   const repoDir = makeTempRepo();
   const sourceDir = path.join(repoDir, 'incoming-archive');
+  const archiveRoot = path.join(repoDir, '.agents', 'workspace', 'archive');
 
   try {
     writeTask(sourceDir, '2026/04/01', 'TASK-20260401-010101', {
       title: 'legacy task',
       completedAt: '2026-04-01 01:01:01'
     });
+    fs.writeFileSync(path.join(archiveRoot, 'manifest.md'), 'target sentinel\n', 'utf8');
 
-    const output = execFileSync(process.execPath, cliArgs('merge', sourceDir), {
-      cwd: repoDir,
-      encoding: 'utf8'
+    assert.throws(
+      () => execFileSync(process.execPath, cliArgs('merge', sourceDir), { cwd: repoDir, encoding: 'utf8' }),
+      /Invalid merge source: expected a current workspace containing active, blocked, completed, or archive sections/
+    );
+    assert.equal(read(path.join(archiveRoot, 'manifest.md')), 'target sentinel\n');
+    assert.equal(fs.existsSync(path.join(archiveRoot, '2026/04/01/TASK-20260401-010101')), false);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge rejects malformed current sources before creating target output', () => {
+  const repoDir = makeTempRepo();
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const archiveRoot = path.join(repoDir, '.agents', 'workspace', 'archive');
+
+  try {
+    fs.mkdirSync(path.join(sourceWorkspace, 'archive/2026/04/01/TASK-20260401-020202'), { recursive: true });
+    fs.writeFileSync(path.join(archiveRoot, 'manifest.md'), 'target sentinel\n', 'utf8');
+
+    assert.throws(
+      () => execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), { cwd: repoDir, encoding: 'utf8' }),
+      /Invalid merge source: .*TASK-20260401-020202.*task\.md/
+    );
+    assert.equal(read(path.join(archiveRoot, 'manifest.md')), 'target sentinel\n');
+    assert.equal(fs.existsSync(path.join(archiveRoot, '2026/04/01/TASK-20260401-020202')), false);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge rejects invalid current task documents before changing the target workspace', () => {
+  const repoDir = makeTempRepo();
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const taskId = 'TASK-20260401-020303';
+  const sourceTaskFile = path.join(sourceWorkspace, 'active', taskId, 'task.md');
+  const targetManifest = path.join(repoDir, '.agents', 'workspace', 'archive', 'manifest.md');
+
+  try {
+    fs.mkdirSync(path.dirname(sourceTaskFile), { recursive: true });
+    fs.writeFileSync(targetManifest, 'target sentinel\n', 'utf8');
+
+    const invalidDocuments = [
+      '',
+      `---\nid: ${taskId}\ntype: feature\nagent_infra_version: v0.0.0\n---\n\n# Task\n`,
+      `---\nid: OTHER\ntype: feature\nagent_infra_version: v0.0.0\n---\n\n# Task\n\n## 审查分歧账本\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`
+    ];
+
+    for (const content of invalidDocuments) {
+      fs.writeFileSync(sourceTaskFile, content, 'utf8');
+      assert.throws(
+        () => execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), { cwd: repoDir, encoding: 'utf8' }),
+        /Invalid merge source: .*task\.md/
+      );
+      assert.equal(read(targetManifest), 'target sentinel\n');
+      assert.equal(fs.existsSync(path.join(repoDir, '.agents', 'workspace', 'active', taskId)), false);
+    }
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge rejects source section symlinks before changing the target workspace', onPlatforms('linux', 'darwin'), () => {
+  const repoDir = makeTempRepo();
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const outsideActive = path.join(repoDir, 'outside-active');
+  const taskId = 'TASK-20260401-020404';
+  const targetManifest = path.join(repoDir, '.agents', 'workspace', 'archive', 'manifest.md');
+
+  try {
+    writeFlatTask(repoDir, 'outside-active', taskId, {
+      title: 'outside source boundary',
+      updatedAt: '2026-04-01 02:04:04'
     });
+    fs.rmSync(path.join(sourceWorkspace, 'active'), { recursive: true, force: true });
+    fs.symlinkSync(outsideActive, path.join(sourceWorkspace, 'active'), 'dir');
+    fs.writeFileSync(targetManifest, 'target sentinel\n', 'utf8');
 
-    assert.match(output, /Detected legacy archive source/);
-    assert.match(output, /Merged TASK-20260401-010101 -> 2026\/04\/01\/TASK-20260401-010101\//);
-    assert.match(output, /- Merged: 1/);
-    assert.match(output, /Backup contains 0 task\(s\)/);
+    assert.throws(
+      () => execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), { cwd: repoDir, encoding: 'utf8' }),
+      /Invalid merge source: .*active.*must not be a symbolic link/
+    );
+    assert.equal(read(targetManifest), 'target sentinel\n');
+    assert.equal(fs.existsSync(path.join(repoDir, '.agents', 'workspace', 'active', taskId)), false);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge rejects nested mutable task symlinks before changing the target workspace', onPlatforms('linux', 'darwin'), () => {
+  const cases = [
+    { name: 'file', link: 'attachments/secret.txt', target: 'outside-secret.txt', type: 'file' as const },
+    { name: 'directory', link: 'attachments/private', target: 'outside-private', type: 'dir' as const }
+  ];
+
+  for (const [index, testCase] of cases.entries()) {
+    const repoDir = makeTempRepo();
+    const sourceWorkspace = makeTempWorkspace(repoDir, `incoming-mutable-symlink-${index}`);
+    const targetWorkspace = path.join(repoDir, '.agents', 'workspace');
+    const targetManifest = path.join(targetWorkspace, 'archive', 'manifest.md');
+    const taskId = `TASK-20260401-02050${index + 1}`;
+
+    try {
+      const outsidePath = path.join(repoDir, testCase.target);
+      if (testCase.type === 'dir') {
+        fs.mkdirSync(outsidePath, { recursive: true });
+        fs.writeFileSync(path.join(outsidePath, 'secret.txt'), 'outside\n', 'utf8');
+      } else {
+        fs.writeFileSync(outsidePath, 'outside\n', 'utf8');
+      }
+
+      const taskDir = writeFlatTask(sourceWorkspace, 'active', taskId, {
+        title: `nested ${testCase.name} symlink`,
+        updatedAt: '2026-04-01 02:05:01'
+      });
+      const linkPath = path.join(taskDir, testCase.link);
+      fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+      fs.symlinkSync(outsidePath, linkPath, testCase.type);
+      fs.writeFileSync(targetManifest, 'target sentinel\n', 'utf8');
+      const targetBefore = snapshotTree(targetWorkspace);
+
+      assert.throws(
+        () => execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), { cwd: repoDir, encoding: 'utf8' }),
+        /Invalid merge source: .*must not be a symbolic link/
+      );
+      assert.deepEqual(snapshotTree(targetWorkspace), targetBefore);
+      assert.equal(fs.existsSync(path.join(targetWorkspace, 'active', taskId)), false);
+    } finally {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('merge rejects nested archive task symlinks before changing the target workspace', onPlatforms('linux', 'darwin'), () => {
+  const cases = [
+    { name: 'file', link: 'attachments/secret.txt', target: 'outside-archive-secret.txt', type: 'file' as const },
+    { name: 'directory', link: 'attachments/private', target: 'outside-archive-private', type: 'dir' as const }
+  ];
+
+  for (const [index, testCase] of cases.entries()) {
+    const repoDir = makeTempRepo();
+    const sourceWorkspace = makeTempWorkspace(repoDir, `incoming-archive-symlink-${index}`);
+    const targetWorkspace = path.join(repoDir, '.agents', 'workspace');
+    const targetManifest = path.join(targetWorkspace, 'archive', 'manifest.md');
+    const taskId = `TASK-20260401-02060${index + 1}`;
+
+    try {
+      const outsidePath = path.join(repoDir, testCase.target);
+      if (testCase.type === 'dir') {
+        fs.mkdirSync(outsidePath, { recursive: true });
+        fs.writeFileSync(path.join(outsidePath, 'secret.txt'), 'outside\n', 'utf8');
+      } else {
+        fs.writeFileSync(outsidePath, 'outside\n', 'utf8');
+      }
+
+      const taskDir = writeTask(path.join(sourceWorkspace, 'archive'), '2026/04/01', taskId, {
+        title: `nested archive ${testCase.name} symlink`,
+        completedAt: '2026-04-01 02:06:01'
+      });
+      const linkPath = path.join(taskDir, testCase.link);
+      fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+      fs.symlinkSync(outsidePath, linkPath, testCase.type);
+      fs.writeFileSync(targetManifest, 'target sentinel\n', 'utf8');
+      const targetBefore = snapshotTree(targetWorkspace);
+
+      assert.throws(
+        () => execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), { cwd: repoDir, encoding: 'utf8' }),
+        /Invalid merge source: .*must not be a symbolic link/
+      );
+      assert.deepEqual(snapshotTree(targetWorkspace), targetBefore);
+      assert.equal(fs.existsSync(path.join(targetWorkspace, 'archive', '2026/04/01', taskId)), false);
+    } finally {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('merge rejects duplicate task identities and legacy deep archive layouts', () => {
+  const repoDir = makeTempRepo();
+  const duplicateWorkspace = makeTempWorkspace(repoDir, 'duplicate-workspace');
+  const deepWorkspace = makeTempWorkspace(repoDir, 'deep-workspace');
+
+  try {
+    writeFlatTask(duplicateWorkspace, 'active', 'TASK-20260401-030303', { title: 'active copy', updatedAt: '2026-04-01 03:03:03' });
+    writeFlatTask(duplicateWorkspace, 'blocked', 'TASK-20260401-030303', { title: 'blocked copy', updatedAt: '2026-04-01 03:03:04' });
+    assert.throws(
+      () => execFileSync(process.execPath, cliArgs('merge', duplicateWorkspace), { cwd: repoDir, encoding: 'utf8' }),
+      /Invalid merge source: duplicate task ID TASK-20260401-030303/
+    );
+
+    writeTask(path.join(deepWorkspace, 'archive'), 'nested/archive/2026/04/01', 'TASK-20260401-040404', {
+      title: 'deep legacy task',
+      completedAt: '2026-04-01 04:04:04'
+    });
+    assert.throws(
+      () => execFileSync(process.execPath, cliArgs('merge', deepWorkspace), { cwd: repoDir, encoding: 'utf8' }),
+      /Invalid merge source: .*archive.*not a YYYY directory/
+    );
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
@@ -742,5 +965,5 @@ test('cli help advertises workspace merge scope', () => {
     encoding: 'utf8'
   });
 
-  assert.match(output, /Merge tasks from another workspace directory \(active\/blocked\/completed\/archive\)/);
+  assert.match(output, /Merge tasks from another current workspace directory \(active\/blocked\/completed\/archive\)/);
 });
