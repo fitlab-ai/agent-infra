@@ -24,7 +24,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
 
-Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
+Run these commands and paste the raw output into this round's `## State Check` section:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text
@@ -205,6 +205,8 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 > The completion timestamp line (the last line of the whole output) uses `date "+%Y-%m-%d %H:%M:%S"` (local timezone, no offset) and always sits at the very end of the output for at-a-glance scanning across windows. This skill renders no "Next steps" commands, but it does render an **optional sandbox-cleanup hint** before the timestamp line (see the gate below), and still prints the line.
 
 > **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block in the output below only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. Use the full `{task-id}` for cleanup; do not substitute the branch name. This block is independent of "Next steps" semantics — it is not a workflow successor command.
+
+> Keep the complete raw state-check output only in this round's task file. On the success path, the user-facing message reports only the check result, necessary summary, and task target path; do not expand the full snapshot. If the state check fails, an anomaly is found, or the user explicitly requests details, show proportionate diagnostics. Keep the completion-gate output as required by this skill.
 
 Output format:
 ```

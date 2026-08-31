@@ -24,7 +24,7 @@ description: >
 
 在加载 workflow / skill / rules 指令之后、做任何任务状态判断或用户可见结论之前，必须先执行状态核对。指令类文件读取不算对外动作或结论。
 
-运行以下命令，并把原文粘贴到回复正文和本轮产物的 `## 状态核对` 段：
+运行以下命令，并把原文粘贴到本轮产物的 `## 状态核对` 段：
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text
@@ -232,6 +232,8 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 > 本步骤为**场景 A** 正常完成输出；场景 B 的单问输出见步骤 4。
 
 > 仅在校验通过后执行本步骤。
+
+> 状态核对的完整原始输出仅写入本轮产物。成功路径的用户消息只报告核对结果、必要摘要和产物路径，不重复展开完整快照；状态核对失败、发现异常或用户明确要求详情时，可展示相称的诊断信息。完成校验输出仍按本技能要求保留。
 
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
