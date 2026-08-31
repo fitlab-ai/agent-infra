@@ -13,16 +13,16 @@ test('commandHelp renders Feishu-card-friendly command lines', () => {
     '/sandbox ls',
     '/sandbox show {ref}',
     '/sandbox vm status',
-    '/task decisions [--task {ref}] [--item {selector}]',
-    '/task log [--task {ref}]',
+    '/task decisions [--task {ref} | -t {ref}] [--item {selector} | -i {selector}]',
+    '/task log [--task {ref} | -t {ref}]',
     '/task ls',
-    '/task show [--task {ref}]',
-    '/task status [--task {ref}]',
+    '/task show [--task {ref} | -t {ref}]',
+    '/task status [--task {ref} | -t {ref}]',
     'Write:',
     '/sandbox create {ref}',
     '/sandbox start {ref}',
     'Exec:',
-    '/decide [--task {ref}] --item {ordinal|ledger-id} [--needs-implementation true|false] {decision}',
+    '/decide [--task {ref} | -t {ref}] (--item {ordinal|ledger-id} | -i {ordinal|ledger-id}) [--needs-implementation true|false] {decision}',
     '/run create-task {description}',
     '/run {skill} {task-ref}'
   ]);
@@ -31,10 +31,10 @@ test('commandHelp renders Feishu-card-friendly command lines', () => {
 test('parseCommand handles built-ins and read-only task commands', () => {
   assert.deepEqual(parseCommand('/ping'), { kind: 'builtin', name: 'ping', role: 'read', args: [] });
   assert.deepEqual(parseCommand('/version'), { kind: 'builtin', name: 'version', role: 'read', args: [] });
-  assert.deepEqual(parseCommand('/task status #7'), {
+  assert.deepEqual(parseCommand('/task status --task #7'), {
     kind: 'ai',
     role: 'read',
-    argv: ['task', 'status', '#7']
+    argv: ['task', 'status', '--task', '#7']
   });
 });
 
@@ -58,15 +58,15 @@ test('parseCommand maps sandbox and run commands with roles', () => {
     role: 'exec',
     argv: ['run', 'create-task', 'demo', '--tui', 'codex']
   });
-  assert.deepEqual(parseCommand('/decide #7 PL-1 yes'), {
+  assert.deepEqual(parseCommand('/decide --task #7 --item PL-1 yes'), {
     kind: 'ai',
     role: 'exec',
-    argv: ['decide', '#7', 'PL-1', 'yes']
+    argv: ['decide', '--task', '#7', '--item', 'PL-1', 'yes']
   });
-  assert.deepEqual(parseCommand('/decide #7 CD-1 --needs-implementation true yes'), {
+  assert.deepEqual(parseCommand('/decide -t #7 -i CD-1 --needs-implementation true yes'), {
     kind: 'ai',
     role: 'exec',
-    argv: ['decide', '#7', 'CD-1', '--needs-implementation', 'true', 'yes']
+    argv: ['decide', '-t', '#7', '-i', 'CD-1', '--needs-implementation', 'true', 'yes']
   });
 });
 

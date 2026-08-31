@@ -8,6 +8,10 @@ description: >
 
 # Run Manual Validation
 
+## Task Context Resolution
+
+The entry point may omit the task ref; explicit task scope accepts only `--task <ref>` or `-t <ref>`, and positional task refs are not interpreted. Parse `--scope`, `--timeout`, and `--format` before `--`, preserve the user command after `--` verbatim, then call `agent-infra-internal task-context resolve {task-scope}`. Pass through resolution failures without scanning tasks locally. The internal `task-validate` protocol continues to use a positional task ref.
+
 ## Boundary
 
 - Select the validation mode, call the sole mechanical entry point, and record evidence; do not mark PR manual validation complete.

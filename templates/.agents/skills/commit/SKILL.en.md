@@ -15,7 +15,7 @@ The commit core returns one primary result: `committed`, `no_op`, `committed_wit
 
 ## Task context
 
-The entry point accepts an omitted task ref, a legacy positional task ref, or `--task <ref>` / `-t <ref>`. First call `agent-infra-internal task-context resolve {task-scope}`.
+The entry point may omit the task ref; explicit task scope accepts only `--task <ref>` or `-t <ref>`, and positional task refs are not interpreted. First call `agent-infra-internal task-context resolve {task-scope}`.
 
 - An explicit task-resolution failure stops the operation.
 - Without an explicit task scope, only `TASK_CONTEXT_NOT_FOUND` may enter taskless direct mode; detached HEAD, malformed candidates, and multiple matches fail closed.

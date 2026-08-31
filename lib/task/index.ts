@@ -1,34 +1,33 @@
 const USAGE = `Usage: ai task <command> [options]
 
 Commands:
-  cat [--task <ref>] <artifact | N>      Print a task artifact (by name or number)
-  decisions, d [--task <ref>] [-i item]  List review decisions, or show one item's detail
-  files [--task <ref>]                   List artifacts in a task dir (numbered)
-  grep <pattern> [--current|--task <ref>] Literal search across task artifacts (global by default)
-  issue-body [--task <ref>] [--template] Print a deterministic Issue body from task.md
-  log [--task <ref>]                     Render a task's activity log as a timeline
+  cat [--task <ref> | -t <ref>] <artifact | N> Print a task artifact (by name or number)
+  decisions, d [--task <ref> | -t <ref>] [--item <selector> | -i <selector>] List review decisions, or show one item's detail
+  files [--task <ref> | -t <ref>]        List artifacts in a task dir (numbered)
+  grep [--current | --task <ref> | -t <ref>] <pattern> Literal search in the current or selected task
+  issue-body [--task <ref> | -t <ref>] [--template <path>] Print a deterministic Issue body from task.md
+  log [--task <ref> | -t <ref>]          Render a task's activity log as a timeline
   ls [--all | --blocked | --completed]   List tasks (default: active)
-  show [--task <ref>]                    Print a task.md
-  status [--task <ref>]                  Aggregated status view (metadata / artifacts / git / platform)
+  show [--task <ref> | -t <ref>]         Print a task.md
+  status [--task <ref> | -t <ref>]       Aggregated status view (metadata / artifacts / git / platform)
 
 Examples:
-  ai task cat 11 analysis
   ai task cat analysis
-  ai task cat 11 3
-  ai task decisions 11
+  ai task cat --task 11 analysis
+  ai task decisions --task 11
   ai task decisions --item 1
-  ai task d 11 PL-3 --format markdown
-  ai task files 11
+  ai task d --task 11 --item PL-3 --format markdown
+  ai task files --task 11
   ai task grep resolveArtifact
   ai task grep resolveArtifact --current
-  ai task grep resolveArtifact 11
-  ai task issue-body 11
-  ai task issue-body 11 --template .github/ISSUE_TEMPLATE/05_other.yml
-  ai task log 11
+  ai task grep resolveArtifact --task 11
+  ai task issue-body --task 11
+  ai task issue-body --task 11 --template .github/ISSUE_TEMPLATE/05_other.yml
+  ai task log --task 11
   ai task ls
-  ai task show 11
-  ai task show TASK-20260612-162737
-  ai task status 11
+  ai task show --task 11
+  ai task show --task TASK-20260612-162737
+  ai task status --task 11
 
 Run 'ai task <command> --help' for details.`;
 

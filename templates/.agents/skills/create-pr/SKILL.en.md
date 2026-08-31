@@ -19,7 +19,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 ## Task Context Resolution
 
-> The entry point may omit the task ref and also accepts a legacy positional ref or `--task <ref>` / `-t <ref>`. Separate task scope from the full arguments while preserving every business operand, then call `agent-infra-internal task-context resolve {task-scope}` where `{task-scope}` is empty, one positional ref, or one task flag. Read only `taskId` from the structured result and bind `{task-id}` to that full `TASK-YYYYMMDD-HHMMSS` for downstream commands. Pass through resolution failures without scanning tasks locally.
+> The entry point may omit the task ref; explicit task scope accepts only `--task <ref>` or `-t <ref>`, and positional task refs are not interpreted. Preserve every other business operand, then call `agent-infra-internal task-context resolve {task-scope}` where `{task-scope}` is empty or one task flag. Read only `taskId` from the structured result and bind `{task-id}` to the full `TASK-YYYYMMDD-HHMMSS` for downstream commands. Pass through resolution failures without scanning tasks locally.
 
 ## Step Start: started Marker
 
@@ -45,9 +45,7 @@ No Pull Request is required; run instead:
 
 ### 1. Parse Command Arguments
 
-Identify arguments from the command input:
-- arguments matching `TASK-{yyyyMMdd-HHmmss}` -> `{task-id}`
-- remaining arguments -> `{target-branch}`
+Parse the task scope first: an optional `--task <ref>` or `-t <ref>` selects `{task-id}`; a positional task ref is not interpreted. The remaining positional argument, when present, is `{target-branch}`.
 
 If `{task-id}` is provided, read `.agents/workspace/active/{task-id}/task.md` to load task metadata such as `issue_number` and `type`.
 If `{task-id}` is omitted, try to resolve it from the current session context; if it still cannot be determined, skip task-association logic in later steps.

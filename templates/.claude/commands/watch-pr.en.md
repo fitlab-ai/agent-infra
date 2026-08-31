@@ -1,6 +1,6 @@
 ---
 description: "Watch all checks on a PR and self-heal on failure"
-usage: "/watch-pr [task-ref | --task <ref> | --pr <number>]"
+usage: "/watch-pr [--task <ref> | -t <ref>] | [--pr <number>] | [<pr-url>]"
 ---
 
 Read and execute the watch-pr skill from `.agents/skills/watch-pr/SKILL.md`.

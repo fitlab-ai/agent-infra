@@ -15,8 +15,7 @@ function parseTaskScope(args: string[]): TaskScope {
       value = args[++index];
       if (value === undefined || value === '' || value.startsWith('-')) throw new Error(`${arg} requires a value`);
     } else if (arg.startsWith('--task=')) {
-      value = arg.slice('--task='.length);
-      if (value === '') throw new Error('--task requires a value');
+      throw new Error("--task=... is not supported; use --task <ref> or -t <ref>");
     } else {
       positionals.push(arg);
       continue;

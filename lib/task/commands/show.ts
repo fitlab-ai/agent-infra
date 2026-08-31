@@ -2,12 +2,11 @@ import fs from 'node:fs';
 import { parseTaskScope } from '../command-options.ts';
 import { resolveTaskContext } from '../resolve-ref.ts';
 
-const USAGE = `Usage: ai task show [<N | TASK-id> | --task <ref> | -t <ref>]
+const USAGE = `Usage: ai task show [--task <ref> | -t <ref>]
 
 Prints the task.md content for the matching task.
   Omit the ref       Resolve the unique active task for the current branch.
-  N (bare numeric)   Recommended; resolves the active short id via the registry.
-  TASK-YYYYMMDD-HHMMSS  Locates a task in active / blocked / completed / archive.
+  --task/-t <ref>    Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
 `;
 
 function show(args: string[] = []): void {
@@ -20,10 +19,10 @@ function show(args: string[] = []): void {
     process.stderr.write(`ai task show: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1; return;
   }
-  if (scope.positionals.length > 1 || (scope.explicit && scope.positionals.length > 0)) {
-    process.stderr.write('ai task show: task ref must be provided once\n'); process.exitCode = 1; return;
+  if (scope.positionals.length > 0) {
+    process.stderr.write('ai task show: positional task ref is not supported; use --task <ref> or -t <ref>\n'); process.exitCode = 1; return;
   }
-  const resolved = resolveTaskContext(scope.taskRef ?? scope.positionals[0]);
+  const resolved = resolveTaskContext(scope.taskRef);
   if (!resolved.ok) {
     process.stderr.write(`ai task show: ${resolved.message}\n`);
     process.exitCode = 1;

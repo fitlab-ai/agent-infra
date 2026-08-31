@@ -1,6 +1,6 @@
 ---
 description: "Review code implementation and output a code review report"
-usage: "/review-code [task-ref | --task <ref>]"
+usage: "/review-code [--task <ref> | -t <ref>]"
 ---
 
 Read and execute the review-code skill from `.agents/skills/review-code/SKILL.md`.

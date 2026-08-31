@@ -13,12 +13,12 @@ import { readRun, type OrchestrationRun } from '../orchestration.ts';
 import type { DelegationReceipt } from '../delegation-receipts.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
 
-const USAGE = `Usage: ai task status [<N | TASK-id> | --task <ref> | -t <ref>]
+const USAGE = `Usage: ai task status [--task <ref> | -t <ref>]
 
 Prints an aggregated "health check" view for a task: header, metadata,
 artifacts, workflow/runtime execution state, and git branch state.
-  Omit <ref>   Resolve the unique active task for the current branch.
-  <ref>   Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  Omit the scope   Resolve the unique active task for the current branch.
+  --task/-t <ref> Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
 Git rows are best-effort: a failed git call degrades that row to '-' without
 failing the command.
@@ -577,10 +577,10 @@ function status(args: string[] = []): void {
   let model: StatusModel;
   try {
     const scope = parseTaskScope(args);
-    if (scope.positionals.length > 1 || (scope.explicit && scope.positionals.length > 0)) {
-      throw new Error('task ref must be provided once');
+    if (scope.positionals.length > 0) {
+      throw new Error('positional task ref is not supported; use --task <ref> or -t <ref>');
     }
-    const resolved = resolveTaskContext(scope.taskRef ?? scope.positionals[0]);
+    const resolved = resolveTaskContext(scope.taskRef);
     if (!resolved.ok) throw new Error(resolved.message);
     model = buildFromResolved({
       taskId: resolved.taskId, taskDir: resolved.taskDir, taskMdPath: resolved.taskMdPath,

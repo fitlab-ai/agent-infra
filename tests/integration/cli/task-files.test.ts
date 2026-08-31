@@ -48,7 +48,7 @@ test('ai task files <ref> prints a numbered artifact table', () => {
   writeTaskWithArtifacts(activeDir, taskId);
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
-  const out = runCli(['task', 'files', '1'], repoRoot);
+  const out = runCli(['task', 'files', '--task', '1'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // Header columns.
   assert.match(out.stdout, /#\s+NAME\s+SIZE\s+MTIME/);
@@ -64,7 +64,7 @@ test('ai task files <ref> prints a numbered artifact table', () => {
 
 test('ai task files rejects an unknown ref', () => {
   const { repoRoot } = mkFixture();
-  const out = runCli(['task', 'files', 'not-a-task'], repoRoot);
+  const out = runCli(['task', 'files', '--task', 'not-a-task'], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /ai task files:/);
 });

@@ -21,7 +21,7 @@ Version stamp rule: before creating or updating `task.md` frontmatter, read `.ag
 
 ## Task Context Resolution
 
-> Keep `--pr <number>` and PR URLs on the existing PR-anchored path. Otherwise, the task path may omit the task ref and also accepts a legacy positional ref or `--task <ref>` / `-t <ref>`. Separate task scope from the full arguments, then call `agent-infra-internal task-context resolve {task-scope}` and bind `{task-id}` to the returned full `taskId`. A PR anchor and task scope are mutually exclusive.
+> Keep `--pr <number>` and PR URLs on the existing PR-anchored path. Otherwise, the task path may omit the task ref; explicit task scope accepts only `--task <ref>` or `-t <ref>`, and positional task refs are not interpreted. Separate task scope from the full arguments, then call `agent-infra-internal task-context resolve {task-scope}` and bind `{task-id}` to the returned full `taskId`. A PR anchor and task scope are mutually exclusive.
 
 ## Step Start: Write the started Marker
 
@@ -40,7 +40,7 @@ After prerequisites pass and before this round's first artifact action, append a
 Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deterministic branches:
 
 - Scenario A (argument omitted): reverse-lookup the active task from the current branch, then read its `pr_number`.
-- Scenario B (omitted task ref, positional task ref, or `--task/-t`, **task-anchored primary path**): resolve the full `{task-id}` via "Task Context Resolution" and read `.agents/workspace/active/{task-id}/task.md` for `pr_number` as `{pr#}`; if `pr_number` is empty, follow "Error Handling" to prompt running `create-pr` first, then stop.
+- Scenario B (omitted task ref or `--task/-t`, **task-anchored primary path**): resolve the full `{task-id}` via "Task Context Resolution" and read `.agents/workspace/active/{task-id}/task.md` for `pr_number` as `{pr#}`; if `pr_number` is empty, follow "Error Handling" to prompt running `create-pr` first, then stop.
 - Scenario C (`--pr <number>` or a PR URL): use that PR number directly as `{pr#}`; then determine `{task-id}` via "Reverse-lookup task".
 - Reverse-lookup task (scenarios A / C): use task context/query capabilities to find the unique active task bound to `{pr#}`. If none exists, stop and request binding first; the typed checks intent does not create a second taskless state machine.
 

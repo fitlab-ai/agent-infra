@@ -1,6 +1,6 @@
 ---
 description: "Analyze a task and produce a requirements document"
-usage: "/analyze-task [task-ref | --task <ref>]"
+usage: "/analyze-task [--task <ref> | -t <ref>]"
 ---
 
 Read and execute the analyze-task skill from `.agents/skills/analyze-task/SKILL.md`.

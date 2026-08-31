@@ -19,7 +19,7 @@ description: >
 
 ## 任务上下文解析
 
-> 入口允许省略 task ref，也接受旧位置 task ref 或 `--task <ref>` / `-t <ref>`。先从完整参数中分离 task scope 并原样保留其他业务操作数，再调用 `agent-infra-internal task-context resolve {task-scope}`；`{task-scope}` 为空、位置 ref 或 task flag 之一。只读取结构化结果的 `taskId`，后续把 `{task-id}` 绑定为该完整 `TASK-YYYYMMDD-HHMMSS`。解析失败时透传非零退出码，不自行扫描任务。
+> 入口可省略 task ref；显式 task scope 仅接受 `--task <ref>` 或 `-t <ref>`，不再解释位置 task ref。保留其余业务操作数后调用 `agent-infra-internal task-context resolve {task-scope}`；`{task-scope}` 为空或 task flag 之一。只读取结构化结果的 `taskId`，后续把 `{task-id}` 绑定为完整 `TASK-YYYYMMDD-HHMMSS`。解析失败时透传非零退出码，不自行扫描任务。
 
 ## 步骤开始：started 标记
 
@@ -45,9 +45,7 @@ description: >
 
 ### 1. 解析命令参数
 
-从命令参数中识别：
-- 匹配 `TASK-{yyyyMMdd-HHmmss}` 格式的参数 -> `{task-id}`
-- 其余参数 -> `{target-branch}`
+先解析 task scope：可选的 `--task <ref>` 或 `-t <ref>` 绑定 `{task-id}`；位置 task ref 不再解释。剩余的可选位置参数绑定为 `{target-branch}`。
 
 如果提供了 `{task-id}`，读取 `.agents/workspace/active/{task-id}/task.md` 获取任务信息（例如 `issue_number`、`type` 等）。
 如果未提供，可从当前 session 上下文获取；仍无法确定 `{task-id}` 时，后续步骤中的任务关联逻辑跳过。

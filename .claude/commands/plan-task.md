@@ -1,6 +1,6 @@
 ---
 description: "为任务设计技术方案和实施计划"
-usage: "/plan-task [task-ref | --task <ref>]"
+usage: "/plan-task [--task <ref> | -t <ref>]"
 ---
 
 读取并执行 `.agents/skills/plan-task/SKILL.md` 中的 plan-task 技能。

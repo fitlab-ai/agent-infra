@@ -60,13 +60,13 @@
 
 | 命令 | 角色 | 执行路径 |
 |------|------|----------|
-| `/decide [--task <ref>] --item <序号\|账本ID> [--needs-implementation true\|false] <裁定>` | `exec` | `ai decide ...`；不在任务 worktree 中时推荐显式 task scope |
+| `/decide [--task <ref> \| -t <ref>] (--item <序号\|账本ID> \| -i <序号\|账本ID>) [--needs-implementation true\|false] <裁定>` | `exec` | `ai decide ...`；不在任务 worktree 中时推荐显式 task scope |
 | `/help`、`/ping`、`/version` | 公开内置 | daemon |
 | `/run create-task <描述> [--tui <name>]` | `exec` | 在宿主环境执行 `ai run create-task ...` |
 | `/run <skill> <task-ref> [args...] [--tui <name>]` | `exec` | `ai run ...`；任务态 skill 在匹配沙箱中执行 |
 | `/sandbox create <ref>`、`/sandbox start <ref>` | `write` | `ai sandbox ...` |
 | `/sandbox ls`、`/sandbox show <ref>`、`/sandbox vm status` | `read` | `ai sandbox ...` |
-| `/task decisions [--task <ref>] [--item <selector>]`、`/task log [--task <ref>]`、`/task ls`、`/task show [--task <ref>]`、`/task status [--task <ref>]` | `read` | `ai task ...`；只有 bridge cwd 能严格证明唯一 active branch 匹配时才可隐式解析 |
+| `/task decisions [--task <ref> \| -t <ref>] [--item <selector> \| -i <selector>]`、`/task log [--task <ref> \| -t <ref>]`、`/task ls`、`/task show [--task <ref> \| -t <ref>]`、`/task status [--task <ref> \| -t <ref>]` | `read` | `ai task ...`；只有 bridge cwd 能严格证明唯一 active branch 匹配时才可隐式解析 |
 
 飞书 adapter 默认使用 `interactive` 卡片返回命令结果；这是基于手机端 Demo 验证后的默认输出载体。其他 adapter 不受影响。
 

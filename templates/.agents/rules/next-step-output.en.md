@@ -110,11 +110,11 @@ This section is a **third standalone rule, co-equal with the two above**, used o
   …(one entry per status=needs-human-decision row of this stage in task.md `## 审查分歧账本`)
 
 View details:
-  - All pending decisions: ai task decisions {task-ref}
-  - A single item's full background/options/impact/recommendation: ai task decisions {task-ref} <ordinal|ledger-id>
+  - All pending decisions: ai task decisions --task {task-ref}
+  - A single item's full background/options/impact/recommendation: ai task decisions --task {task-ref} --item <ordinal|ledger-id>
 
 To resolve:
-  - ai decide {task-ref} <ordinal|ledger-id> <decision and rationale>
+  - ai decide --task {task-ref} --item <ordinal|ledger-id> <decision and rationale>
 
 This command atomically creates the `HDR-N` ruling record, flips the target ledger row to `human-decided`, and updates evidence and the activity log; do not manually edit only part of the transaction.
 

@@ -1,6 +1,6 @@
 ---
 description: "Mark a task as blocked and record the reason"
-usage: "/block-task [task-ref | --task <ref>] [reason]"
+usage: "/block-task [--task <ref> | -t <ref>] [reason]"
 disable-model-invocation: true
 ---
 

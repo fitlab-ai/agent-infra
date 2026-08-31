@@ -94,8 +94,8 @@ test('A1: `decisions` and `d` are equivalent', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000001';
   writeCanonical(activeDir, taskId);
-  const a = runCli(['task', 'decisions', taskId], repoRoot);
-  const b = runCli(['task', 'd', taskId], repoRoot);
+  const a = runCli(['task', 'decisions', '--task', taskId], repoRoot);
+  const b = runCli(['task', 'd', '-t', taskId], repoRoot);
   assert.equal(a.status, 0, a.stderr);
   assert.equal(b.status, 0, b.stderr);
   assert.equal(a.stdout, b.stdout);
@@ -107,14 +107,14 @@ test('A2: resolves bare short id and full TASK-id; rejects removed hash and unkn
   writeCanonical(activeDir, taskId);
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
-  const full = runCli(['task', 'd', taskId], repoRoot);
-  const bare = runCli(['task', 'd', '1'], repoRoot);
-  const hash = runCli(['task', 'd', '#1'], repoRoot);
+  const full = runCli(['task', 'd', '--task', taskId], repoRoot);
+  const bare = runCli(['task', 'd', '-t', '1'], repoRoot);
+  const hash = runCli(['task', 'd', '--task', '#1'], repoRoot);
   assert.equal(full.status, 0, full.stderr);
   assert.equal(bare.stdout, full.stdout);
   assert.equal(hash.status, 1);
 
-  const bad = runCli(['task', 'd', 'not-a-task'], repoRoot);
+  const bad = runCli(['task', 'd', '--task', 'not-a-task'], repoRoot);
   assert.notEqual(bad.status, 0);
   assert.match(bad.stderr, /ai task decisions:/);
 });
@@ -135,7 +135,7 @@ test('A4: default list shows pending decision rows from every review stage', () 
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000003';
   writeCanonical(activeDir, taskId);
-  const out = runCli(['task', 'd', taskId], repoRoot);
+  const out = runCli(['task', 'd', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /#\s+CHOICE\s+WHAT NEEDS A DECISION\s+TRACKING/);
   assert.match(out.stdout, /AN-1\s+分析边界待裁定\s+stage=analysis · severity=minor · status=needs-human-decision · evidence=review-analysis-r2\.md#AN-1/);
@@ -146,7 +146,7 @@ test('A4: default list shows pending decision rows from every review stage', () 
   assert.doesNotMatch(out.stdout, /HD-2/);
   assert.doesNotMatch(out.stdout, /AN-2/);
   assert.doesNotMatch(out.stdout, /PRC-1/);
-  assert.match(out.stdout, /View one item: ai task decisions <task-ref> <ordinal\|ledger-id>/);
+  assert.match(out.stdout, new RegExp(`View one item: ai task decisions --task ${taskId} --item <ordinal\\|ledger-id>`));
 });
 
 test('CD-2 review: title cleanup keeps numeric-prefix ids distinct', () => {
@@ -172,17 +172,17 @@ test('CD-2 review: title cleanup keeps numeric-prefix ids distinct', () => {
     }
   });
 
-  const list = runCli(['task', 'd', taskId], repoRoot);
+  const list = runCli(['task', 'd', '--task', taskId], repoRoot);
   assert.equal(list.status, 0, list.stderr);
   assert.match(list.stdout, /AN-1\s+短编号选择\s+stage=analysis/);
   assert.match(list.stdout, /AN-11\s+多位编号选择\s+stage=analysis/);
 
-  const short = runCli(['task', 'd', taskId, 'AN-1'], repoRoot);
+  const short = runCli(['task', 'd', '--task', taskId, '--item', 'AN-1'], repoRoot);
   assert.equal(short.status, 0, short.stderr);
   assert.match(short.stdout, /Decision needed: 短编号选择/);
   assert.match(short.stdout, /### AN-1：短编号选择/);
 
-  const long = runCli(['task', 'd', taskId, 'AN-11'], repoRoot);
+  const long = runCli(['task', 'd', '-t', taskId, '-i', 'AN-11'], repoRoot);
   assert.equal(long.status, 0, long.stderr);
   assert.match(long.stdout, /Decision needed: 多位编号选择/);
   assert.match(long.stdout, /### AN-11：多位编号选择/);
@@ -193,7 +193,7 @@ test('A5: empty candidate set prints a notice and exits 0', () => {
   const taskId = 'TASK-20260101-000004';
   // Only a decided row -> default (pending) list is empty.
   writeTask(activeDir, taskId, ['| HD-1 | analysis | - | decision | human-decided | task.md#人工裁决 |']);
-  const out = runCli(['task', 'd', taskId], repoRoot);
+  const out = runCli(['task', 'd', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.equal(out.stdout, 'No pending decisions.\n');
 });
@@ -202,15 +202,15 @@ test('A6: select a review finding by ordinal and ledger id', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000005';
   writeCanonical(activeDir, taskId);
-  const byId = runCli(['task', 'd', taskId, 'PL-1'], repoRoot);
+  const byId = runCli(['task', 'd', '--task', taskId, '--item', 'PL-1'], repoRoot);
   assert.equal(byId.status, 0, byId.stderr);
   assert.match(byId.stdout, /Decision needed: 方案回退范围/);
-  assert.match(byId.stdout, /How to record your choice:\nai decide <task-ref> PL-1 <your choice and rationale>/);
+  assert.match(byId.stdout, new RegExp(`How to record your choice:\\nai decide --task ${taskId} --item PL-1 <your choice and rationale>`));
   assert.match(byId.stdout, /### PL-1：方案回退范围/);
   assert.match(byId.stdout, /Tracking:\nstage: plan\nseverity: blocker\nstatus: needs-human-decision\nevidence: review-plan-r3\.md#PL-1/);
   assert.ok(byId.stdout.indexOf('Decision needed:') < byId.stdout.indexOf('### PL-1'));
   assert.ok(byId.stdout.indexOf('### PL-1') < byId.stdout.indexOf('Tracking:'));
-  const byOrdinal = runCli(['task', 'd', taskId, '3'], repoRoot);
+  const byOrdinal = runCli(['task', 'd', '--task', taskId, '-i', '3'], repoRoot);
   assert.equal(byOrdinal.status, 0, byOrdinal.stderr);
   assert.match(byOrdinal.stdout, /### PL-1：方案回退范围/);
 });
@@ -220,12 +220,12 @@ test('A7: --all includes decided rows; --stage filters; --format markdown', () =
   const taskId = 'TASK-20260101-000006';
   writeCanonical(activeDir, taskId);
 
-  const all = runCli(['task', 'd', taskId, '--all'], repoRoot);
+  const all = runCli(['task', 'd', '--task', taskId, '--all'], repoRoot);
   assert.equal(all.status, 0, all.stderr);
   assert.match(all.stdout, /HD-2\s+裁定记录放在哪里\s+stage=plan · severity=decision · status=human-decided/);
   assert.doesNotMatch(all.stdout, /PRC-1/);
 
-  const stage = runCli(['task', 'd', taskId, '--all', '--stage', 'analysis'], repoRoot);
+  const stage = runCli(['task', 'd', '--task', taskId, '--all', '--stage', 'analysis'], repoRoot);
   assert.equal(stage.status, 0, stage.stderr);
   assert.match(stage.stdout, /AN-1/);
   assert.match(stage.stdout, /HD-1/);
@@ -233,13 +233,13 @@ test('A7: --all includes decided rows; --stage filters; --format markdown', () =
   assert.doesNotMatch(stage.stdout, /CD-1/);
   assert.doesNotMatch(stage.stdout, /HD-3/);
 
-  const md = runCli(['task', 'd', taskId, '--format', 'markdown'], repoRoot);
+  const md = runCli(['task', 'd', '--task', taskId, '--format', 'markdown'], repoRoot);
   assert.equal(md.status, 0, md.stderr);
   assert.match(md.stdout, /^\| # \| CHOICE \| WHAT NEEDS A DECISION \| TRACKING \|$/m);
 
-  const badStage = runCli(['task', 'd', taskId, '--stage', 'bogus'], repoRoot);
+  const badStage = runCli(['task', 'd', '--task', taskId, '--stage', 'bogus'], repoRoot);
   assert.equal(badStage.status, 1);
-  const badFmt = runCli(['task', 'd', taskId, '--format', 'xml'], repoRoot);
+  const badFmt = runCli(['task', 'd', '--task', taskId, '--format', 'xml'], repoRoot);
   assert.equal(badFmt.status, 1);
 });
 
@@ -249,10 +249,10 @@ test('A8: command is read-only (task.md unchanged)', () => {
   writeCanonical(activeDir, taskId);
   const taskMd = path.join(activeDir, taskId, 'task.md');
   const before = fs.readFileSync(taskMd);
-  runCli(['task', 'd', taskId], repoRoot);
-  runCli(['task', 'd', taskId, 'PL-1'], repoRoot);
-  runCli(['task', 'd', taskId, '3'], repoRoot);
-  runCli(['task', 'd', taskId, '--all', '--format', 'markdown'], repoRoot);
+  runCli(['task', 'd', '--task', taskId], repoRoot);
+  runCli(['task', 'd', '--task', taskId, '--item', 'PL-1'], repoRoot);
+  runCli(['task', 'd', '--task', taskId, '--item', '3'], repoRoot);
+  runCli(['task', 'd', '--task', taskId, '--all', '--format', 'markdown'], repoRoot);
   const after = fs.readFileSync(taskMd);
   assert.ok(before.equals(after), 'task.md must not be modified by decisions');
 });
@@ -265,7 +265,7 @@ test('missing ledger reports a structured diagnostic without rendering an empty 
   const before = fs.readFileSync(taskMd);
   const beforeMtime = fs.statSync(taskMd).mtimeMs;
 
-  const out = runCli(['task', 'decisions', taskId], repoRoot);
+  const out = runCli(['task', 'decisions', '--task', taskId], repoRoot);
   assert.equal(out.status, 1);
   assert.equal(out.stdout, '');
   assert.match(out.stderr, /^ai task decisions: ledger unavailable \[LEDGER_SECTION_MISSING\]:/);
@@ -281,7 +281,7 @@ test('CD-1: decided detail finds records under the Human Rulings heading', () =>
     decisionRecords: ['- **Original Ledger ID**: HD-2']
   });
 
-  const out = runCli(['task', 'd', taskId, '--all', 'HD-2'], repoRoot);
+  const out = runCli(['task', 'd', '--task', taskId, '--all', '--item', 'HD-2'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /Decision already recorded:/);
   assert.match(out.stdout, /Recorded choice:\n- \*\*Original Ledger ID\*\*: HD-2/);
@@ -295,7 +295,7 @@ test('CD-2: decided detail keeps the original context without asking for another
   const taskId = 'TASK-20260101-000011';
   writeCanonical(activeDir, taskId);
 
-  const out = runCli(['task', 'd', taskId, '--all', 'HD-2'], repoRoot);
+  const out = runCli(['task', 'd', '--task', taskId, '--all', '--item', 'HD-2'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /Decision already recorded: 裁定记录放在哪里/);
   assert.match(out.stdout, /Original context:\n### HD-2：裁定记录放在哪里/);
@@ -307,7 +307,7 @@ test('B3: missing detail block degrades gracefully and exits 0', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000008';
   writeTask(activeDir, taskId, ['| CD-9 | code | 3 | blocker | needs-human-decision | review-code-r3.md#CD-9 |']);
-  const out = runCli(['task', 'd', taskId, 'CD-9'], repoRoot);
+  const out = runCli(['task', 'd', '--task', taskId, '--item', 'CD-9'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /This older task does not include a full explanation for CD-9\./);
   assert.match(out.stdout, /Use the tracking reference below to find the original context\./);
@@ -321,10 +321,10 @@ test('PL-2: duplicate ledger id fails closed for id and ordinal selectors', () =
     '| PL-1 | plan | 2 | major | needs-human-decision | plan-r2.md#PL-1 |',
     '| PL-1 | plan | 3 | blocker | needs-human-decision | plan-r3.md#PL-1 |'
   ]);
-  const byId = runCli(['task', 'd', taskId, 'PL-1'], repoRoot);
+  const byId = runCli(['task', 'd', '--task', taskId, '--item', 'PL-1'], repoRoot);
   assert.equal(byId.status, 1);
   assert.match(byId.stderr, /duplicate table key/);
-  const byOrdinal = runCli(['task', 'd', taskId, '2'], repoRoot);
+  const byOrdinal = runCli(['task', 'd', '--task', taskId, '--item', '2'], repoRoot);
   assert.equal(byOrdinal.status, 1);
   assert.match(byOrdinal.stderr, /duplicate table key/);
 });

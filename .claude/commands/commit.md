@@ -1,6 +1,6 @@
 ---
 description: "提交当前变更到 Git"
-usage: "/commit [task-ref | --task <ref>]"
+usage: "/commit [--task <ref> | -t <ref>]"
 ---
 
 读取并执行 `.agents/skills/commit/SKILL.md` 中的 commit 技能。

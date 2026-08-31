@@ -47,7 +47,7 @@ test('ai task show <bare-numeric> prints task.md', () => {
   assert.equal(alloc.status, 0, alloc.stderr);
   assert.equal(alloc.stdout.trim(), '01');
 
-  const out = runCli(['task', 'show', '1'], repoRoot);
+  const out = runCli(['task', 'show', '--task', '1'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /TASK-20260101-000007/);
   assert.match(out.stdout, /body for TASK-20260101-000007/);
@@ -59,7 +59,7 @@ test('ai task show rejects removed #1 hash form', () => {
   writeTask(activeDir, taskId, 'feature-seven');
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
-  const out = runCli(['task', 'show', '#1'], repoRoot);
+  const out = runCli(['task', 'show', '--task', '#1'], repoRoot);
   assert.equal(out.status, 1);
   assert.match(out.stderr, /expected bare digits/);
 });
@@ -71,7 +71,7 @@ test('ai task show <TASK-id> resolves a completed task (flat layout)', () => {
   const taskId = 'TASK-20250101-000099';
   writeTask(completedDir, taskId, 'feature-completed');
 
-  const out = runCli(['task', 'show', taskId], repoRoot);
+  const out = runCli(['task', 'show', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /feature-completed/);
 });
@@ -98,7 +98,7 @@ test('ai task show <TASK-id> resolves an archived task under archive/YYYY/MM/DD/
     `---\nid: ${taskId}\nbranch: archived-demo\n---\n# Archived\nbody for archived\n`
   );
 
-  const out = runCli(['task', 'show', taskId], repoRoot);
+  const out = runCli(['task', 'show', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /archived-demo/);
   assert.match(out.stdout, /body for archived/);
@@ -126,28 +126,28 @@ test('ai task show <TASK-id> resolves an archived task whose archive date differ
     `---\nid: ${taskId}\ncompleted_at: 2026-06-13 09:00:00+08:00\nbranch: archived-cross-day\n---\n# Archived Cross Day\n`
   );
 
-  const out = runCli(['task', 'show', taskId], repoRoot);
+  const out = runCli(['task', 'show', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /archived-cross-day/);
 });
 
 test('ai task show <reserved> rejects 0', () => {
   const { repoRoot } = mkFixture();
-  const out = runCli(['task', 'show', '0'], repoRoot);
+  const out = runCli(['task', 'show', '--task', '0'], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /reserved/);
 });
 
 test('ai task show <over-capacity> rejects 100 under shortIdLength=2', () => {
   const { repoRoot } = mkFixture();
-  const out = runCli(['task', 'show', '100'], repoRoot);
+  const out = runCli(['task', 'show', '--task', '100'], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /exceeds/);
 });
 
 test('ai task show <non-numeric> rejects garbage input', () => {
   const { repoRoot } = mkFixture();
-  const out = runCli(['task', 'show', 'not-a-task'], repoRoot);
+  const out = runCli(['task', 'show', '--task', 'not-a-task'], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /not a valid short id or TASK-id/);
 });

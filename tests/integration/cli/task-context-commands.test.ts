@@ -71,6 +71,25 @@ test('read-only task commands use implicit context and explicit task flags', () 
   }
 });
 
+test('public task commands reject positional task refs and accept both scope aliases', () => {
+  const data = fixture();
+  for (const args of [
+    ['task', 'show', TASK_ID],
+    ['task', 'files', TASK_ID],
+    ['task', 'log', TASK_ID],
+    ['task', 'status', TASK_ID],
+    ['task', 'issue-body', TASK_ID]
+  ]) {
+    const result = run(data.repoRoot, args);
+    assert.equal(result.status, 1, `${args.join(' ')} should be rejected`);
+    assert.match(result.stderr, /positional task ref.*--task <ref>.*-t <ref>/);
+  }
+  for (const flag of ['--task', '-t']) {
+    const result = run(data.repoRoot, ['task', 'show', flag, TASK_ID]);
+    assert.equal(result.status, 0, `${flag}: ${result.stderr}`);
+  }
+});
+
 test('decisions and decide use --item without confusing it with task refs', () => {
   const data = fixture();
   const detail = run(data.repoRoot, ['task', 'decisions', '--item', '1']);
@@ -82,14 +101,16 @@ test('decisions and decide use --item without confusing it with task refs', () =
   assert.match(fs.readFileSync(data.taskMd, 'utf8'), /human-decided/);
 });
 
-test('grep keeps global default and supports --current/--task while -i remains ignore-case', () => {
+test('grep defaults to current context and supports --current/--task while -i remains ignore-case', () => {
   const data = fixture();
-  const global = run(data.repoRoot, ['task', 'grep', '-i', 'DETAIL']);
-  assert.equal(global.status, 0, global.stderr);
+  const implicit = run(data.repoRoot, ['task', 'grep', '-i', 'DETAIL']);
+  assert.equal(implicit.status, 0, implicit.stderr);
   const current = run(data.repoRoot, ['task', 'grep', '-i', 'DETAIL', '--current', 'plan']);
   assert.equal(current.status, 0, current.stderr);
   const explicit = run(data.repoRoot, ['task', 'grep', 'detail', '-t', TASK_ID, 'plan']);
   assert.equal(explicit.status, 0, explicit.stderr);
+  const legacy = run(data.repoRoot, ['task', 'grep', 'detail', TASK_ID, 'plan']);
+  assert.equal(legacy.status, 1);
 });
 
 test('implicit context failures never select one of multiple tasks', () => {

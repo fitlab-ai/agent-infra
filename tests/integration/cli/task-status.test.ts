@@ -59,7 +59,7 @@ for (const state of ['active', 'blocked', 'completed'] as const) {
     const taskId = 'TASK-20260101-000042';
     writeTask(repoRoot, state, taskId);
 
-    const out = runCli(['task', 'status', taskId], repoRoot);
+    const out = runCli(['task', 'status', '--task', taskId], repoRoot);
     assert.equal(out.status, 0, out.stderr);
     assertCoreSections(out.stdout, taskId);
     // Metadata reflects the task's own frontmatter.
@@ -81,7 +81,7 @@ test('ai task status resolves an active task by its short id', () => {
   });
   assert.equal(alloc.status, 0, alloc.stderr);
 
-  const out = runCli(['task', 'status', '1'], repoRoot);
+  const out = runCli(['task', 'status', '--task', '1'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assertCoreSections(out.stdout, taskId);
   // Active task shows its short id in the header (blocked/completed would be '-').
@@ -115,7 +115,7 @@ test('ai task status uses persisted paused orchestration state and does not requ
     updatedAt: '2026-01-01T00:00:00.000Z'
   })}\n`);
 
-  const out = runCli(['task', 'status', taskId], repoRoot);
+    const out = runCli(['task', 'status', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /^Orchestration$/m);
   assert.match(out.stdout, /^  status +paused$/m);
@@ -133,7 +133,7 @@ test('ai task status without a ref requires a matching current context', () => {
 
 test('ai task status rejects an unknown ref', () => {
   const { repoRoot } = mkFixture();
-  const out = runCli(['task', 'status', 'not-a-task'], repoRoot);
+  const out = runCli(['task', 'status', '--task', 'not-a-task'], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /ai task status:/);
 });

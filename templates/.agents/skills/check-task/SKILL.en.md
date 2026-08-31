@@ -15,7 +15,7 @@ description: >
 
 ## Task Context Resolution
 
-> The entry point may omit the task ref and also accepts a legacy positional ref or `--task <ref>` / `-t <ref>`. Separate task scope from the full arguments while preserving every business operand, then call `agent-infra-internal task-context resolve {task-scope}` where `{task-scope}` is empty, one positional ref, or one task flag. Read only `taskId` from the structured result and bind `{task-id}` to that full `TASK-YYYYMMDD-HHMMSS` for downstream commands. Pass through resolution failures without scanning tasks locally.
+> The entry point may omit the task ref; explicit task scope accepts only `--task <ref>` or `-t <ref>`, and positional task refs are not interpreted. Preserve every other business operand, then call `agent-infra-internal task-context resolve {task-scope}` where `{task-scope}` is empty or one task flag. Read only `taskId` from the structured result and bind `{task-id}` to the full `TASK-YYYYMMDD-HHMMSS` for downstream commands. Pass through resolution failures without scanning tasks locally.
 
 > Resolve the task reference, then confirm that the task is in a state or directory supported by this skill and that `task.md` exists; if it cannot be located, handle it as a missing task and stop.
 
@@ -26,7 +26,7 @@ description: >
 Run the deterministic CLI to collect every mechanical fact, and use its stdout as the factual base of your report:
 
 ```bash
-ai task status {task-id}
+ai task status --task {task-id}
 ```
 
 The command resolves the task across the active, blocked, and completed directories and prints five sections: the task header (`id`, short id, title), `Metadata` (frontmatter fields), `Artifacts` (files grouped by workflow stage), `Git` (branch match, uncommitted count, ahead/behind), and `Platform` (Issue/PR state). Treat that output as authoritative -- do not re-derive any of it by hand.

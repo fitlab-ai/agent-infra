@@ -80,7 +80,7 @@ pr_status: pending             # PR status: pending (default) | created (PR crea
 
 ## Human Rulings
 
-<!-- Use ai decide <task-ref> <ordinal|ledger-id> [--needs-implementation true|false] <decision> for needs-human-decision rulings; upstream AI predeclares implementation intent for new code decisions, while the explicit option remains for legacy tasks or consistency checks. -->
+<!-- Use ai decide [--task <ref> | -t <ref>] (--item <ordinal|ledger-id> | -i <ordinal|ledger-id>) [--needs-implementation true|false] <decision> for needs-human-decision rulings; upstream AI predeclares implementation intent for new code decisions, while the explicit option remains for legacy tasks or consistency checks. -->
 
 ## Implementation Inputs
 

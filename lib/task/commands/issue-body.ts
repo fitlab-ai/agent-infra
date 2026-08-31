@@ -6,11 +6,11 @@ import { extractSection, findSectionHeading } from '../sections.ts';
 import { renderTemplateBody, PLACEHOLDER } from '../issue-form.ts';
 import type { TaskFields } from '../issue-form.ts';
 
-const USAGE = `Usage: ai task issue-body [<ref> | --task <ref> | -t <ref>] [--template <path>]
+const USAGE = `Usage: ai task issue-body [--task <ref> | -t <ref>] [--template <path>]
 
 Print a deterministic Issue body extracted from a task's task.md.
-  Omit <ref>           Resolve the unique active task for the current branch.
-  <ref>               Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  Omit the scope        Resolve the unique active task for the current branch.
+  --task/-t <ref>       Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
   --template <path>   Render the final body for the given GitHub Issue Form (scenario A);
                       without it, print the default '任务输入 + 描述 + 需求' body (scenario B).
 
@@ -71,10 +71,10 @@ function issueBody(args: string[] = []): void {
   try { scope = parseTaskScope(scopeArgs); } catch (error) {
     process.stderr.write(`ai task issue-body: ${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; return;
   }
-  if (scope.positionals.length > 1 || (scope.explicit && scope.positionals.length > 0)) {
-    process.stderr.write('ai task issue-body: task ref must be provided once\n'); process.exitCode = 1; return;
+  if (scope.positionals.length > 0) {
+    process.stderr.write('ai task issue-body: positional task ref is not supported; use --task <ref> or -t <ref>\n'); process.exitCode = 1; return;
   }
-  const resolved = resolveTaskContext(scope.taskRef ?? scope.positionals[0]);
+  const resolved = resolveTaskContext(scope.taskRef);
   if (!resolved.ok) {
     process.stderr.write(`ai task issue-body: ${resolved.message}\n`);
     process.exitCode = 1;

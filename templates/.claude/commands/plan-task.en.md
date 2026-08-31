@@ -1,6 +1,6 @@
 ---
 description: "Design a technical plan for a task"
-usage: "/plan-task [task-ref | --task <ref>]"
+usage: "/plan-task [--task <ref> | -t <ref>]"
 ---
 
 Read and execute the plan-task skill from `.agents/skills/plan-task/SKILL.md`.

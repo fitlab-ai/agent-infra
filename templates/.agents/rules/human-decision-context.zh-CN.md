@@ -44,4 +44,4 @@ code 阶段的提出者必须在详情块的方案说明后另写 `**是否需�
 
 ## 裁决闭环
 
-使用 `ai task decisions <task-ref> <序号|账本ID>` 查看完整详情，使用 `ai decide <task-ref> <序号|账本ID> <裁决内容>` 写入裁决。`ai decide` 负责把目标行更新为 `human-decided`、创建独立 `HDR-N` 记录、更新 evidence 与活动日志；不得手工模拟其中一部分写入。
+使用 `ai task decisions [--task <ref> | -t <ref>] [--item <序号|账本ID> | -i <序号|账本ID>]` 查看完整详情，使用 `ai decide [--task <ref> | -t <ref>] (--item <序号|账本ID> | -i <序号|账本ID>) <裁决内容>` 写入裁决。`ai decide` 负责把目标行更新为 `human-decided`、创建独立 `HDR-N` 记录、更新 evidence 与活动日志；不得手工模拟其中一部分写入。

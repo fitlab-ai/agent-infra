@@ -60,13 +60,13 @@ Put the app credentials in `.agents/server.local.json`. This file is git-ignored
 
 | Command | Role | Execution |
 |---------|------|-----------|
-| `/decide [--task <ref>] --item <ordinal\|ledger-id> [--needs-implementation true\|false] <decision>` | `exec` | `ai decide ...`; explicit task scope is recommended outside a task worktree |
+| `/decide [--task <ref> \| -t <ref>] (--item <ordinal\|ledger-id> \| -i <ordinal\|ledger-id>) [--needs-implementation true\|false] <decision>` | `exec` | `ai decide ...`; explicit task scope is recommended outside a task worktree |
 | `/help`, `/ping`, `/version` | public built-in | daemon |
 | `/run create-task <description> [--tui <name>]` | `exec` | `ai run create-task ...` on the host |
 | `/run <skill> <task-ref> [args...] [--tui <name>]` | `exec` | `ai run ...`; task skills run in the matching sandbox |
 | `/sandbox create <ref>`, `/sandbox start <ref>` | `write` | `ai sandbox ...` |
 | `/sandbox ls`, `/sandbox show <ref>`, `/sandbox vm status` | `read` | `ai sandbox ...` |
-| `/task decisions [--task <ref>] [--item <selector>]`, `/task log [--task <ref>]`, `/task ls`, `/task show [--task <ref>]`, `/task status [--task <ref>]` | `read` | `ai task ...`; implicit scope only works when the bridge cwd proves one active branch match |
+| `/task decisions [--task <ref> \| -t <ref>] [--item <selector> \| -i <selector>]`, `/task log [--task <ref> \| -t <ref>]`, `/task ls`, `/task show [--task <ref> \| -t <ref>]`, `/task status [--task <ref> \| -t <ref>]` | `read` | `ai task ...`; implicit scope only works when the bridge cwd proves one active branch match |
 
 The Feishu adapter returns command results as `interactive` cards by default; this is the default output surface selected after the mobile demo validation. Other adapters are not affected.
 

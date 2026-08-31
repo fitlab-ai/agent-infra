@@ -44,9 +44,9 @@ test('ai task cat <ref> <name> and <ref> <N> produce identical output', () => {
   writeTaskWithArtifacts(activeDir, taskId);
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
-  const byName = runCli(['task', 'cat', '1', 'analysis'], repoRoot);
+  const byName = runCli(['task', 'cat', '--task', '1', 'analysis'], repoRoot);
   // analysis.md is artifact #2 (task.md is #1).
-  const byIndex = runCli(['task', 'cat', '1', '2'], repoRoot);
+  const byIndex = runCli(['task', 'cat', '--task', '1', '2'], repoRoot);
   assert.equal(byName.status, 0, byName.stderr);
   assert.equal(byIndex.status, 0, byIndex.stderr);
   assert.equal(byName.stdout, 'analysis body line\n');
@@ -59,8 +59,8 @@ test('ai task cat <ref> task is byte-identical to ai task show <ref>', () => {
   writeTaskWithArtifacts(activeDir, taskId);
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
-  const cat = runCli(['task', 'cat', '1', 'task'], repoRoot);
-  const show = runCli(['task', 'show', '1'], repoRoot);
+  const cat = runCli(['task', 'cat', '--task', '1', 'task'], repoRoot);
+  const show = runCli(['task', 'show', '--task', '1'], repoRoot);
   assert.equal(cat.status, 0, cat.stderr);
   assert.equal(show.status, 0, show.stderr);
   assert.equal(cat.stdout, show.stdout);
@@ -72,7 +72,7 @@ test('ai task cat rejects a non-existent artifact name', () => {
   writeTaskWithArtifacts(activeDir, taskId);
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
-  const out = runCli(['task', 'cat', '1', 'nope'], repoRoot);
+  const out = runCli(['task', 'cat', '--task', '1', 'nope'], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /ai task cat: artifact 'nope' not found/);
 });

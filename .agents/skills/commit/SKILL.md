@@ -15,7 +15,7 @@ commit core 只返回一个主结果：`committed`、`no_op`、`committed_with_w
 
 ## 任务上下文
 
-入口允许省略 task ref，也接受旧位置 task ref 或 `--task <ref>` / `-t <ref>`。先调用 `agent-infra-internal task-context resolve {task-scope}`。
+入口可省略 task ref；显式 task scope 仅接受 `--task <ref>` 或 `-t <ref>`，不再解释位置 task ref。先调用 `agent-infra-internal task-context resolve {task-scope}`。
 
 - 显式 task scope 解析失败时停止。
 - 未显式指定 task scope 时，只有 `TASK_CONTEXT_NOT_FOUND` 可进入 taskless direct；detached HEAD、损坏候选或多匹配必须 fail closed。
