@@ -7,11 +7,11 @@ description: >
 
 # 运行任务生命周期
 
-总控只编排，不直接执行任何阶段技能。执行前先读取 `.agents/rules/no-mid-flow-questions.md`、`.agents/rules/lifecycle-orchestration.md` 与 `reference/host-validation.md`。
-
 ## 任务上下文解析
 
-入口可省略 task ref；显式 task scope 仅接受 `--task <ref>` 或 `-t <ref>`，不再解释位置 task ref。保留四个策略选项及其值，再调用 `agent-infra-internal task-context resolve {task-scope}`；解析失败时透传非零退出码，不自行扫描任务。内部 orchestration 协议仍使用位置 task ref。
+入口可省略 task ref；显式 task scope 仅接受 `--task <ref>` 或 `-t <ref>`，不再解释位置 task ref。保留四个策略选项及其值，再调用 `agent-infra-internal task-context resolve {task-scope}`。解析失败时透传非零退出码，不自行扫描任务。内部 orchestration 协议仍使用位置 task ref。
+
+总控只编排，不直接执行任何阶段技能。执行前先读取 `.agents/rules/no-mid-flow-questions.md`、`.agents/rules/lifecycle-orchestration.md` 与 `reference/host-validation.md`。
 
 1. 解析规范任务 ID、当前 Agent Client，以及可选的原子策略 `--executor-model`、`--executor-reasoning-effort`、`--reviewer-model`、`--reviewer-reasoning-effort`，并执行 `agent-infra-internal task-snapshot {task-id} --format text`。任一显式策略字段出现时四个 role 字段必须完整，不得与配置拼接；两个角色可以使用同一模型。
 2. Codex 在 `begin-or-resume` 前选择宿主：没有 `AGENT_INFRA_CONTROL_TOKEN` 时使用 direct-host；有 task-bound control authority 但没有 `AGENT_INFRA_CODEX_CONTROLLER_CONTEXT` 时，只调用 `agent-infra-internal codex-sandbox-controller run`（转发完整显式策略）并等待其终态，外层不得创建 run、baseline 或 receipt；已有 context 时先调用 `verify-context`。protocol、task/controller/process、lease 或 source/profile discovery 校验失败即停止；package/build/contract 或 hook/profile 内容漂移只输出结构化 warning，并提示用户重建 sandbox。
