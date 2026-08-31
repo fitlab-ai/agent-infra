@@ -100,8 +100,6 @@ agent-infra-internal task-verify {task-id} review-analysis.completed --artifact 
 
 按 `reference/output-templates.md` 的结论分支输出，并通过统一 helper 渲染已选场景的下一步命令。
 
-> 状态核对的完整原始输出仅写入本轮产物。成功路径的用户消息只报告核对结果、必要摘要和产物路径，不重复展开完整快照；状态核对失败、发现异常或用户明确要求详情时，可展示相称的诊断信息。完成校验输出仍按本技能要求保留。
-
 > 渲染最终输出前先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令的 `{task-ref}` 渲染为当前任务短号 `NN`（取值与回退见该文件），其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
 
 ## 完成检查清单

@@ -205,8 +205,6 @@ agent-infra-internal task-verify {task-id} complete-task.completed --format text
 
 > **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中的「可选：清理本任务的沙箱」块；任一不满足则整段省略。清理时使用完整 `{task-id}`，不要改用 branch 名。该块独立于「下一步」语义，不是工作流后继命令。
 
-> 状态核对的完整原始输出仅写入本轮任务文件。成功路径的用户消息只报告核对结果、必要摘要和任务目标路径，不重复展开完整快照；状态核对失败、发现异常或用户明确要求详情时，可展示相称的诊断信息。完成校验输出仍按本技能要求保留。
-
 输出格式：
 ```
 任务 {task-id} 已完成，任务目录已转移到 completed/。

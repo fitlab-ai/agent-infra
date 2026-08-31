@@ -104,8 +104,6 @@ Handle the result:
 
 ### 8. Tell the User
 
-> Keep the complete raw state-check output only in this round's artifact. On the success path, the user-facing message reports only the check result, necessary summary, and artifact path; do not expand the full snapshot. If the state check fails, an anomaly is found, or the user explicitly requests details, show proportionate diagnostics. Keep the completion-gate output as required by this skill.
-
 Report:
 - Artifact path
 - PR summary sync result

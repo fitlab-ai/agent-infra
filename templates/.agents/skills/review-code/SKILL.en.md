@@ -140,8 +140,6 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> Keep the complete raw state-check output only in this round's artifact. On the success path, the user-facing message reports only the check result, necessary summary, and artifact path; do not expand the full snapshot. If the state check fails, an anomaly is found, or the user explicitly requests details, show proportionate diagnostics. Keep the completion-gate output as required by this skill.
-
 > **Important — branch labels are not values for the verdict field**. The four labels below are user-output template categories (scenarios A/B/C/D), **not** values for the `**Overall Verdict**:` field. The field accepts exactly one of the three canonical values (`Approved` / `Changes Requested` / `Rejected`, or zh-CN `通过` / `需要修改` / `拒绝`); combined phrases like `Approved with issues` will be rejected by the verify gate.
 
 Choose exactly one branch based on the findings:

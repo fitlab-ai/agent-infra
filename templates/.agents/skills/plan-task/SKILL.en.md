@@ -142,8 +142,6 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> Keep the complete raw state-check output only in this round's artifact. On the success path, the user-facing message reports only the check result, necessary summary, and artifact path; do not expand the full snapshot. If the state check fails, an anomaly is found, or the user explicitly requests details, show proportionate diagnostics. Keep the completion-gate output as required by this skill.
-
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Output format:
