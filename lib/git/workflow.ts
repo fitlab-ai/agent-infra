@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 type CommandResult = { status: number | null; stdout: string; stderr: string };
@@ -118,7 +119,7 @@ function previewCommitTree(input: { cwd: string; paths: readonly string[]; expec
   if (unrelatedStaged.length > 0) {
     return { status: 'failed' as const, tree: null, error: { code: 'GIT_STAGED_SCOPE_MISMATCH', message: `Unrelated staged paths: ${unrelatedStaged.join(', ')}` } };
   }
-  const temporaryDirectory = fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/tmp', 'agent-infra-preview-index-'));
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-preview-index-'));
   const indexFile = path.join(temporaryDirectory, 'index');
   const temporaryRunner: GitRunner = (args, cwd) => {
     const result = spawnSync('git', [...args], {
