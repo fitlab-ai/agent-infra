@@ -218,15 +218,9 @@ function renderDetail(
   const decided = r.status === 'human-decided';
   if (format === 'markdown') {
     lines.push(`## ${decided ? 'Decision already recorded' : 'Decision needed'}: ${title}`, '');
-    if (!decided) {
-      lines.push('**How to record your choice**', `\`ai decide --task ${taskId} --item ${r.id} <your choice and rationale>\``, '');
-    }
     lines.push('**Original context**', '');
   } else {
     lines.push(`${decided ? 'Decision already recorded' : 'Decision needed'}: ${title}`, '');
-    if (!decided) {
-      lines.push('How to record your choice:', `ai decide --task ${taskId} --item ${r.id} <your choice and rationale>`, '');
-    }
     lines.push('Original context:');
   }
   if (block) {
@@ -241,6 +235,14 @@ function renderDetail(
     const record = findDecisionRecord(r.id, content);
     lines.push('', format === 'markdown' ? '**Recorded choice**' : 'Recorded choice:');
     lines.push(...(record.length ? record : ['No separate ruling record was found.']));
+  }
+  if (!decided) {
+    lines.push('');
+    if (format === 'markdown') {
+      lines.push('**How to record your choice**', `\`ai decide --task ${taskId} --item ${r.id} <your choice and rationale>\``);
+    } else {
+      lines.push('How to record your choice:', `ai decide --task ${taskId} --item ${r.id} <your choice and rationale>`);
+    }
   }
   lines.push('', ...renderTracking(r, format));
   process.stdout.write(`${lines.join('\n')}\n`);

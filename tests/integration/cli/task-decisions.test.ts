@@ -209,7 +209,13 @@ test('A6: select a review finding by ordinal and ledger id', () => {
   assert.match(byId.stdout, /### PL-1：方案回退范围/);
   assert.match(byId.stdout, /Tracking:\nstage: plan\nseverity: blocker\nstatus: needs-human-decision\nevidence: review-plan-r3\.md#PL-1/);
   assert.ok(byId.stdout.indexOf('Decision needed:') < byId.stdout.indexOf('### PL-1'));
+  assert.ok(byId.stdout.indexOf('### PL-1') < byId.stdout.indexOf('How to record your choice'));
+  assert.ok(byId.stdout.indexOf('How to record your choice') < byId.stdout.indexOf('Tracking:'));
   assert.ok(byId.stdout.indexOf('### PL-1') < byId.stdout.indexOf('Tracking:'));
+  const markdown = runCli(['task', 'd', '--task', taskId, '--item', 'PL-1', '--format', 'markdown'], repoRoot);
+  assert.equal(markdown.status, 0, markdown.stderr);
+  assert.ok(markdown.stdout.indexOf('### PL-1') < markdown.stdout.indexOf('**How to record your choice**'));
+  assert.ok(markdown.stdout.indexOf('**How to record your choice**') < markdown.stdout.indexOf('**Tracking**'));
   const byOrdinal = runCli(['task', 'd', '--task', taskId, '-i', '3'], repoRoot);
   assert.equal(byOrdinal.status, 0, byOrdinal.stderr);
   assert.match(byOrdinal.stdout, /### PL-1：方案回退范围/);
