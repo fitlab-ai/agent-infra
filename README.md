@@ -71,11 +71,11 @@ Just fix it at the application layer in LoginService.
 > AI re-runs `/plan-task` to update the plan accordingly and confirms.
 
 ```bash
-/code-task <task-id>       # AI writes the fix, adds a test for user+tag@example.com — green
+/code-task <task-id>       # AI writes the fix, tests it, and creates a local checkpoint commit
 /review-code <task-id>     # A fresh isolated reviewer reports one minor finding
-/code-task <task-id>       # AI fixes the minor issue and re-validates
-/commit
-/create-pr <task-id>       # PR opened, auto-linked to issue #42
+/code-task <task-id>       # AI fixes the minor issue, re-validates, and creates a new checkpoint
+/review-code <task-id>     # The reviewer approves the current checkpoint
+/create-pr <task-id>       # The reviewed branch is published to its task-bound target; PR links issue #42
 /complete-task <task-id>   # task archived
 ```
 
@@ -189,8 +189,8 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 | `run-task` | Resume the lifecycle with fresh isolated executors/reviewers when the selected client exposes verified actual model/effort evidence; Codex now has an experimental Hooks + App Server evidence channel, but orchestration remains disabled until that channel is connected to delegation receipts |
 | `analyze-task` → `review-analysis` | Capture scope and risks, then review the analysis |
 | `plan-task` → `review-plan` | Design the approach, then review the plan |
-| `code-task` → `review-code` | Implement and test, then run a structured code review |
-| `commit` → `create-pr` → `complete-task` | Commit, open a PR, and archive the task |
+| `code-task` → `review-code` | Implement and test; `code-task` creates a local checkpoint, then a structured review checks that checkpoint |
+| `create-pr` → `complete-task` | Publish the approved checkpoint to the task-bound target branch, then archive after merge and final gates |
 
 Start with one atomic role policy, for example: `$run-task 42 --executor-model <id> --executor-reasoning-effort <value> --reviewer-model <id> --reviewer-reasoning-effort <value>`. Both roles may use the same model. With no explicit policy, `run-task` reads the current Agent Client's optional `agentClients[].orchestration`; if neither source is complete, it shows the host model-selection guidance before creating any run. Re-entry uses the persisted run policy. Finish or clear active runs before upgrading agent-infra; unsupported disk state fails closed without rewriting.
 

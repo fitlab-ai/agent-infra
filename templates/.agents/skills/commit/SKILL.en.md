@@ -19,9 +19,9 @@ The entry point may omit the task ref; explicit task scope accepts only `--task 
 
 - An explicit task-resolution failure stops the operation.
 - Without an explicit task scope, only `TASK_CONTEXT_NOT_FOUND` may enter taskless direct mode; detached HEAD, malformed candidates, and multiple matches fail closed.
-- If the literal `--orchestrated` is present in the business operands, use `mode=orchestrated`; otherwise use `mode=direct`. Never infer the mode from files or environment.
+- If the literal `--orchestrated` is present in the business operands, fail with `ORCHESTRATED_COMMIT_REMOVED` because the standalone commit stage has been removed; otherwise use `mode=direct`. Never infer the mode from files or environment.
 - Taskless direct mode does not read, create, or complete task intent, receipt, checkpoint, or task.md records.
-- Task-bound direct mode does not require a delegation receipt; orchestrated mode must validate the matching activated commit receipt and capability in the core.
+- Task-bound direct mode does not require a delegation receipt; `code-task` calls the shared core for local checkpoints, while standalone `commit` continues to use push delivery.
 - After resolution, use only the core-returned `taskId`; never infer task identity from the environment, branch, or filename.
 
 ## 1. Inspect local changes
@@ -71,7 +71,7 @@ Example:
 }
 ```
 
-Taskless direct mode omits `taskRef`; orchestrated mode must pass `taskRef`, `agent`, and `mode: "orchestrated"`. The core owns repository/worktree mutation locking, task locking when bound, path and sensitive-file checks, staged scope, HEAD/tree, branch/ref, commit, push, protected-branch policy, warnings, and idempotency.
+Taskless direct mode omits `taskRef`; direct task-bound commits use push delivery. The core owns repository/worktree mutation locking, task locking when bound, path and sensitive-file checks, staged scope, HEAD/tree, branch/ref, commit, push, protected-branch policy, warnings, and idempotency.
 
 - Create at most one local commit for explicit changes.
 - If there are no changes but HEAD is ahead and delivery is requested, perform push-only and do not create an empty commit.

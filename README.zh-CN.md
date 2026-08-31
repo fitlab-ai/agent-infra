@@ -70,11 +70,11 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 > AI 按你的要求重跑 `/plan-task` 更新方案并确认。
 
 ```bash
-/code-task <task-id>       # AI 编写修复代码，添加 user+tag@example.com 测试 —— 通过
+/code-task <task-id>       # AI 编写修复代码、测试，并创建本地 checkpoint commit
 /review-code <task-id>     # fresh 隔离 reviewer 报告一个次要问题
-/code-task <task-id>       # AI 修复次要问题并重新验证
-/commit
-/create-pr <task-id>       # PR 已创建，自动关联 Issue #42
+/code-task <task-id>       # AI 修复次要问题、重新验证，并创建新的 checkpoint
+/review-code <task-id>     # reviewer 审查并通过当前 checkpoint
+/create-pr <task-id>       # 将已审查分支发布到任务绑定目标分支；PR 自动关联 Issue #42
 /complete-task <task-id>   # 任务归档
 ```
 
@@ -188,8 +188,8 @@ ai agent-client configure
 | `run-task` | 当所选客户端能提供已验证的 actual model/effort 证据时，用 fresh 隔离 executor/reviewer 续跑生命周期；Codex 现已具备实验性的 Hooks + App Server 证据通道，但在该通道接入 delegation receipt 前仍不会启用 orchestration |
 | `analyze-task` → `review-analysis` | 明确范围与风险，再审查分析 |
 | `plan-task` → `review-plan` | 设计实现路径，再审查方案 |
-| `code-task` → `review-code` | 实现并测试，再执行结构化代码审查 |
-| `commit` → `create-pr` → `complete-task` | 提交、创建 PR、归档任务 |
+| `code-task` → `review-code` | 实现并测试；`code-task` 创建本地 checkpoint，再由结构化审查检视该 checkpoint |
+| `create-pr` → `complete-task` | 将已通过审查的 checkpoint 发布到任务绑定目标分支，并在合并和最终门禁通过后归档 |
 
 启动时可提供原子角色策略，例如：`$run-task 42 --executor-model <id> --executor-reasoning-effort <值> --reviewer-model <id> --reviewer-reasoning-effort <值>`。两个角色可以使用同一模型。完全没有显式策略时，`run-task` 读取当前 Agent Client 可选的 `agentClients[].orchestration`；两个来源都不完整时，会在创建任何 run 前展示宿主模型选择指引。重入使用已持久化的 run 策略。升级 agent-infra 前必须完成或清空 active run；不受支持的磁盘状态会失败关闭且不改写。
 

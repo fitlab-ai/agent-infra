@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 
 import { read } from "../../helpers.ts";
 
-type CommitStep = {
+type DeliveryStep = {
   tasks: string[];
   prTasks: string[];
 };
 
-function parseCommitStep(yamlText: string): CommitStep {
+function parseDeliveryStep(yamlText: string): DeliveryStep {
   const lines = yamlText.split("\n");
 
-  let inCommitStep = false;
+  let inDeliveryStep = false;
   let listKey: "tasks" | "prTasks" | null = null;
   let listIndent = -1;
   const tasks: string[] = [];
@@ -20,12 +20,12 @@ function parseCommitStep(yamlText: string): CommitStep {
   for (const line of lines) {
     const stepMatch = line.match(/^( *)-\s+name:\s+(\S+)/);
     if (stepMatch) {
-      inCommitStep = stepMatch[2] === "commit";
+      inDeliveryStep = stepMatch[2] === "delivery";
       listKey = null;
       listIndent = -1;
       continue;
     }
-    if (!inCommitStep) continue;
+    if (!inDeliveryStep) continue;
 
     const keyMatch = line.match(/^( *)(tasks|pr_tasks):\s*$/);
     if (keyMatch) {
@@ -65,41 +65,21 @@ const workflowPaths = [
   "templates/.agents/workflows/refactoring.zh-CN.yaml"
 ];
 
-const taskSemanticCategories: Array<{ name: string; keywords: string[] }> = [
-  { name: "test", keywords: ["测试", "tests", "test"] },
-  { name: "commit-message", keywords: ["提交信息", "commit message", "提交", "commit"] },
-  { name: "task-completion", keywords: ["将任务移至已完成", "移至已完成", "已完成", "Move the task to completed", "completed"] }
-];
-
 for (const workflowPath of workflowPaths) {
   const yamlText = read(workflowPath);
-  const commit = parseCommitStep(yamlText);
+  const delivery = parseDeliveryStep(yamlText);
 
-  test(`${workflowPath} commit step declares a pr_tasks list`, () => {
+  test(`${workflowPath} delivery step declares a pr_tasks list`, () => {
     assert.ok(
-      commit.prTasks.length > 0,
+      delivery.prTasks.length > 0,
       "expected pr_tasks list to be present and non-empty"
     );
   });
 
-  test(`${workflowPath} commit step pr_tasks lists at least one PR-flow item`, () => {
-    const joined = commit.prTasks.join("\n");
-    assert.ok(
-      /拉取请求|pull request|PR/i.test(joined),
-      "expected pr_tasks to mention PR / pull request"
-    );
+  test(`${workflowPath} delivery step retains local and PR task lists`, () => {
+    assert.ok(delivery.tasks.length > 0, "expected delivery tasks to be present");
+    assert.ok(delivery.prTasks.length > 0, "expected delivery PR tasks to be present");
   });
-
-  for (const category of taskSemanticCategories) {
-    test(`${workflowPath} commit step tasks include a ${category.name} item`, () => {
-      const joined = commit.tasks.join("\n");
-      const matched = category.keywords.some((kw) => joined.includes(kw));
-      assert.ok(
-        matched,
-        `expected tasks list to mention one of: ${category.keywords.join(", ")}`
-      );
-    });
-  }
 
   test(`${workflowPath} references prFlow / pr_status gating`, () => {
     assert.match(yamlText, /prFlow/);

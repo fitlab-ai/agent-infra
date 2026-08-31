@@ -1,5 +1,7 @@
 export {
   extractReviewBaseline,
+  extractReviewTargetHead,
+  extractReviewedHead,
   extractReviewDiffBase,
   extractReviewDiffFingerprint,
   extractReviewedSnapshotTree,

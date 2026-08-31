@@ -301,7 +301,7 @@ test('task-orchestration falls back to the selected client project policy only',
   assert.equal(payload.run.modelPolicy.executor.model, 'configured-executor');
 });
 
-test('task-orchestration CLI completes clean reviewed heads and preserves dirty commit routing', () => {
+test('task-orchestration CLI completes clean reviewed heads and stops on dirty heads', () => {
   const clean = approvedRouteFixture('required');
   assert.equal(run(clean.root, [clean.id, 'begin-or-resume', ...explicitPolicyArgs], clean.env).status, 0);
   const completed = run(clean.root, [clean.id, 'route'], clean.env);
@@ -314,19 +314,25 @@ test('task-orchestration CLI completes clean reviewed heads and preserves dirty 
   const dirty = approvedRouteFixture('required');
   assert.equal(run(dirty.root, [dirty.id, 'begin-or-resume', ...explicitPolicyArgs], dirty.env).status, 0);
   fs.writeFileSync(path.join(dirty.root, 'source.ts'), 'dirty\n');
-  const commit = run(dirty.root, [dirty.id, 'route'], dirty.env);
-  assert.equal(commit.status, 0, commit.stderr || commit.stdout);
-  assert.equal(JSON.parse(commit.stdout).next.stage, 'commit');
+  const routed = run(dirty.root, [dirty.id, 'route'], dirty.env);
+  assert.equal(routed.status, 0, routed.stderr || routed.stdout);
+  const routedPayload = JSON.parse(routed.stdout);
+  assert.equal(routedPayload.status, 'running');
+  assert.equal(routedPayload.next, null);
   assert.equal(fs.existsSync(dirty.calls), false);
 });
 
-test('task-orchestration CLI does not inspect PRs when clean completion is disabled or unspecified', () => {
+test('task-orchestration CLI does not inspect PRs for clean completion', () => {
   for (const prFlow of ['disabled', undefined] as const) {
     const f = approvedRouteFixture(prFlow);
     assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs], f.env).status, 0);
     const routed = run(f.root, [f.id, 'route'], f.env);
     assert.equal(routed.status, 0, routed.stderr || routed.stdout);
-    assert.equal(JSON.parse(routed.stdout).next.stage, 'commit');
+    const payload = JSON.parse(routed.stdout);
+    assert.equal(payload.status, 'completed');
+    assert.equal(payload.next, null);
+    assert.equal(payload.run.completionEvidence.prNumber, null);
+    assert.equal(payload.run.completionEvidence.prHead, null);
     assert.equal(fs.existsSync(f.calls), false);
   }
 });

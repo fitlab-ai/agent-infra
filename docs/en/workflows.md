@@ -4,15 +4,15 @@
 
 agent-infra includes **4 prebuilt workflows**. Three of them share the same symmetric gated delivery lifecycle:
 
-`analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit`
+`analysis -> analysis-review -> design -> design-review -> code (local checkpoint) -> code-review -> delivery -> complete`
 
 The fourth, `code-review`, is intentionally smaller and optimized for reviewing an existing PR or branch.
 
 | Workflow | Best for | Step chain |
 |----------|----------|------------|
-| `feature-development` | Building a new feature or capability | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
-| `bug-fix` | Diagnosing and fixing a defect with regression coverage | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
-| `refactoring` | Structural changes that should preserve behavior | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
+| `feature-development` | Building a new feature or capability | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> delivery -> complete` |
+| `bug-fix` | Diagnosing and fixing a defect with regression coverage | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> delivery -> complete` |
+| `refactoring` | Structural changes that should preserve behavior | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> delivery -> complete` |
 | `code-review` | Reviewing an existing PR or branch | `analysis -> review -> report` |
 
 ## Example lifecycle
@@ -44,7 +44,7 @@ import-issue #42                    Import task from GitHub Issue
       |
          |
          v
-  code-task T1                      Write code and tests
+  code-task T1                      Write code, tests, and a local checkpoint
          |
          v
   +-> review-code T1                Automated code review
@@ -61,8 +61,10 @@ import-issue #42                    Import task from GitHub Issue
          +-----------+
          |
          v
-      commit                        Commit final code
+   create-pr T1                     Publish the approved checkpoint to the task-bound target
          |
          v
-  complete-task T1                  Archive and finish
+  complete-task T1                  Archive after merge and final gates
 ```
+
+`code-task` creates the local checkpoint that `review-code` examines. Task preparation persists the delivery remote and base branch; `create-pr` reuses that binding, validates the reviewed head, and is the only task-path operation that pushes the branch.

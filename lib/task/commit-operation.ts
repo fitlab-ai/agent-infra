@@ -11,10 +11,13 @@ import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation } from './write.ts';
 import {
-  commitOrchestrationStageCompletion,
-  planOrchestrationStageCompletion
-} from './orchestration.ts';
-import type { OrchestrationStageCompletion } from './orchestration.ts';
+  checkpointIntentDigest,
+  readCheckpointIntent,
+  removeCheckpointIntent,
+  sameCheckpointIntent,
+  updateCheckpointIntent,
+  writeCheckpointIntent
+} from './commit-intent.ts';
 
 type CommitExecutionMode = 'direct' | 'orchestrated';
 
@@ -27,7 +30,13 @@ type CommitOperationInput = Readonly<{
   taskRef?: string;
   agent?: string;
   mode?: CommitExecutionMode;
-  push: Readonly<{
+  round?: number;
+  delivery?: Readonly<{
+    mode: 'local' | 'push';
+    remote: string;
+    refs: readonly string[];
+  }> | Readonly<{ mode: 'local' }>;
+  push?: Readonly<{
     remote: string;
     refs: readonly string[];
   }>;
@@ -55,6 +64,7 @@ type BoundTask = Readonly<{
 }>;
 
 const HEAD_REF = /^refs\/heads\/(.+)$/;
+type CommitDelivery = Readonly<{ mode: 'local' } | { mode: 'push'; remote: string; refs: readonly string[] }>;
 
 function isCommitExecutionMode(value: unknown): value is CommitExecutionMode {
   return value === 'direct' || value === 'orchestrated';
@@ -66,6 +76,12 @@ function gitText(repoRoot: string, args: readonly string[]): string {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe']
   }).trim();
+}
+
+function effectiveDelivery(input: CommitOperationInput): CommitDelivery | null {
+  if (input.delivery) return input.delivery;
+  if (input.push) return { mode: 'push', remote: input.push.remote, refs: input.push.refs };
+  return null;
 }
 
 function canonicalRepositoryRoot(cwd: string): string {
@@ -156,7 +172,8 @@ function validateCommon(input: CommitOperationInput, branch: string | null): Rea
   if (!input.message.trim()) return { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Commit message is required' };
   if (!/^[a-f0-9]{40,64}$/.test(input.expectedHead)) return { code: 'GIT_HEAD_EXPECTATION_REQUIRED', message: 'A valid expected HEAD is required' };
   if (!/^[a-f0-9]{40,64}$/.test(input.expectedTree)) return { code: 'GIT_TREE_EXPECTATION_REQUIRED', message: 'A valid expected tree is required' };
-  if (!input.push) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Commit delivery requires a push policy' };
+  const delivery = effectiveDelivery(input);
+  if (!delivery) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Commit delivery requires a delivery policy' };
   if (input.paths.some((candidate) => !candidate || candidate.startsWith('/') || candidate.split(/[\\/]/).includes('..'))) {
     return { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Commit paths must stay inside the repository' };
   }
@@ -164,40 +181,14 @@ function validateCommon(input: CommitOperationInput, branch: string | null): Rea
     return { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Sensitive paths cannot be committed' };
   }
   if (branch !== null && branch === '') return { code: 'GIT_BRANCH_INVALID', message: 'A named branch is required' };
-  if (!input.push.remote || input.push.refs.length !== 1) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push requires one remote and one ref' };
-  const ref = input.push.refs[0] ?? '';
-  if (!HEAD_REF.test(ref) || HEAD_REF.exec(ref)?.[1] !== branch) {
-    return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push ref must be the current full heads ref' };
+  if (delivery.mode === 'push') {
+    if (!delivery.remote || delivery.refs.length !== 1) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push requires one remote and one ref' };
+    const ref = delivery.refs[0] ?? '';
+    if (!HEAD_REF.test(ref) || HEAD_REF.exec(ref)?.[1] !== branch) {
+      return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push ref must be the current full heads ref' };
+    }
   }
   return null;
-}
-
-function validateOrchestrated(
-  input: CommitOperationInput,
-  task: BoundTask
-): { plan: OrchestrationStageCompletion } | { error: Readonly<{ code: string; message: string }> } {
-  if (!input.agent) return { error: { code: 'ORCHESTRATION_PROVENANCE_MISMATCH', message: 'orchestrated commit requires an agent' } };
-  const planned = planOrchestrationStageCompletion(task.taskId, {
-    stage: 'commit',
-    round: 1,
-    artifact: 'commit',
-    role: 'executor',
-    agent: input.agent
-  }, { repoRoot: task.repoRoot });
-  const run = planned.result.run;
-  if (
-    !planned.plan
-    || !run
-    || run.status !== 'running'
-    || !run.commitAuthorization.issuedAt
-    || run.commitAuthorization.consumedAt
-  ) return {
-    error: {
-      code: planned.result.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH',
-      message: planned.result.error?.message ?? 'orchestrated commit requires one matching activated commit delegation'
-    }
-  };
-  return { plan: planned.plan };
 }
 
 function syncTaskCommit(
@@ -227,7 +218,10 @@ function syncTaskCommit(
       heading: activity.heading,
       body: appendActivityEntry(activity, { time: metadata.timestamp, step: 'Commit', agent: input.agent!, note: commitNote })
     });
-    const frontmatter: Record<string, string> = { assigned_to: input.agent! };
+    const frontmatter: Record<string, string> = {
+      assigned_to: input.agent!,
+      checkpoint_commit: committedHead
+    };
     mutations.push({ kind: 'frontmatter', set: frontmatter });
     if (mutations.length === 0) return null;
     const written = writeTask({
@@ -256,29 +250,133 @@ function syncTaskCommit(
   }
 }
 
+function checkpointChildMatches(task: BoundTask, intent: NonNullable<ReturnType<typeof readCheckpointIntent>>, head: string): boolean {
+  try {
+    const parent = gitText(task.repoRoot, ['rev-parse', `${head}^`]);
+    const tree = gitText(task.repoRoot, ['rev-parse', `${head}^{tree}`]);
+    const message = gitText(task.repoRoot, ['show', '-s', '--format=%s', head]);
+    const changed = gitText(task.repoRoot, ['diff-tree', '--no-commit-id', '--name-only', '-r', head]).split('\n').filter(Boolean).sort();
+    return parent === intent.expectedHead
+      && tree === intent.expectedTree
+      && message === intent.message
+      && JSON.stringify(changed) === JSON.stringify([...intent.paths].sort());
+  } catch {
+    return false;
+  }
+}
+
+function checkpointIdentity(input: CommitOperationInput, task: BoundTask, delivery: CommitDelivery): Parameters<typeof checkpointIntentDigest>[0] {
+  if (delivery.mode !== 'local') throw new Error('checkpoint identity requires local delivery');
+  return {
+    taskId: task.taskId,
+    branch: task.branch,
+    mode: 'local',
+    expectedHead: input.expectedHead,
+    expectedTree: input.expectedTree,
+    paths: [...input.paths],
+    message: input.message,
+    round: input.round ?? 1
+  };
+}
+
+function checkpointTimestamp(): string {
+  return new Date().toISOString();
+}
+
 function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode): CommitOperationResult {
   const inspected = inspectGitWorkflow(input.cwd);
   if (!inspected.snapshot) return failure(input, mode, task?.taskId ?? null, 'GIT_INSPECT_FAILED', 'Unable to inspect Git repository');
+  if (mode === 'orchestrated') return failure(
+    input,
+    mode,
+    task?.taskId ?? null,
+    'ORCHESTRATED_COMMIT_REMOVED',
+    'Orchestrated commit is no longer a lifecycle stage; use local checkpoint delivery from code-task',
+    'blocked',
+    inspected.snapshot
+  );
   const branch = inspected.snapshot.branch;
   const commonError = validateCommon(input, branch);
   if (commonError) return failure(input, mode, task?.taskId ?? null, commonError.code, commonError.message, 'blocked', inspected.snapshot);
   if (task && task.state !== 'active') return failure(input, mode, task.taskId, 'TASK_STATE_INVALID', 'task-bound commit requires an active task', 'blocked', inspected.snapshot);
   if (task && task.branch !== branch) return failure(input, mode, task.taskId, 'GIT_BRANCH_MISMATCH', `Task branch '${task.branch}' does not match current branch '${branch}'`, 'blocked', inspected.snapshot);
   if (task && !input.agent) return failure(input, mode, task.taskId, 'COMMIT_AGENT_REQUIRED', 'task-bound commit requires an agent', 'blocked', inspected.snapshot);
-  const orchestrationValidation = mode === 'orchestrated'
-    ? (task
-      ? validateOrchestrated(input, task)
-      : { error: { code: 'ORCHESTRATION_TASK_REQUIRED', message: 'orchestrated commit requires a task context' } })
-    : null;
-  if (orchestrationValidation && 'error' in orchestrationValidation) {
-    const error = orchestrationValidation.error;
-    return failure(input, mode, task?.taskId ?? null, error.code, error.message, 'blocked', inspected.snapshot);
-  }
-  const orchestrationCompletion = orchestrationValidation && 'plan' in orchestrationValidation
-    ? orchestrationValidation.plan
-    : null;
-
-  const committed = input.paths.length === 0
+  const delivery = effectiveDelivery(input)!;
+  if (delivery.mode === 'local' && !task) return failure(input, mode, null, 'CHECKPOINT_TASK_REQUIRED', 'local checkpoint delivery requires a task context', 'blocked', inspected.snapshot);
+  let pendingIntent: NonNullable<ReturnType<typeof readCheckpointIntent>> | null = null;
+  let checkpointCommittedHead: string | null = null;
+  const committed = delivery.mode === 'local'
+    ? (() => {
+      const identity = checkpointIdentity(input, task!, delivery);
+      try {
+        pendingIntent = readCheckpointIntent(task!.repoRoot, task!.taskId);
+      } catch (error) {
+        return {
+          status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+          error: { code: 'COMMIT_INTENT_INVALID', message: error instanceof Error ? error.message : String(error) }
+        };
+      }
+      if (pendingIntent && !sameCheckpointIntent(pendingIntent, identity)) return {
+        status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+        error: { code: 'COMMIT_INTENT_CONFLICT', message: 'A different checkpoint intent is still pending for this task' }
+      };
+      if (!pendingIntent) {
+        const timestamp = checkpointTimestamp();
+        pendingIntent = {
+          version: 1, ...identity, digest: checkpointIntentDigest(identity), state: 'prepared',
+          committedHead: null, createdAt: timestamp, updatedAt: timestamp
+        };
+        try { writeCheckpointIntent(task!.repoRoot, pendingIntent); }
+        catch (error) {
+          return {
+            status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+            error: { code: 'COMMIT_INTENT_WRITE_FAILED', message: error instanceof Error ? error.message : String(error) }
+          };
+        }
+      }
+      if (pendingIntent.state !== 'prepared') {
+        checkpointCommittedHead = pendingIntent.committedHead;
+        return {
+          status: 'no-op' as const, changed: false, snapshot: inspected.snapshot,
+          operations: [{ name: 'commit', status: 'no-op' as const }], error: null
+        };
+      }
+      if (inspected.snapshot.head !== identity.expectedHead && !checkpointChildMatches(task!, pendingIntent, inspected.snapshot.head)) return {
+        status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+        error: { code: 'COMMIT_INTENT_HEAD_CONFLICT', message: 'Current HEAD does not match the pending checkpoint intent' }
+      };
+      if (inspected.snapshot.head !== identity.expectedHead) {
+        checkpointCommittedHead = inspected.snapshot.head;
+        pendingIntent = updateCheckpointIntent(pendingIntent, {
+          state: 'committed', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
+        });
+        writeCheckpointIntent(task!.repoRoot, pendingIntent);
+        return {
+          status: 'no-op' as const, changed: false, snapshot: inspected.snapshot,
+          operations: [{ name: 'commit', status: 'no-op' as const }], error: null
+        };
+      }
+      if (input.paths.length === 0) return {
+        status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+        error: { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Local checkpoint requires explicit paths' }
+      };
+      const created = commitExplicitPaths({
+        cwd: input.cwd, paths: input.paths, message: input.message,
+        expectedHead: identity.expectedHead, expectedTree: identity.expectedTree
+      });
+      if (created.status === 'applied' && created.snapshot?.head) {
+        checkpointCommittedHead = created.snapshot.head;
+        pendingIntent = updateCheckpointIntent(pendingIntent, {
+          state: 'committed', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
+        });
+        writeCheckpointIntent(task!.repoRoot, pendingIntent);
+      } else if (created.status === 'no-op') {
+        removeCheckpointIntent(task!.repoRoot, task!.taskId);
+        pendingIntent = null;
+      }
+      return created;
+    })()
+    : input.paths.length === 0
     ? (() => {
       if (inspected.snapshot.worktree.length > 0 || inspected.snapshot.staged.length > 0) return {
         status: 'failed' as const,
@@ -327,52 +425,41 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
   };
 
   const warnings: OperationWarning[] = [];
-  if (orchestrationCompletion) {
-    try {
-      commitOrchestrationStageCompletion(orchestrationCompletion);
-    } catch (error) {
-      warnings.push(warning(
-        'ORCHESTRATION_COMPLETION_FAILED',
-        error instanceof Error ? error.message : String(error),
-        true,
-        'orchestration',
-        task?.taskId ?? 'orchestration',
-        'ACTION_REQUIRED'
-      ));
-    }
-  }
   let status: CommitOperationResult['status'] = committed.status;
   let result: CommitOperationResult['result'] = committed.status === 'applied' ? 'committed' : 'no_op';
-  const target = `${input.push.remote}:${input.push.refs[0]}`;
-  const decision = commitPushDecision({ branch }, target);
-  if (!decision.shouldPush) {
-    warnings.push(decision.warning!);
-  } else {
-    const pushed = pushGitRefs({
-      cwd: input.cwd,
-      remote: input.push.remote,
-      refs: input.push.refs,
-      expectedSha: committed.snapshot?.head ?? gitText(input.cwd, ['rev-parse', 'HEAD'])
-    });
-    if (pushed.status !== 'applied') warnings.push(warning(
-      'COMMIT_PUSH_FAILED',
-      pushed.error?.message ?? 'Git push failed',
-      true,
-      'push',
-      target,
-      'ACTION_REQUIRED'
-    ));
+  if (delivery.mode === 'push') {
+    const target = `${delivery.remote}:${delivery.refs[0]}`;
+    const decision = commitPushDecision({ branch }, target);
+    if (!decision.shouldPush) {
+      warnings.push(decision.warning!);
+    } else {
+      const pushed = pushGitRefs({
+        cwd: input.cwd, remote: delivery.remote, refs: delivery.refs,
+        expectedSha: committed.snapshot?.head ?? gitText(input.cwd, ['rev-parse', 'HEAD'])
+      });
+      if (pushed.status !== 'applied') warnings.push(warning(
+        'COMMIT_PUSH_FAILED', pushed.error?.message ?? 'Git push failed', true, 'push', target, 'ACTION_REQUIRED'
+      ));
+    }
   }
   if (warnings.length > 0) {
     status = 'applied';
     result = 'committed_with_warnings';
   }
   if (task && (committed.status === 'applied' || committed.status === 'no-op')) {
-    const taskWarning = syncTaskCommit(input, task, committed.snapshot?.head ?? gitText(task.repoRoot, ['rev-parse', 'HEAD']));
+    const committedHead = checkpointCommittedHead ?? committed.snapshot?.head ?? gitText(task.repoRoot, ['rev-parse', 'HEAD']);
+    const taskWarning = syncTaskCommit(input, task, committedHead);
     if (taskWarning) {
       warnings.push(taskWarning);
       status = 'applied';
       result = 'committed_with_warnings';
+    }
+    if (delivery.mode === 'local' && !taskWarning && pendingIntent && checkpointCommittedHead) {
+      const synced = updateCheckpointIntent(pendingIntent, {
+        state: 'synced', committedHead: checkpointCommittedHead, updatedAt: checkpointTimestamp()
+      });
+      writeCheckpointIntent(task.repoRoot, synced);
+      removeCheckpointIntent(task.repoRoot, task.taskId);
     }
   }
   return {

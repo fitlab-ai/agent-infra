@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   extractReviewBaseline,
+  extractReviewTargetHead,
+  extractReviewedHead,
   extractReviewDiffBase,
   extractReviewDiffFingerprint,
   extractReviewedSnapshotTree,
@@ -30,6 +32,7 @@ import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
+import { resolveDeliveryTarget } from "./delivery-target.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -195,15 +198,14 @@ function validateCleanCompletionEvidence(run: any): string | null {
     || !shaPattern.test(evidence.headTree)
     || !shaPattern.test(evidence.worktreeTree)
     || !shaPattern.test(evidence.lastReviewedCommit)
-    || !Number.isInteger(evidence.prNumber)
-    || evidence.prNumber <= 0
-    || !shaPattern.test(evidence.prHead)
+    || !(evidence.prNumber === null || (Number.isInteger(evidence.prNumber) && evidence.prNumber > 0))
+    || !(evidence.prHead === null || shaPattern.test(evidence.prHead))
   ) {
     return 'Clean completion evidence has an invalid structure';
   }
   if (
     evidence.head !== evidence.lastReviewedCommit
-    || evidence.head !== evidence.prHead
+    || (evidence.prHead !== null && evidence.head !== evidence.prHead)
     || evidence.headTree !== evidence.worktreeTree
   ) {
     return 'Clean completion evidence does not bind matching commit and tree identities';
@@ -276,12 +278,8 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   if (run.completionEvidence != null) {
     const evidenceError = validateCleanCompletionEvidence(run);
     if (evidenceError) return failResult('orchestration-evidence', evidenceError);
-  } else if (run.status === 'completed' && (
-      run.receipts.length === 0
-      || run.receipts.at(-1)?.stage !== 'commit'
-      || run.receipts.at(-1)?.status !== 'consumed'
-    )) {
-      return failResult('orchestration-evidence', 'Completed run requires a final consumed commit receipt');
+  } else if (run.status === 'completed') {
+    return failResult('orchestration-evidence', 'Completed run requires reviewed-head-clean completion evidence');
   }
   if (run.pendingDelegation && !['prepared', 'activated', 'stage-completed'].includes(run.pendingDelegation.status)) {
     return failResult('orchestration-evidence', `Pending receipt has unsafe status '${run.pendingDelegation.status}'`);
@@ -1302,7 +1300,8 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
 
   const content = fs.readFileSync(resolvedArtifact.path, "utf8");
   const verdict = parseReviewVerdict(content);
-  const reviewBaseline = extractReviewBaseline(content);
+  const reviewTargetHead = extractReviewTargetHead(content);
+  const reviewReviewedHead = extractReviewedHead(content);
   const reviewDiffBase = extractReviewDiffBase(content);
   const reviewedFingerprint = extractReviewDiffFingerprint(content);
   const reviewedTree = extractReviewedSnapshotTree(content);
@@ -1311,30 +1310,42 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
     return failResult("review-fact", `Unsupported review verdict '${verdict}'`);
   }
 
+  const deliveryRemote = String(task.metadata.delivery_remote || "").trim();
+  const deliveryBaseRef = String(task.metadata.delivery_base_ref || "").trim();
+  if (!deliveryRemote || !deliveryBaseRef) {
+    return failResult("review-fact", "Task delivery target is not bound; re-run task branch preparation before review-code");
+  }
+  if (!reviewTargetHead || !reviewReviewedHead || !reviewDiffBase) {
+    return failResult("review-fact", "Review fact must record target head, reviewed head, and diff base");
+  }
+
   let gitRoot;
   let head;
   let baseline;
+  let targetHead;
   let diffBase;
   try {
     gitRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
     head = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-    baseline = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewBaseline}^{commit}`], { encoding: "utf8" }).trim();
-    diffBase = execFileSync(
-      "git",
-      ["-C", gitRoot, "rev-parse", `${reviewDiffBase || reviewBaseline}^{commit}`],
-      { encoding: "utf8" }
-    ).trim();
+    const target = resolveDeliveryTarget(gitRoot, { remote: deliveryRemote, baseRef: deliveryBaseRef });
+    if (!target.ok) throw new Error(target.message);
+    const reviewedRef = reviewReviewedHead;
+    baseline = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewedRef}^{commit}`], { encoding: "utf8" }).trim();
+    targetHead = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewTargetHead}^{commit}`], { encoding: "utf8" }).trim();
+    const computed = execFileSync("git", ["-C", gitRoot, "merge-base", baseline, targetHead], { encoding: "utf8" }).trim();
+    diffBase = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewDiffBase}^{commit}`], { encoding: "utf8" }).trim();
+    if (diffBase !== computed) throw new Error('saved review diff base does not match merge-base(reviewed head, target head)');
   } catch {
     return blockedResult(
       "review-fact",
-      `Unable to resolve review baseline '${reviewBaseline}' in the task repository; re-run review-code`
+      `Unable to resolve saved review commits in the task repository; re-run review-code`
     );
   }
 
   if (baseline !== head) {
     return failResult(
       "review-fact",
-      `Review baseline ${baseline.slice(0, 8)} does not match current HEAD ${head.slice(0, 8)}; re-run review-code`
+      `Reviewed head ${baseline.slice(0, 8)} does not match current HEAD ${head.slice(0, 8)}; re-run review-code`
     );
   }
 
@@ -1378,7 +1389,7 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
     if (cleanSnapshot && lastReviewedCommit !== baseline) {
       return failResult(
         "review-fact",
-        `Approved clean review must set task last_reviewed_commit to baseline ${baseline.slice(0, 8)}`
+        `Approved clean review must set task last_reviewed_commit to reviewed head ${baseline.slice(0, 8)}`
       );
     }
     if (!cleanSnapshot && lastReviewedCommit) {

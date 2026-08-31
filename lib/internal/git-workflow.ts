@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { inspectGitWorkflow, pushRebasedBranch } from '../git/workflow.ts';
+import { inspectGitWorkflow, previewCommitTree, pushRebasedBranch } from '../git/workflow.ts';
 import { compareReviewTrees, snapshotReview } from '../git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../task/review-fingerprint.ts';
 import { executeCommitOperation } from '../task/commit-operation.ts';
@@ -26,6 +26,12 @@ function gitWorkflow(args: string[] = []): void {
     const inputIndex = rest.indexOf('--input');
     const input = inputIndex >= 0 && rest[inputIndex + 1] ? JSON.parse(fs.readFileSync(rest[inputIndex + 1]!, 'utf8')) : null;
     result = input ? pushRebasedBranch({ cwd: cwd ?? process.cwd(), ...input }) : { status: 'failed', changed: false, error: { code: 'GIT_INPUT_REQUIRED', message: '--input JSON file is required' } };
+  } else if (action === 'preview-tree') {
+    const inputIndex = rest.indexOf('--input');
+    const input = inputIndex >= 0 && rest[inputIndex + 1] ? JSON.parse(fs.readFileSync(rest[inputIndex + 1]!, 'utf8')) : null;
+    result = input
+      ? previewCommitTree({ cwd: cwd ?? process.cwd(), paths: input.paths, expectedHead: input.expectedHead })
+      : { status: 'failed', changed: false, error: { code: 'GIT_INPUT_REQUIRED', message: '--input JSON file is required' } };
   } else if (action === 'snapshot' || action === 'compare-trees') {
     const inputIndex = rest.indexOf('--input');
     const input = inputIndex >= 0 && rest[inputIndex + 1] ? JSON.parse(fs.readFileSync(rest[inputIndex + 1]!, 'utf8')) : null;

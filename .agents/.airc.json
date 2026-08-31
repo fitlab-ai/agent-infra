@@ -5,6 +5,10 @@
   "platform": {
     "type": "github"
   },
+  "delivery": {
+    "remote": "origin",
+    "baseRef": "main"
+  },
   "prFlow": "required",
   "templateVersion": "v0.9.12-alpha.0",
   "sandbox": {

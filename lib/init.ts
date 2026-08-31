@@ -32,6 +32,7 @@ type Defaults = {
   files: FileRegistry;
   sandbox: Record<string, unknown>;
   task: { shortIdLength: number };
+  delivery: { remote: string; baseRef: string };
   labels: Record<string, unknown>;
 };
 
@@ -43,6 +44,7 @@ type AgentConfig = {
   templateVersion: string;
   sandbox: Record<string, unknown>;
   task: { shortIdLength: number };
+  delivery: { remote: string; baseRef: string };
   labels: Record<string, unknown>;
   files: FileRegistry;
   agentClients: ReturnType<typeof serializeAgentClients>;
@@ -244,6 +246,7 @@ async function cmdInit(): Promise<void> {
     templateVersion: VERSION,
     sandbox: structuredClone(defaults.sandbox),
     task: structuredClone(defaults.task),
+    delivery: structuredClone(defaults.delivery),
     labels: structuredClone(defaults.labels),
     files: { managed: [], merged: [], ejected: [] },
     agentClients: serializeAgentClients(defaultState)

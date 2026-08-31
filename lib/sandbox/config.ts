@@ -63,6 +63,7 @@ export type SandboxConfig = {
   tools: string[];
   customTools: SandboxTool[];
   agentClientState: AgentClientState;
+  delivery?: { remote: string; baseRef: string };
   refreshIntervalDays: number;
   dockerfile: string | null;
   vm: SandboxVmConfig;
@@ -73,6 +74,7 @@ type AircConfig = {
   org?: unknown;
   agentClients?: unknown;
   sandbox?: SandboxConfigInput;
+  delivery?: { remote?: unknown; baseRef?: unknown };
 };
 
 function detectRepoRoot(): string {
@@ -135,6 +137,7 @@ export function loadConfig({
   const agentClients = normalizeAgentClients(airc);
   const defaults = cloneDefaults();
   const sandbox = airc.sandbox ?? {};
+  const delivery = airc.delivery ?? {};
   const engine = validateSandboxEngine(sandbox.engine ?? defaults.engine, { platformFn });
   const project = airc.project;
 
@@ -188,6 +191,10 @@ export function loadConfig({
     tools,
     customTools,
     agentClientState: agentClients.state,
+    delivery: {
+      remote: typeof delivery.remote === 'string' ? delivery.remote : 'origin',
+      baseRef: typeof delivery.baseRef === 'string' ? delivery.baseRef : 'main'
+    },
     refreshIntervalDays: asNonNegativeIntegerOrDefault(
       sandbox.refreshIntervalDays,
       defaults.refreshIntervalDays

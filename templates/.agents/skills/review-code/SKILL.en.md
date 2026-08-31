@@ -70,11 +70,11 @@ Read the highest-round code artifact and, if present, the highest-round fix arti
 ### 4. Perform the Review
 
 Follow `.agents/workflows/feature-development.yaml` and inspect the full change context:
-- Capture the reviewed commit `R=$(git rev-parse HEAD)` exactly once; reuse R for this round's report, snapshot tree, and task review fact, and do not re-read HEAD later as a substitute
-- Call `agent-infra-internal platform-pr inspect {task-id}`. When a bound PR provides a base SHA, set the diff base to `D=$(git merge-base "$R" "{base-sha}")`. Without a PR, set `D=$R` only when tracked or untracked worktree changes exist. A clean worktree without a bound PR has no reliable complete committed range: stop and require a bound PR instead of reviewing an empty diff
+- Resolve the task's bound delivery remote/base and read the target SHA once at review start, `M=$(git ls-remote --refs {remote} refs/heads/{baseRef})`; then capture the reviewed commit `R=$(git rev-parse HEAD)` once and compute `D=$(git merge-base "$R" "$M")`. Save M/D/R as historical evidence and never overwrite them with a later live target value
+- If the delivery target cannot be resolved or its target commit is unavailable, stop and record the target error; M/D/R must come from one fact-collection round and must not be replaced by PR-existence evidence
 - `git diff --binary "$D" -- <post-review-globs>` covers committed and uncommitted tracked changes from D to the current worktree
 - `git ls-files -o --exclude-standard -z -- <post-review-globs>` for untracked new files
-- Write `mode=worktree`, `baseline=R`, and `diffBase=D` to a temporary JSON file, then call `agent-infra-internal git-workflow snapshot --input {file}` to generate a reviewed diff fingerprint `F` for the complete committed range and a reviewed snapshot tree `T` for the current worktree; write R, D, F, and T into the report
+- Write `mode=worktree`, `baseline=R`, and `diffBase=D` to a temporary JSON file, then call `agent-infra-internal git-workflow snapshot --input {file}` to generate a reviewed diff fingerprint `F` for the complete committed range and a reviewed snapshot tree `T` for the current worktree; write M, R, D, F, and T into the report
 
 > After collecting those facts, read `.agents/rules/review-method.md`, use them as readiness evidence, and run Passes 2–5 for traceability, risk lenses, counterevidence, and classification; the report must record all five passes.
 > Detailed review criteria, severity rules, and reviewer expectations live in `reference/review-criteria.md`. Read `reference/review-criteria.md` before reviewing.

@@ -19,9 +19,9 @@ commit core 只返回一个主结果：`committed`、`no_op`、`committed_with_w
 
 - 显式 task scope 解析失败时停止。
 - 未显式指定 task scope 时，只有 `TASK_CONTEXT_NOT_FOUND` 可进入 taskless direct；detached HEAD、损坏候选或多匹配必须 fail closed。
-- 入口业务操作数包含字面 `--orchestrated` 时使用 `mode=orchestrated`，否则使用 `mode=direct`；不得从 run 文件或环境推断模式。
+- 入口业务操作数包含字面 `--orchestrated` 时直接失败并返回 `ORCHESTRATED_COMMIT_REMOVED`；普通入口使用 `mode=direct`，不得从 run 文件或环境推断模式。
 - taskless direct 不读取、创建或完成 task intent、receipt、checkpoint 或 task.md 收尾记录。
-- task-bound direct 不要求 delegation receipt；orchestrated 必须由 core 验证匹配的 activated commit receipt 和 capability。
+- task-bound direct 不要求 delegation receipt；local checkpoint 由 `code-task` 直接调用共享 core，独立 `commit` 继续使用 push delivery。
 - 解析成功后只使用 core 返回的 `taskId`；不得从环境、分支或文件名猜测任务身份。
 
 ## 1. 检查本地修改
@@ -71,7 +71,7 @@ agent-infra-internal git-workflow commit --input {commit-operation.json}
 }
 ```
 
-taskless direct 省略 `taskRef`；orchestrated 必须显式传 `taskRef`、`agent` 和 `mode: "orchestrated"`。core 统一负责 repository/worktree mutation lock、task lock（仅 task-bound）、路径和敏感文件、staged scope、HEAD/tree、branch/ref、commit、push、保护分支、warning 和幂等校验。
+taskless direct 省略 `taskRef`；direct task-bound commit 使用 push delivery。core 统一负责 repository/worktree mutation lock、task lock（仅 task-bound）、路径和敏感文件、staged scope、HEAD/tree、branch/ref、commit、push、保护分支、warning 和幂等校验。
 
 - 有明确修改时最多创建一个本地 commit。
 - 无修改但需要交付本地领先的 HEAD 时只执行 push-only，不创建空 commit。

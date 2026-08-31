@@ -63,6 +63,16 @@ export function extractReviewBaseline(content: string): string {
   return match ? match[1]!.trim().replace(/`/g, "") : "";
 }
 
+export function extractReviewTargetHead(content: string): string {
+  const match = String(content).match(/^[-*]?\s*\*\*(?:审查目标提交|审查目标 HEAD|Review Target Commit|Review Target Head)\*\*[:：]\s*(.*?)\s*$/m);
+  return match ? match[1]!.trim().replace(/`/g, "") : "";
+}
+
+export function extractReviewedHead(content: string): string {
+  const match = String(content).match(/^[-*]?\s*\*\*(?:审查已检视提交|已检视提交|Reviewed Head Commit|Reviewed Head)\*\*[:：]\s*(.*?)\s*$/m);
+  return match ? match[1]!.trim().replace(/`/g, "") : "";
+}
+
 export function extractReviewDiffBase(content: string): string {
   const match = String(content).match(/^[-*]?\s*\*\*(?:审查差异基线|Reviewed Diff Base)\*\*[:：]\s*(.*?)\s*$/m);
   return match ? match[1]!.trim().replace(/`/g, "") : "";

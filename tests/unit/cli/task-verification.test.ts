@@ -97,8 +97,8 @@ function currentReceipt(taskId: string, overrides: Record<string, unknown> = {})
 
 function producedCodexReceipt(taskId: string) {
   const prepared = prepareDelegation({
-    taskId, runId: 'run-1', role: 'executor', stage: 'commit', round: 1,
-    artifact: 'commit', client: 'codex', requestedModel: 'executor-model',
+    taskId, runId: 'run-1', role: 'executor', stage: 'analysis', round: 1,
+    artifact: 'analysis.md', client: 'codex', requestedModel: 'executor-model',
     requestedReasoningEffort: 'xhigh', workspaceSnapshotScope: 'task',
     lifecycleProvenance: codexLifecycleProvenance, beforeFingerprint: 'before'
   }, {
@@ -121,7 +121,7 @@ function producedCodexReceipt(taskId: string) {
   assert.equal(activated.ok, true);
   if (!activated.ok) throw new Error('failed to activate Codex receipt fixture');
   const completed = completeDelegationStage(activated.receipt, {
-    stage: 'commit', round: 1, artifact: 'commit', agent: 'codex'
+    stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex'
   });
   assert.equal(completed.ok, true);
   if (!completed.ok) throw new Error('failed to complete Codex receipt fixture');
@@ -242,7 +242,18 @@ test('run-task verification accepts complete current evidence and rejects invali
     skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
   }));
   const runPath = path.join(f.taskDir, 'orchestration.json');
-  const run = currentRun(f.taskId);
+  const head = 'a'.repeat(40);
+  const tree = 'b'.repeat(40);
+  const run = currentRun(f.taskId, {
+    receipts: [],
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    completionEvidence: {
+      kind: 'reviewed-head-clean', observedAt: '2026-01-01T00:00:05.000Z',
+      head, headTree: tree, worktreeTree: tree, lastReviewedCommit: head,
+      prNumber: null, prHead: null
+    },
+    updatedAt: '2026-01-01T00:00:05.000Z'
+  });
   fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
 
   const valid = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
@@ -252,13 +263,17 @@ test('run-task verification accepts complete current evidence and rejects invali
   const codexReceipt = producedCodexReceipt(f.taskId);
   const codexRun = currentRun(f.taskId, {
     modelPolicySource: { ...run.modelPolicySource, client: 'codex' },
-    receipts: [codexReceipt]
+    receipts: [codexReceipt],
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    completionEvidence: run.completionEvidence,
+    updatedAt: '2026-01-01T00:00:05.000Z'
   });
   fs.writeFileSync(runPath, `${JSON.stringify(codexRun, null, 2)}\n`);
-  assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
-    'pass'
+  const codexVerification = verifyTaskEvent(
+    { taskRef: f.taskId, event: 'run-task.completed' },
+    { repoRoot: f.root }
   );
+  assert.equal(codexVerification.status, 'pass', JSON.stringify(codexVerification));
 
   fs.writeFileSync(runPath, `${JSON.stringify({
     ...codexRun,

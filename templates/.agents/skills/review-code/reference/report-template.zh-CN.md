@@ -21,8 +21,10 @@
 - **审查者**：{reviewer-name}
 - **审查时间**：{timestamp}
 - **审查范围**：{file-count and major modules}
-- **审查基线提交**：{本轮一次性捕获的审查提交 R 原文；必须等于本轮 HEAD}
-- **审查差异基线**：{用于完整 diff/fingerprint 的 D 原文；已绑定 PR 时为 R 与 PR base SHA 的 merge-base，否则为 R}
+- **审查目标提交**：{本轮一次性从任务绑定 remote/base 读取的目标分支 SHA M；不可被后续实时目标覆盖}
+- **审查已检视提交**：{本轮一次性捕获的本地 HEAD R；必须等于本轮 HEAD}
+- **审查基线提交**：{R 的兼容显示字段；必须与审查已检视提交相同}
+- **审查差异基线**：{用于完整 diff/fingerprint 的 D；必须等于 merge-base(R, saved M)}
 - **审查差异指纹**：{git-workflow snapshot 输出的 fingerprint 字段}
 - **审查快照树**：{git-workflow snapshot 输出的 tree 字段}
 - **总体结论**：{通过 / 需要修改 / 拒绝}（恰取一个；禁止写组合短语，否则 verify gate 失败）

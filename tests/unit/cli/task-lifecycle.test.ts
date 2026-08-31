@@ -330,6 +330,26 @@ test('directory rename failure keeps the journal at source and retries without d
   assert.equal((content.match(/Complete Task/g) ?? []).length, 2);
 });
 
+test('cross-device lifecycle move copies and verifies before removing the source', () => {
+  const f = fixture();
+  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
+  const result = applyTaskLifecycle(request, {
+    repoRoot: f.repoRoot,
+    metadataProvider: () => METADATA,
+    directoryRenameSync: () => {
+      const error = new Error('cross-device rename') as NodeJS.ErrnoException;
+      error.code = 'EXDEV';
+      throw error;
+    }
+  });
+  assert.equal(result.status, 'applied');
+  const target = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+  assert.equal(fs.existsSync(f.taskDir), false);
+  assert.equal(fs.existsSync(path.join(target, 'task.md')), true);
+  assert.equal(fs.existsSync(path.join(target, '.task-lifecycle.json')), false);
+  assert.equal((fs.readFileSync(path.join(target, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+});
+
 test('journal step write failure after directory move is reconstructed on retry', () => {
   const f = fixture();
   const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };

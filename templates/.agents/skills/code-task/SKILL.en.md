@@ -19,7 +19,7 @@ Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill 
 - Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”
 - Fix mode verifies each finding of the latest `review-code` one by one: fix it if it holds, or rebut it and record it under unresolved if it is unfounded/hallucinated; do not expand to issues the review did not list; manual-validation items are out of scope
 - If implementation encounters a key design decision not covered by the plan, run `agent-infra-internal task-ledger {task-id} decision-next-id`, write the returned `HD-N` detail block per `.agents/rules/human-decision-context.md` and determine whether implementation is required, then run `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`. Do not scan ids, assemble ledger rows, ask mid-flow, or silently expand scope
-- Never auto-run `git add` or `git commit`
+- Do not invoke the `commit` skill or push to a remote; after tests pass, call the shared commit core with `delivery: { mode: 'local' }` to create the local checkpoint. The durable intent must close only after the checkpoint and task state sync succeed; only then emit `code.completed`
 - Create a new code artifact for each round and never overwrite an older one
 - After executing this skill, you **must** immediately update task.md
 
@@ -103,6 +103,8 @@ Use the project test commands from the `test` skill and iterate until all requir
 
 When triaging a test failure or unexpected behavior, first read `.agents/rules/debugging-guide.md` and locate the root cause via its four-phase flow; do not blindly patch and retry.
 
+After tests pass, call the shared commit core with `agent-infra-internal git-workflow commit --input {checkpoint-input}`. Pass `delivery: { "mode": "local" }`, explicit paths, expected HEAD/tree, task ref, agent, and the code round. This creates only a local checkpoint and does not contact a remote. The core writes a durable intent before committing and removes it after task-writer synchronization; do not emit `code.completed` if either checkpoint or task synchronization fails.
+
 ### 9. Write the Code Report
 
 Create `.agents/workspace/active/{task-id}/{code-artifact}`.
@@ -126,6 +128,6 @@ agent-infra-internal task-verify {task-id} code.completed --artifact {code-artif
 
 ### 12. Tell the User
 
-Use `reference/output-template.md` (or `reference/fix-mode.md` in fix mode) and render the selected next-step commands through the shared helper.
+Use `reference/output-template.md` (or `reference/fix-mode.md` in fix mode) and render the selected next-step commands through the shared helper. Do not push, create a PR, or invoke the `commit` skill here.
 
 > Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the current task's short id `NN` (see that file for lookup and fallback), while other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form; (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).

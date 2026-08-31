@@ -19,7 +19,7 @@ description: >
 - 实现前读取 `.agents/rules/compatibility-policy.md`；只实现方案明确批准的兼容预算，不以“稳妥”为由保留旧分支、旧结果契约或迁移 shim
 - 修复模式逐条核实最新 `review-code` 的发现：成立则修复，判定为不成立/幻觉则在报告中反驳并记入 unresolved；不擅自扩大到审查未列出的问题；manual-validation 项不在修复范围
 - 实现中遇到方案未覆盖的关键设计决策时，先调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得 `HD-N`，按 `.agents/rules/human-decision-context.md` 写入实现报告的 `## 人工裁决待办` 详情块并判断是否需要实现，再调用 `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`；不得扫描编号、手写账本行、中途提问或擅自扩范围
-- 绝不自动执行 `git add` 或 `git commit`
+- 不调用 `commit` 技能，也不推送远端；测试通过后直接调用共享 commit core 的 `delivery: { mode: 'local' }` 创建本地 checkpoint。checkpoint 使用 durable intent，只有 checkpoint 与 task 状态同步成功后才发送 `code.completed`
 - 每轮实现都创建新的实现产物，不覆盖旧文件
 - 执行本技能后，你**必须**立即更新 task.md
 
@@ -34,7 +34,7 @@ description: >
 | 「代码太简单，不需要测试」 | 简单代码也会回归；没有"失败→通过"的用例就没有完成标志，先写验证业务行为的测试。 |
 | 「先写代码再补测试更高效」 | 后补测试常沦为对实现的镜像；目标驱动应先定义可验证用例再让它通过。 |
 | 「方案这里不合理，顺手改更好」 | 偏离 `{plan-artifact}` 必须在报告中记录原因；有异议先停下确认，不擅自改方向。 |
-| 「测试过了，顺便提交一下」 | 本技能绝不执行 `git add`/`git commit`，提交是用户显式发起的独立步骤。 |
+| 「测试过了，顺便推送一下」 | 本技能只创建本地 checkpoint；远端推送是 `create-pr` 的唯一边界。 |
 | 「审查既然写了，照着改就行」 | 审查可能基于错误 `file:line` 或幻觉；动手前先 Read/Grep 核实，成立才修，不成立就反驳并记入 unresolved，不盲从。 |
 | 「保留旧入口更稳妥，反正只多一个分支」 | 未获批准的兼容是范围扩张和长期债务；没有对象、必要性、期限和退出条件就只实现当前契约。 |
 
@@ -141,6 +141,8 @@ echo "$result"
 
 如果测试失败，先尝试修复并重新运行测试。只有在确认存在外部阻塞、环境缺失或需求不明确且超出任务范围时，才可以停止。
 
+测试通过后，通过 `agent-infra-internal git-workflow commit --input {checkpoint-input}` 调用共享 commit core，输入 `delivery: { "mode": "local" }`、明确 paths、expected HEAD/tree、task ref、agent 和 code round。该调用只创建本地 checkpoint，不访问远端；core 会在 commit 前写入 durable intent，并在 task writer 成功后清理 intent。checkpoint 失败或 task 状态未闭合时，不得发送 `code.completed`。
+
 排查测试失败或行为不符合预期时，先读取 `.agents/rules/debugging-guide.md`，按其四阶段流程定位根因，禁止盲目改代码重试。
 
 ### 9. 编写实现报告
@@ -197,7 +199,7 @@ agent-infra-internal task-verify {task-id} code.completed --artifact {code-artif
 
 ## 停止
 
-完成检查清单后立即停止。不要自动提交。
+完成检查清单后立即停止。不要在本技能中推送远端、创建 PR 或调用 `commit` 技能。
 
 ## 注意事项
 

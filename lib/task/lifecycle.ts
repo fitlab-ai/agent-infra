@@ -20,6 +20,7 @@ const lifecycleIntentCatalog = [
 ] as const;
 const lifecycleFailureCatalog = [
   'LIFECYCLE_DIRECTORY_RENAME_FAILED',
+  'LIFECYCLE_DIRECTORY_COPY_FAILED',
   'LIFECYCLE_DOCUMENT_INVALID',
   'LIFECYCLE_FINAL_STATE_INVALID',
   'LIFECYCLE_IDENTITY_CONFLICT',
@@ -336,6 +337,62 @@ function parseJournal(content: string): LifecycleJournal {
   return value as LifecycleJournal;
 }
 
+type DirectoryEntry = Readonly<{ relativePath: string; kind: 'file' | 'directory'; size: number; digest: string }>;
+
+function directoryManifest(root: string): DirectoryEntry[] {
+  const entries: DirectoryEntry[] = [];
+  const visit = (current: string, relative = '') => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const relativePath = relative ? path.join(relative, entry.name) : entry.name;
+      const absolute = path.join(current, entry.name);
+      const stat = fs.lstatSync(absolute);
+      if (stat.isSymbolicLink()) throw new Error(`symbolic link is not allowed in lifecycle directory: ${relativePath}`);
+      if (entry.isDirectory()) {
+        entries.push({ relativePath, kind: 'directory', size: 0, digest: '' });
+        visit(absolute, relativePath);
+      } else if (entry.isFile()) {
+        const digest = createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');
+        entries.push({ relativePath, kind: 'file', size: stat.size, digest });
+      } else {
+        throw new Error(`unsupported lifecycle directory entry: ${relativePath}`);
+      }
+    }
+  };
+  visit(root);
+  return entries;
+}
+
+function copyDirectoryVerified(source: string, target: string): void {
+  if (fs.existsSync(target)) throw new Error(`target directory already exists: ${target}`);
+  const copy = (currentSource: string, currentTarget: string) => {
+    fs.mkdirSync(currentTarget);
+    for (const entry of fs.readdirSync(currentSource, { withFileTypes: true })) {
+      const sourcePath = path.join(currentSource, entry.name);
+      const targetPath = path.join(currentTarget, entry.name);
+      const stat = fs.lstatSync(sourcePath);
+      if (stat.isSymbolicLink()) throw new Error(`symbolic link is not allowed in lifecycle directory: ${entry.name}`);
+      if (entry.isDirectory()) copy(sourcePath, targetPath);
+      else if (entry.isFile()) fs.copyFileSync(sourcePath, targetPath);
+      else throw new Error(`unsupported lifecycle directory entry: ${entry.name}`);
+    }
+  };
+  copy(source, target);
+  const sourceManifest = directoryManifest(source);
+  const targetManifest = directoryManifest(target);
+  if (JSON.stringify(sourceManifest) !== JSON.stringify(targetManifest)) {
+    throw new Error('copied lifecycle directory failed manifest verification');
+  }
+}
+
+function removeCopiedSource(source: string, target: string): void {
+  const sourceManifest = directoryManifest(source);
+  const targetManifest = directoryManifest(target);
+  if (JSON.stringify(sourceManifest) !== JSON.stringify(targetManifest)) {
+    throw new Error('lifecycle source and target diverged before source cleanup');
+  }
+  fs.rmSync(source, { recursive: true, force: false });
+}
+
 function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLifecycleOptions = {}): TaskLifecycleResult {
   const normalized = normalizedRequest(requestInput);
   if ('code' in normalized) return failed(requestInput, normalized);
@@ -386,7 +443,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   if (!spec.sources.includes(sourceState) && !existingJournal && !allowsManualOverride(options, 'LIFECYCLE_SOURCE_INVALID')) {
     return failed(request, { code: 'LIFECYCLE_SOURCE_INVALID', message: `${request.intent} is not allowed from ${sourceState}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
-  if (sourcePath !== targetPath && fs.existsSync(targetPath)) {
+  if (sourcePath !== targetPath && fs.existsSync(targetPath) && !existingJournal) {
     return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
   const content = io.readFileSync(currentTaskFile);
@@ -498,13 +555,45 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     if (fs.existsSync(targetPath)) return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
     try { (options.directoryRenameSync ?? io.renameSync)(sourcePath, targetPath); }
     catch (error) {
+      if ((error as { code?: string }).code === 'EXDEV') {
+        try {
+          copyDirectoryVerified(sourcePath, targetPath);
+          completed.add('directory-moved');
+          journal.completedSteps = [...completed];
+          const copiedJournalPath = path.join(targetPath, '.task-lifecycle.json');
+          writeJournal(initialJournalPath, journal, io);
+          writeJournal(copiedJournalPath, journal, io);
+          removeCopiedSource(sourcePath, targetPath);
+          journalPath = copiedJournalPath;
+        } catch (copyError) {
+          if (fs.existsSync(targetPath)) fs.rmSync(targetPath, { recursive: true, force: false });
+          const failure = { code: 'LIFECYCLE_DIRECTORY_COPY_FAILED', message: String(copyError) } as const;
+          rememberJournalFailure(initialJournalPath, journal, io, failure);
+          return failed(request, failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+        }
+      } else {
       const failure = { code: 'LIFECYCLE_DIRECTORY_RENAME_FAILED', message: String(error) } as const;
       rememberJournalFailure(journalPath, journal, io, failure);
       return failed(request, failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+      }
     }
-    completed.add('directory-moved'); journal.completedSteps = [...completed]; journalPath = path.join(targetPath, '.task-lifecycle.json');
-    try { writeJournal(journalPath, journal, io); }
-    catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+    if (completed.has('directory-moved') && !fs.existsSync(sourcePath)) {
+      journalPath = path.join(targetPath, '.task-lifecycle.json');
+    } else if (!completed.has('directory-moved')) {
+      completed.add('directory-moved'); journal.completedSteps = [...completed]; journalPath = path.join(targetPath, '.task-lifecycle.json');
+      try { writeJournal(journalPath, journal, io); }
+      catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+    }
+  }
+  if (completed.has('directory-moved') && sourcePath !== targetPath && fs.existsSync(sourcePath) && fs.existsSync(targetPath)) {
+    try {
+      removeCopiedSource(sourcePath, targetPath);
+      journalPath = path.join(targetPath, '.task-lifecycle.json');
+    } catch (error) {
+      const failure = { code: 'LIFECYCLE_DIRECTORY_COPY_FAILED', message: String(error) } as const;
+      rememberJournalFailure(journalPath, journal, io, failure);
+      return failed(request, failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+    }
   }
   let shortId: TaskLifecycleResult['shortId'] = { effect: 'unchanged', shortId: null, changed: false };
   if (!completed.has('registry-committed')) {

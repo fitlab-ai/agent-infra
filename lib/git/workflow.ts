@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 type CommandResult = { status: number | null; stdout: string; stderr: string };
@@ -105,6 +106,42 @@ function commitExplicitPaths(input: { cwd: string; paths: readonly string[]; mes
   return { status: 'applied' as const, changed: true, snapshot: after.snapshot, operations: [{ name: 'stage', status: 'applied' as const }, { name: 'commit', status: 'applied' as const }], error: null };
 }
 
+function previewCommitTree(input: { cwd: string; paths: readonly string[]; expectedHead: string }) {
+  const invalid = validatePaths(input.paths);
+  if (invalid) return { status: 'failed' as const, tree: null, error: { code: 'GIT_COMMIT_INPUT_INVALID', message: invalid } };
+  const before = inspectGitWorkflow(input.cwd);
+  if (!before.snapshot) return { status: 'failed' as const, tree: null, error: { code: 'GIT_INSPECT_FAILED', message: 'Unable to inspect Git repository' } };
+  if (before.snapshot.head !== input.expectedHead) {
+    return { status: 'failed' as const, tree: null, error: { code: 'GIT_HEAD_MISMATCH', message: `Expected HEAD ${input.expectedHead}, received ${before.snapshot.head}` } };
+  }
+  const selected = new Set(input.paths);
+  const unrelatedStaged = before.snapshot.staged.filter((candidate) => !selected.has(candidate));
+  if (unrelatedStaged.length > 0) {
+    return { status: 'failed' as const, tree: null, error: { code: 'GIT_STAGED_SCOPE_MISMATCH', message: `Unrelated staged paths: ${unrelatedStaged.join(', ')}` } };
+  }
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-preview-index-'));
+  const indexFile = path.join(temporaryDirectory, 'index');
+  const temporaryRunner: GitRunner = (args, cwd) => {
+    const result = spawnSync('git', [...args], {
+      cwd,
+      env: { ...process.env, GIT_INDEX_FILE: indexFile },
+      encoding: 'utf8'
+    });
+    return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+  };
+  try {
+    const read = run(temporaryRunner, input.cwd, ['read-tree', input.expectedHead]);
+    if (read.status !== 0) return { status: 'failed' as const, tree: null, error: { code: 'GIT_PREVIEW_FAILED', message: read.stderr.trim() || 'Unable to prepare a temporary Git index' } };
+    const stage = run(temporaryRunner, input.cwd, ['add', '-A', '--', ...input.paths]);
+    if (stage.status !== 0) return { status: 'failed' as const, tree: null, error: { code: 'GIT_PREVIEW_FAILED', message: stage.stderr.trim() || 'Unable to stage the requested paths in a temporary index' } };
+    const tree = value(temporaryRunner, input.cwd, ['write-tree']);
+    if (!tree) return { status: 'failed' as const, tree: null, error: { code: 'GIT_PREVIEW_FAILED', message: 'Unable to write the temporary Git tree' } };
+    return { status: 'planned' as const, tree, error: null };
+  } finally {
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
 function pushGitRefs(input: { cwd: string; remote: string; refs: readonly string[]; expectedSha?: string }, runner: GitRunner = defaultRunner) {
   if (!input.remote || input.refs.length === 0) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [], error: { code: 'GIT_PUSH_INPUT_INVALID', message: 'Remote and refs are required' } };
   const operations: GitOperation[] = [];
@@ -192,5 +229,5 @@ function pushRebasedBranch(input: PushRebasedInput, runner: GitRunner = defaultR
   return { status: 'applied' as const, changed: true, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'push-rebased', status: 'applied' as const, ref: input.branch }], error: null };
 }
 
-export { commitExplicitPaths, inspectGitWorkflow, pushGitRefs, pushRebasedBranch };
+export { commitExplicitPaths, inspectGitWorkflow, previewCommitTree, pushGitRefs, pushRebasedBranch };
 export type { CommandResult, GitRunner, PushRebasedInput };

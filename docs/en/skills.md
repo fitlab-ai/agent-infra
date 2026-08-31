@@ -24,10 +24,10 @@ These are not thin command aliases. Each skill encapsulates standardized process
 | `review-analysis` | Review the requirement analysis and classify findings by severity. | `task-id` | Confirm the analysis is complete before design. |
 | `plan-task` | Write the technical plan with a review checkpoint. | `task-id` | Define the approach after analysis approval. |
 | `review-plan` | Review the technical plan and classify findings by severity. | `task-id` | Confirm the design is actionable before coding. |
-| `code-task` | Implement the approved plan or fix code review findings, producing a code report. | `task-id` | Write code, tests, and docs after plan approval, or handle review feedback. |
+| `code-task` | Implement the approved plan or a decided review input, create a local checkpoint, and produce a code report. | `task-id` | Write code, tests, and docs after plan approval, or handle an approved implementation input. |
 | `run-manual-validation` | Run host-side validation through snapshot or in-place isolation and record sanitized evidence. | `task-id`, validation command | Validate real container, credential, or worktree behavior without marking the PR check complete. |
 | `review-code` | Review the code and classify findings by severity. | `task-id` | Run a structured code review before merging. |
-| `complete-task` | Mark the task complete and archive it after all gates pass. | `task-id` | Close out a task after review, tests, and commit are done. |
+| `complete-task` | Mark the task complete and archive it after all gates pass. | `task-id` | Close out a task after review, delivery, merge, and final verification are done. |
 
 ## Task Status
 
@@ -41,14 +41,14 @@ These are not thin command aliases. Each skill encapsulates standardized process
 
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
-| `create-pr` | Open a Pull Request to an inferred or explicit target branch. | `task-id` (optional), `target-branch` (optional) | Publish reviewed changes for merge, with optional explicit task linkage after a fresh session. |
+| `create-pr` | Publish the reviewed task branch and open or reuse its Pull Request against the task-bound target. | `task-id` (optional) | Deliver an approved checkpoint after its review anchor and target binding are still valid. |
 | `watch-pr` | Watch a PR's required checks and self-heal failures until green. | `task-id` or `--pr <number>` (optional; defaults to the current branch's PR) | Monitor CI after create-pr and auto-fix simple failures before merging. |
 
 ## Code Quality
 
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
-| `commit` | Create a Git commit with task updates and copyright-year checks. | None | Finalize a coherent change set after tests pass. |
+| `commit` | Create a direct Git commit with task updates and copyright-year checks. | None | Use for standalone or taskless work; the normal task lifecycle creates checkpoints through `code-task`. |
 | `test` | Run the standard project validation flow. | None | Validate compile checks and unit tests after a change. |
 | `test-integration` | Run integration or end-to-end validation. | None | Verify cross-module or workflow-level behavior. |
 

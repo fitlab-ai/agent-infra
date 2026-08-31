@@ -49,6 +49,18 @@ test('GitHub failure classification distinguishes auth, permission and retryable
   assert.equal(classifyGitHubFailure({ status: 1, stdout: '', stderr: 'HTTP 422: validation failed' }).retryable, false);
 });
 
+test('GitHub failure diagnostics redact token-shaped credentials before classification', () => {
+  const failure = classifyGitHubFailure({
+    status: 1,
+    stdout: '',
+    stderr: 'Bearer ghp_example_secret token short-secret https://example.test/?access_token=url-secret'
+  });
+  assert.doesNotMatch(failure.message, /ghp_example_secret|short-secret|url-secret/);
+  assert.match(failure.message, /Bearer \[REDACTED_TOKEN\]/);
+  assert.match(failure.message, /token \[REDACTED_TOKEN\]/);
+  assert.match(failure.message, /access_token=\[REDACTED\]/);
+});
+
 test('GitHub failure classification rejects output overflow without replaying or echoing response bodies', () => {
   const error = Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' });
   const failure = classifyGitHubFailure({ status: null, stdout: 'private-response-body'.repeat(100_000), stderr: '', error });

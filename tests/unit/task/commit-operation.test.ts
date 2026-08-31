@@ -257,6 +257,33 @@ test('task-bound direct commit validates the task branch through the same core',
   }
 });
 
+test('task-bound local delivery creates a checkpoint without touching the remote', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000007';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  try {
+    fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
+
+    const result = executeCommitOperation(input(root, {
+      taskRef: taskId,
+      agent: 'codex',
+      delivery: { mode: 'local' },
+      push: undefined
+    }));
+
+    assert.equal(result.result, 'committed');
+    assert.equal(result.warnings.length, 0);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-commit-intents', `${taskId}.json`)), false);
+    assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /checkpoint_commit: [a-f0-9]{40}/);
+    assert.throws(() => git(root, ['show-ref', '--verify', 'refs/remotes/origin/feature']));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('task-bound commit from a repository subdirectory resolves the canonical repository root', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000003';
@@ -342,7 +369,7 @@ test('no-op task retry does not duplicate a Commit activity after an intervening
   }
 });
 
-test('orchestrated commit accepts only an activated commit delegation for the bound task', () => {
+test('orchestrated commit is rejected because lifecycle commit delegation was removed', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000002';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -398,13 +425,13 @@ test('orchestrated commit accepts only an activated commit delegation for the bo
       mode: 'orchestrated'
     }));
 
-    assert.equal(result.result, 'committed');
+    assert.equal(result.result, 'blocked');
     assert.equal(result.taskId, taskId);
     assert.equal(result.mode, 'orchestrated');
-    assert.equal(git(root, ['log', '-1', '--format=%s']), 'fix: update change');
-    assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /\*\*Commit\*\* by claude — [a-f0-9]+ fix: update change/);
-    assert.equal(readRun(taskDir)?.pendingDelegation?.status, 'stage-completed');
-    assert.equal(readRun(taskDir)?.pendingDelegation?.agent, 'claude');
+    assert.equal(result.error?.code, 'ORCHESTRATED_COMMIT_REMOVED');
+    assert.equal(git(root, ['log', '-1', '--format=%s']), 'initial');
+    assert.doesNotMatch(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /\*\*Commit\*\*/);
+    assert.equal(readRun(taskDir)?.pendingDelegation?.status, 'activated');
     assert.equal(readRun(taskDir)?.commitAuthorization.consumedAt, null);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
