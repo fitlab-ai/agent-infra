@@ -5,7 +5,7 @@ import { parseTaskScope } from '../command-options.ts';
 import { resolveTaskContext } from '../resolve-ref.ts';
 import { isReviewStage, parseLedgerDocument, type LedgerRow, type ReviewStage } from '../ledger.ts';
 import { listDecisionItems, selectDecisionItem } from '../decision-items.ts';
-import { extractSubSection } from '../sections.ts';
+import { normalizeDecisionDetailForDisplay, parseDecisionEvidence, resolveDecisionDetail } from '../decision-details.ts';
 
 const USAGE = `Usage: ai task decisions [--task <ref> | -t <ref>] [--item <selector> | -i <selector>] [options]
 
@@ -87,47 +87,30 @@ function parseArgs(args: string[]): ParsedArgs | null {
   return out;
 }
 
-// Parse `<file>.md#anchor` evidence into its filename, when present.
-function evidenceFile(evidence: string): string | null {
-  const m = /([\w.-]+\.md)#/.exec(evidence);
-  return m ? m[1]! : null;
-}
+// Locate the canonical detail block named by the row's current evidence. Historical
+// artifacts are intentionally not searched: an evidence reference is a precise
+// provenance pointer, not a best-effort hint.
+type DetailLookup =
+  | { status: 'found'; content: string }
+  | { status: 'missing'; reason: string }
+  | { status: 'ambiguous'; reason: string }
+  | { status: 'invalid'; reason: string };
 
-function roundOf(file: string): number {
-  const m = /-r(\d+)\.md$/.exec(file);
-  return m ? Number.parseInt(m[1]!, 10) : 1;
-}
-
-// Locate the `### {ledger-id}` detail block for a row. Prefer the artifact named by the
-// row's evidence anchor; otherwise scan analysis/plan/code artifacts and return
-// the block from the highest-round file that contains it. Returns '' when none
-// is found (caller degrades gracefully — plan B3).
-function findDetailBlock(row: LedgerRow, taskDir: string): string {
-  const hinted = evidenceFile(row.evidence);
-  if (hinted) {
-    const p = path.join(taskDir, hinted);
-    if (fs.existsSync(p)) {
-      const block = extractSubSection(fs.readFileSync(p, 'utf8'), row.id);
-      if (block) return block;
-    }
-  }
-  let best = '';
-  let bestRound = -1;
-  let entries: string[];
+function findDetailBlock(row: LedgerRow, taskDir: string): DetailLookup {
+  const evidence = parseDecisionEvidence(row.evidence);
+  if (!evidence.ok) return { status: 'invalid', reason: `invalid evidence '${row.evidence}'` };
+  const artifactPath = path.join(taskDir, evidence.artifact);
+  if (!fs.existsSync(artifactPath)) return { status: 'missing', reason: `artifact '${evidence.artifact}' is missing` };
+  let artifactContent: string;
   try {
-    entries = fs.readdirSync(taskDir);
+    artifactContent = fs.readFileSync(artifactPath, 'utf8');
   } catch {
-    return '';
+    return { status: 'missing', reason: `artifact '${evidence.artifact}' cannot be read` };
   }
-  for (const file of entries) {
-    if (!/^(analysis|plan|code)(-r\d+)?\.md$/.test(file)) continue;
-    const block = extractSubSection(fs.readFileSync(path.join(taskDir, file), 'utf8'), row.id);
-    if (block && roundOf(file) > bestRound) {
-      best = block;
-      bestRound = roundOf(file);
-    }
-  }
-  return best;
+  const resolved = resolveDecisionDetail(artifactContent, row.id, evidence.anchor);
+  if (resolved.status === 'found') return { status: 'found', content: normalizeDecisionDetailForDisplay(resolved.block) };
+  if (resolved.status === 'ambiguous') return { status: 'ambiguous', reason: resolved.reason };
+  return { status: 'missing', reason: resolved.reason };
 }
 
 // Pull the `## 人工裁决` record lines that mention this ledger id, so a decided item
@@ -147,9 +130,9 @@ function findDecisionRecord(id: string, content: string): string[] {
 }
 
 function titleOf(row: LedgerRow, taskDir: string): string {
-  const block = findDetailBlock(row, taskDir);
-  if (block) {
-    const title = block
+  const detail = findDetailBlock(row, taskDir);
+  if (detail.status === 'found') {
+    const title = detail.content
       .split('\n')[0]!
       .replace(/^###\s+/, '')
       .replace(/\s*\[needs-human-decision\]\s*$/, '')
@@ -221,21 +204,23 @@ function renderDetail(
     return;
   }
   const r = selected.row;
-  const block = findDetailBlock(r, taskDir);
-  const title = titleOf(r, taskDir);
+  const detail = findDetailBlock(r, taskDir);
+  if (detail.status === 'invalid' || detail.status === 'ambiguous') {
+    fail(`cannot resolve ${r.id}: ${detail.reason}`);
+    return;
+  }
+  const block = detail.status === 'found' ? detail.content : '';
+  const title = block
+    ? block.split('\n')[0]!.replace(/^###\s+/, '').replace(/\s*\[needs-human-decision\]\s*$/, '').trim()
+      .replace(new RegExp(`^${r.id}\\s*[:：]\\s*`, 'i'), '').trim()
+    : '(explanation unavailable)';
   const lines: string[] = [];
   const decided = r.status === 'human-decided';
   if (format === 'markdown') {
     lines.push(`## ${decided ? 'Decision already recorded' : 'Decision needed'}: ${title}`, '');
-    if (!decided) {
-      lines.push('**How to record your choice**', `\`ai decide --task ${taskId} --item ${r.id} <your choice and rationale>\``, '');
-    }
     lines.push('**Original context**', '');
   } else {
     lines.push(`${decided ? 'Decision already recorded' : 'Decision needed'}: ${title}`, '');
-    if (!decided) {
-      lines.push('How to record your choice:', `ai decide --task ${taskId} --item ${r.id} <your choice and rationale>`, '');
-    }
     lines.push('Original context:');
   }
   if (block) {
@@ -250,6 +235,14 @@ function renderDetail(
     const record = findDecisionRecord(r.id, content);
     lines.push('', format === 'markdown' ? '**Recorded choice**' : 'Recorded choice:');
     lines.push(...(record.length ? record : ['No separate ruling record was found.']));
+  }
+  if (!decided) {
+    lines.push('');
+    if (format === 'markdown') {
+      lines.push('**How to record your choice**', `\`ai decide --task ${taskId} --item ${r.id} <your choice and rationale>\``);
+    } else {
+      lines.push('How to record your choice:', `ai decide --task ${taskId} --item ${r.id} <your choice and rationale>`);
+    }
   }
   lines.push('', ...renderTracking(r, format));
   process.stdout.write(`${lines.join('\n')}\n`);
@@ -306,7 +299,13 @@ function decisions(args: string[] = []): void {
   if (selector === undefined) {
     renderList(rows, parsed.format, resolved.taskDir, resolved.taskId);
   } else {
-    renderDetail(rows, selector, parsed.format, resolved.taskDir, content, resolved.taskId);
+    const selectionRows = /^[A-Za-z]+-\d+$/.test(selector)
+      ? listDecisionItems(ledger.rows as LedgerRow[], {
+        includeDecided: true,
+        stage: parsed.stage as ReviewStage | undefined
+      })
+      : rows;
+    renderDetail(selectionRows, selector, parsed.format, resolved.taskDir, content, resolved.taskId);
   }
 }
 

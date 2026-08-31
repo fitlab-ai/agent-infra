@@ -119,6 +119,8 @@ agent-infra-internal task-snapshot {task-id} --format text
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`
 
+最终化 intent 会在写入摘要前检查详情块 ID；只有“一个正式 `[needs-human-decision]` 块 + 明确的简短非正式重复块”才会自动删除重复块并重新做只读检查，无法唯一判断时失败关闭。该检查或自动修复失败时，停止在完成事件之前。
+
 ### 7. 完成校验
 
 运行完成校验，确认任务产物和同步状态符合规范：

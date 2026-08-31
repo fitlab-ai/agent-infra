@@ -36,6 +36,7 @@
         "^\\$ "
       ]
     },
+    "decision-details": {},
     "review-summary": {
       "stage": "analysis"
     },

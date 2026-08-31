@@ -7,6 +7,7 @@ import { parseArtifactName, validateCompletedArtifact } from './artifact-lifecyc
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';
+import { inspectDecisionDetailDuplicates, repairDecisionDetailDuplicates } from './decision-details.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
@@ -25,6 +26,7 @@ type ReviewFinalizationErrorCode =
   | 'REVIEW_SUMMARY_NOT_FOUND'
   | 'REVIEW_SUMMARY_PLACEHOLDER_INVALID'
   | 'REVIEW_SUMMARY_COUNT_MISMATCH'
+  | 'REVIEW_DECISION_DETAIL_INVALID'
   | 'REVIEW_ARTIFACT_CONFLICT'
   | 'REVIEW_PROVENANCE_INVALID'
   | 'REVIEW_TEMP_WRITE_FAILED'
@@ -212,14 +214,34 @@ function finalizeReviewSummaryUnlocked(
     );
   }
   const stageStatus = summarizeLedgerStage(rows, stage);
+  const repaired = repairDecisionDetailDuplicates(artifactContent);
+  if (!repaired.ok) {
+    return failed(
+      request,
+      'REVIEW_DECISION_DETAIL_INVALID',
+      `${repaired.code}: ${repaired.message}`,
+      resolved.taskId,
+      stageStatus
+    );
+  }
+  const detailInspection = inspectDecisionDetailDuplicates(repaired.content);
+  if (!detailInspection.ok) {
+    return failed(
+      request,
+      'REVIEW_DECISION_DETAIL_INVALID',
+      `${detailInspection.code}: ${detailInspection.message}`,
+      resolved.taskId,
+      stageStatus
+    );
+  }
   const transformed = finalizeReviewSummaryContent(
-    artifactContent,
+    repaired.content,
     stageStatus.unresolvedFindingCounts
   );
   if (!transformed.ok) {
     return failed(request, transformed.code, transformed.message, resolved.taskId, stageStatus);
   }
-  if (!transformed.changed) {
+  if (!repaired.changed && !transformed.changed) {
     return {
       ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus),
       status: 'no-op',

@@ -199,6 +199,110 @@ test('review summary parser fails closed on partial, mixed, or duplicate summary
   for (const content of invalid) assert.equal(parseReviewSummary(content).ok, false);
 });
 
+test('review finalization removes a clearly informal duplicate before updating the summary', () => {
+  const f = domainFixture();
+  fs.appendFileSync(
+    f.artifactPath,
+    `\n### AN-1：简短复核\n\n- 简短结论\n\n### AN-1：正式详情 [needs-human-decision]\n\n- **要决定什么**：选择方案\n`
+  );
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root, randomSuffix: () => 'safe-detail-repair' }
+  );
+
+  assert.equal(result.status, 'applied');
+  const after = fs.readFileSync(f.artifactPath, 'utf8');
+  assert.doesNotMatch(after, /简短复核/);
+  assert.match(after, /正式详情 \[needs-human-decision\]/);
+  assert.match(after, /0 blockers, 0 majors, 0 minors/);
+});
+
+test('review finalization preserves anchored informal duplicates byte-for-byte', () => {
+  const f = domainFixture();
+  fs.appendFileSync(
+    f.artifactPath,
+    '\n<a id="old-review"></a>\n### AN-1：简短复核\n\n- 简短结论\n\n### AN-1：正式详情 [needs-human-decision]\n\n- **要决定什么**：选择方案\n'
+  );
+  const before = fs.readFileSync(f.artifactPath);
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root, randomSuffix: () => 'anchored-detail' }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_DECISION_DETAIL_INVALID');
+  assert.deepEqual(fs.readFileSync(f.artifactPath), before);
+});
+
+test('review finalization fails closed and preserves ambiguous decision-detail duplicates', () => {
+  const f = domainFixture();
+  fs.appendFileSync(
+    f.artifactPath,
+    `\n### AN-1：第一个详情 [needs-human-decision]\n\n- **要决定什么**：A\n\n### AN-1：第二个详情 [needs-human-decision]\n\n- **要决定什么**：B\n`
+  );
+  const before = fs.readFileSync(f.artifactPath, 'utf8');
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root, randomSuffix: () => 'ambiguous-detail' }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_DECISION_DETAIL_INVALID');
+  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
+});
+
+test('review finalization preserves substantive unmarked duplicate details byte-for-byte', () => {
+  const f = domainFixture();
+  fs.appendFileSync(
+    f.artifactPath,
+    '\n### AN-1：上一轮复核理由\n\nPrevious review rationale\nThe earlier review recorded the cause and risk for this behavior.\n\n### AN-1：正式详情 [needs-human-decision]\n\n- **要决定什么**：选择方案\n'
+  );
+  const before = fs.readFileSync(f.artifactPath);
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root, randomSuffix: () => 'substantive-detail' }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_DECISION_DETAIL_INVALID');
+  assert.deepEqual(fs.readFileSync(f.artifactPath), before);
+});
+
+test('review finalization preserves summary-marked substantive duplicates byte-for-byte', () => {
+  const f = domainFixture();
+  fs.appendFileSync(
+    f.artifactPath,
+    '\n### AN-1: Security summary\n\n- privilege escalation allows unauthorized access\n\n### AN-1: Formal decision [needs-human-decision]\n\n- **What needs a decision**: choose the safe boundary\n'
+  );
+  const before = fs.readFileSync(f.artifactPath);
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root, randomSuffix: () => 'summary-substantive-detail' }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_DECISION_DETAIL_INVALID');
+  assert.deepEqual(fs.readFileSync(f.artifactPath), before);
+});
+
+test('review finalization keeps legal tilde fenced examples intact', () => {
+  const f = domainFixture();
+  fs.appendFileSync(
+    f.artifactPath,
+    '\n~~~~md `example`\n### AN-1：示例 [needs-human-decision]\n~~~~\n\n### AN-1：正式详情 [needs-human-decision]\n\n- **要决定什么**：选择方案\n\n### AN-1：简短复核\n\n- 简短结论\n'
+  );
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root, randomSuffix: () => 'fenced-detail' }
+  );
+
+  assert.equal(result.status, 'applied');
+  const after = fs.readFileSync(f.artifactPath, 'utf8');
+  assert.match(after, /~~~~md `example`/);
+  assert.match(after, /正式详情 \[needs-human-decision\]/);
+  assert.doesNotMatch(after, /简短复核/);
+});
+
 test('review finalization preserves the artifact when atomic rename fails', () => {
   const f = domainFixture();
   const before = fs.readFileSync(f.artifactPath);
