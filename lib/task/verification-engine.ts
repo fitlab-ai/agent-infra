@@ -32,6 +32,7 @@ import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
+import { resolveDeliveryTarget } from "./delivery-target.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -1299,7 +1300,6 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
 
   const content = fs.readFileSync(resolvedArtifact.path, "utf8");
   const verdict = parseReviewVerdict(content);
-  const reviewBaseline = extractReviewBaseline(content);
   const reviewTargetHead = extractReviewTargetHead(content);
   const reviewReviewedHead = extractReviewedHead(content);
   const reviewDiffBase = extractReviewDiffBase(content);
@@ -1310,6 +1310,15 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
     return failResult("review-fact", `Unsupported review verdict '${verdict}'`);
   }
 
+  const deliveryRemote = String(task.metadata.delivery_remote || "").trim();
+  const deliveryBaseRef = String(task.metadata.delivery_base_ref || "").trim();
+  if (!deliveryRemote || !deliveryBaseRef) {
+    return failResult("review-fact", "Task delivery target is not bound; re-run task branch preparation before review-code");
+  }
+  if (!reviewTargetHead || !reviewReviewedHead || !reviewDiffBase) {
+    return failResult("review-fact", "Review fact must record target head, reviewed head, and diff base");
+  }
+
   let gitRoot;
   let head;
   let baseline;
@@ -1318,27 +1327,14 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
   try {
     gitRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
     head = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-    const reviewedRef = reviewReviewedHead || reviewBaseline;
-    if (!reviewedRef) throw new Error('reviewed head is missing');
+    const target = resolveDeliveryTarget(gitRoot, { remote: deliveryRemote, baseRef: deliveryBaseRef });
+    if (!target.ok) throw new Error(target.message);
+    const reviewedRef = reviewReviewedHead;
     baseline = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewedRef}^{commit}`], { encoding: "utf8" }).trim();
-    targetHead = reviewTargetHead
-      ? execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewTargetHead}^{commit}`], { encoding: "utf8" }).trim()
-      : null;
-    if (targetHead) {
-      const computed = execFileSync("git", ["-C", gitRoot, "merge-base", baseline, targetHead], { encoding: "utf8" }).trim();
-      diffBase = execFileSync(
-        "git",
-        ["-C", gitRoot, "rev-parse", `${reviewDiffBase || computed}^{commit}`],
-        { encoding: "utf8" }
-      ).trim();
-      if (diffBase !== computed) throw new Error('saved review diff base does not match merge-base(reviewed head, target head)');
-    } else {
-      diffBase = execFileSync(
-        "git",
-        ["-C", gitRoot, "rev-parse", `${reviewDiffBase || reviewedRef}^{commit}`],
-        { encoding: "utf8" }
-      ).trim();
-    }
+    targetHead = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewTargetHead}^{commit}`], { encoding: "utf8" }).trim();
+    const computed = execFileSync("git", ["-C", gitRoot, "merge-base", baseline, targetHead], { encoding: "utf8" }).trim();
+    diffBase = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewDiffBase}^{commit}`], { encoding: "utf8" }).trim();
+    if (diffBase !== computed) throw new Error('saved review diff base does not match merge-base(reviewed head, target head)');
   } catch {
     return blockedResult(
       "review-fact",

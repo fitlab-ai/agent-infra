@@ -28,6 +28,7 @@ function snapshot(repoRoot: string, baseline: string, diffBase?: string) {
 
 function setupRepo(tempRoot: string) {
   initIsolatedGitRepo(tempRoot);
+  write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({ delivery: { remote: "origin", baseRef: "main" } }) + "\n");
   git(tempRoot, ["config", "user.email", "codex@example.com"]);
   git(tempRoot, ["config", "user.name", "Codex"]);
   write(path.join(tempRoot, ".gitignore"), "task/\n");
@@ -45,11 +46,12 @@ function setupRepo(tempRoot: string) {
   };
 }
 
-function taskContent(lastReviewedCommit?: string) {
+function taskContent(lastReviewedCommit?: string, withDeliveryTarget = true) {
   return [
     buildTaskFrontmatter({
       id: TASK_ID,
       current_step: "code-review",
+      ...(withDeliveryTarget ? { delivery_remote: "origin", delivery_base_ref: "main" } : {}),
       ...(lastReviewedCommit ? { last_reviewed_commit: lastReviewedCommit } : {})
     }),
     "",
@@ -72,6 +74,8 @@ function artifactContent(
     "",
     "## 审查摘要",
     "",
+    `- **审查目标提交**：${diffBase}`,
+    `- **审查已检视提交**：${baseline}`,
     `- **审查基线提交**：${baseline}`,
     `- **审查差异基线**：${diffBase}`,
     `- **审查差异指纹**：${reviewedSnapshot.fingerprint}`,
@@ -132,6 +136,41 @@ test("review-fact rejects an approved report when last_reviewed_commit is missin
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /last_reviewed_commit/);
+  });
+});
+
+test("review-fact rejects a valid report when the task delivery target is missing", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-review-fact-unbound-target-", (tempRoot) => {
+    const { taskDir, baseline } = setupRepo(tempRoot);
+    write(path.join(taskDir, "task.md"), taskContent(baseline, false));
+    write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
+
+    const { result, payload } = runCheck(taskDir);
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(payload.status, "fail");
+    assert.match(payload.message, /delivery target/i);
+  });
+});
+
+test("review-fact rejects a report missing immutable target or reviewed head evidence", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-review-fact-missing-mdr-", (tempRoot) => {
+    const { taskDir, baseline } = setupRepo(tempRoot);
+    write(path.join(taskDir, "task.md"), taskContent(baseline));
+    write(path.join(taskDir, "review-code.md"), [
+      "# Code Review",
+      "",
+      "## Review Summary",
+      "",
+      `- **Reviewed Diff Base**: ${baseline}`,
+      `- **Reviewed Diff Fingerprint**: ${snapshot(tempRoot, baseline).fingerprint}`,
+      `- **Reviewed Snapshot Tree**: ${snapshot(tempRoot, baseline).tree}`,
+      "- **Overall Verdict**: Approved"
+    ].join("\n") + "\n");
+
+    const { result, payload } = runCheck(taskDir);
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(payload.status, "fail");
+    assert.match(payload.message, /target head|reviewed head|diff base/i);
   });
 });
 

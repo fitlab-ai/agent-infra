@@ -1326,7 +1326,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'demo', task: { shortIdLength: 2 }, platform: { type: null } }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'demo', task: { shortIdLength: 2 }, platform: { type: null }, delivery: { remote: 'origin', baseRef: 'main' } }));
   fs.copyFileSync(path.resolve('.agents/templates/task.md'), path.join(root, '.agents', 'templates', 'task.md'));
   fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({

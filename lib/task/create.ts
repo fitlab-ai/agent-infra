@@ -5,7 +5,7 @@ import path from 'node:path';
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
-import { validateBaseRef, validateRemote } from './delivery-target.ts';
+import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
 
 const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const;
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
@@ -246,10 +246,9 @@ function readProject(repoRoot: string): { project: string; delivery: { remote: s
   if (typeof config.project !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.project)) {
     throw new Error('TASK_CREATE_CONFIG_INVALID: project is missing or invalid');
   }
-  const remote = typeof config.delivery?.remote === 'string' ? config.delivery.remote : 'origin';
-  const baseRef = typeof config.delivery?.baseRef === 'string' ? config.delivery.baseRef : 'main';
-  if (!validateRemote(remote) || !validateBaseRef(baseRef)) throw new Error('TASK_CREATE_CONFIG_INVALID: delivery target is invalid');
-  return { project: config.project, delivery: { remote, baseRef } };
+  const delivery = readDeliveryDefaults(repoRoot);
+  if (!delivery.ok) throw new Error(`TASK_CREATE_CONFIG_INVALID: ${delivery.message}`);
+  return { project: config.project, delivery: delivery.value };
 }
 
 function assertRealDirectory(directory: string, code: string): void {

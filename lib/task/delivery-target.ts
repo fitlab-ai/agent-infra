@@ -54,13 +54,17 @@ function readDeliveryDefaults(repoRoot: string): DeliveryTargetResult {
   try {
     const configPath = path.join(repoRoot, '.agents', '.airc.json');
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-    const delivery = config.delivery && typeof config.delivery === 'object' && !Array.isArray(config.delivery)
-      ? config.delivery as Record<string, unknown>
-      : {};
+    if (!config.delivery || typeof config.delivery !== 'object' || Array.isArray(config.delivery)) {
+      return { ok: false, code: 'DELIVERY_CONFIG_INVALID', message: 'delivery config must declare remote and baseRef' };
+    }
+    const delivery = config.delivery as Record<string, unknown>;
+    if (typeof delivery.remote !== 'string' || typeof delivery.baseRef !== 'string') {
+      return { ok: false, code: 'DELIVERY_CONFIG_INVALID', message: 'delivery config must declare remote and baseRef' };
+    }
     return bindDeliveryTarget({
       defaults: {
-        remote: typeof delivery.remote === 'string' ? delivery.remote : 'origin',
-        baseRef: typeof delivery.baseRef === 'string' ? delivery.baseRef : 'main'
+        remote: delivery.remote,
+        baseRef: delivery.baseRef
       }
     });
   } catch (error) {

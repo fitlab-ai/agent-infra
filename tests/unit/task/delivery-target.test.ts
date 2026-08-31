@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 
 import {
   bindDeliveryTarget,
+  readDeliveryDefaults,
   resolveDiffBase,
   validateBaseRef,
   validateRemote
@@ -30,6 +31,19 @@ test('delivery target binding rejects changes after a task is bound', () => {
   });
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, 'DELIVERY_TARGET_CONFLICT');
+});
+
+test('delivery defaults require an explicit project configuration', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-target-config-'));
+  try {
+    fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{}\n');
+    const result = readDeliveryDefaults(root);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, 'DELIVERY_CONFIG_INVALID');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('delivery target validators reject ambiguous refs and accept nested branch refs', () => {

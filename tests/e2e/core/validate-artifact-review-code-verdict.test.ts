@@ -26,6 +26,7 @@ function git(repoRoot: string, args: string[]) {
 
 function setupReviewRepo(tempRoot: string) {
   initIsolatedGitRepo(tempRoot);
+  write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({ delivery: { remote: "origin", baseRef: "main" } }) + "\n");
   git(tempRoot, ["config", "user.email", "codex@example.com"]);
   git(tempRoot, ["config", "user.name", "Codex"]);
   write(path.join(tempRoot, ".gitignore"), `${TASK_ID}/\n`);
@@ -55,6 +56,8 @@ function buildReviewArtifact(verdictLine: string, baseline: string, reviewedFing
     "## 审查摘要",
     "",
     "- **审查者**：codex",
+    `- **审查目标提交**：${baseline}`,
+    `- **审查已检视提交**：${baseline}`,
     `- **审查基线提交**：${baseline}`,
     `- **审查差异基线**：${baseline}`,
     `- **审查差异指纹**：${reviewedFingerprint}`,
@@ -127,6 +130,8 @@ function buildReviewTask(baseline: string, overrides: Record<string, string | nu
       current_step: "code-review",
       agent_infra_version: "v0.0.0-test",
       last_reviewed_commit: baseline,
+      delivery_remote: "origin",
+      delivery_base_ref: "main",
       ...overrides
     },
     {
