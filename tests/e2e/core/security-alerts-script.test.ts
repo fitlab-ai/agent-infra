@@ -19,7 +19,8 @@ function runScript(
   script: string,
   args: string[],
   options: {
-    failApi?: boolean;
+    failReadApi?: boolean;
+    failPatchApi?: boolean;
     preflightFailure?: "auth" | "repo";
     state?: string;
   } = {}
@@ -37,7 +38,8 @@ function runScript(
       message: { text: "unsafe input" }
     }
   });
-  const failApi = options.failApi ? "1" : "0";
+  const failReadApi = options.failReadApi ? "1" : "0";
+  const failPatchApi = options.failPatchApi ? "1" : "0";
   const preflightFailure = options.preflightFailure ?? "";
 
   fs.mkdirSync(binDir, { recursive: true });
@@ -54,7 +56,7 @@ case "$1:$2" in
     exit 0
     ;;
   api:--method)
-    [ "${failApi}" = "1" ] && exit 1
+    [ "${failPatchApi}" = "1" ] && exit 1
     input_file=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
@@ -71,7 +73,7 @@ case "$1:$2" in
     exit 0
     ;;
   api:*)
-    [ "${failApi}" = "1" ] && exit 1
+    [ "${failReadApi}" = "1" ] && exit 1
     printf '%s\\n' '${response}'
     exit 0
     ;;
@@ -171,6 +173,13 @@ test("security GitHub leaf no-ops closed alerts and rejects unknown states witho
 });
 
 test("security GitHub leaf reports preflight and API failures without false success", () => {
+  const authPreflight = runScript(githubScript, ["read-dependabot", "--number", "7"], { preflightFailure: "auth" });
+  assert.equal(authPreflight.result.status, 1);
+  const authPreflightPayload = JSON.parse(authPreflight.result.stdout) as { status: string; error: { code: string } };
+  assert.equal(authPreflightPayload.status, "failed");
+  assert.equal(authPreflightPayload.error.code, "PLATFORM_NOT_AUTHENTICATED");
+  assert.doesNotMatch(authPreflight.log, /api /);
+
   const preflight = runScript(githubScript, ["read-dependabot", "--number", "7"], { preflightFailure: "repo" });
   assert.equal(preflight.result.status, 1);
   const preflightPayload = JSON.parse(preflight.result.stdout) as { status: string; error: { code: string } };
@@ -183,12 +192,22 @@ test("security GitHub leaf reports preflight and API failures without false succ
   try {
     const apiFailure = runScript(githubScript, [
       "dismiss-codescan", "--number", "7", "--reason", "false positive", "--comment-file", commentPath
-    ], { failApi: true });
+    ], { failReadApi: true });
     assert.equal(apiFailure.result.status, 2);
     const apiFailurePayload = JSON.parse(apiFailure.result.stdout) as { status: string; error: { code: string } };
     assert.equal(apiFailurePayload.status, "failed");
     assert.equal(apiFailurePayload.error.code, "SECURITY_API_FAILED");
     assert.doesNotMatch(apiFailure.log, /--method PATCH/);
+
+    const patchFailure = runScript(githubScript, [
+      "dismiss-codescan", "--number", "7", "--reason", "false positive", "--comment-file", commentPath
+    ], { failPatchApi: true });
+    assert.equal(patchFailure.result.status, 2);
+    const patchFailurePayload = JSON.parse(patchFailure.result.stdout) as { status: string; error: { code: string } };
+    assert.equal(patchFailurePayload.status, "failed");
+    assert.equal(patchFailurePayload.error.code, "SECURITY_API_FAILED");
+    assert.match(patchFailure.log, /api repos\/fitlab-ai\/agent-infra\/code-scanning\/alerts\/7\napi --method PATCH/);
+    assert.doesNotMatch(patchFailure.result.stdout, /"status":"applied"/);
   } finally {
     fs.rmSync(commentPath, { force: true });
   }
