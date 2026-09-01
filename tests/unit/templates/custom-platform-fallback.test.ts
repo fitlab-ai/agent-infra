@@ -31,13 +31,16 @@ test("custom platforms fall back to generic platform templates", async () => {
 
   const expectedTargets = [
     ".agents/rules/create-issue.md",
+    ".agents/rules/issue-fields.md",
     ".agents/rules/issue-pr-commands.md",
     ".agents/rules/issue-sync.md",
     ".agents/rules/label-milestone-setup.md",
     ".agents/rules/milestone-inference.md",
+    ".agents/rules/pr-checks-commands.md",
     ".agents/rules/pr-sync.md",
     ".agents/rules/release-commands.md",
     ".agents/rules/security-alerts.md",
+    ".agents/scripts/security-alerts.sh",
     ".agents/skills/init-labels/scripts/init-labels.sh",
     ".agents/skills/init-milestones/scripts/init-milestones.sh",
     ".git-hooks/check-large-files.cjs",
@@ -76,10 +79,12 @@ test("custom platforms fall back to generic platform templates", async () => {
 
     [
       "create-issue",
+      "issue-fields",
       "issue-pr-commands",
       "issue-sync",
       "label-milestone-setup",
       "milestone-inference",
+      "pr-checks-commands",
       "pr-sync",
       "release-commands",
       "security-alerts"
@@ -99,6 +104,7 @@ test("custom platforms fall back to generic platform templates", async () => {
     [
       ".agents/skills/init-labels/scripts/init-labels.sh",
       ".agents/skills/init-milestones/scripts/init-milestones.sh",
+      ".agents/scripts/security-alerts.sh",
       ".git-hooks/check-large-files.cjs",
       ".git-hooks/check-version-format.sh"
     ].forEach((target) => {

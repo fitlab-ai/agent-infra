@@ -2,30 +2,39 @@
 
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-The model writes the semantic reviewer summary. Typed core owns canonical artifact selection, the marker, current HEAD, paginated comment lookup, and create/update/no-op reconciliation.
+The model writes the semantic reviewer summary. Typed core owns canonical artifact selection, marker/HEAD wrapping, paginated comment lookup, and reconciliation.
 
-## Inputs
+## Three-Layer Isolation
+
+- `sync-pr:{task-id}:summary` (`platform-pr summary-sync`) is an updatable reviewer summary; it is neither a process copy nor a formal Review.
+- The full `pr-review*` process copy lives in the Issue artifact comment (`platform-comment sync --kind artifact`) and is restored by `restore-task` under its Issue-only contract.
+- A formal PR Review (`platform-pr-review publish`) is the only formal conclusion carrier published to the PR, bound to the reviewed head SHA, and includes conclusion, findings, receipt, and the Issue artifact link.
+
+The three never cross: a regular PR comment does not carry the full process copy; an Issue artifact comment is not treated as a formal Review; a summary is not presented as a formal Review.
 
 ```bash
 agent-infra-internal platform-pr summary-context {task-id}
-```
 
-Use only the returned latest canonical `plan*`, `review-plan*`, `code*`, `review-code*`, and `manual-validation*` for lifecycle claims. The summary covers scope, tests, review history, and exactly one manual-validation state. It also includes a `### PR Code Changes` section based on authoritative base/head facts from `platform-pr inspect` and the complete `git diff --find-renames --numstat base...head`, with reconciled runtime, test, skill/rule, template, documentation, and other categories plus rename, mechanical-mirror, and unnecessary-change analysis.
-
-## Publish
-
-Write only the summary body to a file, without marker or SHA:
-
-```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
   --agent {standard-agent-token} --body-file {summary-body-file}
 ```
 
-The core wraps `<!-- sync-pr:{task-id}:summary -->` and current `<!-- last-commit: ... -->`, then creates, updates in place, or returns no-op. Duplicate markers fail deterministically. Callers never assemble shell/heredoc comment commands.
+Use only canonical inputs returned by the context command. Write the plain body without marker or SHA. The core owns `<!-- sync-pr:{task-id}:summary -->`, current `<!-- last-commit: ... -->`, create/update/no-op behavior, and duplicate-marker conflicts. Summary failure never rolls back a PR or commit.
 
-`create-pr` does not roll back the PR on summary failure; `commit` records a warning without rolling back; manual validation refreshes after its canonical artifact is written.
+The canonical comment envelope produced by the core is:
 
-For a linked task, the caller records a structured warning:
+```markdown
+<!-- sync-pr:{task-id}:summary -->
+<!-- last-commit: {git-head-sha} -->
+## Review Summary
+{manual-validation-section}
+### Key Technical Decisions
+### Review History
+### Test Results
+### PR Code Changes
+```
+
+Canonical inputs include `manual-validation.md`. The manual-validation section is one of `### ✅ Manual Validation Passed`, `### ⚠️ Manual Verification Required`, or `### ✅ No Manual Verification Needed`; `complete-manual-validation` refreshes the same summary in place. The PR code-change section uses authoritative base/head facts from `platform-pr inspect` and the complete `git diff --find-renames --numstat base...head`, reconciles runtime, test, skill/rule, template, documentation, and other categories, and explains renames, mechanical mirrors, and potentially unnecessary changes.
 
 ```bash
 agent-infra-internal task-warning {task-id} add --step {step} --severity WARNING \

@@ -15,7 +15,7 @@ description: >
 
 确认以下条件成立：
 - 执行前先读取 `.agents/rules/label-milestone-setup.md`
-- 按其中的认证命令验证平台访问能力
+- 请求的 milestone 参数已准备完成
 
 如果任一条件失败，停止并输出对应错误。
 
@@ -31,7 +31,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 - 创建并清理临时工作目录
 - 检测是否传入 `--history`
 - 扫描所有 `v*` Git tag，按 SemVer precedence 选择最高合法版本；没有合法版本时使用兼容默认值 `0.1.0`，且不读取任何生态 manifest
-- 使用平台对应的 milestones 查询命令读取当前里程碑
+- 由 provider 叶子读取并写入当前里程碑
 - 构建目标里程碑集合，并且只创建缺失标题
 - 输出最终执行摘要
 
@@ -78,9 +78,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 
 ## 错误处理
 
-- 未找到平台 CLI：提示 "the platform CLI is not installed"
-- 认证失败：提示 "the platform CLI is not authenticated"
-- 仓库访问失败：提示 "Unable to access the current repository with the platform CLI"
+- provider 能力、认证或仓库访问失败：如实报告脚本的非零退出状态和诊断输出；不得声称远端已变更。
 - 版本解析失败：提示 "Unable to determine current version baseline"
 - `--history` 模式下未找到合法 SemVer `v*` git tags：提示 "No valid SemVer history tags found matching v*; only standard milestones will be created"
 - 权限不足：提示 "No permission to manage milestones in this repository"

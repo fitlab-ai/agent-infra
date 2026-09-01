@@ -24,4 +24,4 @@ agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token
 
 PR 只复用关联 Issue 的具体 milestone；该 PR 资源写入属于 09/10，不在 `platform-issue` 中实现。
 
-调用方不得重新实现 milestone 列表、排序、分支祖先或 `gh issue edit` 逻辑。
+调用方不得重新实现 milestone 列表、排序、分支祖先或平台写入逻辑。

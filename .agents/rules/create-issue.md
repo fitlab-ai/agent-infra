@@ -24,4 +24,4 @@ agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token
 - `blocked`：exit 2；认证、网络或创建 outcome 不确定，调用方保留远端 identity 证据并停止盲目重试。
 - 已绑定有效 Issue 时只验证绑定并返回 no-op，绝不重复创建。
 
-自定义或空平台返回 no-op/degraded；调用方不得回退到直接 `gh issue` 或 GraphQL 编排。
+自定义或空平台返回 no-op/degraded；调用方不得回退到直接平台 CLI 或 GraphQL 编排。

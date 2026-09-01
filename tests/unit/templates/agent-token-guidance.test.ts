@@ -31,12 +31,12 @@ const consumerFiles = [
   ].flatMap((rule) => [
     `.agents/rules/${rule}.md`,
     ...({
-      'create-issue': ['templates/.agents/rules/create-issue.github.en.md', 'templates/.agents/rules/create-issue.github.zh-CN.md'],
-      'issue-fields': ['templates/.agents/rules/issue-fields.github.en.md', 'templates/.agents/rules/issue-fields.github.zh-CN.md'],
-      'issue-pr-commands': ['templates/.agents/rules/issue-pr-commands.en.md', 'templates/.agents/rules/issue-pr-commands.zh-CN.md', 'templates/.agents/rules/issue-pr-commands.github.en.md', 'templates/.agents/rules/issue-pr-commands.github.zh-CN.md'],
-      'issue-sync': ['templates/.agents/rules/issue-sync.github.en.md', 'templates/.agents/rules/issue-sync.github.zh-CN.md'],
-      'milestone-inference': ['templates/.agents/rules/milestone-inference.github.en.md', 'templates/.agents/rules/milestone-inference.github.zh-CN.md'],
-      'pr-sync': ['templates/.agents/rules/pr-sync.en.md', 'templates/.agents/rules/pr-sync.zh-CN.md', 'templates/.agents/rules/pr-sync.github.en.md', 'templates/.agents/rules/pr-sync.github.zh-CN.md']
+      'create-issue': ['templates/.agents/rules/create-issue.en.md', 'templates/.agents/rules/create-issue.zh-CN.md'],
+      'issue-fields': ['templates/.agents/rules/issue-fields.en.md', 'templates/.agents/rules/issue-fields.zh-CN.md'],
+      'issue-pr-commands': ['templates/.agents/rules/issue-pr-commands.en.md', 'templates/.agents/rules/issue-pr-commands.zh-CN.md'],
+      'issue-sync': ['templates/.agents/rules/issue-sync.en.md', 'templates/.agents/rules/issue-sync.zh-CN.md'],
+      'milestone-inference': ['templates/.agents/rules/milestone-inference.en.md', 'templates/.agents/rules/milestone-inference.zh-CN.md'],
+      'pr-sync': ['templates/.agents/rules/pr-sync.en.md', 'templates/.agents/rules/pr-sync.zh-CN.md']
     } as Record<string, string[]>)[rule]!
   ])
 ];

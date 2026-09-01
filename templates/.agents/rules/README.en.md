@@ -32,8 +32,8 @@ so you can quickly find "which ones to read" without opening each file.
 - [`human-decision-context.md`](human-decision-context.md) — Self-contained context and canonical structure for new human-decision details.
 - [`task-short-id.md`](task-short-id.md) — Resolution, allocation and lifecycle of bare-number short ids.
 - [`milestone-inference.md`](milestone-inference.md) — Milestone inference for create-task / code-task / create-pr.
-- [`label-milestone-setup.md`](label-milestone-setup.md) — Platform commands to initialize labels / milestones.
-- [`security-alerts.md`](security-alerts.md) — Commands to import / close Dependabot and Code Scanning alerts.
+- [`label-milestone-setup.md`](label-milestone-setup.md) — Shared entry points to initialize labels / milestones.
+- [`security-alerts.md`](security-alerts.md) — Shared entry point to import / close dependency and code-scanning alerts.
 
 ## Commit & Release
 

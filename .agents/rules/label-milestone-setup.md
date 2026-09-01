@@ -1,60 +1,18 @@
-# Label / Milestone 平台命令
+# Label 和 Milestone 初始化
 
-在初始化 label、初始化 milestone，或发布流程需要调整 milestone 前先读取本文件。
+在初始化 label、milestone，或在发布工作中修改 milestone 元数据前，先阅读本规则。
 
-## 认证与仓库信息
+## 入口
 
-```bash
-gh auth token
-gh repo view --json nameWithOwner --jq '.nameWithOwner'
+SKILL 应调用共享脚本，不得自行拼装 provider 命令：
+
+```text
+bash .agents/skills/init-labels/scripts/init-labels.sh [--cleanup-stale-in]
+bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 ```
 
-## Label 操作
+`init-labels.sh` 读取仓库的 `labels.in` 配置，创建或更新声明的 `in:` label，并保留无关 label。`--cleanup-stale-in` 具有破坏性，只有在得到明确确认后才能传入；它会删除不再声明的过期 `in:` label。
 
-列出现有 label：
+`init-milestones.sh` 负责 milestone 推断和 provider 写入路径。调用方应原样传递请求参数，不得重新实现 milestone 发现、排序、分支祖先判断或写入逻辑。
 
-```bash
-gh label list --limit 200 --json name --jq '.[].name'
-```
-
-创建或更新 label：
-
-```bash
-gh label create "{name}" --color "{color}" --description "{description}" --force
-```
-
-## Milestone 操作
-
-列出 milestone：
-
-```bash
-gh api "repos/$repo/milestones?state=all" --paginate
-```
-
-创建 milestone：
-
-```bash
-gh api "repos/$repo/milestones" -f title="{title}" -f description="{description}" -f state="{state}"
-```
-
-更新 milestone：
-
-```bash
-gh api "repos/$repo/milestones/{number}" -X PATCH -f state="{state}" -f description="{description}"
-```
-
-## 错误提示模板
-
-GitHub 初始化脚本失败时使用以下标准提示：
-
-| 条件 | 提示 |
-|---|---|
-| CLI 缺失 | GitHub CLI (`gh`) is not installed |
-| 认证失败 | `GitHub CLI is not authenticated` |
-| API 限流 | `GitHub API rate limit reached, please retry later` |
-
-## 约束
-
-- label 以名称作为幂等键
-- milestone 以标题作为幂等键，必要时再结合编号更新状态
-- 失败时按调用方规则决定停止或跳过
+两个脚本都返回稳定状态。成功的 no-op 仍算成功；degraded 结果必须如实报告，不能声称远端元数据已变更。失败或取消的操作不得报告为已完成。
