@@ -78,7 +78,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 
 ## 错误处理
 
-- provider 能力、认证或仓库访问失败：如实报告脚本返回的结构化错误。
+- provider 能力、认证或仓库访问失败：如实报告脚本的非零退出状态和诊断输出；不得声称远端已变更。
 - 版本解析失败：提示 "Unable to determine current version baseline"
 - `--history` 模式下未找到合法 SemVer `v*` git tags：提示 "No valid SemVer history tags found matching v*; only standard milestones will be created"
 - 权限不足：提示 "No permission to manage milestones in this repository"

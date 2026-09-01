@@ -78,7 +78,7 @@ Next step - initialize labels (optional):
 
 ## Error Handling
 
-- Provider capability, authentication, or repository access failure: report the script's structured error.
+- Provider capability, authentication, or repository access failure: report the script's non-zero exit status and diagnostic output; do not claim remote changes.
 - Version detection failed: prompt "Unable to determine current version baseline"
 - No valid SemVer `v*` tags found in `--history` mode: prompt "No valid SemVer history tags found matching v*; only standard milestones will be created"
 - Permission error: prompt "No permission to manage milestones in this repository"

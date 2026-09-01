@@ -101,6 +101,6 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 ## 错误处理
 
 - provider 能力不可用：如实报告脚本的 `degraded` 或 `no-op` 结果，不得声称远端已变更。
-- provider 认证或仓库访问失败：如实报告脚本返回的结构化错误。
+- provider 认证或仓库访问失败：如实报告脚本的非零退出状态和诊断输出；不得声称远端已变更。
 - 权限不足：提示 "No permission to manage labels in this repository"
 - API 限流：提示 "platform API rate limit reached, please retry later"

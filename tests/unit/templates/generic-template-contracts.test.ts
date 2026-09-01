@@ -42,11 +42,15 @@ function contractEntries(content: string, name: string): Record<string, string> 
 
 function writeFakeGh(binDir: string): void {
   const fakeGh = path.join(binDir, "gh");
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(fakeGh, `#!/bin/sh
+fs.mkdirSync(binDir, { recursive: true });
+fs.writeFileSync(fakeGh, `#!/bin/sh
 case "$1:$2" in
-  auth:token) exit 0 ;;
+  auth:token)
+    [ "\${FAKE_GH_FAILURE:-}" = "auth" ] && exit 1
+    exit 0
+    ;;
   repo:view)
+    [ "\${FAKE_GH_FAILURE:-}" = "repo" ] && exit 1
     case " $* " in
       *" --jq "*) printf '%s\\n' 'example/project' ;;
       *) printf '%s\\n' '{"nameWithOwner":"example/project"}' ;;
@@ -128,6 +132,22 @@ function runMilestoneScript(
       encoding: "utf8",
       env
     });
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+}
+
+function runMilestonePreflight(failure: "auth" | "repo") {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "milestone-preflight-"));
+  const binDir = path.join(repoDir, "bin");
+  const env = gitSafeEnv({
+    FAKE_GH_FAILURE: failure,
+    PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+  });
+
+  try {
+    writeFakeGh(binDir);
+    return spawnSync("sh", [milestoneScript], { cwd: repoDir, encoding: "utf8", env });
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
@@ -293,4 +313,16 @@ test("milestone history mode derives milestones only from valid SemVer tags", on
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /^Created milestone: 1\.2\.3 \(closed\)$/m);
   assert.match(result.stdout, /^Skip existing milestone: 1\.2\.x$/m);
+});
+
+test("milestone GitHub leaf reports preflight failures with diagnostic output", () => {
+  for (const [failure, message] of [
+    ["auth", "GitHub CLI is not authenticated"],
+    ["repo", "Unable to access the current repository with gh"]
+  ] as const) {
+    const result = runMilestonePreflight(failure);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, new RegExp(message));
+  }
 });

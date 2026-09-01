@@ -86,6 +86,8 @@ for (const key of Object.keys(mapping).sort()) {
 }
 NODE
 
+cut -f1 "$tmpdir/in.tsv" > "$tmpdir/in-names.txt"
+
 cat "$tmpdir/in.tsv" >> "$tmpdir/common.tsv"
 
 while IFS="$(printf '\t')" read -r name color description; do
@@ -97,7 +99,7 @@ if [ "$cleanup_stale_in" = true ]; then
   while IFS= read -r name; do
     case "$name" in
       in:*)
-        if ! grep -Fqx "$name" "$tmpdir/in.tsv"; then
+        if ! grep -Fqx "$name" "$tmpdir/in-names.txt"; then
           gh label delete "$name" --yes
         fi
         ;;

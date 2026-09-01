@@ -101,6 +101,6 @@ Next step - initialize milestones (optional):
 ## Error Handling
 
 - Provider capability unavailable: report the script's `degraded` or `no-op` result without claiming remote changes.
-- Provider authentication or repository access failure: report the script's structured error.
+- Provider authentication or repository access failure: report the script's non-zero exit status and diagnostic output; do not claim remote changes.
 - Permission error: prompt "No permission to manage labels in this repository"
 - API rate limit: prompt "platform API rate limit reached, please retry later"
