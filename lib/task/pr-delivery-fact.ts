@@ -151,6 +151,9 @@ function parseFact(value: unknown): PrDeliveryFact {
   exactKeys(value.provenance, ['establishedBy'], 'provenance');
   const provenance: readonly PrDeliveryProvenance[] = ['create-post', 'reuse', 'explicit-bind', 'external-unique', 'external-explicit', 'legacy-migrated'];
   if (!provenance.includes(value.provenance.establishedBy as PrDeliveryProvenance)) throw factError('provenance.establishedBy is invalid');
+  if (value.provenance.establishedBy !== provenanceForSource(value.binding.source as PrDeliveryBindingSource)) {
+    throw factError('binding.source and provenance.establishedBy do not match');
+  }
   return {
     version: 1,
     state: 'bound',

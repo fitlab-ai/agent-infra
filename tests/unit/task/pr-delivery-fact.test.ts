@@ -46,6 +46,25 @@ test('PR delivery fact rejects state-specific omissions and call-level fields', 
   assert.throws(() => decodePrDeliveryFact(JSON.stringify({ ...valid, createdByCurrentOperation: true })), /PR_DELIVERY_FACT_INVALID/);
   assert.throws(() => decodePrDeliveryFact(JSON.stringify({ version: 1, state: 'skipped', reason: 'initial' })), /PR_DELIVERY_FACT_INVALID/);
   assert.throws(() => decodePrDeliveryFact(JSON.stringify({ version: 2, state: 'unbound', reason: 'initial' })), /PR_DELIVERY_FACT_INVALID/);
+  assert.throws(() => decodePrDeliveryFact(JSON.stringify({
+    ...valid,
+    provenance: { establishedBy: 'create-post' }
+  })), /PR_DELIVERY_FACT_INVALID/);
+});
+
+test('each binding source has its matching durable provenance', () => {
+  for (const source of ['created', 'reused', 'explicit-bind', 'external-unique', 'external-explicit', 'legacy-migrated'] as const) {
+    const fact = buildBoundFact({
+      identity,
+      source,
+      verifiedAt: '2026-09-01T00:00:00.000Z',
+      remoteState: 'open'
+    });
+    const decoded = decodePrDeliveryFact(encodePrDeliveryFact(fact));
+    assert.equal(decoded.state, 'bound');
+    if (decoded.state !== 'bound') continue;
+    assert.equal(decoded.provenance.establishedBy, source === 'created' ? 'create-post' : source === 'reused' ? 'reuse' : source);
+  }
 });
 
 test('fact accessor distinguishes missing, valid, and invalid frontmatter values', () => {

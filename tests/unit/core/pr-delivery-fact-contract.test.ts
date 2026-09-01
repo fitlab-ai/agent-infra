@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { parse as parseYaml } from "yaml";
 
 import { read } from "../../helpers.ts";
 import { decodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
@@ -26,9 +27,16 @@ for (const workflowPath of [
   ".agents/workflows/bug-fix.yaml",
   ".agents/workflows/refactoring.yaml"
 ]) {
-  test(`${workflowPath} documents fact-state PR routing`, () => {
-    const content = read(workflowPath);
-    assert.match(content, /prFlow/);
-    assert.match(content, /pr_delivery_fact\.state/);
+  const document = parseYaml(read(workflowPath)) as {
+    steps?: Array<{ name?: unknown; tasks?: unknown; pr_tasks?: unknown }>;
+  };
+  const delivery = document.steps?.find((step) => step.name === "delivery");
+
+  test(`${workflowPath} declares a structured delivery step`, () => {
+    assert.ok(delivery);
+    assert.ok(Array.isArray(delivery!.tasks));
+    assert.ok(Array.isArray(delivery!.pr_tasks));
+    assert.ok(delivery!.tasks!.length > 0);
+    assert.ok(delivery!.pr_tasks!.length > 0);
   });
 }

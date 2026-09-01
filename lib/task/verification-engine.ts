@@ -526,6 +526,7 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
     const pullRequest = inspected.pullRequest;
     const repository = inspected.platform.repository?.toLowerCase() || '';
     const taskBranch = String(task.metadata.branch || '').trim();
+    const deliveryBaseRef = String(task.metadata.delivery_base_ref || projectConfig.delivery?.baseRef || '').trim();
     if (inspected.status !== 'no-op' || !pullRequest || pullRequest.number !== prNumber) {
       return failResult('required-pr-delivery', 'Bound pull request identity could not be verified');
     }
@@ -534,6 +535,7 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
       || pullRequest.repository.toLowerCase() !== repository
       || pullRequest.base.repository.toLowerCase() !== repository
       || (taskBranch && pullRequest.head.ref !== taskBranch)
+      || (deliveryBaseRef && pullRequest.base.ref !== deliveryBaseRef)
     ) {
       return failResult('required-pr-delivery', 'Bound pull request identity does not match the task');
     }
