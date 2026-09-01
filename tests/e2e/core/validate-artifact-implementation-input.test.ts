@@ -55,6 +55,24 @@ test('implementation input gate accepts matching action, report, and task row', 
   }
 });
 
+test('implementation input gate accepts a consumed input on a fix action', () => {
+  const f = fixture();
+  try {
+    const taskPath = path.join(f.taskDir, 'task.md');
+    const task = fs.readFileSync(taskPath, 'utf8').replace(
+      '**Code Task (Round 2, decision II-1)** by codex — Code implemented, 1 files modified, 4 tests passed → code-r2.md',
+      '**Code Task (Round 2, fix for review-code.md)** by codex — Fixed 0 blockers, 1 major, 0 minor issues → code-r2.md; consumed decision II-1'
+    );
+    fs.writeFileSync(taskPath, task);
+    const reportPath = path.join(f.taskDir, 'code-r2.md');
+    fs.writeFileSync(reportPath, fs.readFileSync(reportPath, 'utf8').replace('- **模式**：decision', '- **模式**：fix'));
+    const result = run(f.taskDir);
+    assert.equal(result.status, 'pass');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('implementation input gate rejects identity and consumption mismatches', () => {
   for (const replacement of [
     ['`II-1`', '`II-2`'],

@@ -704,7 +704,7 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const logSection = getSectionContent(task.content, ["活动日志", "Activity Log"]);
   const doneActions = logSection.split(/\r?\n/).flatMap((line: any) => {
     const match = line.trim().match(ACTIVITY_LOG_PATTERN);
-    return match && !ACTIVITY_LOG_STARTED_RE.test(match[2]) ? [match[2]] : [];
+    return match && !ACTIVITY_LOG_STARTED_RE.test(match[2]) ? [`${match[2]} — ${match[4]}`] : [];
   });
   const latestAction = doneActions.at(-1) || "";
   const actionDecision =
