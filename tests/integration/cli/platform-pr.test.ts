@@ -275,6 +275,28 @@ test('platform-pr bind rejects mismatched task and delivery identities before wr
   }
 });
 
+test('platform-pr bind normalizes a potential merge commit on an open PR', () => {
+  const f = createFixture();
+  try {
+    const pr = JSON.parse(fs.readFileSync(f.pr, 'utf8')) as Record<string, unknown>;
+    pr.merge_commit_sha = 'p'.repeat(40);
+    fs.writeFileSync(f.pr, JSON.stringify(pr));
+    const output = run(['bind', f.taskId, '--agent', 'codex', '--pr', '1'], { cwd: f.root, env: f.env });
+    assert.equal(output.status, 0, output.stderr || output.stdout);
+    assert.equal(JSON.parse(output.stdout).status, 'applied');
+    const fact = readPrDeliveryFact(parseTypedTaskFrontmatter(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8')));
+    assert.equal(fact.status, 'valid');
+    assert.equal(fact.fact.state, 'bound');
+    if (fact.fact.state === 'bound') {
+      assert.equal(fact.fact.binding.remoteState, 'open');
+      assert.equal(fact.fact.binding.mergedAt, null);
+      assert.equal(fact.fact.binding.mergeCommitSha, null);
+    }
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('platform-pr external binding rechecks the selected identity before writing', () => {
   const f = externalFixture('---\nid: {task-id}\nstatus: active\nissue_number: 767\n---\n\n# Task\n\n## Activity Log\n');
   try {

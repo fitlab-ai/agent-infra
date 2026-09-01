@@ -794,8 +794,8 @@ function boundFactFor(
     issueNumber,
     verifiedAt: factTimestamp(verifiedAt),
     remoteState: pullRequest.state,
-    mergedAt: pullRequest.mergedAt,
-    mergeCommitSha: pullRequest.mergeCommitSha
+    mergedAt: pullRequest.state === 'closed' ? pullRequest.mergedAt : null,
+    mergeCommitSha: pullRequest.state === 'closed' ? pullRequest.mergeCommitSha : null
   });
 }
 
