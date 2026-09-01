@@ -57,7 +57,7 @@ test('platform-pr summary-sync accepts the commit path no-op result before task 
 });
 
 test('platform-pr migrate-fact atomically replaces legacy PR fields', () => {
-  const f = externalFixture('---\nid: {task-id}\nstatus: active\npr_number: 771\npr_status: created\n---\n\n# Task\n\n## Activity Log\n');
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\npr_number: 771\npr_status: created\n---\n\n# Task\n\n## Activity Log\n', { legacy: true });
   try {
     const output = run(['migrate-fact', f.taskId, '--state', 'unbound'], { cwd: f.root, env: f.env });
     assert.equal(output.status, 0, output.stderr || output.stdout);
@@ -72,7 +72,7 @@ test('platform-pr migrate-fact atomically replaces legacy PR fields', () => {
   }
 });
 
-function externalFixture(taskContent: string) {
+function externalFixture(taskContent: string, options: { legacy?: boolean } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-external-'));
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
@@ -81,7 +81,7 @@ function externalFixture(taskContent: string) {
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
   const renderedTask = taskContent.replaceAll('{task-id}', taskId);
-  const fact = renderedTask.includes('pr_number:') || renderedTask.includes('pr_status:') ? '' : `\n${factLine(buildUnboundFact())}`;
+  const fact = options.legacy ? '' : `\n${factLine(buildUnboundFact())}`;
   const taskWithContract = renderedTask
     .replace('\n---\n', '\nagent_infra_version: v0.9.11-alpha.0\n---\n')
     .replace('\nagent_infra_version:', `${fact}\nagent_infra_version:`)
@@ -278,6 +278,7 @@ test('platform-pr bind rejects mismatched task and delivery identities before wr
 test('platform-pr external binding rechecks the selected identity before writing', () => {
   const f = externalFixture('---\nid: {task-id}\nstatus: active\nissue_number: 767\n---\n\n# Task\n\n## Activity Log\n');
   try {
+    const before = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
     const selected = JSON.parse(fs.readFileSync(f.selectedPr, 'utf8')) as Record<string, unknown>;
     selected.head = { ref: 'changed-after-selection', sha: 'a'.repeat(40), repo: { full_name: 'contributor/agent-infra' } };
     fs.writeFileSync(f.selectedPr, JSON.stringify(selected));
@@ -287,10 +288,33 @@ test('platform-pr external binding rechecks the selected identity before writing
     const fact = readPrDeliveryFact(parseTypedTaskFrontmatter(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8')));
     assert.equal(fact.status, 'valid');
     assert.equal(fact.fact.state, 'unbound');
+    assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), before);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+for (const [label, mutation] of [
+  ['unmerged', { state: 'open', merged_at: null, merge_commit_sha: null }],
+  ['changed merge commit', { merge_commit_sha: 'd'.repeat(40) }]
+] as const) {
+  test(`platform-pr external binding rejects ${label} merged evidence before writing`, () => {
+    const f = externalFixture('---\nid: {task-id}\nstatus: active\nissue_number: 767\n---\n\n# Task\n\n## Activity Log\n');
+    try {
+      const taskPath = path.join(f.taskDir, 'task.md');
+      const before = fs.readFileSync(taskPath, 'utf8');
+      const selected = JSON.parse(fs.readFileSync(f.selectedPr, 'utf8')) as Record<string, unknown>;
+      Object.assign(selected, mutation);
+      fs.writeFileSync(f.selectedPr, JSON.stringify(selected));
+      const output = run(['resolve-external', f.taskId, '--agent', 'codex'], { cwd: f.root, env: f.env });
+      assert.equal(output.status, 1, output.stderr || output.stdout);
+      assert.equal(JSON.parse(output.stdout).error.code, 'PR_EXTERNAL_IDENTITY_MISMATCH');
+      assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+}
 
 test('platform-pr migration preserves an existing current fact on conflict', () => {
   const current = createFixture(buildBoundFact({

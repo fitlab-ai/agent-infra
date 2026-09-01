@@ -60,7 +60,7 @@ test('required PR delivery gates on normalized merged state and platform availab
     spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const dir = path.join(root, '.agents', 'workspace', 'active', id);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, prFlow: 'required' }));
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' }, prFlow: 'required' }));
     writeJson(path.join(root, '.agents/skills/complete-task/config/verify.json'), {
       skill: 'complete-task', checks: { 'required-pr-delivery': {} }
     });
@@ -104,6 +104,15 @@ test('required PR delivery gates on normalized merged state and platform availab
     assert.equal(merged.status, 0, merged.stderr || merged.stdout);
     assert.equal(JSON.parse(merged.stdout).invocations[0].status, 'pass');
 
+    const taskPath = path.join(dir, 'task.md');
+    const beforeMismatch = fs.readFileSync(taskPath, 'utf8');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'release' }, prFlow: 'required' }));
+    const mismatchedBase = run();
+    assert.equal(mismatchedBase.status, 1, mismatchedBase.stderr || mismatchedBase.stdout);
+    assert.equal(JSON.parse(mismatchedBase.stdout).invocations[0].status, 'fail');
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), beforeMismatch);
+
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' }, prFlow: 'required' }));
     const unavailable = run({ GH_FAKE_FAIL: 'network unavailable' });
     assert.equal(unavailable.status, 2);
     assert.equal(JSON.parse(unavailable.stdout).invocations[0].status, 'blocked');

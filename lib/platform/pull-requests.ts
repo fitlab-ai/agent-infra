@@ -269,6 +269,7 @@ function selectExternalPullRequest(
   const eligible = unique.filter((candidate) =>
     repositoryKey(candidate.repository) === wantedRepository &&
     repositoryKey(candidate.base.repository) === wantedRepository &&
+    candidate.state === 'closed' &&
     Boolean(candidate.mergedAt && candidate.mergeCommitSha)
   );
   if (explicitPrNumber !== null) {
@@ -505,6 +506,26 @@ function validateWriterIdentity(
 
 function sameDeliveryIdentity(left: PullRequestSnapshot, right: PullRequestSnapshot): boolean {
   return JSON.stringify(deliveryIdentity(left)) === JSON.stringify(deliveryIdentity(right));
+}
+
+function validateExternalMergedEvidence(
+  initial: PullRequestSnapshot,
+  rechecked: PullRequestSnapshot
+): { ok: true } | { ok: false; error: { code: string; message: string; retryable: boolean } } {
+  if (
+    initial.state !== 'closed'
+    || !initial.mergedAt
+    || !initial.mergeCommitSha
+    || rechecked.state !== 'closed'
+    || !rechecked.mergedAt
+    || !rechecked.mergeCommitSha
+    || initial.mergedAt !== rechecked.mergedAt
+    || initial.mergeCommitSha !== rechecked.mergeCommitSha
+  ) return {
+    ok: false,
+    error: { code: 'PR_EXTERNAL_IDENTITY_MISMATCH', message: 'Selected pull request merged evidence changed before task binding', retryable: false }
+  };
+  return { ok: true };
 }
 
 function resolvedContext(taskRef: string, options: InspectionOptions) {
@@ -975,6 +996,16 @@ function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOpt
     platform: base.context.platform, capabilities: base.context.capabilities,
     pullRequest: rechecked.value,
     error: { code: 'PR_EXTERNAL_IDENTITY_MISMATCH', message: 'Selected pull request identity changed before task binding', retryable: false }
+  }), { candidates: selected.candidates, eligible: selected.eligible, selected: rechecked.value });
+  const finalIdentity = validateWriterIdentity(base, rechecked.value, { errorCode: 'PR_EXTERNAL_IDENTITY_MISMATCH' });
+  if (!finalIdentity.ok) return externalResult(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    platform: base.context.platform, capabilities: base.context.capabilities,
+    pullRequest: rechecked.value, error: finalIdentity.error
+  }), { candidates: selected.candidates, eligible: selected.eligible, selected: rechecked.value });
+  const finalEvidence = validateExternalMergedEvidence(selected.selected, rechecked.value);
+  if (!finalEvidence.ok) return externalResult(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    platform: base.context.platform, capabilities: base.context.capabilities,
+    pullRequest: rechecked.value, error: finalEvidence.error
   }), { candidates: selected.candidates, eligible: selected.eligible, selected: rechecked.value });
   const selectedPullRequest = rechecked.value;
   const note = externalEvidenceNote(base.issueNumber, selected.source, selectedPullRequest);

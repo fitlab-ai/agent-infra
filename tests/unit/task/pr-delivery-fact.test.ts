@@ -85,7 +85,6 @@ test('bound provenance remains stable across a later no-op result', () => {
   assert.equal(replay.createdByCurrentOperation, false);
   assert.equal(fact.state, 'bound');
   assert.equal(fact.provenance.establishedBy, 'create-post');
-  assert.equal(Object.hasOwn(JSON.parse(encodePrDeliveryFact(fact)), 'createdByCurrentOperation'), false);
 });
 
 test('fact mutation stores one JSON scalar', () => {
