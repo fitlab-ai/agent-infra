@@ -51,6 +51,16 @@ test('only successfully closed fences protect their contents', () => {
   ]);
 });
 
+test('does not protect content after an invalid backtick fence opener', () => {
+  assert.deepEqual(locations('``` info ` bad\n@2x\n```'), [
+    { kind: 'non-user-token', line: 2, column: 1, token: '@2x' }
+  ]);
+  assert.deepEqual(locations('``` info ` bad\n[x](/workspace/file.md)\n```'), [
+    { kind: 'local-link', line: 2, column: 1, token: '/workspace/file.md' }
+  ]);
+  assert.deepEqual(locations('~~~ info ` allowed\n@2x\n~~~'), []);
+});
+
 test('rejects canonical artifact and local path destinations but keeps valid links', () => {
   const content = [
     '[artifact](analysis.md)',
@@ -66,6 +76,32 @@ test('rejects canonical artifact and local path destinations but keeps valid lin
     { kind: 'local-link', line: 2, column: 1, token: '/workspace/file.md' },
     { kind: 'local-link', line: 3, column: 1, token: '/Users/alice/file.md' },
     { kind: 'local-link', line: 4, column: 1, token: 'C:\\Temp\\file.md' }
+  ]);
+});
+
+test('keeps non-user tokens inside valid URL contexts unchanged', () => {
+  const content = [
+    '[asset](https://example.com/@2x)',
+    'https://example.com/@2x',
+    '<a href="https://example.com/@2x">external</a>',
+    '[https://example.com/@2x](#anchor)'
+  ].join('\n');
+  assert.equal(formatKnownNonUserTokens(content), content);
+  assert.deepEqual(locations(content), []);
+});
+
+test('parses quoted HTML attributes and checks every local destination', () => {
+  const quotedAttribute = '<a title="x>y" href="/workspace/file.md">workspace</a>';
+  const multipleAttributes = '<img href="https://example.com/x" src="/workspace/file.png">';
+  assert.deepEqual(locations(quotedAttribute), [
+    { kind: 'local-link', line: 1, column: quotedAttribute.indexOf('href') + 1, token: '/workspace/file.md' }
+  ]);
+  assert.deepEqual(locations(multipleAttributes), [
+    { kind: 'local-link', line: 1, column: multipleAttributes.indexOf('src') + 1, token: '/workspace/file.png' }
+  ]);
+  assert.deepEqual(locations('[home](~/secret.md)\n[root](/root/secret.md)'), [
+    { kind: 'local-link', line: 1, column: 1, token: '~/secret.md' },
+    { kind: 'local-link', line: 2, column: 1, token: '/root/secret.md' }
   ]);
 });
 

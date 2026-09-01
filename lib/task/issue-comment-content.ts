@@ -10,6 +10,8 @@ type IssueCommentViolation = Readonly<{
 
 type Range = Readonly<{ start: number; end: number }>;
 type Line = Readonly<{ start: number; end: number; text: string }>;
+type HtmlAttribute = Readonly<{ name: string; index: number; value: string }>;
+type HtmlTag = Readonly<{ end: number; attributes: readonly HtmlAttribute[] }>;
 
 const NON_USER_TOKEN = '@2x';
 const CANONICAL_ARTIFACT = /^(?:analysis|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run|pr-review)(?:-r(?:[2-9]|[1-9]\d+))?\.md(?:[#?].*)?$/u;
@@ -33,6 +35,12 @@ function runLength(content: string, index: number, character: string): number {
   let end = index;
   while (content[end] === character) end += 1;
   return end - index;
+}
+
+function exactRun(content: string, index: number, character: string, length: number): boolean {
+  return content[index - 1] !== character
+    && runLength(content, index, character) === length
+    && content[index + length] !== character;
 }
 
 function escaped(content: string, index: number): boolean {
@@ -67,6 +75,7 @@ function fenceOpening(line: string): { character: '`' | '~'; length: number } | 
   const match = /^(?: {0,3})(`{3,}|~{3,})/u.exec(line);
   if (!match) return null;
   const character = match[1]![0] as '`' | '~';
+  if (character === '`' && line.slice(match[0].length).includes('`')) return null;
   return { character, length: match[1]!.length };
 }
 
@@ -110,6 +119,11 @@ function findHtmlCommentRanges(content: string, existing: readonly Range[]): Ran
   return ranges;
 }
 
+function fenceCandidateAt(content: string, index: number, length: number): boolean {
+  const lineStart = content.lastIndexOf('\n', index - 1) + 1;
+  return /^ {0,3}$/u.test(content.slice(lineStart, index)) && length >= 3;
+}
+
 function findInlineCodeRanges(content: string, existing: readonly Range[]): Range[] {
   const ranges: Range[] = [];
   let cursor = 0;
@@ -124,6 +138,10 @@ function findInlineCodeRanges(content: string, existing: readonly Range[]): Rang
       continue;
     }
     const length = runLength(content, cursor, '`');
+    if (fenceCandidateAt(content, cursor, length)) {
+      cursor += length;
+      continue;
+    }
     let closing = cursor + length;
     let found = -1;
     while (closing < content.length) {
@@ -132,7 +150,7 @@ function findInlineCodeRanges(content: string, existing: readonly Range[]): Rang
         closing = skipped.end;
         continue;
       }
-      if (content[closing] === '`' && !escaped(content, closing) && runLength(content, closing, '`') === length) {
+      if (content[closing] === '`' && !escaped(content, closing) && exactRun(content, closing, '`', length)) {
         found = closing;
         break;
       }
@@ -178,7 +196,7 @@ function destinationKind(destination: string): IssueCommentViolationKind | null 
   if (CANONICAL_ARTIFACT.test(basename) && !basename.includes('/')) return 'canonical-artifact-link';
   if (
     /(?:^|\/)\.agents\/workspace\/active\//u.test(normalized)
-    || /^\/(?:workspace|Users|home|tmp|var\/tmp)(?:\/|$)/u.test(normalized)
+    || /^(?:~(?:\/|$)|\/(?:root|workspace|Users|home|tmp|var\/tmp)(?:\/|$))/u.test(normalized)
     || /^(?:[A-Za-z]:\/|\\\\|\/\/)/u.test(normalized)
     || /^(?:%TEMP%|\$TMPDIR)(?:\/|$)/iu.test(normalized)
   ) return 'local-link';
@@ -213,15 +231,32 @@ function matchingBracket(content: string, start: number, open: string, close: st
   return -1;
 }
 
-function linkDestination(content: string, start: number): { end: number; labelEnd: number; destination: string } | null {
+function linkDestination(content: string, start: number): {
+  end: number;
+  labelEnd: number;
+  destination: string;
+  destinationRange: Range;
+} | null {
   const closeBracket = matchingBracket(content, start + 1, '[', ']');
   if (closeBracket < 0 || content[closeBracket + 1] !== '(') return null;
   const closeParenthesis = matchingBracket(content, closeBracket + 2, '(', ')');
   if (closeParenthesis < 0) return null;
   const inside = content.slice(closeBracket + 2, closeParenthesis).trim();
   const match = /^(?:<([^>\r\n]*)>|(\S+))/u.exec(inside);
-  if (!match) return { end: closeParenthesis + 1, labelEnd: closeBracket, destination: '' };
-  return { end: closeParenthesis + 1, labelEnd: closeBracket, destination: match[1] ?? match[2]! };
+  if (!match) {
+    return {
+      end: closeParenthesis + 1,
+      labelEnd: closeBracket,
+      destination: '',
+      destinationRange: { start: closeBracket + 2, end: closeParenthesis }
+    };
+  }
+  return {
+    end: closeParenthesis + 1,
+    labelEnd: closeBracket,
+    destination: match[1] ?? match[2]!,
+    destinationRange: { start: closeBracket + 2, end: closeParenthesis }
+  };
 }
 
 function referenceDestination(line: Line): { index: number; end: number; destination: string } | null {
@@ -235,14 +270,106 @@ function referenceDestination(line: Line): { index: number; end: number; destina
   };
 }
 
-function htmlDestination(content: string, start: number): { end: number; index: number; destination: string } | null {
-  const end = content.indexOf('>', start + 1);
-  if (end < 0 || content.slice(start, end).includes('\n')) return null;
-  const tag = content.slice(start, end + 1);
-  const attribute = /\b(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/iu.exec(tag);
-  if (!attribute) return { end: end + 1, index: start, destination: '' };
-  const destination = attribute[1] ?? attribute[2] ?? attribute[3]!;
-  return { end: end + 1, index: start + attribute.index, destination };
+function externalUrlRangeAt(content: string, index: number): Range | null {
+  const match = /^(?:https?:\/\/|mailto:)[^\s<>()\[\]]+/iu.exec(content.slice(index));
+  if (!match) return null;
+  return { start: index, end: index + match[0].length };
+}
+
+function nonVisibleRanges(content: string, protectedRangesInput: readonly Range[]): Range[] {
+  const ranges: Range[] = [];
+  const lines = splitLines(content);
+  for (const line of lines) {
+    if (referenceDestination(line)) ranges.push({ start: line.start, end: line.end });
+  }
+
+  let index = 0;
+  while (index < content.length) {
+    const protectedRange = rangeAt(protectedRangesInput, index);
+    if (protectedRange) {
+      index = protectedRange.end;
+      continue;
+    }
+    if (content[index] === '[' && !escaped(content, index)) {
+      const link = linkDestination(content, index);
+      if (link) {
+        ranges.push(link.destinationRange);
+        index += 1;
+        continue;
+      }
+    }
+    if (content[index] === '<') {
+      const tag = htmlTag(content, index);
+      if (tag) {
+        ranges.push({ start: index, end: tag.end });
+        index = tag.end;
+        continue;
+      }
+    }
+    const url = externalUrlRangeAt(content, index);
+    if (url) {
+      ranges.push(url);
+      index = url.end;
+      continue;
+    }
+    index += 1;
+  }
+  return mergeRanges(ranges);
+}
+
+function htmlTag(content: string, start: number): HtmlTag | null {
+  if (content[start] !== '<' || content.startsWith('<!--', start)) return null;
+  let quote: '"' | "'" | null = null;
+  let end = -1;
+  for (let index = start + 1; index < content.length; index += 1) {
+    const character = content[index];
+    if (quote) {
+      if (character === quote) quote = null;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === '>') {
+      end = index;
+      break;
+    }
+  }
+  if (end < 0) return null;
+
+  const attributes: HtmlAttribute[] = [];
+  let cursor = start + 1;
+  while (cursor < end) {
+    while (cursor < end && /[\s/!?]/u.test(content[cursor]!)) cursor += 1;
+    const nameStart = cursor;
+    while (cursor < end && /[A-Za-z0-9_:.\-]/u.test(content[cursor]!)) cursor += 1;
+    if (cursor === nameStart) {
+      cursor += 1;
+      continue;
+    }
+    const name = content.slice(nameStart, cursor);
+    while (cursor < end && /\s/u.test(content[cursor]!)) cursor += 1;
+    if (content[cursor] !== '=') continue;
+    cursor += 1;
+    while (cursor < end && /\s/u.test(content[cursor]!)) cursor += 1;
+    const valueStart = cursor;
+    let valueEnd = cursor;
+    if (content[cursor] === '"' || content[cursor] === "'") {
+      const valueQuote = content[cursor]!;
+      cursor += 1;
+      const quotedStart = cursor;
+      while (cursor < end && content[cursor] !== valueQuote) cursor += 1;
+      valueEnd = cursor;
+      attributes.push({ name, index: nameStart, value: content.slice(quotedStart, valueEnd) });
+      if (cursor < end) cursor += 1;
+    } else {
+      while (cursor < end && !/[\s>]/u.test(content[cursor]!)) cursor += 1;
+      valueEnd = cursor;
+      attributes.push({ name, index: nameStart, value: content.slice(valueStart, valueEnd) });
+    }
+  }
+  return { end: end + 1, attributes };
+}
+
+function htmlDestinations(tag: HtmlTag): readonly HtmlAttribute[] {
+  return tag.attributes.filter(({ name }) => /^(?:href|src)$/iu.test(name));
 }
 
 function appendTokenViolations(
@@ -269,17 +396,23 @@ function appendTokenViolations(
       index += 1 + NON_USER_TOKEN.length;
       continue;
     }
+    const url = externalUrlRangeAt(content, index);
+    if (url) {
+      index = url.end;
+      continue;
+    }
     index += 1;
   }
 }
 
 function formatKnownNonUserTokens(content: string): string {
   const ranges = protectedRanges(content);
+  const hiddenRanges = mergeRanges([...ranges, ...nonVisibleRanges(content, ranges)]);
   let output = '';
   let cursor = 0;
   let index = 0;
   while (index < content.length) {
-    const protectedRange = rangeAt(ranges, index);
+    const protectedRange = rangeAt(hiddenRanges, index);
     if (protectedRange) {
       index = protectedRange.end;
       continue;
@@ -339,13 +472,20 @@ function findIssueCommentViolations(content: string): IssueCommentViolation[] {
       }
     }
     if (content[index] === '<' && !content.startsWith('<!--', index)) {
-      const html = htmlDestination(content, index);
-      if (html) {
-        const kind = destinationKind(html.destination);
-        if (kind) violations.push(violation(content, html.index, kind, html.destination));
-        index = html.end;
+      const tag = htmlTag(content, index);
+      if (tag) {
+        for (const attribute of htmlDestinations(tag)) {
+          const kind = destinationKind(attribute.value);
+          if (kind) violations.push(violation(content, attribute.index, kind, attribute.value));
+        }
+        index = tag.end;
         continue;
       }
+    }
+    const url = externalUrlRangeAt(content, index);
+    if (url) {
+      index = url.end;
+      continue;
     }
     index += 1;
   }
