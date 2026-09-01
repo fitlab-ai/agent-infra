@@ -23,6 +23,7 @@ import type {
   HostResolution,
   RiskFactors
 } from '../../../lib/pr-review/evidence-grading.ts';
+import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 const UNIQUE_HOST: HostResolution = {
   kind: 'unique', taskId: 'TASK-20260101-000001', taskDir: '/tmp/task', issueNumber: 7, prNumber: 42
@@ -100,7 +101,7 @@ test('extractClosingIssueNumbers parses Closes/Fixes lists with case and separat
   assert.deepEqual(extractClosingIssueNumbers(''), []);
 });
 
-test('collectHostCandidates scans active tasks and prioritizes pr_number hits', () => {
+test('collectHostCandidates scans active tasks and prioritizes verified fact identity hits', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'evidence-host-'));
   try {
     const active = path.join(root, '.agents', 'workspace', 'active');
@@ -109,14 +110,15 @@ test('collectHostCandidates scans active tasks and prioritizes pr_number hits', 
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\n${frontmatter}---\n`);
     };
-    writeTask('TASK-1', 'issue_number: 7\npr_number: 42\n');
+    const factLine = (number: number) => `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({ identity: { repository: 'acme/widgets', number, nodeId: `PR_${number}`, url: `https://github.com/acme/widgets/pull/${number}`, head: { repository: 'acme/widgets', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open' })))}`;
+    writeTask('TASK-1', `issue_number: 7\n${factLine(42)}\n`);
     writeTask('TASK-2', 'issue_number: 7\n');
     writeTask('TASK-3', 'issue_number: 9\n');
-    writeTask('TASK-4', 'issue_number: 10\npr_number: 99\n');
+    writeTask('TASK-4', `issue_number: 10\n${factLine(99)}\n`);
 
     const candidates = collectHostCandidates({ prNumber: 42, closingIssues: [7, 9], workspaceRoot: root });
     const byId = new Map(candidates.map((candidate) => [candidate.taskId, candidate]));
-    // TASK-1 matches by pr_number (42) and issue (7); pr hit wins as a single candidate.
+    // TASK-1 matches by fact identity (42) and issue (7); identity wins as a single candidate.
     assert.equal(candidates.length, 3);
     assert.deepEqual(byId.get('TASK-1'), { taskId: 'TASK-1', taskDir: path.join(active, 'TASK-1'), issueNumber: 7, prNumber: 42 });
     assert.deepEqual(byId.get('TASK-2'), { taskId: 'TASK-2', taskDir: path.join(active, 'TASK-2'), issueNumber: 7, prNumber: null });

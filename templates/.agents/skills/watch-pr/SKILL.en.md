@@ -39,8 +39,8 @@ After prerequisites pass and before this round's first artifact action, append a
 
 Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deterministic branches:
 
-- Scenario A (argument omitted): reverse-lookup the active task from the current branch, then read its `pr_number`.
-- Scenario B (omitted task ref or `--task/-t`, **task-anchored primary path**): resolve the full `{task-id}` via "Task Context Resolution" and read `.agents/workspace/active/{task-id}/task.md` for `pr_number` as `{pr#}`; if `pr_number` is empty, follow "Error Handling" to prompt running `create-pr` first, then stop.
+- Scenario A (argument omitted): reverse-lookup the active task from the current branch, then read its verified `pr_delivery_fact.identity.number`.
+- Scenario B (omitted task ref or `--task/-t`, **task-anchored primary path**): resolve the full `{task-id}` via "Task Context Resolution" and read `.agents/workspace/active/{task-id}/task.md` for verified `pr_delivery_fact.identity.number` as `{pr#}`; if the fact is unbound, follow "Error Handling" to prompt running `create-pr` first, then stop.
 - Scenario C (`--pr <number>` or a PR URL): use that PR number directly as `{pr#}`; then determine `{task-id}` via "Reverse-lookup task".
 - Reverse-lookup task (scenarios A / C): use task context/query capabilities to find the unique active task bound to `{pr#}`. If none exists, stop and request binding first; the typed checks intent does not create a second taskless state machine.
 
@@ -74,7 +74,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `assigned_to`: {current agent}
 - `updated_at`: {current time}
 - `agent_infra_version`: per `.agents/rules/version-stamp.md`
-- **Do not change** `pr_status` (keep `created`) or `current_step`
+- **Do not change** `pr_delivery_fact` or `current_step`
 - **Append** to `## Activity Log` (do not overwrite prior entries; `{N}` = number of existing Watch PR entries for this task + 1):
   ```
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {success: PR ready, repair commits: {k} [{SHA summary}] / blocked: blocked: {summary}}
@@ -148,6 +148,6 @@ Stop immediately after the checklist. The green exit waits for the user to run `
 
 ## Error Handling
 
-- Cannot locate a PR (task short id resolves but task.md has no `pr_number`, and no `--pr` was passed and the current branch has no PR): prompt "Run `create-pr` first, or specify the PR with `--pr <number>`", then stop.
+- Cannot locate a PR (task short id resolves but task.md has no verified bound `pr_delivery_fact`, and no `--pr` was passed and the current branch has no PR): prompt "Run `create-pr` first, or specify the PR with `--pr <number>`", then stop.
 - Platform CLI not authenticated or API unavailable: prompt that manual intervention is needed, then stop.
 - Short-id resolution failure: pass through `task-short-id.js`'s exit code and error message; do not rewrite it.

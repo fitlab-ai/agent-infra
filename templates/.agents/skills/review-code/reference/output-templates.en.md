@@ -22,7 +22,7 @@ Prohibitions:
 
 ### Branch A: Approved with No Findings
 
-Do not route by review round. Compare reviewed snapshot tree `T` with the tree of baseline `R`, then read `prFlow` / `pr_number`; when a PR exists, call `agent-infra-internal platform-checks inspect {task-id}`. Select exactly one mutually exclusive exit:
+Do not route by review round. Compare reviewed snapshot tree `T` with the tree of baseline `R`, then read `prFlow` / verified `pr_delivery_fact`; when a PR exists, call `agent-infra-internal platform-checks inspect {task-id}`. Select exactly one mutually exclusive exit:
 
 - `T != R^{tree}`: Branch A1 (commit).
 - `T == R^{tree}` without a PR: Branch A4 for `prFlow=disabled`, otherwise Branch A2 (create PR).

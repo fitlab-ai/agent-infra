@@ -14,6 +14,7 @@ import {
   watchPullRequestReadiness
 } from '../../../lib/platform/pr-checks.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
+import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 test('required checks classify terminal and non-terminal states', () => {
   assert.equal(classifyRequiredChecks([]).state, 'no-required');
@@ -32,7 +33,9 @@ test('PR readiness watcher reaches injected deadline and preserves the observed 
     const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', 'pr_number: 5', '---', ''].join('\n'));
+    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
+      identity: { repository: 'o/r', number: 5, nodeId: 'PR_5', url: 'https://github.com/o/r/pull/5', head: { repository: 'o/r', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'o/r', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+    })))}`, '---', ''].join('\n'));
     const client = {
       version() { return { ok: true as const, value: '2.72.0' }; },
       json(args: string[]) {

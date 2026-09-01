@@ -3,7 +3,7 @@
 #
 # 注：步骤中的 `pr_tasks` 列表按「走 PR 路径」判定是否计入工作流进度：
 # `.agents/.airc.json:prFlow="required"` 始终计入；`prFlow="disabled"` 不计入；
-# 字段缺省时仅当 task.md 的 `pr_status=skipped` 排除，否则计入（详见 .agents/skills/complete-task/SKILL.md）。
+# 字段缺省时仅当 task.md 的 `pr_delivery_fact.state=skipped` 排除，否则计入（详见 .agents/skills/complete-task/SKILL.md）。
 
 name: refactoring
 description: 安全且结构化的代码重构工作流。

@@ -6,6 +6,15 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { filePath, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+
+function boundFact(number = 42, branch = 'feature', state: 'open' | 'closed' = 'open') {
+  return encodePrDeliveryFact(buildBoundFact({
+    identity: { repository: 'fitlab-ai/agent-infra', number, nodeId: `PR_${number}`, url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`, head: { repository: 'fitlab-ai/agent-infra', ref: branch, sha: 'a'.repeat(40) }, base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) } },
+    source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: state,
+    ...(state === 'closed' ? { mergedAt: '2026-08-01T00:00:00Z', mergeCommitSha: 'c'.repeat(40) } : {})
+  }));
+}
 
 function writeJson(filePath: string, value: unknown) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -56,7 +65,7 @@ test('required PR delivery gates on normalized merged state and platform availab
       skill: 'complete-task', checks: { 'required-pr-delivery': {} }
     });
     fs.writeFileSync(path.join(dir, 'task.md'), [
-      '---', `id: ${id}`, 'status: active', 'pr_status: created', 'pr_number: 42', 'branch: feature', '---', ''
+      '---', `id: ${id}`, 'status: active', `pr_delivery_fact: ${JSON.stringify(boundFact(42, 'feature'))}`, 'branch: feature', '---', ''
     ].join('\n'));
     const prPath = path.join(root, 'pr.json');
     fs.writeFileSync(prPath, JSON.stringify({
@@ -119,7 +128,7 @@ test('review-pr task-verify gate requires re-sync after publication write-back (
       `type: feature`,
       `status: active`,
       `issue_number: 7`,
-      `pr_number: 42`,
+      `pr_delivery_fact: ${JSON.stringify(boundFact(42))}`,
       `---`,
       ``,
       `# 任务`,

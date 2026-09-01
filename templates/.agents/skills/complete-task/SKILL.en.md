@@ -66,27 +66,27 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 ```
 
 - `mode=external`: only this invocation's typed `authorization` and `selected` fields authorize and identify external delivery; continue through the required-PR, local lifecycle, and terminal checks, while peripheral evidence failures become warnings after lifecycle.
-- `mode=normal`: use the existing local lifecycle prerequisites; historical `pr_number` / `pr_status` values do not authorize external delivery.
+- `mode=normal`: use the existing local lifecycle prerequisites; historical legacy PR fields do not authorize external delivery.
 - `status=failed|blocked`: stop immediately and show the stable error; `--force` cannot bypass it.
 
-**Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `prFlow` field (three states: field absent = recommend PR by default, skipping allowed; `"required"` = PR mandatory; `"disabled"` = no PR flow), and `pr_status` from `task.md` frontmatter (`pending` / `created` / `skipped`).
+**Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `prFlow` field (three states: field absent = recommend PR by default, skipping allowed; `"required"` = PR mandatory; `"disabled"` = no PR flow), and `pr_delivery_fact` from `task.md` frontmatter (`unbound` / `bound` / `skipped`).
 
-**PR dimension decision (evaluate the `prFlow` strong constraint FIRST, then `pr_status`)**:
+**PR dimension decision (evaluate the `prFlow` strong constraint FIRST, then `pr_delivery_fact.state`)**:
 
-| `prFlow` | `pr_status` | Decision |
+| `prFlow` | `pr_delivery_fact.state` | Decision |
 |---|---|---|
 | `disabled` | any | No PR path -> PR dimension satisfied, continue with the other prerequisites |
-| `required` | `created` | PR dimension satisfied, continue |
-| `required` | `pending` / `skipped` | **Stop**: under a mandatory PR flow you must run `/create-pr` first; `--skip-pr` is NOT accepted (including a pre-existing / manually-set `skipped`) |
-| absent | `created` / `skipped` | PR dimension satisfied, continue |
-| absent | `pending` | **Stop by default** and print the two-option guidance below; unless the user passes `--skip-pr` (writes `pr_status: skipped`, then continues) or `--force` |
+| `required` | `bound` | PR dimension satisfied, continue |
+| `required` | `unbound` / `skipped` | **Stop**: under a mandatory PR flow you must run `/create-pr` first; `--skip-pr` is NOT accepted (including a pre-existing / manually-set `skipped`) |
+| absent | `bound` / `skipped` | PR dimension satisfied, continue |
+| absent | `unbound` | **Stop by default** and print the two-option guidance below; unless the user passes `--skip-pr` (writes `pr_delivery_fact.state=skipped` through the migration boundary, then continues) or `--force` |
 
-- `--skip-pr` handling: effective only when `prFlow` is not `required` -> set `pr_status` to `skipped` in `task.md`, then continue; when `prFlow=required`, ignore `--skip-pr` and stop per the table.
+- `--skip-pr` handling: effective only when `prFlow` is not `required` -> write `pr_delivery_fact.state=skipped` through `platform-pr migrate-fact`, then continue; when `prFlow=required`, ignore `--skip-pr` and stop per the table.
 - Note: `--force` may override the other prerequisites below, but does **NOT** lift the `prFlow=required` PR constraint (the only exit from the strong constraint is creating a PR).
 
 Two-option guidance for absent + `pending`:
 ```
-Task {task-id} has no PR yet (pr_status: pending). Choose one:
+Task {task-id} has no PR delivery decision yet (pr_delivery_fact: unbound). Choose one:
   - Go through the PR flow: /create-pr {task-ref}
   - Explicitly skip and complete: /complete-task {task-ref} --skip-pr
 ```

@@ -7,6 +7,25 @@ import { execFileSync, spawnSync } from 'node:child_process';
 
 import { filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
+import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
+import { readPrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+
+function factLine(fact: ReturnType<typeof buildUnboundFact> | ReturnType<typeof buildBoundFact>): string {
+  return `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(fact))}`;
+}
+
+function boundFixture(number: number, headSha = 'a'.repeat(40)) {
+  return buildBoundFact({
+    identity: {
+      repository: 'fitlab-ai/agent-infra', number, nodeId: `PR_${number}`,
+      url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`,
+      head: { repository: 'fitlab-ai/agent-infra', ref: 'feature', sha: headSha },
+      base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) }
+    },
+    source: 'explicit-bind', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+  });
+}
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-pr', ...args], {
@@ -17,7 +36,7 @@ function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } 
 test('platform-pr CLI advertises all PR and summary intents', () => {
   const output = run(['--help']);
   assert.equal(output.status, 0);
-  for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'sync', 'summary-context', 'summary-sync']) {
+  for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'migrate-fact', 'sync', 'summary-context', 'summary-sync']) {
     assert.match(output.stdout, new RegExp(`platform-pr ${operation}`));
   }
 });
@@ -37,6 +56,24 @@ test('platform-pr summary-sync accepts the commit path no-op result before task 
   }
 });
 
+test('platform-pr migrate-fact atomically replaces legacy PR fields', () => {
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\npr_number: 771\npr_status: created\n---\n\n# Task\n\n## Activity Log\n');
+  try {
+    const output = run(['migrate-fact', f.taskId, '--state', 'unbound'], { cwd: f.root, env: f.env });
+    assert.equal(output.status, 0, output.stderr || output.stdout);
+    const payload = JSON.parse(output.stdout);
+    assert.equal(payload.status, 'applied');
+    const content = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
+    assert.match(content, /pr_delivery_fact:/);
+    assert.match(content, /state":"unbound/);
+    assert.match(content, /reason":"migrated/);
+    assert.equal(content.includes('pr_number:'), false);
+    assert.equal(content.includes('pr_status:'), false);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 function externalFixture(taskContent: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-external-'));
   execFileSync('git', ['init', '-q'], { cwd: root });
@@ -48,6 +85,7 @@ function externalFixture(taskContent: string) {
   const renderedTask = taskContent.replaceAll('{task-id}', taskId);
   const taskWithContract = renderedTask
     .replace('\n---\n', '\nagent_infra_version: v0.9.11-alpha.0\n---\n')
+    .replace('\nagent_infra_version:', `\n${factLine(buildUnboundFact())}\nagent_infra_version:`)
     .replace('## Activity Log', '## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log');
   fs.writeFileSync(path.join(taskDir, 'task.md'), taskWithContract);
   const closing = path.join(root, 'closing.json');
@@ -109,7 +147,10 @@ test('platform-pr resolve-external paginates, binds one merged fork PR, audits e
     assert.equal(firstResult.authorization, 'unique');
     assert.equal(firstResult.selected.number, 771);
     const content = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
-    assert.match(content, /^pr_number: 771$/m);
+    const fact = readPrDeliveryFact(parseTypedTaskFrontmatter(content));
+    assert.equal(fact.status, 'valid');
+    assert.equal(fact.fact.state, 'bound');
+    assert.equal(fact.fact.identity.number, 771);
     assert.equal((content.match(/\*\*Bind External PR\*\*/g) || []).length, 1);
 
     const replay = run(['resolve-external', f.taskId, '--agent', 'claude'], { cwd: f.root, env: f.env });
@@ -151,7 +192,7 @@ test('platform-pr create refuses to locate or create a PR before remote branch d
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
-      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7', '---', '',
+      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7', factLine(buildUnboundFact()), '---', '',
       '# Task', '', '## Activity Log', ''
     ].join('\n'));
     const title = path.join(root, 'title.txt');
@@ -202,7 +243,7 @@ test('platform-pr create rechecks a bound PR before replaying it', () => {
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
       '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7',
-      'pr_number: 771', 'pr_status: created', '---', '', '# Task', '', '## Activity Log', ''
+      factLine(boundFixture(771, headSha)), '---', '', '# Task', '', '## Activity Log', ''
     ].join('\n'));
     const title = path.join(root, 'title.txt');
     const body = path.join(root, 'body.md');
@@ -255,7 +296,7 @@ test('platform-pr create does not require commit finalization evidence before re
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
-      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7', '---', '',
+      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7', factLine(buildUnboundFact()), '---', '',
       '# Task', '', '## Activity Log', '',
       '- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started', ''
     ].join('\n'));
@@ -293,7 +334,7 @@ test('platform-pr create does not require commit finalization evidence before re
     assert.equal(records.filter((call) => call.includes('POST') && call.some((item) => /\/pulls$/.test(item))).length, 0);
     const task = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
     assert.equal(task.includes('Create PR [started]'), false);
-    assert.equal(task.includes('pr_number:'), false);
+    assert.equal(JSON.parse(JSON.parse((task.match(/^pr_delivery_fact: (.+)$/m) || [])[1] || '"{}"')).state, 'unbound');
 
     const lockBusy = withTaskExecutionLock(root, taskId, 'test-holder', () => run([
       'create', taskId, '--agent', 'codex', '--base', 'main', '--head', 'feature',

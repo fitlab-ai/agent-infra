@@ -10,6 +10,7 @@ import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "./issues.
 import { listRemoteComments } from "./issue-comments.ts";
 import { taskTypeLabel } from "./metadata-labels.ts";
 import { inspectGitHubPullRequest } from "./pull-requests.ts";
+import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 
 const CHECK_TYPE = "platform-sync";
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
@@ -151,12 +152,16 @@ function buildSyncContext({ taskDir, config, artifactFile }: any): any {
   }
 
   const issueNumber = parseIssueNumber(task.metadata.issue_number);
-  const prNumber = parsePrNumber(task.metadata.pr_number);
+  const fact = readPrDeliveryFact(task.metadata);
+  if (fact.status === "invalid") {
+    return { earlyReturn: failResult(CHECK_TYPE, fact.error.message, "check_failed") };
+  }
+  const prNumber = fact.status === "valid" && fact.fact.state === "bound" ? fact.fact.identity.number : null;
   if (config.when === "issue_number_exists" && !issueNumber) {
     return { earlyReturn: passResult(CHECK_TYPE, "Skipped: task has no issue_number") };
   }
-  if (config.when === "pr_number_exists" && !prNumber) {
-    return { earlyReturn: passResult(CHECK_TYPE, "Skipped: task has no pr_number") };
+  if (config.when === "pr_fact_bound" && !prNumber) {
+    return { earlyReturn: passResult(CHECK_TYPE, "Skipped: task has no verified bound pull request") };
   }
 
   if (!issueNumber) {
@@ -322,7 +327,7 @@ function fetchRemoteData(context: any): any {
   if (context.prMarker) {
     if (!context.prNumber) {
       return {
-        earlyReturn: failResult(CHECK_TYPE, "Expected a valid pr_number for PR comment verification", "check_failed")
+        earlyReturn: failResult(CHECK_TYPE, "Expected a verified bound pull request for PR comment verification", "check_failed")
       };
     }
 

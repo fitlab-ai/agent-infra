@@ -6,6 +6,7 @@ import { hasPlatformCapability } from "./adapters.ts";
 import { inspectRequiredChecks } from "./pr-checks.ts";
 import { resolvePlatformContext } from "./context.ts";
 import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
+import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 
 const CHECK_TYPE = "required-checks";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
@@ -34,7 +35,13 @@ function readHead(repoRoot: any): any {
 
 export function evaluateRequiredChecks(context: any, shared: any): any {
   const { metadata, localHead, inspection, prFlow } = context;
-  if (prFlow === "disabled" || metadata.pr_status === "skipped" || !validPrNumber(metadata.pr_number)) {
+  const factRead = readPrDeliveryFact(metadata);
+  if (factRead.status === "invalid") {
+    return shared.failResult(CHECK_TYPE, factRead.error.message, "check_failed");
+  }
+  const fact = factRead.status === "valid" ? factRead.fact : null;
+  const prNumber = fact?.state === "bound" ? fact.identity.number : null;
+  if (prFlow === "disabled" || fact?.state === "skipped" || !validPrNumber(prNumber)) {
     return shared.passResult(CHECK_TYPE, "Skipped: required checks are not applicable to this task");
   }
 
@@ -87,7 +94,10 @@ export function check({ taskDir }: any, shared: any): any {
   const task = shared.loadTask(taskDir);
   if (!task.ok) return shared.failResult(CHECK_TYPE, task.message);
   const prFlow = readPrFlow(shared.repoRoot);
-  if (prFlow === "disabled" || task.metadata.pr_status === "skipped" || !validPrNumber(task.metadata.pr_number)) {
+  const factRead = readPrDeliveryFact(task.metadata);
+  if (factRead.status === "invalid") return shared.failResult(CHECK_TYPE, factRead.error.message, "check_failed");
+  const bound = factRead.status === "valid" && factRead.fact.state === "bound";
+  if (prFlow === "disabled" || (factRead.status === "valid" && factRead.fact.state === "skipped") || !bound) {
     return evaluateRequiredChecks({ metadata: task.metadata, localHead: null, inspection: null, prFlow }, shared);
   }
   const platform = resolvePlatformContext({ cwd: shared.repoRoot });

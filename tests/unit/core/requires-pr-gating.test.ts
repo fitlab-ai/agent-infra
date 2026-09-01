@@ -81,8 +81,8 @@ for (const workflowPath of workflowPaths) {
     assert.ok(delivery.prTasks.length > 0, "expected delivery PR tasks to be present");
   });
 
-  test(`${workflowPath} references prFlow / pr_status gating`, () => {
+  test(`${workflowPath} references prFlow / pr_delivery_fact gating`, () => {
     assert.match(yamlText, /prFlow/);
-    assert.match(yamlText, /pr_status/);
+    assert.match(yamlText, /pr_delivery_fact/);
   });
 }

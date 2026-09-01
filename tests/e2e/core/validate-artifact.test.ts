@@ -13,6 +13,7 @@ import {
   assertPointsToPrSyncRule,
   buildCompletedTaskContent,
   buildTaskContent,
+  boundFactValue,
   buildTaskFrontmatter,
   formatTimestamp,
   formatTimestampInTimeZone,
@@ -95,7 +96,7 @@ const gateCases = [
         "- [x] 代码已审查",
         "- [x] 文档已更新（如适用）",
         "- [x] PR 已创建"
-      ], { pr_status: "created", pr_number: 1 }));
+      ], { pr_delivery_fact: boundFactValue(1) }));
     },
     assertResult(result: ReturnType<typeof runValidator>) {
       assert.equal(result.status, 0, result.stderr);

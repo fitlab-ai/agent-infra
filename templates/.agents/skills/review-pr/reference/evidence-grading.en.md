@@ -17,7 +17,7 @@ Evidence scenario classification (S1/S2/S3) → freshness/alignment → risk gra
 
 - Exactly one hit → `unique`; multiple without a unique winner → `ambiguous` (candidate list); zero hits → `none`.
 - Ambiguous hosts fail closed and never enter evidence classification. `pr-review-grade resolve-host --pr <N>` returns a typed `HostResolution`, and `decide` explicitly rejects `ambiguous`.
-- `Closes/Fixes #N` in the PR body (case-insensitive, comma/space separated, lists supported) is parsed by `extractClosingIssueNumbers`; a local `active/*/task.md` `pr_number` hit takes priority over the `issue_number` reverse lookup, and a task hit via both paths deduplicates to a single candidate.
+- `Closes/Fixes #N` in the PR body (case-insensitive, comma/space separated, lists supported) is parsed by `extractClosingIssueNumbers`; a local `active/*/task.md` verified `pr_delivery_fact.identity.number` hit takes priority over the `issue_number` reverse lookup, and a task hit via both paths deduplicates to a single candidate.
 
 ## Evidence Scenario Classification (S1 → S2 → S3)
 
@@ -33,7 +33,7 @@ Evidence scenario classification (S1/S2/S3) → freshness/alignment → risk gra
 ## Freshness and Alignment
 
 - Freshness benchmark = the reviewed head SHA recorded by the latest `pr-review*`, compared character-for-character with the current head: match → `fresh`, otherwise → `stale`.
-- Alignment = freshness is `fresh` and the `issue_number` / `pr_number` match the resolution result.
+- Alignment = freshness is `fresh` and the `issue_number` / verified `pr_delivery_fact.identity.number` match the resolution result.
 - No prior `pr-review*` → `n/a` / `n/a` (first-review special case).
 
 ## Risk Grading (pure evidence)

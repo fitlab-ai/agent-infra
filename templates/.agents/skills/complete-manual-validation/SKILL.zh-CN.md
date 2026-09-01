@@ -57,7 +57,7 @@ complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] {verification-su
 
 检查：
 - `.agents/workspace/active/{task-id}/task.md`
-- 有效 PR：优先使用显式 `{pr-ref}`，否则读取 task.md frontmatter 的 `pr_number`
+- 有效 PR：优先使用显式 `{pr-ref}`，否则读取 task.md frontmatter 的 verified `pr_delivery_fact.identity.number`
 
 如果任务不存在、验证说明缺失，或无法解析有效 PR，立即停止。
 

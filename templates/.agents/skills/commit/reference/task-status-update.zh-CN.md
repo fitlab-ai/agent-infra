@@ -58,7 +58,7 @@ push 失败时保留任务 active 与本地 HEAD，只展示诊断和人工推�
 - [ ] 所有代码都已提交
 - [ ] 所有测试通过
 - [ ] 代码审查已通过
-- [ ] 所有工作流步骤已完成（对 yaml `commit` 步骤的 `pr_tasks` 列表，按「走 PR 路径」判定是否计入：`prFlow=required` 始终计入；`prFlow=disabled` 不计入；缺省下仅当 `pr_status=skipped` 时不计入，否则计入）
+- [ ] 所有工作流步骤已完成（对 yaml `commit` 步骤的 `pr_tasks` 列表，按「走 PR 路径」判定是否计入：`prFlow=required` 始终计入；`prFlow=disabled` 不计入；缺省下仅当 `pr_delivery_fact.state=skipped` 时不计入，否则计入）
 
 必带下一步命令（按 `prFlow` 渲染）：
 
@@ -115,4 +115,4 @@ push 失败时保留任务 active 与本地 HEAD，只展示诊断和人工推�
 {next-step-commands}
 ```
 
-> 注意：上述场景之外，只要 `task.md` 中存在有效 `pr_number`，commit 技能必须先按 `reference/pr-summary-sync.md` 同步 PR 摘要，再进入完成校验。
+> 注意：上述场景之外，只要 `task.md` 中存在 verified `pr_delivery_fact`，commit 技能必须先按 `reference/pr-summary-sync.md` 同步 PR 摘要，再进入完成校验。

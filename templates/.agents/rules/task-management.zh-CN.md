@@ -49,7 +49,7 @@
 - `review-plan`：更新 `current_step`、`updated_at`、`agent_infra_version`
 - `code-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
 - `review-code`：更新 `current_step`、`updated_at`、`agent_infra_version`
-- `create-pr`：更新 `pr_number`、`updated_at`、`agent_infra_version`
+- `create-pr`：通过 `pr_delivery_fact` writer 更新 PR 绑定事实、`updated_at`、`agent_infra_version`
 - `commit`：更新 `updated_at`、`agent_infra_version`；必要时更新 `current_step`（详见 `commit/reference/task-status-update.md`）
 - `complete-task`：更新 `status`、`current_step`、`completed_at`、`updated_at`、`agent_infra_version`
 - `block-task`：更新 `status`、`blocked_at`、`updated_at`、`agent_infra_version`

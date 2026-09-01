@@ -6,11 +6,18 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-checks', ...args], {
     encoding: 'utf8', cwd: options.cwd, env: gitSafeEnv(options.env)
   });
+}
+
+function boundFactLine(number = 5) {
+  return `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
+    identity: { repository: 'fitlab-ai/agent-infra', number, nodeId: `PR_${number}`, url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`, head: { repository: 'fitlab-ai/agent-infra', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+  })))}`;
 }
 
 test('platform-checks CLI advertises inspect, watch, run resolution and logs', () => {
@@ -30,7 +37,7 @@ test('platform-checks inspect fails when a non-required check fails', () => {
     const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', 'pr_number: 5', '---', ''].join('\n'));
+    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', boundFactLine(), '---', ''].join('\n'));
     const fake = path.join(root, 'fake-gh.cjs');
     const checks = path.join(root, 'checks.json');
     const requiredChecks = path.join(root, 'required-checks.json');
@@ -67,7 +74,7 @@ test('platform-checks inspect fails closed for conflicting, unknown, and contrad
     const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', 'pr_number: 5', '---', ''].join('\n'));
+    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', boundFactLine(), '---', ''].join('\n'));
     const fake = path.join(root, 'fake-gh.cjs');
     const checks = path.join(root, 'checks.json');
     const pr = path.join(root, 'pr.json');
@@ -125,7 +132,7 @@ test('platform-checks preserves deterministic check errors without degradation',
     const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', 'pr_number: 5', '---', ''].join('\n'));
+    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', boundFactLine(), '---', ''].join('\n'));
     const fake = path.join(root, 'fake-gh.cjs');
     fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fake);
     const output = run(['inspect', taskId], { cwd: root, env: {
