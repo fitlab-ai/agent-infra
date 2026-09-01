@@ -196,7 +196,7 @@ function destinationKind(destination: string): IssueCommentViolationKind | null 
   if (CANONICAL_ARTIFACT.test(basename) && !basename.includes('/')) return 'canonical-artifact-link';
   if (
     /(?:^|\/)\.agents\/workspace\/active\//u.test(normalized)
-    || /^(?:~(?:\/|$)|\/(?:root|workspace|Users|home|tmp|var\/tmp)(?:\/|$))/u.test(normalized)
+    || /^(?:~(?:\/|$)|\/(?:root|workspace|Users|home|tmp|var\/tmp|private\/tmp|var\/folders)(?:\/|$))/u.test(normalized)
     || /^(?:[A-Za-z]:\/|\\\\|\/\/)/u.test(normalized)
     || /^(?:%TEMP%|\$TMPDIR)(?:\/|$)/iu.test(normalized)
   ) return 'local-link';
@@ -334,21 +334,37 @@ function htmlTag(content: string, start: number): HtmlTag | null {
   }
   if (end < 0) return null;
 
-  const attributes: HtmlAttribute[] = [];
   let cursor = start + 1;
+  const closing = content[cursor] === '/';
+  if (closing) cursor += 1;
+  if (!/[A-Za-z]/u.test(content[cursor] ?? '')) return null;
+  cursor += 1;
+  while (cursor < end && /[A-Za-z0-9:-]/u.test(content[cursor]!)) cursor += 1;
+  if (closing) {
+    while (cursor < end && /\s/u.test(content[cursor]!)) cursor += 1;
+    return cursor === end ? { end: end + 1, attributes: [] } : null;
+  }
+
+  const attributes: HtmlAttribute[] = [];
   while (cursor < end) {
-    while (cursor < end && /[\s/!?]/u.test(content[cursor]!)) cursor += 1;
-    const nameStart = cursor;
-    while (cursor < end && /[A-Za-z0-9_:.\-]/u.test(content[cursor]!)) cursor += 1;
-    if (cursor === nameStart) {
+    while (cursor < end && /\s/u.test(content[cursor]!)) cursor += 1;
+    if (cursor >= end) break;
+    if (content[cursor] === '/') {
       cursor += 1;
-      continue;
+      while (cursor < end && /\s/u.test(content[cursor]!)) cursor += 1;
+      if (cursor !== end) return null;
+      break;
     }
+    const nameStart = cursor;
+    if (!/[A-Za-z_:]/u.test(content[cursor]!)) return null;
+    cursor += 1;
+    while (cursor < end && /[A-Za-z0-9_.:-]/u.test(content[cursor]!)) cursor += 1;
     const name = content.slice(nameStart, cursor);
     while (cursor < end && /\s/u.test(content[cursor]!)) cursor += 1;
     if (content[cursor] !== '=') continue;
     cursor += 1;
     while (cursor < end && /\s/u.test(content[cursor]!)) cursor += 1;
+    if (cursor >= end) return null;
     const valueStart = cursor;
     let valueEnd = cursor;
     if (content[cursor] === '"' || content[cursor] === "'") {

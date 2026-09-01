@@ -105,6 +105,24 @@ test('parses quoted HTML attributes and checks every local destination', () => {
   ]);
 });
 
+test('does not hide tokens inside malformed HTML-like fragments', () => {
+  assert.deepEqual(locations('<broken\n@2x>'), [
+    { kind: 'non-user-token', line: 2, column: 1, token: '@2x' }
+  ]);
+  assert.deepEqual(locations('<@2x>'), [
+    { kind: 'non-user-token', line: 1, column: 2, token: '@2x' }
+  ]);
+  assert.equal(formatKnownNonUserTokens('<broken\n@2x>'), '<broken\n`@2x`>');
+});
+
+test('rejects macOS temporary directory destinations', () => {
+  const content = '[private-temp](/private/tmp/secret.md)\n[mac-temp](/var/folders/zz/secret.md)';
+  assert.deepEqual(locations(content), [
+    { kind: 'local-link', line: 1, column: 1, token: '/private/tmp/secret.md' },
+    { kind: 'local-link', line: 2, column: 1, token: '/var/folders/zz/secret.md' }
+  ]);
+});
+
 test('uses the same destination policy for reference links and HTML attributes', () => {
   const content = [
     '[artifact][report]',
