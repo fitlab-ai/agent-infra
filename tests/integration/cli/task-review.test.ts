@@ -265,3 +265,26 @@ test('task-review rejects a numeric count mismatch without changing artifact byt
   assert.equal(JSON.parse(result.stdout).error.code, 'REVIEW_SUMMARY_COUNT_MISMATCH');
   assert.deepEqual(fs.readFileSync(path.join(f.dir, f.artifact)), before);
 });
+
+test('task-review reports duplicate decision details without changing artifact bytes', () => {
+  const scenario = scenarios[0];
+  const f = fixture(
+    scenario,
+    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
+  );
+  const artifactPath = path.join(f.dir, f.artifact);
+  fs.appendFileSync(
+    artifactPath,
+    '\n### AN-1: Short review\n\n- Short conclusion\n\n### AN-1: Formal detail [needs-human-decision]\n\n- **What needs a decision**: choose a repair\n'
+  );
+  const before = fs.readFileSync(artifactPath);
+
+  const result = run(f.root, [
+    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact
+  ]);
+
+  assert.equal(result.status, 1);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.error.code, 'REVIEW_DECISION_DETAIL_INVALID');
+  assert.deepEqual(fs.readFileSync(artifactPath), before);
+});

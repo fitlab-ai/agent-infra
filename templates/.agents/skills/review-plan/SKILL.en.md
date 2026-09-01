@@ -69,7 +69,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 ### 6. Update Task Status
 
-After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage plan --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows. After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage plan --artifact {review-artifact} {execution-flag}` exactly once.
+After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage plan --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows. After all ledger writes, make the initial call to `agent-infra-internal task-review {task-id} finalize-summary --stage plan --artifact {review-artifact} {execution-flag}`; after a failure, follow `.agents/rules/local-artifact-repair.md` to decide whether to edit and rerun, and never treat an error type or `changed=false` as automatic authorization.
 
 Bind and reuse this structured mapping from that one response:
 
@@ -79,13 +79,13 @@ Bind and reuse this structured mapping from that one response:
 {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
 ```
 
-The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. If finalization fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`: only `canAdvance=true` permits `approved`; otherwise use `changes-requested` or `rejected`. Then run `agent-infra-internal task-event {task-id} review-plan.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`.
+The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. After a failure, the model may edit the same controlled artifact and rerun the same intent only when the shared rule's mechanical gates pass; reassess convergence after every failure. Only the final complete result with `stageStatus.canAdvance=true` may determine the verdict and next step, followed by `agent-infra-internal task-event {task-id} review-plan.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`. On failure, model stop, lack of progress, or the emergency cap, do not publish a completion event or cross-stage command; use the `repair-stop` scenario in `reference/output-templates.md` to show existing summary/findings, the artifact, actual repair attempts, the last diagnostic, and the stop reason.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
 If task.md has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`.
 
-Before writing the summary, the finalization intent checks decision-detail ids; it auto-removes a duplicate only when exactly one formal `[needs-human-decision]` block remains and every other same-id block is clearly short and informal, then reruns the read-only check. Ambiguous duplicates fail closed. If this check or repair fails, stop before the completion event.
+Before writing the summary, the finalization intent checks decision-detail ids; any visible duplicate returns a structured failure and preserves the artifact bytes, while the model decides whether a minimal edit is safe under the shared rule. If the safety gates fail, diagnostics repeat, no byte-level progress occurs, or the emergency cap is reached, stop before the completion event; the stop path must still show the existing review result instead of hiding the artifact.
 
 ### 7. Run Completion Gate
 

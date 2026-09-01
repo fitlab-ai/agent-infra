@@ -336,7 +336,7 @@ test("workflow state-check consumers use the typed task snapshot entrypoint", ()
   });
 });
 
-test("review skills finalize one summary snapshot before their completion event", () => {
+test("review skills declare one initial finalizer before their completion event", () => {
   const stages = [
     { skill: "review-analysis", stage: "analysis" },
     { skill: "review-plan", stage: "plan" },
@@ -352,7 +352,15 @@ test("review skills finalize one summary snapshot before their completion event"
       assert.equal(
         content.split(finalizer).length - 1,
         1,
-        `${relativePath} should call its summary finalizer exactly once`
+        `${relativePath} should declare one initial summary finalizer`
+      );
+      assert.ok(
+        content.includes(".agents/rules/local-artifact-repair.md"),
+        `${relativePath} should reference the shared local-artifact-repair rule`
+      );
+      assert.ok(
+        content.includes("repair-stop"),
+        `${relativePath} should define the failure-output handoff`
       );
       assert.equal(
         content.match(/agent-infra-internal task-ledger \{task-id\} stage-status/g)?.length ?? 0,
@@ -365,6 +373,28 @@ test("review skills finalize one summary snapshot before their completion event"
       );
     }
   }
+});
+
+test("review output templates define a result-preserving stop scenario", () => {
+  const paths = [
+    ...["review-analysis", "review-plan", "review-code"].map(
+      (name) => `.agents/skills/${name}/reference/output-templates.md`
+    ),
+    ...["review-analysis", "review-plan", "review-code"].flatMap((name) => [
+      `templates/.agents/skills/${name}/reference/output-templates.en.md`,
+      `templates/.agents/skills/${name}/reference/output-templates.zh-CN.md`
+    ])
+  ];
+
+  paths.forEach((relativePath) => {
+    const content = read(relativePath);
+    assert.match(content, /^### (?:场景|Scenario|Branch) R[:：]/m, `${relativePath} should define the stop scenario`);
+    assert.match(content, /\{last-readable-review-result\}/);
+    assert.match(content, /\{repairAttempts\}/);
+    assert.match(content, /\{last-structured-diagnostic\}/);
+    assert.match(content, /\{stop-reason\}/);
+    assert.match(content, /\{next-step-commands\}/);
+  });
 });
 
 test("orchestrated lifecycle handoffs forward the execution marker to sensitive commands", () => {

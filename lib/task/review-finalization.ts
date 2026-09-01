@@ -7,7 +7,7 @@ import { parseArtifactName, validateCompletedArtifact } from './artifact-lifecyc
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';
-import { inspectDecisionDetailDuplicates, repairDecisionDetailDuplicates } from './decision-details.ts';
+import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
@@ -214,17 +214,7 @@ function finalizeReviewSummaryUnlocked(
     );
   }
   const stageStatus = summarizeLedgerStage(rows, stage);
-  const repaired = repairDecisionDetailDuplicates(artifactContent);
-  if (!repaired.ok) {
-    return failed(
-      request,
-      'REVIEW_DECISION_DETAIL_INVALID',
-      `${repaired.code}: ${repaired.message}`,
-      resolved.taskId,
-      stageStatus
-    );
-  }
-  const detailInspection = inspectDecisionDetailDuplicates(repaired.content);
+  const detailInspection = inspectDecisionDetailDuplicates(artifactContent);
   if (!detailInspection.ok) {
     return failed(
       request,
@@ -235,13 +225,13 @@ function finalizeReviewSummaryUnlocked(
     );
   }
   const transformed = finalizeReviewSummaryContent(
-    repaired.content,
+    artifactContent,
     stageStatus.unresolvedFindingCounts
   );
   if (!transformed.ok) {
     return failed(request, transformed.code, transformed.message, resolved.taskId, stageStatus);
   }
-  if (!repaired.changed && !transformed.changed) {
+  if (!transformed.changed) {
     return {
       ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus),
       status: 'no-op',

@@ -5,7 +5,6 @@ import {
   inspectDecisionDetailDuplicates,
   normalizeDecisionDetailForDisplay,
   parseDecisionDetailBlocks,
-  repairDecisionDetailDuplicates,
   resolveDecisionDetail
 } from '../../../lib/task/decision-details.ts';
 
@@ -139,7 +138,7 @@ test('explicit evidence anchors fail closed when the next visible structure is n
   }
 });
 
-test('duplicate details are repairable only when the extra block is structurally informal', () => {
+test('duplicate details are reported without selecting a block for removal', () => {
   const content = [
     '### PL-1：简短复核',
     '- 简短结论',
@@ -151,15 +150,9 @@ test('duplicate details are repairable only when the extra block is structurally
 
   const inspection = inspectDecisionDetailDuplicates(content);
   assert.equal(inspection.ok, false);
-  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.repairable, true);
-
-  const repaired = repairDecisionDetailDuplicates(content);
-  assert.equal(repaired.ok, true);
-  if (repaired.ok) {
-    assert.equal(repaired.changed, true);
-    assert.equal(parseDecisionDetailBlocks(repaired.content).length, 1);
-    assert.match(repaired.content, /正式方案选择/);
-    assert.doesNotMatch(repaired.content, /简短复核/);
+  if (!inspection.ok) {
+    assert.deepEqual(inspection.duplicates.map((duplicate) => duplicate.id), ['PL-1']);
+    assert.equal(inspection.duplicates[0]?.blocks.length, 2);
   }
 });
 
@@ -176,11 +169,7 @@ test('anchored informal duplicate details remain ambiguous and preserve the anch
 
   const inspection = inspectDecisionDetailDuplicates(content);
   assert.equal(inspection.ok, false);
-  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.repairable, false);
-
-  const repaired = repairDecisionDetailDuplicates(content);
-  assert.equal(repaired.ok, false);
-  if (!repaired.ok) assert.equal(repaired.content, content);
+  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.id, 'CD-1');
 
   const resolved = resolveDecisionDetail(content, 'CD-1', 'old-review');
   assert.equal(resolved.status, 'missing');
@@ -200,11 +189,7 @@ test('substantive unmarked duplicate details are ambiguous and preserve content'
 
   const inspection = inspectDecisionDetailDuplicates(content);
   assert.equal(inspection.ok, false);
-  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.repairable, false);
-
-  const repaired = repairDecisionDetailDuplicates(content);
-  assert.equal(repaired.ok, false);
-  if (!repaired.ok) assert.equal(repaired.content, content);
+  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.id, 'AN-1');
 });
 
 test('summary-marked substantive duplicate details remain ambiguous', () => {
@@ -219,11 +204,7 @@ test('summary-marked substantive duplicate details remain ambiguous', () => {
 
   const inspection = inspectDecisionDetailDuplicates(content);
   assert.equal(inspection.ok, false);
-  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.repairable, false);
-
-  const repaired = repairDecisionDetailDuplicates(content);
-  assert.equal(repaired.ok, false);
-  if (!repaired.ok) assert.equal(repaired.content, content);
+  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.id, 'AN-1');
 });
 
 test('ambiguous canonical duplicates fail closed and preserve content', () => {
@@ -238,11 +219,7 @@ test('ambiguous canonical duplicates fail closed and preserve content', () => {
 
   const inspection = inspectDecisionDetailDuplicates(content);
   assert.equal(inspection.ok, false);
-  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.repairable, false);
-
-  const repaired = repairDecisionDetailDuplicates(content);
-  assert.equal(repaired.ok, false);
-  if (!repaired.ok) assert.equal(repaired.content, content);
+  if (!inspection.ok) assert.equal(inspection.duplicates[0]?.id, 'AN-1');
 });
 
 test('display normalization puts the decision context before options and recording help', () => {

@@ -36,7 +36,6 @@ type DecisionDetailResolution =
 type DecisionDetailDuplicate = {
   id: string;
   blocks: DecisionDetailBlock[];
-  repairable: boolean;
 };
 
 type DecisionDetailInspection =
@@ -47,15 +46,6 @@ type DecisionDetailInspection =
       message: string;
       blocks: DecisionDetailBlock[];
       duplicates: DecisionDetailDuplicate[];
-    };
-
-type DecisionDetailRepair =
-  | { ok: true; changed: boolean; content: string }
-  | {
-      ok: false;
-      code: 'DECISION_DETAIL_AMBIGUOUS';
-      message: string;
-      content: string;
     };
 
 const DECISION_ID = /^(AN|PL|CD|HD)-[1-9]\d*(?=$|[\s:：])/i;
@@ -172,32 +162,8 @@ function resolveDecisionDetail(content: string, rowId: string, anchor: string): 
   return { status: 'found', block: matches[0]! };
 }
 
-const INFORMAL_SHORT_HEADING = /^(?:AN|PL|CD|HD)-[1-9]\d*[：:]\s*(?:上一轮)?简短复核$/i;
-const INFORMAL_SHORT_FRAGMENT = /^简短(?:结论|说明)$/;
-
-function isInformalShortBlock(block: DecisionDetailBlock): boolean {
-  if (block.canonical || block.content.length > 600) return false;
-  if (!INFORMAL_SHORT_HEADING.test(block.heading)) return false;
-  const scanned = scanVisibleMarkdown(block.content);
-  const bodyLines = scanned.lines
-    .filter((line) => !scanned.headings.some((heading) => heading.start === line.start) && line.text.trim())
-    .map((line) => line.text);
-  if (bodyLines.length === 0 || bodyLines.length > 2) return false;
-  const fragments = bodyLines.map((line) => line.match(/^\s*[-*]\s+([^\s].*?)\s*$/)?.[1] ?? null);
-  if (fragments.some((fragment) => fragment === null)) return false;
-  return fragments.every((fragment) => INFORMAL_SHORT_FRAGMENT.test(fragment!));
-}
-
-function hasDirectPrecedingAnchor(block: DecisionDetailBlock, scanned: VisibleMarkdown): boolean {
-  return scanned.anchors.some((anchor) => (
-    anchor.end < block.start
-    && !scanned.lines.some((line) => line.start > anchor.end && line.start < block.start && line.text.trim())
-  ));
-}
-
 function inspectDecisionDetailDuplicates(content: string): DecisionDetailInspection {
   const blocks = parseDecisionDetailBlocks(content);
-  const scanned = scanVisibleMarkdown(content);
   const grouped = new Map<string, DecisionDetailBlock[]>();
   for (const block of blocks) {
     const key = block.id.toUpperCase();
@@ -208,16 +174,12 @@ function inspectDecisionDetailDuplicates(content: string): DecisionDetailInspect
   const duplicates: DecisionDetailDuplicate[] = [];
   for (const group of grouped.values()) {
     if (group.length < 2) continue;
-    const canonical = group.filter((block) => block.canonical);
-    const repairable = canonical.length === 1 && group.every((block) => (
-      block.canonical || (!hasDirectPrecedingAnchor(block, scanned) && isInformalShortBlock(block))
-    ));
-    duplicates.push({ id: canonical[0]?.id ?? group[0]!.id, blocks: group, repairable });
+    duplicates.push({ id: group[0]!.id, blocks: group });
   }
   if (duplicates.length === 0) return { ok: true, blocks };
   const summary = duplicates.map((duplicate) => {
     const types = duplicate.blocks.map((block) => block.canonical ? 'canonical' : 'informal').join(', ');
-    return `${duplicate.id} (${duplicate.blocks.length} blocks: ${types}${duplicate.repairable ? '; safe repair available' : ''})`;
+    return `${duplicate.id} (${duplicate.blocks.length} blocks: ${types})`;
   }).join(', ');
   return {
     ok: false,
@@ -226,26 +188,6 @@ function inspectDecisionDetailDuplicates(content: string): DecisionDetailInspect
     blocks,
     duplicates
   };
-}
-
-function repairDecisionDetailDuplicates(content: string): DecisionDetailRepair {
-  const inspection = inspectDecisionDetailDuplicates(content);
-  if (inspection.ok) return { ok: true, changed: false, content };
-  const unsafe = inspection.duplicates.filter((duplicate) => !duplicate.repairable);
-  if (unsafe.length > 0) {
-    return {
-      ok: false,
-      code: 'DECISION_DETAIL_AMBIGUOUS',
-      message: `Cannot safely repair duplicate decision detail ids: ${unsafe.map((duplicate) => duplicate.id).join(', ')}`,
-      content
-    };
-  }
-  const removals = inspection.duplicates.flatMap((duplicate) => duplicate.blocks.filter((block) => !block.canonical));
-  let repaired = content;
-  for (const block of removals.sort((left, right) => right.start - left.start)) {
-    repaired = repaired.slice(0, block.start) + repaired.slice(block.end);
-  }
-  return { ok: true, changed: repaired !== content, content: repaired };
 }
 
 type FieldKey = 'decision' | 'why' | 'impact' | 'risk' | 'analogy' | 'recommend' | 'reason' | 'implementation';
@@ -328,13 +270,11 @@ export {
   normalizeDecisionDetailForDisplay,
   parseDecisionDetailBlocks,
   parseDecisionEvidence,
-  repairDecisionDetailDuplicates,
   resolveDecisionDetail
 };
 export type {
   DecisionDetailBlock,
   DecisionDetailDuplicate,
   DecisionDetailInspection,
-  DecisionDetailRepair,
   DecisionDetailResolution
 };
