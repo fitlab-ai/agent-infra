@@ -8,11 +8,18 @@ import {
   buildProcessStartTimeQuery,
   getProcessIdentityState,
   getProcessStartTime,
+  parseDarwinStartTime,
   parseLinuxProcessStat,
   readProcessState,
   removePidFileIfMatches,
   writePidRecord
 } from '../../../lib/server/process-state.ts';
+
+test('parseDarwinStartTime accepts ps padding for single-digit days', () => {
+  assert.equal(parseDarwinStartTime('Tue Sep  1 00:25:12 2026'), Date.UTC(2026, 8, 1, 0, 25, 12));
+  assert.equal(parseDarwinStartTime('Mon Aug 31 16:00:00 2026'), Date.UTC(2026, 7, 31, 16, 0, 0));
+  assert.equal(parseDarwinStartTime('invalid'), null);
+});
 
 test('parseLinuxProcessStat handles spaces and closing parentheses in comm', () => {
   const fields = ['S', ...Array.from({ length: 18 }, (_, index) => String(index + 1)), '987654', '0'];

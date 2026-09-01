@@ -494,30 +494,32 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
   } catch {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
-  const candidate = manifest as Partial<SandboxControlManifest> & { version?: unknown };
+  const candidate = manifest as Partial<SandboxControlManifest>;
   const expectedKeys = [
     'branch', 'channelDir', 'container', 'containerIdentity', 'engine', 'generation',
     'mode', 'processingDir', 'project', 'publicStatusDir', 'repoRoot', 'runtimeDir',
     'taskId', 'token', 'worktreeRoot'
   ];
-  if ('version' in candidate || typeof candidate.runtimeDir !== 'string'
-    || Object.keys(manifest).sort().join(',') !== expectedKeys.sort().join(',')) {
-    throw new Error('SANDBOX_CONTROL_MANIFEST_REBUILD_REQUIRED: container-only recreation/rebuild is required');
+  if (Object.keys(manifest).sort().join(',') !== expectedKeys.sort().join(',')) {
+    throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
   if (typeof candidate.containerIdentity !== 'object' || candidate.containerIdentity === null
     || Array.isArray(candidate.containerIdentity)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const containerIdentity = candidate.containerIdentity as Record<string, unknown>;
-  if (typeof candidate.engine !== 'string' || candidate.engine.length === 0
+  if (Object.keys(containerIdentity).sort().join(',') !== 'id,labels'
+    || typeof candidate.engine !== 'string' || candidate.engine.length === 0
     || typeof candidate.repoRoot !== 'string' || typeof candidate.worktreeRoot !== 'string'
     || typeof candidate.project !== 'string' || typeof candidate.container !== 'string'
     || typeof containerIdentity.id !== 'string' || containerIdentity.id.length === 0
     || typeof containerIdentity.labels !== 'object' || containerIdentity.labels === null
     || Array.isArray(containerIdentity.labels)
     || Object.values(containerIdentity.labels).some((value) => typeof value !== 'string')
-    || typeof candidate.branch !== 'string' || !['task-bound', 'branch-only'].includes(candidate.mode ?? '')
+    || typeof candidate.branch !== 'string'
+    || (candidate.mode !== 'task-bound' && candidate.mode !== 'branch-only')
     || (candidate.taskId !== null && typeof candidate.taskId !== 'string')
     || typeof candidate.channelDir !== 'string' || typeof candidate.publicStatusDir !== 'string'
-    || typeof candidate.processingDir !== 'string' || typeof candidate.token !== 'string'
+    || typeof candidate.processingDir !== 'string' || typeof candidate.runtimeDir !== 'string'
+    || typeof candidate.token !== 'string'
     || typeof candidate.generation !== 'string'
     || (candidate.mode === 'task-bound' && (typeof candidate.taskId !== 'string' || candidate.taskId.length === 0))
     || (candidate.mode === 'branch-only' && candidate.taskId !== null)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
@@ -530,7 +532,27 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
   if (path.resolve(candidate.runtimeDir) !== path.join(root, 'runtime')) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
-  return candidate as SandboxControlManifest;
+  const normalized: SandboxControlManifest = {
+    engine: candidate.engine,
+    repoRoot: candidate.repoRoot,
+    worktreeRoot: candidate.worktreeRoot,
+    project: candidate.project,
+    container: candidate.container,
+    containerIdentity: {
+      id: containerIdentity.id as string,
+      labels: { ...(containerIdentity.labels as Record<string, string>) }
+    },
+    branch: candidate.branch,
+    mode: candidate.mode,
+    taskId: candidate.taskId,
+    token: candidate.token,
+    generation: candidate.generation,
+    channelDir: candidate.channelDir,
+    publicStatusDir: candidate.publicStatusDir,
+    processingDir: candidate.processingDir,
+    runtimeDir: candidate.runtimeDir
+  };
+  return normalized;
 }
 
 export function readSandboxControlManifest(manifestPath: string): SandboxControlManifest {

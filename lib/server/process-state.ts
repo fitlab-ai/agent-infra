@@ -85,8 +85,8 @@ export function isProcessAlive(pid: number, platform: NodeJS.Platform = process.
   }
 }
 
-function parseDarwinStartTime(output: string): number | null {
-  const match = output.trim().match(/^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) ([A-Z][a-z]{2}) (\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/);
+export function parseDarwinStartTime(output: string): number | null {
+  const match = output.trim().match(/^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) ([A-Z][a-z]{2})\s+(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/);
   if (!match) return null;
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const month = months.indexOf(match[1]!);

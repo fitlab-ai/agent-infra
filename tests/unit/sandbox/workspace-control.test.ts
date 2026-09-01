@@ -750,43 +750,44 @@ test('control broker ownership is acquired exclusively', async () => {
   }
 });
 
-test('control broker rejects legacy manifests with container-only recreation guidance', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-legacy-manifest-'));
+test('control broker rejects manifests missing required fields', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-invalid-manifest-'));
   const manifestPath = path.join(root, 'manifest.json');
-  fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, version: 1, worktreeRoot: undefined })}\n`);
+  fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, worktreeRoot: undefined })}\n`);
   try {
     await assert.rejects(
       serveSandboxControl(manifestPath),
-      /SANDBOX_CONTROL_MANIFEST_REBUILD_REQUIRED: container-only recreation\/rebuild is required/
+      /SANDBOX_CONTROL_MANIFEST_INVALID/
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('replacement lease serializes generation cutover and rebuilds versioned manifests', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-replacement-'));
+test('manifest reader rejects fields outside the current structure', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-extra-field-'));
   const manifestPath = path.join(root, 'manifest.json');
-  const legacy = {
+  const stored = {
     ...manifest,
-    version: 4,
     repoRoot: root,
     worktreeRoot: root,
     channelDir: path.join(root, 'channel'),
     publicStatusDir: path.join(root, 'public'),
-    processingDir: path.join(root, 'processing')
+    processingDir: path.join(root, 'processing'),
+    runtimeDir: path.join(root, 'runtime')
   };
-  fs.mkdirSync(legacy.channelDir, { recursive: true });
-  fs.mkdirSync(legacy.publicStatusDir);
-  fs.mkdirSync(legacy.processingDir);
-  fs.writeFileSync(manifestPath, `${JSON.stringify(legacy)}\n`);
-  const lease = acquireSandboxControlReplacement(root);
+  fs.mkdirSync(stored.channelDir, { recursive: true });
+  fs.mkdirSync(stored.publicStatusDir);
+  fs.mkdirSync(stored.processingDir);
   try {
-    assert.throws(() => acquireSandboxControlReplacement(root), /SANDBOX_CONTROL_REPLACEMENT_BUSY/);
-    assert.throws(() => readSandboxControlManifest(manifestPath), /SANDBOX_CONTROL_MANIFEST_REBUILD_REQUIRED/);
-    lease.assertOwned();
+    fs.writeFileSync(manifestPath, `${JSON.stringify({ ...stored, unexpected: true })}\n`);
+    assert.throws(() => readSandboxControlManifest(manifestPath), /SANDBOX_CONTROL_MANIFEST_INVALID/);
+    fs.writeFileSync(manifestPath, `${JSON.stringify({
+      ...stored,
+      containerIdentity: { ...stored.containerIdentity, unexpected: true }
+    })}\n`);
+    assert.throws(() => readSandboxControlManifest(manifestPath), /SANDBOX_CONTROL_MANIFEST_INVALID/);
   } finally {
-    lease.release();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -824,7 +825,7 @@ test('replacement cutover restores the previous root after materialization failu
   const lease = acquireSandboxControlReplacement(root);
   try {
     beginSandboxControlReplacement(root, lease);
-    fs.writeFileSync(manifestPath, '{"version":5}\n');
+    fs.writeFileSync(manifestPath, '{"engine":false}\n');
     await recoverSandboxControlReplacement(root, lease);
     assert.deepEqual(JSON.parse(fs.readFileSync(manifestPath, 'utf8')), oldManifest);
     const snapshot = captureSandboxControlCutoverSnapshot(root);
