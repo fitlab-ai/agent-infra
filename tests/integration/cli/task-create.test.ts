@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+
+import { canonicalTaskCreateCandidate, validateTaskCreateCandidate } from '../../../lib/task/create.ts';
 
 const internalCli = path.resolve('bin/internal-cli.ts');
 const hostEnvironment = Object.fromEntries(
@@ -61,6 +64,45 @@ test('task-create internal CLI persists a task and replays as no-op', () => {
     const replayed = JSON.parse(second.stdout);
     assert.equal(replayed.status, 'no-op');
     assert.equal(replayed.task.id, applied.task.id);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create formats non-user tokens in title, description and every input field without changing the raw candidate digest', () => {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  const raw = {
+    ...candidate(),
+    title: 'Optical detail @2x',
+    description: 'Description @2x',
+    taskInput: {
+      sources: ['source @2x'],
+      facts: ['fact @2x'],
+      constraints: ['constraint @2x'],
+      decisions: ['decision @2x'],
+      alternatives: ['alternative @2x'],
+      acceptanceCriteria: ['acceptance @2x'],
+      openQuestions: ['question @2x']
+    }
+  };
+  const expectedDigest = createHash('sha256')
+    .update(canonicalTaskCreateCandidate(validateTaskCreateCandidate(raw)))
+    .digest('hex');
+  fs.writeFileSync(input, JSON.stringify(raw));
+  try {
+    const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+      cwd: root, encoding: 'utf8', env: hostEnvironment
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const taskId = JSON.parse(result.stdout).task.id as string;
+    const task = fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md'), 'utf8');
+    assert.match(task, /^# 任务：Optical detail `@2x`$/m);
+    assert.match(task, /Description `@2x`/);
+    for (const field of ['source', 'fact', 'constraint', 'decision', 'alternative', 'acceptance', 'question']) {
+      assert.match(task, new RegExp('^- ' + field + ' `@2x`$', 'm'));
+    }
+    assert.match(task, new RegExp(`^task_create_candidate_digest: ${expectedDigest}$`, 'm'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

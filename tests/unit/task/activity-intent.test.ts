@@ -91,7 +91,7 @@ test('PR review start and complete create a paired compact Activity Log row with
     const updated = fs.readFileSync(path.join(fixture.taskDir, 'task.md'), 'utf8');
     assert.match(updated, /\*\*Review PR \(Round 1\) \[started\]\*\* by claude — started/);
     assert.match(updated, /\*\*Review PR \(Round 1\)\*\* by claude — Verdict: Changes Requested, blockers: 1, major: 2, minor: 3 → pr-review\.md/);
-    assert.match(updated, /\[PR 审查报告（Round 1）\]\(pr-review\.md\)/);
+    assert.match(updated, /PR 审查报告（Round 1）：`pr-review\.md`/);
     assert.match(updated, /^current_step: technical-design-review$/m);
     assert.match(updated, new RegExp(`^agent_infra_version: ${VERSION.replace('.', '\\.')}$`, 'm'));
   } finally {

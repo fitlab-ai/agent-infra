@@ -60,6 +60,34 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
 });
 
+test('platform-comment rejects unsafe task and artifact content before creating remote comments', () => {
+  const taskFixture = fixture();
+  try {
+    const taskPath = path.join(taskFixture.root, '.agents', 'workspace', 'active', taskFixture.taskId, 'task.md');
+    fs.appendFileSync(taskPath, '\n@2x\n');
+    const taskResult = runComment(['sync', taskFixture.taskId, '--kind', 'task', '--agent', 'codex'], taskFixture);
+    assert.equal(taskResult.status, 1, taskResult.stderr || taskResult.stdout);
+    assert.equal(JSON.parse(taskResult.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
+    assert.deepEqual(JSON.parse(fs.readFileSync(taskFixture.commentsPath, 'utf8')), []);
+  } finally {
+    fs.rmSync(taskFixture.root, { recursive: true, force: true });
+  }
+
+  const artifactFixture = fixture();
+  try {
+    const artifactPath = path.join(artifactFixture.root, '.agents', 'workspace', 'active', artifactFixture.taskId, 'analysis.md');
+    fs.writeFileSync(artifactPath, '# Analysis\n\n[local](/workspace/file.md)\n');
+    const artifactResult = runComment([
+      'sync', artifactFixture.taskId, '--kind', 'artifact', '--artifact', 'analysis.md', '--agent', 'codex'
+    ], artifactFixture);
+    assert.equal(artifactResult.status, 1, artifactResult.stderr || artifactResult.stdout);
+    assert.equal(JSON.parse(artifactResult.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
+    assert.deepEqual(JSON.parse(fs.readFileSync(artifactFixture.commentsPath, 'utf8')), []);
+  } finally {
+    fs.rmSync(artifactFixture.root, { recursive: true, force: true });
+  }
+});
+
 test('platform task comment sync transports receipt evidence with the task document', () => {
   const f = fixture();
   try {

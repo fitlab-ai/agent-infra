@@ -122,6 +122,44 @@ function syncFixture() {
   return root;
 }
 
+test('comment sync rejects unsafe task content before platform access', () => {
+  const root = syncFixture();
+  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  fs.appendFileSync(taskPath, '\n@2x\n');
+  let calls = 0;
+  const client = {
+    version() { calls += 1; return { ok: true, value: '2.72.0' }; },
+    json() { calls += 1; return { ok: true, value: {} }; },
+    text() { calls += 1; return { ok: true, value: '' }; }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'task', agent: 'codex', cwd: root, client
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'COMMENT_PAYLOAD_INVALID');
+  assert.equal(calls, 0);
+});
+
+test('comment sync rejects unsafe artifact content before platform access', () => {
+  const root = syncFixture();
+  const artifactPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md');
+  fs.writeFileSync(artifactPath, '# Analysis\n\n[local](/workspace/file.md)\n');
+  let calls = 0;
+  const client = {
+    version() { calls += 1; return { ok: true, value: '2.72.0' }; },
+    json() { calls += 1; return { ok: true, value: {} }; },
+    text() { calls += 1; return { ok: true, value: '' }; }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'COMMENT_PAYLOAD_INVALID');
+  assert.equal(calls, 0);
+});
+
 test('comment sync creates once and becomes a no-op on replay', () => {
   const root = syncFixture();
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];

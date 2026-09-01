@@ -335,7 +335,7 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
   assert.match(content, /current_step: technical-design/);
-  assert.match(content, /\]\(plan\.md\)/);
+  assert.match(content, /`plan\.md`/);
 });
 
 test('started derives its round and completion rejects an unlanded artifact', () => {
@@ -348,6 +348,18 @@ test('started derives its round and completion rejects an unlanded artifact', ()
   const done = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md']);
   assert.equal(done.status, 1);
   assert.equal(JSON.parse(done.stdout).error.code, 'ARTIFACT_NOT_FOUND');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('completed event rejects unsafe artifact content before writing task state', () => {
+  const f = fixture();
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n\n@2x\n');
+  const before = fs.readFileSync(f.file);
+  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md']);
+  assert.equal(completed.status, 1);
+  assert.equal(JSON.parse(completed.stdout).error.code, 'ARTIFACT_CONTENT_INVALID');
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
@@ -386,7 +398,7 @@ test('plan event reopens technical design after commit preparation', () => {
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /current_step: technical-design/);
   assert.match(content, /Plan Task \(Round 2\) \[started\]/);
-  assert.match(content, /\]\(plan-r2\.md\)/);
+  assert.match(content, /`plan-r2\.md`/);
 });
 
 test('completed event validates orchestration provenance before writing task state', () => {
@@ -658,7 +670,7 @@ test('analysis can restart from code when task requirements expand', () => {
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /current_step: requirement-analysis/);
   assert.match(content, /Analyze Task \(Round 2\) \[started\]/);
-  assert.match(content, /\]\(analysis-r2\.md\)/);
+  assert.match(content, /`analysis-r2\.md`/);
 });
 
 test('analysis restart still rejects an unrelated workflow stage without changing task bytes', () => {
@@ -741,7 +753,7 @@ test('review-code event completes the regular code review path', () => {
   assert.equal(JSON.parse(completed.stdout).toStep, 'code-review');
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /current_step: code-review/);
-  assert.match(content, /\]\(review-code\.md\)/);
+  assert.match(content, /`review-code\.md`/);
 });
 
 for (const scenario of reviewScenarios) {
@@ -978,7 +990,7 @@ test('review-code event completes a supplemental round against the latest code a
   assert.equal(JSON.parse(completed.stdout).toStep, 'code-review');
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /Review Code \(Round 2\) \[started\]/);
-  assert.match(content, /\]\(review-code-r2\.md\)/);
+  assert.match(content, /`review-code-r2\.md`/);
 });
 
 test('review-code event allows a supplemental round after commit preparation', () => {

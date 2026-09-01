@@ -8,6 +8,7 @@ import { resolvePlatformContext } from "./context.ts";
 import { hasCheckedRequirement, resolveRequirementSection } from "./issue-metadata.ts";
 import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "./issues.ts";
 import { listRemoteComments } from "./issue-comments.ts";
+import { findIssueCommentViolations } from "../task/issue-comment-content.ts";
 import { taskTypeLabel } from "./metadata-labels.ts";
 import { inspectGitHubPullRequest } from "./pull-requests.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
@@ -622,8 +623,17 @@ function checkCommentContent(context: any, remoteData: any): any {
     );
   }
 
+  const rawLocalContent = fs.readFileSync(context.artifactPath, "utf8");
+  const violation = findIssueCommentViolations(rawLocalContent)[0];
+  if (violation) {
+    return failResult(CHECK_TYPE,
+      `Artifact comment content is invalid at line ${violation.line}, column ${violation.column}: ${violation.message}; offending token '${violation.token}'`,
+      "check_failed"
+    );
+  }
+
   const comment = findCommentByMarker(remoteData.comments, context.marker);
-  const localContent = normalizeContent(fs.readFileSync(context.artifactPath, "utf8"));
+  const localContent = normalizeContent(rawLocalContent);
   const commentContent = normalizeContent(extractCommentBody(comment?.body || ""));
 
   if (localContent === commentContent) {
@@ -644,6 +654,14 @@ function checkCommentContent(context: any, remoteData: any): any {
 function checkTaskCommentContent(context: any, remoteData: any): any {
   if (!context.config.verify_task_comment_content) {
     return null;
+  }
+
+  const violation = findIssueCommentViolations(context.task.content)[0];
+  if (violation) {
+    return failResult(CHECK_TYPE,
+      `Task comment content is invalid at line ${violation.line}, column ${violation.column}: ${violation.message}; offending token '${violation.token}'`,
+      "check_failed"
+    );
   }
 
   const taskMarker = `<!-- sync-issue:${context.task.metadata.id}:task -->`;

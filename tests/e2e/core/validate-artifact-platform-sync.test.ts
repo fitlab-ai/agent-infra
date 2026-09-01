@@ -524,6 +524,56 @@ for (const c of implementSyncCases) {
   }));
 }
 
+test("validate-artifact platform-sync rejects unsafe local comment content before comparing remote data", () => withTempRoot("agent-infra-platform-sync-content-policy-", (tempRoot) => {
+  const ctx = setupPlatformSyncEnv(tempRoot);
+  const taskContent = buildTaskContent({ issue_number: "65" });
+  const artifactContent = "# Code\n\n@2x\n";
+  write(path.join(ctx.taskDir, "task.md"), taskContent);
+  write(path.join(ctx.taskDir, "code.md"), artifactContent);
+  writeJson(ctx.issuePath, buildIssuePayload());
+  writeJson(ctx.commentsPath, [
+    { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+    { body: buildTaskComment(taskId, taskContent) }
+  ]);
+
+  const result = runValidatorWithFakeGh(
+    ["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"],
+    ctx,
+    { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
+  );
+  assert.equal(result.status, 1);
+  assertPayloadStatus(result, {
+    type: "platform-sync",
+    status: "fail",
+    message: /Artifact comment content is invalid/
+  });
+}));
+
+test("validate-artifact platform-sync rejects unsafe local task content before comparing remote data", () => withTempRoot("agent-infra-platform-sync-task-content-policy-", (tempRoot) => {
+  const ctx = setupPlatformSyncEnv(tempRoot);
+  const taskContent = `${buildTaskContent({ issue_number: "65" })}\n@2x\n`;
+  const artifactContent = loadFixture("valid-code.md");
+  write(path.join(ctx.taskDir, "task.md"), taskContent);
+  write(path.join(ctx.taskDir, "code.md"), artifactContent);
+  writeJson(ctx.issuePath, buildIssuePayload());
+  writeJson(ctx.commentsPath, [
+    { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+    { body: buildTaskComment(taskId, taskContent) }
+  ]);
+
+  const result = runValidatorWithFakeGh(
+    ["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"],
+    ctx,
+    { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
+  );
+  assert.equal(result.status, 1);
+  assertPayloadStatus(result, {
+    type: "platform-sync",
+    status: "fail",
+    message: /Task comment content is invalid/
+  });
+}));
+
 const issueFieldCases = [
   {
     name: "validate-artifact platform-sync passes when Issue fields match task frontmatter",
