@@ -1,49 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  findIssueCommentViolations,
-  formatKnownNonUserTokens
-} from '../../../lib/task/issue-comment-content.ts';
+import { findIssueCommentViolations } from '../../../lib/task/issue-comment-content.ts';
 
 function locations(content: string) {
   return findIssueCommentViolations(content).map(({ kind, line, column, token }) => ({ kind, line, column, token }));
 }
 
-test('formats raw and escaped non-user tokens while preserving real mentions and email addresses', () => {
-  assert.equal(formatKnownNonUserTokens('清晰度 @2x'), '清晰度 `@2x`');
-  assert.equal(formatKnownNonUserTokens(String.raw`清晰度 \@2x`), '清晰度 `@2x`');
-  assert.equal(formatKnownNonUserTokens('请联系 @alice 或 test@example.com'), '请联系 @alice 或 test@example.com');
-});
-
-test('formatting is idempotent and skips successfully closed code spans and fences', () => {
-  const content = '已处理 `@2x`。\n```text\n@2x\n```';
-  assert.equal(formatKnownNonUserTokens(content), content);
-  assert.equal(formatKnownNonUserTokens(formatKnownNonUserTokens('raw @2x')), 'raw `@2x`');
-});
-
-test('reports raw and escaped non-user tokens outside successful code spans', () => {
-  assert.deepEqual(locations('raw @2x\nescaped \\@2x'), [
-    { kind: 'non-user-token', line: 1, column: 5, token: '@2x' },
-    { kind: 'non-user-token', line: 2, column: 10, token: '@2x' }
-  ]);
-  assert.deepEqual(locations('`@2x`\n```\n@2x\n```'), []);
+test('leaves @ content to the source author without classifying it as a violation', () => {
+  assert.deepEqual(locations('清晰度 @2x\nescaped \\@2x\n请联系 @alice 或 test@example.com'), []);
+  assert.deepEqual(locations('`@2x`\n```text\n@2x\n```'), []);
 });
 
 test('continues scanning after an unclosed or mismatched inline delimiter', () => {
   assert.deepEqual(locations('literal ` then @2x and [x](/workspace/file.md)'), [
-    { kind: 'non-user-token', line: 1, column: 16, token: '@2x' },
     { kind: 'local-link', line: 1, column: 24, token: '/workspace/file.md' }
   ]);
-  assert.deepEqual(locations('`literal `` then @2x'), [
-    { kind: 'non-user-token', line: 1, column: 18, token: '@2x' }
-  ]);
+  assert.deepEqual(locations('`literal `` then @2x'), []);
 });
 
 test('only successfully closed fences protect their contents', () => {
   assert.deepEqual(locations('```text\n@2x\n```'), []);
   assert.deepEqual(locations('```text\n@2x'), [
-    { kind: 'non-user-token', line: 2, column: 1, token: '@2x' }
   ]);
   assert.deepEqual(locations('~~~\n[x](/workspace/file.md)\n~~~'), []);
   assert.deepEqual(locations('~~~\n[x](/workspace/file.md)'), [
@@ -53,7 +31,6 @@ test('only successfully closed fences protect their contents', () => {
 
 test('does not protect content after an invalid backtick fence opener', () => {
   assert.deepEqual(locations('``` info ` bad\n@2x\n```'), [
-    { kind: 'non-user-token', line: 2, column: 1, token: '@2x' }
   ]);
   assert.deepEqual(locations('``` info ` bad\n[x](/workspace/file.md)\n```'), [
     { kind: 'local-link', line: 2, column: 1, token: '/workspace/file.md' }
@@ -79,14 +56,13 @@ test('rejects canonical artifact and local path destinations but keeps valid lin
   ]);
 });
 
-test('keeps non-user tokens inside valid URL contexts unchanged', () => {
+test('leaves @ content inside valid URL contexts unchanged', () => {
   const content = [
     '[asset](https://example.com/@2x)',
     'https://example.com/@2x',
     '<a href="https://example.com/@2x">external</a>',
     '[https://example.com/@2x](#anchor)'
   ].join('\n');
-  assert.equal(formatKnownNonUserTokens(content), content);
   assert.deepEqual(locations(content), []);
 });
 
@@ -106,13 +82,8 @@ test('parses quoted HTML attributes and checks every local destination', () => {
 });
 
 test('does not hide tokens inside malformed HTML-like fragments', () => {
-  assert.deepEqual(locations('<broken\n@2x>'), [
-    { kind: 'non-user-token', line: 2, column: 1, token: '@2x' }
-  ]);
-  assert.deepEqual(locations('<@2x>'), [
-    { kind: 'non-user-token', line: 1, column: 2, token: '@2x' }
-  ]);
-  assert.equal(formatKnownNonUserTokens('<broken\n@2x>'), '<broken\n`@2x`>');
+  assert.deepEqual(locations('<broken\n@2x>'), []);
+  assert.deepEqual(locations('<@2x>'), []);
 });
 
 test('rejects macOS temporary directory destinations', () => {
@@ -139,7 +110,5 @@ test('uses the same destination policy for reference links and HTML attributes',
 
 test('scans visible inline-link labels while leaving their destinations to the link policy', () => {
   const violations = findIssueCommentViolations('[@2x](https://example.com/@2x)');
-  assert.deepEqual(violations.map((item) => ({ kind: item.kind, column: item.column, token: item.token })), [
-    { kind: 'non-user-token', column: 2, token: '@2x' }
-  ]);
+  assert.deepEqual(violations, []);
 });

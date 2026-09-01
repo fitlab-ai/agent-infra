@@ -181,7 +181,7 @@ function renderList(items: readonly string[]): string {
 
 function replaceEmptySubsection(content: string, heading: string, items: readonly string[]): string {
   if (items.length === 0) return content;
-  return content.replace(`${heading}\n`, `${heading}\n\n${formatKnownNonUserTokens(renderList(items))}\n`);
+  return content.replace(`${heading}\n`, `${heading}\n\n${renderList(items)}\n`);
 }
 
 function renderTask(params: Readonly<{
@@ -224,8 +224,8 @@ function renderTask(params: Readonly<{
     '---'
   ].join('\n');
   let content = params.template.replace(/^---\n[\s\S]*?\n---/, frontmatter);
-  content = content.replace('# 任务：[标题]', `# 任务：${formatKnownNonUserTokens(candidate.title)}`);
-  content = content.replace('[清晰简洁地描述任务。]', formatKnownNonUserTokens(markdownBlock(candidate.description)));
+  content = content.replace('# 任务：[标题]', `# 任务：${candidate.title}`);
+  content = content.replace('[清晰简洁地描述任务。]', markdownBlock(candidate.description));
   const sections: Array<[string, keyof TaskCreateCandidateV1['taskInput']]> = [
     ['### 来源', 'sources'], ['### 已确认事实与证据', 'facts'], ['### 约束', 'constraints'],
     ['### 已确认决策', 'decisions'], ['### 候选与否决方案', 'alternatives'],

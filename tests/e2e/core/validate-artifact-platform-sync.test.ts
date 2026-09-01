@@ -524,7 +524,7 @@ for (const c of implementSyncCases) {
   }));
 }
 
-test("validate-artifact platform-sync rejects unsafe local comment content before comparing remote data", () => withTempRoot("agent-infra-platform-sync-content-policy-", (tempRoot) => {
+test("validate-artifact platform-sync preserves source @ content when comparing artifact data", () => withTempRoot("agent-infra-platform-sync-content-policy-", (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
   const taskContent = buildTaskContent({ issue_number: "65" });
   const artifactContent = "# Code\n\n@2x\n";
@@ -541,15 +541,11 @@ test("validate-artifact platform-sync rejects unsafe local comment content befor
     ctx,
     { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
   );
-  assert.equal(result.status, 1);
-  assertPayloadStatus(result, {
-    type: "platform-sync",
-    status: "fail",
-    message: /Artifact comment content is invalid/
-  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
 }));
 
-test("validate-artifact platform-sync rejects unsafe local task content before comparing remote data", () => withTempRoot("agent-infra-platform-sync-task-content-policy-", (tempRoot) => {
+test("validate-artifact platform-sync preserves source @ content when comparing task data", () => withTempRoot("agent-infra-platform-sync-task-content-policy-", (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
   const taskContent = `${buildTaskContent({ issue_number: "65" })}\n@2x\n`;
   const artifactContent = loadFixture("valid-code.md");
@@ -566,12 +562,8 @@ test("validate-artifact platform-sync rejects unsafe local task content before c
     ctx,
     { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
   );
-  assert.equal(result.status, 1);
-  assertPayloadStatus(result, {
-    type: "platform-sync",
-    status: "fail",
-    message: /Task comment content is invalid/
-  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
 }));
 
 const issueFieldCases = [

@@ -69,7 +69,7 @@ test('task-create internal CLI persists a task and replays as no-op', () => {
   }
 });
 
-test('task-create formats non-user tokens in title, description and every input field without changing the raw candidate digest', () => {
+test('task-create preserves source @ content without changing the raw candidate digest', () => {
   const root = fixture();
   const input = path.join(root, 'candidate.json');
   const raw = {
@@ -97,10 +97,10 @@ test('task-create formats non-user tokens in title, description and every input 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const taskId = JSON.parse(result.stdout).task.id as string;
     const task = fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md'), 'utf8');
-    assert.match(task, /^# 任务：Optical detail `@2x`$/m);
-    assert.match(task, /Description `@2x`/);
+    assert.match(task, /^# 任务：Optical detail @2x$/m);
+    assert.match(task, /Description @2x/);
     for (const field of ['source', 'fact', 'constraint', 'decision', 'alternative', 'acceptance', 'question']) {
-      assert.match(task, new RegExp('^- ' + field + ' `@2x`$', 'm'));
+      assert.match(task, new RegExp('^- ' + field + ' @2x$', 'm'));
     }
     assert.match(task, new RegExp(`^task_create_candidate_digest: ${expectedDigest}$`, 'm'));
   } finally {

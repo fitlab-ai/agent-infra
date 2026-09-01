@@ -351,16 +351,15 @@ test('started derives its round and completion rejects an unlanded artifact', ()
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
-test('completed event rejects unsafe artifact content before writing task state', () => {
+test('completed event preserves source @ content without blocking task state', () => {
   const f = fixture();
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n\n@2x\n');
   const before = fs.readFileSync(f.file);
   const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md']);
-  assert.equal(completed.status, 1);
-  assert.equal(JSON.parse(completed.stdout).error.code, 'ARTIFACT_CONTENT_INVALID');
-  assert.deepEqual(fs.readFileSync(f.file), before);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.notDeepEqual(fs.readFileSync(f.file), before);
 });
 
 test('started replay keeps the open identity after its artifact lands', () => {

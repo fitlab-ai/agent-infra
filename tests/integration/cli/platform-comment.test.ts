@@ -60,15 +60,15 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
 });
 
-test('platform-comment rejects unsafe task and artifact content before creating remote comments', () => {
+test('platform-comment preserves @ content while rejecting unsafe artifact links', () => {
   const taskFixture = fixture();
   try {
     const taskPath = path.join(taskFixture.root, '.agents', 'workspace', 'active', taskFixture.taskId, 'task.md');
     fs.appendFileSync(taskPath, '\n@2x\n');
     const taskResult = runComment(['sync', taskFixture.taskId, '--kind', 'task', '--agent', 'codex'], taskFixture);
-    assert.equal(taskResult.status, 1, taskResult.stderr || taskResult.stdout);
-    assert.equal(JSON.parse(taskResult.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
-    assert.deepEqual(JSON.parse(fs.readFileSync(taskFixture.commentsPath, 'utf8')), []);
+    assert.equal(taskResult.status, 0, taskResult.stderr || taskResult.stdout);
+    assert.equal(JSON.parse(taskResult.stdout).status, 'applied');
+    assert.equal(JSON.parse(fs.readFileSync(taskFixture.commentsPath, 'utf8')).length, 1);
   } finally {
     fs.rmSync(taskFixture.root, { recursive: true, force: true });
   }

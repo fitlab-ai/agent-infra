@@ -100,11 +100,10 @@ test('unknown families fail without resolving outside the catalog', () => {
   assert.equal(result.error?.code, 'ARTIFACT_FAMILY_UNKNOWN');
 });
 
-test('completed artifacts reject unsafe Issue comment content', () => {
+test('completed artifacts preserve source @ content', () => {
   const f = fixture({ 'analysis.md': '# Analysis\n\n@2x\n' });
   const result = validateCompletedArtifact(f.taskDir, 'analysis', 'analysis.md', 1);
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.error.code, 'ARTIFACT_CONTENT_INVALID');
+  assert.equal(result.ok, true);
 });
 
 test('automatic artifact references use code text and remain idempotent', () => {

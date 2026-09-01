@@ -122,23 +122,34 @@ function syncFixture() {
   return root;
 }
 
-test('comment sync rejects unsafe task content before platform access', () => {
+test('comment sync preserves source @ content', () => {
   const root = syncFixture();
   const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
   fs.appendFileSync(taskPath, '\n@2x\n');
-  let calls = 0;
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   const client = {
-    version() { calls += 1; return { ok: true, value: '2.72.0' }; },
-    json() { calls += 1; return { ok: true, value: {} }; },
-    text() { calls += 1; return { ok: true, value: '' }; }
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        const body = JSON.parse(options?.input || '{}').body;
+        comments.push({ id: 10, body, user: { login: 'codex' } });
+        return { ok: true, value: { id: 10 } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
 
   const result = syncPlatformComment('TASK-20260101-000001', {
     kind: 'task', agent: 'codex', cwd: root, client
   });
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'COMMENT_PAYLOAD_INVALID');
-  assert.equal(calls, 0);
+  assert.equal(result.status, 'applied');
+  assert.equal(result.changed, true);
+  assert.equal(comments.length, 1);
 });
 
 test('comment sync rejects unsafe artifact content before platform access', () => {

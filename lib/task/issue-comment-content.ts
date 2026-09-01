@@ -1,4 +1,4 @@
-type IssueCommentViolationKind = 'non-user-token' | 'canonical-artifact-link' | 'local-link';
+type IssueCommentViolationKind = 'canonical-artifact-link' | 'local-link';
 
 type IssueCommentViolation = Readonly<{
   kind: IssueCommentViolationKind;
@@ -13,7 +13,6 @@ type Line = Readonly<{ start: number; end: number; text: string }>;
 type HtmlAttribute = Readonly<{ name: string; index: number; value: string }>;
 type HtmlTag = Readonly<{ end: number; attributes: readonly HtmlAttribute[] }>;
 
-const NON_USER_TOKEN = '@2x';
 const CANONICAL_ARTIFACT = /^(?:analysis|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run|pr-review)(?:-r(?:[2-9]|[1-9]\d+))?\.md(?:[#?].*)?$/u;
 
 function splitLines(content: string): Line[] {
@@ -173,15 +172,6 @@ function protectedRanges(content: string): Range[] {
   return mergeRanges([...base, ...findInlineCodeRanges(content, base)]);
 }
 
-function wordCharacter(character: string | undefined): boolean {
-  return character !== undefined && /[\p{L}\p{N}_]/u.test(character);
-}
-
-function tokenAt(content: string, index: number): boolean {
-  if (!content.startsWith(NON_USER_TOKEN, index)) return false;
-  return !wordCharacter(content[index - 1]) && !wordCharacter(content[index + NON_USER_TOKEN.length]);
-}
-
 function lineColumn(content: string, index: number): { line: number; column: number } {
   const prefix = content.slice(0, index);
   const line = prefix.split('\n').length;
@@ -210,9 +200,7 @@ function violation(
   token: string
 ): IssueCommentViolation {
   const position = lineColumn(content, index);
-  const message = kind === 'non-user-token'
-    ? '明确的非用户 token 必须使用行内代码格式'
-    : kind === 'canonical-artifact-link'
+  const message = kind === 'canonical-artifact-link'
       ? 'artifact 文件引用必须使用代码文本而不是 Markdown 链接'
       : '本地路径不得作为 Issue 评论中的可点击链接';
   return { kind, line: position.line, column: position.column, token, message };
@@ -233,9 +221,7 @@ function matchingBracket(content: string, start: number, open: string, close: st
 
 function linkDestination(content: string, start: number): {
   end: number;
-  labelEnd: number;
   destination: string;
-  destinationRange: Range;
 } | null {
   const closeBracket = matchingBracket(content, start + 1, '[', ']');
   if (closeBracket < 0 || content[closeBracket + 1] !== '(') return null;
@@ -246,16 +232,12 @@ function linkDestination(content: string, start: number): {
   if (!match) {
     return {
       end: closeParenthesis + 1,
-      labelEnd: closeBracket,
-      destination: '',
-      destinationRange: { start: closeBracket + 2, end: closeParenthesis }
+      destination: ''
     };
   }
   return {
     end: closeParenthesis + 1,
-    labelEnd: closeBracket,
-    destination: match[1] ?? match[2]!,
-    destinationRange: { start: closeBracket + 2, end: closeParenthesis }
+    destination: match[1] ?? match[2]!
   };
 }
 
@@ -274,47 +256,6 @@ function externalUrlRangeAt(content: string, index: number): Range | null {
   const match = /^(?:https?:\/\/|mailto:)[^\s<>()\[\]]+/iu.exec(content.slice(index));
   if (!match) return null;
   return { start: index, end: index + match[0].length };
-}
-
-function nonVisibleRanges(content: string, protectedRangesInput: readonly Range[]): Range[] {
-  const ranges: Range[] = [];
-  const lines = splitLines(content);
-  for (const line of lines) {
-    if (referenceDestination(line)) ranges.push({ start: line.start, end: line.end });
-  }
-
-  let index = 0;
-  while (index < content.length) {
-    const protectedRange = rangeAt(protectedRangesInput, index);
-    if (protectedRange) {
-      index = protectedRange.end;
-      continue;
-    }
-    if (content[index] === '[' && !escaped(content, index)) {
-      const link = linkDestination(content, index);
-      if (link) {
-        ranges.push(link.destinationRange);
-        index += 1;
-        continue;
-      }
-    }
-    if (content[index] === '<') {
-      const tag = htmlTag(content, index);
-      if (tag) {
-        ranges.push({ start: index, end: tag.end });
-        index = tag.end;
-        continue;
-      }
-    }
-    const url = externalUrlRangeAt(content, index);
-    if (url) {
-      ranges.push(url);
-      index = url.end;
-      continue;
-    }
-    index += 1;
-  }
-  return mergeRanges(ranges);
 }
 
 function htmlTag(content: string, start: number): HtmlTag | null {
@@ -388,64 +329,6 @@ function htmlDestinations(tag: HtmlTag): readonly HtmlAttribute[] {
   return tag.attributes.filter(({ name }) => /^(?:href|src)$/iu.test(name));
 }
 
-function appendTokenViolations(
-  content: string,
-  start: number,
-  end: number,
-  ranges: readonly Range[],
-  violations: IssueCommentViolation[]
-): void {
-  let index = start;
-  while (index < end) {
-    const protectedRange = rangeAt(ranges, index);
-    if (protectedRange) {
-      index = protectedRange.end;
-      continue;
-    }
-    if (tokenAt(content, index)) {
-      violations.push(violation(content, index, 'non-user-token', NON_USER_TOKEN));
-      index += NON_USER_TOKEN.length;
-      continue;
-    }
-    if (content[index] === '\\' && tokenAt(content, index + 1)) {
-      violations.push(violation(content, index + 1, 'non-user-token', NON_USER_TOKEN));
-      index += 1 + NON_USER_TOKEN.length;
-      continue;
-    }
-    const url = externalUrlRangeAt(content, index);
-    if (url) {
-      index = url.end;
-      continue;
-    }
-    index += 1;
-  }
-}
-
-function formatKnownNonUserTokens(content: string): string {
-  const ranges = protectedRanges(content);
-  const hiddenRanges = mergeRanges([...ranges, ...nonVisibleRanges(content, ranges)]);
-  let output = '';
-  let cursor = 0;
-  let index = 0;
-  while (index < content.length) {
-    const protectedRange = rangeAt(hiddenRanges, index);
-    if (protectedRange) {
-      index = protectedRange.end;
-      continue;
-    }
-    if (!tokenAt(content, index)) {
-      index += 1;
-      continue;
-    }
-    const start = escaped(content, index) && content[index - 1] === '\\' ? index - 1 : index;
-    output += content.slice(cursor, start);
-    output += `\`${NON_USER_TOKEN}\``;
-    cursor = index + NON_USER_TOKEN.length;
-    index = cursor;
-  }
-  return output + content.slice(cursor);
-}
-
 function findIssueCommentViolations(content: string): IssueCommentViolation[] {
   const ranges = protectedRanges(content);
   const violations: IssueCommentViolation[] = [];
@@ -467,22 +350,11 @@ function findIssueCommentViolations(content: string): IssueCommentViolation[] {
         continue;
       }
     }
-    if (tokenAt(content, index)) {
-      violations.push(violation(content, index, 'non-user-token', NON_USER_TOKEN));
-      index += NON_USER_TOKEN.length;
-      continue;
-    }
-    if (content[index] === '\\' && tokenAt(content, index + 1)) {
-      violations.push(violation(content, index + 1, 'non-user-token', NON_USER_TOKEN));
-      index += 1 + NON_USER_TOKEN.length;
-      continue;
-    }
     if (content[index] === '[' && !escaped(content, index)) {
       const link = linkDestination(content, index);
       if (link) {
         const kind = destinationKind(link.destination);
         if (kind) violations.push(violation(content, index, kind, link.destination));
-        appendTokenViolations(content, index + 1, link.labelEnd, ranges, violations);
         index = link.end;
         continue;
       }
@@ -512,5 +384,5 @@ function findIssueCommentViolations(content: string): IssueCommentViolation[] {
   });
 }
 
-export { findIssueCommentViolations, formatKnownNonUserTokens };
+export { findIssueCommentViolations };
 export type { IssueCommentViolation, IssueCommentViolationKind };
