@@ -82,7 +82,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
 ```
 
-该 intent 原子最终化报告摘要并返回同一次账本快照；不得再调用 `stage-status`、手工替换占位符或扫描问题清单。失败后，模型只能在共享规则的机械安全门通过时修改同一个受控 artifact，并完整重跑相同 intent；每次失败都重新判断是否收敛。只有最终一次完整成功返回的 `stageStatus.canAdvance=true` 才能决定 verdict 和下一步，并执行 `agent-infra-internal task-event {task-id} review-analysis.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`。失败、模型停止、无进展或紧急熔断时，不发布完成事件或跨阶段命令，但必须按 `reference/output-templates.md` 的 `repair-stop` 场景展示已有 summary/findings、artifact、实际修复次数、最后诊断和停止原因。
+该 intent 原子最终化报告摘要并返回同一次账本快照；不得再调用 `stage-status`、手工替换占位符或扫描问题清单。失败后，模型只能在共享规则的机械安全门通过时修改同一个受控 artifact，并完整重跑相同 intent；每次失败都重新判断是否收敛。最终一次完整成功返回决定同一快照的 verdict 和计数：`stageStatus.canAdvance=true` 且结论为 Approved 时允许跨阶段推进；`stageStatus.canAdvance=false` 时仍须执行 `agent-infra-internal task-event {task-id} review-analysis.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`，使用 `changes-requested` 并路由到同阶段修订/复审（报告明确拒绝时使用 `rejected`）。失败、模型停止、无进展或紧急熔断时，不发布完成事件或跨阶段命令，但必须按 `reference/output-templates.md` 的 `repair-stop` 场景展示已有 summary/findings、artifact、实际修复次数、最后诊断和停止原因。
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 

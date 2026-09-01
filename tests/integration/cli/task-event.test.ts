@@ -85,6 +85,16 @@ function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env)
   return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8', env });
 }
 
+function finalizeReview(
+  f: ReturnType<typeof fixture>,
+  scenario: (typeof reviewScenarios)[number]
+) {
+  return spawnSync('node', [
+    INTERNAL_CLI_PATH, 'task-review', f.id, 'finalize-summary', '--stage', scenario.stage,
+    '--artifact', scenario.artifact
+  ], { cwd: f.root, encoding: 'utf8' });
+}
+
 function inspect(root: string, args: string[]) {
   return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], { cwd: root, encoding: 'utf8' });
 }
@@ -745,6 +755,51 @@ for (const scenario of reviewScenarios) {
     const digest = sha256File(path.join(f.dir, scenario.input));
     const content = fs.readFileSync(f.file, 'utf8');
     assert.match(content, new RegExp(`\\| ${scenario.family}\\.completed \\| ${scenario.artifact} \\| ${scenario.input} \\| ${digest} \\|`));
+  });
+}
+
+for (const scenario of reviewScenarios) {
+  test(`${scenario.family} completes a finalized non-advancing review`, () => {
+    const f = prepareReview(scenario, [
+      `| ${scenario.findingId} | ${scenario.stage} | 1 | minor | open | ${scenario.artifact}#finding |`
+    ], '需要修改', { blockers: 0, major: 0, minor: 1 });
+
+    const finalized = finalizeReview(f, scenario);
+    assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+    const finalization = JSON.parse(finalized.stdout);
+    assert.equal(finalization.status, 'no-op');
+    assert.equal(finalization.stageStatus.canAdvance, false);
+
+    const completed = completeReview(f, scenario, 'changes-requested', { blockers: 0, major: 0, minor: 1 });
+    assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+    assert.equal(JSON.parse(completed.stdout).status, 'applied');
+  });
+}
+
+for (const scenario of reviewScenarios) {
+  test(`${scenario.family} preserves a known pending decision during unrelated artifact repair`, () => {
+    const f = prepareReview(scenario, [
+      `| HD-1 | ${scenario.stage} | - | decision | needs-human-decision | ${scenario.artifact}#HD-1 |`
+    ], '需要修改');
+    const artifactPath = path.join(f.dir, scenario.artifact);
+    const original = fs.readFileSync(artifactPath, 'utf8');
+    fs.writeFileSync(
+      artifactPath,
+      `${original.replace('0 阻塞项，0 主要，0 次要', '{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要')}\n### HD-1: Decision [needs-human-decision]\n\n- **What needs a decision**: choose a repair\n`
+    );
+
+    const finalized = finalizeReview(f, scenario);
+    assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+    const finalization = JSON.parse(finalized.stdout);
+    assert.equal(finalization.status, 'applied');
+    assert.equal(finalization.changed, true);
+    assert.equal(finalization.stageStatus.canAdvance, false);
+    assert.match(fs.readFileSync(artifactPath, 'utf8'), /0 阻塞项，0 主要，0 次要/);
+    assert.match(fs.readFileSync(artifactPath, 'utf8'), /### HD-1: Decision \[needs-human-decision\]/);
+
+    const completed = completeReview(f, scenario, 'changes-requested', { blockers: 0, major: 0, minor: 0 });
+    assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+    assert.equal(JSON.parse(completed.stdout).status, 'applied');
   });
 }
 

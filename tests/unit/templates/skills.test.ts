@@ -375,6 +375,28 @@ test("review skills declare one initial finalizer before their completion event"
   }
 });
 
+test("review skills publish non-advancing finalizer results before same-stage routing", () => {
+  const stages = [
+    { skill: "review-analysis", stage: "analysis" },
+    { skill: "review-plan", stage: "plan" },
+    { skill: "review-code", stage: "code" }
+  ];
+
+  for (const { skill, stage } of stages) {
+    for (const relativePath of skillDocPaths(skill)) {
+      const content = read(relativePath);
+      const finalizer = `agent-infra-internal task-review {task-id} finalize-summary --stage ${stage} --artifact {review-artifact}`;
+      const nonAdvancing = content.indexOf("stageStatus.canAdvance=false");
+      const completion = content.indexOf(`agent-infra-internal task-event {task-id} ${skill}.completed`);
+
+      assert.ok(content.includes(finalizer), `${relativePath} should declare finalization`);
+      assert.notEqual(nonAdvancing, -1, `${relativePath} should define non-advancing routing`);
+      assert.ok(content.includes("changes-requested"), `${relativePath} should define the non-advancing verdict`);
+      assert.ok(nonAdvancing < completion, `${relativePath} should route non-advancing results before completion`);
+    }
+  }
+});
+
 test("review output templates define a result-preserving stop scenario", () => {
   const paths = [
     ...["review-analysis", "review-plan", "review-code"].map(

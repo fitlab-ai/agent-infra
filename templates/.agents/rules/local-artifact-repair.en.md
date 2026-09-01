@@ -16,7 +16,7 @@ Before every model edit, confirm that:
 1. the finalizer returned a failure and no artifact operation was committed;
 2. the task, stage, artifact, review round, identity, and provenance still match;
 3. the target is an ordinary file inside the current task directory, with no concurrency conflict, permission error, I/O uncertainty, or target replacement;
-4. the change does not involve a human decision, task state, ledger state, receipt, Git, platform, or any other external side effect.
+4. the change does not alter human-decision semantics, decision-detail or ledger identity, and does not involve task state, receipts, Git, platform, or any other external side effect. A known and verifiable pending human decision may remain when the model proves the edit is unrelated to that decision.
 
 If any condition fails, stop immediately without invoking a model edit. The model cannot bypass these gates.
 
@@ -27,7 +27,7 @@ If any condition fails, stop immediately without invoking a model edit. The mode
 3. On failure with the safety gates passed, let the model read the structured diagnostic, current artifact, and required context, then decide whether to repair or stop. It must explain the scope and reason for the proposed change.
 4. If the model continues, perform one minimal edit to the artifact. Increment `repairAttempts` only when the file bytes actually change, then rerun the same finalizer intent completely.
 5. Re-run every safety check after each retry. A new, independent problem still limited to the same artifact may be offered to the model for another decision; the previous repairability decision must not be reused automatically.
-6. Stop immediately when the model cannot establish safety or identifies an environment, permission, concurrency, identity, provenance, unknown-state, human-decision, or other non-local problem.
+6. Stop immediately when the model cannot establish safety or identifies an environment, permission, concurrency, identity, provenance, unknown-state, uncertain human-decision semantics/details, or other non-local problem. A known human decision is not itself a stop condition.
 7. Stop when the diagnostic or artifact fingerprint repeats, no byte-level progress occurs, or the model cannot propose a verifiable minimal change.
 8. Allow at most 8 actual artifact edits per skill invocation as an emergency circuit breaker. This cap only prevents infinite loops and resource exhaustion; it is not a normal business stop condition and does not mean that at most eight problems may be repaired. Preserve the final structured diagnostic when the cap is reached.
 
@@ -35,7 +35,7 @@ The repair count exists only in the in-memory context of the current skill invoc
 
 ## Completion Events and User Output
 
-- Publish the review completed event and cross-stage next-step commands only when the final complete finalizer result succeeds and that same result's provenance, ledger state, and `stageStatus.canAdvance` allow advancement.
+- After the final complete finalizer result succeeds, publish the review completed event using that same result's provenance, ledger state, verdict, and counts. Generate cross-stage next-step commands only when `stageStatus.canAdvance=true` and the verdict is Approved; when `canAdvance=false`, still record the result and route to same-stage revision/review.
 - On failure, model stop, lack of progress, repeated diagnostics, or the emergency cap, do not publish a completed event, advance the lifecycle, generate cross-stage commands, or fabricate an approval.
 - Stopping advancement does not discard review results. User output must show the artifact path, the last safely readable summary/findings, actual `repairAttempts`, the last structured diagnostic, and the stop reason.
 - If the summary cannot be safely parsed, show only the artifact path and the raw structured diagnostic; do not infer counts or add a conclusion, and state that lifecycle advancement stopped while the artifact remains available.
