@@ -4,13 +4,21 @@
 
 PR 摘要的语义聚合由模型完成；canonical 产物选择、marker、当前 HEAD、分页评论查找和 create/update/no-op 由 typed core 负责。
 
+## 三层隔离
+
+- `sync-pr:{task-id}:summary`（`platform-pr summary-sync`）是可更新的 reviewer 摘要，不是过程原文，也不是正式 Review。
+- `pr-review*` 完整过程原文在 Issue artifact 评论（`platform-comment sync --kind artifact`），由 `restore-task` 按 Issue-only 契约恢复。
+- 正式 PR Review（`platform-pr-review publish`）是唯一发布到 PR 的正式结论载体，绑定被审 head SHA，含结论、finding、receipt 与 Issue artifact 链接。
+
+三者不串用：PR 普通评论不承载完整过程原文；Issue artifact 评论不当作正式 Review；摘要不冒充正式 Review。
+
 ## 聚合输入
 
 ```bash
 agent-infra-internal platform-pr summary-context {task-id}
 ```
 
-只使用返回的 canonical latest `plan*`、`review-plan*`、`code*`、`review-code*`、`manual-validation*`。模型据此生成 reviewer 摘要正文，至少包含：
+只使用返回的 canonical latest `plan*`、`review-plan*`、`code*`、`review-code*`、`manual-validation*`（包括 `manual-validation.md`）。模型据此生成 reviewer 摘要正文，至少包含：
 
 - 变更摘要与实现范围
 - 测试结果
@@ -19,6 +27,19 @@ agent-infra-internal platform-pr summary-context {task-id}
 - `### PR 代码增减`：基于 `platform-pr inspect` 的权威 base/head 和完整 `git diff --find-renames --numstat base...head`，按运行时代码、测试、Skill/规则、模板、文档及其他分类核算，并说明 rename、机械镜像与疑似不必要变化
 
 保留人工校验项时，每条写明校验内容、定位和只能人工完成的原因。
+
+core 最终包装出的 canonical 评论结构为：
+
+```markdown
+<!-- sync-pr:{task-id}:summary -->
+<!-- last-commit: {git-head-sha} -->
+## 审查摘要
+{manual-validation-section}
+### 关键技术决策
+### 审查历程
+### 测试结果
+### PR 代码增减
+```
 
 ## 发布
 

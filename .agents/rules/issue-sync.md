@@ -20,7 +20,7 @@
 
 ## 平台 intent
 
-GitHub upstream、认证、capability、分页、marker 查找、幂等 create/update、分片、重试与错误分类由 typed platform core 统一处理：
+平台 upstream、认证、capability、分页、marker 查找、幂等 create/update、分片、重试与错误分类由 typed platform core 统一处理：
 
 ```bash
 agent-infra-internal platform-context resolve [--cwd <path>]
@@ -63,7 +63,7 @@ agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {sta
 agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} {desired-state-flags}
 ```
 
-`sync` 支持 status/in labels、assignee、milestone、Issue Type、pinned fields、需求复选框与 Issue state。省略 flag 表示 preserve，`none` 表示显式清空。适配层统一处理集合差集、动态 schema、权限降级、dry-run、重试、错误分类与幂等重放；SKILL 不得拼装 `gh issue`、GraphQL 或权限分支。
+`sync` 支持 status/in labels、assignee、milestone、Issue Type、pinned fields、需求复选框与 Issue state。省略 flag 表示 preserve，`none` 表示显式清空。适配层统一处理集合差集、动态 schema、权限降级、dry-run、重试、错误分类与幂等重放；SKILL 不得拼装平台 CLI、GraphQL 或权限分支。
 
 - `planned|applied|no-op|degraded` → exit 0
 - `failed` → exit 1

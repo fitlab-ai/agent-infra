@@ -34,7 +34,7 @@ description: >
 
 ### 1. 获取告警信息
 
-执行前先读取 `.agents/rules/security-alerts.md`，并按其中的 Dependabot 告警读取命令获取告警详情。
+执行前先读取 `.agents/rules/security-alerts.md`，然后运行 `bash .agents/scripts/security-alerts.sh read-dependabot --number {alert-number}`，解析其 JSON 结果获取告警详情。
 
 提取关键信息：
 - `number`：告警编号

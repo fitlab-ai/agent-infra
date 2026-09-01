@@ -15,7 +15,7 @@ Initialize the repository's standard milestones taxonomy.
 
 Confirm that:
 - read `.agents/rules/label-milestone-setup.md` first
-- use its authentication commands to verify platform access
+- the requested milestone arguments are ready
 
 If any prerequisite fails, stop and report the matching error.
 
@@ -31,7 +31,7 @@ The script and `.agents/rules/label-milestone-setup.md` are responsible for:
 - Creating and cleaning up a temporary workspace
 - Detecting whether `--history` was requested
 - Scanning all `v*` Git tags, selecting the highest valid version by SemVer precedence, and using compatibility default `0.1.0` when none is valid, without reading ecosystem manifests
-- Listing current milestones with the platform-specific milestone query command
+- Letting the provider leaf list and write current milestones
 - Building the desired milestone set and creating only the missing titles
 - Printing the final execution summary
 
@@ -78,9 +78,7 @@ Next step - initialize labels (optional):
 
 ## Error Handling
 
-- platform CLI not found: prompt "the platform CLI is not installed"
-- Authentication failed: prompt "the platform CLI is not authenticated"
-- Repository access failed: prompt "Unable to access the current repository with the platform CLI"
+- Provider capability, authentication, or repository access failure: report the script's structured error.
 - Version detection failed: prompt "Unable to determine current version baseline"
 - No valid SemVer `v*` tags found in `--history` mode: prompt "No valid SemVer history tags found matching v*; only standard milestones will be created"
 - Permission error: prompt "No permission to manage milestones in this repository"

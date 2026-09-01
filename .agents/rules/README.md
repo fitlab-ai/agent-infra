@@ -31,8 +31,8 @@
 - [`human-decision-context.md`](human-decision-context.md) — 新建人工裁决详情的自足上下文与规范结构。
 - [`task-short-id.md`](task-short-id.md) — 裸数字任务短号的解析、分配与生命周期。
 - [`milestone-inference.md`](milestone-inference.md) — create-task / code-task / create-pr 的 milestone 推断。
-- [`label-milestone-setup.md`](label-milestone-setup.md) — 初始化 label / milestone 的平台命令集。
-- [`security-alerts.md`](security-alerts.md) — 导入 / 关闭 Dependabot 与 Code Scanning 告警的命令集。
+- [`label-milestone-setup.md`](label-milestone-setup.md) — 初始化 label / milestone 的共享入口。
+- [`security-alerts.md`](security-alerts.md) — 导入 / 关闭依赖与代码扫描告警的共享入口。
 
 ## 提交与发布
 

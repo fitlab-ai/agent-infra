@@ -23,7 +23,7 @@ description: >
 
 ### 1. 获取告警信息
 
-执行前先读取 `.agents/rules/security-alerts.md`，并按其中的 Code Scanning 告警读取命令获取告警详情。
+执行前先读取 `.agents/rules/security-alerts.md`，然后运行 `bash .agents/scripts/security-alerts.sh read-codescan --number {alert-number}`，解析其 JSON 结果获取告警详情。
 
 验证告警处于 `open` 状态。如果已被关闭/修复，告知用户并退出。
 
@@ -71,7 +71,7 @@ Code Scanning 告警 #{alert-number}
 
 ### 6. 执行关闭
 
-按 `.agents/rules/security-alerts.md` 中的 Code Scanning 告警关闭命令执行关闭操作，并传入映射后的 `{api-reason}` 与用户说明。
+将用户说明写入 `{comment-file}`，然后运行 `bash .agents/scripts/security-alerts.sh dismiss-codescan --number {alert-number} --reason {api-reason} --comment-file {comment-file}`。解析 JSON 结果，仅当关闭状态为 `applied` 或 `no-op` 时继续。
 
 **API reason 映射**（按 Code Scanning API）：
 - 误报 -> `false positive`

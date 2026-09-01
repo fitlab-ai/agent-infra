@@ -2,6 +2,20 @@
 
 set -e
 
+cleanup_stale_in=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --cleanup-stale-in)
+      cleanup_stale_in=true
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
 if ! command -v gh >/dev/null 2>&1; then
   echo "GitHub CLI (\`gh\`) is not installed"
   exit 1
@@ -53,10 +67,43 @@ help wanted	008672	Extra attention is needed
 dependencies	0366d6	Pull requests that update a dependency file
 EOF
 
+node - ".agents/.airc.json" > "$tmpdir/in.tsv" <<'NODE'
+const fs = require("node:fs");
+
+const configPath = process.argv[2];
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const mapping = config.labels?.in;
+if (mapping === undefined) process.exit(0);
+if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) {
+  throw new Error("labels.in must be an object");
+}
+
+for (const key of Object.keys(mapping).sort()) {
+  if (!key || key.includes("\n") || key.includes("\r") || key.includes("\t")) {
+    throw new Error("labels.in keys must be non-empty single-line values");
+  }
+  process.stdout.write(`in: ${key}\tBFD4F2\tModule label for ${key}\n`);
+}
+NODE
+
+cat "$tmpdir/in.tsv" >> "$tmpdir/common.tsv"
+
 while IFS="$(printf '\t')" read -r name color description; do
   [ -n "$name" ] || continue
   gh label create "$name" --color "$color" --description "$description" --force
 done < "$tmpdir/common.tsv"
+
+if [ "$cleanup_stale_in" = true ]; then
+  while IFS= read -r name; do
+    case "$name" in
+      in:*)
+        if ! grep -Fqx "$name" "$tmpdir/in.tsv"; then
+          gh label delete "$name" --yes
+        fi
+        ;;
+    esac
+  done < "$tmpdir/existing-names.txt"
+fi
 
 gh label list --limit 200 --json name --jq '.[].name' > "$tmpdir/final-names.txt"
 cp "$tmpdir/final-names.txt" "$tmpdir/final.txt"
@@ -69,11 +116,13 @@ for label in bug documentation duplicate enhancement invalid question wontfix; d
 done
 
 common_count="$(wc -l < "$tmpdir/common.tsv" | tr -d ' ')"
+dynamic_count="$(wc -l < "$tmpdir/in.tsv" | tr -d ' ')"
 
 echo "GitHub Labels initialized."
 echo
 echo "Summary:"
 echo "- Common labels created or updated: $common_count"
+echo "- in: labels created or updated: $dynamic_count"
 echo "- Exact-match GitHub defaults overwritten: good first issue, help wanted"
 
 if [ -s "$tmpdir/unmatched-defaults.txt" ]; then
@@ -87,4 +136,9 @@ echo
 echo "Notes:"
 echo "- theme: labels were intentionally not created."
 echo "- The operation is idempotent because every label uses gh label create --force."
-echo "- in: labels are managed by the AI-guided step in the SKILL."
+echo "- in: labels are derived from .agents/.airc.json labels.in."
+if [ "$cleanup_stale_in" = true ]; then
+  echo "- Stale in: labels were removed only for labels absent from the confirmed mapping."
+else
+  echo "- Stale in: labels were preserved; pass --cleanup-stale-in after mapping confirmation to remove them."
+fi

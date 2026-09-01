@@ -1,8 +1,6 @@
-# GitHub PR readiness 平台意图
+# PR readiness 平台意图
 
-PR 全部 checks 的获取、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。SKILL/模型只负责失败分类、根因分析、最小修复和授权后的提交推送。
-
-GitHub adapter 要求 `gh >= 2.72.0`。平台上下文会在任何 GitHub API、PR 或 checks 操作前检查该依赖；未选择 GitHub 平台时不探测也不依赖 `gh`。
+PR 全部 checks、PR mergeability、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。每次 inspect/poll 都在同一 PR head 快照上聚合，不跨 head 拼接事实。
 
 ## 快照与监控
 
@@ -13,7 +11,7 @@ agent-infra-internal platform-checks watch {task-id} \
   --interval-seconds 30 --deadline-seconds 1800
 ```
 
-adapter 把 REST `mergeable=false` 规范化为 `conflicting`，null/缺失为 `unknown`，true 为 `mergeable`；true 与诊断 `dirty` 矛盾时降为 `unknown`。`blocked` 等其他诊断不覆盖 REST true。core 在同一 `headSha` 上与全部 checks 聚合：仅 `ready` 退出 0，`conflicting|checks-failed` 退出 1，pending/timeout/cancel/网络阻塞退出 2。依赖与确定性平台错误不降级。
+结构化 `readiness.state` 为 `ready|conflicting|checks-failed|pending|timed-out|cancelled`，并携带 `headSha`。仅 `ready` 退出 0；`conflicting|checks-failed` 退出 1；其余或网络阻塞退出 2。`checks.state` 仍保留 check-only 诊断；平台 adapter 的依赖和确定性错误不降级。
 
 ## 定位失败 run/job
 

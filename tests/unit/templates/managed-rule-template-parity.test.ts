@@ -6,7 +6,7 @@ import path from 'node:path';
 const PAIRS: ReadonlyArray<readonly [string, string]> = [
   [
     '.agents/rules/release-commands.md',
-    'templates/.agents/rules/release-commands.github.zh-CN.md',
+    'templates/.agents/rules/release-commands.zh-CN.md',
   ],
   [
     '.agents/rules/review-handshake.md',

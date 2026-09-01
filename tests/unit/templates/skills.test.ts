@@ -1322,10 +1322,10 @@ test("workflow warning producers submit warnings through the internal CLI", () =
     ".agents/rules/pr-sync.md",
     ".agents/skills/create-task/SKILL.md",
     ".agents/skills/create-pr/SKILL.md",
-    "templates/.agents/rules/issue-sync.github.en.md",
-    "templates/.agents/rules/issue-sync.github.zh-CN.md",
-    "templates/.agents/rules/pr-sync.github.en.md",
-    "templates/.agents/rules/pr-sync.github.zh-CN.md",
+    "templates/.agents/rules/issue-sync.en.md",
+    "templates/.agents/rules/issue-sync.zh-CN.md",
+    "templates/.agents/rules/pr-sync.en.md",
+    "templates/.agents/rules/pr-sync.zh-CN.md",
     "templates/.agents/skills/create-task/SKILL.en.md",
     "templates/.agents/skills/create-task/SKILL.zh-CN.md",
     "templates/.agents/skills/create-pr/SKILL.en.md",
@@ -1905,13 +1905,13 @@ test("commit skill variants preserve the single commit-core structure", () => {
   });
 });
 
-test("deployed create-issue rule stays byte-identical to its github zh-CN template", () => {
+test("deployed create-issue rule stays byte-identical to its generic zh-CN template", () => {
   // create-issue body construction delegates to `ai task issue-body`; the
-  // deployed copy is the rendered github zh-CN variant. Guard against drift the
+  // deployed copy is the rendered generic zh-CN baseline. Guard against drift the
   // same way analyze-task / no-mid-flow-questions are guarded above.
   assert.equal(
     read(".agents/rules/create-issue.md"),
-    read("templates/.agents/rules/create-issue.github.zh-CN.md"),
-    "deployed create-issue rule should stay byte-identical to its github zh-CN template variant"
+    read("templates/.agents/rules/create-issue.zh-CN.md"),
+    "deployed create-issue rule should stay byte-identical to its generic zh-CN template"
   );
 });

@@ -4,6 +4,18 @@ import assert from "node:assert/strict";
 import { listFilesRecursive, read } from "../../helpers.ts";
 
 const platformTokenPattern = /GitHub|\.github\/|\bgh\b/;
+const coreRuleNames = [
+  "create-issue",
+  "issue-fields",
+  "issue-pr-commands",
+  "issue-sync",
+  "label-milestone-setup",
+  "milestone-inference",
+  "pr-checks-commands",
+  "pr-sync",
+  "release-commands",
+  "security-alerts"
+];
 
 function assertPlatformAgnostic(relativePath: string) {
   assert.doesNotMatch(read(relativePath), platformTokenPattern, `${relativePath} should stay platform-agnostic`);
@@ -33,6 +45,20 @@ test("skill references do not use platform-specific variants", () => {
     ...listFilesRecursive(".agents/skills")
       .filter((relativePath) => /\/reference\/.*\.md$/.test(relativePath))
   ].forEach(assertNoPlatformReferenceVariants);
+});
+
+test("core rule contracts stay platform-agnostic and use language baselines", () => {
+  const templateRules = coreRuleNames.flatMap((name) => [
+    `templates/.agents/rules/${name}.en.md`,
+    `templates/.agents/rules/${name}.zh-CN.md`
+  ]);
+  const deployedRules = coreRuleNames.map((name) => `.agents/rules/${name}.md`);
+  [...templateRules, ...deployedRules].forEach(assertPlatformAgnostic);
+
+  const ruleFiles = listFilesRecursive("templates/.agents/rules");
+  ruleFiles.filter((relativePath) => /\.github\.(?:en|zh-CN)\.md$/.test(relativePath)).forEach((relativePath) => {
+    assert.fail(`${relativePath} should not remain in the core rule directory`);
+  });
 });
 
 test("command descriptions stay platform-agnostic", () => {
@@ -128,8 +154,8 @@ test("release-note workflow documents reference the typed release-note intent", 
     "templates/.agents/skills/create-release-note/SKILL.en.md",
     "templates/.agents/skills/create-release-note/SKILL.zh-CN.md",
     ".agents/rules/release-commands.md",
-    "templates/.agents/rules/release-commands.github.en.md",
-    "templates/.agents/rules/release-commands.github.zh-CN.md"
+    "templates/.agents/rules/release-commands.en.md",
+    "templates/.agents/rules/release-commands.zh-CN.md"
   ].forEach((relativePath) => {
     assert.match(read(relativePath), /agent-infra-internal platform-release-notes context/, relativePath);
     assert.match(read(relativePath), /agent-infra-internal platform-release-notes publish/, relativePath);

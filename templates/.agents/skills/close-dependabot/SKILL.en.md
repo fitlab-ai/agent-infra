@@ -23,7 +23,7 @@ The skill still owns the security-alert API. When a related task exists, Step 7 
 
 ### 1. Retrieve Alert Information
 
-Read `.agents/rules/security-alerts.md` before this step, then use its Dependabot alert read command to fetch the alert details.
+Read `.agents/rules/security-alerts.md` before this step, then run `bash .agents/scripts/security-alerts.sh read-dependabot --number {alert-number}` and parse its JSON result to fetch the alert details.
 
 Verify that the alert is in the `open` state. If it is already dismissed or fixed, inform the user and exit.
 
@@ -77,7 +77,7 @@ Confirm? (y/N)
 
 ### 6. Execute the Dismissal
 
-Dismiss the alert by following the Dependabot dismiss command in `.agents/rules/security-alerts.md`, passing the mapped `{api-reason}` and the user's explanation.
+Write the user's explanation to `{comment-file}`, then run `bash .agents/scripts/security-alerts.sh dismiss-dependabot --number {alert-number} --reason {api-reason} --comment-file {comment-file}`. Parse the JSON result and continue only when the dismissal is `applied` or `no-op`.
 
 **API reason mapping**:
 - False Positive -> `not_used` or `inaccurate`

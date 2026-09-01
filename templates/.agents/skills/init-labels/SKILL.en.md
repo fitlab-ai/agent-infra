@@ -15,7 +15,7 @@ Initialize the repository's standard labels taxonomy.
 
 Confirm that:
 - read `.agents/rules/label-milestone-setup.md` first
-- use its authentication commands to verify platform access
+- the repository configuration and requested mapping are ready
 
 If any prerequisite fails, stop and report the matching error.
 
@@ -28,9 +28,9 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 ```
 
 The script and `.agents/rules/label-milestone-setup.md` are responsible for:
-- Capturing the current label snapshot before making changes
-- Creating or updating the standard label set with the platform-specific label command
-- Reporting unmatched platform-default labels such as `question` and `wontfix`
+- Reading the configured `labels.in` mapping and preserving unrelated labels
+- Selecting the provider leaf or returning a clear no-op/degraded result
+- Creating or updating the standard label set and reporting the final summary
 - Printing the final execution summary
 
 ### 3. Standard taxonomy
@@ -69,8 +69,8 @@ Show the current mapping and ask whether it should be updated.
 #### 4.3 Write the mapping and create labels
 
 1. Write the final mapping to `.agents/.airc.json` under `labels.in`.
-2. Create one `in: {key}` label for each mapping key by following the label-create command in `.agents/rules/label-milestone-setup.md`.
-3. After user confirmation, delete stale `in:` labels that are no longer present in the final mapping.
+2. Run `bash .agents/skills/init-labels/scripts/init-labels.sh` to create or update one `in: {key}` label for each mapping key.
+3. After user confirmation, rerun the script with `--cleanup-stale-in` to delete stale `in:` labels that are no longer present in the final mapping.
 
 ### 5. Output and behavior guarantees
 
@@ -82,7 +82,7 @@ The summary must include:
 - Any unmatched platform-default labels still present
 
 Operational notes:
-- The operation is idempotent because the rule-file command updates or overwrites existing labels in place.
+- The operation is idempotent because the provider leaf updates or overwrites existing labels in place.
 - `in:` labels are managed by the AI-guided step together with the `.airc.json` mapping.
 
 ### 6. Inform User
@@ -100,8 +100,7 @@ Next step - initialize milestones (optional):
 
 ## Error Handling
 
-- platform CLI not found: prompt "the platform CLI is not installed"
-- Authentication failed: prompt "the platform CLI is not authenticated"
-- Repository access failed: prompt "Unable to access the current repository with the platform CLI"
+- Provider capability unavailable: report the script's `degraded` or `no-op` result without claiming remote changes.
+- Provider authentication or repository access failure: report the script's structured error.
 - Permission error: prompt "No permission to manage labels in this repository"
 - API rate limit: prompt "platform API rate limit reached, please retry later"

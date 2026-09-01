@@ -1,5 +1,15 @@
 # Milestone Inference
 
-This code platform does not provide milestone inference; `platform-issue sync --milestone ...` returns a structured no-op/degraded result.
+> `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-Milestone narrowing and reuse are skipped for custom platforms unless you provide matching `.{platform}.en.md` rule templates. Do not block task progress when no platform-specific milestone implementation is available.
+Milestones narrow through declarative Issue intents:
+
+```bash
+# create/import phase
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone initial
+
+# code phase
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone specific
+```
+
+`initial` prefers a valid task milestone, otherwise the lowest open `X.Y.x`, then `General Backlog`. `specific` narrows a release line to the highest open patch version using main/release-line ancestry. Missing facts or triage permission preserve the remote value and return skipped/degraded. `create-pr` reuses the Issue milestone in the 09/10 PR adapter.
