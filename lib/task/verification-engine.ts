@@ -704,9 +704,10 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const logSection = getSectionContent(task.content, ["活动日志", "Activity Log"]);
   const doneActions = logSection.split(/\r?\n/).flatMap((line: any) => {
     const match = line.trim().match(ACTIVITY_LOG_PATTERN);
-    return match && !ACTIVITY_LOG_STARTED_RE.test(match[2]) ? [`${match[2]} — ${match[4]}`] : [];
+    return match && !ACTIVITY_LOG_STARTED_RE.test(match[2]) ? [{ action: match[2], note: match[4] }] : [];
   });
-  const latestAction = doneActions.at(-1) || "";
+  const latestCodeAction = doneActions.filter((entry: any) => /^(?:Code Task|Code) \(Round \d+/.test(entry.action)).at(-1);
+  const latestAction = latestCodeAction ? `${latestCodeAction.action} — ${latestCodeAction.note}` : "";
   const actionDecision =
     /(?:Code Task|Code) \(Round \d+, decision (II-[1-9]\d*)\)/.exec(latestAction)?.[1] ||
     /(?:Code Task|Code) \(Round \d+, fix for review-code(?:-r\d+)?\.md\).*consumed decision (II-[1-9]\d*)/.exec(latestAction)?.[1] ||
@@ -767,6 +768,7 @@ function checkActivityLog({ taskDir, config }: any): any {
   let previousTimestamp = "";
   let latestAction = "";
   let latestTimestamp = "";
+  const doneEntries: Array<{ action: string; timestamp: string }> = [];
 
   for (const entry of entries) {
     const match = entry.match(ACTIVITY_LOG_PATTERN);
@@ -786,14 +788,24 @@ function checkActivityLog({ taskDir, config }: any): any {
     if (!ACTIVITY_LOG_STARTED_RE.test(action)) {
       latestTimestamp = timestamp;
       latestAction = action;
+      doneEntries.push({ action, timestamp });
     }
   }
 
-  if (config.expected_action_pattern && !new RegExp(config.expected_action_pattern).test(latestAction)) {
-    return failResult(
-      "activity-log",
-      `Latest action '${latestAction}' does not match '${config.expected_action_pattern}'`
-    );
+  if (config.expected_action_pattern) {
+    const expected = new RegExp(config.expected_action_pattern);
+    if (!expected.test(latestAction)) {
+      const matching = doneEntries.slice().reverse().find((entry) => expected.test(entry.action));
+      if (latestAction === 'Commit' && matching) {
+        latestAction = matching.action;
+        latestTimestamp = matching.timestamp;
+      } else {
+        return failResult(
+          "activity-log",
+          `Latest action '${latestAction}' does not match '${config.expected_action_pattern}'`
+        );
+      }
+    }
   }
 
   return passResult("activity-log", `Latest entry '${latestAction}' at ${latestTimestamp}`);
