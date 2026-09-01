@@ -238,7 +238,7 @@ function hasCompleteExternalIdentity(pullRequest: PullRequestSnapshot): boolean 
   ];
   return Number.isInteger(pullRequest.number) && pullRequest.number > 0 &&
     required.every((value) => Boolean(value?.trim())) &&
-    Boolean(pullRequest.mergedAt) === Boolean(pullRequest.mergeCommitSha);
+    (pullRequest.state === 'open' || Boolean(pullRequest.mergedAt) === Boolean(pullRequest.mergeCommitSha));
 }
 
 function selectExternalPullRequest(

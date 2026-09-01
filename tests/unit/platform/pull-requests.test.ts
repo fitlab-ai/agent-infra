@@ -141,6 +141,13 @@ test('external PR selection filters before uniqueness and accepts a merged fork 
   assert.deepEqual(result.eligible.map((item) => item.number), [7]);
 });
 
+test('external PR identity accepts a potential merge commit on an open PR', () => {
+  const open = normalizePullRequest({ ...remote(10), merge_commit_sha: 'potential-10' }, 'o/r')!;
+  const result = selectExternalPullRequest([open], 'o/r', null, null);
+  assert.equal(result.status, 'normal');
+  assert.deepEqual(result.candidates.map((item) => item.number), [10]);
+});
+
 test('external PR selection fails closed for ambiguity, explicit mismatch, binding conflict, and identity conflict', () => {
   const first = normalizePullRequest({
     ...remote(7), state: 'closed', merged_at: '2026-07-25T00:00:00Z', merge_commit_sha: 'merge-7'
