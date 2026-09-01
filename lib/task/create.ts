@@ -13,6 +13,7 @@ const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
 const PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'] as const;
 const EFFORTS = ['High', 'Medium', 'Low'] as const;
+const NON_USER_TOKEN = '@2x';
 const TASK_INPUT_KEYS = [
   'sources', 'facts', 'constraints', 'decisions', 'alternatives',
   'acceptanceCriteria', 'openQuestions'
@@ -175,8 +176,33 @@ function markdownBlock(value: string): string {
   return value.split(/\r?\n/).map((line) => /^(?:#{1,6}\s|```)/.test(line) ? `\\${line}` : line).join('\n');
 }
 
+function generatedTokenBoundary(character: string | undefined): boolean {
+  return character === undefined || !/[\p{L}\p{N}_/]/u.test(character);
+}
+
+function formatGeneratedContent(content: string): string {
+  let output = '';
+  let cursor = 0;
+  let index = 0;
+  while (index < content.length) {
+    if (!content.startsWith(NON_USER_TOKEN, index)) {
+      index += 1;
+      continue;
+    }
+    const end = index + NON_USER_TOKEN.length;
+    const alreadyCode = content[index - 1] === '`' || content[end] === '`';
+    if (!alreadyCode && generatedTokenBoundary(content[index - 1]) && generatedTokenBoundary(content[end])) {
+      output += content.slice(cursor, index);
+      output += `\`${NON_USER_TOKEN}\``;
+      cursor = end;
+    }
+    index = end;
+  }
+  return output + content.slice(cursor);
+}
+
 function renderList(items: readonly string[]): string {
-  return items.map((item) => `- ${item}`).join('\n');
+  return items.map((item) => `- ${formatGeneratedContent(item)}`).join('\n');
 }
 
 function replaceEmptySubsection(content: string, heading: string, items: readonly string[]): string {
@@ -224,8 +250,8 @@ function renderTask(params: Readonly<{
     '---'
   ].join('\n');
   let content = params.template.replace(/^---\n[\s\S]*?\n---/, frontmatter);
-  content = content.replace('# 任务：[标题]', `# 任务：${candidate.title}`);
-  content = content.replace('[清晰简洁地描述任务。]', markdownBlock(candidate.description));
+  content = content.replace('# 任务：[标题]', `# 任务：${formatGeneratedContent(candidate.title)}`);
+  content = content.replace('[清晰简洁地描述任务。]', formatGeneratedContent(markdownBlock(candidate.description)));
   const sections: Array<[string, keyof TaskCreateCandidateV1['taskInput']]> = [
     ['### 来源', 'sources'], ['### 已确认事实与证据', 'facts'], ['### 约束', 'constraints'],
     ['### 已确认决策', 'decisions'], ['### 候选与否决方案', 'alternatives'],
