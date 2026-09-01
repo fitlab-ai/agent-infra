@@ -707,7 +707,10 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
     return match && !ACTIVITY_LOG_STARTED_RE.test(match[2]) ? [match[2]] : [];
   });
   const latestAction = doneActions.at(-1) || "";
-  const actionDecision = /(?:Code Task|Code) \(Round \d+, decision (II-[1-9]\d*)\)/.exec(latestAction)?.[1] || null;
+  const actionDecision =
+    /(?:Code Task|Code) \(Round \d+, decision (II-[1-9]\d*)\)/.exec(latestAction)?.[1] ||
+    /(?:Code Task|Code) \(Round \d+, fix for review-code(?:-r\d+)?\.md\).*consumed decision (II-[1-9]\d*)/.exec(latestAction)?.[1] ||
+    null;
   const report = fs.readFileSync(artifactPath, "utf8");
   const reportSection = getSectionContent(report, ["实现输入", "Implementation Input"]);
   if (!reportSection) return failResult("implementation-input", "Implementation Input report section not found");

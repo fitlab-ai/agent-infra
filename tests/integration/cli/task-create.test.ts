@@ -74,16 +74,16 @@ test('task-create preserves controlled candidate content without changing the ra
   const input = path.join(root, 'candidate.json');
   const raw = {
     ...candidate(),
-    title: 'Optical detail @2x',
-    description: 'Description @2x; contact test@example.com; mention @alice; URL https://example.com/@2x',
+    title: 'Optical detail `@2x`',
+    description: 'Description `@2x`; contact test@example.com; mention @alice; URL https://example.com/@2x',
     taskInput: {
-      sources: ['source @2x'],
-      facts: ['fact @2x'],
-      constraints: ['constraint @2x'],
-      decisions: ['decision @2x'],
-      alternatives: ['alternative @2x'],
-      acceptanceCriteria: ['acceptance @2x'],
-      openQuestions: ['question @2x']
+      sources: ['source `@2x`'],
+      facts: ['fact `@2x`'],
+      constraints: ['constraint `@2x`'],
+      decisions: ['decision `@2x`'],
+      alternatives: ['alternative `@2x`'],
+      acceptanceCriteria: ['acceptance `@2x`'],
+      openQuestions: ['question `@2x`']
     }
   };
   const expectedDigest = createHash('sha256')
@@ -97,10 +97,10 @@ test('task-create preserves controlled candidate content without changing the ra
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const taskId = JSON.parse(result.stdout).task.id as string;
     const task = fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md'), 'utf8');
-    assert.match(task, /^# 任务：Optical detail @2x$/m);
-    assert.match(task, /Description @2x; contact test@example.com; mention @alice; URL https:\/\/example\.com\/@2x/);
+    assert.match(task, /^# 任务：Optical detail `@2x`$/m);
+    assert.match(task, /Description `@2x`; contact test@example.com; mention @alice; URL https:\/\/example\.com\/@2x/);
     for (const field of ['source', 'fact', 'constraint', 'decision', 'alternative', 'acceptance', 'question']) {
-      assert.match(task, new RegExp('^- ' + field + ' @2x$', 'm'));
+      assert.match(task, new RegExp('^- ' + field + ' `@2x`$', 'm'));
     }
     assert.match(task, new RegExp(`^task_create_candidate_digest: ${expectedDigest}$`, 'm'));
   } finally {

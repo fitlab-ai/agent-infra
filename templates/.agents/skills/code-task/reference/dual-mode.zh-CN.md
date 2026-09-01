@@ -27,7 +27,7 @@ agent-infra-internal task-artifact {task-id} inspect --family code
 | 最新 review-code 为 Changes Requested | `fix` | 0 | 必需修复模式 |
 | 最新 review-code 为 Rejected | `refused` | 1 | 需要重新设计，不进入局部修复 |
 
-> 上表 5 个 review-code 分支在 `rev_max >= code_max` 时命中，均以最新 `review-code-r{rev_max}` 的结论及实现输入决定：
+> 上表 5 个 review-code 分支在 `rev_max >= code_max` 时命中，均以最新 `review-code-r{rev_max}` 的结论及实现输入决定。`fix` 模式在存在待实现裁决输入时会同时返回 `implementation_input`；此时本轮可用同一组 fix + implementation-input 身份完成修复并消费输入：
 > - `rev_max == code_max`：AI 修复轮（`code-task` 产出代码后由 `review-code` 审查同号产物）。
 > - `rev_max > code_max`：人工补审轮——PR 创建后维护者追加一轮 `review-code-r{N}` 审查既有最新代码。此时 `fix` 模式的 `next_round = code_max + 1`。
 >

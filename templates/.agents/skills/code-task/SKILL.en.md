@@ -43,7 +43,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## Step Start: Write the started Marker
 
-After prerequisites and mode are confirmed and before this round's first artifact action, run `agent-infra-internal task-event {task-id} code.started --agent {standard-agent-token}`. Append `--fix-for {review-artifact}` in fix mode or `--implementation-input {input-id}` in decision mode. The core derives and validates the round and input identity; record the returned `artifactContext`.
+After prerequisites and mode are confirmed and before this round's first artifact action, run `agent-infra-internal task-event {task-id} code.started --agent {standard-agent-token}`. Append `--fix-for {review-artifact}` in fix mode; if `artifactContext.implementationInput` is non-null, also append `--implementation-input {input-id}`. Append `--implementation-input {input-id}` in decision mode. The core derives and validates the round and input identity; record the returned `artifactContext`.
 
 ## Steps
 
@@ -74,7 +74,7 @@ echo "$result"
 Dispatch by `$status` and `result.mode`:
 
 - `0` + `"init"`: initial implementation; record `{code-artifact}` and `{code-round}`
-- `0` + `"fix"`: fix mode; record `{code-artifact}`, `{code-round}`, and `{review-artifact}`
+- `0` + `"fix"`: fix mode; record `{code-artifact}`, `{code-round}`, and `{review-artifact}`; if `result.implementation_input` is non-null, also record that implementation input
 - `0` + `"decision"`: decision implementation mode; record `{code-artifact}`, `{code-round}`, `{input-id}`, `{decision-id}`, and `{decision-evidence}`
 - `1` + `"refused"`: print `result.message`, stop, and do not write an artifact or Activity Log entry
 - `2` + `"error"`: print `result.message`, stop, and do not write an artifact or Activity Log entry
@@ -83,7 +83,7 @@ Dispatch by `$status` and `result.mode`:
 
 ### 5. Read Structured Inputs
 
-Use only the structured result from step 4: read the selected plan artifact and, in fix mode, the selected review artifact. Use `next.name` as `{code-artifact}` and `next.round` as `{code-round}`. In decision mode, take the unified identity from `implementation_input`, `decision_id`, and `decision_evidence`; do not rescan or construct identities in the skill.
+Use only the structured result from step 4: read the selected plan artifact and, in fix mode, the selected review artifact. Use `next.name` as `{code-artifact}` and `next.round` as `{code-round}`. In fix mode, carry a non-null `implementation_input` through the same round; in decision mode, take the unified identity from `implementation_input`, `decision_id`, and `decision_evidence`; do not rescan or construct identities in the skill.
 
 ### 6. Read the Technical Plan
 
@@ -113,7 +113,7 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 ### 10. Update Task Status
 
-After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n} {execution-flag}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
+After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n} {execution-flag}`; in fix mode use `--fix-for {review-artifact} [--implementation-input {input-id}] --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}` instead, and pass the implementation input whenever the structured result provided one; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`

@@ -27,7 +27,7 @@ The core scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.
 | latest review-code is Changes Requested | `fix` | 0 | required fix mode |
 | latest review-code is Rejected | `refused` | 1 | re-plan instead of local fixing |
 
-> The five review-code branches above fire when `rev_max >= code_max`, decided by the latest `review-code-r{rev_max}` verdict and implementation inputs:
+> The five review-code branches above fire when `rev_max >= code_max`, decided by the latest `review-code-r{rev_max}` verdict and implementation inputs. In `fix` mode, a pending decision input is also returned as `implementation_input`; the same fix + implementation-input identity can then complete one round and consume that input:
 > - `rev_max == code_max`: AI fix round (`review-code` reviews the same-numbered code artifact produced by `code-task`).
 > - `rev_max > code_max`: human-supplemented review round — after a PR is opened a maintainer appends a `review-code-r{N}` round against the existing latest code. `fix` mode then uses `next_round = code_max + 1`.
 >

@@ -409,8 +409,11 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
         ? `Latest ${review.name} verdict is Approved with no findings. Nothing to fix. Run /commit to proceed.`
         : `Latest ${review.name} verdict is Rejected. Re-plan before re-running code-task.`);
   }
+  const decision = resolveDecisionImplementationInput(inventory, review);
+  if ('error' in decision) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', decision.error, review.name);
   return withCodeMode(inventory, [...inputs, review], 'ready', 'fix', codeMax, reviewMax, verdict.verdict, review.name,
-    `Latest ${review.name} requires or permits fixes. Entering fix mode.`);
+    `Latest ${review.name} requires or permits fixes. Entering fix mode${decision.input ? ` with implementation input ${decision.input.id}.` : '.'}`,
+    decision.input?.id ?? null, decision.input?.ledgerId ?? null, decision.input?.decisionEvidence ?? null);
 }
 
 function contextFailure(inventory: ArtifactInventoryResult, code: ArtifactErrorCode, message: string, reviewArtifact: string | null = null): ArtifactContextResult {

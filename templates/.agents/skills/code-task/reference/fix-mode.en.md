@@ -55,6 +55,8 @@ Decision rules:
 3. do not select direct commit while any `Blocker` or `Major` remains unresolved
 4. render only the selected branch and invoke the helper exactly once
 
+One fix round may also carry one pending decision implementation input. When artifact context returns `implementationInput`, pass the same `II-N` to both started and completed events; completion consumes it together with the implementation artifact.
+
 For the default branch, populate `{next-step-commands}` by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`:
 
 ```text

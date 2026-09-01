@@ -27,11 +27,11 @@ test('code fix completion requires its review identity', () => {
   assert.equal(result?.code, 'EVENT_PAYLOAD_INVALID');
 });
 
-test('decision implementation identity is canonical and mutually exclusive with fix identity', () => {
+test('decision implementation identity can accompany a code fix identity', () => {
   assert.equal(validateTaskEventRequest({
     taskRef: '1', event: 'code.started', agent: 'codex', implementationInput: 'II-1',
     fixFor: 'review-code.md'
-  })?.code, 'EVENT_PAYLOAD_INVALID');
+  }), null);
   assert.equal(validateTaskEventRequest({
     taskRef: '1', event: 'code.started', agent: 'codex', implementationInput: 'II-0'
   })?.code, 'EVENT_PAYLOAD_INVALID');
