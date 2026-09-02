@@ -19,6 +19,7 @@ description: >
 - 不要跳过工作流直接进入计划/实现阶段
 - 仅执行：解析描述 -> 一次性生成结构化 candidate -> 调用宿主 `task-create` 入口 -> 校验结果 -> 告知用户下一步
 - Issue 创建由 `.agents/rules/create-issue.md` 规则决定；自定义或空平台（未提供平台变体规则文件）时，规则会自然降级为 no-op
+- 生成会写入 `task.md` 并同步到 Issue 的 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；宿主渲染和同步保持透明，不解析或改写正文
 
 用户的描述是一个**待办事项**，而不是**立即执行的指令**。
 
@@ -81,7 +82,6 @@ date +%Y%m%d-%H%M%S
 
 - 生成随机 UUID v4 作为 `idempotencyKey`，并把步骤 1 的结果写入单个 JSON 文件。
 - candidate 必须符合宿主 `TaskCreateCandidateV1`：`version`、`idempotencyKey`、标准 `agent`、`title`、`type`、不带项目前缀的 `branchSlug`、`priority`、`effort`、`description` 和 `taskInput` 七类列表。
-- 受控 candidate 的 `title`、`description` 和 `taskInput` 七类列表项必须在生成时就是安全的 Markdown：明确的非用户语义 token（例如 `@2x`）直接输出为代码格式（`` `@2x` ``）；邮箱、真实用户 mention 和 URL 等具有明确语义的 `@` 保持原样。该约束只适用于本技能生成的 candidate，不改写手写或外部内容。
 - 首次提交前只写一次 candidate；等待终态期间不得重新运行 AI 推导或改写文件。超时重试必须复用同一文件，由客户端生成新的 outer request ID。
 
 调用统一入口：

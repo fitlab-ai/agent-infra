@@ -787,7 +787,7 @@ test("review skills and criteria reference the shared review method", () => {
 });
 
 test("lifecycle producer skills reference the shared synchronized-content rule", () => {
-  const producerSkills = ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code"];
+  const producerSkills = ["create-task", "analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code"];
   const relativePaths = producerSkills.flatMap((skill) => skillDocPaths(skill));
 
   assert.ok(exists(".agents/rules/sync-content-generation.md"));
