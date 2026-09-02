@@ -360,6 +360,20 @@ const activityLogCases: ActivityLogCase[] = [
       assert.equal(result.status, 1);
       assert.match(result.stdout, /Latest action 'Issue Creation Skipped' does not match/);
     }
+  },
+  {
+    name: "validate-artifact activity-log fails for create-task when Commit entry is appended",
+    issueNumber: 296,
+    activityLines(now) {
+      return [
+        `- ${now} — **Task Created** by codex — Task created from description`,
+        `- ${now} — **Commit** by codex — abc123 fix: update`
+      ];
+    },
+    assertResult(result) {
+      assert.equal(result.status, 1);
+      assert.match(result.stdout, /Latest action 'Commit' does not match/);
+    }
   }
 ];
 

@@ -796,7 +796,7 @@ function checkActivityLog({ taskDir, config }: any): any {
     const expected = new RegExp(config.expected_action_pattern);
     if (!expected.test(latestAction)) {
       const matching = doneEntries.slice().reverse().find((entry) => expected.test(entry.action));
-      if (latestAction === 'Commit' && matching) {
+      if (config.allow_trailing_commit === true && latestAction === 'Commit' && matching) {
         latestAction = matching.action;
         latestTimestamp = matching.timestamp;
       } else {
