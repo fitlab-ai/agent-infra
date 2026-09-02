@@ -45,6 +45,16 @@ function launcherIdentity(relativePath: string, firstLine: string, body = 'expor
   });
 }
 
+function writeLifecycleManifest(root: string, launcherShebang: Record<string, unknown>) {
+  const file = path.join(root, 'lib', 'agent-clients', 'adapters', 'codex-lifecycle', 'manifest-files.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    executableFiles: [launcherShebang.sourceFile],
+    contractFiles: [],
+    launcherShebang
+  }));
+}
+
 test('lifecycle build identity separates executable and contract hashes', () => {
   const root = fixture();
   const options = {
@@ -134,6 +144,27 @@ test('lifecycle manifest declares the exact protected launcher shebang policy', 
       '#!/home/linuxbrew/.linuxbrew/opt/node/bin/node\n'
     ]
   });
+});
+
+test('lifecycle manifest rejects malformed launcher shebang policies', () => {
+  for (const launcherShebang of [
+    {
+      sourceFile: 'bin/internal-cli.ts',
+      compiledFile: 'dist/bin/internal-cli.js',
+      canonicalLine: '#!/usr/bin/env node\npayload\n',
+      acceptedLines: ['#!/usr/bin/env node\npayload\n']
+    },
+    {
+      sourceFile: '../outside.ts',
+      compiledFile: 'outside.js',
+      canonicalLine: '#!/usr/bin/env node\n',
+      acceptedLines: ['#!/usr/bin/env node\n']
+    }
+  ]) {
+    const root = fixture();
+    writeLifecycleManifest(root, launcherShebang);
+    assert.throws(() => readLifecycleManifestFiles(root));
+  }
 });
 
 test('lifecycle identity normalizes only the exact source and compiled launcher lines', () => {

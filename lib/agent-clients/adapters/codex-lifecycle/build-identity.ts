@@ -61,12 +61,21 @@ function normalizeRelativePath(value: string): string {
   return value.replaceAll('\\', '/');
 }
 
+function isSafeLifecyclePath(value: unknown): value is string {
+  return exactText(value)
+    && value === normalizeRelativePath(value)
+    && !path.isAbsolute(value)
+    && !/^[A-Za-z]:[\\/]/u.test(value)
+    && !value.split('/').includes('..');
+}
+
 function isLifecycleLauncherLine(value: unknown): value is string {
   return typeof value === 'string'
     && value.length > 1
     && value.slice(0, -1).trim() === value.slice(0, -1)
     && value.startsWith('#!')
     && value.endsWith('\n')
+    && value.indexOf('\n') === value.length - 1
     && !value.includes('\r');
 }
 
@@ -78,8 +87,8 @@ function readLifecycleLauncherShebang(
     throw new Error('Lifecycle manifest launcher shebang policy is invalid');
   }
   const policy = value as Record<string, unknown>;
-  if (!exactText(policy.sourceFile)
-    || !exactText(policy.compiledFile)
+  if (!isSafeLifecyclePath(policy.sourceFile)
+    || !isSafeLifecyclePath(policy.compiledFile)
     || !isLifecycleLauncherLine(policy.canonicalLine)
     || !Array.isArray(policy.acceptedLines)
     || !policy.acceptedLines.every(isLifecycleLauncherLine)
@@ -118,8 +127,8 @@ function readLifecycleManifestFiles(packageRoot: string): LifecycleManifestFiles
   };
   if (!Array.isArray(value.executableFiles)
     || !Array.isArray(value.contractFiles)
-    || !value.executableFiles.every(exactText)
-    || !value.contractFiles.every(exactText)
+    || !value.executableFiles.every(isSafeLifecyclePath)
+    || !value.contractFiles.every(isSafeLifecyclePath)
     || new Set(value.executableFiles).size !== value.executableFiles.length
     || new Set(value.contractFiles).size !== value.contractFiles.length) {
     throw new Error('Lifecycle manifest file list is invalid');

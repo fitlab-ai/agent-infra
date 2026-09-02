@@ -11,12 +11,23 @@ function normalizeRelativePath(value) {
   return value.replaceAll("\\", "/");
 }
 
+function isSafeLifecyclePath(value) {
+  return typeof value === "string"
+    && value.trim() === value
+    && value.length > 0
+    && value === normalizeRelativePath(value)
+    && !path.isAbsolute(value)
+    && !/^[A-Za-z]:[\\/]/u.test(value)
+    && !value.split("/").includes("..");
+}
+
 function isLifecycleLauncherLine(value) {
   return typeof value === "string"
     && value.length > 1
     && value.slice(0, -1).trim() === value.slice(0, -1)
     && value.startsWith("#!")
     && value.endsWith("\n")
+    && value.indexOf("\n") === value.length - 1
     && !value.includes("\r");
 }
 
@@ -24,12 +35,8 @@ function readLifecycleLauncherShebang(value, executableFiles) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Lifecycle manifest launcher shebang policy is invalid");
   }
-  if (typeof value.sourceFile !== "string"
-    || value.sourceFile.trim() !== value.sourceFile
-    || value.sourceFile.length === 0
-    || typeof value.compiledFile !== "string"
-    || value.compiledFile.trim() !== value.compiledFile
-    || value.compiledFile.length === 0
+  if (!isSafeLifecyclePath(value.sourceFile)
+    || !isSafeLifecyclePath(value.compiledFile)
     || !isLifecycleLauncherLine(value.canonicalLine)
     || !Array.isArray(value.acceptedLines)
     || !value.acceptedLines.every(isLifecycleLauncherLine)
@@ -103,6 +110,14 @@ const lifecycleFiles = JSON.parse(fs.readFileSync(
   path.join(rootDir, "lib", "agent-clients", "adapters", "codex-lifecycle", "manifest-files.json"),
   "utf8"
 ));
+if (!Array.isArray(lifecycleFiles.executableFiles)
+  || !Array.isArray(lifecycleFiles.contractFiles)
+  || !lifecycleFiles.executableFiles.every(isSafeLifecyclePath)
+  || !lifecycleFiles.contractFiles.every(isSafeLifecyclePath)
+  || new Set(lifecycleFiles.executableFiles).size !== lifecycleFiles.executableFiles.length
+  || new Set(lifecycleFiles.contractFiles).size !== lifecycleFiles.contractFiles.length) {
+  throw new Error("Lifecycle manifest file list is invalid");
+}
 const launcherShebang = readLifecycleLauncherShebang(
   lifecycleFiles.launcherShebang,
   lifecycleFiles.executableFiles
