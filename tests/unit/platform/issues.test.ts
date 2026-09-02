@@ -83,7 +83,7 @@ test('issue create binds exactly once and replay inspects the existing binding',
   assert.equal(posts, 1);
 });
 
-test('issue sync plans dry-run without writes and applies one converging patch', () => {
+test('issue sync plans dry-run without writes and applies incremental label writes', () => {
   const root = fixture('7');
   let patches = 0;
   let labels = ['status: blocked'];
@@ -92,9 +92,16 @@ test('issue sync plans dry-run without writes and applies one converging patch',
     if (context) return context;
     const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
     if (endpoint.endsWith('/labels?per_page=100')) return [{ name: 'status: blocked' }, { name: 'status: in-progress' }];
+    if (args.includes('DELETE') && endpoint.includes('/labels/')) {
+      labels = labels.filter((label) => label !== decodeURIComponent(endpoint.split('/labels/')[1]!));
+      return {};
+    }
+    if (args.includes('POST') && endpoint.endsWith('/labels')) {
+      labels.push(...(JSON.parse(input || '{}').labels as string[]));
+      return {};
+    }
     if (args.includes('PATCH')) {
       patches += 1;
-      labels = JSON.parse(input || '{}').labels;
       return {};
     }
     return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: labels.map((name) => ({ name })), assignees: [], milestone: null };
@@ -104,19 +111,20 @@ test('issue sync plans dry-run without writes and applies one converging patch',
   assert.equal(patches, 0);
   const applied = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
   assert.equal(applied.status, 'applied');
-  assert.equal(patches, 1);
+  assert.equal(patches, 0);
+  assert.deepEqual(labels.sort(), ['status: in-progress']);
   const replay = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
   assert.equal(replay.status, 'no-op');
-  assert.equal(patches, 1);
+  assert.equal(patches, 0);
 });
 
 test('issue in-label sync requires the task-bound base and uses it for diff evidence', () => {
   const missingBase = fixture('7');
   try {
-    const client = clientFor((args) => contextResponse(args) || {
+    const client = clientFor((args) => contextResponse(args) || (args.some((arg) => arg.endsWith('/labels?per_page=100')) ? [{ name: 'in: core' }] : {
       number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
       state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: null
-    });
+    }));
     const result = syncPlatformIssue('TASK-20260101-000001', {
       cwd: missingBase, agent: 'codex', client, inLabels: 'from-diff'
     });
@@ -145,15 +153,22 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
     execFileSync('git', ['add', '.'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'change'], { cwd: root });
     let payload: Record<string, unknown> | null = null;
-    let currentLabels: string[] = [];
+    let currentLabels: string[] = ['in: stale', 'keep'];
     const client = clientFor((args, input) => {
       const context = contextResponse(args);
       if (context) return context;
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint.endsWith('/labels?per_page=100')) return [{ name: 'in: core' }];
+      if (args.includes('DELETE') && endpoint.includes('/labels/')) {
+        currentLabels = currentLabels.filter((label) => label !== decodeURIComponent(endpoint.split('/labels/')[1]!));
+        return {};
+      }
+      if (args.includes('POST') && endpoint.endsWith('/labels')) {
+        currentLabels.push(...(JSON.parse(input || '{}').labels as string[]));
+        return {};
+      }
       if (args.includes('PATCH')) {
         payload = JSON.parse(input || '{}') as Record<string, unknown>;
-        currentLabels = (payload.labels as string[] | undefined) || currentLabels;
         return {};
       }
       return {
@@ -165,7 +180,8 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
       cwd: root, agent: 'codex', client, inLabels: 'from-diff'
     });
     assert.equal(result.status, 'applied');
-    assert.deepEqual((payload as Record<string, unknown> | null)?.labels, ['in: core']);
+    assert.equal((payload as Record<string, unknown> | null)?.labels, undefined);
+    assert.deepEqual(currentLabels, ['keep', 'in: core']);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

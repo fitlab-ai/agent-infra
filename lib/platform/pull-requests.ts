@@ -20,8 +20,10 @@ import type { IssueSnapshot } from './issues.ts';
 import { planPullRequestMetadata } from './pull-request-metadata.ts';
 import {
   extractPullRequestFileNames,
-  extractRepositoryLabelNames,
-  planInLabelUpdate
+  planInLabelUpdate,
+  syncLabelDelta,
+  validateInLabelMapping,
+  validateRepositoryLabelPayload
 } from './in-label-sync.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
@@ -785,8 +787,8 @@ function readInLabelMapping(repoRoot: string): { ok: true; value: Record<string,
     const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as {
       labels?: { in?: unknown };
     };
-    const mapping = config.labels?.in;
-    return { ok: true, value: mapping && typeof mapping === 'object' && !Array.isArray(mapping) ? mapping as Record<string, unknown> : {} };
+    const mapping = validateInLabelMapping(config.labels?.in);
+    return mapping.ok ? { ok: true, value: mapping.value } : mapping;
   } catch (error) {
     return {
       ok: false,
@@ -837,7 +839,8 @@ function inspectClosingIssueNumbers(client: GitHubClient, repository: string, pu
 function inspectRepositoryLabels(client: GitHubClient, repository: string, cwd: string) {
   const response = client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository}/labels?per_page=100`], { cwd });
   if (!response.ok) return response;
-  return { ok: true as const, value: new Set(extractRepositoryLabelNames(response.value)) };
+  const labels = validateRepositoryLabelPayload(response.value);
+  return labels.ok ? { ok: true as const, value: new Set(labels.value) } : labels;
 }
 
 function inspectPullRequestFiles(client: GitHubClient, repository: string, pullRequest: number, cwd: string) {
@@ -880,6 +883,7 @@ function inspectTaskInLabelTarget(
   const planned = planInLabelUpdate({
     changedFiles, currentLabels: pullRequest.labels, mapping: mapping.value, repositoryLabels: labels.value
   });
+  if (planned.error) return { ok: false as const, error: planned.error };
   return { ok: true as const, value: { changedFiles, target: planned.target } };
 }
 
@@ -926,10 +930,15 @@ function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOption
     platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
     resource: { kind: 'pull-request', number: prNumber }, error: repositoryLabels.error
   });
-  const target = planInLabelUpdate({
+  const plannedTarget = planInLabelUpdate({
     changedFiles: files.value, currentLabels: fetched.value.labels,
     mapping: mapping.value, repositoryLabels: repositoryLabels.value
-  }).target;
+  });
+  if (plannedTarget.error) return result('failed', null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+    resource: { kind: 'pull-request', number: prNumber }, error: plannedTarget.error
+  });
+  const target = plannedTarget.target;
   const association = inspectClosingIssueNumbers(client, repository, prNumber, cwd);
   if (!association.ok) return result(association.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
     platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
@@ -990,21 +999,18 @@ function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOption
   let successfulWrites = 0;
   for (const item of plans) {
     if (!item.plan.changed) continue;
-    const patched = client.json<unknown>(['api', `repos/${repository}/issues/${item.number}/labels`, '-X', 'PUT', '--input', '-'], {
-      cwd, method: 'PUT', input: JSON.stringify({ labels: item.plan.labels })
-    });
-    if (!patched.ok) {
-      const partial = successfulWrites > 0 || patched.error.retryable;
-      const error = partial
-        ? { ...patched.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${patched.error.message}` }
-        : patched.error;
-      return result(partial || patched.error.retryable ? 'blocked' : 'failed', null, issueNumber, prNumber, {
-        changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,
+    const synced = syncLabelDelta(client, repository, item.number, cwd, item.snapshot.labels, item.plan.target);
+    if (synced.status === 'failed' || synced.status === 'blocked') {
+      const state = resourcesState.find((resource) => resource.kind === item.kind && resource.number === item.number)!;
+      state.effect = synced.status === 'blocked' ? 'unknown' : 'no-op';
+      state.after = synced.status === 'blocked' ? null : item.snapshot.labels;
+      return result(synced.status, null, issueNumber, prNumber, {
+        changed: successfulWrites > 0 || synced.changed, platform: context.platform, capabilities: context.capabilities,
         pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
-        evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error
+        evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error: synced.error
       });
     }
-    successfulWrites += 1;
+    successfulWrites += synced.changed ? 1 : 0;
     const reread = item.kind === 'issue'
       ? inspectGitHubIssue(client, repository, item.number, cwd)
       : inspectGitHubPullRequest(client, repository, item.number, cwd);
@@ -1572,33 +1578,12 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
       platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, error: target.error
     }));
     inLabels = target.value.target;
-    // The target was computed against repository labels above; merge only the current Issue labels with that target here.
-    const issueLabels = [...new Set([...issue.issue.labels.filter((label) => !label.startsWith('in:')), ...inLabels])].sort();
+    const issueInLabels = issue.issue.labels.filter((label) => label.startsWith('in:')).sort();
     inLabelIssueOperation = !base.context.capabilities.triage
       ? { name: 'labels:in:issue', status: 'skipped', reasonCode: 'TRIAGE_REQUIRED' }
-      : issueLabels.join('\0') === issue.issue.labels.join('\0')
+      : issueInLabels.join('\0') === inLabels.join('\0')
         ? { name: 'labels:in:issue', status: 'no-op', reasonCode: null }
         : { name: 'labels:in:issue', status: 'planned', reasonCode: null };
-    if (inLabelIssueOperation.status === 'planned' && !options.dryRun) {
-      const patchedIssue = base.client.json<unknown>(['api', `repos/${base.context.platform.repository}/issues/${base.issueNumber}/labels`, '-X', 'PUT', '--input', '-'], {
-        cwd: base.resolved.repoRoot, method: 'PUT', input: JSON.stringify({ labels: issueLabels })
-      });
-      if (!patchedIssue.ok) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
-        platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value,
-        operations: [inLabelIssueOperation], error: { ...patchedIssue.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${patchedIssue.error.message}` }
-      }));
-      const rereadIssue = inspectGitHubIssue(base.client, base.context.platform.repository!, base.issueNumber, base.resolved.repoRoot);
-      if (!rereadIssue.ok) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
-        platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value,
-        operations: [inLabelIssueOperation], error: { ...rereadIssue.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${rereadIssue.error.message}` }
-      }));
-      const expectedIssueInLabels = issueLabels.filter((label) => label.startsWith('in:')).sort();
-      const actualIssueInLabels = rereadIssue.value.labels.filter((label) => label.startsWith('in:')).sort();
-      if (actualIssueInLabels.join('\0') !== expectedIssueInLabels.join('\0')) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
-        platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value,
-        operations: [inLabelIssueOperation], error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue in: labels did not converge after update', retryable: true }
-      }));
-    }
   }
   const planned = planPullRequestMetadata({
     pullRequest: fetched.value,
@@ -1613,24 +1598,51 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
     ...(inLabelIssueOperation ? [inLabelIssueOperation] : []),
     ...planned.map(({ name, status, reasonCode }) => ({ name, status, reasonCode }))
   ];
-  if (options.dryRun) return softenFailure(result(planned.some((operation) => operation.status === 'planned') || inLabelIssueOperation?.status === 'planned' ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
-    platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, operations, error: null
-  }));
+  const prLabelOperation = planned.find((operation) => operation.name === 'labels' && operation.status === 'planned');
+  const prLabelWrite = Boolean(prLabelOperation);
+  const authorityPlanned = inLabelIssueOperation?.status === 'planned' || prLabelWrite;
   const payload: Record<string, unknown> = {};
   for (const operation of planned) {
     if (operation.status !== 'planned') continue;
-    if (operation.name === 'labels') payload.labels = operation.value;
     if (operation.name === 'assignees') payload.assignees = operation.value;
     if (operation.name === 'closing-issue') payload.body = operation.value;
     if (operation.name === 'milestone') {
       const milestones = base.client.json<unknown[]>(['api', '--paginate', '--slurp', `repos/${base.context.platform.repository}/milestones?state=open&per_page=100`], { cwd: base.resolved.repoRoot });
-      if (!milestones.ok) return softenFailure(result(milestones.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { pullRequest: fetched.value, operations, error: milestones.error }));
+      if (!milestones.ok) {
+        const output = result(milestones.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+          platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, operations, error: milestones.error
+        });
+        return authorityPlanned ? output : softenFailure(output);
+      }
       const flat = milestones.value.flatMap((entry) => Array.isArray(entry) ? entry : [entry]) as Array<{ title?: string; number?: number }>;
       payload.milestone = flat.find((entry) => entry.title === operation.value)?.number ?? null;
     }
   }
-  const issueInLabelChanged = inLabelIssueOperation?.status === 'planned';
-  if (Object.keys(payload).length === 0) {
+  if (options.dryRun) return softenFailure(result(planned.some((operation) => operation.status === 'planned') || inLabelIssueOperation?.status === 'planned' ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, operations, error: null
+  }));
+  let issueInLabelChanged = false;
+  if (inLabelIssueOperation?.status === 'planned') {
+    const syncedIssue = syncLabelDelta(base.client, base.context.platform.repository!, base.issueNumber, base.resolved.repoRoot, issue.issue.labels, inLabels);
+    if (syncedIssue.status === 'failed' || syncedIssue.status === 'blocked') return result(syncedIssue.status, base.resolved.taskId, base.issueNumber, base.prNumber, {
+      platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value,
+      operations, error: syncedIssue.error
+    });
+    const rereadIssue = inspectGitHubIssue(base.client, base.context.platform.repository!, base.issueNumber, base.resolved.repoRoot);
+    if (!rereadIssue.ok) return result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      changed: syncedIssue.changed, platform: base.context.platform, capabilities: base.context.capabilities,
+      pullRequest: fetched.value, operations,
+      error: { ...rereadIssue.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${rereadIssue.error.message}` }
+    });
+    const actualIssueInLabels = rereadIssue.value.labels.filter((label) => label.startsWith('in:')).sort();
+    if (actualIssueInLabels.join('\0') !== inLabels.join('\0')) return result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      changed: syncedIssue.changed, platform: base.context.platform, capabilities: base.context.capabilities,
+      pullRequest: fetched.value, operations,
+      error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue in: labels did not converge after update', retryable: true }
+    });
+    issueInLabelChanged = syncedIssue.changed;
+  }
+  if (Object.keys(payload).length === 0 && !prLabelWrite) {
     const degraded = planned.some((operation) => operation.status === 'skipped');
     return softenFailure(result(issueInLabelChanged ? degraded ? 'degraded' : 'applied' : degraded ? 'degraded' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
       changed: issueInLabelChanged, platform: base.context.platform, capabilities: base.context.capabilities,
@@ -1641,25 +1653,37 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
   const patched = base.client.json<RemotePullRequest>(['api', `repos/${base.context.platform.repository}/issues/${base.prNumber}`, '-X', 'PATCH', '--input', '-'], {
     cwd: base.resolved.repoRoot, method: 'PATCH', input: JSON.stringify(payload)
   });
-  const prLabelWrite = planned.some((operation) => operation.name === 'labels' && operation.status === 'planned');
   if (!patched.ok) {
-    const partial = prLabelWrite && patched.error.retryable;
+    const partial = issueInLabelChanged || patched.error.retryable;
     const error = partial
       ? { ...patched.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${patched.error.message}` }
       : patched.error;
-    return softenFailure(result(partial || patched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    const output = result(partial || patched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
       changed: issueInLabelChanged, pullRequest: fetched.value, operations, error
-    }));
+    });
+    return authorityPlanned ? output : softenFailure(output);
   }
+  const prMetadataChanged = Object.keys(payload).length > 0;
   let finalPullRequest = fetched.value;
   if (prLabelWrite) {
+    const desiredLabels = prLabelOperation?.value as string[];
+    const syncedPullRequest = syncLabelDelta(base.client, base.context.platform.repository!, base.prNumber, base.resolved.repoRoot, fetched.value.labels, desiredLabels, ['in:', 'type:']);
+    if (syncedPullRequest.status === 'failed' || syncedPullRequest.status === 'blocked') {
+      const partial = issueInLabelChanged || prMetadataChanged || syncedPullRequest.status === 'blocked';
+      const error = partial && syncedPullRequest.error
+        ? { ...syncedPullRequest.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${syncedPullRequest.error.message}` }
+        : syncedPullRequest.error;
+      return result(partial ? 'blocked' : syncedPullRequest.status, base.resolved.taskId, base.issueNumber, base.prNumber, {
+        changed: issueInLabelChanged || prMetadataChanged || syncedPullRequest.changed, platform: base.context.platform, capabilities: base.context.capabilities,
+        pullRequest: fetched.value, operations, error
+      });
+    }
     const rereadPullRequest = inspectGitHubPullRequest(base.client, base.context.platform.repository!, base.prNumber, base.resolved.repoRoot);
     if (!rereadPullRequest.ok) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
       changed: true, pullRequest: fetched.value, operations,
       error: { ...rereadPullRequest.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${rereadPullRequest.error.message}` }
     }));
-    const expectedPrInLabels = (planned.find((operation) => operation.name === 'labels')?.value as string[])
-      .filter((label) => label.startsWith('in:')).sort();
+    const expectedPrInLabels = inLabels;
     const actualPrInLabels = rereadPullRequest.value.labels.filter((label) => label.startsWith('in:')).sort();
     if (expectedPrInLabels.join('\0') !== actualPrInLabels.join('\0')) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
       changed: true, pullRequest: rereadPullRequest.value, operations,
@@ -1668,7 +1692,7 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
     finalPullRequest = rereadPullRequest.value;
   }
   return softenFailure(result(planned.some((operation) => operation.status === 'skipped') ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, base.prNumber, {
-    changed: true, platform: base.context.platform, capabilities: base.context.capabilities,
+    changed: issueInLabelChanged || prMetadataChanged || prLabelWrite, platform: base.context.platform, capabilities: base.context.capabilities,
     resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: finalPullRequest,
     operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
   }));

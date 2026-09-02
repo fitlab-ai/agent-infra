@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 import {
   inspectPlatformPullRequestByNumber,
@@ -12,10 +12,12 @@ import {
   resolveGitHubChangeRequestGitEvidence,
   selectExternalPullRequest,
   selectPullRequest,
+  syncPlatformPullRequest,
   syncPlatformPullRequestInLabels,
   warningResultForPrimary
 } from '../../../lib/platform/pull-requests.ts';
 import type { GitHubClient, RequestOptions } from '../../../lib/platform/github-client.ts';
+import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 const remote = (number: number, head = 'feature', base = 'main') => ({
   number,
@@ -151,12 +153,16 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
         number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/o/r/issues/7', state: 'open', title: 'Issue', body: '',
         labels: issueLabels.map((name) => ({ name })), assignees: [], milestone: null
       } };
-      if (args.includes('PUT') && /issues\/7\/labels$/.test(args[1] || '')) {
-        issueLabels = JSON.parse(options.input || '{}').labels;
+      if (args.includes('DELETE') && /issues\/(7|42)\/labels\//.test(endpoint)) {
+        const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
+        if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
+        else prLabels = prLabels.filter((label) => label !== name);
         return { ok: true, value: {} };
       }
-      if (args.includes('PUT') && /issues\/42\/labels$/.test(args[1] || '')) {
-        prLabels = JSON.parse(options.input || '{}').labels;
+      if (args.includes('POST') && /issues\/(7|42)\/labels$/.test(endpoint)) {
+        const labels = JSON.parse(options.input || '{}').labels as string[];
+        if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
+        else prLabels.push(...labels);
         return { ok: true, value: {} };
       }
       return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: joined, retryable: false } };
@@ -166,8 +172,8 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   try {
     const result = syncPlatformPullRequestInLabels(42, { cwd: root, client });
     assert.equal(result.status, 'applied', JSON.stringify({ error: result.error, operations: result.operations, resources: result.resources, calls }));
-    assert.deepEqual(issueLabels, ['in: core', 'keep']);
-    assert.deepEqual(prLabels, ['in: core', 'type: feature']);
+    assert.deepEqual([...issueLabels].sort(), ['in: core', 'keep']);
+    assert.deepEqual([...prLabels].sort(), ['in: core', 'type: feature']);
     assert.ok(calls.findIndex((call) => /issues\/7\/labels/.test(call)) < calls.findIndex((call) => /issues\/42\/labels/.test(call)));
     assert.deepEqual(result.evidence?.pullRequestFiles, ['lib/core.ts']);
     assert.deepEqual(result.resources?.map((resource) => resource.effect), ['applied', 'applied']);
@@ -176,7 +182,7 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   }
 });
 
-function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean } = {}) {
+function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; injectConcurrentUnrelatedLabel?: boolean } = {}) {
   const root = prByNumberFixture();
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
     platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
@@ -208,13 +214,20 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
         number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/o/r/issues/7', state: 'open', title: 'Issue', body: '',
         labels: issueLabels.map((name) => ({ name })), assignees: [], milestone: null
       } };
-      if (args.includes('PUT') && /issues\/7\/labels$/.test(args[1] || '')) {
-        issueLabels = JSON.parse(request.input || '{}').labels;
+      if (args.includes('DELETE') && /issues\/(7|42)\/labels\//.test(endpoint)) {
+        if (fixtureOptions.injectConcurrentUnrelatedLabel && endpoint.includes('/issues/42/') && !prLabels.includes('unrelated: concurrent')) {
+          prLabels.push('unrelated: concurrent');
+        }
+        const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
+        if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
+        else prLabels = prLabels.filter((label) => label !== name);
         return { ok: true, value: {} };
       }
-      if (args.includes('PUT') && /issues\/42\/labels$/.test(args[1] || '')) {
-        if (fixtureOptions.failPullRequestWrite) return { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'network timeout', retryable: true } };
-        prLabels = JSON.parse(request.input || '{}').labels;
+      if (args.includes('POST') && /issues\/(7|42)\/labels$/.test(endpoint)) {
+        if (fixtureOptions.failPullRequestWrite && endpoint.includes('/issues/42/')) return { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'network timeout', retryable: true } };
+        const labels = JSON.parse(request.input || '{}').labels as string[];
+        if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
+        else prLabels.push(...labels);
         return { ok: true, value: {} };
       }
       return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: joined, retryable: false } };
@@ -224,13 +237,146 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
   return { root, client, calls, getPrLabels: () => prLabels, getIssueLabels: () => issueLabels };
 }
 
+function boundPullRequestFixture(options: { milestoneFailure?: boolean; failPullRequestLabel?: boolean; prLabels?: string[] } = {}) {
+  const root = prByNumberFixture();
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  fs.writeFileSync(path.join(root, 'base.txt'), 'base\n');
+  execFileSync('git', ['add', 'base.txt'], { cwd: root });
+  execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+  fs.mkdirSync(path.join(root, 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'lib', 'core.ts'), 'change\n');
+  execFileSync('git', ['add', 'lib/core.ts'], { cwd: root });
+  execFileSync('git', ['commit', '-qm', 'change'], { cwd: root });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+    platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
+  }));
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const fact = buildBoundFact({
+    identity: {
+      repository: 'o/r', number: 42, nodeId: 'PR_42', url: 'https://github.com/o/r/pull/42',
+      head: { repository: 'o/r', ref: 'feature', sha: 'sha-42' },
+      base: { repository: 'o/r', ref: 'main', sha: 'base-42' }
+    }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open', issueNumber: 7
+  });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), [
+    '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7',
+    'delivery_base_ref: HEAD~1', `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(fact))}`, '---', ''
+  ].join('\n'));
+  let issueLabels = ['in: stale', 'keep'];
+  let prLabels = options.prLabels || ['in: stale', 'type: feature'];
+  let prBody = 'Body';
+  const issueMilestone = options.milestoneFailure ? '1.0.1' : '1.0.0';
+  const writes: string[] = [];
+  const client: GitHubClient = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], request: RequestOptions = {}) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+        return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      }
+      if (args[0] === 'api' && args[1] === 'repos/o/r') {
+        return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: false, admin: false } } };
+      }
+      if (/pulls\/42$/.test(args[1] || '')) return { ok: true, value: { ...remote(42), body: prBody, labels: prLabels.map((name) => ({ name })) } };
+      if (/labels\?per_page=100$/.test(endpoint)) return { ok: true, value: [[{ name: 'in: core' }, { name: 'in: stale' }]] };
+      if (/issues\/7$/.test(args[1] || '')) return { ok: true, value: {
+        number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/o/r/issues/7', state: 'open', title: 'Issue', body: '',
+        labels: issueLabels.map((name) => ({ name })), assignees: [{ login: 'codex' }], milestone: { title: issueMilestone }
+      } };
+      if (/milestones\?state=open/.test(endpoint)) {
+        if (options.milestoneFailure) return { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'milestone lookup failed', retryable: true } };
+        return { ok: true, value: [[{ title: '1.0.0', number: 100 }, { title: '1.0.1', number: 101 }]] };
+      }
+      if (args.includes('DELETE') && /issues\/(7|42)\/labels\//.test(endpoint)) {
+        const name = decodeURIComponent(endpoint.split('/labels/')[1]!);
+        if (endpoint.includes('/issues/7/')) issueLabels = issueLabels.filter((label) => label !== name);
+        else prLabels = prLabels.filter((label) => label !== name);
+        writes.push(`DELETE ${endpoint}`);
+        return { ok: true, value: {} };
+      }
+      if (args.includes('POST') && /issues\/(7|42)\/labels$/.test(endpoint)) {
+        if (options.failPullRequestLabel && endpoint.includes('/issues/42/')) {
+          writes.push(`POST ${endpoint}`);
+          return { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } };
+        }
+        const labels = JSON.parse(request.input || '{}').labels as string[];
+        if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
+        else prLabels.push(...labels);
+        writes.push(`POST ${endpoint}`);
+        return { ok: true, value: {} };
+      }
+      if (args.includes('PATCH') && /issues\/42$/.test(endpoint)) {
+        writes.push(`PATCH ${endpoint}`);
+        const payload = JSON.parse(request.input || '{}') as { body?: string };
+        if (payload.body !== undefined) prBody = payload.body;
+        return { ok: true, value: {} };
+      }
+      return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: args.join(' '), retryable: false } };
+    },
+    text() { return { ok: true, value: '' }; }
+  } as unknown as GitHubClient;
+  return { root, taskId, client, writes, getIssueLabels: () => issueLabels, getPrLabels: () => prLabels };
+}
+
+test('task-bound PR sync reads milestone prerequisites before writing Issue labels', () => {
+  const fixture = boundPullRequestFixture({ milestoneFailure: true });
+  try {
+    const result = syncPlatformPullRequest(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'NETWORK_TRANSIENT');
+    assert.deepEqual(fixture.writes, []);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound PR sync blocks with partial evidence on a nonretryable PR label failure', () => {
+  const fixture = boundPullRequestFixture({ failPullRequestLabel: true, prLabels: ['type: feature'] });
+  try {
+    const result = syncPlatformPullRequest(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.equal(result.changed, true);
+    assert.deepEqual(fixture.getIssueLabels().sort(), ['in: core', 'keep']);
+    assert.deepEqual(fixture.getPrLabels(), ['type: feature']);
+    assert.equal(result.warnings?.length, 0);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound PR metadata and in-label sync replay as no-op after convergence', () => {
+  const fixture = boundPullRequestFixture();
+  try {
+    const first = syncPlatformPullRequest(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
+    });
+    assert.equal(first.status, 'applied', JSON.stringify({ error: first.error, writes: fixture.writes }));
+    const writes = fixture.writes.length;
+    const second = syncPlatformPullRequest(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
+    });
+    assert.equal(second.status, 'no-op');
+    assert.equal(fixture.writes.length, writes);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('in-label PR sync updates only the PR when no unique closing Issue exists', () => {
   for (const closingIssues of [[], [7, 8]]) {
     const fixture = prOnlyInLabelFixture(closingIssues);
     try {
       const result = syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
       assert.equal(result.status, 'degraded');
-      assert.deepEqual(fixture.getPrLabels(), ['in: core', 'type: feature']);
+      assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature']);
       assert.equal(fixture.calls.some((call) => /issues\/7|issues\/8/.test(call)), false);
       assert.equal(result.resources?.length, 1);
       assert.equal(result.resources?.[0]?.kind, 'pull-request');
@@ -246,8 +392,19 @@ test('in-label PR sync blocks with partial evidence when the PR write is uncerta
     const result = syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
     assert.equal(result.status, 'blocked');
     assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
-    assert.deepEqual(fixture.getIssueLabels(), ['in: core', 'keep']);
+    assert.deepEqual([...fixture.getIssueLabels()].sort(), ['in: core', 'keep']);
     assert.deepEqual(result.resources?.map((resource) => resource.effect), ['applied', 'unknown']);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('in-label PR sync preserves an unrelated label added after the initial read', () => {
+  const fixture = prOnlyInLabelFixture([], { injectConcurrentUnrelatedLabel: true });
+  try {
+    const result = syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    assert.equal(result.status, 'degraded');
+    assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature', 'unrelated: concurrent']);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

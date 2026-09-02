@@ -9,7 +9,7 @@ import { hasCheckedRequirement, resolveRequirementSection } from "./issue-metada
 import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "./issues.ts";
 import { listRemoteComments } from "./issue-comments.ts";
 import { taskTypeLabel } from "./metadata-labels.ts";
-import { extractRepositoryLabelNames, planInLabelUpdate } from "./in-label-sync.ts";
+import { planInLabelUpdate, validateInLabelMapping, validateRepositoryLabelPayload } from "./in-label-sync.ts";
 import { inspectGitHubPullRequest } from "./pull-requests.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 
@@ -1163,12 +1163,19 @@ function computeExpectedInLabels(taskDir: any, repository: any): any {
     return repoLabelsResult;
   }
 
+  const repositoryLabels = validateRepositoryLabelPayload(repoLabelsResult.value);
+  if (!repositoryLabels.ok) {
+    return { ok: false, type: "check_failed", message: repositoryLabels.error.message };
+  }
   const planned = planInLabelUpdate({
     changedFiles,
     currentLabels: [],
     mapping: mapping.value ?? {},
-    repositoryLabels: new Set(extractRepositoryLabelNames(repoLabelsResult.value))
+    repositoryLabels: new Set(repositoryLabels.value)
   });
+  if (planned.error) {
+    return { ok: false, type: "check_failed", message: planned.error.message };
+  }
   return { ok: true, labels: planned.target, mode: "mapped" };
 }
 
@@ -1180,26 +1187,10 @@ function loadInLabelMapping(): any {
 
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const mapping = config?.labels?.in;
-    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) {
-      return { ok: true, value: {} };
-    }
-
-    const normalized: Record<string, string[]> = {};
-    for (const [label, prefixes] of Object.entries(mapping)) {
-      if (!Array.isArray(prefixes)) {
-        continue;
-      }
-
-      const cleaned = prefixes
-        .map((value) => String(value || "").trim())
-        .filter(Boolean);
-      if (cleaned.length > 0) {
-        normalized[label] = cleaned;
-      }
-    }
-
-    return { ok: true, value: normalized };
+    const mapping = validateInLabelMapping(config?.labels?.in);
+    return mapping.ok
+      ? { ok: true, value: mapping.value }
+      : { ok: false, type: "check_failed", message: mapping.error.message };
   } catch (error: any) {
     return { ok: false, type: "check_failed", message: `Unable to parse .agents/.airc.json: ${error.message}` };
   }
