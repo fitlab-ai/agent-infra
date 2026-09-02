@@ -7,7 +7,6 @@ import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
-import { formatKnownNonUserTokens } from './issue-comment-content.ts';
 
 const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const;
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
