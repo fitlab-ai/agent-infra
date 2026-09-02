@@ -59,7 +59,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件与模式后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {standard-agent-token}`。修复模式追加 `--fix-for {review-artifact}`；若返回的 `artifactContext.implementationInput` 非空，再同时追加 `--implementation-input {input-id}`。裁决模式追加 `--implementation-input {input-id}`。核心根据 artifact context 推导并校验轮次与输入身份；以返回的 `artifactContext` 记录本轮身份。
+确认前置条件与模式后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {standard-agent-token}`。修复模式追加 `--fix-for {review-artifact}`，裁决模式追加 `--implementation-input {input-id}`。核心根据 artifact context 推导并校验轮次与输入身份；以返回的 `artifactContext` 记录本轮身份。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -104,7 +104,7 @@ echo "$result"
 | `$status` | `result.mode` | 行动 |
 |---|---|---|
 | 0 | `"init"` | 进入初次实现模式。记录 `{code-artifact}` = `result.next_artifact`、`{code-round}` = `result.next_round` |
-| 0 | `"fix"` | 进入修复模式。记录 `{code-artifact}` = `result.next_artifact`、`{code-round}` = `result.next_round`、`{review-artifact}` = `result.review_artifact`；若 `result.implementation_input` 非空，同时记录该裁决实现输入 |
+| 0 | `"fix"` | 进入修复模式。记录 `{code-artifact}` = `result.next_artifact`、`{code-round}` = `result.next_round`、`{review-artifact}` = `result.review_artifact` |
 | 0 | `"decision"` | 进入裁决实现模式。记录 `{code-artifact}`、`{code-round}`、`{input-id}`、`{decision-id}` 与 `{decision-evidence}` |
 | 1 | `"refused"` | 输出 `result.message` 给用户；立即停止；不写 Activity Log、不创建产物 |
 | 2 | `"error"` | 输出 `result.message` 给用户；立即停止；不写 Activity Log、不创建产物 |
@@ -114,7 +114,7 @@ echo "$result"
 
 ### 5. 确定输入方案
 
-只使用步骤 4 的结构化结果：从 `inputs` 取得 `{plan-artifact}`，从 `next_round` / `next_artifact` 取得 `{code-round}` / `{code-artifact}`；修复模式从 `review_artifact` 取得 `{review-artifact}`，并在 `implementation_input` 非空时携带同一实现输入；裁决模式从 `implementation_input`、`decision_id`、`decision_evidence` 取得统一输入身份。不得自行扫描轮次或拼装文件名。
+只使用步骤 4 的结构化结果：从 `inputs` 取得 `{plan-artifact}`，从 `next_round` / `next_artifact` 取得 `{code-round}` / `{code-artifact}`；修复模式从 `review_artifact` 取得 `{review-artifact}`；裁决模式从 `implementation_input`、`decision_id`、`decision_evidence` 取得统一输入身份。不得自行扫描轮次或拼装文件名。
 
 ### 6. 阅读技术方案
 
@@ -159,7 +159,7 @@ echo "$result"
 - 产物链接、阶段与完成日志由 completed 事件统一登记
 - 完成业务内容更新后声明完成事件：
   - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n} {execution-flag}`
-  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --fix-for {review-artifact} [--implementation-input {input-id}] --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}`；若本轮 `implementation_input` 非空，必须传入该参数
+  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}`
   - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --implementation-input {input-id} --files-modified {n} --tests-passed {n} {execution-flag}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则记录 warning 并继续；Issue 元数据边界仍见 `.agents/rules/issue-sync.md`）：

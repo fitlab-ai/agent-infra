@@ -622,9 +622,8 @@ function checkCommentContent(context: any, remoteData: any): any {
     );
   }
 
-  const rawLocalContent = fs.readFileSync(context.artifactPath, "utf8");
   const comment = findCommentByMarker(remoteData.comments, context.marker);
-  const localContent = normalizeContent(rawLocalContent);
+  const localContent = normalizeContent(fs.readFileSync(context.artifactPath, "utf8"));
   const commentContent = normalizeContent(extractCommentBody(comment?.body || ""));
 
   if (localContent === commentContent) {

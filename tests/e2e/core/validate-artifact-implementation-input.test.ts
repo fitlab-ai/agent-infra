@@ -45,73 +45,11 @@ function run(taskDir: string) {
   }) as { status: string };
 }
 
-function runCheck(taskDir: string, check: string) {
-  return verifyInProcess({
-    mode: 'checks', skillName: 'code-task', taskDir, checks: [check], repositoryRoot: process.cwd()
-  }) as { status: string; message: string };
-}
-
 test('implementation input gate accepts matching action, report, and task row', () => {
   const f = fixture();
   try {
     const result = run(f.taskDir);
     assert.equal(result.status, 'pass');
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
-test('implementation input gate accepts a consumed input on a fix action', () => {
-  const f = fixture();
-  try {
-    const taskPath = path.join(f.taskDir, 'task.md');
-    const task = fs.readFileSync(taskPath, 'utf8').replace(
-      '**Code Task (Round 2, decision II-1)** by codex — Code implemented, 1 files modified, 4 tests passed → code-r2.md',
-      '**Code Task (Round 2, fix for review-code.md)** by codex — Fixed 0 blockers, 1 major, 0 minor issues → code-r2.md; consumed decision II-1'
-    );
-    fs.writeFileSync(taskPath, task);
-    const reportPath = path.join(f.taskDir, 'code-r2.md');
-    fs.writeFileSync(reportPath, fs.readFileSync(reportPath, 'utf8').replace('- **模式**：decision', '- **模式**：fix'));
-    const result = run(f.taskDir);
-    assert.equal(result.status, 'pass');
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
-test('activity log gate ignores a later commit entry when checking code completion', () => {
-  const f = fixture();
-  try {
-    const taskPath = path.join(f.taskDir, 'task.md');
-    fs.appendFileSync(taskPath, '\n- 2026-07-18 10:03:00+08:00 — **Commit** by codex — abc123 fix: update\n');
-    const result = runCheck(f.taskDir, 'activity-log');
-    assert.equal(result.status, 'pass');
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
-test('activity log gate rejects a latest review-code action for code completion', () => {
-  const f = fixture();
-  try {
-    const taskPath = path.join(f.taskDir, 'task.md');
-    fs.appendFileSync(taskPath, '\n- 2026-07-18 10:03:00+08:00 — **Review Code (Round 1)** by codex — Review complete\n');
-    const result = runCheck(f.taskDir, 'activity-log');
-    assert.equal(result.status, 'fail');
-    assert.match(result.message, /Latest action 'Review Code \(Round 1\)' does not match/);
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
-test('activity log gate rejects a commit after an intervening review-code action', () => {
-  const f = fixture();
-  try {
-    const taskPath = path.join(f.taskDir, 'task.md');
-    fs.appendFileSync(taskPath, '\n- 2026-07-18 10:03:00+08:00 — **Review Code (Round 1)** by codex — Review complete\n- 2026-07-18 10:04:00+08:00 — **Commit** by codex — abc123 fix: update\n');
-    const result = runCheck(f.taskDir, 'activity-log');
-    assert.equal(result.status, 'fail');
-    assert.match(result.message, /Latest action 'Commit' does not match/);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

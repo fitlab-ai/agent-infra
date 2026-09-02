@@ -232,12 +232,6 @@ last_reviewed_commit: abcdef1234567890
   return f;
 }
 
-function fixDecisionFixture() {
-  const f = decisionFixture();
-  fs.writeFileSync(path.join(f.dir, 'review-code.md'), `## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n`);
-  return f;
-}
-
 test('internal task-event rejects a non-standard --agent token', () => {
   const f = fixture();
   const before = fs.readFileSync(f.file);
@@ -1061,34 +1055,6 @@ test('decision code event clears the review baseline and consumes its input on c
     '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4'
   ]);
   assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
-});
-
-test('fix code event can explicitly consume a pending decision input on completion', () => {
-  const f = fixDecisionFixture();
-  const started = run(f.root, [
-    f.id, 'code.started', '--agent', 'codex', '--fix-for', 'review-code.md', '--implementation-input', 'II-1'
-  ]);
-  assert.equal(started.status, 0, started.stdout || started.stderr);
-  const startedResult = JSON.parse(started.stdout);
-  assert.equal(startedResult.status, 'applied');
-  assert.equal(startedResult.fixFor, 'review-code.md');
-  assert.equal(startedResult.implementationInput, 'II-1');
-  let content = fs.readFileSync(f.file, 'utf8');
-  assert.match(content, /Code Task \(Round 2, fix for review-code\.md\) \[started\].*decision II-1/);
-
-  fs.writeFileSync(path.join(f.dir, 'code-r2.md'), codeReport());
-  const completed = run(f.root, [
-    f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
-    '--fix-for', 'review-code.md', '--implementation-input', 'II-1',
-    '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
-  ]);
-  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
-  const completedResult = JSON.parse(completed.stdout);
-  assert.equal(completedResult.status, 'applied');
-  assert.equal(completedResult.implementationInput, 'II-1');
-  content = fs.readFileSync(f.file, 'utf8');
-  assert.match(content, /\| II-1 .*\| consumed \| code-r2\.md \|/);
-  assert.match(content, /Code Task \(Round 2, fix for review-code\.md\).*consumed decision II-1/);
 });
 
 test('code completion rejects a report without a canonical plan input', () => {

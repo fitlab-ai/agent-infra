@@ -121,6 +121,7 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
   }
   if (request.fixFor && !/^review-code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/.test(request.fixFor)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor must reference a canonical review-code artifact' };
   if (request.implementationInput && !/^II-[1-9]\d*$/.test(request.implementationInput)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'implementationInput must be a canonical II-N id' };
+  if (request.fixFor && request.implementationInput) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor and implementationInput are mutually exclusive' };
   if (request.summaryResult !== undefined && (!request.summaryResult.trim() || /[\r\n]/.test(request.summaryResult))) return { code: 'EVENT_PAYLOAD_INVALID', message: 'summaryResult must be a non-empty single line' };
   return null;
 }
@@ -227,14 +228,11 @@ function identity(request: TaskEventRequest) {
     ? `, fix for ${request.fixFor}`
     : request.implementationInput ? `, decision ${request.implementationInput}` : '';
   const action = `${spec.label} (Round ${request.round}${qualifier})`;
-  if (phase === 'started') {
-    const decisionNote = request.implementationInput ? `; decision ${request.implementationInput}` : '';
-    return { family, phase, action, note: `started${decisionNote}`, target: null } as const;
-  }
+  if (phase === 'started') return { family, phase, action, note: 'started', target: null } as const;
   let note = '';
   if (family === 'analyze') note = `Analysis completed → ${request.artifact}`;
   else if (family === 'plan') note = `Plan completed, awaiting human review → ${request.artifact}`;
-  else if (family === 'code' && request.fixFor) note = `Fixed ${request.blockers} blockers, ${request.major} major, ${request.minor} minor issues${request.manualValidation ? `, skipped ${request.manualValidation} manual-validation` : ''} → ${request.artifact}${request.implementationInput ? `; consumed decision ${request.implementationInput}` : ''}`;
+  else if (family === 'code' && request.fixFor) note = `Fixed ${request.blockers} blockers, ${request.major} major, ${request.minor} minor issues${request.manualValidation ? `, skipped ${request.manualValidation} manual-validation` : ''} → ${request.artifact}`;
   else if (family === 'code') note = `Code implemented, ${request.filesModified} files modified, ${request.testsPassed} tests passed → ${request.artifact}`;
   else if (family === 'validation-run') note = `Validation evidence recorded → ${request.artifact}`;
   else {
@@ -264,7 +262,7 @@ function normalizeStarted(request: TaskEventRequest, repoRoot: string): { reques
   const round = context.next.round;
   if (request.round !== undefined && request.round !== round) return { error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `round ${request.round} conflicts with expected round ${round}` }, context };
   const expectedFix = family === 'code' && context.codeMode?.mode === 'fix' ? context.codeMode.reviewArtifact ?? undefined : undefined;
-  const expectedImplementation = family === 'code' && (context.codeMode?.mode === 'decision' || context.codeMode?.mode === 'fix')
+  const expectedImplementation = family === 'code' && context.codeMode?.mode === 'decision'
     ? context.codeMode.implementationInput ?? undefined : undefined;
   if (request.fixFor !== undefined && request.fixFor !== expectedFix) return { error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with artifact context` }, context };
   if (request.implementationInput !== expectedImplementation) return { error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with artifact context` }, context };
@@ -283,8 +281,7 @@ function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: Event
   const matches = rows.flatMap((row) => {
     if (!row.started || row.done) return [];
     const match = pattern.exec(row.step);
-    const notedDecision = match?.[2] ? /(?:^|;\s*)decision (II-[1-9]\d*)\b/.exec(row.note)?.[1] : undefined;
-    return match ? [{ row, round: Number(match[1]), fixFor: match[2], implementationInput: match[3] ?? notedDecision }] : [];
+    return match ? [{ row, round: Number(match[1]), fixFor: match[2], implementationInput: match[3] }] : [];
   });
   return matches.length === 1 ? matches[0] : matches.length > 1 ? { conflict: true as const } : null;
 }

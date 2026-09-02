@@ -55,8 +55,6 @@ manual-validation 项不在修复范围。处理规则：
 3. 如果仍有任何 `Blocker` 或 `Major` 未解决，不要选择直接提交
 4. 只渲染已选分支，且只调用一次 helper
 
-修复轮可以同时携带一个待实现的裁决输入：当 artifact context 返回 `implementationInput` 时，started 与 completed 事件都必须传递同一个 `II-N`；这仍是同一轮修复，completed 会在写入实现产物的同时消费该输入。
-
 默认分支使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成 `{next-step-commands}`：
 
 ```text
