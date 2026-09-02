@@ -20,6 +20,27 @@ function taskSubcommand(subcommand: string): string {
   return subcommand === 'list' ? 'ls' : subcommand;
 }
 
+function splitRunArguments(args: readonly string[]): { hostArgs: string[]; skillArgs: string[] } {
+  const hostArgs: string[] = [];
+  const skillArgs: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (arg === '--tui') {
+      hostArgs.push(arg);
+      const value = args[i + 1];
+      if (value !== undefined) {
+        hostArgs.push(value);
+        i += 1;
+      }
+    } else if (arg === '--recreate') {
+      hostArgs.push(arg);
+    } else {
+      skillArgs.push(arg);
+    }
+  }
+  return { hostArgs, skillArgs };
+}
+
 export function commandHelp(): string {
   return [
     `agent-infra ${VERSION}`,
@@ -93,10 +114,15 @@ export function parseCommand(text: string): CommandPlan {
     }
     const [taskRef, ...skillArgs] = rest;
     if (!taskRef) return { kind: 'error', message: '/run task skills require a task-ref' };
+    const { hostArgs, skillArgs: forwardedSkillArgs } = splitRunArguments(skillArgs);
     return {
       kind: 'ai',
       role: spec.role,
-      argv: ['run', '--skill', subcommand, '--task', taskRef, ...skillArgs]
+      argv: [
+        'run', '--skill', subcommand, '--task', taskRef,
+        ...hostArgs,
+        ...(forwardedSkillArgs.length > 0 ? ['--', ...forwardedSkillArgs] : [])
+      ]
     };
   }
 

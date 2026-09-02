@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { commandHelp, parseCommand } from '../../../lib/server/protocol.ts';
+import { parseRunArgs } from '../../../lib/run/index.ts';
 
 test('commandHelp renders Feishu-card-friendly command lines', () => {
   assert.deepEqual(commandHelp().split('\n').slice(1), [
@@ -67,6 +68,26 @@ test('parseCommand maps sandbox and run commands with roles', () => {
     kind: 'ai',
     role: 'exec',
     argv: ['decide', '-t', '#7', '-i', 'CD-1', '--needs-implementation', 'true', 'yes']
+  });
+});
+
+test('server run argv composes with the host parser when skill args and host flags coexist', () => {
+  const plan = parseCommand('/run cancel-task 7 obsolete --tui codex --recreate');
+  assert.deepEqual(plan, {
+    kind: 'ai',
+    role: 'exec',
+    argv: [
+      'run', '--skill', 'cancel-task', '--task', '7', '--tui', 'codex', '--recreate',
+      '--', 'obsolete'
+    ]
+  });
+  if (plan.kind !== 'ai') return;
+  assert.deepEqual(parseRunArgs(plan.argv.slice(1)), {
+    skill: 'cancel-task',
+    taskRef: '7',
+    args: ['obsolete'],
+    tui: 'codex',
+    recreate: true
   });
 });
 

@@ -124,6 +124,3 @@ repair hint.
 
 Bare numeric `N` is safe in every shell and TUI without quoting:
 `ai sandbox exec 11 'npm test'`, `/review-analysis --task 11`.
-
-The old `#NN` form has been removed; even a quoted value delivered intact to
-the CLI is rejected.
