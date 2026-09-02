@@ -57,8 +57,8 @@ function writeTaskFixture(options: { withShortId?: boolean } = {}): string {
   return repoRoot;
 }
 
-test('parseRunArgs accepts create-task without task-ref and captures --tui', () => {
-  const parsed = parseRunArgs(['create-task', 'write', 'docs', '--tui', 'claude']);
+test('parseRunArgs accepts create-task with explicit skill selection and captures --tui', () => {
+  const parsed = parseRunArgs(['--skill', 'create-task', 'write', 'docs', '--tui', 'claude']);
   assert.deepEqual(parsed, {
     skill: 'create-task',
     taskRef: null,
@@ -68,27 +68,64 @@ test('parseRunArgs accepts create-task without task-ref and captures --tui', () 
 });
 
 test('parseRunArgs requires task-ref for task skills', () => {
-  assert.throws(() => parseRunArgs(['code-task']), /requires a task-ref/);
-  assert.deepEqual(parseRunArgs(['code-task', '#7', '--tui', 'codex']), {
+  assert.throws(() => parseRunArgs(['--skill', 'code-task']), /requires a task-ref/);
+  assert.deepEqual(parseRunArgs(['--skill', 'code-task', '--task', '7', '--tui', 'codex']), {
     skill: 'code-task',
-    taskRef: '#7',
+    taskRef: '7',
     args: [],
     tui: 'codex'
   });
 });
 
 test('parseRunArgs consumes --recreate as a sandbox recovery flag', () => {
-  assert.deepEqual(parseRunArgs(['code-task', '#7', '--recreate', '--tui', 'codex']), {
+  assert.deepEqual(parseRunArgs(['--skill', 'code-task', '--task', '7', '--recreate', '--tui', 'codex']), {
     skill: 'code-task',
-    taskRef: '#7',
+    taskRef: '7',
     args: [],
     tui: 'codex',
     recreate: true
   });
   assert.throws(
-    () => parseRunArgs(['create-task', 'demo', '--recreate']),
+    () => parseRunArgs(['--skill', 'create-task', 'demo', '--recreate']),
     /--recreate is only valid for sandbox task runs/
   );
+});
+
+test('parseRunArgs rejects positional host selection and duplicate or inline options', () => {
+  for (const args of [
+    ['code-task', '7'],
+    ['--skill', 'code-task', '7', '--task', '7'],
+    ['--skill', 'code-task', '--task', '7', '--task', '8'],
+    ['--skill', 'code-task', '--task=7'],
+    ['--skill', 'code-task', '--task', '7', '--tui', 'codex', '--tui', 'claude']
+  ]) {
+    assert.throws(() => parseRunArgs(args), /requires|not supported|duplicate|Unknown|is required/);
+  }
+});
+
+test('parseRunArgs forwards skill arguments only after the host option delimiter', () => {
+  assert.deepEqual(parseRunArgs([
+    '--skill', 'code-task', '--task', '7', '--', '--task', 'inside-skill'
+  ]), {
+    skill: 'code-task',
+    taskRef: '7',
+    args: ['--task', 'inside-skill'],
+    tui: null
+  });
+});
+
+test('runSkill rejects the legacy positional host syntax before scheduling a sandbox', async () => {
+  let sandboxCalls = 0;
+  await assert.rejects(
+    () => runSkill(['code-task', '7'], {
+      runSandbox: async () => {
+        sandboxCalls += 1;
+        return { exitCode: 0, signal: null, stdout: '', stderr: '' };
+      }
+    }),
+    /option '--skill' is required/
+  );
+  assert.equal(sandboxCalls, 0);
 });
 
 test('TUI selection uses cli override, per-skill default, command default, then codex', () => {
@@ -132,7 +169,7 @@ test('buildTuiCommand returns argv arrays, not shell strings', () => {
 test('runSkill routes create-task to host and task skills to sandbox', async () => {
   const calls: string[] = [];
   const repoRoot = writeTaskFixture();
-  const createCode = await runSkill(['create-task', 'demo'], {
+  const createCode = await runSkill(['--skill', 'create-task', 'demo'], {
     repoRoot,
     command: { defaultTui: 'codex' },
     runHost: async (command) => {
@@ -146,7 +183,7 @@ test('runSkill routes create-task to host and task skills to sandbox', async () 
   assert.equal(createCode, 0);
   assert.match(calls[0] ?? '', /^host:codex exec/);
 
-  const taskCode = await runSkill(['code-task', TASK_ID], {
+  const taskCode = await runSkill(['--skill', 'code-task', '--task', TASK_ID], {
     repoRoot,
     command: { defaultTui: 'codex' },
     runHost: async () => {
@@ -154,6 +191,7 @@ test('runSkill routes create-task to host and task skills to sandbox', async () 
     },
     runSandbox: async (request) => {
       calls.push(`sandbox:${request.taskRef}:${request.command.join(' ')}`);
+      assert.equal(request.command.at(-1), '$code-task');
       return { exitCode: 2, signal: null, stdout: '', stderr: '' };
     }
   });
@@ -164,7 +202,7 @@ test('runSkill routes create-task to host and task skills to sandbox', async () 
 test('runSkill forwards --recreate to sandbox readiness without adding it to the TUI prompt', async () => {
   const repoRoot = writeTaskFixture();
   let request: { recreate?: boolean; command: string[] } | undefined;
-  const code = await runSkill(['code-task', TASK_ID, '--recreate'], {
+  const code = await runSkill(['--skill', 'code-task', '--task', TASK_ID, '--recreate'], {
     repoRoot,
     command: { defaultTui: 'codex' },
     runSandbox: async (value) => {
@@ -182,7 +220,7 @@ test('runSkill prints sandbox scheduling stdout and stderr', async () => {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const repoRoot = writeTaskFixture();
-  const code = await runSkill(['code-task', TASK_ID], {
+  const code = await runSkill(['--skill', 'code-task', '--task', TASK_ID], {
     repoRoot,
     command: { defaultTui: 'codex' },
     writeStdout: (chunk) => stdout.push(chunk),
@@ -204,7 +242,7 @@ test('runSkill schedules task skills without stdout and stderr stream callbacks'
   const stdout: string[] = [];
   const stderr: string[] = [];
   const repoRoot = writeTaskFixture();
-  const code = await runSkill(['code-task', TASK_ID], {
+  const code = await runSkill(['--skill', 'code-task', '--task', TASK_ID], {
     repoRoot,
     command: { defaultTui: 'codex' },
     writeStdout: (chunk) => stdout.push(chunk),
@@ -228,7 +266,7 @@ test('runSkill schedules task skills without stdout and stderr stream callbacks'
 
 test('runSkill writes a managed run record after successful task scheduling', async () => {
   const repoRoot = writeTaskFixture();
-  const code = await runSkill(['code-task', TASK_ID], {
+  const code = await runSkill(['--skill', 'code-task', '--task', TASK_ID], {
     repoRoot,
     command: { defaultTui: 'codex' },
     runSandbox: async (request) => {
@@ -266,7 +304,7 @@ test('runSkill writes a managed run record after successful task scheduling', as
 
 test('runSkill resolves bare short task refs when writing managed run records', async () => {
   const repoRoot = writeTaskFixture({ withShortId: true });
-  const code = await runSkill(['code-task', '1'], {
+  const code = await runSkill(['--skill', 'code-task', '--task', '1'], {
     repoRoot,
     command: { defaultTui: 'codex' },
     runSandbox: async (request) => ({
@@ -293,7 +331,7 @@ test('runSkill resolves bare short task refs when writing managed run records', 
 
 test('runSkill does not write run records for create-task host execution', async () => {
   const repoRoot = writeTaskFixture();
-  const code = await runSkill(['create-task', 'demo'], {
+  const code = await runSkill(['--skill', 'create-task', 'demo'], {
     repoRoot,
     command: { defaultTui: 'codex' },
     runHost: async () => ({ exitCode: 0 })
@@ -306,7 +344,7 @@ test('runSkill does not write run records for create-task host execution', async
 test('runSkill honors command.allowedSkills as a narrowing allow-list', async () => {
   await assert.rejects(
     () =>
-      runSkill(['code-task', '#7'], {
+      runSkill(['--skill', 'code-task', '--task', '7'], {
         command: { allowedSkills: ['plan-task'] },
         runHost: async () => ({ exitCode: 0 }),
         runSandbox: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' })

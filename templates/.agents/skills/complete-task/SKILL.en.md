@@ -87,14 +87,14 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 Two-option guidance for absent + `pending`:
 ```
 Task {task-id} has no PR delivery decision yet (pr_delivery_fact: unbound). Choose one:
-  - Go through the PR flow: /create-pr {task-ref}
-  - Explicitly skip and complete: /complete-task {task-ref} --skip-pr
+  - Go through the PR flow: /create-pr --task {task-ref}
+  - Explicitly skip and complete: /complete-task --task {task-ref} --skip-pr
 ```
 
 Stop message for `required` + `pending`/`skipped`:
 ```
 This project enforces the PR flow (prFlow: "required") and the task has no PR yet.
-Run /create-pr {task-ref} first, then complete; --skip-pr is not accepted under a mandatory PR flow.
+Run /create-pr --task {task-ref} first, then complete; --skip-pr is not accepted under a mandatory PR flow.
 ```
 
 Before lifecycle, verify only the hard gates:

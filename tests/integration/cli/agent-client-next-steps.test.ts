@@ -46,9 +46,9 @@ test('agent-client next-steps renders enabled built-ins and custom TUIs in text 
   assert.equal(text.status, 0, text.stderr);
   assert.equal(
     text.stdout,
-    '  - Codex: $review-code 16\n'
-      + '  - Antigravity CLI: /review-code 16\n'
-      + '  - Acme: acme demo:review-code 16\n'
+    '  - Codex: $review-code --task 16\n'
+      + '  - Antigravity CLI: /review-code --task 16\n'
+      + '  - Acme: acme demo:review-code --task 16\n'
   );
   assert.equal(text.stderr, '');
 
@@ -62,7 +62,7 @@ test('agent-client next-steps renders enabled built-ins and custom TUIs in text 
   assert.equal(payload.status, 'rendered');
   assert.equal(payload.changed, false);
   assert.equal(payload.commands.length, 3);
-  assert.equal(payload.commands[0].command, '$review-code TASK-20260718-232501');
+  assert.equal(payload.commands[0].command, '$review-code --task TASK-20260718-232501');
   assert.deepEqual(payload.diagnostics, []);
   assert.equal(payload.error, null);
 

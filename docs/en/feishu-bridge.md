@@ -62,8 +62,8 @@ Put the app credentials in `.agents/server.local.json`. This file is git-ignored
 |---------|------|-----------|
 | `/decide [--task <ref> \| -t <ref>] (--item <ordinal\|ledger-id> \| -i <ordinal\|ledger-id>) [--needs-implementation true\|false] <decision>` | `exec` | `ai decide ...`; explicit task scope is recommended outside a task worktree |
 | `/help`, `/ping`, `/version` | public built-in | daemon |
-| `/run create-task <description> [--tui <name>]` | `exec` | `ai run create-task ...` on the host |
-| `/run <skill> <task-ref> [args...] [--tui <name>]` | `exec` | `ai run ...`; task skills run in the matching sandbox |
+| `/run create-task <description> [--tui <name>]` | `exec` | `ai run --skill create-task ...` on the host |
+| `/run <skill> <task-ref> [args...] [--tui <name>]` | `exec` | `ai run --skill <skill> --task <task-ref> ...`; task skills run in the matching sandbox |
 | `/sandbox create <ref>`, `/sandbox start <ref>` | `write` | `ai sandbox ...` |
 | `/sandbox ls`, `/sandbox show <ref>`, `/sandbox vm status` | `read` | `ai sandbox ...` |
 | `/task decisions [--task <ref> \| -t <ref>] [--item <selector> \| -i <selector>]`, `/task log [--task <ref> \| -t <ref>]`, `/task ls`, `/task show [--task <ref> \| -t <ref>]`, `/task status [--task <ref> \| -t <ref>]` | `read` | `ai task ...`; implicit scope only works when the bridge cwd proves one active branch match |
@@ -77,6 +77,8 @@ The Feishu adapter returns command results as `interactive` cards by default; th
 `ai merge` accepts only a current workspace source containing one or more of `active`, `blocked`, `completed`, or `archive`. Archive-only legacy inputs and malformed layouts are rejected before the target is changed; historical recovery and AI-based alignment are not implicit merge behavior.
 
 `/task` commands are read-only views. Lifecycle progress goes through `/run`. Task skills resolve `<task-ref>` to the task branch, find the matching sandbox, and fail with an instruction to run `ai sandbox create <task-ref>` if no sandbox exists. `create-task` is the only v1 skill runner that does not require an existing task or sandbox. Sandbox removal is intentionally not exposed through IM because local deletion still requires interactive confirmation.
+
+The server keeps the `/run <skill> <task-ref>` transport syntax, then converts it at the boundary to the local `ai run --skill <skill> --task <task-ref>` argv. `/run create-task <description>` is converted separately to `ai run --skill create-task <description>` because its description is not a task reference. The old positional local command `ai run <skill> <task-ref>` is rejected.
 
 The bridge intentionally exposes the v1 allow-list above, not every local `ai task` or `ai sandbox` subcommand. `/run <skill>` accepts the built-in lifecycle skill allow-list from `ai run`; `command.allowedSkills` can narrow that list per deployment. All rows in the table have local equivalents, so verify the local path first with `ai decide ...`, `ai run ...`, `ai sandbox ...`, and `ai task ...`; task-state `ai run` commands require a matching sandbox and the selected TUI installed. After local verification passes, test the same command allow-list through Feishu. Destructive or arbitrary execution commands such as `/sandbox rm` and `/sandbox exec` are intentionally not implemented for IM.
 

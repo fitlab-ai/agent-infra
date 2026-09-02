@@ -88,7 +88,16 @@ export function parseCommand(text: string): CommandPlan {
   if (command === '/run') {
     const spec = getSkillRunSpec(subcommand);
     if (!spec) return { kind: 'error', message: `Unknown skill: ${subcommand}` };
-    return { kind: 'ai', role: spec.role, argv: ['run', subcommand, ...rest] };
+    if (spec.kind === 'create') {
+      return { kind: 'ai', role: spec.role, argv: ['run', '--skill', subcommand, ...rest] };
+    }
+    const [taskRef, ...skillArgs] = rest;
+    if (!taskRef) return { kind: 'error', message: '/run task skills require a task-ref' };
+    return {
+      kind: 'ai',
+      role: spec.role,
+      argv: ['run', '--skill', subcommand, '--task', taskRef, ...skillArgs]
+    };
   }
 
   return { kind: 'error', message: `Unknown command: ${command}` };

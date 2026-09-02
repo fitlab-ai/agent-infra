@@ -54,10 +54,10 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 
 ```bash
 /import-issue 42           # AI 读取 Issue，创建任务，提取需求
-/analyze-task <task-id>    # AI 扫描代码库，定位根因，输出 analysis.md
-/review-analysis <task-id> # 隔离 reviewer 审查分析产物
-/plan-task <task-id>       # AI 提出修复方案
-/review-plan <task-id>     # fresh 隔离 reviewer 审查方案
+/analyze-task --task <task-id>    # AI 扫描代码库，定位根因，输出 analysis.md
+/review-analysis --task <task-id> # 隔离 reviewer 审查分析产物
+/plan-task --task <task-id>       # AI 提出修复方案
+/review-plan --task <task-id>     # fresh 隔离 reviewer 审查方案
 ```
 
 > **你审查方案后用自然语言回复：**
@@ -70,12 +70,12 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 > AI 按你的要求重跑 `/plan-task` 更新方案并确认。
 
 ```bash
-/code-task <task-id>       # AI 编写修复代码、测试，并创建本地 checkpoint commit
-/review-code <task-id>     # fresh 隔离 reviewer 报告一个次要问题
-/code-task <task-id>       # AI 修复次要问题、重新验证，并创建新的 checkpoint
-/review-code <task-id>     # reviewer 审查并通过当前 checkpoint
-/create-pr <task-id>       # 将已审查分支发布到任务绑定目标分支；PR 自动关联 Issue #42
-/complete-task <task-id>   # 任务归档
+/code-task --task <task-id>       # AI 编写修复代码、测试，并创建本地 checkpoint commit
+/review-code --task <task-id>     # fresh 隔离 reviewer 报告一个次要问题
+/code-task --task <task-id>       # AI 修复次要问题、重新验证，并创建新的 checkpoint
+/review-code --task <task-id>     # reviewer 审查并通过当前 checkpoint
+/create-pr --task <task-id>       # 将已审查分支发布到任务绑定目标分支；PR 自动关联 Issue #42
+/complete-task --task <task-id>   # 任务归档
 ```
 
 **11 条命令，1 次自然语言纠正，从 Issue 到合并 PR。** 这就是完整的 SOP —— 编程也可以有标准作业流程。
@@ -191,7 +191,7 @@ ai agent-client configure
 | `code-task` → `review-code` | 实现并测试；`code-task` 创建本地 checkpoint，再由结构化审查检视该 checkpoint |
 | `create-pr` → `complete-task` | 将已通过审查的 checkpoint 发布到任务绑定目标分支，并在合并和最终门禁通过后归档 |
 
-启动时可提供原子角色策略，例如：`$run-task 42 --executor-model <id> --executor-reasoning-effort <值> --reviewer-model <id> --reviewer-reasoning-effort <值>`。两个角色可以使用同一模型。完全没有显式策略时，`run-task` 读取当前 Agent Client 可选的 `agentClients[].orchestration`；两个来源都不完整时，会在创建任何 run 前展示宿主模型选择指引。重入使用已持久化的 run 策略。升级 agent-infra 前必须完成或清空 active run；不受支持的磁盘状态会失败关闭且不改写。
+启动时可提供原子角色策略，例如：`$run-task --task 42 --executor-model <id> --executor-reasoning-effort <值> --reviewer-model <id> --reviewer-reasoning-effort <值>`。两个角色可以使用同一模型。完全没有显式策略时，`run-task` 读取当前 Agent Client 可选的 `agentClients[].orchestration`；两个来源都不完整时，会在创建任何 run 前展示宿主模型选择指引。重入使用已持久化的 run 策略。升级 agent-infra 前必须完成或清空 active run；不受支持的磁盘状态会失败关闭且不改写。
 
 完整清单（任务状态、发布、安全、项目维护等 skill）见 [内置 AI Skills](./docs/zh-CN/skills.md)。
 

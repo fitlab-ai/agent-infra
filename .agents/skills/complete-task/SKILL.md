@@ -86,14 +86,14 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 缺省 + `pending` 的二选一引导消息：
 ```
 任务 {task-id} 尚未决定 PR 交付（pr_delivery_fact: unbound）。请二选一：
-  - 走 PR 流程：/create-pr {task-ref}
-  - 显式跳过并完成：/complete-task {task-ref} --skip-pr
+  - 走 PR 流程：/create-pr --task {task-ref}
+  - 显式跳过并完成：/complete-task --task {task-ref} --skip-pr
 ```
 
 `required` + `pending`/`skipped` 的停止消息：
 ```
 当前项目强制 PR 流程（prFlow: "required"），任务尚未创建 PR。
-请先运行 /create-pr {task-ref} 创建 PR 后再完成；--skip-pr 在强制 PR 下不被接受。
+请先运行 /create-pr --task {task-ref} 创建 PR 后再完成；--skip-pr 在强制 PR 下不被接受。
 ```
 
 生命周期前只验证硬门禁：

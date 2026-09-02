@@ -38,54 +38,90 @@ export type RunSkillOptions = {
   writeStderr?: (chunk: string) => void;
 };
 
-const USAGE = `Usage: ai run <skill> [task-ref] [args...] [--tui <name>] [--recreate]
+const USAGE = `Usage: ai run --skill <skill> [--task <task-ref>] [--tui <name>] [--recreate] [-- <skill-args...>]
 
 Task skills are scheduled inside the sandbox tmux session; ai run returns once
 the tmux window is created. --recreate authorizes container-only replacement
 when in-place sandbox recovery fails; it is not included in the TUI prompt.
 
 Examples:
-  ai run create-task "describe the task" --tui codex
-  ai run code-task #7 --tui codex --recreate`;
+  ai run --skill create-task "describe the task" --tui codex
+  ai run --skill code-task --task 7 --tui codex --recreate`;
 
-function extractTui(args: string[]): { rest: string[]; tui: string | null } {
-  const rest: string[] = [];
+function optionValue(args: string[], index: number, option: string): string {
+  const value = args[index + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${option} requires a value`);
+  return value;
+}
+
+function extractHostOptions(args: string[]): {
+  positionals: string[];
+  forwarded: string[];
+  skill: string | null;
+  taskRef: string | null;
+  tui: string | null;
+  recreate: boolean;
+} {
+  const positionals: string[] = [];
+  const forwarded: string[] = [];
+  let skill: string | null = null;
+  let taskRef: string | null = null;
   let tui: string | null = null;
+  let recreate = false;
+  let separator = false;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i] as string;
-    if (arg === '--tui') {
-      const value = args[i + 1];
-      if (!value) throw new Error('--tui requires a value');
-      tui = value;
+    if (separator) {
+      forwarded.push(arg);
+    } else if (arg === '--') {
+      separator = true;
+    } else if (arg === '--skill') {
+      if (skill !== null) throw new Error("duplicate option '--skill'");
+      skill = optionValue(args, i, '--skill');
       i += 1;
-      continue;
+    } else if (arg === '--task') {
+      if (taskRef !== null) throw new Error("duplicate option '--task'");
+      taskRef = optionValue(args, i, '--task');
+      i += 1;
+    } else if (arg === '--tui') {
+      if (tui !== null) throw new Error("duplicate option '--tui'");
+      tui = optionValue(args, i, '--tui');
+      i += 1;
+    } else if (arg === '--recreate') {
+      if (recreate) throw new Error("duplicate option '--recreate'");
+      recreate = true;
+    } else if (arg.startsWith('-')) {
+      throw new Error(`Unknown option '${arg}'`);
+    } else {
+      positionals.push(arg);
     }
-    rest.push(arg);
   }
-  return { rest, tui };
+  return { positionals, forwarded, skill, taskRef, tui, recreate };
 }
 
 export function parseRunArgs(args: string[]): ParsedRunArgs {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     throw new Error(USAGE);
   }
-  const { rest: withRecoveryFlags, tui } = extractTui(args);
-  const recreate = withRecoveryFlags.includes('--recreate');
-  const rest = withRecoveryFlags.filter((arg) => arg !== '--recreate');
-  const [skill = '', maybeTaskRef, ...remaining] = rest;
+  const { positionals, forwarded, skill, taskRef, tui, recreate } = extractHostOptions(args);
+  if (!skill) throw new Error("option '--skill' is required");
   const spec = getSkillRunSpec(skill);
   if (!spec) throw new Error(`Unknown skill '${skill}'`);
   if (spec.kind === 'create') {
+    if (taskRef !== null) throw new Error("create-task does not accept '--task'");
     if (recreate) throw new Error('--recreate is only valid for sandbox task runs');
-    const createArgs = rest.slice(1);
+    const createArgs = [...positionals, ...forwarded];
     if (createArgs.length === 0) throw new Error('create-task requires a description');
     return { skill, taskRef: null, args: createArgs, tui };
   }
-  if (!maybeTaskRef) throw new Error(`${skill} requires a task-ref`);
+  if (positionals.length > 0) {
+    throw new Error('ai run requires --skill and --task; positional host arguments are not supported');
+  }
+  if (taskRef === null) throw new Error(`${skill} requires a task-ref`);
   return {
     skill,
-    taskRef: maybeTaskRef,
-    args: remaining,
+    taskRef,
+    args: forwarded,
     tui,
     ...(recreate ? { recreate: true as const } : {})
   };
@@ -200,8 +236,7 @@ export async function runSkill(args: string[], options: RunSkillOptions = {}): P
   const commandConfig = options.command ?? config?.command ?? {};
   assertAllowedByConfig(parsed.skill, commandConfig);
   const tui = selectTui(parsed.skill, { cliTui: parsed.tui, command: commandConfig });
-  const promptArgs = parsed.taskRef === null ? parsed.args : [parsed.taskRef, ...parsed.args];
-  const prompt = renderPrompt({ tui, skill: parsed.skill, args: promptArgs });
+  const prompt = renderPrompt({ tui, skill: parsed.skill, args: parsed.args });
   const [file, argv] = buildTuiCommand(tui, prompt);
   const command = [file, ...argv];
 

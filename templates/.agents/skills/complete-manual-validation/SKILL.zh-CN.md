@@ -109,7 +109,7 @@ agent-infra-internal task-verify {task-id} manual-validation.completed --artifac
 - 产物路径
 - PR 摘要同步结果
 - 当次完成校验输出
-- 下一步建议：进入最终收尾流程，运行 /complete-task {task-ref}
+- 下一步建议：进入最终收尾流程，运行 /complete-task --task {task-ref}
 
 渲染最终输出前，先读取 `.agents/rules/next-step-output.md`，并在绝对最后一行追加 `Completed at: YYYY-MM-DD HH:mm:ss`。
 

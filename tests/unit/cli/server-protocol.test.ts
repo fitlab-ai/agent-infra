@@ -48,15 +48,15 @@ test('parseCommand maps sandbox and run commands with roles', () => {
     kind: 'error',
     message: '/sandbox rm is not available from IM because it requires interactive confirmation'
   });
-  assert.deepEqual(parseCommand('/run code-task #7 --tui codex'), {
+  assert.deepEqual(parseCommand('/run code-task 7 --tui codex'), {
     kind: 'ai',
     role: 'exec',
-    argv: ['run', 'code-task', '#7', '--tui', 'codex']
+    argv: ['run', '--skill', 'code-task', '--task', '7', '--tui', 'codex']
   });
   assert.deepEqual(parseCommand('/run create-task demo --tui codex'), {
     kind: 'ai',
     role: 'exec',
-    argv: ['run', 'create-task', 'demo', '--tui', 'codex']
+    argv: ['run', '--skill', 'create-task', 'demo', '--tui', 'codex']
   });
   assert.deepEqual(parseCommand('/decide --task #7 --item PL-1 yes'), {
     kind: 'ai',
