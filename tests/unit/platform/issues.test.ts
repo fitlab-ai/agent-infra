@@ -110,6 +110,67 @@ test('issue sync plans dry-run without writes and applies one converging patch',
   assert.equal(patches, 1);
 });
 
+test('issue in-label sync requires the task-bound base and uses it for diff evidence', () => {
+  const missingBase = fixture('7');
+  try {
+    const client = clientFor((args) => contextResponse(args) || {
+      number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
+      state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: null
+    });
+    const result = syncPlatformIssue('TASK-20260101-000001', {
+      cwd: missingBase, agent: 'codex', client, inLabels: 'from-diff'
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_BASE_MISSING');
+  } finally {
+    fs.rmSync(missingBase, { recursive: true, force: true });
+  }
+
+  const root = fixture('7');
+  try {
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'base.txt'), 'base\n');
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    execFileSync('git', ['branch', '-M', 'main'], { cwd: root });
+    execFileSync('git', ['checkout', '-qb', 'feature'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'lib.txt'), 'change\n');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+      platform: { type: 'github' }, labels: { in: { core: ['lib.txt'] } }
+    }));
+    fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
+      fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), 'utf8')
+        .replace('issue_number: 7', 'issue_number: 7\ndelivery_base_ref: main'));
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'change'], { cwd: root });
+    let payload: Record<string, unknown> | null = null;
+    let currentLabels: string[] = [];
+    const client = clientFor((args, input) => {
+      const context = contextResponse(args);
+      if (context) return context;
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint.endsWith('/labels?per_page=100')) return [{ name: 'in: core' }];
+      if (args.includes('PATCH')) {
+        payload = JSON.parse(input || '{}') as Record<string, unknown>;
+        currentLabels = (payload.labels as string[] | undefined) || currentLabels;
+        return {};
+      }
+      return {
+        number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
+        state: 'open', title: 'x', body: '', labels: currentLabels.map((name) => ({ name })), assignees: [], milestone: null
+      };
+    });
+    const result = syncPlatformIssue('TASK-20260101-000001', {
+      cwd: root, agent: 'codex', client, inLabels: 'from-diff'
+    });
+    assert.equal(result.status, 'applied');
+    assert.deepEqual((payload as Record<string, unknown> | null)?.labels, ['in: core']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('requirement anchors follow the deterministically selected Issue Form', () => {
   const root = fixture('7');
   const formDir = path.join(root, '.github', 'ISSUE_TEMPLATE');

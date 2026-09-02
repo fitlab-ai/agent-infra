@@ -39,7 +39,7 @@ agent-infra-internal platform-pr sync {task-id} \
   --agent {standard-agent-token} --metadata --closing-issue
 ```
 
-core 从关联 Issue 复制 type / `in:` labels、assignee、具体 milestone，并确保 closing association。权限不足返回逐项 `skipped` 和顶层 `degraded`；不得反向修改 Issue。
+core 根据 task-bound diff/PR files 与仓库映射计算唯一 `in:` target；唯一 closing Issue 按 Issue→PR 顺序收敛，其他 metadata 从关联 Issue 复制。零或多个 closing Issue 只更新 PR 并返回 `degraded`；不得从 Issue 反向复制 `in:`，也不清除非 `in:` labels。权限不足逐项返回 `skipped`，部分副作用返回 `blocked` 与 `IN_LABEL_SYNC_PARTIAL`。
 
 ## 状态语义
 

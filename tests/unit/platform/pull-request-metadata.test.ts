@@ -11,7 +11,8 @@ test('PR metadata planner converges labels, assignees and milestone deterministi
     issue: { labels: ['type: enhancement', 'in: cli', 'status: in-progress'], assignees: ['codex'], milestone: '0.8.7' },
     taskType: 'refactor',
     issueNumber: 622,
-    capabilities
+    capabilities,
+    inLabels: ['in: cli']
   });
   assert.deepEqual(planned.operations.map(({ name, status, value }) => ({ name, status, value })), [
     { name: 'labels', status: 'planned', value: ['in: cli', 'old', 'type: enhancement'] },
@@ -19,6 +20,19 @@ test('PR metadata planner converges labels, assignees and milestone deterministi
     { name: 'milestone', status: 'planned', value: '0.8.7' },
     { name: 'closing-issue', status: 'planned', value: 'Body\n\nCloses #622' }
   ]);
+});
+
+test('PR metadata planner does not copy Issue in labels when no PR target is supplied', () => {
+  const planned = planPullRequestMetadata({
+    pullRequest: { labels: ['in: pr'], assignees: [], milestone: null, body: '' },
+    issue: { labels: ['in: issue'], assignees: [], milestone: null },
+    taskType: 'task',
+    issueNumber: 9,
+    capabilities
+  });
+  assert.deepEqual(planned.operations[0], {
+    name: 'labels', status: 'planned', reasonCode: null, value: ['in: pr', 'type: task']
+  });
 });
 
 test('PR metadata planner preserves permission-bound state and closing references are idempotent', () => {

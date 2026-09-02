@@ -74,7 +74,7 @@ description: >
 
 ### 6. 同步 PR 元数据
 
-记录 `platform-pr create` 结构化结果中的 `result`（`pr_created`、`pr_reused` 或 `no_op`），并调用 `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue --result {primary-result}`。core 从 Issue 复制 type / `in:` labels、assignee 和具体 milestone，并维护 Development 关联；逐项权限不足返回 degraded，不反向更新 Issue。PR 已成功绑定后，metadata/summary 同步失败只产生与 primary result 对应的 `pr_created_with_warnings`、`pr_reused_with_warnings` 或 `no_op_with_warnings`，保留主动作事实，重试只执行未完成的同步步骤。
+记录 `platform-pr create` 结构化结果中的 `result`（`pr_created`、`pr_reused` 或 `no_op`），并调用 `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue --result {primary-result}`。`in:` target 由 shared core 根据 task-bound diff/PR evidence 和仓库映射计算，唯一 closing Issue 按 Issue→PR 顺序收敛，其他 metadata 仍从 Issue 同步；不从 Issue 反向复制 `in:`，也不清除非 `in:` labels。权限不足逐项返回 degraded，部分副作用返回 blocked/`IN_LABEL_SYNC_PARTIAL`。
 
 ### 7. 生成 PR 代码增减报告
 

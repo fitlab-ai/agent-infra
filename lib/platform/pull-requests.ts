@@ -15,8 +15,14 @@ import type { PlatformChangeRequestSnapshot } from './adapters.ts';
 import { parseGitHubRemote, resolvePlatformContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
-import { inspectPlatformIssue } from './issues.ts';
+import { inspectGitHubIssue, inspectPlatformIssue } from './issues.ts';
+import type { IssueSnapshot } from './issues.ts';
 import { planPullRequestMetadata } from './pull-request-metadata.ts';
+import {
+  extractPullRequestFileNames,
+  extractRepositoryLabelNames,
+  planInLabelUpdate
+} from './in-label-sync.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 import { inspectCompletionArtifacts } from '../task/finalization-artifacts.ts';
@@ -39,6 +45,15 @@ type PullRequestResult = PlatformResult & {
   result: 'pr_created' | 'pr_reused' | 'no_op' | 'pr_created_with_warnings' | 'pr_reused_with_warnings' | 'no_op_with_warnings' | 'failed' | 'blocked' | null;
   creation: CreationOutcome | null;
   warnings: readonly OperationWarning[];
+  evidence?: { kind: string; pullRequestFiles?: string[]; closingIssues?: number[] };
+  resources?: Array<{
+    kind: 'issue' | 'pull-request';
+    number: number;
+    before: string[];
+    expected: string[];
+    after: string[] | null;
+    effect: 'no-op' | 'applied' | 'unknown';
+  }>;
 };
 type InspectionOptions = { cwd?: string; client?: unknown };
 type SharedOptions = { cwd?: string; client?: GitHubClient };
@@ -763,6 +778,262 @@ function inspectPlatformPullRequestByNumber(prNumber: number, options: Inspectio
   });
 }
 
+const CLOSING_ISSUES_QUERY = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number} pageInfo{hasNextPage endCursor}}}}}';
+
+function readInLabelMapping(repoRoot: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: { code: string; message: string; retryable: boolean } } {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as {
+      labels?: { in?: unknown };
+    };
+    const mapping = config.labels?.in;
+    return { ok: true, value: mapping && typeof mapping === 'object' && !Array.isArray(mapping) ? mapping as Record<string, unknown> : {} };
+  } catch (error) {
+    return {
+      ok: false,
+      error: { code: 'IN_LABEL_SYNC_CONFIG_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
+    };
+  }
+}
+
+function inspectClosingIssueNumbers(client: GitHubClient, repository: string, pullRequest: number, cwd: string) {
+  const [owner, name] = repository.split('/');
+  if (!owner || !name) return {
+    ok: false as const,
+    error: { code: 'IN_LABEL_SYNC_REPOSITORY_INVALID', message: 'Repository identity is invalid', retryable: false }
+  };
+  let cursor: string | null = null;
+  const numbers: number[] = [];
+  for (;;) {
+    const args = ['api', 'graphql', '-f', `query=${CLOSING_ISSUES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${pullRequest}`];
+    if (cursor) args.push('-F', `cursor=${cursor}`);
+    const response = client.json<unknown>(args, { cwd });
+    if (!response.ok) return response;
+    const connection = (response.value as {
+      data?: { repository?: { pullRequest?: { closingIssuesReferences?: {
+        nodes?: unknown[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+      } } } };
+    })?.data?.repository?.pullRequest?.closingIssuesReferences;
+    if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) return {
+      ok: false as const,
+      error: { code: 'IN_LABEL_SYNC_ASSOCIATION_INVALID', message: 'Closing Issue response is incomplete', retryable: false }
+    };
+    for (const node of connection.nodes) {
+      const issue = Number((node as { number?: unknown })?.number);
+      if (!Number.isSafeInteger(issue) || issue <= 0) return {
+        ok: false as const,
+        error: { code: 'IN_LABEL_SYNC_ASSOCIATION_INVALID', message: 'Closing Issue identity is invalid', retryable: false }
+      };
+      numbers.push(issue);
+    }
+    if (!connection.pageInfo.hasNextPage) return { ok: true as const, value: [...new Set(numbers)] };
+    if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === cursor) return {
+      ok: false as const,
+      error: { code: 'IN_LABEL_SYNC_ASSOCIATION_INVALID', message: 'Closing Issue pagination cursor is invalid', retryable: false }
+    };
+    cursor = connection.pageInfo.endCursor;
+  }
+}
+
+function inspectRepositoryLabels(client: GitHubClient, repository: string, cwd: string) {
+  const response = client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository}/labels?per_page=100`], { cwd });
+  if (!response.ok) return response;
+  return { ok: true as const, value: new Set(extractRepositoryLabelNames(response.value)) };
+}
+
+function inspectPullRequestFiles(client: GitHubClient, repository: string, pullRequest: number, cwd: string) {
+  const response = client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository}/pulls/${pullRequest}/files?per_page=100`], { cwd });
+  if (!response.ok) return response;
+  const files = extractPullRequestFileNames(response.value);
+  return files ? { ok: true as const, value: files } : {
+    ok: false as const,
+    error: { code: 'IN_LABEL_SYNC_FILES_INVALID', message: 'Pull request files response is incomplete', retryable: false }
+  };
+}
+
+function inspectTaskInLabelTarget(
+  repoRoot: string,
+  frontmatter: Record<string, unknown>,
+  pullRequest: PullRequestSnapshot,
+  repository: string,
+  client: GitHubClient
+) {
+  const baseRef = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
+  if (!baseRef) return {
+    ok: false as const,
+    error: { code: 'IN_LABEL_SYNC_BASE_MISSING', message: 'Task has no delivery_base_ref for in-label evidence', retryable: false }
+  };
+  let changedFiles: string[];
+  try {
+    changedFiles = execFileSync('git', ['diff', `${baseRef}...HEAD`, '--name-only'], {
+      cwd: repoRoot, encoding: 'utf8'
+    }).trim().split(/\r?\n/).filter(Boolean);
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: { code: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE', message: error instanceof Error ? error.message : String(error), retryable: false }
+    };
+  }
+  const mapping = readInLabelMapping(repoRoot);
+  if (!mapping.ok) return mapping;
+  const labels = inspectRepositoryLabels(client, repository, repoRoot);
+  if (!labels.ok) return labels;
+  const planned = planInLabelUpdate({
+    changedFiles, currentLabels: pullRequest.labels, mapping: mapping.value, repositoryLabels: labels.value
+  });
+  return { ok: true as const, value: { changedFiles, target: planned.target } };
+}
+
+function inLabelResource(
+  kind: 'issue' | 'pull-request',
+  number: number,
+  before: string[],
+  expected: string[],
+  after: string[] | null,
+  effect: 'no-op' | 'applied' | 'unknown'
+) {
+  return { kind, number, before: [...before].sort(), expected: [...expected].sort(), after: after ? [...after].sort() : null, effect };
+}
+
+function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOptions & { dryRun?: boolean } = {}): PullRequestResult {
+  const cwd = path.resolve(options.cwd || process.cwd());
+  const client = options.client || createGitHubClient();
+  const context = resolvePlatformContext({ cwd, client });
+  const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
+  if (!usable) return result(context.status, null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
+  });
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) return result('failed', null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities,
+    error: { code: 'PR_NUMBER_INVALID', message: 'PR number must be positive', retryable: false }
+  });
+  const repository = context.platform.repository!;
+  const fetched = inspectGitHubPullRequest(client, repository, prNumber, cwd);
+  if (!fetched.ok) return result(fetched.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: fetched.error
+  });
+  const files = inspectPullRequestFiles(client, repository, prNumber, cwd);
+  if (!files.ok) return result(files.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+    resource: { kind: 'pull-request', number: prNumber }, error: files.error
+  });
+  const mapping = readInLabelMapping(cwd);
+  if (!mapping.ok) return result('failed', null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+    resource: { kind: 'pull-request', number: prNumber }, error: mapping.error
+  });
+  const repositoryLabels = inspectRepositoryLabels(client, repository, cwd);
+  if (!repositoryLabels.ok) return result(repositoryLabels.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+    resource: { kind: 'pull-request', number: prNumber }, error: repositoryLabels.error
+  });
+  const target = planInLabelUpdate({
+    changedFiles: files.value, currentLabels: fetched.value.labels,
+    mapping: mapping.value, repositoryLabels: repositoryLabels.value
+  }).target;
+  const association = inspectClosingIssueNumbers(client, repository, prNumber, cwd);
+  if (!association.ok) return result(association.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+    resource: { kind: 'pull-request', number: prNumber }, evidence: { kind: 'pull-request-files', pullRequestFiles: files.value }, error: association.error
+  });
+
+  const issueNumber = association.value.length === 1 ? association.value[0]! : null;
+  let issue: IssueSnapshot | null = null;
+  if (issueNumber) {
+    const fetchedIssue = inspectGitHubIssue(client, repository, issueNumber, cwd);
+    if (!fetchedIssue.ok) return result(fetchedIssue.error.retryable ? 'blocked' : 'failed', null, issueNumber, prNumber, {
+      platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+      resource: { kind: 'issue', number: issueNumber }, evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error: fetchedIssue.error
+    });
+    issue = fetchedIssue.value;
+  }
+
+  const resources = issue
+    ? [
+      { kind: 'issue' as const, number: issue.number, snapshot: issue },
+      { kind: 'pull-request' as const, number: prNumber, snapshot: fetched.value }
+    ]
+    : [{ kind: 'pull-request' as const, number: prNumber, snapshot: fetched.value }];
+  const plans = resources.map((resource) => ({
+    ...resource,
+    plan: planInLabelUpdate({
+      changedFiles: files.value, currentLabels: resource.snapshot.labels,
+      mapping: mapping.value, repositoryLabels: repositoryLabels.value
+    })
+  }));
+  const operations: PlatformOperation[] = [
+    { name: 'closing-issues', status: 'no-op', reasonCode: association.value.length === 1 ? null : association.value.length === 0 ? 'ISSUE_ASSOCIATION_NONE' : 'ISSUE_ASSOCIATION_AMBIGUOUS' },
+    ...plans.map((item) => ({
+      name: `labels:in:${item.kind}`,
+      status: !context.capabilities.triage ? 'skipped' as const : item.plan.changed ? 'planned' as const : 'no-op' as const,
+      reasonCode: !context.capabilities.triage ? 'TRIAGE_REQUIRED' : null
+    }))
+  ];
+  const willWrite = context.capabilities.triage && !options.dryRun;
+  const resourcesState = plans.map((item) => inLabelResource(
+    item.kind,
+    item.number,
+    item.snapshot.labels,
+    target,
+    item.plan.changed && willWrite ? null : item.snapshot.labels,
+    item.plan.changed && willWrite ? 'unknown' : 'no-op'
+  ));
+  if (options.dryRun || !context.capabilities.triage) return result(
+    !context.capabilities.triage || association.value.length !== 1 ? 'degraded' : plans.some((item) => item.plan.changed) ? 'planned' : 'no-op',
+    null, issueNumber, prNumber, {
+      platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+      resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
+      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error: null
+    }
+  );
+
+  let currentPullRequest = fetched.value;
+  let successfulWrites = 0;
+  for (const item of plans) {
+    if (!item.plan.changed) continue;
+    const patched = client.json<unknown>(['api', `repos/${repository}/issues/${item.number}/labels`, '-X', 'PUT', '--input', '-'], {
+      cwd, method: 'PUT', input: JSON.stringify({ labels: item.plan.labels })
+    });
+    if (!patched.ok) {
+      const partial = successfulWrites > 0 || patched.error.retryable;
+      const error = partial
+        ? { ...patched.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${patched.error.message}` }
+        : patched.error;
+      return result(partial || patched.error.retryable ? 'blocked' : 'failed', null, issueNumber, prNumber, {
+        changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,
+        pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
+        evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error
+      });
+    }
+    successfulWrites += 1;
+    const reread = item.kind === 'issue'
+      ? inspectGitHubIssue(client, repository, item.number, cwd)
+      : inspectGitHubPullRequest(client, repository, item.number, cwd);
+    if (!reread.ok) return result('blocked', null, issueNumber, prNumber, {
+      changed: true, platform: context.platform, capabilities: context.capabilities,
+      pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
+      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value },
+      error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
+    });
+    const after = reread.value.labels;
+    const state = resourcesState.find((resource) => resource.kind === item.kind && resource.number === item.number)!;
+    state.after = after;
+    state.effect = after.filter((label) => label.startsWith('in:')).sort().join('\0') === target.join('\0') ? 'applied' : 'unknown';
+    if (state.effect === 'unknown') return result('blocked', null, issueNumber, prNumber, {
+      changed: true, platform: context.platform, capabilities: context.capabilities,
+      pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
+      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value },
+      error: { code: 'IN_LABEL_SYNC_PARTIAL', message: `${item.kind} #${item.number} did not converge to the expected in: labels`, retryable: true }
+    });
+    if (item.kind === 'pull-request') currentPullRequest = reread.value as PullRequestSnapshot;
+  }
+  return result(association.value.length !== 1 ? 'degraded' : successfulWrites > 0 ? 'applied' : 'no-op', null, issueNumber, prNumber, {
+    changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,
+    pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber },
+    operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' as const } : operation),
+    resources: resourcesState, evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error: null
+  });
+}
+
 function appendActivity(content: string, line: string): string {
   const body = extractSection(content, ['活动日志', 'Activity Log']);
   return `${body.replace(/\s+$/, '')}${body.trim() ? '\n' : ''}${line}`;
@@ -1256,7 +1527,9 @@ function createPlatformPullRequest(taskRef: string, options: CreateOptions): Pul
 function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullRequestResult {
   const warningResult = warningResultForPrimary(options.primaryResult);
   const softenFailure = (output: PullRequestResult): PullRequestResult => {
+    const authorityError = output.error?.code.startsWith('IN_LABEL_SYNC') || output.error?.code.startsWith('PR_IDENTITY');
     const warning = output.error && output.task.prNumber !== null
+      && !authorityError
       && !['PR_NOT_LINKED', 'PR_BIND_CONFLICT'].includes(output.error.code)
       ? {
         code: output.error.code,
@@ -1291,16 +1564,56 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
   if (!issue.issue) return softenFailure(result(issue.status, base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, error: issue.error
   }));
+  let inLabels = fetched.value.labels.filter((label) => label.startsWith('in:')).sort();
+  let inLabelIssueOperation: PlatformOperation | null = null;
+  if (options.metadata) {
+    const target = inspectTaskInLabelTarget(base.resolved.repoRoot, base.frontmatter, fetched.value, base.context.platform.repository!, base.client);
+    if (!target.ok) return softenFailure(result(target.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, error: target.error
+    }));
+    inLabels = target.value.target;
+    // The target was computed against repository labels above; merge only the current Issue labels with that target here.
+    const issueLabels = [...new Set([...issue.issue.labels.filter((label) => !label.startsWith('in:')), ...inLabels])].sort();
+    inLabelIssueOperation = !base.context.capabilities.triage
+      ? { name: 'labels:in:issue', status: 'skipped', reasonCode: 'TRIAGE_REQUIRED' }
+      : issueLabels.join('\0') === issue.issue.labels.join('\0')
+        ? { name: 'labels:in:issue', status: 'no-op', reasonCode: null }
+        : { name: 'labels:in:issue', status: 'planned', reasonCode: null };
+    if (inLabelIssueOperation.status === 'planned' && !options.dryRun) {
+      const patchedIssue = base.client.json<unknown>(['api', `repos/${base.context.platform.repository}/issues/${base.issueNumber}/labels`, '-X', 'PUT', '--input', '-'], {
+        cwd: base.resolved.repoRoot, method: 'PUT', input: JSON.stringify({ labels: issueLabels })
+      });
+      if (!patchedIssue.ok) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+        platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value,
+        operations: [inLabelIssueOperation], error: { ...patchedIssue.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${patchedIssue.error.message}` }
+      }));
+      const rereadIssue = inspectGitHubIssue(base.client, base.context.platform.repository!, base.issueNumber, base.resolved.repoRoot);
+      if (!rereadIssue.ok) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+        platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value,
+        operations: [inLabelIssueOperation], error: { ...rereadIssue.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${rereadIssue.error.message}` }
+      }));
+      const expectedIssueInLabels = issueLabels.filter((label) => label.startsWith('in:')).sort();
+      const actualIssueInLabels = rereadIssue.value.labels.filter((label) => label.startsWith('in:')).sort();
+      if (actualIssueInLabels.join('\0') !== expectedIssueInLabels.join('\0')) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+        platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value,
+        operations: [inLabelIssueOperation], error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue in: labels did not converge after update', retryable: true }
+      }));
+    }
+  }
   const planned = planPullRequestMetadata({
     pullRequest: fetched.value,
     issue: issue.issue,
     taskType: String(base.frontmatter.type || 'task'),
     issueNumber: base.issueNumber,
-    capabilities: base.context.capabilities
+    capabilities: base.context.capabilities,
+    inLabels
   }).operations.filter((operation) => options.metadata || operation.name === 'closing-issue')
     .filter((operation) => options.closingIssue || operation.name !== 'closing-issue');
-  const operations: PlatformOperation[] = planned.map(({ name, status, reasonCode }) => ({ name, status, reasonCode }));
-  if (options.dryRun) return softenFailure(result(planned.some((operation) => operation.status === 'planned') ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
+  const operations: PlatformOperation[] = [
+    ...(inLabelIssueOperation ? [inLabelIssueOperation] : []),
+    ...planned.map(({ name, status, reasonCode }) => ({ name, status, reasonCode }))
+  ];
+  if (options.dryRun) return softenFailure(result(planned.some((operation) => operation.status === 'planned') || inLabelIssueOperation?.status === 'planned' ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, operations, error: null
   }));
   const payload: Record<string, unknown> = {};
@@ -1316,19 +1629,47 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
       payload.milestone = flat.find((entry) => entry.title === operation.value)?.number ?? null;
     }
   }
+  const issueInLabelChanged = inLabelIssueOperation?.status === 'planned';
   if (Object.keys(payload).length === 0) {
     const degraded = planned.some((operation) => operation.status === 'skipped');
-    return softenFailure(result(degraded ? 'degraded' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
-      platform: base.context.platform, capabilities: base.context.capabilities, resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: fetched.value, operations, error: null
+    return softenFailure(result(issueInLabelChanged ? degraded ? 'degraded' : 'applied' : degraded ? 'degraded' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      changed: issueInLabelChanged, platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: fetched.value,
+      operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
     }));
   }
   const patched = base.client.json<RemotePullRequest>(['api', `repos/${base.context.platform.repository}/issues/${base.prNumber}`, '-X', 'PATCH', '--input', '-'], {
     cwd: base.resolved.repoRoot, method: 'PATCH', input: JSON.stringify(payload)
   });
-  if (!patched.ok) return softenFailure(result(patched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { pullRequest: fetched.value, operations, error: patched.error }));
+  const prLabelWrite = planned.some((operation) => operation.name === 'labels' && operation.status === 'planned');
+  if (!patched.ok) {
+    const partial = prLabelWrite && patched.error.retryable;
+    const error = partial
+      ? { ...patched.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${patched.error.message}` }
+      : patched.error;
+    return softenFailure(result(partial || patched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      changed: issueInLabelChanged, pullRequest: fetched.value, operations, error
+    }));
+  }
+  let finalPullRequest = fetched.value;
+  if (prLabelWrite) {
+    const rereadPullRequest = inspectGitHubPullRequest(base.client, base.context.platform.repository!, base.prNumber, base.resolved.repoRoot);
+    if (!rereadPullRequest.ok) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      changed: true, pullRequest: fetched.value, operations,
+      error: { ...rereadPullRequest.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${rereadPullRequest.error.message}` }
+    }));
+    const expectedPrInLabels = (planned.find((operation) => operation.name === 'labels')?.value as string[])
+      .filter((label) => label.startsWith('in:')).sort();
+    const actualPrInLabels = rereadPullRequest.value.labels.filter((label) => label.startsWith('in:')).sort();
+    if (expectedPrInLabels.join('\0') !== actualPrInLabels.join('\0')) return softenFailure(result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      changed: true, pullRequest: rereadPullRequest.value, operations,
+      error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Pull request in: labels did not converge after update', retryable: true }
+    }));
+    finalPullRequest = rereadPullRequest.value;
+  }
   return softenFailure(result(planned.some((operation) => operation.status === 'skipped') ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, base.prNumber, {
     changed: true, platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: fetched.value,
+    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: finalPullRequest,
     operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
   }));
 }
@@ -1438,7 +1779,8 @@ export {
   skipPlatformPullRequestFact,
   selectExternalPullRequest,
   selectPullRequest,
-  syncPlatformPullRequest
+  syncPlatformPullRequest,
+  syncPlatformPullRequestInLabels
 };
 export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, PullRequestPrimaryResult, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SkipFactOptions, SyncOptions };
 export { warningResultForPrimary };

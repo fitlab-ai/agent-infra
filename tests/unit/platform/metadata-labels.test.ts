@@ -13,3 +13,11 @@ test('shared metadata labels normalize task types and configured path matches', 
     new Set(['in: cli', 'in: templates'])
   ), ['in: cli', 'in: templates']);
 });
+
+test('configured path matches stop at directory boundaries', () => {
+  assert.deepEqual(computeInLabels(
+    ['library/README.md'],
+    { lib: ['lib/'], library: ['lib'] },
+    new Set(['in: lib', 'in: library'])
+  ), []);
+});

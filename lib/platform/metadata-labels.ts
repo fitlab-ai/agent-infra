@@ -23,8 +23,11 @@ function computeInLabels(
 ): string[] {
   return Object.entries(mapping).flatMap(([name, rawPrefixes]) => {
     if (!Array.isArray(rawPrefixes)) return [];
-    const matches = rawPrefixes.some((prefix) => typeof prefix === 'string' && prefix.length > 0
-      && changedFiles.some((file) => file === prefix.replace(/\/$/, '') || file.startsWith(prefix)));
+    const matches = rawPrefixes.some((prefix) => {
+      if (typeof prefix !== 'string' || prefix.trim().length === 0) return false;
+      const normalized = prefix.trim().replace(/\/+$/, '');
+      return changedFiles.some((file) => file === normalized || file.startsWith(`${normalized}/`));
+    });
     const label = `in: ${name}`;
     return matches && repositoryLabels.has(label) ? [label] : [];
   }).sort();

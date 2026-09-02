@@ -154,6 +154,7 @@ function buildTaskFrontmatter(overrides: FrontmatterOverrides = {}) {
     updated_at: formatTimestamp(now),
     agent_infra_version: "v0.9.11-alpha.0",
     pr_delivery_fact: factValue(buildUnboundFact()),
+    delivery_base_ref: "main",
     issue_number: "N/A",
     current_step: "code",
     assigned_to: "codex",
@@ -602,7 +603,7 @@ async function withProjectTempRoot<T>(prefix: string, fn: (tempRoot: string) => 
 }
 
 function setupPlatformSyncEnv(tempRoot: string): PlatformSyncEnv {
-  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const taskDir = path.join(tempRoot, ".agents", "workspace", "active", "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = writeFakeGh(path.join(binDir, "gh"));
   const issuePath = path.join(tempRoot, "issue.json");
@@ -613,6 +614,17 @@ function setupPlatformSyncEnv(tempRoot: string): PlatformSyncEnv {
   const labelsPath = path.join(tempRoot, "labels.json");
 
   initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+  const configName = spawnSync("git", ["config", "user.name", "Test"], { cwd: tempRoot, encoding: "utf8", env: gitSafeEnv() });
+  const configEmail = spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: tempRoot, encoding: "utf8", env: gitSafeEnv() });
+  assert.equal(configName.status, 0, configName.stderr);
+  assert.equal(configEmail.status, 0, configEmail.stderr);
+  write(path.join(tempRoot, ".platform-sync-base"), "base\n");
+  const addBase = spawnSync("git", ["add", ".platform-sync-base"], { cwd: tempRoot, encoding: "utf8", env: gitSafeEnv() });
+  const commitBase = spawnSync("git", ["commit", "-qm", "platform sync base"], { cwd: tempRoot, encoding: "utf8", env: gitSafeEnv() });
+  assert.equal(addBase.status, 0, addBase.stderr);
+  assert.equal(commitBase.status, 0, commitBase.stderr);
+  const checkoutFixtureBranch = spawnSync("git", ["checkout", "-qb", "fixture-head"], { cwd: tempRoot, encoding: "utf8", env: gitSafeEnv() });
+  assert.equal(checkoutFixtureBranch.status, 0, checkoutFixtureBranch.stderr);
 
   return {
     taskDir,

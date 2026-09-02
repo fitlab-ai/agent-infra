@@ -14,6 +14,8 @@ Call one declarative intent. The internal core owns diff computation, repository
 agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {base-branch} --requirements
 ```
 
+If `--base` is supplied, it must exactly match task.md's `delivery_base_ref`; the core uses that task-bound ref as the only diff evidence and never falls back to `main` or a repository default. The `in:` target is the intersection of the `labels.in` mapping and repository labels, and unrelated labels are preserved.
+
 ## Error Handling
 
 Treat sync failures as warnings only. Do not block an already completed `git commit`.

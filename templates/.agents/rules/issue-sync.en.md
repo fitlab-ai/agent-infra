@@ -25,6 +25,8 @@ agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token
 
 The core owns status/in labels, assignees, milestones, Issue Type, pinned fields, requirements, state, capabilities, dry-run, retries, errors, and idempotency. Omitted flags preserve values; `none` explicitly clears them. Status labels converge to at most one, and ambiguous requirement identity fails closed.
 
+PR event `in:` synchronization uses `agent-infra-internal platform-pr sync-in-labels --pr <N> [--cwd <path>]`. PR files are the event evidence; a unique closing Issue is written and re-read before the PR. Zero or multiple closing Issues update only the PR and return `degraded`; unknown side effects or failed convergence return `blocked` with `IN_LABEL_SYNC_PARTIAL`.
+
 `planned|applied|no-op|degraded` exit 0; `failed` exits 1; `blocked` exits 2.
 
 Map material degraded/failed/blocked results to workflow warnings through the structured intent; callers must not edit warning rows directly:

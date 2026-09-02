@@ -71,6 +71,8 @@ agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token
 
 status labels 始终至多一个；关闭后不保留 status label。`in:` labels 只从项目允许映射与仓库实际 labels 交集产生。需求复选框以 task.md 原文为身份，歧义时 fail closed。
 
+PR event 的 `in:` 同步使用 `agent-infra-internal platform-pr sync-in-labels --pr <N> [--cwd <path>]`。PR files 是事件证据；唯一 closing Issue 按 Issue→PR 顺序写入并复读，零或多个 closing Issue 只写 PR 并返回 `degraded`。写入后副作用不明或复读未收敛必须返回 `blocked` 与 `IN_LABEL_SYNC_PARTIAL`。
+
 ## 补发
 
 complete-task 按 artifact catalog 时间线遍历本地已有产物：task 使用 `--kind task`，其余使用 `--kind artifact --artifact <file> --backfill`；最后用 `--kind summary --body-file <path>` 原地同步交付摘要。artifact backfill 在远端缺少 marker 时创建带“历史产物补发”提示的评论；已存在合法 marker 集合时保持原评论和分片不变并返回 `no-op`；marker 冲突仍失败。该判定由 core 完成，不由 Skill 扫描评论或拼标题。

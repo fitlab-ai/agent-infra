@@ -8,7 +8,8 @@ import {
   inspectPlatformPullRequest,
   resolveExternalPullRequest,
   skipPlatformPullRequestFact,
-  syncPlatformPullRequest
+  syncPlatformPullRequest,
+  syncPlatformPullRequestInLabels
 } from '../platform/pull-requests.ts';
 import type { PullRequestResult } from '../platform/pull-requests.ts';
 import { summaryContext, syncPullRequestSummary } from '../platform/pr-summary.ts';
@@ -20,6 +21,7 @@ const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd
        agent-infra-internal platform-pr bind <task-ref> --pr <N> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr skip <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync <task-ref> --agent <agent> [--metadata] [--closing-issue] --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr sync-in-labels --pr <N> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-context <task-ref> [--cwd <path>]
        agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
 `;
@@ -66,7 +68,19 @@ function readFile(value: string, cwd: string): string {
 function platformPr(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'sync-in-labels', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (operation === 'sync-in-labels') {
+    const parsed = parse(args, 1);
+    if (parsed.error) { fail(parsed.error); return; }
+    const values = parsed.values;
+    const unexpected = Object.keys(values).find((name) => !['cwd', 'pr', 'dryRun'].includes(name));
+    if (unexpected) { fail(`sync-in-labels does not accept --${unexpected}`); return; }
+    const pr = Number(values.pr);
+    if (!Number.isInteger(pr) || pr <= 0) { fail('sync-in-labels requires a positive --pr'); return; }
+    const cwd = path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd());
+    finish(syncPlatformPullRequestInLabels(pr, { cwd, dryRun: values.dryRun === true }));
+    return;
+  }
   const taskRef = args[1];
   if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
   const parsed = parse(args, 2);
@@ -80,6 +94,7 @@ function platformPr(args: string[] = []): void {
     bind: ['cwd', 'agent', 'pr', 'dryRun'],
     skip: ['cwd', 'agent', 'dryRun'],
     sync: ['cwd', 'agent', 'metadata', 'closingIssue', 'result', 'dryRun'],
+    'sync-in-labels': ['cwd', 'pr', 'dryRun'],
     'summary-context': ['cwd'],
     'summary-sync': ['cwd', 'agent', 'bodyFile', 'result', 'dryRun']
   };

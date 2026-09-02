@@ -36,9 +36,15 @@ function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } 
 test('platform-pr CLI advertises all PR and summary intents', () => {
   const output = run(['--help']);
   assert.equal(output.status, 0);
-  for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'summary-context', 'summary-sync']) {
+  for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'sync-in-labels', 'summary-context', 'summary-sync']) {
     assert.match(output.stdout, new RegExp(`platform-pr ${operation}`));
   }
+});
+
+test('platform-pr sync-in-labels validates the PR number before platform access', () => {
+  const output = run(['sync-in-labels', '--pr', '0']);
+  assert.equal(output.status, 1);
+  assert.equal(JSON.parse(output.stdout).error.code, 'PR_PAYLOAD_INVALID');
 });
 
 test('platform-pr summary-sync accepts the commit path no-op result before task resolution', () => {

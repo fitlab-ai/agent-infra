@@ -14,6 +14,8 @@
 agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {base-branch} --requirements
 ```
 
+`--base`（如保留）必须与 task.md 的 `delivery_base_ref` 完全一致；core 以 task-bound base 作为唯一 diff evidence，不回退到 `main` 或仓库默认分支。`in:` target 只来自 `labels.in` 映射与仓库实际 labels 的交集，并保留其他 labels。
+
 ## 错误处理
 
 同步失败只记为警告，不阻塞已完成的 `git commit`。

@@ -14,7 +14,6 @@ import type { GitHubClient } from './github-client.ts';
 import {
   DEFAULT_REQUIREMENT_SECTION_ANCHORS,
   chooseMilestone,
-  computeInLabels,
   desiredIssueType,
   normalizeOption,
   planIssueMetadata
@@ -22,6 +21,7 @@ import {
 import type { IssueDesiredState, PlannedOperation, Requirement, RequirementSectionAnchor } from './issue-metadata.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
+import { planInLabelUpdate } from './in-label-sync.ts';
 
 type IssueSnapshot = {
   repository: string;
@@ -634,16 +634,33 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
         : { name: 'labels:in', status: 'skipped', reasonCode: 'TRIAGE_REQUIRED' });
   }
   if (options.inLabels === 'from-diff') {
-    try {
-      const changed = execFileSync('git', ['diff', `${options.base}...HEAD`, '--name-only'], { cwd: base.resolved.repoRoot, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-      const config = JSON.parse(fs.readFileSync(`${base.resolved.repoRoot}/.agents/.airc.json`, 'utf8'));
-      const targets = computeInLabels(changed, config?.labels?.in || {}, new Set(repositoryLabels));
-      const labels = [...snapshot.labels.filter((label) => !label.startsWith('in:')), ...targets].sort();
-      plan.operations.push(labels.join('\0') === snapshot.labels.join('\0')
-        ? { name: 'labels:in', status: 'no-op', reasonCode: null }
-        : { name: 'labels:in', status: 'planned', reasonCode: null, value: labels });
-    } catch {
-      plan.operations.push({ name: 'labels:in', status: 'skipped', reasonCode: 'DIFF_UNAVAILABLE' });
+    const taskBase = typeof base.frontmatter.delivery_base_ref === 'string'
+      ? base.frontmatter.delivery_base_ref.trim()
+      : '';
+    if (!taskBase) {
+      plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISSING' });
+    } else if (options.base && options.base !== taskBase) {
+      plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISMATCH' });
+    } else {
+      try {
+        const changed = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+          cwd: base.resolved.repoRoot, encoding: 'utf8'
+        }).trim().split(/\r?\n/).filter(Boolean);
+        const config = JSON.parse(fs.readFileSync(`${base.resolved.repoRoot}/.agents/.airc.json`, 'utf8')) as {
+          labels?: { in?: Record<string, unknown> };
+        };
+        const planned = planInLabelUpdate({
+          changedFiles: changed,
+          currentLabels: snapshot.labels,
+          mapping: config.labels?.in || {},
+          repositoryLabels: new Set(repositoryLabels)
+        });
+        plan.operations.push(planned.changed
+          ? { name: 'labels:in', status: 'planned', reasonCode: null, value: planned.labels }
+          : { name: 'labels:in', status: 'no-op', reasonCode: null });
+      } catch {
+        plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE' });
+      }
     }
   }
   const graph = planGraphMetadata(
@@ -666,7 +683,29 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
     const patched = base.client.json<unknown>(['api', `repos/${repository}/issues/${base.issueNumber}`, '-X', 'PATCH', '--input', '-'], {
       cwd: base.resolved.repoRoot, method: 'PATCH', input: JSON.stringify(payload)
     });
-    if (!patched.ok) return result(patched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: patched.error });
+    if (!patched.ok) {
+      const inLabelWrite = restPlanned.some((operation) => operation.name === 'labels:in');
+      const error = inLabelWrite && patched.error.retryable
+        ? { ...patched.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${patched.error.message}` }
+        : patched.error;
+      return result(error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error });
+    }
+  }
+  let finalSnapshot = snapshot;
+  const inLabelWrite = restPlanned.find((operation) => operation.name === 'labels:in' && operation.status === 'planned');
+  if (inLabelWrite) {
+    const reread = inspectGitHubIssue(base.client, repository, base.issueNumber, base.resolved.repoRoot);
+    if (!reread.ok) return result('blocked', base.resolved.taskId, base.issueNumber, {
+      issue: snapshot, operations: plan.operations,
+      error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
+    });
+    const expected = (inLabelWrite.value as string[]).filter((label) => label.startsWith('in:')).sort();
+    const actual = reread.value.labels.filter((label) => label.startsWith('in:')).sort();
+    if (expected.join('\0') !== actual.join('\0')) return result('blocked', base.resolved.taskId, base.issueNumber, {
+      issue: reread.value, operations: plan.operations,
+      error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue in: labels did not converge after update', retryable: true }
+    });
+    finalSnapshot = reread.value;
   }
   for (const operation of graphPlanned) {
     if (!graph.issueId) return result('failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: { code: 'ISSUE_GRAPH_IDENTITY_INVALID', message: 'Issue GraphQL identity is unavailable', retryable: false } });
@@ -675,7 +714,7 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
   }
   return result(skipped ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, {
     changed: true, platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'issue', number: base.issueNumber }, issue: snapshot,
+    resource: { kind: 'issue', number: base.issueNumber }, issue: finalSnapshot,
     operations: plan.operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
   });
 }
