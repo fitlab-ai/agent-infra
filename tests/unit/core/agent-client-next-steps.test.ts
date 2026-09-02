@@ -125,18 +125,18 @@ test('next-step renderer uses Registry order, appends custom entries, and freeze
       source: 'builtin',
       clientId: 'codex',
       displayName: 'Codex',
-      command: '$review-code 16'
+      command: '$review-code --task 16'
     },
     {
       source: 'builtin',
       clientId: 'opencode',
       displayName: 'OpenCode',
-      command: '/review-code 16'
+      command: '/review-code --task 16'
     },
     {
       source: 'custom',
       displayName: 'Acme',
-      command: 'acme demo:review-code 16'
+      command: 'acme demo:review-code --task 16'
     }
   ]);
   assert.ok(Object.isFrozen(result));
@@ -149,7 +149,7 @@ test('next-step renderer uses Registry order, appends custom entries, and freeze
   }), []);
 });
 
-test('next-step renderer appends a canonical version after the task ref', () => {
+test('next-step renderer preserves positional arguments for non-task versioned skills', () => {
   const result = renderNextStepCommands({
     projectName: 'demo',
     state: stateFor(['codex']),
@@ -160,6 +160,18 @@ test('next-step renderer appends a canonical version after the task ref', () => 
   });
 
   assert.equal(result[0]?.command, '$post-release 16 1.2.3-rc.1');
+});
+
+test('next-step renderer emits an explicit task flag for task-scoped skills', () => {
+  const result = renderNextStepCommands({
+    projectName: 'demo',
+    state: stateFor(['codex']),
+    customTUIs: [],
+    skillName: 'commit',
+    taskRef: '16'
+  });
+
+  assert.equal(result[0]?.command, '$commit --task 16');
 });
 
 test('next-step renderer validates names and task refs without evaluating invocation text', () => {
@@ -173,7 +185,7 @@ test('next-step renderer validates names and task refs without evaluating invoca
   assert.equal(renderNextStepCommands(base)[0]?.command, '/review-plan');
   assert.equal(
     renderNextStepCommands({ ...base, taskRef: 'TASK-20260718-232501' })[0]?.command,
-    '/review-plan TASK-20260718-232501'
+    '/review-plan --task TASK-20260718-232501'
   );
   for (const input of [
     { ...base, projectName: 'bad\nname' },

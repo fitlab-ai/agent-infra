@@ -97,6 +97,4 @@ fi
 ## 跨 TUI 使用
 
 裸数字 `N` 在所有 shell 与 TUI 中都安全无需引号：
-`ai sandbox exec 11 'npm test'`、`/review-analysis 11`。
-
-从下一个大版本起，原 `#NN` 写法必须迁移为 `NN`；即使引用后完整传入 CLI 也会被拒绝。
+`ai sandbox exec 11 'npm test'`、`/review-analysis --task 11`。

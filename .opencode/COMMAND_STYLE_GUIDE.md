@@ -175,7 +175,7 @@ Status: active
 
 ```markdown
 **下一步：**
-使用 `/plan-task {task-id}` 设计技术方案。
+使用 `/plan-task --task {task-id}` 设计技术方案。
 ```
 
 ## 反模式

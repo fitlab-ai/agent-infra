@@ -1,6 +1,7 @@
 import { listEnabledAgentClientAdapters } from './registry.ts';
 import { renderAgentClientInvocation } from './invocation.ts';
 import semver from 'semver';
+import { isTaskScopeSkill } from '../task/skill-scope.ts';
 import type { CustomTUI } from './custom-tuis.ts';
 import type { AgentClientId, AgentClientState } from './types.ts';
 
@@ -45,7 +46,11 @@ function renderNextStepCommands(
   }
 
   const args = [
-    ...(input.taskRef === undefined ? [] : [input.taskRef]),
+    ...(input.taskRef === undefined
+      ? []
+      : isTaskScopeSkill(input.skillName)
+        ? ['--task', input.taskRef]
+        : [input.taskRef]),
     ...(input.version === undefined ? [] : [input.version])
   ];
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { commandSpecs } from '../../helpers/command-specs.ts';
+import { isTaskScopeSkill } from '../../../lib/task/skill-scope.ts';
 
 const TASK_CONTEXT_SKILL_USAGES: Record<string, string> = {
   'analyze-task': '[--task <ref> | -t <ref>]',
@@ -24,6 +25,14 @@ const TASK_CONTEXT_SKILL_USAGES: Record<string, string> = {
 };
 
 const TASK_CONTEXT_SKILLS = Object.keys(TASK_CONTEXT_SKILL_USAGES);
+
+test('public task scope registry covers the documented sixteen skills only', () => {
+  assert.equal(TASK_CONTEXT_SKILLS.length, 16);
+  for (const name of TASK_CONTEXT_SKILLS) assert.equal(isTaskScopeSkill(name), true);
+  assert.equal(isTaskScopeSkill('post-release'), false);
+  assert.equal(isTaskScopeSkill('test'), false);
+  assert.equal(isTaskScopeSkill('test-integration'), false);
+});
 
 const SHORT_ID_ONLY_SKILLS = [
   'restore-task',

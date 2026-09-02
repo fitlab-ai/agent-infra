@@ -123,7 +123,4 @@ repair hint.
 ## Cross-TUI use
 
 Bare numeric `N` is safe in every shell and TUI without quoting:
-`ai sandbox exec 11 'npm test'`, `/review-analysis 11`.
-
-Starting with the next major version, migrate the old `#NN` form to `NN`;
-even a quoted value delivered intact to the CLI is rejected.
+`ai sandbox exec 11 'npm test'`, `/review-analysis --task 11`.

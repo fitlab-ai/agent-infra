@@ -55,10 +55,10 @@ Once initialized, open the project in your AI TUI and install the latest skills:
 
 ```bash
 /import-issue 42           # AI reads the issue, creates a task, extracts requirements
-/analyze-task <task-id>    # AI scans the codebase, finds the root cause, writes analysis.md
-/review-analysis <task-id> # An isolated reviewer checks the analysis
-/plan-task <task-id>       # AI proposes a fix plan
-/review-plan <task-id>     # A fresh isolated reviewer checks the plan
+/analyze-task --task <task-id>    # AI scans the codebase, finds the root cause, writes analysis.md
+/review-analysis --task <task-id> # An isolated reviewer checks the analysis
+/plan-task --task <task-id>       # AI proposes a fix plan
+/review-plan --task <task-id>     # A fresh isolated reviewer checks the plan
 ```
 
 > **You review the plan and reply in natural language:**
@@ -71,12 +71,12 @@ Just fix it at the application layer in LoginService.
 > AI re-runs `/plan-task` to update the plan accordingly and confirms.
 
 ```bash
-/code-task <task-id>       # AI writes the fix, tests it, and creates a local checkpoint commit
-/review-code <task-id>     # A fresh isolated reviewer reports one minor finding
-/code-task <task-id>       # AI fixes the minor issue, re-validates, and creates a new checkpoint
-/review-code <task-id>     # The reviewer approves the current checkpoint
-/create-pr <task-id>       # The reviewed branch is published to its task-bound target; PR links issue #42
-/complete-task <task-id>   # task archived
+/code-task --task <task-id>       # AI writes the fix, tests it, and creates a local checkpoint commit
+/review-code --task <task-id>     # A fresh isolated reviewer reports one minor finding
+/code-task --task <task-id>       # AI fixes the minor issue, re-validates, and creates a new checkpoint
+/review-code --task <task-id>     # The reviewer approves the current checkpoint
+/create-pr --task <task-id>       # The reviewed branch is published to its task-bound target; PR links issue #42
+/complete-task --task <task-id>   # task archived
 ```
 
 **11 commands. 1 natural-language correction. From issue to merged PR.** That is the entire SOP — programming can have a standard operating procedure too.
@@ -192,7 +192,7 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 | `code-task` → `review-code` | Implement and test; `code-task` creates a local checkpoint, then a structured review checks that checkpoint |
 | `create-pr` → `complete-task` | Publish the approved checkpoint to the task-bound target branch, then archive after merge and final gates |
 
-Start with one atomic role policy, for example: `$run-task 42 --executor-model <id> --executor-reasoning-effort <value> --reviewer-model <id> --reviewer-reasoning-effort <value>`. Both roles may use the same model. With no explicit policy, `run-task` reads the current Agent Client's optional `agentClients[].orchestration`; if neither source is complete, it shows the host model-selection guidance before creating any run. Re-entry uses the persisted run policy. Finish or clear active runs before upgrading agent-infra; unsupported disk state fails closed without rewriting.
+Start with one atomic role policy, for example: `$run-task --task 42 --executor-model <id> --executor-reasoning-effort <value> --reviewer-model <id> --reviewer-reasoning-effort <value>`. Both roles may use the same model. With no explicit policy, `run-task` reads the current Agent Client's optional `agentClients[].orchestration`; if neither source is complete, it shows the host model-selection guidance before creating any run. Re-entry uses the persisted run policy. Finish or clear active runs before upgrading agent-infra; unsupported disk state fails closed without rewriting.
 
 See the full catalog — task status, release, security, and project-maintenance skills — in [Built-in AI Skills](./docs/en/skills.md).
 
