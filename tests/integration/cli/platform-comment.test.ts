@@ -60,7 +60,7 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
 });
 
-test('platform-comment preserves @ content while rejecting unsafe artifact links', () => {
+test('platform-comment preserves source content including local-looking artifact links', () => {
   const taskFixture = fixture();
   try {
     const taskPath = path.join(taskFixture.root, '.agents', 'workspace', 'active', taskFixture.taskId, 'task.md');
@@ -80,9 +80,11 @@ test('platform-comment preserves @ content while rejecting unsafe artifact links
     const artifactResult = runComment([
       'sync', artifactFixture.taskId, '--kind', 'artifact', '--artifact', 'analysis.md', '--agent', 'codex'
     ], artifactFixture);
-    assert.equal(artifactResult.status, 1, artifactResult.stderr || artifactResult.stdout);
-    assert.equal(JSON.parse(artifactResult.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
-    assert.deepEqual(JSON.parse(fs.readFileSync(artifactFixture.commentsPath, 'utf8')), []);
+    assert.equal(artifactResult.status, 0, artifactResult.stderr || artifactResult.stdout);
+    assert.equal(JSON.parse(artifactResult.stdout).status, 'applied');
+    const comments = JSON.parse(fs.readFileSync(artifactFixture.commentsPath, 'utf8')) as Array<{ body: string }>;
+    assert.equal(comments.length, 1);
+    assert.match(comments[0]!.body, /\[local\]\(\/workspace\/file\.md\)/);
   } finally {
     fs.rmSync(artifactFixture.root, { recursive: true, force: true });
   }

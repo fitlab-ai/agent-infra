@@ -3,7 +3,6 @@ import path from 'node:path';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { findIssueCommentViolations } from '../task/issue-comment-content.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import { resolvePlatformContext } from './context.ts';
@@ -255,21 +254,6 @@ function expectedComments(
   return [{ marker, body, content: options.body, part: 1, total: 1 }];
 }
 
-function localCommentContent(taskContent: string, taskDir: string, options: SyncOptions): string | null {
-  if (options.kind === 'task') return taskContent;
-  if (options.kind !== 'artifact') return null;
-  if (!options.artifact) throw new Error('artifact sync requires an artifact filename');
-  return resolveArtifactBody(taskDir, options.artifact);
-}
-
-function validateLocalCommentContent(taskContent: string, taskDir: string, options: SyncOptions): string | null {
-  const content = localCommentContent(taskContent, taskDir, options);
-  if (content === null) return null;
-  const violation = findIssueCommentViolations(content)[0];
-  if (!violation) return null;
-  return `${violation.message} at line ${violation.line}, column ${violation.column}: '${violation.token}'`;
-}
-
 function markerPrefix(taskId: string, options: SyncOptions): string {
   if (options.kind === 'task') return `<!-- sync-issue:${taskId}:task`;
   if (options.kind === 'summary') return `<!-- sync-issue:${taskId}:summary`;
@@ -333,20 +317,6 @@ function syncPlatformComment(taskRef: string, options: SyncOptions): PlatformRes
   if (!issue) {
     return platformResult('no-op', {
       error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false }
-    });
-  }
-  try {
-    const invalidContent = validateLocalCommentContent(taskContent, resolved.taskDir, options);
-    if (invalidContent) {
-      return platformResult('failed', {
-        resource: { kind: 'issue', number: issue },
-        error: { code: 'COMMENT_PAYLOAD_INVALID', message: invalidContent, retryable: false }
-      });
-    }
-  } catch (error) {
-    return platformResult('failed', {
-      resource: { kind: 'issue', number: issue },
-      error: { code: 'COMMENT_PAYLOAD_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
     });
   }
   const context = resolvePlatformContext({ cwd: resolved.repoRoot, client: options.client });

@@ -8,7 +8,6 @@ import { parseImplementationInputs, selectPendingImplementationInput } from './i
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
 import { receiptForOutput, sha256File } from './artifact-receipts.ts';
-import { findIssueCommentViolations } from './issue-comment-content.ts';
 
 const artifactFamilyCatalog = [
   { family: 'analysis', sectionAliases: ['分析', 'Analysis'], heading: '分析', labels: ['需求分析报告', 'Requirements Analysis'] },
@@ -48,7 +47,7 @@ type ArtifactErrorCode =
   | 'ARTIFACT_REFERENCE_INVALID' | 'ARTIFACT_PATH_INVALID'
   | 'ARTIFACT_IDENTITY_INVALID' | 'ARTIFACT_NOT_FOUND'
   | 'ARTIFACT_NOT_REGULAR' | 'ARTIFACT_NOT_READABLE' | 'ARTIFACT_VERDICT_INVALID'
-  | 'ARTIFACT_MODE_REFUSED' | 'ARTIFACT_CONTENT_INVALID';
+  | 'ARTIFACT_MODE_REFUSED';
 type ArtifactError = { code: ArtifactErrorCode; message: string };
 type ArtifactInventoryResult = {
   status: 'ready' | 'failed';
@@ -470,19 +469,6 @@ function validateCompletedArtifact(taskDir: string, family: ArtifactFamily, name
   const inventory = inspectArtifactDirectory(taskDir, family);
   const topology = assertWritableInventory(inventory);
   if (topology) return { ok: false, error: topology };
-  let content: string;
-  try { content = fs.readFileSync(abs, 'utf8'); }
-  catch { return { ok: false, error: { code: 'ARTIFACT_NOT_READABLE', message: `artifact '${name}' is not readable` } }; }
-  const violation = findIssueCommentViolations(content)[0];
-  if (violation) {
-    return {
-      ok: false,
-      error: {
-        code: 'ARTIFACT_CONTENT_INVALID',
-        message: `artifact '${name}' contains invalid Issue comment content at line ${violation.line}, column ${violation.column}: ${violation.message}; offending token '${violation.token}'`
-      }
-    };
-  }
   const artifact = inventory.artifacts.find((item) => item.name === name);
   return artifact ? { ok: true, artifact } : { ok: false, error: { code: 'ARTIFACT_NOT_FOUND', message: `artifact '${name}' is not in inventory` } };
 }
