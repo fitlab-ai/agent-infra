@@ -23,7 +23,7 @@ function usageFailure(message: string): void {
   process.exitCode = 1;
 }
 
-function taskLedger(args: string[] = []): void {
+async function taskLedger(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
   if (!taskRef || !kind) { usageFailure('task ref and intent are required'); return; }
@@ -106,11 +106,11 @@ function taskLedger(args: string[] = []): void {
   let result;
   let humanOverride: unknown = null;
   try {
-    result = withTaskExecutionLock(lockResolved.repoRoot, lockResolved.taskId, `task-ledger.${kind}`, () => {
+    result = await withTaskExecutionLock(lockResolved.repoRoot, lockResolved.taskId, `task-ledger.${kind}`, async () => {
       let current = applyLedgerIntent(values as LedgerIntent);
       if (current.status !== 'failed' || !values.overrideTicket) return current;
       if (!values.overrideTarget || !values.overrideScope) { usageFailure('override ticket requires target and scope'); return current; }
-      const consumed = consumeHumanOverride({
+      const consumed = await consumeHumanOverride({
         taskRef,
         ticketId: String(values.overrideTicket),
         failureId: failureId('ledger-intent', current.error?.code ?? 'TASK_STATE_MISMATCH'),

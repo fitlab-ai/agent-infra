@@ -169,7 +169,7 @@ function engine(status: 'pass' | 'fail' | 'blocked') {
   });
 }
 
-test('verification catalog is a closed mapping of all business events', () => {
+test('verification catalog is a closed mapping of all business events', async () => {
   assert.deepEqual(Object.keys(VERIFICATION_CATALOG).sort(), [...EXPECTED_EVENTS].sort());
   const expected = {
     'analyze.awaiting-input': ['analyze-task', 'active', 'checks', undefined, ['task-meta']],
@@ -203,23 +203,23 @@ test('verification catalog is a closed mapping of all business events', () => {
   }
 });
 
-test('verification rejects workspace and artifact identity mismatches before invoking checks', () => {
+test('verification rejects workspace and artifact identity mismatches before invoking checks', async () => {
   const f = fixture();
   let calls = 0;
   const checkEngine = (input: Parameters<ReturnType<typeof engine>>[0]) => { calls += 1; return engine('pass')(input); };
-  const wrongState = verifyTaskEvent({ taskRef: f.taskId, event: 'block-task.completed' }, { repoRoot: f.root, engine: checkEngine });
+  const wrongState = await verifyTaskEvent({ taskRef: f.taskId, event: 'block-task.completed' }, { repoRoot: f.root, engine: checkEngine });
   assert.equal(wrongState.error?.code, 'VERIFY_TASK_STATE_MISMATCH');
-  const missingArtifact = verifyTaskEvent({ taskRef: f.taskId, event: 'code.completed' }, { repoRoot: f.root, engine: checkEngine });
+  const missingArtifact = await verifyTaskEvent({ taskRef: f.taskId, event: 'code.completed' }, { repoRoot: f.root, engine: checkEngine });
   assert.equal(missingArtifact.error?.code, 'VERIFY_ARTIFACT_REQUIRED');
-  const extraArtifact = verifyTaskEvent({ taskRef: f.taskId, event: 'commit.completed', artifact: 'code.md' }, { repoRoot: f.root, engine: checkEngine });
+  const extraArtifact = await verifyTaskEvent({ taskRef: f.taskId, event: 'commit.completed', artifact: 'code.md' }, { repoRoot: f.root, engine: checkEngine });
   assert.equal(extraArtifact.error?.code, 'VERIFY_ARTIFACT_UNEXPECTED');
   assert.equal(calls, 0);
 });
 
-test('preflight stops on the first non-pass and preserves blocked exit semantics', () => {
+test('preflight stops on the first non-pass and preserves blocked exit semantics', async () => {
   const f = fixture();
   let calls = 0;
-  const result = verifyTaskEvent({ taskRef: f.taskId, event: 'complete-task.preflight' }, {
+  const result = await verifyTaskEvent({ taskRef: f.taskId, event: 'complete-task.preflight' }, {
     repoRoot: f.root,
     engine(input: Parameters<ReturnType<typeof engine>>[0]) { calls += 1; return engine('blocked')(input); }
   });
@@ -228,13 +228,13 @@ test('preflight stops on the first non-pass and preserves blocked exit semantics
   assert.equal(calls, 1);
 });
 
-test('unknown events fail with a stable orchestration error', () => {
+test('unknown events fail with a stable orchestration error', async () => {
   const f = fixture();
-  const unknown = verifyTaskEvent({ taskRef: f.taskId, event: 'unknown.completed' }, { repoRoot: f.root });
+  const unknown = await verifyTaskEvent({ taskRef: f.taskId, event: 'unknown.completed' }, { repoRoot: f.root });
   assert.equal(unknown.error?.code, 'VERIFY_EVENT_UNKNOWN');
 });
 
-test('run-task verification accepts complete current evidence and rejects invalid host identity', () => {
+test('run-task verification accepts complete current evidence and rejects invalid host identity', async () => {
   const f = fixture();
   const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
@@ -256,7 +256,7 @@ test('run-task verification accepts complete current evidence and rejects invali
   });
   fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
 
-  const valid = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
+  const valid = await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
   assert.equal(valid.status, 'pass');
   assert.equal(valid.invocations.length, 2);
 
@@ -269,7 +269,7 @@ test('run-task verification accepts complete current evidence and rejects invali
     updatedAt: '2026-01-01T00:00:05.000Z'
   });
   fs.writeFileSync(runPath, `${JSON.stringify(codexRun, null, 2)}\n`);
-  const codexVerification = verifyTaskEvent(
+  const codexVerification = await verifyTaskEvent(
     { taskRef: f.taskId, event: 'run-task.completed' },
     { repoRoot: f.root }
   );
@@ -285,7 +285,7 @@ test('run-task verification accepts complete current evidence and rejects invali
     }]
   }, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
     'fail'
   );
 
@@ -294,7 +294,7 @@ test('run-task verification accepts complete current evidence and rejects invali
     receipts: [{ ...codexReceipt, parentId: 'different-parent' }]
   }, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
     'fail'
   );
   fs.writeFileSync(runPath, `${JSON.stringify({
@@ -302,7 +302,7 @@ test('run-task verification accepts complete current evidence and rejects invali
     receipts: [{ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, kind: 'codex-lifecycle-v1' } }]
   }, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
     'fail'
   );
   fs.writeFileSync(runPath, `${JSON.stringify({
@@ -310,7 +310,7 @@ test('run-task verification accepts complete current evidence and rejects invali
     receipts: [{ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, spawnToolUseId: undefined } }]
   }, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
     'fail'
   );
   fs.writeFileSync(runPath, `${JSON.stringify({
@@ -324,7 +324,7 @@ test('run-task verification accepts complete current evidence and rejects invali
     }]
   }, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
     'fail'
   );
 
@@ -333,12 +333,12 @@ test('run-task verification accepts complete current evidence and rejects invali
     receipts: [currentReceipt(f.taskId, { client: 'antigravity-cli', actualModel: null })]
   }, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
     'fail'
   );
 });
 
-test('run-task verification accepts only internally consistent clean completion evidence', () => {
+test('run-task verification accepts only internally consistent clean completion evidence', async () => {
   const f = fixture();
   const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
@@ -361,7 +361,7 @@ test('run-task verification accepts only internally consistent clean completion 
   const runPath = path.join(f.taskDir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
     'pass'
   );
 
@@ -373,13 +373,13 @@ test('run-task verification accepts only internally consistent clean completion 
   ]) {
     fs.writeFileSync(runPath, `${JSON.stringify(invalid, null, 2)}\n`);
     assert.equal(
-      verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+      (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
       'fail'
     );
   }
 });
 
-test('run-task verification applies current receipt and pause invariants', () => {
+test('run-task verification applies current receipt and pause invariants', async () => {
   const f = fixture();
   const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
@@ -394,7 +394,7 @@ test('run-task verification applies current receipt and pause invariants', () =>
   const runPath = path.join(f.taskDir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root })).status,
     'pass'
   );
 
@@ -405,7 +405,7 @@ test('run-task verification applies current receipt and pause invariants', () =>
   });
   fs.writeFileSync(runPath, `${JSON.stringify({ ...paused, pendingDelegation: pending }, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root })).status,
     'pass'
   );
 
@@ -416,13 +416,13 @@ test('run-task verification applies current receipt and pause invariants', () =>
   ]) {
     fs.writeFileSync(runPath, `${JSON.stringify({ ...paused, pendingDelegation: invalidReceipt }, null, 2)}\n`);
     assert.equal(
-      verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root }).status,
+      (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root })).status,
       'fail'
     );
   }
 });
 
-test('run-task verification accepts only current recovery provenance and rejects legacy structures', () => {
+test('run-task verification accepts only current recovery provenance and rejects legacy structures', async () => {
   const f = fixture();
   const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
@@ -455,7 +455,7 @@ test('run-task verification accepts only current recovery provenance and rejects
   const runPath = path.join(f.taskDir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
   assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
     'pass'
   );
 
@@ -466,7 +466,7 @@ test('run-task verification accepts only current recovery provenance and rejects
     { ...run, modelPolicy: { executor: 'executor-model', reviewer: 'reviewer-model' } }
   ]) {
     fs.writeFileSync(runPath, `${JSON.stringify(invalid, null, 2)}\n`);
-    const result = verifyTaskEvent(
+    const result = await verifyTaskEvent(
       { taskRef: f.taskId, event: 'run-task.completed' },
       { repoRoot: f.root }
     );

@@ -37,7 +37,7 @@ function usageFailure(message: string): void {
   process.exitCode = 1;
 }
 
-function taskOverride(args: string[] = []): void {
+async function taskOverride(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, operation] = args;
   if (!taskRef || !operation || !['diagnose', 'issue', 'consume'].includes(operation)) {
@@ -76,17 +76,17 @@ function taskOverride(args: string[] = []): void {
   let result;
   try {
     if (operation === 'diagnose') {
-      result = diagnoseHumanOverrideForTask(
+      result = await diagnoseHumanOverrideForTask(
         taskRef,
         values.failureId ? String(values.failureId) : undefined,
         values.target ? String(values.target) : undefined
       );
     } else if (operation === 'issue') {
-      result = withTaskExecutionLock(
+      result = await withTaskExecutionLock(
         resolved.repoRoot,
         resolved.taskId,
         'task-override.issue',
-        () => issueHumanOverride({
+        async () => issueHumanOverride({
           taskRef,
           failureId: String(values.failureId),
           target: String(values.target),
@@ -103,11 +103,11 @@ function taskOverride(args: string[] = []): void {
         } satisfies HumanOverrideRequest)
       );
     } else {
-        result = withTaskExecutionLock(
+        result = await withTaskExecutionLock(
         resolved.repoRoot,
         resolved.taskId,
         'task-override.consume',
-        () => consumeHumanOverride({
+        async () => consumeHumanOverride({
           taskRef,
           ticketId: String(values.ticketId),
           failureId: String(values.failureId),

@@ -1,12 +1,19 @@
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
-import { resolvePlatformContext } from './context.ts';
+import { resolvePlatformProviderContext } from './context.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
+import {
+  providerError,
+  providerOperationContext,
+  providerStatus,
+  resourceIdentity,
+  unsupportedProviderOperation
+} from './provider-bridge.ts';
 
 export type PrReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
 export type PrReviewIdentity = { scope: string; round: number; commitSha: string };
-export type PrReviewListEntry = { id: number; commitId: string; body: string; url: string };
+export type PrReviewListEntry = { id: number | string; commitId: string; body: string; url: string };
 export type PrReviewListResult = PlatformResult & { reviews: PrReviewListEntry[] };
 
 type RemoteReview = {
@@ -48,9 +55,10 @@ function invalidPrNumber(prNumber: number): boolean {
   return !Number.isInteger(prNumber) || prNumber <= 0;
 }
 
-export function listPrReviews(prNumber: number, options: { cwd?: string; client?: GitHubClient } = {}): PrReviewListResult {
+export async function listPrReviews(prNumber: number, options: { cwd?: string; client?: GitHubClient } = {}): Promise<PrReviewListResult> {
   const client = options.client || createGitHubClient();
-  const context = resolvePlatformContext({ cwd: options.cwd || process.cwd(), client });
+  const loaded = await resolvePlatformProviderContext({ cwd: options.cwd || process.cwd(), client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!hasUsableContext(context)) {
     return { ...platformResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error }), reviews: [] };
   }
@@ -62,6 +70,24 @@ export function listPrReviews(prNumber: number, options: { cwd?: string; client?
         error: { code: 'PR_NUMBER_INVALID', message: 'PR number must be positive', retryable: false }
       }),
       reviews: []
+    };
+  }
+  if (loaded.ok) {
+    const fetched = loaded.value.provider.reviews?.list
+      ? await loaded.value.provider.reviews.list({ context: providerOperationContext(loaded.value), changeRequest: resourceIdentity(prNumber) })
+      : unsupportedProviderOperation(loaded.value.provider, 'reviews.list');
+    if (!fetched.ok) return {
+      ...platformResult(providerStatus(fetched.error), {
+        platform: context.platform, capabilities: context.capabilities,
+        resource: { kind: 'pull-request', number: prNumber }, error: providerError(fetched.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+      }), reviews: []
+    };
+    return {
+      ...platformResult('no-op', {
+        platform: context.platform, capabilities: context.capabilities,
+        resource: { kind: 'pull-request', number: prNumber }, error: null
+      }),
+      reviews: fetched.value.map((review) => ({ id: review.id, commitId: review.commitSha || '', body: review.body, url: review.displayUrl || '' }))
     };
   }
   const fetched = client.json<RemoteReview[]>(['api', '--paginate', '--slurp', `repos/${repository}/pulls/${prNumber}/reviews?per_page=100`], { cwd: options.cwd || process.cwd() });
@@ -92,7 +118,7 @@ export function listPrReviews(prNumber: number, options: { cwd?: string; client?
   };
 }
 
-export function publishPrReview(options: {
+export async function publishPrReview(options: {
   cwd?: string;
   client?: GitHubClient;
   dryRun?: boolean;
@@ -100,9 +126,10 @@ export function publishPrReview(options: {
   identity: PrReviewIdentity;
   event: PrReviewEvent;
   body: string;
-}): PlatformResult {
+}): Promise<PlatformResult> {
   const client = options.client || createGitHubClient();
-  const context = resolvePlatformContext({ cwd: options.cwd || process.cwd(), client });
+  const loaded = await resolvePlatformProviderContext({ cwd: options.cwd || process.cwd(), client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!hasUsableContext(context)) {
     return platformResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error });
   }
@@ -129,7 +156,7 @@ export function publishPrReview(options: {
   }
 
   const marker = reviewMarker(options.identity);
-  const listed = listPrReviews(options.prNumber, { cwd: options.cwd, client });
+  const listed = await listPrReviews(options.prNumber, { cwd: options.cwd, client });
   if (listed.status === 'failed' || listed.status === 'blocked') return listed;
   const existing = listed.reviews.find((review) => firstLine(review.body) === marker) ?? null;
   if (existing) {
@@ -164,6 +191,48 @@ export function publishPrReview(options: {
     });
   }
 
+  if (loaded.ok) {
+    const published = loaded.value.provider.reviews?.publish
+      ? await loaded.value.provider.reviews.publish({
+        context: providerOperationContext(loaded.value),
+        changeRequest: resourceIdentity(options.prNumber),
+        identity: options.identity,
+        event: options.event,
+        body: wrappedBody,
+        mutation: { idempotencyKey: `review:publish:${marker}` }
+      })
+      : unsupportedProviderOperation(loaded.value.provider, 'reviews.publish');
+    if (!published.ok) {
+      if (published.error.retryable) {
+        const reconciled = await listPrReviews(options.prNumber, { cwd: options.cwd, client });
+        const found = reconciled.reviews.find((review) => firstLine(review.body) === marker);
+        if (found) return platformResult('applied', {
+          changed: true, platform: context.platform, capabilities: context.capabilities,
+          resource: { kind: 'pull-request', number: options.prNumber },
+          operations: [{ name: 'review:publish', status: 'applied', reasonCode: 'CREATE_RECONCILED' }], error: null
+        });
+        return platformResult('blocked', {
+          platform: context.platform, capabilities: context.capabilities,
+          resource: { kind: 'pull-request', number: options.prNumber },
+          operations: [{ name: 'review:publish', status: 'failed', reasonCode: 'REVIEW_CREATE_OUTCOME_UNKNOWN' }],
+          error: { code: 'REVIEW_CREATE_OUTCOME_UNKNOWN', message: published.error.message, retryable: true }
+        });
+      }
+      return platformResult(providerStatus(published.error), {
+        platform: context.platform, capabilities: context.capabilities,
+        resource: { kind: 'pull-request', number: options.prNumber },
+        operations: [{ name: 'review:publish', status: 'failed', reasonCode: published.error.code }],
+        error: providerError(published.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+      });
+    }
+    return platformResult('applied', {
+      changed: published.value.changed,
+      platform: context.platform, capabilities: context.capabilities,
+      resource: { kind: 'pull-request', number: options.prNumber },
+      operations: [{ name: 'review:publish', status: 'applied', reasonCode: null }], error: null
+    });
+  }
+
   const posted = client.json<RemoteReview>(['api', `repos/${repository}/pulls/${options.prNumber}/reviews`, '-X', 'POST', '--input', '-'], {
     cwd: options.cwd || process.cwd(),
     method: 'POST',
@@ -171,7 +240,7 @@ export function publishPrReview(options: {
   });
   if (!posted.ok) {
     if (posted.error.retryable) {
-      const reconciled = listPrReviews(options.prNumber, { cwd: options.cwd, client });
+      const reconciled = await listPrReviews(options.prNumber, { cwd: options.cwd, client });
       const found = reconciled.reviews.find((review) => firstLine(review.body) === marker);
       if (found) {
         return platformResult('applied', {

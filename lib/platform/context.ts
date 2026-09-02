@@ -1,14 +1,11 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 
-import semver from 'semver';
-
-import { getPlatformAdapter, registerPlatformAdapter } from './adapters.ts';
-import { createGitHubClient, MINIMUM_GITHUB_CLI_VERSION } from './github-client.ts';
-import type { GitHubClient } from './github-client.ts';
+import { loadPlatformProvider } from './provider-loader.ts';
+import { defaultGitRemote, parseGitHubRemote } from './github-provider.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
+import type { PlatformProvider, PlatformContextSnapshot, PlatformError } from './provider-contract.ts';
+import type { GitHubClient } from './github-client.ts';
 
 type ContextOptions = {
   cwd?: string;
@@ -20,148 +17,109 @@ type ContextOptions = {
   platformType?: string;
 };
 
-const CURRENT_USER_QUERY = 'query { viewer { login } }';
+type LoadedContext = {
+  provider: PlatformProvider;
+  providerType: string;
+  repositoryRoot: string;
+  workingDirectory: string;
+  sourceIdentity: string;
+  snapshot: PlatformContextSnapshot;
+  context: PlatformResult;
+};
 
-function findRepoRoot(cwd: string): string {
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
-    }).trim();
-  } catch {
-    return cwd;
-  }
+function errorStatus(error: PlatformError): PlatformResult['status'] {
+  if (error.retryable || error.code === 'AUTH_REQUIRED' || error.code === 'PLATFORM_DEPENDENCY_MISSING') return 'blocked';
+  if (error.code === 'REMOTE_MISSING' || error.code === 'PLATFORM_UNSUPPORTED') return 'no-op';
+  return 'failed';
 }
 
-function parseGitHubRemote(remote: string): string | null {
-  const trimmed = remote.trim().replace(/\.git$/, '');
-  const match = trimmed.match(/^(?:https?:\/\/github\.com\/|ssh:\/\/(?:git@)?github\.com\/|git@github\.com:)([^/\s]+\/[^/\s]+)$/i);
-  return match?.[1] || null;
-}
-
-function defaultGitRemote(cwd: string): string | null {
-  try {
-    return execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-function readPlatformType(repoRoot: string): string | null {
-  try {
-    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8'));
-    return typeof config?.platform?.type === 'string' ? config.platform.type : null;
-  } catch {
-    return null;
-  }
-}
-
-function failure(error: { code: string; message: string; retryable: boolean }, repo: string | null): PlatformResult {
-  const blocked = error.retryable || error.code === 'AUTH_REQUIRED' || error.code === 'PLATFORM_DEPENDENCY_MISSING';
-  return platformResult(blocked ? 'blocked' : 'failed', {
-    platform: { type: 'github', repository: repo, currentUser: null }, error
+function contextError(
+  providerType: string,
+  error: PlatformError,
+  repository: string | null = null
+): PlatformResult {
+  return platformResult(errorStatus(error), {
+    platform: { type: providerType || null, repository, currentUser: null },
+    error: { code: error.code, message: error.message, retryable: error.retryable }
   });
 }
 
-function resolveGitHubContext(options: ContextOptions & { cwd: string }): PlatformResult {
-  const { cwd } = options;
-  const platform = 'github';
-  const client = options.client || createGitHubClient();
-  const version = client.version({ cwd });
-  if (!version.ok) return failure(version.error, null);
-  if (!semver.gte(version.value, MINIMUM_GITHUB_CLI_VERSION)) {
-    return failure({
-      code: 'GH_CLI_VERSION_UNSUPPORTED',
-      message: `GitHub CLI ${version.value} is unsupported; install gh >= ${MINIMUM_GITHUB_CLI_VERSION}`,
-      retryable: false
-    }, null);
-  }
-  const remote = (options.gitRemote || defaultGitRemote)(cwd);
-  if (!remote) {
+function contextFromSnapshot(
+  providerType: string,
+  snapshot: PlatformContextSnapshot
+): PlatformResult {
+  if (providerType === 'none') {
     return platformResult('no-op', {
-      platform: { type: platform, repository: null, currentUser: null },
-      error: { code: 'REMOTE_MISSING', message: 'Git origin remote is not configured', retryable: false }
+      platform: { type: 'none', repository: null, currentUser: null },
+      operations: [{ name: 'resolve', status: 'no-op', reasonCode: 'PLATFORM_DISABLED' }]
     });
   }
-  const ownerRepo = parseGitHubRemote(remote);
-  if (!ownerRepo) {
-    const nonGitHub = !/github\.com/i.test(remote);
-    return platformResult(nonGitHub ? 'no-op' : 'failed', {
-      platform: { type: platform, repository: null, currentUser: null },
-      error: {
-        code: nonGitHub ? 'PLATFORM_UNSUPPORTED' : 'REMOTE_INVALID',
-        message: `Unable to parse GitHub owner/repo from '${remote}'`,
-        retryable: false
-      }
-    });
-  }
-
-  const repository = client.json(['api', `repos/${ownerRepo}`], { cwd });
-  if (!repository.ok) return failure(repository.error, null);
-  const repositoryValue = repository.value as { fork?: boolean; full_name?: string; parent?: { full_name?: string } } | null;
-  const upstream = repositoryValue?.fork ? repositoryValue.parent?.full_name : repositoryValue?.full_name;
-  if (!upstream) {
-    return platformResult('blocked', {
-      platform: { type: platform, repository: null, currentUser: null },
-      error: { code: 'UPSTREAM_UNRESOLVED', message: 'Unable to resolve the upstream repository', retryable: false }
-    });
-  }
-  const user = client.json(['api', 'graphql', '-f', `query=${CURRENT_USER_QUERY}`], { cwd });
-  if (!user.ok) return failure(user.error, upstream);
-  const userValue = user.value as { data?: { viewer?: { login?: string } } } | null;
-  const currentUser = userValue?.data?.viewer?.login || null;
-  const permissions = client.json(['api', `repos/${upstream}`], { cwd });
-  if (!permissions.ok) return failure(permissions.error, upstream);
-  const permissionValue = permissions.value as { permissions?: Record<string, boolean> } | null;
-  const values = permissionValue?.permissions || {};
-  const capabilities = {
-    authenticated: Boolean(currentUser),
-    comment: Boolean(currentUser),
-    triage: Boolean(values.triage || values.push || values.admin),
-    push: Boolean(values.push || values.admin),
-    admin: Boolean(values.admin)
-  };
+  const capabilities = snapshot.capabilities;
   const status = Object.values(capabilities).every(Boolean) ? 'no-op' : 'degraded';
+  const repository = snapshot.scope.label || snapshot.scope.id || null;
   return platformResult(status, {
-    changed: false,
-    platform: { type: platform, repository: upstream, currentUser },
+    platform: {
+      type: snapshot.type || providerType,
+      repository,
+      currentUser: snapshot.currentUser?.name || snapshot.currentUser?.id || null
+    },
     resource: { kind: 'repository', number: null },
     capabilities,
     operations: [{ name: 'resolve', status: 'no-op', reasonCode: null }]
   });
 }
 
-registerPlatformAdapter({
-  type: 'github',
-  resolveContext(options) {
-    return resolveGitHubContext(options as ContextOptions & { cwd: string });
+async function resolvePlatformProviderContext(options: ContextOptions = {}): Promise<
+  { ok: true; value: LoadedContext } | { ok: false; context: PlatformResult }
+> {
+  const workingDirectory = path.resolve(options.cwd || process.cwd());
+  const loaded = await loadPlatformProvider({
+    cwd: workingDirectory,
+    platformType: options.platformType,
+    client: options.client as GitHubClient | undefined
+  });
+  if (!loaded.ok) {
+    if (!loaded.error.providerType && options.platformType === undefined) {
+      return {
+        ok: false,
+        context: platformResult('no-op', {
+          platform: { type: null, repository: null, currentUser: null },
+          error: {
+            code: 'PLATFORM_UNSUPPORTED',
+            message: 'No platform provider is configured',
+            retryable: false
+          }
+        })
+      };
+    }
+    return { ok: false, context: contextError(loaded.error.providerType || options.platformType || '', loaded.error) };
   }
-});
 
-registerPlatformAdapter({
-  type: 'none',
-  resolveContext() {
-    return platformResult('no-op', {
-      platform: { type: 'none', repository: null, currentUser: null },
-      operations: [{ name: 'resolve', status: 'no-op', reasonCode: 'PLATFORM_DISABLED' }]
-    });
-  }
-});
-
-function resolvePlatformContext(options: ContextOptions = {}): PlatformResult {
-  const cwd = path.resolve(options.cwd || process.cwd());
-  const repoRoot = findRepoRoot(cwd);
-  const platform = options.platformType ?? readPlatformType(repoRoot);
-  const adapter = getPlatformAdapter(platform);
-  if (!adapter) {
-    return platformResult('no-op', {
-      platform: { type: platform, repository: null, currentUser: null },
-      error: { code: 'PLATFORM_UNSUPPORTED', message: `Platform '${platform || 'none'}' has no registered adapter`, retryable: false }
-    });
-  }
-  return adapter.resolveContext({ cwd, gitRemote: options.gitRemote, client: options.client });
+  const gitRemote = options.gitRemote ? options.gitRemote(workingDirectory) : null;
+  const resolved = await loaded.value.provider.context.resolve({
+    repositoryRoot: loaded.value.repositoryRoot,
+    workingDirectory,
+    scopeId: loaded.value.repositoryRoot,
+    gitRemote
+  });
+  if (!resolved.ok) return {
+    ok: false,
+    context: contextError(loaded.value.providerType, resolved.error)
+  };
+  return {
+    ok: true,
+    value: {
+      ...loaded.value,
+      snapshot: resolved.value,
+      context: contextFromSnapshot(loaded.value.providerType, resolved.value)
+    }
+  };
 }
 
-export { parseGitHubRemote, resolvePlatformContext };
-export type { ContextOptions };
+async function resolvePlatformContext(options: ContextOptions = {}): Promise<PlatformResult> {
+  const resolved = await resolvePlatformProviderContext(options);
+  return resolved.ok ? resolved.value.context : resolved.context;
+}
+
+export { defaultGitRemote, parseGitHubRemote, resolvePlatformContext, resolvePlatformProviderContext };
+export type { ContextOptions, LoadedContext };

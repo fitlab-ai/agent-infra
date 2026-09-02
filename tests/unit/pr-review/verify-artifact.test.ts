@@ -56,7 +56,7 @@ function validArtifact(): string {
   ].join('\n');
 }
 
-function runVerify(root: string, fileName: string, content: string) {
+async function runVerify(root: string, fileName: string, content: string) {
   const artifactPath = path.join(root, fileName);
   fs.writeFileSync(artifactPath, content);
   return verifyInProcess({
@@ -66,24 +66,24 @@ function runVerify(root: string, fileName: string, content: string) {
     artifactFile: fileName,
     checks: ['artifact'],
     repositoryRoot: root
-  }) as { status: 'pass' | 'fail' | 'blocked'; message: string };
+  });
 }
 
-test('verify-artifact passes a complete standalone pr-review artifact without task context', () => {
+test('verify-artifact passes a complete standalone pr-review artifact without task context', async () => {
   const root = fixtureRoot();
   try {
-    const result = runVerify(root, 'pr-review.md', validArtifact());
+    const result = await runVerify(root, 'pr-review.md', validArtifact());
     assert.equal(result.status, 'pass', result.message);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('verify-artifact fails when the reviewed head SHA is missing', () => {
+test('verify-artifact fails when the reviewed head SHA is missing', async () => {
   const root = fixtureRoot();
   try {
     const content = validArtifact().replace(`- **被审 head SHA**：${HEAD}\n`, '');
-    const result = runVerify(root, 'pr-review.md', content);
+    const result = await runVerify(root, 'pr-review.md', content);
     assert.equal(result.status, 'fail');
     assert.match(result.message, /required pattern/);
   } finally {
@@ -91,11 +91,11 @@ test('verify-artifact fails when the reviewed head SHA is missing', () => {
   }
 });
 
-test('verify-artifact fails when the evidence scenario is missing', () => {
+test('verify-artifact fails when the evidence scenario is missing', async () => {
   const root = fixtureRoot();
   try {
     const content = validArtifact().replace('- **证据场景**：S1\n', '');
-    const result = runVerify(root, 'pr-review.md', content);
+    const result = await runVerify(root, 'pr-review.md', content);
     assert.equal(result.status, 'fail');
     assert.match(result.message, /required pattern/);
   } finally {
@@ -103,11 +103,11 @@ test('verify-artifact fails when the evidence scenario is missing', () => {
   }
 });
 
-test('verify-artifact fails when the review mode is missing', () => {
+test('verify-artifact fails when the review mode is missing', async () => {
   const root = fixtureRoot();
   try {
     const content = validArtifact().replace('- **审查模式**：verify\n', '');
-    const result = runVerify(root, 'pr-review.md', content);
+    const result = await runVerify(root, 'pr-review.md', content);
     assert.equal(result.status, 'fail');
     assert.match(result.message, /required pattern/);
   } finally {
@@ -115,11 +115,11 @@ test('verify-artifact fails when the review mode is missing', () => {
   }
 });
 
-test('verify-artifact fails when the receipt is missing', () => {
+test('verify-artifact fails when the receipt is missing', async () => {
   const root = fixtureRoot();
   try {
     const content = validArtifact().replace('- **receipt**：r1-abc\n', '');
-    const result = runVerify(root, 'pr-review.md', content);
+    const result = await runVerify(root, 'pr-review.md', content);
     assert.equal(result.status, 'fail');
     assert.match(result.message, /required pattern/);
   } finally {
@@ -127,11 +127,11 @@ test('verify-artifact fails when the receipt is missing', () => {
   }
 });
 
-test('verify-artifact reports missing required sections', () => {
+test('verify-artifact reports missing required sections', async () => {
   const root = fixtureRoot();
   try {
     const content = validArtifact().replace('## 覆盖矩阵', '## 缺失的段');
-    const result = runVerify(root, 'pr-review.md', content);
+    const result = await runVerify(root, 'pr-review.md', content);
     assert.equal(result.status, 'fail');
     assert.match(result.message, /missing sections/);
     assert.match(result.message, /覆盖矩阵/);

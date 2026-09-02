@@ -79,11 +79,11 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       metadataProvider: () => ({ timestamp: now, agentInfraVersion: options.version ?? VERSION })
     };
     let result;
-    const execute = () => {
+    const execute = async () => {
       let current = applyHumanDecision(request, writeOptions);
       if (current.status !== 'failed' || !parsedDecision.overrideTicket) return current;
       if (!parsedDecision.overrideTarget || !parsedDecision.overrideScope) throw new Error('override ticket requires --override-target and --override-scope');
-      const consumed = consumeHumanOverride({
+      const consumed = await consumeHumanOverride({
         taskRef: resolved.taskId,
         ticketId: parsedDecision.overrideTicket,
         failureId: failureId('decision-intent', current.error?.code ?? 'TASK_STATE_MISMATCH'),
@@ -102,7 +102,7 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       if (consumed.status === 'failed') throw new Error(consumed.error.message);
       return current;
     };
-    result = withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-decision', execute);
+    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-decision', execute);
     if (result.error) throw new Error(result.error.message);
     return 0;
   } catch (error) {

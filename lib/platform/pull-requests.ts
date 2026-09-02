@@ -6,17 +6,13 @@ import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { extractSection } from '../task/sections.ts';
 import { captureTaskWriteMetadata, writeTask } from '../task/write.ts';
-import {
-  inspectPlatformChangeRequest,
-  inspectPlatformIssueClosingChangeRequests,
-  registerPlatformCapabilities
-} from './adapters.ts';
 import type { PlatformChangeRequestSnapshot } from './adapters.ts';
-import { parseGitHubRemote, resolvePlatformContext } from './context.ts';
+import { parseGitHubRemote, resolvePlatformContext, resolvePlatformProviderContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import { inspectGitHubIssue, inspectPlatformIssue } from './issues.ts';
 import type { IssueSnapshot } from './issues.ts';
+import { configuredGitRemotes, resolveGitHubChangeRequestGitEvidence as resolveGitHubProviderEvidence } from './github-provider.ts';
 import { planPullRequestMetadata } from './pull-request-metadata.ts';
 import {
   extractPullRequestFileNames,
@@ -38,6 +34,14 @@ import {
   readPrDeliveryFact
 } from '../task/pr-delivery-fact.ts';
 import type { CreationOutcome, PrDeliveryBindingSource, PrDeliveryFact } from '../task/pr-delivery-fact.ts';
+import {
+  providerError,
+  providerOperationContext,
+  providerStatus,
+  resourceIdentity,
+  unsupportedProviderOperation
+} from './provider-bridge.ts';
+import type { ChangeRequestSnapshot as ProviderChangeRequestSnapshot } from './provider-contract.ts';
 
 type PullRequestSnapshot = PlatformChangeRequestSnapshot;
 
@@ -421,7 +425,7 @@ function remoteBranchHead(cwd: string, repository: string, head: string):
   }
 }
 
-function verifyCreateHead(base: ReturnType<typeof resolvedContext> & { ok: true }, head: string) {
+function verifyCreateHead(base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true }, head: string) {
   let localHead: string;
   try {
     localHead = repositoryHead(base.resolved.repoRoot);
@@ -438,7 +442,7 @@ function verifyCreateHead(base: ReturnType<typeof resolvedContext> & { ok: true 
 }
 
 function validateBoundPullRequest(
-  base: ReturnType<typeof resolvedContext> & { ok: true },
+  base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
   pullRequest: PullRequestSnapshot | null,
   head: string,
   baseRef: string,
@@ -481,7 +485,7 @@ function resolveTaskDeliveryTarget(repoRoot: string, frontmatter: Record<string,
     : { ok: false as const, error: { code: target.code, message: target.message, retryable: false } };
 }
 
-function taskDeliveryTarget(base: ReturnType<typeof resolvedContext> & { ok: true }) {
+function taskDeliveryTarget(base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true }) {
   return resolveTaskDeliveryTarget(base.resolved.repoRoot, base.frontmatter);
 }
 
@@ -513,7 +517,7 @@ function validateIdentityAgainstTarget(
 }
 
 function validateWriterIdentity(
-  base: ReturnType<typeof resolvedContext> & { ok: true },
+  base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
   pullRequest: PullRequestSnapshot | null,
   options: BindingIdentityOptions = {}
 ): { ok: true } | { ok: false; error: { code: string; message: string; retryable: boolean } } {
@@ -546,7 +550,7 @@ function validateExternalMergedEvidence(
   return { ok: true };
 }
 
-function resolvedContext(taskRef: string, options: InspectionOptions) {
+async function resolvedContext(taskRef: string, options: InspectionOptions) {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ok: false as const, output: result('failed', resolved.taskId, null, null, {
     error: { code: resolved.code, message: resolved.message, retryable: false }
@@ -563,12 +567,75 @@ function resolvedContext(taskRef: string, options: InspectionOptions) {
   const issueNumber = Number.isInteger(issue) && issue > 0 ? issue : null;
   const prNumber = Number.isInteger(pr) && pr > 0 ? pr : null;
   const client = (options.client as GitHubClient | undefined) || createGitHubClient();
-  const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
-  if (!usable) return { ok: false as const, output: result(context.status, resolved.taskId, issueNumber, prNumber, {
+  if (!usable || !loaded.ok) return { ok: false as const, output: result(context.status, resolved.taskId, issueNumber, prNumber, {
     platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
   }) };
-  return { ok: true as const, resolved, content, frontmatter, fact, issueNumber, prNumber, client, context };
+  return { ok: true as const, resolved, content, frontmatter, fact, issueNumber, prNumber, client, context, provider: loaded.value.provider, providerType: loaded.value.providerType, loadedContext: loaded.value };
+}
+
+function normalizeProviderPullRequest(
+  remote: ProviderChangeRequestSnapshot,
+  repository: string,
+  fallbackNumber: number,
+  fallback?: PullRequestSnapshot | null
+): PullRequestSnapshot {
+  const head = remote.head || fallback?.head || { repository, ref: '', sha: remote.headSha || '' };
+  const base = remote.base || fallback?.base || { repository, ref: '', sha: remote.baseSha || '' };
+  return {
+    repository,
+    number: remote.number ?? fallbackNumber,
+    nodeId: remote.id,
+    url: remote.displayUrl || fallback?.url || '',
+    state: remote.state === 'closed' ? 'closed' : 'open',
+    title: remote.title,
+    body: remote.body,
+    draft: remote.draft ?? fallback?.draft ?? false,
+    head: { ...head, sha: remote.headSha || head.sha },
+    base: { ...base, sha: remote.baseSha || base.sha },
+    mergedAt: remote.mergedAt ?? fallback?.mergedAt ?? null,
+    mergeCommitSha: remote.mergeCommitSha ?? fallback?.mergeCommitSha ?? null,
+    labels: [...(remote.labels || fallback?.labels || [])].sort(),
+    assignees: [...(remote.assignees || fallback?.assignees || [])].sort(),
+    milestone: remote.milestone ?? fallback?.milestone ?? null,
+    mergeability: remote.mergeability || fallback?.mergeability || { state: 'unknown', detail: null }
+  };
+}
+
+function providerPullRequestError(
+  base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
+  error: { code: string; message: string; retryable: boolean },
+  prNumber: number | null
+): PullRequestResult {
+  return result(providerStatus(error), base.resolved.taskId, base.issueNumber, prNumber, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    resource: { kind: 'pull-request', number: prNumber },
+    error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+  });
+}
+
+async function inspectExternalPullRequest(
+  base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
+  prNumber: number
+): Promise<PullRequestResult> {
+  const fallback = base.fact?.state === 'bound' && base.fact.identity.number === prNumber
+    ? base.fact.identity as unknown as PullRequestSnapshot
+    : null;
+  const inspected = base.provider.changeRequests?.inspect
+    ? await base.provider.changeRequests.inspect({ context: providerOperationContext(base.loadedContext), target: resourceIdentity(prNumber) })
+    : unsupportedProviderOperation(base.provider, 'changeRequests.inspect');
+  if (!inspected.ok) return providerPullRequestError(base, inspected.error, prNumber);
+  const pullRequest = normalizeProviderPullRequest(inspected.value, base.context.platform.repository!, prNumber, fallback);
+  return result('no-op', base.resolved.taskId, base.issueNumber, prNumber, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    resource: { kind: 'pull-request', number: prNumber },
+    pullRequest,
+    error: null
+  });
 }
 
 function inspectGitHubPullRequest(client: GitHubClient, repository: string, number: number, cwd: string) {
@@ -580,33 +647,6 @@ function inspectGitHubPullRequest(client: GitHubClient, repository: string, numb
     : { ok: false as const, error: { code: 'PR_IDENTITY_INVALID', message: 'Remote resource is not a valid pull request', retryable: false } };
 }
 
-function configuredGitRemotes(cwd: string): Array<{ name: string; url: string; repository: string }> {
-  try {
-    return execFileSync('git', ['remote'], {
-      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
-    }).split(/\r?\n/).filter(Boolean).flatMap((name) => {
-      try {
-        const url = execFileSync('git', ['config', '--get', `remote.${name}.url`], {
-          cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
-        }).trim();
-        const repository = parseGitHubRemote(url);
-        return repository ? [{ name, url, repository }] : [];
-      } catch {
-        return [];
-      }
-    });
-  } catch {
-    return [];
-  }
-}
-
-function rewriteGitHubRemote(remote: string, repository: string): string | null {
-  const match = remote.trim().match(
-    /^(https?:\/\/github\.com\/|ssh:\/\/(?:git@)?github\.com\/|git@github\.com:)[^/\s]+\/[^/\s]+(?:\.git)?$/i
-  );
-  return match ? `${match[1]}${repository}.git` : null;
-}
-
 function resolveGitHubChangeRequestGitEvidence({
   cwd,
   repository,
@@ -616,81 +656,16 @@ function resolveGitHubChangeRequestGitEvidence({
   repository: string;
   pullRequest: PullRequestSnapshot;
 }) {
-  if (
-    pullRequest.repository !== repository ||
-    pullRequest.base.repository !== repository ||
-    pullRequest.number <= 0
-  ) {
-    return {
-      ok: false as const,
-      error: {
-        code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
-        message: 'Pull request repository identity is inconsistent',
-        retryable: false
-      }
-    };
-  }
-  const reviewedHeadRef = `refs/pull/${pullRequest.number}/head`;
-  const targetHeadRef = `refs/heads/${pullRequest.base.ref}`;
-  const refValid = (ref: string) => {
-    try {
-      execFileSync('git', ['check-ref-format', ref], {
-        cwd, encoding: 'utf8', stdio: ['ignore', 'ignore', 'ignore']
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (!refValid(reviewedHeadRef) || !refValid(targetHeadRef)) {
-    return {
-      ok: false as const,
-      error: {
-        code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
-        message: 'Pull request Git refs are invalid',
-        retryable: false
-      }
-    };
-  }
-
-  const remotes = configuredGitRemotes(cwd);
-  const exact = remotes
-    .filter((remote) => remote.repository === repository)
-    .sort((left, right) => Number(right.name === 'origin') - Number(left.name === 'origin') ||
-      left.name.localeCompare(right.name))[0];
-  const origin = remotes.find((remote) => remote.name === 'origin');
-  const remoteUrl = exact?.url || (origin ? rewriteGitHubRemote(origin.url, repository) : null);
-  if (!remoteUrl) {
-    return {
-      ok: false as const,
-      error: {
-        code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
-        message: `No GitHub remote can provide evidence for ${repository}`,
-        retryable: false
-      }
-    };
-  }
-  return {
-    ok: true as const,
-    value: { remoteUrl, reviewedHeadRef, targetHeadRef }
-  };
+  return resolveGitHubProviderEvidence({
+    cwd,
+    repository,
+    number: pullRequest.number,
+    baseRepository: pullRequest.base.repository,
+    baseRef: pullRequest.base.ref
+  });
 }
 
-registerPlatformCapabilities('github', {
-  inspectChangeRequest({ client, repository, number, cwd }) {
-    return inspectGitHubPullRequest((client as GitHubClient | undefined) || createGitHubClient(), repository, number, cwd);
-  },
-  inspectIssueClosingChangeRequests({ client, repository, issueNumber, cwd }) {
-    return inspectGitHubIssueClosingChangeRequests(
-      (client as GitHubClient | undefined) || createGitHubClient(), repository, issueNumber, cwd
-    );
-  },
-  resolveChangeRequestGitEvidence(context) {
-    return resolveGitHubChangeRequestGitEvidence(context);
-  }
-});
-
-function locatePullRequest(base: ReturnType<typeof resolvedContext> & { ok: true }, head: string, target: string, expectedSha?: string) {
+function locatePullRequest(base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true }, head: string, target: string, expectedSha?: string) {
   const repository = base.context.platform.repository!;
   const listed = base.client.json<RemotePullRequest[]>([
     'api', `repos/${repository}/pulls?state=open&base=${encodeURIComponent(target)}&per_page=100`
@@ -709,8 +684,8 @@ function locatePullRequest(base: ReturnType<typeof resolvedContext> & { ok: true
     } };
 }
 
-function inspectPlatformPullRequest(taskRef: string, options: InspectionOptions = {}): PullRequestResult {
-  const base = resolvedContext(taskRef, options);
+async function inspectPlatformPullRequest(taskRef: string, options: InspectionOptions = {}): Promise<PullRequestResult> {
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.fact) return result('no-op', base.resolved.taskId, base.issueNumber, null, {
     error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
@@ -719,32 +694,13 @@ function inspectPlatformPullRequest(taskRef: string, options: InspectionOptions 
     platform: base.context.platform, capabilities: base.context.capabilities,
     error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false }
   });
-  const fetched = inspectPlatformChangeRequest(base.context.platform.type, {
-    cwd: base.resolved.repoRoot,
-    repository: base.context.platform.repository!,
-    number: base.prNumber,
-    client: options.client || base.client
-  });
-  if (!fetched.ok || !fetched.value) {
-    const error = fetched.error || {
-      code: 'PR_INSPECTION_INVALID',
-      message: 'Platform adapter returned no change-request snapshot',
-      retryable: false
-    };
-    return result(error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
-      platform: base.context.platform, capabilities: base.context.capabilities,
-      resource: { kind: 'pull-request', number: base.prNumber }, error
-    });
-  }
-  return result('no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: fetched.value, error: null
-  });
+  return inspectExternalPullRequest(base, base.prNumber);
 }
 
-function inspectPlatformPullRequestByNumber(prNumber: number, options: InspectionOptions = {}): PullRequestResult {
+async function inspectPlatformPullRequestByNumber(prNumber: number, options: InspectionOptions = {}): Promise<PullRequestResult> {
   const client = (options.client as GitHubClient | undefined) || createGitHubClient();
-  const context = resolvePlatformContext({ cwd: options.cwd || process.cwd(), client });
+  const loaded = await resolvePlatformProviderContext({ cwd: options.cwd || process.cwd(), client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
   if (!usable) {
     return result(context.status, null, null, null, {
@@ -757,26 +713,24 @@ function inspectPlatformPullRequestByNumber(prNumber: number, options: Inspectio
       error: { code: 'PR_NUMBER_INVALID', message: 'PR number must be positive', retryable: false }
     });
   }
-  const fetched = inspectPlatformChangeRequest(context.platform.type, {
-    cwd: options.cwd || process.cwd(),
-    repository: context.platform.repository!,
-    number: prNumber,
-    client
-  });
-  if (!fetched.ok || !fetched.value) {
-    const error = fetched.error || {
-      code: 'PR_INSPECTION_INVALID',
-      message: 'Platform adapter returned no change-request snapshot',
-      retryable: false
-    };
-    return result(error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
+  if (loaded.ok) {
+    const inspected = loaded.value.provider.changeRequests?.inspect
+      ? await loaded.value.provider.changeRequests.inspect({ context: providerOperationContext(loaded.value), target: resourceIdentity(prNumber) })
+      : unsupportedProviderOperation(loaded.value.provider, 'changeRequests.inspect');
+    if (!inspected.ok) return result(providerStatus(inspected.error), null, null, prNumber, {
       platform: context.platform, capabilities: context.capabilities,
-      resource: { kind: 'pull-request', number: prNumber }, error
+      resource: { kind: 'pull-request', number: prNumber }, error: providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+    });
+    return result('no-op', null, null, prNumber, {
+      platform: context.platform, capabilities: context.capabilities,
+      resource: { kind: 'pull-request', number: prNumber },
+      pullRequest: normalizeProviderPullRequest(inspected.value, context.platform.repository!, prNumber), error: null
     });
   }
-  return result('no-op', null, null, prNumber, {
+  return result('failed', null, null, prNumber, {
     platform: context.platform, capabilities: context.capabilities,
-    resource: { kind: 'pull-request', number: prNumber }, pullRequest: fetched.value, error: null
+    resource: { kind: 'pull-request', number: prNumber },
+    error: { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false }
   });
 }
 
@@ -1081,7 +1035,7 @@ function boundFactFor(
   });
 }
 
-function writeCreateStarted(base: ReturnType<typeof resolvedContext> & { ok: true }, agent: string) {
+function writeCreateStarted(base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true }, agent: string) {
   const starts = (base.content.match(/\*\*Create PR \[started\]\*\*/g) || []).length;
   const dones = (base.content.match(/\*\*Create PR\*\*/g) || []).length;
   if (starts > dones) return { status: 'no-op' as const };
@@ -1096,7 +1050,7 @@ function writeCreateStarted(base: ReturnType<typeof resolvedContext> & { ok: tru
 }
 
 function bindIdentity(
-  base: ReturnType<typeof resolvedContext> & { ok: true },
+  base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
   pullRequest: PullRequestSnapshot,
   agent: string,
   source: PrDeliveryBindingSource,
@@ -1136,8 +1090,8 @@ function bindIdentity(
   }, { repoRoot: base.resolved.repoRoot, metadataProvider: () => metadata });
 }
 
-function bindPlatformPullRequest(taskRef: string, options: BindOptions): PullRequestResult {
-  const base = resolvedContext(taskRef, options);
+async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.fact) return result('failed', base.resolved.taskId, base.issueNumber, null, {
     error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
@@ -1148,6 +1102,30 @@ function bindPlatformPullRequest(taskRef: string, options: BindOptions): PullReq
   if (base.prNumber && base.prNumber !== options.pr) return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     error: { code: 'PR_BIND_CONFLICT', message: `Task is already bound to PR #${base.prNumber}`, retryable: false }
   });
+  if (base.providerType !== 'github') {
+    const inspected = await inspectExternalPullRequest(base, options.pr);
+    if (inspected.status === 'failed' || inspected.status === 'blocked' || !inspected.pullRequest) return inspected;
+    const identity = validateWriterIdentity(base, inspected.pullRequest, {
+      expectedHead: String(base.frontmatter.branch || ''),
+      errorCode: 'PR_BIND_IDENTITY_MISMATCH'
+    });
+    if (!identity.ok) return result('failed', base.resolved.taskId, base.issueNumber, options.pr, {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      pullRequest: inspected.pullRequest, error: identity.error
+    });
+    const written = bindIdentity(base, inspected.pullRequest, options.agent, 'explicit-bind', options.dryRun);
+    if (written.status === 'failed') return result('failed', base.resolved.taskId, base.issueNumber, options.pr, {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      pullRequest: inspected.pullRequest, error: { code: written.error.code, message: written.error.message, retryable: false }
+    });
+    const status = options.dryRun ? 'planned' : written.status === 'no-op' ? 'no-op' : 'applied';
+    return result(status, base.resolved.taskId, base.issueNumber, options.pr, {
+      changed: !options.dryRun && written.status === 'applied',
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: options.pr }, pullRequest: inspected.pullRequest,
+      operations: [{ name: 'task:bind-pr', status, reasonCode: null }], error: null
+    });
+  }
   const fetched = inspectGitHubPullRequest(base.client, base.context.platform.repository!, options.pr, base.resolved.repoRoot);
   if (!fetched.ok) return result(fetched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { error: fetched.error });
   const initialIdentity = validateWriterIdentity(base, fetched.value, {
@@ -1203,8 +1181,8 @@ function externalIdentityEvidenceNote(
   ].join('; ');
 }
 
-function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOptions): ExternalPullRequestResult {
-  const base = resolvedContext(taskRef, options);
+async function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOptions): Promise<ExternalPullRequestResult> {
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return externalResult(base.output);
   if (!base.fact) return externalResult(result('failed', base.resolved.taskId, base.issueNumber, null, {
     error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
@@ -1233,20 +1211,27 @@ function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOpt
     capabilities: base.context.capabilities,
     error: { code: 'EXTERNAL_DELIVERY_ISSUE_REQUIRED', message: 'External delivery requires a valid issue_number', retryable: false }
   }));
-  const inspected = inspectPlatformIssueClosingChangeRequests(base.context.platform.type, {
-    cwd: base.resolved.repoRoot,
-    repository: base.context.platform.repository!,
-    issueNumber: base.issueNumber,
-    client: base.client
-  });
+  const inspected = base.providerType !== 'github'
+    ? await (base.provider.changeRequests?.listClosing
+      ? base.provider.changeRequests.listClosing({
+        context: providerOperationContext(base.loadedContext),
+        issue: resourceIdentity(base.issueNumber)
+      })
+      : unsupportedProviderOperation(base.provider, 'changeRequests.listClosing'))
+    : inspectGitHubIssueClosingChangeRequests(base.client, base.context.platform.repository!, base.issueNumber, base.resolved.repoRoot);
   if (!inspected.ok || !inspected.value) {
-    const error = inspected.error || { code: 'PR_IDENTITY_INVALID', message: 'Closing PR inspection returned no candidates', retryable: false };
+    const error = 'error' in inspected && inspected.error
+      ? inspected.error
+      : { code: 'PR_IDENTITY_INVALID', message: 'Closing PR inspection returned no candidates', retryable: false };
     return externalResult(result(error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
       platform: base.context.platform, capabilities: base.context.capabilities, error
     }));
   }
+  const candidates = base.providerType !== 'github'
+    ? (inspected.value as ProviderChangeRequestSnapshot[]).map((item) => normalizeProviderPullRequest(item, base.context.platform.repository!, item.number || 0))
+    : inspected.value as PullRequestSnapshot[];
   const selected = selectExternalPullRequest(
-    inspected.value,
+    candidates,
     base.context.platform.repository!,
     base.prNumber,
     options.pr ?? null
@@ -1268,7 +1253,16 @@ function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOpt
     platform: base.context.platform, capabilities: base.context.capabilities,
     pullRequest: selected.selected, error: initialIdentity.error
   }), { candidates: selected.candidates, eligible: selected.eligible, selected: selected.selected });
-  const rechecked = inspectGitHubPullRequest(base.client, base.context.platform.repository!, selected.selected.number, base.resolved.repoRoot);
+  const rechecked = base.providerType !== 'github'
+    ? await (base.provider.changeRequests?.inspect
+      ? base.provider.changeRequests.inspect({
+        context: providerOperationContext(base.loadedContext),
+        target: resourceIdentity(selected.selected.number)
+      }).then((response) => response.ok
+        ? { ok: true as const, value: normalizeProviderPullRequest(response.value, base.context.platform.repository!, selected.selected.number, selected.selected) }
+        : response)
+      : unsupportedProviderOperation(base.provider, 'changeRequests.inspect'))
+    : inspectGitHubPullRequest(base.client, base.context.platform.repository!, selected.selected.number, base.resolved.repoRoot);
   if (!rechecked.ok || !rechecked.value) return externalResult(result(rechecked.ok ? 'failed' : rechecked.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities,
     pullRequest: selected.selected,
@@ -1347,9 +1341,11 @@ function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOpt
   }), { mode: 'external', authorization: selected.source, candidates: selected.candidates, eligible: selected.eligible, selected: selectedPullRequest });
 }
 
-function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptions): PullRequestResult {
-  const base = resolvedContext(taskRef, options);
-  if (!base.ok) return withCreation(base.output, PRECONDITION_NOT_CREATED);
+function createPlatformPullRequestUnlocked(
+  taskRef: string,
+  options: CreateOptions,
+  base: Extract<Awaited<ReturnType<typeof resolvedContext>>, { ok: true }>
+): PullRequestResult {
   if (!base.fact) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
     error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
   }), PRECONDITION_NOT_CREATED);
@@ -1371,15 +1367,24 @@ function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptio
       capabilities: base.context.capabilities,
       error: headCheck.error
     }), PRECONDITION_NOT_CREATED);
-    const inspected = inspectPlatformPullRequest(taskRef, options);
-    const identity = validateBoundPullRequest(base, inspected.pullRequest, options.head, options.base, headCheck.value);
+    const inspected = inspectGitHubPullRequest(base.client, base.context.platform.repository!, base.prNumber, base.resolved.repoRoot);
+    const inspectedResult = inspected.ok
+      ? result('no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
+        platform: base.context.platform, capabilities: base.context.capabilities,
+        resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: inspected.value, error: null
+      })
+      : result(inspected.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+        platform: base.context.platform, capabilities: base.context.capabilities,
+        resource: { kind: 'pull-request', number: base.prNumber }, error: inspected.error
+      });
+    const identity = validateBoundPullRequest(base, inspectedResult.pullRequest, options.head, options.base, headCheck.value);
     if (!identity.ok) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
       platform: base.context.platform,
       capabilities: base.context.capabilities,
-      pullRequest: inspected.pullRequest,
+      pullRequest: inspectedResult.pullRequest,
       error: identity.error
     }), PRECONDITION_NOT_CREATED);
-    return withCreation({ ...inspected, result: 'no_op' }, { kind: 'no-op', createdByCurrentOperation: false });
+    return withCreation({ ...inspectedResult, result: 'no_op' }, { kind: 'no-op', createdByCurrentOperation: false });
   }
   const headCheck = verifyCreateHead(base, options.head);
   if (!headCheck.ok) return withCreation(result(headCheck.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, null, {
@@ -1474,11 +1479,7 @@ function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptio
     error: { code: 'PR_BIND_IDENTITY_MISMATCH', message: 'Pull request identity changed before task binding', retryable: false }
   }), created ? { kind: 'created', createdByCurrentOperation: true } : { kind: 'not-created', reason: 'precondition-failed', createdByCurrentOperation: false });
   pullRequest = beforeBind.value;
-  const refreshed = resolvedContext(taskRef, options);
-  if (!refreshed.ok) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
-    pullRequest, error: { code: 'PR_CREATED_BIND_FAILED', message: pullRequest.url, retryable: false }
-  }), created ? { kind: 'created', createdByCurrentOperation: true } : { kind: 'not-created', reason: 'precondition-failed', createdByCurrentOperation: false });
-  const bound = bindIdentity(refreshed, pullRequest, options.agent, created ? 'created' : 'reused', false, options.head, expectedHeadSha);
+  const bound = bindIdentity(base, pullRequest, options.agent, created ? 'created' : 'reused', false, options.head, expectedHeadSha);
   if (bound.status === 'failed') return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
     platform: base.context.platform, capabilities: base.context.capabilities,
     resource: { kind: 'pull-request', number: pullRequest.number }, pullRequest,
@@ -1493,13 +1494,34 @@ function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptio
   }), created ? { kind: 'created', createdByCurrentOperation: true } : { kind: 'reused', createdByCurrentOperation: false });
 }
 
-function createPlatformPullRequest(taskRef: string, options: CreateOptions): PullRequestResult {
-  const base = resolvedContext(taskRef, options);
+async function createPlatformPullRequest(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return withCreation(base.output, PRECONDITION_NOT_CREATED);
   if (!options.base || !options.head || !options.title.trim() || !options.body.trim()) {
     return withCreation(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
       error: { code: 'PR_PAYLOAD_INVALID', message: 'base, head, title and body are required', retryable: false }
     }), PRECONDITION_NOT_CREATED);
+  }
+  if (base.providerType !== 'github') {
+    try {
+      return await withTaskExecutionLock(
+        base.resolved.repoRoot,
+        base.resolved.taskId,
+        'platform-pr.create',
+        () => createExternalPullRequest(taskRef, options, base)
+      );
+    } catch (error) {
+      if (error instanceof TaskExecutionLockError) return withCreation(result('blocked', base.resolved.taskId, base.issueNumber, null, {
+        platform: base.context.platform,
+        capabilities: base.context.capabilities,
+        error: { code: error.code, message: error.message, retryable: true }
+      }), PRECONDITION_NOT_CREATED);
+      return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
+        platform: base.context.platform,
+        capabilities: base.context.capabilities,
+        error: { code: 'PR_CREATE_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }
+      }), PRECONDITION_NOT_CREATED);
+    }
   }
   const phase = { value: 'before-post' as CreatePhase };
   try {
@@ -1507,7 +1529,7 @@ function createPlatformPullRequest(taskRef: string, options: CreateOptions): Pul
       base.resolved.repoRoot,
       base.resolved.taskId,
       'platform-pr.create',
-      () => createPlatformPullRequestUnlocked(taskRef, { ...options, phase })
+      () => createPlatformPullRequestUnlocked(taskRef, { ...options, phase }, base)
     );
   } catch (error) {
     if (error instanceof TaskExecutionLockError) {
@@ -1534,7 +1556,117 @@ function createPlatformPullRequest(taskRef: string, options: CreateOptions): Pul
   }
 }
 
-function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullRequestResult {
+async function createExternalPullRequest(
+  taskRef: string,
+  options: CreateOptions,
+  base: Extract<Awaited<ReturnType<typeof resolvedContext>>, { ok: true }>
+): Promise<PullRequestResult> {
+  if (!base.fact) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
+    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
+  }), PRECONDITION_NOT_CREATED);
+  const target = taskDeliveryTarget(base);
+  if (!target.ok) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    error: target.error
+  }), PRECONDITION_NOT_CREATED);
+  if (options.base !== target.value.baseRef) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    error: { code: 'PR_DELIVERY_TARGET_MISMATCH', message: `Pull request base '${options.base}' does not match delivery target '${target.value.baseRef}'`, retryable: false }
+  }), PRECONDITION_NOT_CREATED);
+  if (base.prNumber) {
+    const inspected = await inspectExternalPullRequest(base, base.prNumber);
+    return inspected.status === 'failed' || inspected.status === 'blocked'
+      ? withCreation(inspected, PRECONDITION_NOT_CREATED)
+      : withCreation({ ...inspected, result: 'no_op' }, { kind: 'no-op', createdByCurrentOperation: false });
+  }
+  if (options.dryRun) return withCreation(result('planned', base.resolved.taskId, base.issueNumber, null, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    operations: [{ name: 'pr:create', status: 'planned', reasonCode: null }],
+    result: 'pr_created',
+    error: null
+  }), { kind: 'planned', action: 'create', createdByCurrentOperation: false });
+
+  const started = writeCreateStarted(base, options.agent);
+  if (started.status === 'failed') return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
+    error: { code: started.error.code, message: started.error.message, retryable: false }
+  }), PRECONDITION_NOT_CREATED);
+  const created = base.provider.changeRequests?.create
+    ? await base.provider.changeRequests.create({
+      context: providerOperationContext(base.loadedContext),
+      base: options.base,
+      head: options.head,
+      title: options.title,
+      body: options.body,
+      draft: Boolean(options.draft),
+      mutation: { idempotencyKey: `pull-request:create:${base.resolved.taskId}` }
+    })
+    : unsupportedProviderOperation(base.provider, 'changeRequests.create');
+  if (!created.ok) return withCreation(providerPullRequestError(base, created.error, null), { kind: 'unknown', errorCode: 'PR_CREATE_OUTCOME_UNKNOWN' });
+  const remoteId = String(created.value.remoteId || '');
+  const number = Number(remoteId);
+  const fallback = normalizeProviderPullRequest({
+    id: remoteId,
+    number: Number.isInteger(number) && number > 0 ? number : undefined,
+    state: 'open',
+    title: options.title,
+    body: options.body,
+    headSha: '',
+    baseSha: '',
+    head: { repository: base.context.platform.repository!, ref: options.head, sha: '' },
+    base: { repository: base.context.platform.repository!, ref: options.base, sha: '' },
+    displayUrl: `${base.provider.type}:${remoteId}`
+  }, base.context.platform.repository!, Number.isInteger(number) && number > 0 ? number : 0);
+  const inspected = base.provider.changeRequests?.inspect
+    ? await base.provider.changeRequests.inspect({
+      context: providerOperationContext(base.loadedContext),
+      target: Number.isInteger(number) && number > 0 ? { number } : { id: remoteId }
+    })
+    : unsupportedProviderOperation(base.provider, 'changeRequests.inspect');
+  if (!inspected.ok) return withCreation(providerPullRequestError(base, inspected.error, Number.isInteger(number) && number > 0 ? number : null), { kind: 'created', createdByCurrentOperation: true });
+  const pullRequest = normalizeProviderPullRequest(
+    inspected.value,
+    base.context.platform.repository!,
+    inspected.value.number ?? fallback.number,
+    fallback
+  );
+  if (!pullRequest.number || !pullRequest.nodeId) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    error: { code: 'PR_CREATE_RESPONSE_INVALID', message: 'Provider create response lacks validated identity', retryable: false }
+  }), { kind: 'created', createdByCurrentOperation: true });
+  const identity = validateWriterIdentity(base, pullRequest, {
+    expectedHead: options.head,
+    errorCode: 'PR_BIND_IDENTITY_MISMATCH'
+  });
+  if (!identity.ok) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, pullRequest.number, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    resource: { kind: 'pull-request', number: pullRequest.number },
+    pullRequest,
+    error: identity.error
+  }), { kind: 'created', createdByCurrentOperation: true });
+  const bound = bindIdentity(base, pullRequest, options.agent, 'created', false, options.head);
+  if (bound.status === 'failed') return withCreation(result('failed', base.resolved.taskId, base.issueNumber, pullRequest.number, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    resource: { kind: 'pull-request', number: pullRequest.number },
+    pullRequest,
+    error: { code: bound.error.code, message: bound.error.message, retryable: false }
+  }), { kind: 'created', createdByCurrentOperation: true });
+  return withCreation(result('applied', base.resolved.taskId, base.issueNumber, pullRequest.number, {
+    changed: true,
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    resource: { kind: 'pull-request', number: pullRequest.number },
+    pullRequest,
+    operations: [{ name: 'pr:create', status: 'applied', reasonCode: null }, { name: 'task:bind-pr', status: 'applied', reasonCode: null }],
+    result: 'pr_created',
+    error: null
+  }), { kind: 'created', createdByCurrentOperation: true });
+}
+
+async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   const softenFailure = (output: PullRequestResult): PullRequestResult => {
     const authorityError = output.error?.code.startsWith('IN_LABEL_SYNC') || output.error?.code.startsWith('PR_IDENTITY');
@@ -1554,7 +1686,7 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
       ? { ...output, status: 'applied', changed: false, error: null, result: warningResult, warnings: mergeOperationWarnings([warning]) }
       : output;
   };
-  const base = resolvedContext(taskRef, options);
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return softenFailure(base.output);
   if (!base.fact) return softenFailure(result('failed', base.resolved.taskId, base.issueNumber, null, {
     error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
@@ -1562,6 +1694,62 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
   if (!base.prNumber) return softenFailure(result('failed', base.resolved.taskId, base.issueNumber, null, {
     error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false }
   }));
+  if (base.providerType !== 'github') {
+    const inspected = await inspectExternalPullRequest(base, base.prNumber);
+    if (inspected.status === 'failed' || inspected.status === 'blocked' || !inspected.pullRequest) return softenFailure(inspected);
+    if (!options.metadata && !options.closingIssue) return softenFailure(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      error: { code: 'PR_PAYLOAD_INVALID', message: 'sync requires a desired-state option', retryable: false }
+    }));
+    if (!base.issueNumber) return softenFailure(result('degraded', base.resolved.taskId, null, base.prNumber, {
+      pullRequest: inspected.pullRequest,
+      error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no linked Issue to copy metadata from', retryable: false }
+    }));
+    const issue = await inspectPlatformIssue(taskRef, { cwd: base.resolved.repoRoot, client: base.client });
+    if (!issue.issue) return softenFailure(result(issue.status, base.resolved.taskId, base.issueNumber, base.prNumber, {
+      platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: inspected.pullRequest, error: issue.error
+    }));
+    const planned = planPullRequestMetadata({
+      pullRequest: inspected.pullRequest,
+      issue: issue.issue,
+      taskType: String(base.frontmatter.type || 'task'),
+      issueNumber: base.issueNumber,
+      capabilities: base.context.capabilities
+    }).operations.filter((operation) => options.metadata || operation.name === 'closing-issue')
+      .filter((operation) => options.closingIssue || operation.name !== 'closing-issue');
+    const operations: PlatformOperation[] = planned.map(({ name, status, reasonCode }) => ({ name, status, reasonCode }));
+    if (options.dryRun) return softenFailure(result(planned.some((operation) => operation.status === 'planned') ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: inspected.pullRequest, operations, error: null
+    }));
+    const patch: Record<string, unknown> = {};
+    for (const operation of planned) {
+      if (operation.status !== 'planned') continue;
+      if (operation.name === 'labels') patch.labels = operation.value;
+      if (operation.name === 'assignees') patch.assignees = operation.value;
+      if (operation.name === 'closing-issue') patch.body = operation.value;
+      if (operation.name === 'milestone') patch.milestone = operation.value;
+    }
+    if (Object.keys(patch).length === 0) return softenFailure(result(planned.some((operation) => operation.status === 'skipped') ? 'degraded' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      platform: base.context.platform, capabilities: base.context.capabilities, resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: inspected.pullRequest, operations, error: null
+    }));
+    const updated = base.provider.changeRequests?.update
+      ? await base.provider.changeRequests.update({
+        context: providerOperationContext(base.loadedContext),
+        target: resourceIdentity(base.prNumber),
+        patch: patch as never,
+        mutation: { idempotencyKey: `pull-request:update:${base.resolved.taskId}` }
+      })
+      : unsupportedProviderOperation(base.provider, 'changeRequests.update');
+    if (!updated.ok) return softenFailure(providerPullRequestError(base, updated.error, base.prNumber));
+    return softenFailure(result(planned.some((operation) => operation.status === 'skipped') ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      changed: updated.value.changed,
+      platform: base.context.platform,
+      capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber },
+      pullRequest: inspected.pullRequest,
+      operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation),
+      error: null
+    }));
+  }
   const fetched = inspectGitHubPullRequest(base.client, base.context.platform.repository!, base.prNumber, base.resolved.repoRoot);
   if (!fetched.ok) return softenFailure(result(fetched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { error: fetched.error }));
   if (!options.metadata && !options.closingIssue) return softenFailure(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
@@ -1570,7 +1758,7 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
   if (!base.issueNumber) return softenFailure(result('degraded', base.resolved.taskId, null, base.prNumber, {
     pullRequest: fetched.value, error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no linked Issue to copy metadata from', retryable: false }
   }));
-  const issue = inspectPlatformIssue(taskRef, { cwd: base.resolved.repoRoot, client: base.client });
+  const issue = await inspectPlatformIssue(taskRef, { cwd: base.resolved.repoRoot, client: base.client });
   if (!issue.issue) return softenFailure(result(issue.status, base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, error: issue.error
   }));
@@ -1769,7 +1957,7 @@ function skipPlatformPullRequestFactUnlocked(
   });
 }
 
-function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOptions): PullRequestResult {
+async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOptions): Promise<PullRequestResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return result('failed', resolved.taskId, null, null, {
     error: { code: resolved.code, message: resolved.message, retryable: false }

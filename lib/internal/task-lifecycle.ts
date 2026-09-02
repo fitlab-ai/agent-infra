@@ -21,7 +21,7 @@ function parseFailure(error: unknown): string {
   return message.replace(/^TASK_CONTROL_OPERATION_INVALID: /u, '');
 }
 
-function taskLifecycle(args: string[] = []): void {
+async function taskLifecycle(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
 
   let operation;
@@ -56,7 +56,7 @@ function taskLifecycle(args: string[] = []): void {
     repoRoot = resolved.repoRoot;
   }
 
-  const result = dispatchTaskControlOperation(
+  const result = await dispatchTaskControlOperation(
     createDirectHostExecutionContext({ repoRoot }),
     operation
   ) as TaskLifecycleResult & { humanOverride?: unknown };

@@ -486,14 +486,14 @@ function reconcileWarningProjection(repoRoot: string, taskId: string, receipt: T
   catch { return receipt; }
 }
 
-function syncPendingTaskComment(input: {
+async function syncPendingTaskComment(input: {
   repoRoot: string;
   taskId: string;
   agent: string;
   receipt: TaskFinalizationReceipt;
   commentSync: typeof syncPlatformComment;
   consumedCapabilities: Set<string>;
-}): TaskCommentSyncOutcome {
+}): Promise<TaskCommentSyncOutcome> {
   const { repoRoot, taskId, agent, commentSync, consumedCapabilities } = input;
   let receipt = input.receipt;
   if (receipt.taskComment !== 'pending') {
@@ -505,7 +505,7 @@ function syncPendingTaskComment(input: {
     };
   }
   try {
-    const result = commentSync(taskId, { kind: 'task', agent, cwd: repoRoot });
+    const result = await commentSync(taskId, { kind: 'task', agent, cwd: repoRoot });
     const step = commentStep(result);
     if (result.status === 'applied' || result.status === 'no-op') {
       const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
@@ -569,11 +569,11 @@ function terminalResult(
   };
 }
 
-function applyUnderLock(
+async function applyUnderLock(
   request: TaskFinalizationRequest,
   taskId: string,
   options: TaskFinalizationOptions
-): TaskFinalizationResult {
+): Promise<TaskFinalizationResult> {
   const repoRoot = path.resolve(options.repoRoot);
   const lifecycle = options.lifecycle ?? applyTaskLifecycle;
   const commentSync = options.commentSync ?? syncPlatformComment;
@@ -592,7 +592,7 @@ function applyUnderLock(
   const preflightState = resolveTaskRef(taskId, { repoRoot });
   if (options.preflight && preflightState.ok && preflightState.state === 'active') {
     try {
-      const preflight = options.preflight(
+      const preflight = await options.preflight(
         { taskRef: taskId, event: 'complete-task.preflight' },
         { repoRoot }
       );
@@ -668,7 +668,7 @@ function applyUnderLock(
 
   let taskComment: TaskFinalizationStep | null = null;
   receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-  const initialComment = syncPendingTaskComment({
+  const initialComment = await syncPendingTaskComment({
     repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
   });
   receipt = initialComment.receipt;
@@ -684,7 +684,7 @@ function applyUnderLock(
     if (receipt.verification !== 'pending') {
       verification = { status: 'no-op', changed: false, error: null };
     } else {
-      const result = verify(
+      const result = await verify(
         { taskRef: taskId, event: 'complete-task.completed' },
         { repoRoot }
       );
@@ -695,7 +695,7 @@ function applyUnderLock(
           scope: 'verification', operation: 'succeeded'
         }, consumedCapabilities);
         receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-        const finalComment = syncPendingTaskComment({
+        const finalComment = await syncPendingTaskComment({
           repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
         });
         receipt = finalComment.receipt;
@@ -729,7 +729,7 @@ function applyUnderLock(
   return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed);
 }
 
-function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): TaskFinalizationResult {
+async function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
   if (request.intent !== 'complete' || !request.taskRef || !request.agent) {
     return failed(null, { code: 'TASK_FINALIZATION_PAYLOAD_INVALID', message: 'complete finalization requires taskRef and agent', retryable: false });
   }
@@ -737,7 +737,7 @@ function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFi
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
-    return withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.complete', () => applyUnderLock(request, resolved.taskId, options));
+    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.complete', () => applyUnderLock(request, resolved.taskId, options));
   } catch (error) {
     const detail = error instanceof TaskExecutionLockError
       ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }

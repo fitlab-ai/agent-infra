@@ -105,8 +105,7 @@ function registerPlatformCapabilities(
     'inspectChangeRequest' | 'inspectIssueClosingChangeRequests' | 'inspectRequiredChecks' | 'resolveChangeRequestGitEvidence'
   >
 ): void {
-  const adapter = adapters.get(type);
-  if (!adapter) throw new Error(`Platform adapter '${type}' must be registered before its capabilities`);
+  const adapter = adapters.get(type) ?? { type } as PlatformAdapter;
   adapters.set(type, { ...adapter, ...capabilities });
 }
 

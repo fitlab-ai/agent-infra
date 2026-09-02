@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "sourceMap": false,
+    "declarationMap": false
+  },
+  "include": ["lib/platform/provider-contract.ts"]
+}

@@ -42,10 +42,10 @@ function excludedPrReview(taskDir: string, message: string): string | null {
   }
 }
 
-function backfillCompletionComments(
+async function backfillCompletionComments(
   taskRef: string,
   options: CompletionBackfillOptions
-): CompletionBackfillResult {
+): Promise<CompletionBackfillResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return result(platformResult('failed', {
     error: { code: resolved.code, message: resolved.message, retryable: false }
@@ -68,7 +68,7 @@ function backfillCompletionComments(
   const operations: PlatformOperation[] = [];
   let latest = platformResult('no-op', { error: null });
   for (const artifact of inventory.artifacts) {
-    latest = syncPlatformComment(resolved.taskId, {
+    latest = await syncPlatformComment(resolved.taskId, {
       kind: 'artifact',
       artifact: artifact.name,
       agent: options.agent,

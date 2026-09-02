@@ -5,7 +5,7 @@ import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { renderHumanOverrideAudit } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { resolvePlatformContext } from './context.ts';
+import { resolvePlatformProviderContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import { listRemoteComments, normalizeCommentContent, writeComment } from './issue-comments.ts';
@@ -13,8 +13,9 @@ import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
+import { providerError, providerOperationContext, providerStatus, unsupportedProviderOperation } from './provider-bridge.ts';
 
-type SummaryComment = { id: number; body: string };
+type SummaryComment = { id: number | string; body: string };
 type SummaryContextResult = PlatformResult & {
   task: { id: string | null; prNumber: number | null };
   artifacts: Array<{ family: string; name: string; path: string }>;
@@ -41,7 +42,7 @@ function buildPullRequestSummary(taskId: string, body: string, headSha: string, 
 }
 
 function reconcileSummaryComment(comments: SummaryComment[], taskId: string, desired: string):
-  { action: 'create' | 'update' | 'no-op' | 'conflict'; commentId: number | null } {
+  { action: 'create' | 'update' | 'no-op' | 'conflict'; commentId: number | string | null } {
   const marker = summaryMarker(taskId);
   const matches = comments.filter((comment) => comment.body.includes(marker));
   if (matches.length > 1) return { action: 'conflict', commentId: null };
@@ -74,7 +75,7 @@ function summaryContext(taskRef: string, options: { cwd?: string; client?: GitHu
   return { ...platformResult('no-op'), task: { id: resolved.taskId, prNumber }, artifacts: canonicalArtifacts(resolved.taskDir) };
 }
 
-function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult }): PullRequestSummaryResult {
+async function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult }): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
   const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
@@ -113,7 +114,8 @@ function syncPullRequestSummary(taskRef: string, options: { agent: string; body:
   if (!prNumber) return softenFailure(platformResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }));
   knownPrNumber = prNumber;
   const client = options.client || createGitHubClient();
-  const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return softenFailure(context);
   let headSha: string;
   try {
@@ -127,16 +129,36 @@ function syncPullRequestSummary(taskRef: string, options: { agent: string; body:
     headSha,
     renderHumanOverrideAudit(fs.readFileSync(resolved.taskMdPath, 'utf8'))
   );
-  const listed = listRemoteComments(client, context.platform.repository, prNumber, resolved.repoRoot);
+  const listed = loaded.ok
+    ? (loaded.value.provider.comments?.list
+      ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: { number: prNumber } }).then((response) => response.ok
+        ? { ok: true as const, value: response.value.map((comment) => ({ id: loaded.value.providerType === 'github' && /^\d+$/.test(comment.id) ? Number(comment.id) : comment.id, body: comment.body })) }
+        : response)
+      : unsupportedProviderOperation(loaded.value.provider, 'comments.list'))
+    : listRemoteComments(client, context.platform.repository, prNumber, resolved.repoRoot);
   if (!listed.ok) return softenFailure(platformResult(listed.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: listed.error }));
   const reconciliation = reconcileSummaryComment(listed.value, resolved.taskId, desired);
   if (reconciliation.action === 'conflict') return softenFailure(platformResult('failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: { code: 'PR_SUMMARY_MARKER_AMBIGUOUS', message: 'Multiple PR comments contain the summary marker', retryable: false } }));
   if (reconciliation.action === 'no-op') return softenFailure(platformResult('no-op', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: [reconciliation.commentId!], parts: 1 }, error: null }));
   if (options.dryRun) return softenFailure(platformResult('planned', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, operations: [{ name: `summary:${reconciliation.action}`, status: 'planned', reasonCode: null }], error: null }));
-  const written = writeComment(client, context.platform.repository, prNumber, resolved.repoRoot, desired, reconciliation.commentId || undefined);
+  const written = loaded.ok
+    ? (loaded.value.provider.comments?.write
+      ? await loaded.value.provider.comments.write({
+        context: providerOperationContext(loaded.value),
+        parent: { number: prNumber },
+        body: desired,
+        ...(reconciliation.commentId !== null ? { existingComment: { id: String(reconciliation.commentId) } } : {}),
+        mutation: { idempotencyKey: `pr-summary:${resolved.taskId}` }
+      })
+      : unsupportedProviderOperation(loaded.value.provider, 'comments.write'))
+    : writeComment(client, context.platform.repository, prNumber, resolved.repoRoot, desired, typeof reconciliation.commentId === 'number' ? reconciliation.commentId : undefined);
   if (!written.ok) return softenFailure(platformResult(written.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: written.error }));
-  const id = Number(written.value.id || reconciliation.commentId);
-  return softenFailure(platformResult('applied', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: Number.isInteger(id) ? [id] : [], parts: 1 }, operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }], error: null }));
+  const id = loaded.ok
+    ? (loaded.value.providerType === 'github' && /^\d+$/.test((written.value as { remoteId: string }).remoteId)
+      ? Number((written.value as { remoteId: string }).remoteId)
+      : (written.value as { remoteId: string }).remoteId)
+    : Number((written.value as { id?: number }).id || reconciliation.commentId);
+  return softenFailure(platformResult('applied', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: id ? [id] : [], parts: 1 }, operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }], error: null }));
 }
 
 export { buildPullRequestSummary, reconcileSummaryComment, summaryContext, summaryMarker, syncPullRequestSummary };

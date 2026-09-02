@@ -43,7 +43,7 @@ function usageFailure(message: string): void {
   process.exitCode = 1;
 }
 
-function taskActivity(args: string[] = []): void {
+async function taskActivity(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
   if (!taskRef || taskRef.startsWith('--') || !kind || !OPERATIONS.has(kind)) {
@@ -94,11 +94,11 @@ function taskActivity(args: string[] = []): void {
   let result;
   let humanOverride: unknown = null;
   try {
-    result = withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-activity.${kind}`, () => {
+    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-activity.${kind}`, async () => {
       let current = applyPrReviewActivityIntent(values as PrReviewActivityIntent, { lockAlreadyHeld: true });
       if (current.status !== 'failed' || !values.overrideTicket) return current;
       if (!values.overrideTarget || !values.overrideScope) { usageFailure('override ticket requires target and scope'); return current; }
-      const consumed = consumeHumanOverride({
+      const consumed = await consumeHumanOverride({
         taskRef, ticketId: String(values.overrideTicket),
         failureId: failureId('activity-intent', current.error?.code ?? 'TASK_STATE_MISMATCH'),
         target: String(values.overrideTarget), scope: String(values.overrideScope)

@@ -17,6 +17,12 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
+  "exports": {
+    "./platform-provider": {
+      "types": "./dist/lib/platform/provider-contract.d.ts",
+      "import": "./dist/lib/platform/provider-contract.js"
+    }
+  },
   "bin": {
     "agent-infra": "./dist/bin/cli.js",
     "ai": "./dist/bin/cli.js",

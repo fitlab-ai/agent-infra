@@ -49,7 +49,7 @@ type TaskVerificationResult = {
 };
 type VerificationOptions = {
   repoRoot?: string;
-  engine?: typeof verifyInProcess;
+  engine?: (input: Parameters<typeof verifyInProcess>[0]) => Record<string, unknown> | Promise<Record<string, unknown>>;
   manualOverride?: ManualOverrideCapability;
 };
 
@@ -91,7 +91,7 @@ function failure(request: { taskRef: string; event: string; artifact?: string },
   };
 }
 
-function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: string }, options: VerificationOptions = {}): TaskVerificationResult {
+async function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: string }, options: VerificationOptions = {}): Promise<TaskVerificationResult> {
   const spec = VERIFICATION_CATALOG[request.event as VerificationEvent];
   if (!spec) return failure(request, 'VERIFY_EVENT_UNKNOWN', `unknown verification event '${request.event}'`);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
@@ -113,7 +113,7 @@ function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: s
   const invocations: VerificationInvocation[] = [];
   const engine = options.engine ?? verifyInProcess;
   if (spec.mode === 'gate') {
-    const payload = engine({ mode: 'gate', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [], repositoryRoot: resolved.repoRoot }) as Record<string, unknown>;
+    const payload = await engine({ mode: 'gate', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [], repositoryRoot: resolved.repoRoot });
     const status = payload.gate as 'pass' | 'fail' | 'blocked';
     if (status !== 'pass' && allowsManualOverride(options.manualOverride, 'verification-engine', status === 'blocked' ? 'CHECK_BLOCKED' : 'CHECK_FAILED')) {
       invocations.push({ status: 'pass', exitCode: 0, payload: { ...payload, gate: 'pass', humanOverride: 'human-approved', originalGate: status } });
@@ -125,7 +125,7 @@ function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: s
     invocations.push({ status, exitCode: ({ pass: 0, fail: 1, blocked: 2 } as const)[status], payload });
   } else {
     for (const check of spec.checks ?? []) {
-      const payload = engine({ mode: 'checks', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [check], repositoryRoot: resolved.repoRoot }) as Record<string, unknown>;
+      const payload = await engine({ mode: 'checks', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [check], repositoryRoot: resolved.repoRoot });
       const status = payload.status as 'pass' | 'fail' | 'blocked';
       if (status !== 'pass' && allowsManualOverride(options.manualOverride, 'verification-engine', status === 'blocked' ? 'CHECK_BLOCKED' : 'CHECK_FAILED')) {
         invocations.push({ status: 'pass', exitCode: 0, payload: { ...payload, status: 'pass', humanOverride: 'human-approved', originalStatus: status } });

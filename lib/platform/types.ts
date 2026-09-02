@@ -23,7 +23,7 @@ type PlatformOperation = {
 type CommentIdentity = {
   kind: 'task' | 'artifact' | 'summary' | 'cancel';
   marker: string;
-  ids: number[];
+  ids: Array<number | string>;
   parts: number;
 };
 

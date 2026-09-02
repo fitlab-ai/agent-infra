@@ -34,7 +34,7 @@ ${activityEntries.join('\n')}
   return taskDir;
 }
 
-function check(taskDir: string) {
+async function check(taskDir: string) {
   return verifyInProcess({
     mode: 'check',
     skillName: 'complete-task',
@@ -45,53 +45,53 @@ function check(taskDir: string) {
   });
 }
 
-test('manual-validation check passes when no review-code artifact exists', () => {
+test('manual-validation check passes when no review-code artifact exists', async () => {
   const taskDir = fixture([]);
-  const result = check(taskDir);
+  const result = await check(taskDir);
   assert.equal(result.status, 'pass');
   assert.match(result.message, /No review-code artifact/);
 });
 
-test('manual-validation check passes when the latest review-code has zero pending items', () => {
+test('manual-validation check passes when the latest review-code has zero pending items', async () => {
   const taskDir = fixture([]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1.replace('**人工校验**：1', '**人工校验**：0'));
-  const result = check(taskDir);
+  const result = await check(taskDir);
   assert.equal(result.status, 'pass');
   assert.match(result.message, /No pending manual validation items/);
 });
 
-test('manual-validation check fails when pending items exist without a manual-validation artifact', () => {
+test('manual-validation check fails when pending items exist without a manual-validation artifact', async () => {
   const taskDir = fixture([]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
-  const result = check(taskDir);
+  const result = await check(taskDir);
   assert.equal(result.status, 'fail');
   assert.match(result.message, /manual validation item\(s\) pending/);
 });
 
-test('manual-validation check fails when the artifact exists but completion is not recorded', () => {
+test('manual-validation check fails when the artifact exists but completion is not recorded', async () => {
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md'
   ]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
   fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
-  const result = check(taskDir);
+  const result = await check(taskDir);
   assert.equal(result.status, 'fail');
   assert.match(result.message, /completion is not recorded/);
 });
 
-test('manual-validation check passes on the standard flow when completion follows the latest review-code', () => {
+test('manual-validation check passes on the standard flow when completion follows the latest review-code', async () => {
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md',
     '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; verified on staging'
   ]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
   fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
-  const result = check(taskDir);
+  const result = await check(taskDir);
   assert.equal(result.status, 'pass');
   assert.match(result.message, /Manual validation completed → manual-validation\.md/);
 });
 
-test('manual-validation check fails when completion predates a newer review-code round', () => {
+test('manual-validation check fails when completion predates a newer review-code round', async () => {
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md',
     '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; verified on staging',
@@ -100,18 +100,18 @@ test('manual-validation check fails when completion predates a newer review-code
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
   fs.writeFileSync(path.join(taskDir, 'review-code-r2.md'), REVIEW_CODE_MV_1);
   fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
-  const result = check(taskDir);
+  const result = await check(taskDir);
   assert.equal(result.status, 'fail');
   assert.match(result.message, /Latest review-code \(round 2\) came after/);
 });
 
-test('manual-validation check fails closed when the latest review-code completion entry is missing', () => {
+test('manual-validation check fails closed when the latest review-code completion entry is missing', async () => {
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; verified on staging'
   ]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
   fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
-  const result = check(taskDir);
+  const result = await check(taskDir);
   assert.equal(result.status, 'fail');
   assert.match(result.message, /completion entry is missing from the Activity Log/);
 });

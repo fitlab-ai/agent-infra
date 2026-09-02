@@ -27,8 +27,8 @@ function trySymlink(target: string, linkPath: string): boolean {
   }
 }
 
-test('unsupported platforms return a stable no-op without probing GitHub', () => {
-  const context = releaseNoteContext(
+test('unsupported platforms return a stable no-op without probing GitHub', async () => {
+  const context = await releaseNoteContext(
     { fromTag: 'v0.9.0', toTag: 'v0.9.1', branch: 'main' },
     { platformType: 'none', client: unavailable }
   );
@@ -40,7 +40,7 @@ test('unsupported platforms return a stable no-op without probing GitHub', () =>
   const notesFile = path.join(root, 'notes.md');
   fs.writeFileSync(notesFile, 'Notes\n');
   try {
-    const publish = publishReleaseNotes(
+    const publish = await publishReleaseNotes(
       {
         tag: 'v0.9.1',
         title: 'v0.9.1',
@@ -49,7 +49,8 @@ test('unsupported platforms return a stable no-op without probing GitHub', () =>
       },
       { cwd: path.join(root, 'worktree'), platformType: 'custom', client: unavailable }
     );
-    assert.equal(publish.status, 'no-op');
+    assert.equal(publish.status, 'failed');
+    assert.equal(publish.error?.code, 'PLATFORM_PROVIDER_SOURCE_MISSING');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -116,12 +117,12 @@ test('stage rejects paths in the worktree, symlinks, and non-files', () => {
   }
 });
 
-test('publish rejects digest mismatches before platform access', () => {
+test('publish rejects digest mismatches before platform access', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-publish-'));
   const notesFile = path.join(root, 'notes.md');
   fs.writeFileSync(notesFile, 'Notes\n');
   try {
-    const result = publishReleaseNotes(
+    const result = await publishReleaseNotes(
       { tag: 'v1.0.0', title: 'v1.0.0', notesFile, expectedSha256: `sha256:${'0'.repeat(64)}` },
       { cwd: path.join(root, 'worktree'), platformType: 'github', client: unavailable }
     );
@@ -132,7 +133,7 @@ test('publish rejects digest mismatches before platform access', () => {
   }
 });
 
-test('publish accepts a matching digest and rejects unreadable files before platform access', () => {
+test('publish accepts a matching digest and rejects unreadable files before platform access', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-match-'));
   const notesFile = path.join(root, 'notes.md');
   fs.writeFileSync(notesFile, 'Notes\n');
@@ -158,14 +159,14 @@ test('publish accepts a matching digest and rejects unreadable files before plat
     }
   };
   try {
-    const published = publishReleaseNotes(
+    const published = await publishReleaseNotes(
       { tag: 'v1.0.0', title: 'v1.0.0', notesFile, expectedSha256: digest },
       { cwd: process.cwd(), platformType: 'github', client }
     );
     assert.equal(published.status, 'applied');
     assert.equal(writes.length, 1);
 
-    const unreadable = publishReleaseNotes(
+    const unreadable = await publishReleaseNotes(
       { tag: 'v1.0.0', title: 'v1.0.0', notesFile: path.join(root, 'missing.md'), expectedSha256: digest },
       { cwd: process.cwd(), platformType: 'github', client: unavailable }
     );
@@ -176,8 +177,8 @@ test('publish accepts a matching digest and rejects unreadable files before plat
   }
 });
 
-test('context validates its range before platform access', () => {
-  const result = releaseNoteContext(
+test('context validates its range before platform access', async () => {
+  const result = await releaseNoteContext(
     { fromTag: '', toTag: 'v0.9.1', branch: 'main' },
     { platformType: 'github', client: unavailable }
   );

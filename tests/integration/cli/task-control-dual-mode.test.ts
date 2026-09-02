@@ -373,14 +373,14 @@ function assertTaskSnapshotShape(value: unknown, taskId: string): void {
   }
 }
 
-test('direct-host and sandbox executor share lifecycle, orchestration, auto-hook, and failure results', () => {
+test('direct-host and sandbox executor share lifecycle, orchestration, auto-hook, and failure results', async () => {
   const directFixture = taskFixture();
   const sandboxFixture = taskFixture();
   try {
     const direct = contexts(directFixture.root);
     const sandbox = contexts(sandboxFixture.root);
-    const directLifecycle = dispatchTaskControlOperation(direct.direct, lifecycleOperation());
-    const sandboxLifecycle = dispatchTaskControlOperation(sandbox.sandbox, lifecycleOperation());
+    const directLifecycle = await dispatchTaskControlOperation(direct.direct, lifecycleOperation());
+    const sandboxLifecycle = await dispatchTaskControlOperation(sandbox.sandbox, lifecycleOperation());
     assert.deepEqual(comparableLifecycle(directLifecycle), comparableLifecycle(sandboxLifecycle));
     assert.equal(fs.readFileSync(path.join(directFixture.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md'), 'utf8').includes('status: blocked'), true);
     assert.equal(fs.readFileSync(path.join(sandboxFixture.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md'), 'utf8').includes('status: blocked'), true);
@@ -399,8 +399,8 @@ test('direct-host and sandbox executor share lifecycle, orchestration, auto-hook
       },
       options: { id: () => 'run-id', now: () => '2026-08-09 01:02:03+00:00' }
     };
-    const directBegin = dispatchTaskControlOperation(direct.direct, begin);
-    const sandboxBegin = dispatchTaskControlOperation(sandbox.sandbox, begin);
+    const directBegin = await dispatchTaskControlOperation(direct.direct, begin);
+    const sandboxBegin = await dispatchTaskControlOperation(sandbox.sandbox, begin);
     assert.deepEqual(sandboxBegin, directBegin);
 
     const autoHook = {
@@ -413,8 +413,8 @@ test('direct-host and sandbox executor share lifecycle, orchestration, auto-hook
         event: { nativeAgent: 'claude', childId: 'child', parentId: 'parent', spawnMode: 'fresh' }
       }
     };
-    const directAuto = dispatchTaskControlOperation(direct.direct, autoHook);
-    const sandboxAuto = dispatchTaskControlOperation(sandbox.sandbox, autoHook);
+    const directAuto = await dispatchTaskControlOperation(direct.direct, autoHook);
+    const sandboxAuto = await dispatchTaskControlOperation(sandbox.sandbox, autoHook);
     assert.deepEqual(sandboxAuto, directAuto);
   } finally {
     fs.rmSync(directFixture.root, { recursive: true, force: true });
@@ -422,12 +422,12 @@ test('direct-host and sandbox executor share lifecycle, orchestration, auto-hook
   }
 });
 
-test('sandbox lifecycle uses the shared task lock and human override authority', () => {
+test('sandbox lifecycle uses the shared task lock and human override authority', async () => {
   const lockFixture = taskFixture();
   try {
     const sandbox = contexts(lockFixture.root).sandbox;
-    withTaskExecutionLock(lockFixture.root, TASK_ID, 'test-holder', () => {
-      const result = dispatchTaskControlOperation(sandbox, lifecycleOperation());
+    await withTaskExecutionLock(lockFixture.root, TASK_ID, 'test-holder', async () => {
+      const result = await dispatchTaskControlOperation(sandbox, lifecycleOperation());
       assert.equal((result as { error?: { code?: string } }).error?.code, 'ORCHESTRATION_LOCK_BUSY');
       assert.equal((result as { status?: string }).status, 'failed');
     });
@@ -438,7 +438,7 @@ test('sandbox lifecycle uses the shared task lock and human override authority',
   const directFixture = taskFixture(false);
   const sandboxFixture = taskFixture(false);
   try {
-    const issue = (root: string, ticketId: string) => issueHumanOverride({
+    const issue = async (root: string, ticketId: string) => issueHumanOverride({
       taskRef: TASK_ID,
       failureId: 'lifecycle.apply:LIFECYCLE_LOG_MISSING',
       target: 'repair-task',
@@ -448,19 +448,19 @@ test('sandbox lifecycle uses the shared task lock and human override authority',
       intent: 'cancel',
       expiresAt: '2099-01-01 00:00:00+00:00'
     }, { repoRoot: root, randomId: () => ticketId, now: () => '2026-08-09 01:02:03+00:00' });
-    assert.equal(issue(directFixture.root, 'direct-ticket').status, 'applied');
-    assert.equal(issue(sandboxFixture.root, 'sandbox-ticket').status, 'applied');
+    assert.equal((await issue(directFixture.root, 'direct-ticket')).status, 'applied');
+    assert.equal((await issue(sandboxFixture.root, 'sandbox-ticket')).status, 'applied');
     const request = {
       intent: 'cancel' as const,
       reason: 'normal cancel blocked by missing log',
       overrideTarget: 'repair-task',
       overrideScope: 'task-lifecycle'
     };
-    const directResult = dispatchTaskControlOperation(
+    const directResult = await dispatchTaskControlOperation(
       contexts(directFixture.root).direct,
       lifecycleOperation({ ...request, overrideTicket: 'direct-ticket' })
     );
-    const sandboxResult = dispatchTaskControlOperation(
+    const sandboxResult = await dispatchTaskControlOperation(
       contexts(sandboxFixture.root).sandbox,
       lifecycleOperation({ ...request, overrideTicket: 'sandbox-ticket' })
     );
@@ -496,7 +496,7 @@ test('direct-host and sandbox client transport preserve task state, receipts, sn
         }
       }
     };
-    const directBegin = dispatchTaskControlOperation(directContext, begin);
+    const directBegin = await dispatchTaskControlOperation(directContext, begin);
     const sandboxBegin = runSandboxClient(sandbox, 'task-orchestration', [
       TASK_ID, 'begin-or-resume', '--client', 'claude-code', '--max-steps', '3',
       '--executor-model', 'executor-model', '--executor-reasoning-effort', 'high',
@@ -511,7 +511,7 @@ test('direct-host and sandbox client transport preserve task state, receipts, sn
       intent: 'route' as const,
       input: {}
     };
-    const directRoute = dispatchTaskControlOperation(directContext, route);
+    const directRoute = await dispatchTaskControlOperation(directContext, route);
     const sandboxRoute = runSandboxClient(sandbox, 'task-orchestration', [TASK_ID, 'route']);
     assert.equal(sandboxRoute.status, 0, sandboxRoute.stderr);
     assert.deepEqual(comparableOrchestration(directRoute), comparableOrchestration(sandboxRoute.payload));
@@ -526,7 +526,7 @@ test('direct-host and sandbox client transport preserve task state, receipts, sn
         requestedReasoningEffort: 'high'
       }
     };
-    const directPrepare = dispatchTaskControlOperation(directContext, prepare);
+    const directPrepare = await dispatchTaskControlOperation(directContext, prepare);
     const sandboxPrepare = runSandboxClient(sandbox, 'task-orchestration', [
       TASK_ID, 'prepare', '--client', 'claude-code',
       '--requested-model', 'executor-model', '--requested-reasoning-effort', 'high'
@@ -550,7 +550,7 @@ test('direct-host and sandbox client transport preserve task state, receipts, sn
       intent: 'recover-prepared' as const,
       input: {}
     };
-    const directRecover = dispatchTaskControlOperation(directContext, recover);
+    const directRecover = await dispatchTaskControlOperation(directContext, recover);
     const sandboxRecover = runSandboxClient(sandbox, 'task-orchestration', [TASK_ID, 'recover-prepared']);
     assert.equal(sandboxRecover.status, 0, sandboxRecover.stderr);
     assert.deepEqual(comparableOrchestration(directRecover), comparableOrchestration(sandboxRecover.payload));
@@ -565,13 +565,13 @@ test('direct-host and sandbox client transport preserve task state, receipts, sn
       intent: 'advance' as const,
       input: {}
     };
-    const directAdvance = dispatchTaskControlOperation(directContext, advance);
+    const directAdvance = await dispatchTaskControlOperation(directContext, advance);
     const sandboxAdvance = runSandboxClient(sandbox, 'task-orchestration', [TASK_ID, 'advance']);
     assert.equal(sandboxAdvance.status, 1, sandboxAdvance.stderr);
     assert.deepEqual(comparableOrchestration(directAdvance), comparableOrchestration(sandboxAdvance.payload));
     assert.equal((directAdvance as { error?: { code?: string } }).error?.code, 'ORCHESTRATION_DELEGATION_MISSING');
 
-    const directLifecycle = dispatchTaskControlOperation(directContext, lifecycleOperation());
+    const directLifecycle = await dispatchTaskControlOperation(directContext, lifecycleOperation());
     const sandboxLifecycle = runSandboxClient(sandbox, 'task-lifecycle', [
       TASK_ID, 'block', '--agent', 'codex', '--reason', 'pause for dual-mode verification',
       '--unblock-condition', 'resume after verification'

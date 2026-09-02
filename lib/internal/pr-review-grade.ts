@@ -49,7 +49,7 @@ function readInput(value: string, cwd: string): string {
   return value === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(path.resolve(cwd, value), 'utf8');
 }
 
-function prReviewGrade(args: string[] = []): void {
+async function prReviewGrade(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['decide', 'resolve-host', 'verify-artifact'].includes(operation)) { fail('a valid operation is required'); return; }
@@ -87,7 +87,7 @@ function prReviewGrade(args: string[] = []): void {
   if (operation === 'resolve-host') {
     const pr = Number(values.pr);
     if (!Number.isInteger(pr) || pr <= 0) { fail('resolve-host requires a positive --pr'); return; }
-    const inspected = inspectPlatformPullRequestByNumber(pr, { cwd });
+    const inspected = await inspectPlatformPullRequestByNumber(pr, { cwd });
     if (!inspected.pullRequest) {
       finish({
         status: 'failed', changed: false, host: null, candidates: [], closingIssues: [],
@@ -111,7 +111,7 @@ function prReviewGrade(args: string[] = []): void {
   const artifactPath = path.resolve(cwd, values.artifactFile);
   let result: Record<string, unknown>;
   try {
-    result = verifyInProcess({
+    result = await verifyInProcess({
       mode: 'checks',
       skillName: 'review-pr',
       taskDir: path.dirname(artifactPath),

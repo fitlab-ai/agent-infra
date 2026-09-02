@@ -128,10 +128,10 @@ for (const scenario of [
     client: (root: string): GitHubClient => resolvedContextClient(root, 'duplicate')
   }
 ] as const) {
-  test(`PR summary ${scenario.name} preserves a known primary PR result as a warning`, () => {
+  test(`PR summary ${scenario.name} preserves a known primary PR result as a warning`, async () => {
     const fixture = summaryFixture();
     try {
-      const result = syncPullRequestSummary(fixture.taskId, {
+      const result = await syncPullRequestSummary(fixture.taskId, {
         cwd: fixture.root,
         agent: 'codex',
         body: 'Summary',

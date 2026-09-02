@@ -106,10 +106,10 @@ function mockPrByNumberClient(pullRequest: unknown): GitHubClient {
   } as unknown as GitHubClient;
 }
 
-test('inspectPlatformPullRequestByNumber reads a bare PR number without a task binding', () => {
+test('inspectPlatformPullRequestByNumber reads a bare PR number without a task binding', async () => {
   const root = prByNumberFixture();
   try {
-    const result = inspectPlatformPullRequestByNumber(42, { cwd: root, client: mockPrByNumberClient(remote(42)) });
+    const result = await inspectPlatformPullRequestByNumber(42, { cwd: root, client: mockPrByNumberClient(remote(42)) });
     assert.equal(result.status, 'no-op');
     assert.equal(result.pullRequest?.number, 42);
     assert.equal(result.pullRequest?.head.sha, 'sha-42');

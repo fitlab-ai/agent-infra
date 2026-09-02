@@ -16,7 +16,7 @@ function failUsage(message: string): void {
   process.exitCode = 2;
 }
 
-function taskReview(args: string[] = []): void {
+async function taskReview(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
     return;
@@ -78,11 +78,11 @@ function taskReview(args: string[] = []): void {
   let result;
   let humanOverride: unknown = null;
   try {
-    result = withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-review.finalize-summary', () => {
+    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-review.finalize-summary', async () => {
       let current = finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun }, { lockAlreadyHeld: true });
       if (current.status !== 'failed' || !overrideTicket) return current;
       if (!overrideTarget || !overrideScope) { failUsage('override ticket requires target and scope'); return current; }
-      const consumed = consumeHumanOverride({
+      const consumed = await consumeHumanOverride({
         taskRef: args[0]!, ticketId: overrideTicket,
         failureId: failureId('review-finalization', current.error?.code ?? 'TASK_STATE_MISMATCH'),
         target: overrideTarget, scope: overrideScope

@@ -59,8 +59,8 @@ function buildReviewCode(baselineLine: string | null, verdict = "通过") {
   ].join("\n");
 }
 
-function runCheck(taskDir: string, repositoryRoot?: string) {
-  const result = runValidator(
+async function runCheck(taskDir: string, repositoryRoot?: string) {
+  const result = await runValidator(
     ["check", "post-review-commit", taskDir, "--skill", "complete-task"],
     repositoryRoot ? { repositoryRoot } : {}
   );
@@ -76,25 +76,25 @@ function setupRepo(tempRoot: string) {
 }
 
 test("post-review-commit passes when there is no review-code artifact", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-none-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-none-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask());
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "pass");
     assert.match(payload.message, /check inactive/);
   });
 });
 
 test("post-review-commit blocks when an approved snapshot was not anchored", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-clean-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-clean-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask());
     write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 2, result.stdout);
     assert.equal(payload.status, "blocked");
     assert.match(payload.message, /reviewed snapshot was not anchored/);
@@ -102,20 +102,20 @@ test("post-review-commit blocks when an approved snapshot was not anchored", onP
 });
 
 test("post-review-commit prefers last_reviewed_commit over the review baseline", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-last-reviewed-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-last-reviewed-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const reviewBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
     write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewBaseline));
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "pass");
   });
 });
 
 test("post-review-commit accepts an equivalent rewrite followed only by excluded-path commits", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-local-equivalent-excluded-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-local-equivalent-excluded-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const parent = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
@@ -135,13 +135,13 @@ test("post-review-commit accepts an equivalent rewrite followed only by excluded
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
     write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewedCommit));
 
-    const { payload } = runCheck(taskDir, tempRoot);
+    const { payload } = await runCheck(taskDir, tempRoot);
     assert.equal(payload.status, "pass");
   });
 });
 
 test("post-review-commit rejects additional protected commits after an equivalent rewrite", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-local-equivalent-later-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-local-equivalent-later-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const parent = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
@@ -152,13 +152,13 @@ test("post-review-commit rejects additional protected commits after an equivalen
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
     write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewedCommit));
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "fail");
   });
 });
 
 test("post-review-commit accepts a local content-equivalent recommit without a PR", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-local-equivalent-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-local-equivalent-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const parent = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
@@ -170,14 +170,14 @@ test("post-review-commit accepts a local content-equivalent recommit without a P
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
     write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewedCommit));
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "pass");
     assert.match(payload.message, /content-equivalent to local rewrite/);
   });
 });
 
 test("post-review-commit fails when a code-path commit lands after last_reviewed_commit", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-after-last-reviewed-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-after-last-reviewed-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const reviewBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
@@ -185,13 +185,13 @@ test("post-review-commit fails when a code-path commit lands after last_reviewed
     write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewBaseline));
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\nextra\n", "unreviewed change");
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "fail");
   });
 });
 
 test("post-review-commit passes after a supplemental approved review advances last_reviewed_commit to HEAD", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-supplemental-review-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-supplemental-review-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const oldReviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "old reviewed change");
     const supplementalBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\ncommitted\n", "committed before supplemental review");
@@ -199,33 +199,33 @@ test("post-review-commit passes after a supplemental approved review advances la
     write(path.join(taskDir, "review-code.md"), buildReviewCode(oldReviewedCommit, "通过"));
     write(path.join(taskDir, "review-code-r2.md"), buildReviewCode(supplementalBaseline, "通过"));
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "pass");
   });
 });
 
 test("post-review-commit still fails when a commit lands after the supplemental review fact", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-after-supplemental-review-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-after-supplemental-review-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const supplementalBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "supplementally reviewed change");
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: supplementalBaseline }));
     write(path.join(taskDir, "review-code-r2.md"), buildReviewCode(supplementalBaseline, "通过"));
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\nunreviewed\n", "unreviewed follow-up");
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "fail");
   });
 });
 
 test("post-review-commit blocks when last_reviewed_commit is invalid", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-invalid-last-reviewed-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-invalid-last-reviewed-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     const fallbackBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: "not-a-sha" }));
     write(path.join(taskDir, "review-code.md"), buildReviewCode(fallbackBaseline));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 2, result.stdout);
     assert.equal(payload.status, "blocked");
     assert.match(payload.message, /reviewed snapshot was not anchored/);
@@ -233,7 +233,7 @@ test("post-review-commit blocks when last_reviewed_commit is invalid", onPlatfor
 });
 
 test("post-review-commit does not use the highest-round review baseline as an anchor", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-highest-review-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-highest-review-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const oldBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     const highRoundBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
@@ -241,7 +241,7 @@ test("post-review-commit does not use the highest-round review baseline as an an
     write(path.join(taskDir, "review-code.md"), buildReviewCode(oldBaseline, "通过"));
     write(path.join(taskDir, "review-code-r2.md"), buildReviewCode(highRoundBaseline, "需要修改"));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 2, result.stdout);
     assert.equal(payload.status, "blocked");
     assert.match(payload.message, /reviewed snapshot was not anchored/);
@@ -249,21 +249,21 @@ test("post-review-commit does not use the highest-round review baseline as an an
 });
 
 test("post-review-commit fails when a code-path commit lands after the baseline", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-dirty-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-dirty-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: baseline }));
     write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\nmore\n", "post-review change");
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /re-run review-code|exemption/);
   });
 });
 
 test("post-review-commit passes when a human-decided exemption covers the commits", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-exempt-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-exempt-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask([
@@ -272,7 +272,7 @@ test("post-review-commit passes when a human-decided exemption covers the commit
     write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\nmore\n", "post-review change");
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "pass");
     assert.match(payload.message, /exemption/);
     assert.match(payload.message, /PRC-1/);
@@ -281,7 +281,7 @@ test("post-review-commit passes when a human-decided exemption covers the commit
 });
 
 test("post-review-commit fails closed when an exemption row is malformed", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-malformed-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-malformed-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask([
@@ -290,7 +290,7 @@ test("post-review-commit fails closed when an exemption row is malformed", onPla
     write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\nmore\n", "post-review change");
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "fail");
     assert.equal(
       (payload as typeof payload & { fail_type?: string }).fail_type,
@@ -300,26 +300,26 @@ test("post-review-commit fails closed when an exemption row is malformed", onPla
 });
 
 test("post-review-commit blocks on an empty or malformed baseline SHA", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-badsha-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-badsha-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask());
     write(path.join(taskDir, "review-code.md"), buildReviewCode("not-a-sha"));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 2, result.stdout);
     assert.equal(payload.status, "blocked");
   });
 });
 
 test("post-review-commit blocks legacy review-code artifacts without an anchored commit", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-legacy-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-legacy-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask());
     write(path.join(taskDir, "review-code.md"), buildReviewCode(null));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 2, result.stdout);
     assert.equal(payload.status, "blocked");
     assert.match(payload.message, /reviewed snapshot was not anchored/);
@@ -327,39 +327,39 @@ test("post-review-commit blocks legacy review-code artifacts without an anchored
 });
 
 test("post-review-commit blocks when the task is not inside a git repository", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-nogit-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-nogit-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "task");
     write(path.join(taskDir, "task.md"), buildTask());
     write(path.join(taskDir, "review-code.md"), buildReviewCode("0123456789abcdef0123456789abcdef01234567"));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 2, result.stdout);
     assert.equal(payload.status, "blocked");
   });
 });
 
 test("post-review-commit fails for a commit outside the legacy allowlist (fail-closed coverage)", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-failclosed-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-failclosed-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: baseline }));
     write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
     commitCodePath(tempRoot, "scripts/build-inline.js", "// generated\n", "post-review change to a previously-uncovered path");
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "fail");
   });
 });
 
 test("post-review-commit covers package-lock.json by default (no hardcoded exclusion)", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-prc-lockfile-", (tempRoot) => {
+  await withTempRoot("agent-infra-prc-lockfile-", async (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);
     const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: baseline }));
     write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
     commitCodePath(tempRoot, "package-lock.json", "{}\n", "post-review lockfile bump");
 
-    const { payload } = runCheck(taskDir);
+    const { payload } = await runCheck(taskDir);
     assert.equal(payload.status, "fail");
   });
 });

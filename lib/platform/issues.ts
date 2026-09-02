@@ -8,7 +8,7 @@ import { requirementFieldLabels, renderTemplateBody } from '../task/issue-form.t
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { extractSection, findSectionHeading } from '../task/sections.ts';
 import { writeTask } from '../task/write.ts';
-import { resolvePlatformContext } from './context.ts';
+import { resolvePlatformContext, resolvePlatformProviderContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import {
@@ -28,6 +28,14 @@ import {
   validateInLabelMapping,
   validateRepositoryLabelPayload
 } from './in-label-sync.ts';
+import {
+  providerError,
+  providerOperationContext,
+  providerStatus,
+  resourceIdentity,
+  unsupportedProviderOperation
+} from './provider-bridge.ts';
+import type { IssueSnapshot as ProviderIssueSnapshot } from './provider-contract.ts';
 
 type IssueSnapshot = {
   repository: string;
@@ -106,7 +114,7 @@ function result(
   };
 }
 
-function resolvedContext(taskRef: string, options: SharedOptions) {
+async function resolvedContext(taskRef: string, options: SharedOptions) {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ok: false as const, output: result('failed', resolved.taskId, null, {
     error: { code: resolved.code, message: resolved.message, retryable: false }
@@ -116,12 +124,58 @@ function resolvedContext(taskRef: string, options: SharedOptions) {
   const rawIssue = Number(frontmatter.issue_number);
   const issueNumber = Number.isInteger(rawIssue) && rawIssue > 0 ? rawIssue : null;
   const client = options.client || createGitHubClient();
-  const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
-  if (!usable) return { ok: false as const, output: result(context.status, resolved.taskId, issueNumber, {
+  if (!usable || !loaded.ok) return { ok: false as const, output: result(context.status, resolved.taskId, issueNumber, {
     platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
   }) };
-  return { ok: true as const, resolved, content, frontmatter, issueNumber, client, context };
+  return { ok: true as const, resolved, content, frontmatter, issueNumber, client, context, provider: loaded.value.provider, providerType: loaded.value.providerType, loadedContext: loaded.value };
+}
+
+function normalizeProviderIssue(remote: ProviderIssueSnapshot, repository: string, fallbackNumber: number): IssueSnapshot {
+  return {
+    repository,
+    number: remote.number ?? fallbackNumber,
+    databaseId: null,
+    nodeId: remote.id,
+    url: remote.displayUrl || '',
+    state: remote.state,
+    title: remote.title,
+    body: remote.body,
+    labels: [...remote.labels].sort(),
+    assignees: [...remote.assignees].sort(),
+    milestone: remote.milestone,
+    issueType: null,
+    fields: { ...remote.fields }
+  };
+}
+
+function providerIssueError(base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true }, error: { code: string; message: string; retryable: boolean }, issueNumber: number | null): IssueResult {
+  return result(providerStatus(error), base.resolved.taskId, issueNumber, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    resource: { kind: 'issue', number: issueNumber },
+    error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+  });
+}
+
+async function inspectExternalIssue(
+  base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true },
+  issueNumber: number
+): Promise<IssueResult> {
+  const operation = base.provider.issues?.inspect
+    ? await base.provider.issues.inspect({ context: providerOperationContext(base.loadedContext), target: resourceIdentity(issueNumber) })
+    : unsupportedProviderOperation(base.provider, 'issues.inspect');
+  if (!operation.ok) return providerIssueError(base, operation.error, issueNumber);
+  const issue = normalizeProviderIssue(operation.value, base.context.platform.repository!, issueNumber);
+  return result('no-op', base.resolved.taskId, issueNumber, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    resource: { kind: 'issue', number: issueNumber },
+    issue,
+    error: null
+  });
 }
 
 function normalizeIssue(remote: RemoteIssue, repository: string): IssueSnapshot | null {
@@ -231,30 +285,14 @@ function inspectGitHubIssueMetadata(client: GitHubClient, repository: string, is
   };
 }
 
-function inspectPlatformIssue(taskRef: string, options: SharedOptions = {}): IssueResult {
-  const base = resolvedContext(taskRef, options);
+async function inspectPlatformIssue(taskRef: string, options: SharedOptions = {}): Promise<IssueResult> {
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.issueNumber) return result('no-op', base.resolved.taskId, null, {
     platform: base.context.platform, capabilities: base.context.capabilities,
     error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false }
   });
-  const fetched = inspectGitHubIssue(base.client, base.context.platform.repository!, base.issueNumber, base.resolved.repoRoot);
-  if (!fetched.ok) return result(fetched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'issue', number: base.issueNumber }, error: fetched.error
-  });
-  const issue = fetched.value;
-  if (base.context.capabilities.push) {
-    const graph = graphState(base.client, base.context.platform.repository!, base.issueNumber, base.resolved.repoRoot);
-    if (graph) {
-      issue.issueType = graph.type?.name || null;
-      issue.fields = Object.fromEntries(graph.values.map((field) => [field.name, field.value]));
-    }
-  }
-  return result('no-op', base.resolved.taskId, base.issueNumber, {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'issue', number: base.issueNumber }, issue, error: null
-  });
+  return inspectExternalIssue(base, base.issueNumber);
 }
 
 function taskTitle(content: string): string {
@@ -327,8 +365,8 @@ function deterministicIssueBody(repoRoot: string, content: string, taskType: str
   return buildDefaultBody(content);
 }
 
-function createPlatformIssue(taskRef: string, options: CreateOptions): IssueResult {
-  const base = resolvedContext(taskRef, options);
+async function createPlatformIssue(taskRef: string, options: CreateOptions): Promise<IssueResult> {
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (base.issueNumber) return inspectPlatformIssue(taskRef, options);
   const repository = base.context.platform.repository!;
@@ -361,6 +399,54 @@ function createPlatformIssue(taskRef: string, options: CreateOptions): IssueResu
     platform: base.context.platform, capabilities: base.context.capabilities,
     operations: [{ name: 'issue:create', status: 'planned', reasonCode: null }], error: null
   });
+  if (base.providerType) {
+    const created = base.provider.issues?.create
+      ? await base.provider.issues.create({
+        context: providerOperationContext(base.loadedContext),
+        desired: {
+          title: payload.title,
+          body: payload.body,
+          labels: payload.labels || [],
+          assignees: payload.assignees,
+          milestone: typeof payload.milestone === 'string' ? payload.milestone : null,
+          fields: {}
+        },
+        mutation: { idempotencyKey: `issue:create:${base.resolved.taskId}` }
+      })
+      : unsupportedProviderOperation(base.provider, 'issues.create');
+    if (!created.ok) return providerIssueError(base, created.error, null);
+    const remoteId = String(created.value.remoteId || '');
+    const number = Number(remoteId);
+    const inspected = base.provider.issues?.inspect
+      ? await base.provider.issues.inspect({
+        context: providerOperationContext(base.loadedContext),
+        target: Number.isInteger(number) && number > 0 ? { number } : { id: remoteId }
+      })
+      : unsupportedProviderOperation(base.provider, 'issues.inspect');
+    if (!inspected.ok) return providerIssueError(base, inspected.error, Number.isInteger(number) && number > 0 ? number : null);
+    const issueNumber = inspected.value.number ?? (Number.isInteger(number) && number > 0 ? number : null);
+    if (!issueNumber) return result('failed', base.resolved.taskId, null, {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      error: { code: 'ISSUE_CREATE_RESPONSE_INVALID', message: 'Provider create response lacks issue number', retryable: false }
+    });
+    const written = writeTask({
+      taskRef: base.resolved.taskId, expectedState: 'active', mutations: [{ kind: 'frontmatter', set: { issue_number: issueNumber } }]
+    }, { repoRoot: base.resolved.repoRoot });
+    if (written.status === 'failed') return result('failed', base.resolved.taskId, null, {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'issue', number: issueNumber },
+      error: { code: 'ISSUE_CREATED_BIND_FAILED', message: written.error.message, retryable: false }
+    });
+    return result('applied', base.resolved.taskId, issueNumber, {
+      changed: true,
+      platform: base.context.platform,
+      capabilities: base.context.capabilities,
+      resource: { kind: 'issue', number: issueNumber },
+      operations: [{ name: 'issue:create', status: 'applied', reasonCode: null }, { name: 'task:bind', status: 'applied', reasonCode: null }],
+      issue: normalizeProviderIssue(inspected.value, repository, issueNumber),
+      error: null
+    });
+  }
   const created = base.client.json<RemoteIssue>(['api', `repos/${repository}/issues`, '-X', 'POST', '--input', '-'], {
     cwd: base.resolved.repoRoot, method: 'POST', input: JSON.stringify(payload)
   });
@@ -404,8 +490,8 @@ function createPlatformIssue(taskRef: string, options: CreateOptions): IssueResu
   });
 }
 
-function bindPlatformIssue(taskRef: string, options: BindOptions): IssueResult {
-  const base = resolvedContext(taskRef, options);
+async function bindPlatformIssue(taskRef: string, options: BindOptions): Promise<IssueResult> {
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!Number.isInteger(options.issue) || options.issue <= 0) return result('failed', base.resolved.taskId, base.issueNumber, {
     error: { code: 'ISSUE_NUMBER_INVALID', message: 'Issue number must be positive', retryable: false }
@@ -413,6 +499,19 @@ function bindPlatformIssue(taskRef: string, options: BindOptions): IssueResult {
   if (base.issueNumber && base.issueNumber !== options.issue) return result('failed', base.resolved.taskId, base.issueNumber, {
     error: { code: 'ISSUE_BIND_CONFLICT', message: `Task is already bound to Issue #${base.issueNumber}`, retryable: false }
   });
+  if (base.providerType) {
+    const fetched = base.provider.issues?.inspect
+      ? await base.provider.issues.inspect({ context: providerOperationContext(base.loadedContext), target: resourceIdentity(options.issue) })
+      : unsupportedProviderOperation(base.provider, 'issues.inspect');
+    if (!fetched.ok) return providerIssueError(base, fetched.error, options.issue);
+    const issue = normalizeProviderIssue(fetched.value, base.context.platform.repository!, options.issue);
+    if (base.issueNumber === options.issue) return result('no-op', base.resolved.taskId, options.issue, { issue, error: null });
+    const written = writeTask({ taskRef: base.resolved.taskId, expectedState: 'active', dryRun: options.dryRun, mutations: [{ kind: 'frontmatter', set: { issue_number: options.issue } }] }, { repoRoot: base.resolved.repoRoot });
+    if (written.status === 'failed') return result('failed', base.resolved.taskId, null, { issue, error: { code: written.error.code, message: written.error.message, retryable: false } });
+    return result(options.dryRun ? 'planned' : 'applied', base.resolved.taskId, options.dryRun ? null : options.issue, {
+      changed: !options.dryRun, issue, operations: [{ name: 'task:bind', status: options.dryRun ? 'planned' : 'applied', reasonCode: null }], error: null
+    });
+  }
   const fetched = fetchIssue(base.client, base.context.platform.repository!, options.issue, base.resolved.repoRoot);
   if (!fetched.ok) return result(fetched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { error: fetched.error });
   const issue = normalizeIssue(fetched.value, base.context.platform.repository!);
@@ -585,11 +684,54 @@ function executeGraphOperation(
   });
 }
 
-function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
-  const base = resolvedContext(taskRef, options);
+async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+  const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.issueNumber) return result('failed', base.resolved.taskId, null, { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false } });
   const repository = base.context.platform.repository!;
+  if (base.providerType !== 'github') {
+    const inspected = base.provider.issues?.inspect
+      ? await base.provider.issues.inspect({ context: providerOperationContext(base.loadedContext), target: resourceIdentity(base.issueNumber) })
+      : unsupportedProviderOperation(base.provider, 'issues.inspect');
+    if (!inspected.ok) return providerIssueError(base, inspected.error, base.issueNumber);
+    const snapshot = normalizeProviderIssue(inspected.value, repository, base.issueNumber);
+    const desired: IssueDesiredState = {
+      status: options.status,
+      assignees: options.assignees,
+      milestone: options.milestone,
+      requirements: options.requirements ? requirementsFromTask(base.content) : undefined,
+      state: options.state
+    };
+    const plan = planIssueMetadata({
+      snapshot,
+      desired,
+      repositoryLabels: new Set([...snapshot.labels, ...(options.status && options.status !== 'none' ? [`status: ${options.status}`] : [])]),
+      milestones: snapshot.milestone ? [snapshot.milestone] : [],
+      currentUser: base.context.platform.currentUser,
+      requirementAnchors: requirementSectionAnchors(base.resolved.repoRoot, base.frontmatter.type || 'task'),
+      capabilities: base.context.capabilities
+    });
+    const failure = plan.operations.find((operation) => operation.status === 'failed');
+    if (failure) return result('failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: { code: failure.reasonCode || 'ISSUE_SYNC_FAILED', message: `Operation ${failure.name} failed`, retryable: false } });
+    const planned = plan.operations.filter((operation) => operation.status === 'planned');
+    const operations = plan.operations;
+    if (options.dryRun) return result(planned.length ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations, error: null });
+    if (planned.length === 0) return result('no-op', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations, error: null });
+    const patch = applyRestOperations(snapshot, planned);
+    const updated = base.provider.issues?.update
+      ? await base.provider.issues.update({ context: providerOperationContext(base.loadedContext), target: resourceIdentity(base.issueNumber), patch: patch as never, mutation: { idempotencyKey: `issue:update:${base.resolved.taskId}` } })
+      : unsupportedProviderOperation(base.provider, 'issues.update');
+    if (!updated.ok) return providerIssueError(base, updated.error, base.issueNumber);
+    return result('applied', base.resolved.taskId, base.issueNumber, {
+      changed: updated.value.changed,
+      platform: base.context.platform,
+      capabilities: base.context.capabilities,
+      resource: { kind: 'issue', number: base.issueNumber },
+      issue: snapshot,
+      operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation),
+      error: null
+    });
+  }
   const fetched = fetchIssue(base.client, repository, base.issueNumber, base.resolved.repoRoot);
   if (!fetched.ok) return result(fetched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { error: fetched.error });
   const snapshot = normalizeIssue(fetched.value, repository);

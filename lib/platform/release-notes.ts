@@ -3,13 +3,14 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
-import { resolvePlatformContext } from './context.ts';
+import { resolvePlatformContext, resolvePlatformProviderContext } from './context.ts';
 import {
   fetchGitHubReleaseNoteData,
   publishGitHubReleaseNotes
 } from './github-release-notes.ts';
 import type { ReleaseNoteActor } from './github-release-notes.ts';
 import type { GitHubClient } from './github-client.ts';
+import { providerError, providerOperationContext, providerStatus, unsupportedProviderOperation } from './provider-bridge.ts';
 
 type ReleaseNoteOptions = {
   cwd?: string;
@@ -130,7 +131,7 @@ function configuredPlatform(cwd: string): string | null {
   }
 }
 
-function releaseNoteContext(
+async function releaseNoteContext(
   input: { fromTag: string; toTag: string; branch: string; historyLimit?: number },
   options: ReleaseNoteOptions = {}
 ) {
@@ -140,7 +141,19 @@ function releaseNoteContext(
   }
   const cwd = path.resolve(options.cwd || process.cwd());
   const platformType = options.platformType ?? configuredPlatform(cwd);
-  if (platformType !== 'github') return baseResult('no-op');
+  if (platformType !== 'github') {
+    const loaded = await resolvePlatformProviderContext({ cwd, platformType: platformType || undefined, client: options.client });
+    if (!loaded.ok) {
+      if (loaded.context.status === 'no-op') return baseResult('no-op');
+      const status = loaded.context.status === 'blocked'
+        ? 'blocked'
+        : 'failed';
+      return { ...baseResult(status), error: loaded.context.error };
+    }
+    return loaded.value.providerType !== 'github'
+      ? { ...baseResult('no-op'), error: { ...unsupportedError, message: `Platform '${loaded.value.providerType}' does not provide release-note collection` } }
+      : baseResult('no-op');
+  }
   let fromOid: string;
   let toOid: string;
   let fromTime: string;
@@ -160,7 +173,7 @@ function releaseNoteContext(
   } catch {
     return { ...baseResult('failed'), error: { code: 'RELEASE_NOTES_RANGE_INVALID', message: 'The release tag range is missing or is not ancestral', retryable: false } };
   }
-  const context = resolvePlatformContext({ cwd, platformType, client: options.client });
+  const context = await resolvePlatformContext({ cwd, platformType, client: options.client });
   if (!context.platform.repository) {
     return {
       ...baseResult(context.status === 'blocked' ? 'blocked' : 'failed'),
@@ -228,7 +241,7 @@ function releaseNoteContext(
   };
 }
 
-function publishReleaseNotes(
+async function publishReleaseNotes(
   input: { tag: string; title: string; notesFile: string; expectedSha256: string; dryRun?: boolean },
   options: ReleaseNoteOptions = {}
 ) {
@@ -246,12 +259,36 @@ function publishReleaseNotes(
   }
   const cwd = path.resolve(options.cwd || process.cwd());
   const platformType = options.platformType ?? configuredPlatform(cwd);
-  if (platformType !== 'github') return { status: 'no-op' as const, changed: false, operation: null, url: null, error: unsupportedError };
-  const context = resolvePlatformContext({ cwd, platformType, client: options.client });
-  if (!context.platform.repository) {
-    return { status: context.status === 'blocked' ? 'blocked' as const : 'failed' as const, changed: false, operation: null, url: null, error: context.error };
+  const loaded = await resolvePlatformProviderContext({ cwd, platformType: platformType || undefined, client: options.client });
+  if (!loaded.ok) {
+    const status = loaded.context.status === 'blocked'
+      ? 'blocked'
+      : loaded.context.status === 'no-op' ? 'no-op' : 'failed';
+    return {
+      ...baseResult(status),
+      error: loaded.context.error || { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false }
+    };
   }
-  return publishGitHubReleaseNotes({ ...input, repository: context.platform.repository }, { cwd, client: options.client });
+  if (loaded.ok) {
+    const context = loaded.value.context;
+    if (!context.platform.repository) return { status: context.status === 'blocked' ? 'blocked' as const : 'failed' as const, changed: false, operation: null, url: null, error: context.error };
+    const published = loaded.value.provider.releases?.publishNotes
+      ? await loaded.value.provider.releases.publishNotes({
+        context: providerOperationContext(loaded.value),
+        release: { key: input.tag },
+        title: input.title,
+        notes: {
+          text: fs.readFileSync(input.notesFile, 'utf8'),
+          sha256: actualSha256,
+          byteLength: fs.statSync(input.notesFile).size
+        },
+        mutation: { idempotencyKey: `release-notes:publish:${input.tag}` }
+      })
+      : unsupportedProviderOperation(loaded.value.provider, 'releases.publishNotes');
+    if (!published.ok) return { status: providerStatus(published.error), changed: false, operation: null, url: null, error: providerError(published.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') };
+    return { status: 'applied' as const, changed: published.value.changed, operation: 'publish-notes', url: null, error: null };
+  }
+  return { status: 'failed' as const, changed: false, operation: null, url: null, error: { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false } };
 }
 
 export {

@@ -5,11 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { registerPlatformAdapter } from "../../../lib/platform/adapters.ts";
 import { resolveMaterializedReviewedHeadRelation } from "../../../lib/platform/change-request-git-evidence.ts";
 import type { PullRequestSnapshot } from "../../../lib/platform/pull-requests.ts";
-import { platformResult } from "../../../lib/platform/types.ts";
 import { gitSafeEnv } from "../../helpers.ts";
+
+const providerSource = path.resolve("tests/fixtures/platform-providers/git-evidence-provider.mjs");
 
 function git(cwd: string, args: string[]): string {
   const result = spawnSync("git", args, {
@@ -88,31 +88,22 @@ function fixture(advanceTarget = false) {
   return { root, remote, caller, base, head, merge, pullRequest };
 }
 
-function registerEvidenceAdapter(type: string, remote: string, reviewedHeadRef = "refs/pull/1/head") {
-  registerPlatformAdapter({
-    type,
-    resolveContext() {
-      return platformResult("no-op", {
-        platform: { type, repository: "o/r", currentUser: "reviewer" }
-      });
-    },
-    resolveChangeRequestGitEvidence() {
-      return {
-        ok: true,
-        value: {
-          remoteUrl: remote,
-          reviewedHeadRef,
-          targetHeadRef: "refs/heads/main"
-        }
-      };
+function configureEvidenceProvider(caller: string, type: string, remote: string, reviewedHeadRef = "refs/pull/1/head") {
+  fs.mkdirSync(path.join(caller, ".agents"), { recursive: true });
+  fs.writeFileSync(path.join(caller, ".agents", ".airc.json"), JSON.stringify({
+    platform: {
+      type,
+      providers: {
+        [type]: { source: providerSource, config: { remoteUrl: remote, reviewedHeadRef } }
+      }
     }
-  });
+  }));
 }
 
-test("materializes merged PR evidence without changing the caller repository", () => {
+test("materializes merged PR evidence without changing the caller repository", async () => {
   const f = fixture();
   try {
-    registerEvidenceAdapter("isolated-evidence-test", f.remote);
+    configureEvidenceProvider(f.caller, "isolated-evidence-test", f.remote);
     assert.notEqual(spawnSync("git", ["cat-file", "-e", `${f.head}^{commit}`], {
       cwd: f.caller,
       env: gitSafeEnv()
@@ -123,7 +114,7 @@ test("materializes merged PR evidence without changing the caller repository", (
     }).status, 0);
     const before = repositorySnapshot(f.caller);
 
-    assert.deepEqual(resolveMaterializedReviewedHeadRelation({
+    assert.deepEqual(await resolveMaterializedReviewedHeadRelation({
       cwd: f.caller,
       platformType: "isolated-evidence-test",
       lastReviewedCommit: f.head,
@@ -141,12 +132,12 @@ test("materializes merged PR evidence without changing the caller repository", (
   }
 });
 
-test("materializes an equivalent squash after the target advances in the same file", () => {
+test("materializes an equivalent squash after the target advances in the same file", async () => {
   const f = fixture(true);
   try {
-    registerEvidenceAdapter("advanced-isolated-evidence-test", f.remote);
+    configureEvidenceProvider(f.caller, "advanced-isolated-evidence-test", f.remote);
     const before = repositorySnapshot(f.caller);
-    assert.deepEqual(resolveMaterializedReviewedHeadRelation({
+    assert.deepEqual(await resolveMaterializedReviewedHeadRelation({
       cwd: f.caller,
       platformType: "advanced-isolated-evidence-test",
       lastReviewedCommit: f.head,
@@ -163,11 +154,11 @@ test("materializes an equivalent squash after the target advances in the same fi
   }
 });
 
-test("blocks with a stable code when platform refs cannot be fetched", () => {
+test("blocks with a stable code when platform refs cannot be fetched", async () => {
   const f = fixture();
   try {
-    registerEvidenceAdapter("missing-evidence-ref-test", f.remote, "refs/pull/999/head");
-    const result = resolveMaterializedReviewedHeadRelation({
+    configureEvidenceProvider(f.caller, "missing-evidence-ref-test", f.remote, "refs/pull/999/head");
+    const result = await resolveMaterializedReviewedHeadRelation({
       cwd: f.caller,
       platformType: "missing-evidence-ref-test",
       lastReviewedCommit: f.head,
@@ -180,11 +171,11 @@ test("blocks with a stable code when platform refs cannot be fetched", () => {
   }
 });
 
-test("fails closed when fetched refs do not match the platform snapshot", () => {
+test("fails closed when fetched refs do not match the platform snapshot", async () => {
   const f = fixture();
   try {
-    registerEvidenceAdapter("mismatched-evidence-head-test", f.remote, "refs/heads/main");
-    const result = resolveMaterializedReviewedHeadRelation({
+    configureEvidenceProvider(f.caller, "mismatched-evidence-head-test", f.remote, "refs/heads/main");
+    const result = await resolveMaterializedReviewedHeadRelation({
       cwd: f.caller,
       platformType: "mismatched-evidence-head-test",
       lastReviewedCommit: f.head,
@@ -197,11 +188,11 @@ test("fails closed when fetched refs do not match the platform snapshot", () => 
   }
 });
 
-test("rejects an inconsistent reviewed identity before fetching", () => {
+test("rejects an inconsistent reviewed identity before fetching", async () => {
   const f = fixture();
   try {
-    registerEvidenceAdapter("invalid-evidence-identity-test", f.remote);
-    const result = resolveMaterializedReviewedHeadRelation({
+    configureEvidenceProvider(f.caller, "invalid-evidence-identity-test", f.remote);
+    const result = await resolveMaterializedReviewedHeadRelation({
       cwd: f.caller,
       platformType: "invalid-evidence-identity-test",
       lastReviewedCommit: "f".repeat(40),

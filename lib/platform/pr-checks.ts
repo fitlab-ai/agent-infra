@@ -2,12 +2,8 @@ import fs from 'node:fs';
 
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import {
-  inspectPlatformRequiredChecks,
-  registerPlatformCapabilities
-} from './adapters.ts';
 import type { PlatformCheckSnapshot } from './adapters.ts';
-import { resolvePlatformContext } from './context.ts';
+import { resolvePlatformContext, resolvePlatformProviderContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import { inspectPlatformPullRequest } from './pull-requests.ts';
@@ -15,6 +11,13 @@ import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { PullRequestSnapshot } from './pull-requests.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
+import {
+  providerError,
+  providerOperationContext,
+  providerStatus,
+  resourceIdentity,
+  unsupportedProviderOperation
+} from './provider-bridge.ts';
 
 type CheckBucket = 'pass' | 'fail' | 'pending' | 'cancel';
 type CheckState = 'passed' | 'failed' | 'pending' | 'timed-out' | 'cancelled' | 'no-required';
@@ -81,8 +84,8 @@ function checksResult(status: PlatformResult['status'], overrides: Partial<Check
   };
 }
 
-function normalizeBucket(value: { bucket?: string; state?: string; conclusion?: string }): CheckBucket {
-  const raw = String(value.bucket || value.conclusion || value.state || '').toLowerCase();
+function normalizeBucket(value: { bucket?: string; status?: string; state?: string; conclusion?: string }): CheckBucket {
+  const raw = String(value.bucket || value.status || value.conclusion || value.state || '').toLowerCase();
   if (['pass', 'success', 'successful', 'neutral'].includes(raw)) return 'pass';
   if (['fail', 'failure', 'failed', 'error', 'timed_out', 'action_required'].includes(raw)) return 'fail';
   if (['cancel', 'cancelled', 'canceled', 'skipped', 'stale'].includes(raw)) return 'cancel';
@@ -106,20 +109,17 @@ function normalizeChecks(value: unknown): CheckSnapshot[] {
   });
 }
 
-registerPlatformCapabilities('github', {
-  inspectRequiredChecks({ client, repository, number, cwd }) {
-    const github = (client as GitHubClient | undefined) || createGitHubClient();
-    const inspected = github.json<unknown>([
-      'pr', 'checks', String(number), '--repo', repository,
-      '--json', 'name,state,bucket,link,workflow,startedAt,completedAt'
-    ], { cwd });
-    return inspected.ok
-      ? { ok: true, value: normalizeChecks(inspected.value) }
-      : { ok: false, error: inspected.error };
-  }
-});
+function inspectGitHubRequiredChecks(client: GitHubClient, repository: string, number: number, cwd: string) {
+  const inspected = client.json<unknown>([
+    'pr', 'checks', String(number), '--repo', repository,
+    '--json', 'name,state,bucket,link,workflow,startedAt,completedAt'
+  ], { cwd });
+  return inspected.ok
+    ? { ok: true as const, value: normalizeChecks(inspected.value) }
+    : { ok: false as const, error: inspected.error };
+}
 
-function resolvedTask(taskRef: string, options: InspectionOptions) {
+async function resolvedTask(taskRef: string, options: InspectionOptions) {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ok: false as const, output: checksResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }) };
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
@@ -128,63 +128,62 @@ function resolvedTask(taskRef: string, options: InspectionOptions) {
   const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null;
   if (!prNumber) return { ok: false as const, output: checksResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }) };
   const client = (options.client as GitHubClient | undefined) || createGitHubClient();
-  const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ok: false as const, output: checksResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error }) };
-  const inspected = inspectPlatformPullRequest(taskRef, { cwd: resolved.repoRoot, client });
+  const inspected = await inspectPlatformPullRequest(taskRef, { cwd: resolved.repoRoot, client });
   if (!inspected.pullRequest) return { ok: false as const, output: checksResult(inspected.status, { platform: context.platform, capabilities: context.capabilities, error: inspected.error }) };
-  return { ok: true as const, resolved, prNumber, client, context, pullRequest: inspected.pullRequest };
+  if (!loaded.ok) return { ok: false as const, output: checksResult('failed', { platform: context.platform, capabilities: context.capabilities, error: context.error }) };
+  return { ok: true as const, resolved, prNumber, client, context, pullRequest: inspected.pullRequest, provider: loaded.value.provider, loadedContext: loaded.value };
 }
 
-function inspectRequiredChecks(taskRef: string, options: InspectionOptions = {}): ChecksResult {
-  const base = resolvedTask(taskRef, options);
+async function inspectRequiredChecks(taskRef: string, options: InspectionOptions = {}): Promise<ChecksResult> {
+  const base = await resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
   return inspectChecksForResolvedTask(base, options);
 }
 
-function inspectChecksForResolvedTask(
-  base: Extract<ReturnType<typeof resolvedTask>, { ok: true }>,
+async function inspectChecksForResolvedTask(
+  base: Extract<Awaited<ReturnType<typeof resolvedTask>>, { ok: true }>,
   options: InspectionOptions
-): ChecksResult {
+): Promise<ChecksResult> {
   const repository = base.context.platform.repository!;
-  const inspected = inspectPlatformRequiredChecks(base.context.platform.type, {
-    cwd: base.resolved.repoRoot,
-    repository,
-    number: base.prNumber,
-    headSha: base.pullRequest.head.sha,
-    client: options.client || base.client
-  });
-  if (!inspected.ok || !inspected.value) {
-    const error = inspected.error || {
-      code: 'REQUIRED_CHECKS_INSPECTION_INVALID',
-      message: 'Platform adapter returned no required-checks snapshot',
-      retryable: false
-    };
-    return checksResult(error.retryable ? 'blocked' : 'failed', {
-      platform: base.context.platform, capabilities: base.context.capabilities,
+  {
+    const inspected = base.provider.checks?.inspectRequired
+      ? await base.provider.checks.inspectRequired({
+        context: providerOperationContext(base.loadedContext),
+        changeRequest: resourceIdentity(base.prNumber),
+        headSha: base.pullRequest.head.sha
+      })
+      : unsupportedProviderOperation(base.provider, 'checks.inspectRequired');
+    if (!inspected.ok) return checksResult(providerStatus(inspected.error), {
+      platform: base.context.platform,
+      capabilities: base.context.capabilities,
       resource: { kind: 'pull-request', number: base.prNumber },
-      pullRequest: base.pullRequest, error
+      pullRequest: base.pullRequest,
+      error: providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+    });
+    const required = normalizeChecks(inspected.value);
+    const classified = classifyRequiredChecks(required);
+    const status = classified.state === 'passed' || classified.state === 'no-required'
+      ? 'no-op'
+      : classified.state === 'failed' || classified.state === 'cancelled' ? 'failed' : 'blocked';
+    return checksResult(status, {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
+      checks: classified,
+      error: status === 'no-op' ? null : {
+        code: classified.state === 'pending' ? 'REQUIRED_CHECKS_PENDING' : `REQUIRED_CHECKS_${classified.state.toUpperCase()}`,
+        message: `Required checks are ${classified.state}`, retryable: classified.state === 'pending'
+      }
     });
   }
-  const classified = classifyRequiredChecks(inspected.value);
-  const status = classified.state === 'passed' || classified.state === 'no-required'
-    ? 'no-op'
-    : classified.state === 'failed' || classified.state === 'cancelled' ? 'failed' : 'blocked';
-  return checksResult(status, {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'pull-request', number: base.prNumber },
-    pullRequest: base.pullRequest, checks: classified,
-    error: status === 'no-op' ? null : {
-      code: classified.state === 'pending' ? 'REQUIRED_CHECKS_PENDING' : `REQUIRED_CHECKS_${classified.state.toUpperCase()}`,
-      message: `Required checks are ${classified.state}`,
-      retryable: classified.state === 'pending'
-    }
-  });
 }
 
-function inspectPullRequestReadiness(taskRef: string, options: InspectionOptions = {}): ChecksResult {
-  const base = resolvedTask(taskRef, options);
+async function inspectPullRequestReadiness(taskRef: string, options: InspectionOptions = {}): Promise<ChecksResult> {
+  const base = await resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
-  const checked = inspectChecksForResolvedTask(base, options);
+  const checked = await inspectChecksForResolvedTask(base, options);
   const classifiedCodes = new Set(['REQUIRED_CHECKS_PENDING', 'REQUIRED_CHECKS_FAILED', 'REQUIRED_CHECKS_CANCELLED']);
   if (checked.error && !classifiedCodes.has(checked.error.code)) return checked;
   const readiness = classifyPullRequestReadiness({
@@ -226,7 +225,7 @@ async function watchPullRequestReadiness(taskRef: string, options: InspectionOpt
       readiness: { state: 'cancelled', headSha: last?.pullRequest?.head.sha ?? '' },
       error: { code: 'PR_READINESS_CANCELLED', message: 'Pull request readiness watch was cancelled', retryable: false }
     });
-    last = inspectPullRequestReadiness(taskRef, options);
+    last = await inspectPullRequestReadiness(taskRef, options);
     if (last.readiness?.state !== 'pending' || last.error?.code !== 'PR_READINESS_PENDING') return last;
     const elapsed = now() - started;
     if (elapsed >= options.deadlineSeconds * 1000) return checksResult('blocked', {
@@ -239,30 +238,36 @@ async function watchPullRequestReadiness(taskRef: string, options: InspectionOpt
   }
 }
 
-function resolvePlatformCheckRun(taskRef: string, options: SharedOptions & { checkName: string; detailsUrl?: string }): ChecksResult {
-  const base = resolvedTask(taskRef, options);
+async function resolvePlatformCheckRun(taskRef: string, options: SharedOptions & { checkName: string; detailsUrl?: string }): Promise<ChecksResult> {
+  const base = await resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
-  const direct = options.detailsUrl ? parseRunJobIdentity(options.detailsUrl) : null;
-  if (direct) {
-    const run = base.client.json<{ id?: number; head_sha?: string }>(['api', `repos/${base.context.platform.repository}/actions/runs/${direct.runId}`], { cwd: base.resolved.repoRoot });
-    if (!run.ok) return checksResult(run.error.retryable ? 'blocked' : 'failed', { platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: base.pullRequest, error: run.error });
-    if (run.value.head_sha !== base.pullRequest.head.sha) return checksResult('failed', { error: { code: 'CHECK_RUN_HEAD_MISMATCH', message: 'Resolved run does not belong to the PR head SHA', retryable: false } });
-    return checksResult('no-op', { platform: base.context.platform, capabilities: base.context.capabilities, resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest, resolution: { status: 'resolved', ...direct }, error: null });
+  {
+    const resolved = base.provider.checks?.resolveRun
+      ? await base.provider.checks.resolveRun({
+        context: providerOperationContext(base.loadedContext),
+        changeRequest: resourceIdentity(base.prNumber),
+        checkName: options.checkName,
+        ...(options.detailsUrl ? { detailsUrl: options.detailsUrl } : {})
+      })
+      : unsupportedProviderOperation(base.provider, 'checks.resolveRun');
+    if (!resolved.ok) return checksResult(providerStatus(resolved.error), {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
+      error: providerError(resolved.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+    });
+    const runId = Number(resolved.value.runId);
+    if (!Number.isSafeInteger(runId) || runId <= 0) return checksResult('failed', {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
+      error: { code: 'CHECK_RUN_IDENTITY_INVALID', message: 'Provider returned an invalid check run identity', retryable: false }
+    });
+    const jobId = resolved.value.jobId ? Number(resolved.value.jobId) : null;
+    return checksResult('no-op', {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
+      resolution: { status: 'resolved', runId, jobId: jobId !== null && Number.isSafeInteger(jobId) && jobId > 0 ? jobId : null }, error: null
+    });
   }
-  const listed = base.client.json<{ check_runs?: Array<{ name?: string; details_url?: string }> }>(['api', `repos/${base.context.platform.repository}/commits/${base.pullRequest.head.sha}/check-runs`], { cwd: base.resolved.repoRoot });
-  if (!listed.ok) return checksResult(listed.error.retryable ? 'blocked' : 'failed', { error: listed.error });
-  const candidates = (listed.value.check_runs || []).flatMap((check) => {
-    if (check.name !== options.checkName || !check.details_url) return [];
-    const identity = parseRunJobIdentity(check.details_url);
-    return identity ? [{ id: identity.runId, jobId: identity.jobId, name: check.name, headSha: base.pullRequest.head.sha }] : [];
-  });
-  const resolution = resolveRunCandidate(candidates, base.pullRequest.head.sha, options.checkName);
-  return checksResult(resolution.status === 'resolved' ? 'no-op' : 'failed', {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
-    resolution,
-    error: resolution.status === 'resolved' ? null : { code: resolution.status === 'ambiguous' ? 'CHECK_RUN_AMBIGUOUS' : 'CHECK_RUN_NOT_FOUND', message: `Check run is ${resolution.status}`, retryable: false }
-  });
 }
 
 function fetchCheckLogText(client: GitHubClient, args: string[], cwd: string) {
@@ -273,20 +278,32 @@ function fetchCheckLogText(client: GitHubClient, args: string[], cwd: string) {
   return client.text([...args, '--allow-escape-sequences'], { cwd });
 }
 
-function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & { run: number; job?: number }): ChecksResult {
-  const base = resolvedTask(taskRef, options);
+async function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & { run: number; job?: number }): Promise<ChecksResult> {
+  const base = await resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
-  const args = options.job
-    ? ['api', `repos/${base.context.platform.repository}/actions/jobs/${options.job}/logs`]
-    : ['run', 'view', String(options.run), '--repo', base.context.platform.repository!, '--log-failed'];
-  const fetched = fetchCheckLogText(base.client, args, base.resolved.repoRoot);
-  if (!fetched.ok) return checksResult(fetched.error.retryable ? 'blocked' : 'failed', { platform: base.context.platform, capabilities: base.context.capabilities, error: fetched.error });
-  if (!fetched.value) return checksResult('failed', { error: { code: 'CHECK_LOGS_MISSING', message: 'No failed logs are available', retryable: false } });
-  return checksResult('no-op', {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
-    logs: { runId: options.run, ...(options.job ? { jobId: options.job } : {}), text: fetched.value }, error: null
-  });
+  {
+    const fetched = base.provider.checks?.fetchLogs
+      ? await base.provider.checks.fetchLogs({
+        context: providerOperationContext(base.loadedContext),
+        runId: String(options.run),
+        ...(options.job ? { jobId: String(options.job) } : {})
+      })
+      : unsupportedProviderOperation(base.provider, 'checks.fetchLogs');
+    if (!fetched.ok) return checksResult(providerStatus(fetched.error), {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
+      error: providerError(fetched.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+    });
+    if (!fetched.value.text) return checksResult('failed', {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      error: { code: 'CHECK_LOGS_MISSING', message: 'No failed logs are available', retryable: false }
+    });
+    return checksResult('no-op', {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
+      logs: { runId: options.run, ...(options.job ? { jobId: options.job } : {}), text: fetched.value.text }, error: null
+    });
+  }
 }
 
 export {
@@ -294,6 +311,7 @@ export {
   classifyRequiredChecks,
   fetchCheckLogText,
   fetchPlatformCheckLogs,
+  inspectGitHubRequiredChecks,
   inspectRequiredChecks,
   inspectPullRequestReadiness,
   parseRunJobIdentity,

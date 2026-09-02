@@ -139,7 +139,7 @@ test("required-checks skips tasks without a PR or with PR flow disabled", () => 
   }).status, "pass");
 });
 
-test("required-checks fails closed when an applicable platform adapter lacks checks inspection", () => {
+test("required-checks fails closed when an applicable platform adapter lacks checks inspection", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "required-checks-adapter-"));
   try {
     fs.mkdirSync(path.join(root, ".agents"), { recursive: true });
@@ -159,7 +159,7 @@ test("required-checks fails closed when an applicable platform adapter lacks che
         });
       }
     });
-    const result = check({ taskDir: root }, {
+    const result = await check({ taskDir: root }, {
       ...shared,
       repoRoot: root,
       loadTask() {

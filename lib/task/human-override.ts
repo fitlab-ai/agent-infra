@@ -97,7 +97,7 @@ type HumanOverrideOptions = Readonly<{
   probePullRequestNumber?: number;
   probeStagingDir?: string;
   platformClient?: GitHubClient;
-  effectExecutor?: (capability: ManualOverrideCapability) => OverrideError | null;
+  effectExecutor?: (capability: ManualOverrideCapability) => OverrideError | null | Promise<OverrideError | null>;
 }>;
 
 type FailureSnapshot = Readonly<{
@@ -694,12 +694,12 @@ function probeNotObserved(policy: FailurePolicy): OverrideError {
   return error('OVERRIDE_FAILURE_NOT_PRESENT', `producer ${policy.producerId} did not produce ${policy.code}`);
 }
 
-function probePlatformFailure(
+async function probePlatformFailure(
   taskRef: string,
   policy: FailurePolicy,
   resolved: ProbeTask,
   options: HumanOverrideOptions
-): ProducerFailure | OverrideError {
+): Promise<ProducerFailure | OverrideError> {
   let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
   try {
     frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(path.join(resolved.taskDir, 'task.md'), 'utf8'));
@@ -709,7 +709,7 @@ function probePlatformFailure(
   const issueNumber = options.probeIssueNumber ?? toPositiveInteger(frontmatter.issue_number);
   const fact = readPrDeliveryFact(frontmatter);
   const pullRequestNumber = options.probePullRequestNumber ?? (fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null);
-  const operation = policy.producerId === 'platform.issue'
+  const operation = await (policy.producerId === 'platform.issue'
     ? issueNumber === null
       ? null
       : bindPlatformIssue(taskRef, {
@@ -727,7 +727,8 @@ function probePlatformFailure(
         dryRun: true,
         cwd: resolved.repoRoot,
         ...(options.platformClient ? { client: options.platformClient } : {})
-      });
+      })
+  );
   if (!operation) return error('OVERRIDE_PROBE_INPUT_MISSING', `${policy.producerId} requires a bound issue or pull request number`);
   if (operation.status !== 'failed' && operation.status !== 'blocked') return probeNotObserved(policy);
   if (!operation.error) return error('OVERRIDE_PROBE_INPUT_MISSING', `${policy.producerId} returned no platform error evidence`);
@@ -774,8 +775,8 @@ function probeTaskEventFailure(taskRef: string, policy: FailurePolicy, resolved:
   return probeNotObserved(policy);
 }
 
-function probeVerificationFailure(taskRef: string, policy: FailurePolicy, resolved: ProbeTask): ProducerFailure | OverrideError {
-  const result = verifyTaskEvent(
+async function probeVerificationFailure(taskRef: string, policy: FailurePolicy, resolved: ProbeTask): Promise<ProducerFailure | OverrideError> {
+  const result = await verifyTaskEvent(
     {
       taskRef,
       event: 'review-code.completed',
@@ -795,12 +796,12 @@ function latestArtifact(taskDir: string, family: string): string | undefined {
   ));
   candidates.sort((a, b) => {
     const round = (name: string) => Number(/-r(\d+)\.md$/.exec(name)?.[1] ?? 1);
-    return round(b) - round(a);
-  });
+      return round(b) - round(a);
+    });
   return candidates[0];
 }
 
-function probeVerificationEngineFailure(policy: FailurePolicy, resolved: ProbeTask): ProducerFailure | OverrideError {
+async function probeVerificationEngineFailure(policy: FailurePolicy, resolved: ProbeTask): Promise<ProducerFailure | OverrideError> {
   const candidates = [
     { skillName: 'review-code', family: 'review-code' },
     { skillName: 'review-plan', family: 'review-plan' },
@@ -814,7 +815,7 @@ function probeVerificationEngineFailure(policy: FailurePolicy, resolved: ProbeTa
     const artifactFile = candidate.family ? latestArtifact(resolved.taskDir, candidate.family) : undefined;
     if (candidate.family && !artifactFile) continue;
     try {
-      const payload = verifyInProcess({
+      const payload = await verifyInProcess({
         mode: 'gate',
         skillName: candidate.skillName,
         taskDir: resolved.taskDir,
@@ -838,12 +839,12 @@ function probeVerificationEngineFailure(policy: FailurePolicy, resolved: ProbeTa
   return probeNotObserved(policy);
 }
 
-function probeGenericFailure(
+async function probeGenericFailure(
   taskRef: string,
   policy: FailurePolicy,
   resolved: ProbeTask,
   options: HumanOverrideOptions = {}
-): ProducerFailure | OverrideError {
+): Promise<ProducerFailure | OverrideError> {
   switch (policy.producerId) {
     case 'task.resolve':
       return probeNotObserved(policy);
@@ -852,9 +853,9 @@ function probeGenericFailure(
     case 'task-event':
       return probeTaskEventFailure(taskRef, policy, resolved);
     case 'task-verify':
-      return probeVerificationFailure(taskRef, policy, resolved);
+      return await probeVerificationFailure(taskRef, policy, resolved);
     case 'verification-engine':
-      return probeVerificationEngineFailure(policy, resolved);
+      return await probeVerificationEngineFailure(policy, resolved);
     case 'activity-intent':
       return probeResult(policy, applyPrReviewActivityIntent({
         kind: 'pr-review-start', taskRef, agent: 'codex', artifact: 'pr-review.md', head: '0'.repeat(40), dryRun: true
@@ -889,7 +890,7 @@ function probeGenericFailure(
     }
     case 'platform.issue':
     case 'platform.pull-request':
-      return probePlatformFailure(taskRef, policy, resolved, options);
+      return await probePlatformFailure(taskRef, policy, resolved, options);
     default:
       return error('OVERRIDE_PROBE_INPUT_MISSING', `no producer probe is registered for ${policy.producerId}`);
   }
@@ -899,7 +900,7 @@ function isProducerFailure(value: ProducerFailure | OverrideError): value is Pro
   return 'observedFacts' in value && 'state' in value && Array.isArray(value.observedFacts);
 }
 
-function captureFailureSnapshot(taskRef: string, failureIdValue: string, target: string, options: HumanOverrideOptions = {}): FailureSnapshot | OverrideError {
+async function captureFailureSnapshot(taskRef: string, failureIdValue: string, target: string, options: HumanOverrideOptions = {}): Promise<FailureSnapshot | OverrideError> {
   const policy = policyFor(failureIdValue);
   if (!policy) return error('OVERRIDE_FAILURE_UNKNOWN', `failure policy '${failureIdValue}' is not registered`);
   if (!policy.targets.includes(target)) return error('OVERRIDE_TARGET_INVALID', `target '${target}' is not registered for ${failureIdValue}`);
@@ -915,7 +916,7 @@ function captureFailureSnapshot(taskRef: string, failureIdValue: string, target:
   try { frontmatter = parseTypedTaskFrontmatter(content); } catch { /* probe reports an unconfirmed identity */ }
   const producer: ProducerFailure | OverrideError = policy.producerId === LIFECYCLE_PRODUCER
     ? probeLifecycleFailure(taskRef, policy, resolved, options)
-    : probeGenericFailure(taskRef, policy, resolved, options);
+    : await probeGenericFailure(taskRef, policy, resolved, options);
   if (!isProducerFailure(producer)) return producer;
   const digest = computeFailureDigest(snapshotEvidence(
     resolved.taskId,
@@ -984,7 +985,7 @@ function validateResourceNumbers(request: HumanOverrideRequest): OverrideError |
   return null;
 }
 
-function issueHumanOverride(request: HumanOverrideRequest, options: HumanOverrideOptions = {}): HumanOverrideIssueResult {
+async function issueHumanOverride(request: HumanOverrideRequest, options: HumanOverrideOptions = {}): Promise<HumanOverrideIssueResult> {
   const invalid = validateCommon(request);
   if (invalid) return failedIssue(invalid.code, invalid.message);
   const policy = policyFor(request.failureId);
@@ -1005,7 +1006,7 @@ function issueHumanOverride(request: HumanOverrideRequest, options: HumanOverrid
   const document = readTask(resolved.taskMdPath);
   if ('code' in document) return failedIssue(document.code, document.message, resolved.taskId);
   if (document.frontmatter.id !== resolved.taskId) return failedIssue('OVERRIDE_DOCUMENT_INVALID', 'task frontmatter id does not match resolved task', resolved.taskId);
-  const snapshotResult = captureFailureSnapshot(request.taskRef, request.failureId, request.target, {
+  const snapshotResult = await captureFailureSnapshot(request.taskRef, request.failureId, request.target, {
     ...options,
     probeIntent: request.intent,
     probeOperator: request.operator,
@@ -1127,18 +1128,18 @@ function lifecycleRequestFor(
   return { taskRef, intent: 'restore', agent: operator, stagingDir, issueNumber };
 }
 
-function applyOutcomeEffect(
+async function applyOutcomeEffect(
   request: ConsumeHumanOverrideRequest,
   row: Readonly<Record<string, string>>,
   snapshot: FailureSnapshot,
   outcome: Outcome,
   options: HumanOverrideOptions
-): OverrideError | null {
+): Promise<OverrideError | null> {
   if (outcome.effect === 'no-write' || outcome.effect === 'record-only') return null;
   const intent = outcome.target === 'safe-close' ? 'cancel' : row.intent || request.intent;
   if (!intent && outcome.target === 'continue-local') {
     if (!options.effectExecutor) return error('OVERRIDE_EFFECT_EXECUTOR_MISSING', 'the producer must supply an effect executor for a continue-local outcome');
-    return options.effectExecutor({
+    return await options.effectExecutor({
       failureId: request.failureId,
       operator: row.operator ?? 'local-operator',
       reason: row.reason ?? snapshot.message
@@ -1242,7 +1243,7 @@ function snapshotFromTicket(taskId: string, row: Readonly<Record<string, string>
   };
 }
 
-function consumeHumanOverride(request: ConsumeHumanOverrideRequest, options: HumanOverrideOptions = {}): HumanOverrideConsumeResult {
+async function consumeHumanOverride(request: ConsumeHumanOverrideRequest, options: HumanOverrideOptions = {}): Promise<HumanOverrideConsumeResult> {
   const values = [request.taskRef, request.ticketId, request.failureId, request.target, request.scope];
   if (values.some((value) => !singleLine(value))) {
     return failedConsume('OVERRIDE_PAYLOAD_INVALID', 'consume fields must be non-empty single-line values', request.ticketId || null);
@@ -1278,7 +1279,7 @@ function consumeHumanOverride(request: ConsumeHumanOverrideRequest, options: Hum
     if (isOverrideError(recoverySnapshot)) return failedConsume(recoverySnapshot.code, recoverySnapshot.message, request.ticketId, resolved.taskId);
     snapshot = recoverySnapshot;
   } else {
-    const snapshotResult = captureFailureSnapshot(request.taskRef, request.failureId, request.target, {
+    const snapshotResult = await captureFailureSnapshot(request.taskRef, request.failureId, request.target, {
       ...options,
       probeIntent: row.values.intent ? row.values.intent as TaskLifecycleIntent : request.intent,
       probeOperator: row.values.operator,
@@ -1323,7 +1324,7 @@ function consumeHumanOverride(request: ConsumeHumanOverrideRequest, options: Hum
     if (staged.status === 'planned') return failedConsume('OVERRIDE_WRITE_INVALID', 'override writes cannot be planned', request.ticketId, resolved.taskId);
     effectRow = { ...row.values, status: 'consuming', effect: outcome.effect, result: outcome.result, context_id: outcome.contextId, residual: `effect pending: ${outcome.residual}` };
   }
-  const effectError = applyOutcomeEffect(request, effectRow, snapshot, outcome, options);
+  const effectError = await applyOutcomeEffect(request, effectRow, snapshot, outcome, options);
   if (effectError) return failedConsume(effectError.code, effectError.message, request.ticketId, resolved.taskId);
   const after = resolveTask(request.taskRef, options);
   if (!after.ok) return failedConsume(after.code, after.message, request.ticketId, after.taskId);
@@ -1359,7 +1360,7 @@ function diagnoseHumanOverride(failure: string, target?: string) {
   };
 }
 
-function diagnoseHumanOverrideForTask(
+async function diagnoseHumanOverrideForTask(
   taskRef: string,
   failure?: string,
   target?: string,
@@ -1403,12 +1404,12 @@ function diagnoseHumanOverrideForTask(
       error: error('OVERRIDE_FAILURE_UNKNOWN', `failure policy '${failure}' is not registered`)
     };
   }
-  const probes = policies
+  const probes = await Promise.all(policies
     .filter((policy) => !target || policy.targets.includes(target))
-    .map((policy) => {
+    .map(async (policy) => {
       const producer = policy.producerId === LIFECYCLE_PRODUCER
         ? probeLifecycleFailure(taskRef, policy, resolved, options)
-    : probeGenericFailure(taskRef, policy, resolved, options);
+        : await probeGenericFailure(taskRef, policy, resolved, options);
       const observed = isProducerFailure(producer);
       return {
         failureId: policy.id,
@@ -1422,7 +1423,7 @@ function diagnoseHumanOverrideForTask(
         message: observed ? producer.message : producer.message,
         errorCode: observed ? null : producer.code
       };
-    });
+    }));
   const blockedBy = probes.filter((probe) => probe.status === 'observed');
   return {
     status: 'ready' as const,

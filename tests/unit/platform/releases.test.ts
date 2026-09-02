@@ -35,24 +35,24 @@ function client(release: Record<string, unknown> | null, options: { blocked?: bo
   };
 }
 
-test('release inspection distinguishes missing, published, and blocked facts', () => {
+test('release inspection distinguishes missing, published, and blocked facts', async () => {
   const root = fixture();
   try {
-    assert.equal(inspectPlatformRelease('v0.8.6', { cwd: root, client: client(null) }).release, null);
-    const published = inspectPlatformRelease('v0.8.6', { cwd: root, client: client({ tagName: 'v0.8.6', isDraft: false, url: 'https://example/release' }) });
+    assert.equal((await inspectPlatformRelease('v0.8.6', { cwd: root, client: client(null) })).release, null);
+    const published = await inspectPlatformRelease('v0.8.6', { cwd: root, client: client({ tagName: 'v0.8.6', isDraft: false, url: 'https://example/release' }) });
     assert.equal(published.release?.published, true);
     assert.equal(published.workflows.length, 1);
-    assert.equal(inspectPlatformRelease('v0.8.6', { cwd: root, client: client(null, { blocked: true }) }).status, 'blocked');
+    assert.equal((await inspectPlatformRelease('v0.8.6', { cwd: root, client: client(null, { blocked: true }) })).status, 'blocked');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('release inspection requests workflow identity and ordering fields', () => {
+test('release inspection requests workflow identity and ordering fields', async () => {
   const root = fixture();
   const calls: string[][] = [];
   try {
-    inspectPlatformRelease(
+    await inspectPlatformRelease(
       'v0.8.6',
       { cwd: root, client: client({ tagName: 'v0.8.6', isDraft: false, url: 'https://example/release' }, { calls }) }
     );
@@ -68,10 +68,10 @@ test('release inspection requests workflow identity and ordering fields', () => 
   }
 });
 
-test('release upsert is idempotent once the release is published', () => {
+test('release upsert is idempotent once the release is published', async () => {
   const root = fixture();
   try {
-    const result = upsertPlatformRelease({ tag: 'v0.8.6' }, { cwd: root, client: client({ tagName: 'v0.8.6', isDraft: false, url: 'https://example/release' }) });
+    const result = await upsertPlatformRelease({ tag: 'v0.8.6' }, { cwd: root, client: client({ tagName: 'v0.8.6', isDraft: false, url: 'https://example/release' }) });
     assert.equal(result.status, 'no-op');
     assert.equal(result.changed, false);
   } finally {
@@ -79,7 +79,7 @@ test('release upsert is idempotent once the release is published', () => {
   }
 });
 
-test('platform-free release operations are no-op without probing GitHub', () => {
+test('platform-free release operations are no-op without probing GitHub', async () => {
   const root = fixture();
   fs.writeFileSync(`${root}/.agents/.airc.json`, '{"platform":{"type":"none"}}');
   const unavailable: GitHubClient = {
@@ -94,15 +94,15 @@ test('platform-free release operations are no-op without probing GitHub', () => 
     }
   };
   try {
-    assert.equal(inspectPlatformRelease('v0.8.6', { cwd: root, client: unavailable }).status, 'no-op');
-    assert.equal(upsertPlatformRelease({ tag: 'v0.8.6' }, { cwd: root, client: unavailable }).status, 'no-op');
-    assert.equal(reconcileReleaseMilestones('0.8.6', { cwd: root, client: unavailable }).status, 'no-op');
+    assert.equal((await inspectPlatformRelease('v0.8.6', { cwd: root, client: unavailable })).status, 'no-op');
+    assert.equal((await upsertPlatformRelease({ tag: 'v0.8.6' }, { cwd: root, client: unavailable })).status, 'no-op');
+    assert.equal((await reconcileReleaseMilestones('0.8.6', { cwd: root, client: unavailable })).status, 'no-op');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('release milestone reconciliation closes current and ensures planning milestones idempotently', () => {
+test('release milestone reconciliation closes current and ensures planning milestones idempotently', async () => {
   const root = fixture();
   const milestones = [{ title: '0.8.0', number: 1, state: 'open' }];
   const patchCalls: string[][] = [];
@@ -137,7 +137,7 @@ test('release milestone reconciliation closes current and ensures planning miles
     text: () => ({ ok: true, value: '' })
   };
   try {
-    assert.equal(reconcileReleaseMilestones('0.8.0', { cwd: root, client: mutable }).status, 'applied');
+    assert.equal((await reconcileReleaseMilestones('0.8.0', { cwd: root, client: mutable })).status, 'applied');
     assert.deepEqual(patchCalls, [[
       'api', '--method', 'PATCH', 'repos/acme/widgets/milestones/1', '-f', 'state=closed'
     ]]);
@@ -151,7 +151,7 @@ test('release milestone reconciliation closes current and ensures planning miles
 
     const patchCount = patchCalls.length;
     const postCount = postFields.length;
-    assert.equal(reconcileReleaseMilestones('0.8.0', { cwd: root, client: mutable }).status, 'no-op');
+    assert.equal((await reconcileReleaseMilestones('0.8.0', { cwd: root, client: mutable })).status, 'no-op');
     assert.equal(patchCalls.length, patchCount);
     assert.equal(postFields.length, postCount);
   } finally {

@@ -5,15 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { registerPlatformAdapter } from "../../../lib/platform/adapters.ts";
 import type { PlatformChangeRequestSnapshot } from "../../../lib/platform/adapters.ts";
-import { platformResult } from "../../../lib/platform/types.ts";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { gitSafeEnv } from "../../helpers.ts";
 import { buildBoundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 
 const TASK_A_ID = "TASK-20260731-000001";
 const TASK_B_ID = "TASK-20260731-000002";
+const providerSource = path.resolve("tests/fixtures/platform-providers/remote-evidence-provider.mjs");
 
 function git(cwd: string, args: string[]): string {
   const result = spawnSync("git", args, { cwd, encoding: "utf8", env: gitSafeEnv() });
@@ -70,7 +69,7 @@ function writeTask(
   return taskDir;
 }
 
-test("complete-task gate verifies target advancement and consecutive squash merges from isolated remote evidence", () => {
+test("complete-task gate verifies target advancement and consecutive squash merges from isolated remote evidence", async () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-remote-evidence-"));
   const remote = path.join(fixtureRoot, "remote.git");
   const seed = path.join(fixtureRoot, "seed");
@@ -142,31 +141,17 @@ test("complete-task gate verifies target advancement and consecutive squash merg
         milestone: null
       }]
     ]);
-    registerPlatformAdapter({
-      type: platformType,
-      resolveContext() {
-        return platformResult("no-op", {
-          platform: { type: platformType, repository: "o/r", currentUser: "reviewer" }
-        });
-      },
-      inspectChangeRequest({ number }) {
-        return { ok: true, value: pullRequests.get(number)! };
-      },
-      resolveChangeRequestGitEvidence({ number }) {
-        return {
-          ok: true,
-          value: {
-            remoteUrl: remote,
-            reviewedHeadRef: `refs/pull/${number}/head`,
-            targetHeadRef: "refs/heads/main"
-          }
-        };
-      }
-    });
-
     fs.mkdirSync(path.join(caller, ".agents", "skills", "complete-task", "config"), { recursive: true });
     fs.writeFileSync(path.join(caller, ".agents", ".airc.json"), JSON.stringify({
-      platform: { type: platformType }
+      platform: {
+        type: platformType,
+        providers: {
+          [platformType]: {
+            source: providerSource,
+            config: { remoteUrl: remote, pullRequests: Object.fromEntries(pullRequests) }
+          }
+        }
+      }
     }));
     fs.writeFileSync(
       path.join(caller, ".agents", "skills", "complete-task", "config", "verify.json"),
@@ -183,7 +168,7 @@ test("complete-task gate verifies target advancement and consecutive squash merg
     const before = repositorySnapshot(caller);
 
     for (const taskDir of [taskA, taskB]) {
-      const result = verifyInProcess({
+      const result = await verifyInProcess({
         mode: "gate",
         skillName: "complete-task",
         taskDir,
@@ -200,7 +185,7 @@ test("complete-task gate verifies target advancement and consecutive squash merg
   }
 });
 
-test("complete-task consumes a human exemption for merged identity failures before and after archival", () => {
+test("complete-task consumes a human exemption for merged identity failures before and after archival", async () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-identity-exemption-"));
   const taskId = "TASK-20260731-000003";
   try {
@@ -228,20 +213,17 @@ test("complete-task consumes a human exemption for merged identity failures befo
       assignees: [],
       milestone: null
     };
-    registerPlatformAdapter({
-      type: platformType,
-      resolveContext() {
-        return platformResult("no-op", {
-          platform: { type: platformType, repository: "o/r", currentUser: "reviewer" }
-        });
-      },
-      inspectChangeRequest() {
-        return { ok: true, value: pullRequest };
-      }
-    });
     fs.mkdirSync(path.join(fixtureRoot, ".agents", "skills", "complete-task", "config"), { recursive: true });
     fs.writeFileSync(path.join(fixtureRoot, ".agents", ".airc.json"), JSON.stringify({
-      platform: { type: platformType }
+      platform: {
+        type: platformType,
+        providers: {
+          [platformType]: {
+            source: providerSource,
+            config: { pullRequests: { 3: pullRequest }, evidenceEnabled: false }
+          }
+        }
+      }
     }));
     fs.writeFileSync(
       path.join(fixtureRoot, ".agents", "skills", "complete-task", "config", "verify.json"),
@@ -251,7 +233,7 @@ test("complete-task consumes a human exemption for merged identity failures befo
       "| PRC-1 | post-review-commit | - | - | human-decided | maintainer allowed reviewed and merged identities |"
     ]);
 
-    const active = verifyInProcess({
+    const active = await verifyInProcess({
       mode: "gate",
       skillName: "complete-task",
       taskDir: activeTask,
@@ -269,7 +251,7 @@ test("complete-task consumes a human exemption for merged identity failures befo
     const completedTask = path.join(fixtureRoot, ".agents", "workspace", "completed", taskId);
     fs.mkdirSync(path.dirname(completedTask), { recursive: true });
     fs.renameSync(activeTask, completedTask);
-    const completed = verifyInProcess({
+    const completed = await verifyInProcess({
       mode: "gate",
       skillName: "complete-task",
       taskDir: completedTask,
@@ -283,7 +265,7 @@ test("complete-task consumes a human exemption for merged identity failures befo
   }
 });
 
-test("complete-task keeps merged identity failures closed without a valid exemption", () => {
+test("complete-task keeps merged identity failures closed without a valid exemption", async () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-invalid-identity-exemption-"));
   const reviewedHead = "a".repeat(40);
   try {
@@ -293,36 +275,35 @@ test("complete-task keeps merged identity failures closed without a valid exempt
     commit(fixtureRoot, "base\n", "base");
 
     const platformType = "complete-task-invalid-identity-exemption-test";
-    registerPlatformAdapter({
-      type: platformType,
-      resolveContext() {
-        return platformResult("no-op", {
-          platform: { type: platformType, repository: "o/r", currentUser: "reviewer" }
-        });
-      },
-      inspectChangeRequest({ number }) {
-        return {
-          ok: true,
-          value: {
-            repository: "o/r", number, nodeId: `PR_${number}`, url: `https://example.test/o/r/pull/${number}`,
-            state: "closed", title: "", body: "", draft: false,
-            head: { repository: "o/r", ref: "feature", sha: "b".repeat(40) },
-            base: { repository: "o/r", ref: "main", sha: "c".repeat(40) },
-            mergedAt: "2026-07-31T00:00:00Z", mergeCommitSha: "d".repeat(40),
-            labels: [], assignees: [], milestone: null
-          }
-        };
-      }
-    });
     fs.mkdirSync(path.join(fixtureRoot, ".agents", "skills", "complete-task", "config"), { recursive: true });
-    fs.writeFileSync(path.join(fixtureRoot, ".agents", ".airc.json"), JSON.stringify({ platform: { type: platformType } }));
+    fs.writeFileSync(path.join(fixtureRoot, ".agents", ".airc.json"), JSON.stringify({
+      platform: {
+        type: platformType,
+        providers: {
+          [platformType]: {
+            source: providerSource,
+            config: {
+              evidenceEnabled: false,
+              pullRequests: Object.fromEntries([1, 2, 3, 4, 5, 6].map((number) => [number, {
+                repository: "o/r", number, nodeId: `PR_${number}`, url: `https://example.test/o/r/pull/${number}`,
+                state: "closed", title: "", body: "", draft: false,
+                head: { repository: "o/r", ref: "feature", sha: "b".repeat(40) },
+                base: { repository: "o/r", ref: "main", sha: "c".repeat(40) },
+                mergedAt: "2026-07-31T00:00:00Z", mergeCommitSha: "d".repeat(40),
+                labels: [], assignees: [], milestone: null
+              }]))
+            }
+          }
+        }
+      }
+    }));
     fs.writeFileSync(
       path.join(fixtureRoot, ".agents", "skills", "complete-task", "config", "verify.json"),
       JSON.stringify({ skill: "complete-task", checks: { "post-review-commit": {} } })
     );
 
     const noExemption = writeTask(fixtureRoot, "TASK-20260731-000004", 4, reviewedHead);
-    const missing = verifyInProcess({
+    const missing = await verifyInProcess({
       mode: "gate", skillName: "complete-task", taskDir: noExemption, checks: [], repositoryRoot: fixtureRoot
     });
     assert.equal(missing.gate, "fail");
@@ -331,7 +312,7 @@ test("complete-task keeps merged identity failures closed without a valid exempt
     const malformed = writeTask(fixtureRoot, "TASK-20260731-000005", 5, reviewedHead, [
       "| PRC-1 | post-review-commit | - | - | open | decision is pending |"
     ]);
-    const invalid = verifyInProcess({
+    const invalid = await verifyInProcess({
       mode: "gate", skillName: "complete-task", taskDir: malformed, checks: [], repositoryRoot: fixtureRoot
     });
     assert.equal(invalid.gate, "fail");
@@ -340,7 +321,7 @@ test("complete-task keeps merged identity failures closed without a valid exempt
     const blockedTask = writeTask(fixtureRoot, "TASK-20260731-000006", 6, "b".repeat(40), [
       "| PRC-1 | post-review-commit | - | - | human-decided | maintainer allowed the identity change |"
     ]);
-    const blocked = verifyInProcess({
+    const blocked = await verifyInProcess({
       mode: "gate", skillName: "complete-task", taskDir: blockedTask, checks: [], repositoryRoot: fixtureRoot
     });
     assert.equal(blocked.gate, "blocked");

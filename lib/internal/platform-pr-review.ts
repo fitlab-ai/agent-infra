@@ -50,7 +50,7 @@ function readBodyFile(value: string, cwd: string): string {
   return value === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(path.resolve(cwd, value), 'utf8');
 }
 
-function platformPrReview(args: string[] = []): void {
+async function platformPrReview(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['inspect', 'list', 'publish'].includes(operation)) { fail('a valid operation is required'); return; }
@@ -68,11 +68,11 @@ function platformPrReview(args: string[] = []): void {
   const pr = Number(values.pr);
   if (!Number.isInteger(pr) || pr <= 0) { fail(`${operation} requires a positive --pr`); return; }
   if (operation === 'inspect') {
-    finish(inspectPlatformPullRequestByNumber(pr, { cwd }));
+    finish(await inspectPlatformPullRequestByNumber(pr, { cwd }));
     return;
   }
   if (operation === 'list') {
-    finish(listPrReviews(pr, { cwd }));
+    finish(await listPrReviews(pr, { cwd }));
     return;
   }
   const scope = typeof values.scope === 'string' ? values.scope : '';
@@ -91,7 +91,7 @@ function platformPrReview(args: string[] = []): void {
     fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
-  finish(publishPrReview({
+  finish(await publishPrReview({
     cwd,
     prNumber: pr,
     identity: { scope, round, commitSha: commit },

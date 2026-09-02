@@ -28,7 +28,7 @@ function usageFailure(message: string): void {
   process.exitCode = 1;
 }
 
-function taskEvent(args: string[] = []): void {
+async function taskEvent(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (args.length < 2) { usageFailure('task ref and event are required'); return; }
   const request: TaskEventRequest = { taskRef: args[0]!, event: args[1]!, agent: '' };
@@ -67,14 +67,14 @@ function taskEvent(args: string[] = []): void {
   let result;
   let humanOverride: unknown = null;
   try {
-    result = withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-event.${request.event}`, () => {
+    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-event.${request.event}`, async () => {
       let current = applyTaskEvent(request, { lockAlreadyHeld: true });
       const values = request as Record<string, unknown>;
       if (current.status !== 'failed' || !values.overrideTicket) return current;
       if (!values.overrideTarget || !values.overrideScope) {
         return { ...current, humanOverride: { status: 'failed', error: { code: 'OVERRIDE_PAYLOAD_INVALID', message: 'override ticket requires target and scope' } } } as typeof current & { humanOverride: unknown };
       }
-      const consumed = consumeHumanOverride({
+      const consumed = await consumeHumanOverride({
         taskRef: request.taskRef,
         ticketId: String(values.overrideTicket),
         failureId: failureId('task-event', current.error?.code ?? 'EVENT_TRANSITION_INVALID'),

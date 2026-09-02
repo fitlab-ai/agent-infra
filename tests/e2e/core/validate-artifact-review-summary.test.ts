@@ -30,7 +30,7 @@ ${withFinding ? `| ${scenario.findingId} | ${scenario.stage} | 1 | minor | open 
   return taskDir;
 }
 
-function check(scenario: (typeof scenarios)[number], taskDir: string) {
+async function check(scenario: (typeof scenarios)[number], taskDir: string) {
   return verifyInProcess({
     mode: 'check',
     skillName: scenario.skill,
@@ -42,16 +42,16 @@ function check(scenario: (typeof scenarios)[number], taskDir: string) {
 }
 
 for (const [index, scenario] of scenarios.entries()) {
-  test(`${scenario.skill} review-summary gate rejects placeholders`, () => {
+  test(`${scenario.skill} review-summary gate rejects placeholders`, async () => {
     const taskDir = fixture(scenario, `## Review Summary
 
 - **Overall Verdict**: Approved
 - **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors
 `);
-    assert.equal(check(scenario, taskDir).status, 'fail');
+    assert.equal((await check(scenario, taskDir)).status, 'fail');
   });
 
-  test(`${scenario.skill} review-summary gate compares numeric counts with its ledger stage`, () => {
+  test(`${scenario.skill} review-summary gate compares numeric counts with its ledger stage`, async () => {
     const summary = index % 2 === 0
       ? `## 审查摘要
 
@@ -64,12 +64,12 @@ for (const [index, scenario] of scenarios.entries()) {
 - **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors
 `;
     const taskDir = fixture(scenario, summary, true);
-    assert.equal(check(scenario, taskDir).status, 'fail');
+    assert.equal((await check(scenario, taskDir)).status, 'fail');
 
     fs.writeFileSync(
       path.join(taskDir, scenario.artifact),
       summary.replace(/0 (次要|minors)/, '1 $1')
     );
-    assert.equal(check(scenario, taskDir).status, 'pass');
+    assert.equal((await check(scenario, taskDir)).status, 'pass');
   });
 }
