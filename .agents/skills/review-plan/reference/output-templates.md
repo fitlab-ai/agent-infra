@@ -18,6 +18,24 @@
 - 所选场景必须通过统一 helper 生成 `{next-step-commands}`
 - 计数行固定显示 4 个数字。`人工裁决`（`{h}`）是本阶段 `needs-human-decision` 行数；它属于未闭环账本状态，因此 `{h} > 0` 时 `canAdvance=false`，必须按 `.agents/rules/next-step-output.md` 的「人工裁决待办前置块」展开详情，并只输出修订与复审路径。
 
+### 场景 R：最终化停止但结果可见
+
+当 finalizer 失败，或模型因安全门、无进展、重复诊断或紧急熔断停止时，使用本场景，不调用统一 helper，也不输出跨阶段命令。
+
+```text
+任务 {task-id} 审查结果已生成，但生命周期未推进。
+- 审查产物：.agents/workspace/active/{task-id}/{review-artifact}
+- 最后有效 summary/findings：{last-readable-review-result}
+- 本地修复次数：{repairAttempts}
+- 最后诊断：{last-structured-diagnostic}
+- 停止原因：{stop-reason}
+- 完成事件：未发布 | 跨阶段命令：未生成
+
+说明：本次仅停止生命周期推进，已有审查结果仍可查看。请先进行人工处理，或重新运行当前审查技能。
+```
+
+如果 summary 无法安全解析，`{last-readable-review-result}` 必须改为“摘要不可安全解析”，并保留 artifact 路径和原始结构化诊断；不得推算计数或补写结论。
+
 ### 场景 A：通过且无问题
 
 使用 `agent-infra-internal agent-client next-steps --skill code-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。

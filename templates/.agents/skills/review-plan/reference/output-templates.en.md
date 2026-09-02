@@ -18,6 +18,24 @@ Rules:
 - The selected scenario must generate `{next-step-commands}` through the shared helper
 - The count line shows 4 numbers. `Human-decision` (`{h}`) counts this stage's `needs-human-decision` rows; because those rows are unresolved, `{h} > 0` means `canAdvance=false`. Expand the "Pending human-decision pre-block" from `.agents/rules/next-step-output.md` and show revision and re-review paths only.
 
+### Scenario R: Finalization stopped with results visible
+
+When the finalizer fails, or the model stops because of a safety gate, lack of progress, repeated diagnostics, or the emergency cap, use this scenario. Do not call the shared helper or output cross-stage commands.
+
+```text
+Task {task-id} review results were generated, but lifecycle advancement stopped.
+- Review artifact: .agents/workspace/active/{task-id}/{review-artifact}
+- Last valid summary/findings: {last-readable-review-result}
+- Local repair attempts: {repairAttempts}
+- Last diagnostic: {last-structured-diagnostic}
+- Stop reason: {stop-reason}
+- Completion event: not published | Cross-stage commands: not generated
+
+Note: only lifecycle advancement stopped; the existing review result remains available. Handle it manually or rerun the current review skill.
+```
+
+If the summary cannot be parsed safely, set `{last-readable-review-result}` to "summary could not be parsed safely" and retain the artifact path and raw structured diagnostic; do not infer counts or add a conclusion.
+
 ### Scenario A: Approved with no findings
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill code-task --task-ref {task-ref}`.

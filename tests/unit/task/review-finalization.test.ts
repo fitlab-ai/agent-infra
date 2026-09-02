@@ -199,22 +199,21 @@ test('review summary parser fails closed on partial, mixed, or duplicate summary
   for (const content of invalid) assert.equal(parseReviewSummary(content).ok, false);
 });
 
-test('review finalization removes a clearly informal duplicate before updating the summary', () => {
+test('review finalization fails closed and preserves a clearly informal duplicate', () => {
   const f = domainFixture();
   fs.appendFileSync(
     f.artifactPath,
     `\n### AN-1：简短复核\n\n- 简短结论\n\n### AN-1：正式详情 [needs-human-decision]\n\n- **要决定什么**：选择方案\n`
   );
+  const before = fs.readFileSync(f.artifactPath);
   const result = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
     { repoRoot: f.root, randomSuffix: () => 'safe-detail-repair' }
   );
 
-  assert.equal(result.status, 'applied');
-  const after = fs.readFileSync(f.artifactPath, 'utf8');
-  assert.doesNotMatch(after, /简短复核/);
-  assert.match(after, /正式详情 \[needs-human-decision\]/);
-  assert.match(after, /0 blockers, 0 majors, 0 minors/);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_DECISION_DETAIL_INVALID');
+  assert.deepEqual(fs.readFileSync(f.artifactPath), before);
 });
 
 test('review finalization preserves anchored informal duplicates byte-for-byte', () => {
@@ -285,7 +284,7 @@ test('review finalization preserves summary-marked substantive duplicates byte-f
   assert.deepEqual(fs.readFileSync(f.artifactPath), before);
 });
 
-test('review finalization keeps legal tilde fenced examples intact', () => {
+test('review finalization ignores fenced examples but preserves visible duplicates', () => {
   const f = domainFixture();
   fs.appendFileSync(
     f.artifactPath,
@@ -296,11 +295,8 @@ test('review finalization keeps legal tilde fenced examples intact', () => {
     { repoRoot: f.root, randomSuffix: () => 'fenced-detail' }
   );
 
-  assert.equal(result.status, 'applied');
-  const after = fs.readFileSync(f.artifactPath, 'utf8');
-  assert.match(after, /~~~~md `example`/);
-  assert.match(after, /正式详情 \[needs-human-decision\]/);
-  assert.doesNotMatch(after, /简短复核/);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_DECISION_DETAIL_INVALID');
 });
 
 test('review finalization preserves the artifact when atomic rename fails', () => {
