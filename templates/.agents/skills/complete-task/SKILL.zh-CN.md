@@ -78,7 +78,7 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 | `required` | `bound` | PR 维度满足，继续 |
 | `required` | `unbound` / `skipped` | **停止**：强制 PR 下必须先 `/create-pr`；`--skip-pr` 不被接受（含既有/手动写入的 `skipped`） |
 | 缺省 | `bound` / `skipped` | PR 维度满足，继续 |
-| 缺省 | `unbound` | **默认停止**并输出下方二选一引导；除非用户提供 `--skip-pr`（通过迁移边界写入 `pr_delivery_fact.state=skipped` 后继续）或 `--force` |
+| 缺省 | `unbound` | **默认停止**并输出下方二选一引导；除非用户提供 `--skip-pr`（通过当前 `platform-pr skip` 写入器写入 `pr_delivery_fact.state=skipped` 后继续）或 `--force` |
 
 - `--skip-pr` 处理：仅在 `prFlow` 非 `required` 时生效——通过当前 `platform-pr skip` 写入器把 `task.md` 的 `pr_delivery_fact.state` 写为 `skipped` 后继续；`prFlow=required` 时忽略 `--skip-pr` 并按上表停止。
 - 注：`--force` 可越过下方其余前置条件，但**不解除 `prFlow=required` 的 PR 强约束**（强约束的唯一出口是创建 PR）。

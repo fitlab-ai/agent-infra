@@ -1380,7 +1380,7 @@ function skipPlatformPullRequestFactUnlocked(
   const fact = buildSkippedFact(factTimestamp(metadata.timestamp));
   const write = writeTask({
     taskRef: resolved.taskId,
-    expectedState: resolved.state,
+    expectedState: 'active',
     dryRun: options.dryRun,
     mutations: [
       { kind: 'frontmatter', set: { ...factFrontmatterMutation(fact).set, assigned_to: options.agent } },
@@ -1404,6 +1404,9 @@ function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOptions):
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return result('failed', resolved.taskId, null, null, {
     error: { code: resolved.code, message: resolved.message, retryable: false }
+  });
+  if (resolved.state !== 'active') return result('failed', resolved.taskId, null, null, {
+    error: { code: 'TASK_STATE_INVALID', message: 'platform-pr skip requires an active task', retryable: false }
   });
   try {
     return withTaskExecutionLock(

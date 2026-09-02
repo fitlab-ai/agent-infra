@@ -343,6 +343,23 @@ test('platform-pr skip refuses a bound fact without mutation', () => {
   }
 });
 
+test('platform-pr skip refuses completed tasks without mutation', () => {
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\n---\n\n# Task\n\n## Activity Log\n');
+  try {
+    const completedDir = path.join(f.root, '.agents', 'workspace', 'completed', f.taskId);
+    fs.mkdirSync(path.dirname(completedDir), { recursive: true });
+    fs.renameSync(f.taskDir, completedDir);
+    const taskPath = path.join(completedDir, 'task.md');
+    const before = fs.readFileSync(taskPath, 'utf8');
+    const output = run(['skip', f.taskId, '--agent', 'codex'], { cwd: f.root, env: f.env });
+    assert.equal(output.status, 1, output.stderr || output.stdout);
+    assert.equal(JSON.parse(output.stdout).error.code, 'TASK_STATE_INVALID');
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('platform-pr skip writes and replays the current skipped fact without platform calls', () => {
   const f = externalFixture('---\nid: {task-id}\nstatus: active\n---\n\n# Task\n\n## Activity Log\n');
   try {

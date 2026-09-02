@@ -79,7 +79,7 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 | `required` | `bound` | PR dimension satisfied, continue |
 | `required` | `unbound` / `skipped` | **Stop**: under a mandatory PR flow you must run `/create-pr` first; `--skip-pr` is NOT accepted (including a pre-existing / manually-set `skipped`) |
 | absent | `bound` / `skipped` | PR dimension satisfied, continue |
-| absent | `unbound` | **Stop by default** and print the two-option guidance below; unless the user passes `--skip-pr` (writes `pr_delivery_fact.state=skipped` through the migration boundary, then continues) or `--force` |
+| absent | `unbound` | **Stop by default** and print the two-option guidance below; unless the user passes `--skip-pr` (writes `pr_delivery_fact.state=skipped` through the current `platform-pr skip` writer, then continues) or `--force` |
 
 - `--skip-pr` handling: effective only when `prFlow` is not `required` -> write `pr_delivery_fact.state=skipped` through the current `platform-pr skip` writer, then continue; when `prFlow=required`, ignore `--skip-pr` and stop per the table.
 - Note: `--force` may override the other prerequisites below, but does **NOT** lift the `prFlow=required` PR constraint (the only exit from the strong constraint is creating a PR).
