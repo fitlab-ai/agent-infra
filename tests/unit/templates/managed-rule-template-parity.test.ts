@@ -16,6 +16,10 @@ const PAIRS: ReadonlyArray<readonly [string, string]> = [
     '.agents/rules/review-method.md',
     'templates/.agents/rules/review-method.zh-CN.md',
   ],
+  [
+    '.agents/rules/sync-content-generation.md',
+    'templates/.agents/rules/sync-content-generation.zh-CN.md',
+  ],
 ];
 
 for (const [runtimePath, templatePath] of PAIRS) {

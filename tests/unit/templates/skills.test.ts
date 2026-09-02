@@ -786,6 +786,21 @@ test("review skills and criteria reference the shared review method", () => {
   });
 });
 
+test("lifecycle producer skills reference the shared synchronized-content rule", () => {
+  const producerSkills = ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code"];
+  const relativePaths = producerSkills.flatMap((skill) => skillDocPaths(skill));
+
+  assert.ok(exists(".agents/rules/sync-content-generation.md"));
+  assert.ok(exists("templates/.agents/rules/sync-content-generation.en.md"));
+  assert.ok(exists("templates/.agents/rules/sync-content-generation.zh-CN.md"));
+  relativePaths.forEach((relativePath) => {
+    assert.ok(
+      read(relativePath).includes(".agents/rules/sync-content-generation.md"),
+      `${relativePath} should reference the shared synchronized-content rule`
+    );
+  });
+});
+
 test("review method risk-lens references resolve in every language variant", () => {
   const methodFiles = [
     ".agents/rules/review-method.md",
