@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
@@ -55,7 +56,7 @@ type BindOptions = SharedOptions & { agent: string; pr: number; dryRun?: boolean
 type PullRequestPrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
 type SyncOptions = SharedOptions & { agent: string; metadata?: boolean; closingIssue?: boolean; dryRun?: boolean; primaryResult: PullRequestPrimaryResult };
 type ResolveExternalOptions = SharedOptions & { agent: string; pr?: number; dryRun?: boolean };
-type MigrateFactOptions = SharedOptions & { state: 'unbound' | 'skipped' | 'bound'; pr?: number; dryRun?: boolean };
+type SkipFactOptions = { cwd?: string; agent: string; dryRun?: boolean };
 type ExternalPullRequestSelection =
   | { status: 'normal'; candidates: PullRequestSnapshot[]; eligible: [] }
   | { status: 'selected'; source: 'unique' | 'explicit'; selected: PullRequestSnapshot; candidates: PullRequestSnapshot[]; eligible: PullRequestSnapshot[] }
@@ -695,7 +696,7 @@ function inspectPlatformPullRequest(taskRef: string, options: InspectionOptions 
   const base = resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.fact) return result('no-op', base.resolved.taskId, base.issueNumber, null, {
-    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; migrate the task before inspecting a PR', retryable: false }
+    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
   });
   if (!base.prNumber) return result('no-op', base.resolved.taskId, base.issueNumber, null, {
     platform: base.context.platform, capabilities: base.context.capabilities,
@@ -858,7 +859,7 @@ function bindPlatformPullRequest(taskRef: string, options: BindOptions): PullReq
   const base = resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.fact) return result('failed', base.resolved.taskId, base.issueNumber, null, {
-    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; use migrate-fact for legacy tasks', retryable: false }
+    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
   });
   if (!Number.isInteger(options.pr) || options.pr <= 0) return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     error: { code: 'PR_NUMBER_INVALID', message: 'PR number must be positive', retryable: false }
@@ -925,7 +926,7 @@ function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOpt
   const base = resolvedContext(taskRef, options);
   if (!base.ok) return externalResult(base.output);
   if (!base.fact) return externalResult(result('failed', base.resolved.taskId, base.issueNumber, null, {
-    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; migrate the task before external binding', retryable: false }
+    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
   }));
   const inventory = inspectCompletionArtifacts(base.resolved.taskId, { repoRoot: base.resolved.repoRoot });
   if (inventory.status === 'failed') return externalResult(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
@@ -1069,7 +1070,7 @@ function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptio
   const base = resolvedContext(taskRef, options);
   if (!base.ok) return withCreation(base.output, PRECONDITION_NOT_CREATED);
   if (!base.fact) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, null, {
-    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; run migrate-fact or create a new task', retryable: false }
+    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
   }), PRECONDITION_NOT_CREATED);
   if (!options.base || !options.head || !options.title.trim() || !options.body.trim()) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     error: { code: 'PR_PAYLOAD_INVALID', message: 'base, head, title and body are required', retryable: false }
@@ -1273,7 +1274,7 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
   const base = resolvedContext(taskRef, options);
   if (!base.ok) return softenFailure(base.output);
   if (!base.fact) return softenFailure(result('failed', base.resolved.taskId, base.issueNumber, null, {
-    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; migrate the task before syncing PR metadata', retryable: false }
+    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
   }));
   if (!base.prNumber) return softenFailure(result('failed', base.resolved.taskId, base.issueNumber, null, {
     error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false }
@@ -1332,120 +1333,93 @@ function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullReq
   }));
 }
 
-function migratePlatformPullRequestFact(taskRef: string, options: MigrateFactOptions): PullRequestResult {
-  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
-  if (!resolved.ok) return result('failed', resolved.taskId, null, null, {
-    error: { code: resolved.code, message: resolved.message, retryable: false }
-  });
-  if (options.state !== 'bound' && options.pr !== undefined) return result('failed', resolved.taskId, null, null, {
-    error: { code: 'PR_PAYLOAD_INVALID', message: `${options.state} migration does not accept --pr`, retryable: false }
-  });
-  if (options.state === 'bound' && (!Number.isSafeInteger(options.pr) || options.pr! <= 0)) return result('failed', resolved.taskId, null, null, {
-    error: { code: 'PR_NUMBER_INVALID', message: 'bound migration requires a positive --pr', retryable: false }
-  });
+function readProjectPrFlow(repoRoot: string): 'required' | 'disabled' | undefined {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { prFlow?: unknown };
+    return config.prFlow === 'required' || config.prFlow === 'disabled' ? config.prFlow : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function skipPlatformPullRequestFactUnlocked(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  options: SkipFactOptions
+): PullRequestResult {
+  let content: string;
   let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
-  try { frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8')); }
-  catch (error) { return result('failed', resolved.taskId, null, null, { error: { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } }); }
-  const existing = readPrDeliveryFact(frontmatter);
-  if (existing.status === 'invalid') return result('failed', resolved.taskId, null, null, {
-    error: { code: 'PR_DELIVERY_FACT_INVALID', message: existing.error.message, retryable: false }
-  });
+  try {
+    content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    frontmatter = parseTypedTaskFrontmatter(content);
+  } catch (error) {
+    return result('failed', resolved.taskId, null, null, {
+      error: { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
+    });
+  }
   const issue = Number(frontmatter.issue_number);
   const issueNumber = Number.isSafeInteger(issue) && issue > 0 ? issue : null;
-  const hasLegacyFields = Object.hasOwn(frontmatter, 'pr_number') || Object.hasOwn(frontmatter, 'pr_status');
-  let fact: PrDeliveryFact;
-  let prNumber: number | null = null;
-  if (existing.status === 'valid') {
-    const sameState = existing.fact.state === options.state
-      && (options.state !== 'bound' || (existing.fact.state === 'bound' && existing.fact.identity.number === options.pr));
-    if (!sameState) return result('failed', resolved.taskId, issueNumber, existing.fact.state === 'bound' ? existing.fact.identity.number : null, {
-      error: { code: 'PR_MIGRATION_CONFLICT', message: 'Migration cannot replace an existing current delivery fact', retryable: false }
-    });
-    fact = existing.fact;
-    if (fact.state === 'bound') prNumber = fact.identity.number;
-  } else if (options.state === 'unbound') {
-    fact = { version: 1, state: 'unbound', reason: 'migrated' };
-  } else if (options.state === 'skipped') {
-    fact = buildSkippedFact(factTimestamp(captureTaskWriteMetadata().timestamp));
-  } else {
-    const client = options.client || createGitHubClient();
-    const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
-    if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return result(context.status, resolved.taskId, issueNumber, options.pr!, {
-      platform: context.platform, capabilities: context.capabilities, error: context.error
-    });
-    const inspected = inspectGitHubPullRequest(client, context.platform.repository, options.pr!, resolved.repoRoot);
-    if (!inspected.ok || !inspected.value) {
-      const remoteError = inspected.ok ? { code: 'PR_IDENTITY_INVALID', message: 'Remote resource is not a valid pull request', retryable: false } : inspected.error;
-      return result(remoteError.retryable ? 'blocked' : 'failed', resolved.taskId, issueNumber, options.pr!, {
-      platform: context.platform, capabilities: context.capabilities,
-        error: remoteError
-      });
-    }
-    let pullRequest = inspected.value;
-    const taskBranch = String(frontmatter.branch || '').trim();
-    const repository = context.platform.repository;
-    const target = resolveTaskDeliveryTarget(resolved.repoRoot, frontmatter);
-    if (!target.ok) return result('failed', resolved.taskId, issueNumber, options.pr!, {
-      platform: context.platform, capabilities: context.capabilities, error: target.error
-    });
-    const identity = validateIdentityAgainstTarget(repository, target.value, pullRequest);
-    const taskBranchMatches = !taskBranch || (pullRequest.head.ref === taskBranch
-      && repositoryKey(pullRequest.head.repository) === repositoryKey(repository));
-    const rechecked = inspectGitHubPullRequest(client, repository, pullRequest.number, resolved.repoRoot);
-    if (!rechecked.ok || !rechecked.value) return result(rechecked.ok ? 'failed' : rechecked.error.retryable ? 'blocked' : 'failed', resolved.taskId, issueNumber, options.pr!, {
-      platform: context.platform, capabilities: context.capabilities,
-      pullRequest,
-      error: rechecked.ok ? { code: 'PR_MIGRATION_RECHECK_FAILED', message: 'Pull request recheck returned no identity', retryable: false } : rechecked.error
-    });
-    if (!sameDeliveryIdentity(pullRequest, rechecked.value)) return result('failed', resolved.taskId, issueNumber, options.pr!, {
-      platform: context.platform, capabilities: context.capabilities,
-      pullRequest: rechecked.value,
-      error: { code: 'PR_MIGRATION_EVIDENCE_INVALID', message: 'Pull request identity changed during migration', retryable: false }
-    });
-    pullRequest = rechecked.value;
-    let hasEvidence = pullRequest.state === 'closed' && Boolean(pullRequest.mergedAt && pullRequest.mergeCommitSha);
-    if (!hasEvidence && issueNumber) {
-      const closing = inspectPlatformIssueClosingChangeRequests(context.platform.type, {
-        cwd: resolved.repoRoot, repository, issueNumber, client
-      });
-      if (!closing.ok) {
-        const closingError = closing.error || { code: 'PR_IDENTITY_INVALID', message: 'Closing pull request inspection failed', retryable: false };
-        return result(closingError.retryable ? 'blocked' : 'failed', resolved.taskId, issueNumber, options.pr!, {
-          platform: context.platform, capabilities: context.capabilities, error: closingError
-        });
-      }
-      hasEvidence = closing.value?.some((candidate) => candidate.number === pullRequest.number
-        && candidate.repository === pullRequest.repository && candidate.base.repository === pullRequest.base.repository
-        && candidate.head.sha === pullRequest.head.sha && Boolean(candidate.mergedAt && candidate.mergeCommitSha)) ?? false;
-    }
-    if (!identity.ok || !taskBranchMatches || !hasEvidence) return result('failed', resolved.taskId, issueNumber, options.pr!, {
-      platform: context.platform, capabilities: context.capabilities, pullRequest,
-      error: { code: 'PR_MIGRATION_EVIDENCE_INVALID', message: 'Explicit PR migration requires complete task identity and merge or Issue-closing evidence', retryable: false }
-    });
-    prNumber = pullRequest.number;
-    const metadata = captureTaskWriteMetadata();
-    fact = boundFactFor(pullRequest, 'legacy-migrated', issueNumber, metadata.timestamp);
-  }
-  if (fact.state === 'bound') prNumber = fact.identity.number;
-  const encoded = JSON.stringify(fact);
-  if (existing.status === 'valid' && JSON.stringify(existing.fact) === encoded && !hasLegacyFields) {
-    return result('no-op', resolved.taskId, issueNumber, prNumber, { error: null });
-  }
+  const existing = readPrDeliveryFact(frontmatter);
+  if (existing.status === 'invalid') return result('failed', resolved.taskId, issueNumber, null, {
+    error: { code: 'PR_DELIVERY_FACT_INVALID', message: existing.error.message, retryable: false }
+  });
+  if (existing.status === 'missing') return result('failed', resolved.taskId, issueNumber, null, {
+    error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
+  });
+  if (existing.fact.state === 'skipped') return result('no-op', resolved.taskId, issueNumber, null, {
+    operations: [{ name: 'task:skip-pr', status: 'no-op', reasonCode: null }],
+    error: null
+  });
+  if (existing.fact.state === 'bound') return result('failed', resolved.taskId, issueNumber, existing.fact.identity.number, {
+    error: { code: 'PR_DELIVERY_FACT_CONFLICT', message: `Task is already bound to PR #${existing.fact.identity.number}`, retryable: false }
+  });
+  if (readProjectPrFlow(resolved.repoRoot) === 'required') return result('failed', resolved.taskId, issueNumber, null, {
+    error: { code: 'PR_SKIP_FORBIDDEN', message: 'Cannot skip PR delivery when prFlow is required', retryable: false }
+  });
+
+  const metadata = captureTaskWriteMetadata();
+  const fact = buildSkippedFact(factTimestamp(metadata.timestamp));
   const write = writeTask({
     taskRef: resolved.taskId,
     expectedState: resolved.state,
     dryRun: options.dryRun,
-    mutations: [{ kind: 'frontmatter', ...factFrontmatterMutation(fact), remove: ['pr_number', 'pr_status'] }]
-  }, { repoRoot: resolved.repoRoot });
-  if (write.status === 'failed') return result('failed', resolved.taskId, issueNumber, prNumber, {
+    mutations: [
+      { kind: 'frontmatter', set: { ...factFrontmatterMutation(fact).set, assigned_to: options.agent } },
+      { kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: '活动日志', body: appendActivity(
+        content, `- ${metadata.timestamp} — **Skip PR** by ${options.agent} — PR delivery explicitly skipped`
+      ) }
+    ]
+  }, { repoRoot: resolved.repoRoot, metadataProvider: () => metadata });
+  if (write.status === 'failed') return result('failed', resolved.taskId, issueNumber, null, {
     error: { code: write.error.code, message: write.error.message, retryable: false }
   });
-  return result(options.dryRun ? 'planned' : write.status === 'no-op' ? 'no-op' : 'applied', resolved.taskId, issueNumber, prNumber, {
+  const status = options.dryRun ? 'planned' : write.status === 'no-op' ? 'no-op' : 'applied';
+  return result(status, resolved.taskId, issueNumber, null, {
     changed: !options.dryRun && write.changed,
-    resource: { kind: 'pull-request', number: prNumber },
-    operations: [{ name: 'task:migrate-pr-delivery-fact', status: options.dryRun ? 'planned' : write.status === 'no-op' ? 'no-op' : 'applied', reasonCode: null }],
+    operations: [{ name: 'task:skip-pr', status, reasonCode: null }],
     error: null
   });
+}
+
+function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOptions): PullRequestResult {
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return result('failed', resolved.taskId, null, null, {
+    error: { code: resolved.code, message: resolved.message, retryable: false }
+  });
+  try {
+    return withTaskExecutionLock(
+      resolved.repoRoot,
+      resolved.taskId,
+      'platform-pr.skip',
+      () => skipPlatformPullRequestFactUnlocked(resolved, options)
+    );
+  } catch (error) {
+    if (error instanceof TaskExecutionLockError) return result('blocked', resolved.taskId, null, null, {
+      error: { code: error.code, message: error.message, retryable: true }
+    });
+    return result('failed', resolved.taskId, null, null, {
+      error: { code: 'PR_SKIP_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false }
+    });
+  }
 }
 
 export {
@@ -1458,10 +1432,10 @@ export {
   normalizePullRequest,
   resolveGitHubChangeRequestGitEvidence,
   resolveExternalPullRequest,
-  migratePlatformPullRequestFact,
+  skipPlatformPullRequestFact,
   selectExternalPullRequest,
   selectPullRequest,
   syncPlatformPullRequest
 };
-export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, MigrateFactOptions, PullRequestPrimaryResult, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SyncOptions };
+export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, PullRequestPrimaryResult, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SkipFactOptions, SyncOptions };
 export { warningResultForPrimary };

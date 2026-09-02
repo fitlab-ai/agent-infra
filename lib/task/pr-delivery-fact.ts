@@ -14,19 +14,17 @@ type PrDeliveryBindingSource =
   | 'reused'
   | 'explicit-bind'
   | 'external-unique'
-  | 'external-explicit'
-  | 'legacy-migrated';
+  | 'external-explicit';
 
 type PrDeliveryProvenance =
   | 'create-post'
   | 'reuse'
   | 'explicit-bind'
   | 'external-unique'
-  | 'external-explicit'
-  | 'legacy-migrated';
+  | 'external-explicit';
 
 type PrDeliveryFact =
-  | { version: 1; state: 'unbound'; reason: 'initial' | 'migrated' }
+  | { version: 1; state: 'unbound'; reason: 'initial' }
   | { version: 1; state: 'skipped'; reason: 'explicit'; decidedAt: string }
   | {
       version: 1;
@@ -123,7 +121,7 @@ function parseFact(value: unknown): PrDeliveryFact {
   if (value.version !== 1 || typeof value.state !== 'string') throw factError('version or state is invalid');
   if (value.state === 'unbound') {
     exactKeys(value, ['version', 'state', 'reason'], 'unbound fact');
-    if (value.reason !== 'initial' && value.reason !== 'migrated') throw factError('unbound reason is invalid');
+    if (value.reason !== 'initial') throw factError('unbound reason is invalid');
     return { version: 1, state: 'unbound', reason: value.reason };
   }
   if (value.state === 'skipped') {
@@ -138,7 +136,7 @@ function parseFact(value: unknown): PrDeliveryFact {
   if (!isRecord(value.binding)) throw factError('binding must be an object');
   exactKeys(value.binding, ['status', 'source', 'verifiedAt', 'issueNumber', 'remoteState', 'mergedAt', 'mergeCommitSha'], 'binding');
   if (value.binding.status !== 'verified') throw factError('binding status is invalid');
-  const sources: readonly PrDeliveryBindingSource[] = ['created', 'reused', 'explicit-bind', 'external-unique', 'external-explicit', 'legacy-migrated'];
+  const sources: readonly PrDeliveryBindingSource[] = ['created', 'reused', 'explicit-bind', 'external-unique', 'external-explicit'];
   if (!sources.includes(value.binding.source as PrDeliveryBindingSource)) throw factError('binding source is invalid');
   const verifiedAt = text(value.binding.verifiedAt, 'binding.verifiedAt');
   if (Number.isNaN(Date.parse(verifiedAt))) throw factError('binding.verifiedAt must be a valid timestamp');
@@ -149,7 +147,7 @@ function parseFact(value: unknown): PrDeliveryFact {
   if (Boolean(mergedAt) !== Boolean(mergeCommitSha)) throw factError('mergedAt and mergeCommitSha must be paired');
   if (!isRecord(value.provenance)) throw factError('provenance must be an object');
   exactKeys(value.provenance, ['establishedBy'], 'provenance');
-  const provenance: readonly PrDeliveryProvenance[] = ['create-post', 'reuse', 'explicit-bind', 'external-unique', 'external-explicit', 'legacy-migrated'];
+  const provenance: readonly PrDeliveryProvenance[] = ['create-post', 'reuse', 'explicit-bind', 'external-unique', 'external-explicit'];
   if (!provenance.includes(value.provenance.establishedBy as PrDeliveryProvenance)) throw factError('provenance.establishedBy is invalid');
   if (value.provenance.establishedBy !== provenanceForSource(value.binding.source as PrDeliveryBindingSource)) {
     throw factError('binding.source and provenance.establishedBy do not match');
@@ -189,8 +187,8 @@ function readPrDeliveryFact(metadata: Record<string, unknown>): PrDeliveryFactRe
   catch (error) { return { status: 'invalid', fact: null, error: error instanceof Error ? error : factError(String(error)) }; }
 }
 
-function buildUnboundFact(reason: 'initial' | 'migrated' = 'initial'): PrDeliveryFact {
-  return { version: 1, state: 'unbound', reason };
+function buildUnboundFact(): PrDeliveryFact {
+  return { version: 1, state: 'unbound', reason: 'initial' };
 }
 
 function buildSkippedFact(decidedAt: string): PrDeliveryFact {

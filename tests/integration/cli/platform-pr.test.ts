@@ -36,7 +36,7 @@ function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } 
 test('platform-pr CLI advertises all PR and summary intents', () => {
   const output = run(['--help']);
   assert.equal(output.status, 0);
-  for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'migrate-fact', 'sync', 'summary-context', 'summary-sync']) {
+  for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'summary-context', 'summary-sync']) {
     assert.match(output.stdout, new RegExp(`platform-pr ${operation}`));
   }
 });
@@ -56,23 +56,7 @@ test('platform-pr summary-sync accepts the commit path no-op result before task 
   }
 });
 
-test('platform-pr migrate-fact atomically replaces legacy PR fields', () => {
-  const f = externalFixture('---\nid: {task-id}\nstatus: active\npr_number: 771\npr_status: created\n---\n\n# Task\n\n## Activity Log\n', { legacy: true });
-  try {
-    const output = run(['migrate-fact', f.taskId, '--state', 'unbound'], { cwd: f.root, env: f.env });
-    assert.equal(output.status, 0, output.stderr || output.stdout);
-    const payload = JSON.parse(output.stdout);
-    assert.equal(payload.status, 'applied');
-    const content = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
-    assert.match(content, /pr_delivery_fact:/);
-    assert.match(content, /state":"unbound/);
-    assert.match(content, /reason":"migrated/);
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
-function externalFixture(taskContent: string, options: { legacy?: boolean } = {}) {
+function externalFixture(taskContent: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-external-'));
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
@@ -81,7 +65,7 @@ function externalFixture(taskContent: string, options: { legacy?: boolean } = {}
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
   const renderedTask = taskContent.replaceAll('{task-id}', taskId);
-  const fact = options.legacy ? '' : `\n${factLine(buildUnboundFact())}`;
+  const fact = `\n${factLine(buildUnboundFact())}`;
   const taskWithContract = renderedTask
     .replace('\n---\n', '\nagent_infra_version: v0.9.11-alpha.0\n---\n')
     .replace('\nagent_infra_version:', `${fact}\nagent_infra_version:`)
@@ -338,7 +322,7 @@ for (const [label, mutation] of [
   });
 }
 
-test('platform-pr migration preserves an existing current fact on conflict', () => {
+test('platform-pr skip refuses a bound fact without mutation', () => {
   const current = createFixture(buildBoundFact({
     identity: {
       repository: 'fitlab-ai/agent-infra', number: 1, nodeId: 'PR_1',
@@ -350,16 +334,76 @@ test('platform-pr migration preserves an existing current fact on conflict', () 
   }));
   try {
     const before = fs.readFileSync(path.join(current.taskDir, 'task.md'), 'utf8');
-    const conflict = run(['migrate-fact', current.taskId, '--state', 'unbound'], { cwd: current.root, env: current.env });
+    const conflict = run(['skip', current.taskId, '--agent', 'codex'], { cwd: current.root, env: current.env });
     assert.equal(conflict.status, 1, conflict.stderr || conflict.stdout);
-    assert.equal(JSON.parse(conflict.stdout).error.code, 'PR_MIGRATION_CONFLICT');
+    assert.equal(JSON.parse(conflict.stdout).error.code, 'PR_DELIVERY_FACT_CONFLICT');
     assert.equal(fs.readFileSync(path.join(current.taskDir, 'task.md'), 'utf8'), before);
-
-    const replay = run(['migrate-fact', current.taskId, '--state', 'bound', '--pr', '1'], { cwd: current.root, env: current.env });
-    assert.equal(replay.status, 0, replay.stderr || replay.stdout);
-    assert.equal(JSON.parse(replay.stdout).status, 'no-op');
   } finally {
     fs.rmSync(current.root, { recursive: true, force: true });
+  }
+});
+
+test('platform-pr skip writes and replays the current skipped fact without platform calls', () => {
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\n---\n\n# Task\n\n## Activity Log\n');
+  try {
+    const output = run(['skip', f.taskId, '--agent', 'codex'], { cwd: f.root, env: f.env });
+    assert.equal(output.status, 0, output.stderr || output.stdout);
+    assert.equal(JSON.parse(output.stdout).status, 'applied');
+    const taskPath = path.join(f.taskDir, 'task.md');
+    const fact = readPrDeliveryFact(parseTypedTaskFrontmatter(fs.readFileSync(taskPath, 'utf8')));
+    assert.equal(fact.status, 'valid');
+    if (fact.status === 'valid') {
+      assert.equal(fact.fact.state, 'skipped');
+      assert.equal(fact.fact.reason, 'explicit');
+    }
+    const replay = run(['skip', f.taskId, '--agent', 'codex'], { cwd: f.root, env: f.env });
+    assert.equal(replay.status, 0, replay.stderr || replay.stdout);
+    assert.equal(JSON.parse(replay.stdout).status, 'no-op');
+    assert.equal(fs.existsSync(f.calls) ? fs.readFileSync(f.calls, 'utf8').trim() : '', '');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('platform-pr skip dry-run does not mutate the current fact', () => {
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\n---\n\n# Task\n\n## Activity Log\n');
+  try {
+    const taskPath = path.join(f.taskDir, 'task.md');
+    const before = fs.readFileSync(taskPath, 'utf8');
+    const output = run(['skip', f.taskId, '--agent', 'codex', '--dry-run'], { cwd: f.root, env: f.env });
+    assert.equal(output.status, 0, output.stderr || output.stdout);
+    assert.equal(JSON.parse(output.stdout).status, 'planned');
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('platform-pr skip refuses required PR policy and missing facts without mutation', () => {
+  const required = externalFixture('---\nid: {task-id}\nstatus: active\n---\n\n# Task\n\n## Activity Log\n');
+  try {
+    fs.writeFileSync(path.join(required.root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'required' }));
+    const taskPath = path.join(required.taskDir, 'task.md');
+    const before = fs.readFileSync(taskPath, 'utf8');
+    const output = run(['skip', required.taskId, '--agent', 'codex'], { cwd: required.root, env: required.env });
+    assert.equal(output.status, 1, output.stderr || output.stdout);
+    assert.equal(JSON.parse(output.stdout).error.code, 'PR_SKIP_FORBIDDEN');
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+  } finally {
+    fs.rmSync(required.root, { recursive: true, force: true });
+  }
+
+  const missing = externalFixture('---\nid: {task-id}\nstatus: active\n---\n\n# Task\n\n## Activity Log\n');
+  try {
+    const taskPath = path.join(missing.taskDir, 'task.md');
+    const before = fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact:.*\n/m, '');
+    fs.writeFileSync(taskPath, before);
+    const output = run(['skip', missing.taskId, '--agent', 'codex'], { cwd: missing.root, env: missing.env });
+    assert.equal(output.status, 1, output.stderr || output.stdout);
+    assert.equal(JSON.parse(output.stdout).error.code, 'PR_DELIVERY_FACT_MISSING');
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), before);
+  } finally {
+    fs.rmSync(missing.root, { recursive: true, force: true });
   }
 });
 

@@ -7,7 +7,7 @@ import {
   createPlatformPullRequest,
   inspectPlatformPullRequest,
   resolveExternalPullRequest,
-  migratePlatformPullRequestFact,
+  skipPlatformPullRequestFact,
   syncPlatformPullRequest
 } from '../platform/pull-requests.ts';
 import type { PullRequestResult } from '../platform/pull-requests.ts';
@@ -18,14 +18,14 @@ const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd
        agent-infra-internal platform-pr resolve-external <task-ref> --agent <agent> [--pr <N>] [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr create <task-ref> --agent <agent> --base <branch> --head <branch> --title-file <path|-> --body-file <path|-> [--draft] [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr bind <task-ref> --pr <N> --agent <agent> [--dry-run] [--cwd <path>]
-       agent-infra-internal platform-pr migrate-fact <task-ref> --state <unbound|skipped|bound> [--pr <N>] [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr skip <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync <task-ref> --agent <agent> [--metadata] [--closing-issue] --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-context <task-ref> [--cwd <path>]
        agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
 `;
 
 const BOOLEAN_FLAGS = new Set(['--draft', '--dry-run', '--metadata', '--closing-issue']);
-const VALUE_FLAGS = new Set(['--cwd', '--agent', '--base', '--head', '--title-file', '--body-file', '--pr', '--result', '--state']);
+const VALUE_FLAGS = new Set(['--cwd', '--agent', '--base', '--head', '--title-file', '--body-file', '--pr', '--result']);
 
 function key(flag: string): string {
   return flag.slice(2).replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
@@ -66,7 +66,7 @@ function readFile(value: string, cwd: string): string {
 function platformPr(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'migrate-fact', 'sync', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
   const taskRef = args[1];
   if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
   const parsed = parse(args, 2);
@@ -78,7 +78,7 @@ function platformPr(args: string[] = []): void {
     'resolve-external': ['cwd', 'agent', 'pr', 'dryRun'],
     create: ['cwd', 'agent', 'base', 'head', 'titleFile', 'bodyFile', 'draft', 'dryRun'],
     bind: ['cwd', 'agent', 'pr', 'dryRun'],
-    'migrate-fact': ['cwd', 'state', 'pr', 'dryRun'],
+    skip: ['cwd', 'agent', 'dryRun'],
     sync: ['cwd', 'agent', 'metadata', 'closingIssue', 'result', 'dryRun'],
     'summary-context': ['cwd'],
     'summary-sync': ['cwd', 'agent', 'bodyFile', 'result', 'dryRun']
@@ -87,17 +87,14 @@ function platformPr(args: string[] = []): void {
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
   if (operation === 'inspect') { finish(inspectPlatformPullRequest(taskRef, { cwd })); return; }
   if (operation === 'summary-context') { finish(summaryContext(taskRef, { cwd })); return; }
-  if (operation === 'migrate-fact') {
-    if (typeof values.state !== 'string' || !['unbound', 'skipped', 'bound'].includes(values.state)) { fail('migrate-fact requires --state unbound, skipped, or bound'); return; }
-    const pr = values.pr === undefined ? undefined : Number(values.pr);
-    if (pr !== undefined && (!Number.isInteger(pr) || pr <= 0)) { fail('migrate-fact requires a positive --pr'); return; }
-    finish(migratePlatformPullRequestFact(taskRef, { cwd, state: values.state as 'unbound' | 'skipped' | 'bound', pr, dryRun: values.dryRun === true }));
-    return;
-  }
   if (typeof values.agent !== 'string' || !values.agent) { fail(`${operation} requires --agent`); return; }
   const agent = normalizeAgentToken(values.agent);
   if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
+  if (operation === 'skip') {
+    finish(skipPlatformPullRequestFact(taskRef, { cwd, agent, dryRun: values.dryRun === true }));
+    return;
+  }
   const primaryResult = values.result === undefined ? undefined : values.result;
   if (primaryResult !== undefined && !['pr_created', 'pr_reused', 'no_op'].includes(primaryResult as string)) {
     fail('--result must be pr_created, pr_reused, or no_op');

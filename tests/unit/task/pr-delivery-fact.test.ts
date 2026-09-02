@@ -23,7 +23,6 @@ const identity = {
 test('PR delivery fact round-trips each legal state', () => {
   const facts = [
     buildUnboundFact(),
-    buildUnboundFact('migrated'),
     buildSkippedFact('2026-09-01T00:00:00.000Z'),
     buildBoundFact({
       identity,
@@ -53,7 +52,7 @@ test('PR delivery fact rejects state-specific omissions and call-level fields', 
 });
 
 test('each binding source has its matching durable provenance', () => {
-  for (const source of ['created', 'reused', 'explicit-bind', 'external-unique', 'external-explicit', 'legacy-migrated'] as const) {
+  for (const source of ['created', 'reused', 'explicit-bind', 'external-unique', 'external-explicit'] as const) {
     const fact = buildBoundFact({
       identity,
       source,
