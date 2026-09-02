@@ -16,6 +16,7 @@ Based on the target PR's lifecycle-evidence completeness and change risk, select
 - `pr-review*` is an independent artifact family: it does not join the analysis/plan/code stage chain and never changes `current_step`
 - Only a formal PR Review (head SHA, conclusion, findings, receipt, Issue artifact link) is published on the PR; no second full process copy goes to a regular PR comment
 - The full process copy and the reversible `task.md` mirror are synced only to the linked Issue; `restore-task` keeps its Issue-only contract
+- Before generating artifact Markdown that will be synced to an Issue, read `.agents/rules/sync-content-generation.md` and follow its generator-side constraints; Issue sync remains transparent and does not parse or rewrite the body
 - Never backfill or fabricate `analysis`/`plan`/`code` lifecycle history for an external PR
 - The head SHA is recorded only in `pr-review*` and the formal PR Review; on head drift you must start a new round and never reuse an old conclusion
 - Review depth is driven by evidence completeness and change risk, never by the submitter's identity

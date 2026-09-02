@@ -15,6 +15,7 @@ description: >
 - 本技能用于收尾已有 PR 摘要评论中的人工校验状态，不创建并行的普通验证留言。
 - 必须写入 `manual-validation.md` 或 `manual-validation-r{N}.md`，让后续 PR 摘要刷新可复用人工验证结果。
 - 找不到 `sync-pr` 摘要评论时失败，不创建部分摘要兜底。
+- 生成会同步到 Issue 的人工验证 artifact Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；Issue 同步保持透明，不解析或改写正文。
 - 执行本技能后必须立即更新 `task.md`。
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
