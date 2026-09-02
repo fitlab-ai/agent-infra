@@ -68,6 +68,17 @@ function fixture() {
   const hooks = '{"hooks":{}}\n';
   fs.mkdirSync(path.join(root, '.codex'), { recursive: true });
   fs.writeFileSync(path.join(root, '.codex', 'hooks.json'), hooks);
+  for (const file of [
+    '.codex/agents/agent-infra-lifecycle-executor.toml',
+    '.codex/agents/agent-infra-lifecycle-reviewer.toml',
+    '.agents/hooks/lifecycle-delegation.js',
+    '.agents/skills/run-task/SKILL.md',
+    '.agents/rules/lifecycle-orchestration.md'
+  ]) {
+    const target = path.join(root, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, 'managed lifecycle contract\n');
+  }
   return {
     root,
     env: envWithPrependedPath(sandboxControlSafeEnv({
@@ -81,11 +92,115 @@ function fixture() {
   };
 }
 
-function run(root: string, env: NodeJS.ProcessEnv, args: string[], input = '') {
-  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'codex-lifecycle', ...args], {
+function writeCapabilityTask(root: string, taskId: string) {
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.12-alpha.0\n---\n\n# Task\n`);
+}
+
+function copyCompiledPackage(root: string) {
+  fs.copyFileSync(path.join(process.cwd(), 'package.json'), path.join(root, 'package.json'));
+  fs.cpSync(path.join(process.cwd(), 'dist'), path.join(root, 'dist'), { recursive: true });
+  fs.cpSync(path.join(process.cwd(), 'lib'), path.join(root, 'lib'), { recursive: true });
+  fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(root, 'node_modules'), 'dir');
+}
+
+function rewriteCompiledLauncher(root: string) {
+  const file = path.join(root, 'dist', 'bin', 'internal-cli.js');
+  const content = fs.readFileSync(file);
+  const lineEnd = content.indexOf(0x0a);
+  fs.writeFileSync(file, Buffer.concat([
+    Buffer.from('#!/opt/homebrew/opt/node/bin/node\n'),
+    content.subarray(lineEnd + 1)
+  ]));
+}
+
+function run(root: string, env: NodeJS.ProcessEnv, args: string[], input = '', cliPath = INTERNAL_CLI_PATH) {
+  return spawnSync(process.execPath, [cliPath, 'codex-lifecycle', ...args], {
     cwd: root, env, input, encoding: 'utf8'
   });
 }
+
+function runBuildFixture(launcherShebang: Record<string, unknown>, executableFiles: readonly string[] = ['bin/internal-cli.ts']) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-build-'));
+  fixtureRoots.add(root);
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  fs.copyFileSync(path.join(process.cwd(), 'scripts', 'build.js'), path.join(root, 'scripts', 'build.js'));
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
+    type: 'module',
+    version: '0.9.12-alpha.0'
+  }));
+  const manifest = path.join(root, 'lib', 'agent-clients', 'adapters', 'codex-lifecycle', 'manifest-files.json');
+  fs.mkdirSync(path.dirname(manifest), { recursive: true });
+  fs.writeFileSync(manifest, JSON.stringify({ executableFiles, contractFiles: [], launcherShebang }));
+  fs.mkdirSync(path.join(root, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'bin', 'internal-cli.ts'), '#!/usr/bin/env node\n');
+  fs.mkdirSync(path.join(root, 'dist', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'dist', 'bin', 'internal-cli.js'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(root, 'lib', 'defaults.json'), '{}\n');
+  fs.mkdirSync(path.join(root, 'lib', 'sandbox', 'runtimes'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'lib', 'agent-clients', 'adapters', 'runtimes'), { recursive: true });
+  const result = spawnSync(process.execPath, [path.join(root, 'scripts', 'build.js')], {
+    cwd: root, encoding: 'utf8'
+  });
+  return { root, result };
+}
+
+test('compiled codex-lifecycle CLI rechecks its generated executable identity', () => {
+  const { root, env } = fixture();
+  const taskId = 'TASK-20260101-000001';
+  writeCapabilityTask(root, taskId);
+
+  const result = run(root, env, ['capability-arm', '--task-id', taskId]);
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, 'armed');
+  assert.equal(payload.error, null);
+  assert.equal(payload.buildIdentity.protocolVersion, 3);
+  assert.match(payload.buildIdentity.internalExecutableBuildHash, /^[0-9a-f]{64}$/u);
+});
+
+test('compiled codex-lifecycle CLI accepts a Homebrew-rewritten launcher in an isolated package', () => {
+  const { root, env } = fixture();
+  const taskId = 'TASK-20260101-000001';
+  writeCapabilityTask(root, taskId);
+  copyCompiledPackage(root);
+  rewriteCompiledLauncher(root);
+
+  const result = run(
+    root,
+    env,
+    ['capability-arm', '--task-id', taskId],
+    '',
+    path.join(root, 'dist', 'bin', 'internal-cli.js')
+  );
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, 'armed');
+  assert.equal(payload.error, null);
+  assert.equal(payload.buildIdentity.protocolVersion, 3);
+});
+
+test('build rejects malformed launcher policies before creating a lifecycle manifest', () => {
+  for (const [launcherShebang, executableFiles] of [
+    [{
+      sourceFile: 'bin/internal-cli.ts',
+      compiledFile: 'dist/bin/internal-cli.js',
+      canonicalLine: '#!/usr/bin/env node\npayload\n',
+      acceptedLines: ['#!/usr/bin/env node\npayload\n']
+    }, ['bin/internal-cli.ts']],
+    [{
+      sourceFile: '../outside.ts',
+      compiledFile: 'outside.js',
+      canonicalLine: '#!/usr/bin/env node\n',
+      acceptedLines: ['#!/usr/bin/env node\n']
+    }, ['../outside.ts']]
+  ] as const) {
+    const { root, result } = runBuildFixture(launcherShebang, executableFiles);
+    assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(fs.existsSync(path.join(root, 'dist', 'lifecycle-build-manifest.json')), false);
+  }
+});
 
 test('codex-lifecycle CLI records normalized hook identity across invocations', () => {
   const { root, env } = fixture();

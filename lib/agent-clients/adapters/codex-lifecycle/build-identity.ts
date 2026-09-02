@@ -22,6 +22,14 @@ type LifecycleBuildIdentityOptions = Readonly<{
 type LifecycleManifestFiles = Readonly<{
   executableFiles: readonly string[];
   contractFiles: readonly string[];
+  launcherShebang: LifecycleLauncherShebang;
+}>;
+
+type LifecycleLauncherShebang = Readonly<{
+  sourceFile: string;
+  compiledFile: string;
+  canonicalLine: string;
+  acceptedLines: readonly string[];
 }>;
 
 type IdentityVerification = Readonly<{
@@ -53,6 +61,56 @@ function normalizeRelativePath(value: string): string {
   return value.replaceAll('\\', '/');
 }
 
+function isSafeLifecyclePath(value: unknown): value is string {
+  return exactText(value)
+    && value === normalizeRelativePath(value)
+    && !path.isAbsolute(value)
+    && !/^[A-Za-z]:[\\/]/u.test(value)
+    && !value.split('/').includes('..');
+}
+
+function isLifecycleLauncherLine(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 1
+    && value.slice(0, -1).trim() === value.slice(0, -1)
+    && value.startsWith('#!')
+    && value.endsWith('\n')
+    && value.indexOf('\n') === value.length - 1
+    && !value.includes('\r');
+}
+
+function readLifecycleLauncherShebang(
+  value: unknown,
+  executableFiles: readonly string[]
+): LifecycleLauncherShebang {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Lifecycle manifest launcher shebang policy is invalid');
+  }
+  const policy = value as Record<string, unknown>;
+  if (!isSafeLifecyclePath(policy.sourceFile)
+    || !isSafeLifecyclePath(policy.compiledFile)
+    || !isLifecycleLauncherLine(policy.canonicalLine)
+    || !Array.isArray(policy.acceptedLines)
+    || !policy.acceptedLines.every(isLifecycleLauncherLine)
+    || new Set(policy.acceptedLines).size !== policy.acceptedLines.length
+    || !policy.acceptedLines.includes(policy.canonicalLine)
+    || !executableFiles.includes(policy.sourceFile)
+    || policy.compiledFile !== normalizeRelativePath(path.join(
+      'dist',
+      policy.sourceFile.endsWith('.ts')
+        ? policy.sourceFile.replace(/\.ts$/u, '.js')
+        : policy.sourceFile
+    ))) {
+    throw new Error('Lifecycle manifest launcher shebang policy is invalid');
+  }
+  return Object.freeze({
+    sourceFile: policy.sourceFile,
+    compiledFile: policy.compiledFile,
+    canonicalLine: policy.canonicalLine,
+    acceptedLines: Object.freeze([...policy.acceptedLines])
+  });
+}
+
 function readLifecycleManifestFiles(packageRoot: string): LifecycleManifestFiles {
   const file = path.join(
     packageRoot,
@@ -65,18 +123,21 @@ function readLifecycleManifestFiles(packageRoot: string): LifecycleManifestFiles
   const value = JSON.parse(fs.readFileSync(file, 'utf8')) as {
     executableFiles?: unknown;
     contractFiles?: unknown;
+    launcherShebang?: unknown;
   };
   if (!Array.isArray(value.executableFiles)
     || !Array.isArray(value.contractFiles)
-    || !value.executableFiles.every(exactText)
-    || !value.contractFiles.every(exactText)
+    || !value.executableFiles.every(isSafeLifecyclePath)
+    || !value.contractFiles.every(isSafeLifecyclePath)
     || new Set(value.executableFiles).size !== value.executableFiles.length
     || new Set(value.contractFiles).size !== value.contractFiles.length) {
     throw new Error('Lifecycle manifest file list is invalid');
   }
+  const executableFiles = Object.freeze([...value.executableFiles] as string[]);
   return Object.freeze({
-    executableFiles: Object.freeze([...value.executableFiles] as string[]),
-    contractFiles: Object.freeze([...value.contractFiles] as string[])
+    executableFiles,
+    contractFiles: Object.freeze([...value.contractFiles] as string[]),
+    launcherShebang: readLifecycleLauncherShebang(value.launcherShebang, executableFiles)
   });
 }
 
@@ -94,7 +155,28 @@ function executablePackageRoot(): string {
   }
 }
 
-function hashFiles(root: string, files: readonly string[]): string {
+function normalizeLifecycleLauncherBytes(
+  relative: string,
+  content: Buffer,
+  policy: LifecycleLauncherShebang
+): Buffer {
+  const normalized = normalizeRelativePath(relative);
+  if (normalized !== policy.sourceFile && normalized !== policy.compiledFile) return content;
+  const lineEnd = content.indexOf(0x0a);
+  if (lineEnd < 0) return content;
+  const firstLine = content.subarray(0, lineEnd + 1);
+  if (!policy.acceptedLines.some((line) => Buffer.from(line).equals(firstLine))) return content;
+  return Buffer.concat([
+    Buffer.from(policy.canonicalLine),
+    content.subarray(lineEnd + 1)
+  ]);
+}
+
+function hashFiles(
+  root: string,
+  files: readonly string[],
+  launcherShebang?: LifecycleLauncherShebang
+): string {
   const hash = crypto.createHash('sha256');
   for (const relative of [...new Set(files.map(normalizeRelativePath))].sort()) {
     if (path.isAbsolute(relative) || relative.split(/[\\/]/u).includes('..')) {
@@ -107,7 +189,10 @@ function hashFiles(root: string, files: readonly string[]): string {
     }
     hash.update(relative);
     hash.update('\0');
-    hash.update(fs.readFileSync(file));
+    const content = fs.readFileSync(file);
+    hash.update(launcherShebang
+      ? normalizeLifecycleLauncherBytes(relative, content, launcherShebang)
+      : content);
     hash.update('\0');
   }
   return hash.digest('hex');
@@ -157,7 +242,7 @@ function computeLifecycleBuildIdentity(
   if (!exactText(packageJson.version)) throw new Error('Lifecycle package version is invalid');
   let internalExecutableBuildHash: string;
   if (options.executableFiles) {
-    internalExecutableBuildHash = hashFiles(repoRoot, options.executableFiles);
+    internalExecutableBuildHash = hashFiles(repoRoot, options.executableFiles, defaults.launcherShebang);
   } else {
     const manifestFile = path.join(executableRoot, 'dist', 'lifecycle-build-manifest.json');
     if (fs.existsSync(manifestFile)) {
@@ -177,16 +262,25 @@ function computeLifecycleBuildIdentity(
         const compiledFiles = defaults.executableFiles.map((file) =>
           file.endsWith('.ts') ? path.join('dist', file.replace(/\.ts$/u, '.js')) : file
         );
-        if (hashFiles(executableRoot, resolveLifecycleExecutableFiles(executableRoot, compiledFiles)) !== manifest.internalExecutableBuildHash) {
+        if (hashFiles(
+          executableRoot,
+          resolveLifecycleExecutableFiles(executableRoot, compiledFiles),
+          defaults.launcherShebang
+        ) !== manifest.internalExecutableBuildHash) {
           throw new Error('Lifecycle compiled executable build does not match its manifest');
         }
-      } else if (hashFiles(executableRoot, resolveLifecycleExecutableFiles(executableRoot, defaults.executableFiles)) !== manifest.sourceInputHash) {
+      } else if (hashFiles(
+        executableRoot,
+        resolveLifecycleExecutableFiles(executableRoot, defaults.executableFiles),
+        defaults.launcherShebang
+      ) !== manifest.sourceInputHash) {
         throw new Error('Lifecycle executable build manifest is stale or invalid');
       }
       internalExecutableBuildHash = manifest.internalExecutableBuildHash;
     } else internalExecutableBuildHash = hashFiles(
       executableRoot,
-      resolveLifecycleExecutableFiles(executableRoot, defaults.executableFiles)
+      resolveLifecycleExecutableFiles(executableRoot, defaults.executableFiles),
+      defaults.launcherShebang
     );
   }
   return Object.freeze({
@@ -249,6 +343,7 @@ export type {
   IdentityVerification,
   LifecycleIdentityWarning,
   LifecycleBuildIdentity,
+  LifecycleLauncherShebang,
   LifecycleManifestFiles,
   LifecycleBuildIdentityOptions
 };

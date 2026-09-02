@@ -30,5 +30,16 @@
     ".agents/hooks/lifecycle-delegation.js",
     ".agents/skills/run-task/SKILL.md",
     ".agents/rules/lifecycle-orchestration.md"
-  ]
+  ],
+  "launcherShebang": {
+    "sourceFile": "bin/internal-cli.ts",
+    "compiledFile": "dist/bin/internal-cli.js",
+    "canonicalLine": "#!/usr/bin/env node\n",
+    "acceptedLines": [
+      "#!/usr/bin/env node\n",
+      "#!/opt/homebrew/opt/node/bin/node\n",
+      "#!/usr/local/opt/node/bin/node\n",
+      "#!/home/linuxbrew/.linuxbrew/opt/node/bin/node\n"
+    ]
+  }
 }

@@ -34,6 +34,27 @@ function fixture() {
   return root;
 }
 
+function launcherIdentity(relativePath: string, firstLine: string, body = 'export const launcher = true;\n') {
+  const root = fixture();
+  const file = path.join(root, relativePath);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, Buffer.concat([Buffer.from(firstLine), Buffer.from(body)]));
+  return computeLifecycleBuildIdentity(root, {
+    executableFiles: [relativePath],
+    contractFiles: []
+  });
+}
+
+function writeLifecycleManifest(root: string, launcherShebang: Record<string, unknown>) {
+  const file = path.join(root, 'lib', 'agent-clients', 'adapters', 'codex-lifecycle', 'manifest-files.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    executableFiles: [launcherShebang.sourceFile],
+    contractFiles: [],
+    launcherShebang
+  }));
+}
+
 test('lifecycle build identity separates executable and contract hashes', () => {
   const root = fixture();
   const options = {
@@ -106,6 +127,85 @@ test('lifecycle build identity reads one validated manifest file list', () => {
   assert.ok(closure.includes('lib/sandbox/control/controller-registration.ts'));
   assert.ok(closure.includes('lib/agent-clients/adapters/codex-lifecycle/controller-context.ts'));
   assert.ok(manifest.contractFiles.includes('.agents/skills/run-task/SKILL.md'));
+});
+
+test('lifecycle manifest declares the exact protected launcher shebang policy', () => {
+  const manifest = readLifecycleManifestFiles(process.cwd()) as ReturnType<typeof readLifecycleManifestFiles> & {
+    launcherShebang?: unknown
+  };
+  assert.deepEqual(manifest.launcherShebang, {
+    sourceFile: 'bin/internal-cli.ts',
+    compiledFile: 'dist/bin/internal-cli.js',
+    canonicalLine: '#!/usr/bin/env node\n',
+    acceptedLines: [
+      '#!/usr/bin/env node\n',
+      '#!/opt/homebrew/opt/node/bin/node\n',
+      '#!/usr/local/opt/node/bin/node\n',
+      '#!/home/linuxbrew/.linuxbrew/opt/node/bin/node\n'
+    ]
+  });
+});
+
+test('lifecycle manifest rejects malformed launcher shebang policies', () => {
+  for (const launcherShebang of [
+    {
+      sourceFile: 'bin/internal-cli.ts',
+      compiledFile: 'dist/bin/internal-cli.js',
+      canonicalLine: '#!/usr/bin/env node\npayload\n',
+      acceptedLines: ['#!/usr/bin/env node\npayload\n']
+    },
+    {
+      sourceFile: '../outside.ts',
+      compiledFile: 'outside.js',
+      canonicalLine: '#!/usr/bin/env node\n',
+      acceptedLines: ['#!/usr/bin/env node\n']
+    }
+  ]) {
+    const root = fixture();
+    writeLifecycleManifest(root, launcherShebang);
+    assert.throws(() => readLifecycleManifestFiles(root));
+  }
+});
+
+test('lifecycle identity normalizes only the exact source and compiled launcher lines', () => {
+  const acceptedLines = [
+    '#!/usr/bin/env node\n',
+    '#!/opt/homebrew/opt/node/bin/node\n',
+    '#!/usr/local/opt/node/bin/node\n',
+    '#!/home/linuxbrew/.linuxbrew/opt/node/bin/node\n'
+  ];
+  const sourceCanonical = launcherIdentity('bin/internal-cli.ts', acceptedLines[0]!);
+  const compiledCanonical = launcherIdentity('dist/bin/internal-cli.js', acceptedLines[0]!);
+  for (const line of acceptedLines) {
+    assert.equal(launcherIdentity('bin/internal-cli.ts', line).internalExecutableBuildHash, sourceCanonical.internalExecutableBuildHash);
+    assert.equal(launcherIdentity('dist/bin/internal-cli.js', line).internalExecutableBuildHash, compiledCanonical.internalExecutableBuildHash);
+  }
+
+  for (const line of [
+    '#!/usr/bin/env node --no-warnings\n',
+    '#!/opt/homebrew/opt/node/bin/node --inspect\n',
+    '#!/custom/homebrew/opt/node/bin/node\n',
+    '#!/usr/bin/env deno\n',
+    '#!/opt/homebrew/opt/node/bin/node\r\n',
+    '#!/opt/homebrew/opt/node/bin/node \n',
+    '#! /usr/bin/env node\n',
+    '#!/opt/homebrew/opt/node/bin/node'
+  ]) {
+    assert.notEqual(
+      launcherIdentity('dist/bin/internal-cli.js', line).internalExecutableBuildHash,
+      compiledCanonical.internalExecutableBuildHash,
+      line
+    );
+  }
+
+  assert.notEqual(
+    launcherIdentity('dist/bin/internal-cli.js', acceptedLines[1]!, 'export const launcher = false;\n').internalExecutableBuildHash,
+    compiledCanonical.internalExecutableBuildHash
+  );
+  assert.notEqual(
+    launcherIdentity('lib/not-the-launcher.js', acceptedLines[1]!).internalExecutableBuildHash,
+    launcherIdentity('lib/not-the-launcher.js', acceptedLines[0]!).internalExecutableBuildHash
+  );
 });
 
 test('lifecycle package version validator accepts only canonical semver', () => {

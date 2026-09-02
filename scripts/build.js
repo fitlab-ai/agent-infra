@@ -11,12 +11,71 @@ function normalizeRelativePath(value) {
   return value.replaceAll("\\", "/");
 }
 
-function hashFiles(files) {
+function isSafeLifecyclePath(value) {
+  return typeof value === "string"
+    && value.trim() === value
+    && value.length > 0
+    && value === normalizeRelativePath(value)
+    && !path.isAbsolute(value)
+    && !/^[A-Za-z]:[\\/]/u.test(value)
+    && !value.split("/").includes("..");
+}
+
+function isLifecycleLauncherLine(value) {
+  return typeof value === "string"
+    && value.length > 1
+    && value.slice(0, -1).trim() === value.slice(0, -1)
+    && value.startsWith("#!")
+    && value.endsWith("\n")
+    && value.indexOf("\n") === value.length - 1
+    && !value.includes("\r");
+}
+
+function readLifecycleLauncherShebang(value, executableFiles) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Lifecycle manifest launcher shebang policy is invalid");
+  }
+  if (!isSafeLifecyclePath(value.sourceFile)
+    || !isSafeLifecyclePath(value.compiledFile)
+    || !isLifecycleLauncherLine(value.canonicalLine)
+    || !Array.isArray(value.acceptedLines)
+    || !value.acceptedLines.every(isLifecycleLauncherLine)
+    || new Set(value.acceptedLines).size !== value.acceptedLines.length
+    || !value.acceptedLines.includes(value.canonicalLine)
+    || !executableFiles.includes(value.sourceFile)
+    || value.compiledFile !== normalizeRelativePath(path.join(
+      "dist",
+      value.sourceFile.endsWith(".ts")
+        ? value.sourceFile.replace(/\.ts$/u, ".js")
+        : value.sourceFile
+    ))) {
+    throw new Error("Lifecycle manifest launcher shebang policy is invalid");
+  }
+  return value;
+}
+
+function normalizeLifecycleLauncherBytes(relative, content, policy) {
+  const normalized = normalizeRelativePath(relative);
+  if (normalized !== policy.sourceFile && normalized !== policy.compiledFile) return content;
+  const lineEnd = content.indexOf(0x0a);
+  if (lineEnd < 0) return content;
+  const firstLine = content.subarray(0, lineEnd + 1);
+  if (!policy.acceptedLines.some((line) => Buffer.from(line).equals(firstLine))) return content;
+  return Buffer.concat([
+    Buffer.from(policy.canonicalLine),
+    content.subarray(lineEnd + 1)
+  ]);
+}
+
+function hashFiles(files, launcherShebang) {
   const hash = crypto.createHash("sha256");
   for (const relative of [...new Set(files.map(normalizeRelativePath))].sort()) {
     hash.update(relative);
     hash.update("\0");
-    hash.update(fs.readFileSync(path.join(rootDir, relative)));
+    const content = fs.readFileSync(path.join(rootDir, relative));
+    hash.update(launcherShebang
+      ? normalizeLifecycleLauncherBytes(relative, content, launcherShebang)
+      : content);
     hash.update("\0");
   }
   return hash.digest("hex");
@@ -51,6 +110,18 @@ const lifecycleFiles = JSON.parse(fs.readFileSync(
   path.join(rootDir, "lib", "agent-clients", "adapters", "codex-lifecycle", "manifest-files.json"),
   "utf8"
 ));
+if (!Array.isArray(lifecycleFiles.executableFiles)
+  || !Array.isArray(lifecycleFiles.contractFiles)
+  || !lifecycleFiles.executableFiles.every(isSafeLifecyclePath)
+  || !lifecycleFiles.contractFiles.every(isSafeLifecyclePath)
+  || new Set(lifecycleFiles.executableFiles).size !== lifecycleFiles.executableFiles.length
+  || new Set(lifecycleFiles.contractFiles).size !== lifecycleFiles.contractFiles.length) {
+  throw new Error("Lifecycle manifest file list is invalid");
+}
+const launcherShebang = readLifecycleLauncherShebang(
+  lifecycleFiles.launcherShebang,
+  lifecycleFiles.executableFiles
+);
 const packageVersion = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8")).version;
 const compiledExecutableFiles = lifecycleFiles.executableFiles.map((file) =>
   file.endsWith(".ts") ? path.join("dist", file.replace(/\.ts$/u, ".js")) : file
@@ -58,8 +129,8 @@ const compiledExecutableFiles = lifecycleFiles.executableFiles.map((file) =>
 fs.writeFileSync(path.join(rootDir, "dist", "lifecycle-build-manifest.json"), `${JSON.stringify({
   protocolVersion: 3,
   packageVersion,
-  sourceInputHash: hashFiles(resolveExecutableFiles(lifecycleFiles.executableFiles)),
-  internalExecutableBuildHash: hashFiles(resolveExecutableFiles(compiledExecutableFiles))
+  sourceInputHash: hashFiles(resolveExecutableFiles(lifecycleFiles.executableFiles), launcherShebang),
+  internalExecutableBuildHash: hashFiles(resolveExecutableFiles(compiledExecutableFiles), launcherShebang)
 }, null, 2)}\n`);
 process.stdout.write("Generated dist/lifecycle-build-manifest.json\n");
 
