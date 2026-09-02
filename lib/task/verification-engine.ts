@@ -795,10 +795,18 @@ function checkActivityLog({ taskDir, config }: any): any {
   if (config.expected_action_pattern) {
     const expected = new RegExp(config.expected_action_pattern);
     if (!expected.test(latestAction)) {
-      const matching = doneEntries.slice().reverse().find((entry) => expected.test(entry.action));
-      if (config.allow_trailing_commit === true && latestAction === 'Commit' && matching) {
-        latestAction = matching.action;
-        latestTimestamp = matching.timestamp;
+      let matchingIndex = -1;
+      for (let index = doneEntries.length - 1; index >= 0; index -= 1) {
+        if (expected.test(doneEntries[index]!.action)) {
+          matchingIndex = index;
+          break;
+        }
+      }
+      const trailingEntries = matchingIndex >= 0 ? doneEntries.slice(matchingIndex + 1) : [];
+      const hasOnlyTrailingCommits = trailingEntries.length > 0 && trailingEntries.every((entry) => entry.action === 'Commit');
+      if (config.allow_trailing_commit === true && latestAction === 'Commit' && matchingIndex >= 0 && hasOnlyTrailingCommits) {
+        latestAction = doneEntries[matchingIndex]!.action;
+        latestTimestamp = doneEntries[matchingIndex]!.timestamp;
       } else {
         return failResult(
           "activity-log",
