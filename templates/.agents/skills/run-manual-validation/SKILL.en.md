@@ -18,6 +18,7 @@ The entry point may omit the task ref; explicit task scope accepts only `--task 
 - `complete-manual-validation` remains the maintainer's final registration after coverage is judged sufficient.
 - Never manipulate temporary worktrees, leases, or containers directly; only call `agent-infra-internal task-validate`.
 - Never record tokens, environment variables, full argv, absolute user paths, or raw transcripts in the artifact.
+- Before generating a validation artifact Markdown file that will be synced to an Issue, read `.agents/rules/sync-content-generation.md` and follow its generator-side constraints; Issue sync remains transparent and does not parse or rewrite the body.
 
 ## Step 0: State Check (pre-execution hard gate)
 

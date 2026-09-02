@@ -482,9 +482,9 @@ function buildArtifactLinkSection(content: string, artifact: ArtifactIdentity): 
   const label = english
     ? `${spec.labels[1]} (Round ${artifact.round})`
     : `${spec.labels[0]}（Round ${artifact.round}）`;
-  const link = `[${label}](${artifact.name})`;
+  const link = `${label}：\`${artifact.name}\``;
   let body = extractSection(content, aliases);
-  if (body.includes(`](${artifact.name})`)) return { aliases, heading, body };
+  if (body.includes(link)) return { aliases, heading, body };
   const placeholders = new Set([
     '[分析阶段的发现。哪些文件受影响？范围是什么？]',
     '[Findings from the analysis phase. Which files are affected? What is the scope?]',

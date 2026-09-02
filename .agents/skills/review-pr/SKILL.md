@@ -16,6 +16,7 @@ description: >
 - `pr-review*` 是独立 artifact family：不接入 analysis/plan/code 阶段依赖链，不修改 `current_step`
 - PR 上只发布正式 PR Review（head SHA、结论、finding、receipt、Issue artifact 链接），不发第二份完整过程原文到 PR 普通评论
 - 完整过程原文与 `task.md` 的可逆镜像只在关联 Issue 上同步；`restore-task` 保持 Issue-only 契约
+- 生成会同步到 Issue 的 artifact Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；Issue 同步保持透明，不解析或改写正文
 - 不得为外部 PR 倒填或伪造已发生的 `analysis`/`plan`/`code` 生命周期历史
 - head SHA 唯一记录于 `pr-review*` 与正式 PR Review；head 漂移必须进入新轮次，不得沿用旧结论
 - 审查深度由证据完整度和变更风险决定，不由提交者身份决定

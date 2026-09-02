@@ -122,6 +122,67 @@ function syncFixture() {
   return root;
 }
 
+test('comment sync preserves source @ content', () => {
+  const root = syncFixture();
+  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  fs.appendFileSync(taskPath, '\n@2x\n');
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
+  const client = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        const body = JSON.parse(options?.input || '{}').body;
+        comments.push({ id: 10, body, user: { login: 'codex' } });
+        return { ok: true, value: { id: 10 } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'task', agent: 'codex', cwd: root, client
+  });
+  assert.equal(result.status, 'applied');
+  assert.equal(result.changed, true);
+  assert.equal(comments.length, 1);
+});
+
+test('comment sync transports artifact content without content validation', () => {
+  const root = syncFixture();
+  const artifactPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md');
+  fs.writeFileSync(artifactPath, '# Analysis\n\n[local](/workspace/file.md)\n');
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
+  const client = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        const body = JSON.parse(options?.input || '{}').body;
+        comments.push({ id: 10, body, user: { login: 'codex' } });
+        return { ok: true, value: { id: 10 } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client
+  });
+  assert.equal(result.status, 'applied');
+  assert.equal(result.changed, true);
+  assert.equal(comments.length, 1);
+  assert.match(comments[0]!.body, /\[local\]\(\/workspace\/file\.md\)/);
+});
+
 test('comment sync creates once and becomes a no-op on replay', () => {
   const root = syncFixture();
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];

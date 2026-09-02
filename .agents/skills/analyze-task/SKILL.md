@@ -15,6 +15,7 @@ description: >
 
 - 本技能仅产出需求分析文档（`analysis.md` 或 `analysis-r{N}.md`）—— 不修改任何业务代码
 - 严格基于 `task.md` 中已有的任务输入、需求、上下文和来源信息展开分析
+- 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 涉及旧行为、旧数据、旧 schema 或旧调用方时，先读取 `.agents/rules/compatibility-policy.md`；没有兼容准入证据时明确采用 current-only，不把推测写成需求
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 

@@ -16,6 +16,7 @@ description: >
 ## 行为边界 / 关键规则
 
 - 本技能只审查分析产物并写报告，不修改业务代码
+- 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 执行本技能后，你**必须**立即更新 task.md
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。

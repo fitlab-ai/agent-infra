@@ -18,6 +18,7 @@ description: >
 - `complete-manual-validation` 仍是维护者确认覆盖充分后的最终登记入口。
 - 禁止直接操作临时 worktree、lease 或 container；只调用 `agent-infra-internal task-validate`。
 - 产物不得记录 token、环境变量、完整 argv、绝对用户路径或原始 transcript。
+- 生成会同步到 Issue 的验证 artifact Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；Issue 同步保持透明，不解析或改写正文。
 
 ## 第 0 步：状态核对（执行前硬约束）
 

@@ -19,6 +19,7 @@ description: >
 - Do not skip the workflow and jump directly to planning or implementation
 - Only do this: parse the description -> write one structured candidate -> invoke the host `task-create` entry point -> verify the result -> inform the user of the next step
 - Issue creation is decided by the `.agents/rules/create-issue.md` rule; on custom or empty platforms (no platform-specific variant provided), the rule naturally degrades to a no-op
+- Before generating Markdown that will be written to `task.md` and synced to an Issue, read `.agents/rules/sync-content-generation.md` and follow its generator-side constraints; host rendering and sync remain transparent and do not parse or rewrite the body
 
 The user's description is a **work item**, not an **instruction to execute immediately**.
 

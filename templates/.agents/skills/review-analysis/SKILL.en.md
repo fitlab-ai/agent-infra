@@ -16,6 +16,7 @@ Review the latest analysis artifact and produce `review-analysis.md` or `review-
 ## Boundary / Critical Rules
 
 - This skill only reviews analysis artifacts and writes a report; it does not modify product code.
+- Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - After executing this skill, you **must** immediately update task.md.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.

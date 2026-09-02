@@ -15,6 +15,7 @@ description: >
 - This skill closes the manual-validation status in an existing PR summary comment; it does not create a parallel ordinary validation comment.
 - It must write `manual-validation.md` or `manual-validation-r{N}.md` so later PR summary refreshes can reuse the validation result.
 - If the `sync-pr` summary comment is missing, fail instead of creating a partial fallback summary.
+- Before generating manual-validation artifact Markdown that will be synced to an Issue, read `.agents/rules/sync-content-generation.md` and follow its generator-side constraints; Issue sync remains transparent and does not parse or rewrite the body.
 - After this skill runs, update `task.md` immediately.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.

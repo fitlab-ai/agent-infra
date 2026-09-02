@@ -19,6 +19,7 @@ description: >
 - 不要跳过工作流直接进入计划/实现阶段
 - 仅执行：解析描述 -> 一次性生成结构化 candidate -> 调用宿主 `task-create` 入口 -> 校验结果 -> 告知用户下一步
 - Issue 创建由 `.agents/rules/create-issue.md` 规则决定；自定义或空平台（未提供平台变体规则文件）时，规则会自然降级为 no-op
+- 生成会写入 `task.md` 并同步到 Issue 的 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；宿主渲染和同步保持透明，不解析或改写正文
 
 用户的描述是一个**待办事项**，而不是**立即执行的指令**。
 

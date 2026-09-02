@@ -8,9 +8,11 @@ import { spawnSync } from 'node:child_process';
 import {
   artifactFamilyCatalog,
   artifactName,
+  buildArtifactLinkSection,
   inspectTaskArtifacts,
   parseArtifactName,
-  resolveArtifactContext
+  resolveArtifactContext,
+  validateCompletedArtifact
 } from '../../../lib/task/artifact-lifecycle.ts';
 import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
@@ -96,6 +98,24 @@ test('unknown families fail without resolving outside the catalog', () => {
   const result = inspectTaskArtifacts(TASK_ID, 'unknown', { repoRoot: f.repoRoot });
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'ARTIFACT_FAMILY_UNKNOWN');
+});
+
+test('completed artifacts preserve source Markdown content', () => {
+  const f = fixture({ 'analysis.md': '# Analysis\n\n[local](/workspace/file.md)\n\n@2x\n' });
+  const result = validateCompletedArtifact(f.taskDir, 'analysis', 'analysis.md', 1);
+  assert.equal(result.ok, true);
+});
+
+test('automatic artifact references use code text and remain idempotent', () => {
+  const f = fixture({ 'analysis.md': '# Analysis\n' });
+  const inventory = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
+  assert.equal(inventory.status, 'ready');
+  const artifact = inventory.artifacts[0]!;
+  const content = '# Task\n\n## 分析\n\n[分析阶段的发现。哪些文件受影响？范围是什么？]\n';
+  const first = buildArtifactLinkSection(content, artifact);
+  assert.match(first.body, /：`analysis\.md`$/);
+  const second = buildArtifactLinkSection(`# Task\n\n## 分析\n\n${first.body}\n`, artifact);
+  assert.equal(second.body, first.body);
 });
 
 test('context resolves required latest inputs and actual review references independently', () => {

@@ -15,6 +15,7 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 - This skill only outputs a technical plan document (`plan.md` or `plan-r{N}.md`) and does not modify any business code
 - This is a **mandatory human review checkpoint**; do not automatically proceed to implementation
+- Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - When the plan touches compatibility, migration, old formats, or old entry points, read `.agents/rules/compatibility-policy.md` first. Do not design adapters, shims, dual writes, or parallel state machines without passing its admission gate
 - After executing this skill, you **must** immediately update task status in task.md
 
