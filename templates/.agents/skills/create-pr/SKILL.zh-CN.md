@@ -33,7 +33,7 @@ description: >
 
 按读取结果分支：
 - 缺省 / `"required"` → 继续到下方第 1 步
-- `"disabled"` → 输出以下消息后**立即停止**，不要执行任何后续编号步骤、不要触发任何 PR 创建命令、不要修改 `task.md` 的 `pr_number` / `pr_status`、不要发布 PR 摘要评论：
+- `"disabled"` → 输出以下消息后**立即停止**，不要执行任何后续编号步骤、不要触发任何 PR 创建命令、不要修改 `task.md` 的 `pr_delivery_fact`、不要发布 PR 摘要评论：
 
 使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
@@ -92,7 +92,7 @@ description: >
 
 ### 9. 确认任务状态
 
-`platform-pr create` 在成功创建或恢复唯一远端身份后，通过任务写入内核原子更新 `pr_number`、`pr_status`、规范时间/版本和 Create PR 完成日志。调用方只核对结构化结果，不再次编辑这些字段。
+`platform-pr create` 在成功创建或恢复唯一远端身份后，通过任务写入内核原子更新 verified `pr_delivery_fact`、规范时间/版本和 Create PR 完成日志。调用方只核对结构化结果，不再次编辑 fact。
 
 ### 10. 完成校验
 
@@ -149,5 +149,5 @@ agent-infra-internal task-verify {task-id} create-pr.completed --format text
 - 推送被拒绝：建议执行 `git pull --rebase`
 - 已存在 PR：直接输出当前 PR URL 并结束
 - 无法访问 Issue 元数据：跳过继承并继续
-- PR 创建失败且已关联 `{task-id}`：调用 `agent-infra-internal task-warning {task-id} add --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "修复推送、权限或平台问题后重跑 create-pr"` 提交结构化 warning 意图，不写 `pr_number`
+- PR 创建失败且已关联 `{task-id}`：调用 `agent-infra-internal task-warning {task-id} add --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "修复推送、权限或平台问题后重跑 create-pr"` 提交结构化 warning 意图，不写不完整 `pr_delivery_fact`
 - PR 摘要评论失败且已关联 `{task-id}`：按 `.agents/rules/pr-sync.md` 记录 `COMMENT_SYNC_FAILED` 告警，不回滚已创建 PR

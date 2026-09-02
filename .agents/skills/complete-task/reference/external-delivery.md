@@ -10,8 +10,8 @@ core 通过平台 adapter 读取 Issue 的权威 closing change requests，穷�
 
 ## 授权与持久审计
 
-当次调用只以 typed result 的 `mode=external`、`authorization` 和 `selected` 为机器分支依据。`pr_status: created` 只是现有 verifier 的兼容 shim，表示任务已绑定可验证的 PR；它既不表示 PR 由本任务创建，也不能单独授权跳过 lifecycle。
+当次调用只以 typed result 的 `mode=external`、`authorization` 和 `selected` 为机器分支依据。持久化 `pr_delivery_fact` 保存已验证绑定及 provenance；它不表示本次调用创建了 PR，也不能单独授权跳过 lifecycle。
 
-成功绑定会原子写入 PR 字段并追加 `Bind External PR` Activity Log，记录授权来源、Issue、PR URL/编号、base/head repository/ref/SHA、合并时间和 merge commit。相同完整证据重试为 no-op；已有同号但缺审计签名时补写一次；编号或身份变化失败。不得调用 PR create 路径。
+成功绑定会原子写入 `pr_delivery_fact` 并追加 `Bind External PR` Activity Log，记录授权来源、Issue、PR URL/编号、base/head repository/ref/SHA、合并时间和 merge commit。相同完整证据重试为 no-op；已有同号但缺审计签名时补写一次；编号或身份变化失败。不得调用 PR create 路径。
 
 外部模式仍须通过身份、required-PR、本地生命周期与终态校验；review ledger、manual validation、post-review commit 和平台同步等外围证据在 lifecycle 后作为 warning/pending steps 投影。无 canonical review-code 时仅沿用 verifier 已定义的 N/A 规则；`--force` 不解除身份、本地原子性或 required-PR 硬门禁。

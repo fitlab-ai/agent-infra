@@ -7,6 +7,7 @@ import {
   createPlatformPullRequest,
   inspectPlatformPullRequest,
   resolveExternalPullRequest,
+  skipPlatformPullRequestFact,
   syncPlatformPullRequest
 } from '../platform/pull-requests.ts';
 import type { PullRequestResult } from '../platform/pull-requests.ts';
@@ -17,6 +18,7 @@ const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd
        agent-infra-internal platform-pr resolve-external <task-ref> --agent <agent> [--pr <N>] [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr create <task-ref> --agent <agent> --base <branch> --head <branch> --title-file <path|-> --body-file <path|-> [--draft] [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr bind <task-ref> --pr <N> --agent <agent> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr skip <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync <task-ref> --agent <agent> [--metadata] [--closing-issue] --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-context <task-ref> [--cwd <path>]
        agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
@@ -64,7 +66,7 @@ function readFile(value: string, cwd: string): string {
 function platformPr(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'sync', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
   const taskRef = args[1];
   if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
   const parsed = parse(args, 2);
@@ -76,6 +78,7 @@ function platformPr(args: string[] = []): void {
     'resolve-external': ['cwd', 'agent', 'pr', 'dryRun'],
     create: ['cwd', 'agent', 'base', 'head', 'titleFile', 'bodyFile', 'draft', 'dryRun'],
     bind: ['cwd', 'agent', 'pr', 'dryRun'],
+    skip: ['cwd', 'agent', 'dryRun'],
     sync: ['cwd', 'agent', 'metadata', 'closingIssue', 'result', 'dryRun'],
     'summary-context': ['cwd'],
     'summary-sync': ['cwd', 'agent', 'bodyFile', 'result', 'dryRun']
@@ -88,6 +91,10 @@ function platformPr(args: string[] = []): void {
   const agent = normalizeAgentToken(values.agent);
   if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
+  if (operation === 'skip') {
+    finish(skipPlatformPullRequestFact(taskRef, { cwd, agent, dryRun: values.dryRun === true }));
+    return;
+  }
   const primaryResult = values.result === undefined ? undefined : values.result;
   if (primaryResult !== undefined && !['pr_created', 'pr_reused', 'no_op'].includes(primaryResult as string)) {
     fail('--result must be pr_created, pr_reused, or no_op');

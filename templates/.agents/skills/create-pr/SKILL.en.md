@@ -33,7 +33,7 @@ On a real `platform-pr create`, the typed core idempotently records `Create PR [
 
 Branch on the result:
 - absent / `"required"` -> continue to Step 1 below
-- `"disabled"` -> output the message below and **stop immediately**. Do not run any subsequent numbered step, do not trigger any PR-creation command, do not modify `pr_number` / `pr_status` in `task.md`, and do not publish a PR summary comment:
+- `"disabled"` -> output the message below and **stop immediately**. Do not run any subsequent numbered step, do not trigger any PR-creation command, do not modify `pr_delivery_fact` in `task.md`, and do not publish a PR summary comment:
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
 
@@ -92,7 +92,7 @@ Aggregate a reviewer-facing summary from those artifacts, append the `### PR Cod
 
 ### 9. Confirm Task Status
 
-After a PR is created or uniquely recovered, `platform-pr create` atomically updates `pr_number`, `pr_status`, canonical time/version metadata, and the Create PR completion log through the task write core. The caller verifies the structured result and does not edit those fields again.
+After a PR is created or uniquely recovered, `platform-pr create` atomically updates the verified `pr_delivery_fact`, canonical time/version metadata, and the Create PR completion log through the task write core. The caller verifies the structured result and does not edit the fact again.
 
 ### 10. Verification Gate
 
@@ -148,5 +148,5 @@ Next step (alternative) - Skip active monitoring and attempt completion:
 - Push rejected: suggest `git pull --rebase`
 - Existing PR found: show the current PR URL and stop
 - Inaccessible Issue metadata: skip inheritance and continue
-- PR creation failed with an associated `{task-id}`: run `agent-infra-internal task-warning {task-id} add --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "Fix push, permission, or platform issues and rerun create-pr"` to submit a structured warning intent, and do not write `pr_number`
+- PR creation failed with an associated `{task-id}`: run `agent-infra-internal task-warning {task-id} add --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "Fix push, permission, or platform issues and rerun create-pr"` to submit a structured warning intent, and do not write an incomplete `pr_delivery_fact`
 - PR summary comment failed with an associated `{task-id}`: record a `COMMENT_SYNC_FAILED` warning per `.agents/rules/pr-sync.md`, without rolling back an already-created PR

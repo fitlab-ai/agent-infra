@@ -131,14 +131,17 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/pulls(?:\?|$)/.test(ar
       title: payload.title,
       body: payload.body,
       draft: Boolean(payload.draft),
-      head: { ref: String(payload.head).replace(/^.*:/, ""), sha: "created-sha", repo: { full_name: repository } },
-      base: { ref: payload.base, repo: { full_name: repository } },
+      head: { ref: String(payload.head).replace(/^.*:/, ""), sha: process.env.GH_FAKE_CREATED_HEAD_SHA || "created-sha", repo: { full_name: repository } },
+      base: { ref: payload.base, sha: process.env.GH_FAKE_CREATED_BASE_SHA || "base-sha", repo: { full_name: repository } },
       labels: [],
       assignees: [],
       milestone: null
     };
     pulls.push(created);
     if (pullsPath) fs.writeFileSync(pullsPath, JSON.stringify(pulls));
+    if (process.env.GH_FAKE_POST_TASK_PATH) {
+      fs.writeFileSync(process.env.GH_FAKE_POST_TASK_PATH, process.env.GH_FAKE_POST_TASK_CONTENT || "");
+    }
     process.stdout.write(JSON.stringify(created));
     process.exit(0);
   }

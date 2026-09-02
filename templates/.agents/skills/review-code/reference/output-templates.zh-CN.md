@@ -40,7 +40,7 @@
 
 ### 场景 A：通过且无问题
 
-通过后不得按轮次路由。先比较审查快照树 `T` 与基线 `R` 的树，再读取任务的 `prFlow` / `pr_number`；存在 PR 时调用 `agent-infra-internal platform-checks inspect {task-id}`。只选择以下一个互斥出口：
+通过后不得按轮次路由。先比较审查快照树 `T` 与基线 `R` 的树，再读取任务的 `prFlow` / verified `pr_delivery_fact`；存在 PR 时调用 `agent-infra-internal platform-checks inspect {task-id}`。只选择以下一个互斥出口：
 
 - `T != R^{tree}`：场景 A1（提交）。
 - `T == R^{tree}` 且无 PR：`prFlow=disabled` 用场景 A4（完成），否则用场景 A2（创建 PR）。

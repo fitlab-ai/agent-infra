@@ -12,6 +12,7 @@ import {
   warningResultForPrimary
 } from '../../../lib/platform/pr-summary.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
+import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -33,8 +34,13 @@ function summaryFixture(): { root: string; taskId: string } {
     '---',
     `id: ${taskId}`,
     'status: active',
-    'pr_status: created',
-    'pr_number: 42',
+    `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
+      identity: {
+        repository: 'acme/widgets', number: 42, nodeId: 'PR_42', url: 'https://github.com/acme/widgets/pull/42',
+        head: { repository: 'acme/widgets', ref: 'feature', sha: 'a'.repeat(40) },
+        base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) }
+      }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+    })))}`,
     'branch: feature',
     '---',
     ''

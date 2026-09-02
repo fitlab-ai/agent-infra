@@ -24,6 +24,7 @@ import { verifyTaskEvent } from './verification.ts';
 import { verifyInProcess } from './verification-engine.ts';
 import { canonicalTimestamp, writeTask } from './write.ts';
 import type { TaskFileSystem, TaskWriteMetadata, TaskWriteResult } from './write.ts';
+import { readPrDeliveryFact } from './pr-delivery-fact.ts';
 
 type Eligibility = 'eligible' | 'repair-only' | 'runtime-recovery-only' | 'never-overridable';
 type OutcomeEffect = 'apply-target' | 'retry-same-intent' | 'record-only' | 'no-write';
@@ -614,7 +615,8 @@ function resourceForSnapshot(
     return number === null ? null : { kind: 'issue', number };
   }
   if (policy.producerId === 'platform.pull-request') {
-    const number = options.probePullRequestNumber ?? toPositiveInteger(frontmatter?.pr_number);
+    const fact = frontmatter ? readPrDeliveryFact(frontmatter) : null;
+    const number = options.probePullRequestNumber ?? (fact?.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null);
     return number === null ? null : { kind: 'pull-request', number };
   }
   return null;
@@ -705,7 +707,8 @@ function probePlatformFailure(
     return error('OVERRIDE_DOCUMENT_INVALID', cause instanceof Error ? cause.message : String(cause));
   }
   const issueNumber = options.probeIssueNumber ?? toPositiveInteger(frontmatter.issue_number);
-  const pullRequestNumber = options.probePullRequestNumber ?? toPositiveInteger(frontmatter.pr_number);
+  const fact = readPrDeliveryFact(frontmatter);
+  const pullRequestNumber = options.probePullRequestNumber ?? (fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null);
   const operation = policy.producerId === 'platform.issue'
     ? issueNumber === null
       ? null

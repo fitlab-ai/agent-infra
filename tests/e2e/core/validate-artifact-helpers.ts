@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
+import { buildBoundFact, buildSkippedFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
+import { parseTypedTaskFrontmatter } from "../../../lib/task/frontmatter.ts";
 
 import {
   filePath,
@@ -121,6 +123,26 @@ function writeJson(filePathname: string, value: unknown) {
   write(filePathname, JSON.stringify(value));
 }
 
+function factValue(fact: ReturnType<typeof buildUnboundFact> | ReturnType<typeof buildSkippedFact> | ReturnType<typeof buildBoundFact>): string {
+  return JSON.stringify(encodePrDeliveryFact(fact));
+}
+
+function boundFactValue(number = 77, headSha = "a".repeat(40)) {
+  return factValue(buildBoundFact({
+    identity: {
+      repository: "fitlab-ai/agent-infra",
+      number,
+      nodeId: `PR_${number}`,
+      url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`,
+      head: { repository: "fitlab-ai/agent-infra", ref: "agent-infra-feature-pr", sha: headSha },
+      base: { repository: "fitlab-ai/agent-infra", ref: "main", sha: "b".repeat(40) }
+    },
+    source: "created",
+    verifiedAt: "2026-01-01T00:00:00.000Z",
+    remoteState: "open"
+  }));
+}
+
 function buildTaskFrontmatter(overrides: FrontmatterOverrides = {}) {
   const now = new Date();
   const metadata = {
@@ -131,6 +153,7 @@ function buildTaskFrontmatter(overrides: FrontmatterOverrides = {}) {
     created_at: formatTimestamp(new Date(now.getTime() - 60_000)),
     updated_at: formatTimestamp(now),
     agent_infra_version: "v0.9.11-alpha.0",
+    pr_delivery_fact: factValue(buildUnboundFact()),
     issue_number: "N/A",
     current_step: "code",
     assigned_to: "codex",
@@ -171,7 +194,7 @@ function buildCompletedTaskContent(checklistLines: string[], overrides: Frontmat
       completed_at: now,
       updated_at: now,
       target_date: now.slice(0, 10),
-      pr_status: "skipped",
+      pr_delivery_fact: factValue(buildSkippedFact(now)),
       ...overrides
     }),
     "",
@@ -377,6 +400,13 @@ function parseTestFrontmatter(content: string) {
       continue;
     }
     metadata[key] = value.trim();
+  }
+
+  try {
+    const typed = parseTypedTaskFrontmatter(content);
+    if (typeof typed.pr_delivery_fact === "string") metadata.pr_delivery_fact = typed.pr_delivery_fact;
+  } catch {
+    return null;
   }
 
   return metadata;
@@ -637,6 +667,7 @@ export {
   buildPrPayload,
   buildTaskComment,
   buildTaskContent,
+  boundFactValue,
   buildTaskFrontmatter,
   commitInWorktree,
   createHeadCommit,

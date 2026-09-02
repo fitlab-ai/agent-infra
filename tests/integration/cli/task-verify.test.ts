@@ -6,6 +6,15 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { filePath, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+
+function boundFact(number = 42, branch = 'feature', state: 'open' | 'closed' = 'open') {
+  return encodePrDeliveryFact(buildBoundFact({
+    identity: { repository: 'fitlab-ai/agent-infra', number, nodeId: `PR_${number}`, url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`, head: { repository: 'fitlab-ai/agent-infra', ref: branch, sha: 'a'.repeat(40) }, base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) } },
+    source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: state,
+    ...(state === 'closed' ? { mergedAt: '2026-08-01T00:00:00Z', mergeCommitSha: 'c'.repeat(40) } : {})
+  }));
+}
 
 function writeJson(filePath: string, value: unknown) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -51,12 +60,12 @@ test('required PR delivery gates on normalized merged state and platform availab
     spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const dir = path.join(root, '.agents', 'workspace', 'active', id);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, prFlow: 'required' }));
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' }, prFlow: 'required' }));
     writeJson(path.join(root, '.agents/skills/complete-task/config/verify.json'), {
       skill: 'complete-task', checks: { 'required-pr-delivery': {} }
     });
     fs.writeFileSync(path.join(dir, 'task.md'), [
-      '---', `id: ${id}`, 'status: active', 'pr_status: created', 'pr_number: 42', 'branch: feature', '---', ''
+      '---', `id: ${id}`, 'status: active', `pr_delivery_fact: ${JSON.stringify(boundFact(42, 'feature'))}`, 'branch: feature', '---', ''
     ].join('\n'));
     const prPath = path.join(root, 'pr.json');
     fs.writeFileSync(prPath, JSON.stringify({
@@ -95,6 +104,15 @@ test('required PR delivery gates on normalized merged state and platform availab
     assert.equal(merged.status, 0, merged.stderr || merged.stdout);
     assert.equal(JSON.parse(merged.stdout).invocations[0].status, 'pass');
 
+    const taskPath = path.join(dir, 'task.md');
+    const beforeMismatch = fs.readFileSync(taskPath, 'utf8');
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'release' }, prFlow: 'required' }));
+    const mismatchedBase = run();
+    assert.equal(mismatchedBase.status, 1, mismatchedBase.stderr || mismatchedBase.stdout);
+    assert.equal(JSON.parse(mismatchedBase.stdout).invocations[0].status, 'fail');
+    assert.equal(fs.readFileSync(taskPath, 'utf8'), beforeMismatch);
+
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, delivery: { remote: 'origin', baseRef: 'main' }, prFlow: 'required' }));
     const unavailable = run({ GH_FAKE_FAIL: 'network unavailable' });
     assert.equal(unavailable.status, 2);
     assert.equal(JSON.parse(unavailable.stdout).invocations[0].status, 'blocked');
@@ -119,7 +137,7 @@ test('review-pr task-verify gate requires re-sync after publication write-back (
       `type: feature`,
       `status: active`,
       `issue_number: 7`,
-      `pr_number: 42`,
+      `pr_delivery_fact: ${JSON.stringify(boundFact(42))}`,
       `---`,
       ``,
       `# 任务`,

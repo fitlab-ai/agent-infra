@@ -49,7 +49,7 @@ The seven internal commands (`task-event` / `task-lifecycle` / `task-finalizatio
 - `review-plan`: update `current_step`, `updated_at`, `agent_infra_version`
 - `code-task`: update `current_step`, `updated_at`, `agent_infra_version`
 - `review-code`: update `current_step`, `updated_at`, `agent_infra_version`
-- `create-pr`: update `pr_number`, `updated_at`, `agent_infra_version`
+- `create-pr`: update the verified `pr_delivery_fact`, `updated_at`, `agent_infra_version`
 - `commit`: update `updated_at`, `agent_infra_version`; update `current_step` when needed (see `commit/reference/task-status-update.md`)
 - `complete-task`: update `status`, `current_step`, `completed_at`, `updated_at`, `agent_infra_version`
 - `block-task`: update `status`, `blocked_at`, `updated_at`, `agent_infra_version`

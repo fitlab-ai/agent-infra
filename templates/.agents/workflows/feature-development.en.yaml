@@ -3,7 +3,7 @@
 #
 # Note: whether a step's `pr_tasks` list counts toward workflow progress follows the "PR path" rule:
 # `.agents/.airc.json:prFlow="required"` always counts; `prFlow="disabled"` never counts;
-# when the field is absent, exclude only if task.md's `pr_status=skipped`, otherwise count
+# when the field is absent, exclude only if task.md's `pr_delivery_fact.state=skipped`, otherwise count
 # (see .agents/skills/complete-task/SKILL.md).
 
 name: feature-development

@@ -6,6 +6,7 @@ import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
+import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
 
 const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const;
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
@@ -212,7 +213,7 @@ function renderTask(params: Readonly<{
     'target_date:',
     'current_step: requirement-analysis',
     `assigned_to: ${candidate.agent}`,
-    'pr_status: pending',
+    `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildUnboundFact()))}`,
     `delivery_remote: ${candidate.deliveryRemote ?? params.delivery.remote}`,
     `delivery_base_ref: ${candidate.deliveryBaseRef ?? params.delivery.baseRef}`,
     'checkpoint_commit:',

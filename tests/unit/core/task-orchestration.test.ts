@@ -22,6 +22,7 @@ import {
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
+import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 const snapshot = () => 'before-tree';
 const modelPolicy = {
@@ -124,7 +125,8 @@ function cleanCommitCandidateFixture(prFlow: unknown = 'required') {
   const head = 'a'.repeat(40);
   fs.mkdirSync(path.join(f.root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ prFlow })}\n`);
-  fs.writeFileSync(path.join(f.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: code-review\nagent_infra_version: v0.9.11-alpha.0\npr_number: 42\nlast_reviewed_commit: ${head}\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  const fact = encodePrDeliveryFact(buildBoundFact({ identity: { repository: 'acme/widgets', number: 42, nodeId: 'PR_42', url: 'https://github.com/acme/widgets/pull/42', head: { repository: 'acme/widgets', ref: 'feature', sha: head }, base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open' }));
+  fs.writeFileSync(path.join(f.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: code-review\nagent_infra_version: v0.9.11-alpha.0\npr_delivery_fact: ${JSON.stringify(fact)}\nlast_reviewed_commit: ${head}\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   seedLifecycleReceipts(f);
   beginOrResumeOrchestration('TASK-20260101-000001', {
     repoRoot: f.root,

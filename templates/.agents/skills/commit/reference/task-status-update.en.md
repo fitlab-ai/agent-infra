@@ -58,7 +58,7 @@ Prerequisites:
 - [ ] all code committed
 - [ ] all tests passed
 - [ ] code review approved
-- [ ] all workflow steps completed (for the `pr_tasks` list under each yaml `commit` step, decide whether to count them by the "PR path" rule: `prFlow=required` always counts; `prFlow=disabled` never counts; when absent, exclude only if `pr_status=skipped`, otherwise count)
+- [ ] all workflow steps completed (for the `pr_tasks` list under each yaml `commit` step, decide whether to count them by the "PR path" rule: `prFlow=required` always counts; `prFlow=disabled` never counts; when absent, exclude only if `pr_delivery_fact.state=skipped`, otherwise count)
 
 Required next-step commands (rendered by `prFlow`):
 
@@ -115,4 +115,4 @@ Next step - code review:
 {next-step-commands}
 ```
 
-> Note: beyond the cases above, if `task.md` contains a valid `pr_number`, the commit skill must sync the PR summary via `reference/pr-summary-sync.md` before entering the verification gate.
+> Note: beyond the cases above, if a verified bound `pr_delivery_fact` exists in `task.md`, the commit skill must sync the PR summary via `reference/pr-summary-sync.md` before entering the verification gate.

@@ -33,6 +33,7 @@ import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
 import { resolveDeliveryTarget } from "./delivery-target.ts";
+import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -498,17 +499,17 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
     return failResult('required-pr-delivery', 'Project configuration is invalid');
   }
   const flow = projectConfig.prFlow;
-  const status = String(task.metadata.pr_status || 'pending');
-  const prNumber = parsePrNumber(task.metadata.pr_number);
+  const factRead = readPrDeliveryFact(task.metadata);
+  if (factRead.status === 'invalid') return failResult('required-pr-delivery', factRead.error.message);
+  const fact = factRead.status === 'valid' ? factRead.fact : null;
+  const status = fact?.state || 'unbound';
+  const prNumber = fact?.state === 'bound' ? fact.identity.number : null;
   if (flow === 'disabled') return passResult('required-pr-delivery', 'Pull request delivery is disabled by project policy');
-  if (flow === 'required' && (status !== 'created' || prNumber === null)) {
+  if (flow === 'required' && (status !== 'bound' || prNumber === null)) {
     return failResult('required-pr-delivery', 'Project policy requires a bound pull request before completion');
   }
-  if (flow !== 'required' && status === 'pending') {
+  if (flow !== 'required' && status === 'unbound') {
     return failResult('required-pr-delivery', 'Pull request delivery is pending; create a PR or explicitly skip it');
-  }
-  if (status === 'created' && prNumber === null) {
-    return failResult('required-pr-delivery', 'Task claims a created pull request without a valid pr_number');
   }
   if (flow === 'required') {
     if (mode === 'gate') {
@@ -525,6 +526,7 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
     const pullRequest = inspected.pullRequest;
     const repository = inspected.platform.repository?.toLowerCase() || '';
     const taskBranch = String(task.metadata.branch || '').trim();
+    const deliveryBaseRef = String(task.metadata.delivery_base_ref || projectConfig.delivery?.baseRef || '').trim();
     if (inspected.status !== 'no-op' || !pullRequest || pullRequest.number !== prNumber) {
       return failResult('required-pr-delivery', 'Bound pull request identity could not be verified');
     }
@@ -533,6 +535,7 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
       || pullRequest.repository.toLowerCase() !== repository
       || pullRequest.base.repository.toLowerCase() !== repository
       || (taskBranch && pullRequest.head.ref !== taskBranch)
+      || (deliveryBaseRef && pullRequest.base.ref !== deliveryBaseRef)
     ) {
       return failResult('required-pr-delivery', 'Bound pull request identity does not match the task');
     }
@@ -1108,9 +1111,12 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
 
   const task = loadTask(taskDir);
   if (!task.ok) return failResult("post-review-commit", task.message);
+  const factRead = readPrDeliveryFact(task.metadata);
+  if (factRead.status === 'invalid') return failResult("post-review-commit", factRead.error.message);
+  const fact = factRead.status === 'valid' ? factRead.fact : null;
   const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
   const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repoRoot));
-  const hasPullRequest = Number(task.metadata.pr_number) > 0;
+  const hasPullRequest = fact?.state === 'bound';
   let inspected: ReturnType<typeof inspectPlatformPullRequest> | null = null;
   if (hasPullRequest) {
     inspected = inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });

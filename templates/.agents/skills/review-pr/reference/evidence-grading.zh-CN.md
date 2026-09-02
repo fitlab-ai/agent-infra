@@ -17,7 +17,7 @@
 
 - 唯一命中 → `unique`；多个且无法唯一 → `ambiguous`（候选列表）；零命中 → `none`。
 - 多宿主歧义即 fail closed：不进入证据分类；由 `pr-review-grade resolve-host --pr <N>` 返回 typed `HostResolution`，`decide` 对 `ambiguous` 显式拒绝。
-- PR body 的 `Closes/Fixes #N`（大小写不敏感、逗号/空格分隔、支持列表）经 `extractClosingIssueNumbers` 解析；本地 `active/*/task.md` 的 `pr_number` 命中优先于 `issue_number` 反查，同一任务经两条路径命中按单候选去重。
+- PR body 的 `Closes/Fixes #N`（大小写不敏感、逗号/空格分隔、支持列表）经 `extractClosingIssueNumbers` 解析；本地 `active/*/task.md` 的 verified `pr_delivery_fact.identity.number` 命中优先于 `issue_number` 反查，同一任务经两条路径命中按单候选去重。
 
 ## 证据场景分类（S1 → S2 → S3）
 
@@ -33,7 +33,7 @@
 ## 新鲜度与对齐
 
 - 新鲜度基准 = 上一轮 `pr-review*` 记录的被审 head SHA，与当前 head 逐字符比对：一致 → `fresh`，否则 → `stale`。
-- 对齐 = freshness 为 fresh 且 `issue_number` / `pr_number` 与解析结果一致。
+- 对齐 = freshness 为 fresh 且 `issue_number` / verified `pr_delivery_fact.identity.number` 与解析结果一致。
 - 无先前 `pr-review*` → `n/a` / `n/a`（首轮特例）。
 
 ## 风险分级（纯证据口径）

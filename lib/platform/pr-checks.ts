@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-import { parseTaskFrontmatter } from '../task/frontmatter.ts';
+import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import {
   inspectPlatformRequiredChecks,
@@ -14,6 +14,7 @@ import { inspectPlatformPullRequest } from './pull-requests.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { PullRequestSnapshot } from './pull-requests.ts';
+import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
 
 type CheckBucket = 'pass' | 'fail' | 'pending' | 'cancel';
 type CheckState = 'passed' | 'failed' | 'pending' | 'timed-out' | 'cancelled' | 'no-required';
@@ -121,10 +122,11 @@ registerPlatformCapabilities('github', {
 function resolvedTask(taskRef: string, options: InspectionOptions) {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ok: false as const, output: checksResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }) };
-  const frontmatter = parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
-  const pr = Number(frontmatter.pr_number);
-  const prNumber = Number.isInteger(pr) && pr > 0 ? pr : null;
-  if (!prNumber) return { ok: false as const, output: checksResult('failed', { error: { code: 'PR_NOT_LINKED', message: 'Task has no valid pr_number', retryable: false } }) };
+  const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+  const fact = readPrDeliveryFact(frontmatter);
+  if (fact.status === 'invalid') return { ok: false as const, output: checksResult('failed', { error: { code: 'PR_DELIVERY_FACT_INVALID', message: fact.error.message, retryable: false } }) };
+  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null;
+  if (!prNumber) return { ok: false as const, output: checksResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }) };
   const client = (options.client as GitHubClient | undefined) || createGitHubClient();
   const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
   if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ok: false as const, output: checksResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error }) };

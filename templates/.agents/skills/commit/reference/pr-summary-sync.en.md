@@ -1,6 +1,6 @@
 # Commit-stage PR Summary Synchronization
 
-Run only when `{task-id}` is valid and task.md has a valid `pr_number`.
+Run only when `{task-id}` is valid and task.md has a `bound/verified` `pr_delivery_fact`.
 
 1. Run `agent-infra-internal platform-pr summary-context {task-id}`.
 2. Generate the plain summary body per `.agents/rules/pr-sync.md` and write it to a temporary file.

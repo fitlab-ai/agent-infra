@@ -34,7 +34,7 @@
       "stage_scope": ["analysis", "plan", "code"]
     },
     "platform-sync": {
-      "when": "pr_number_exists",
+      "when": "pr_fact_bound",
       "expected_pr_comment_marker_key": "prSummary",
       "expected_pr_comment_required_patterns": [
         "^### ✅ 人工验证已通过$"

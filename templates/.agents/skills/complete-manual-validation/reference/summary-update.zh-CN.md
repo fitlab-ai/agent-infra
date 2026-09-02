@@ -1,6 +1,6 @@
 # PR 摘要人工验证更新
 
-人工验证产物结构见 `reference/report-template.md`。本步骤只在有效 `{task-id}` 且 task.md 已绑定 `pr_number` 时执行；用户另传 PR 身份时必须与绑定值一致。
+人工验证产物结构见 `reference/report-template.md`。本步骤只在有效 `{task-id}` 且 task.md 已绑定 verified `pr_delivery_fact` 时执行；用户另传 PR 身份时必须与 fact identity 一致。
 
 摘要结构与失败语义统一遵循 `.agents/rules/pr-sync.md`。
 

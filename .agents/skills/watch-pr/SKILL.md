@@ -39,8 +39,8 @@ description: >
 
 按以下确定性分支解析出目标 PR 号 `{pr#}` 与可选 `{task-id}`：
 
-- 场景 A（省略入参）：从当前分支反查 active task；定位后读取其 `pr_number`。
-- 场景 B（省略 task ref 或 `--task/-t`，**任务锚定主路径**）：按「任务上下文解析」取得完整 `{task-id}`。读 `.agents/workspace/active/{task-id}/task.md` 取 `pr_number` 作为 `{pr#}`；`pr_number` 为空时按「错误处理」提示先 `create-pr`，停止。
+- 场景 A（省略入参）：从当前分支反查 active task；定位后读取其 verified `pr_delivery_fact.identity.number`。
+- 场景 B（省略 task ref 或 `--task/-t`，**任务锚定主路径**）：按「任务上下文解析」取得完整 `{task-id}`。读 `.agents/workspace/active/{task-id}/task.md` 取 verified `pr_delivery_fact.identity.number` 作为 `{pr#}`；fact 未绑定时按「错误处理」提示先 `create-pr`，停止。
 - 场景 C（`--pr <number>` 或 PR URL）：直接取该 PR 号为 `{pr#}`；随后按「反查任务」确定 `{task-id}`。
 - 反查任务（场景 A / C）：通过任务上下文/任务查询取得与 `{pr#}` 唯一绑定的 active task。未命中时停止并提示先绑定 PR；typed checks intent 不建立第二套无任务状态机。
 
@@ -74,7 +74,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - `assigned_to`：{当前代理}
 - `updated_at`：{当前时间}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
-- **不改** `pr_status`（保持 `created`）与 `current_step`
+- **不改** `pr_delivery_fact` 与 `current_step`
 - **追加**到 `## 活动日志`（不要覆盖之前的记录；`{N}` = 本任务已有 Watch PR 条目数 + 1）：
   ```
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {成功：PR ready, repair commits: {k} [{sha 摘要}] / 阻塞：blocked: {简述}}
@@ -148,6 +148,6 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 
 ## 错误处理
 
-- 无法定位 PR（任务短号命中但 task.md 无 `pr_number`，且未传 `--pr`、当前分支也无 PR）：提示「请先运行 `create-pr`，或用 `--pr <number>` 指定 PR」，停止。
+- 无法定位 PR（任务短号命中但 task.md 无 verified bound `pr_delivery_fact`，且未传 `--pr`、当前分支也无 PR）：提示「请先运行 `create-pr`，或用 `--pr <number>` 指定 PR」，停止。
 - 平台 CLI 未认证或 API 不可用：提示需人工介入，停止。
 - 短号解析失败：透传 `task-short-id.js` 的退出码与错误信息，不重写。

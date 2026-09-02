@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { parseTaskFrontmatter } from '../task/frontmatter.ts';
+import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
+import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
 
 // ---------------------------------------------------------------------------
 // Host resolution (PL-4): PR -> unique / ambiguous / none.
@@ -62,7 +63,7 @@ export function extractClosingIssueNumbers(body: string): number[] {
 /**
  * Scan `.agents/workspace/active/{task-id}/task.md` files for tasks bound to the
  * PR number or to one of the PR's closing issues. A task is emitted at most once;
- * a direct `pr_number` hit takes priority over the issue-number reverse lookup.
+ * a verified fact identity hit takes priority over the issue-number reverse lookup.
  */
 export function collectHostCandidates(input: {
   prNumber: number;
@@ -87,9 +88,11 @@ export function collectHostCandidates(input: {
     } catch {
       continue;
     }
-    const frontmatter = parseTaskFrontmatter(content);
+    let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
+    try { frontmatter = parseTypedTaskFrontmatter(content); } catch { continue; }
     const issueNumber = toPositiveNumber(frontmatter.issue_number);
-    const prNumber = toPositiveNumber(frontmatter.pr_number);
+    const fact = readPrDeliveryFact(frontmatter);
+    const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null;
     if (prNumber === input.prNumber) {
       candidates.push({ taskId: entry.name, taskDir, issueNumber, prNumber });
     } else if (issueNumber !== null && input.closingIssues.includes(issueNumber)) {

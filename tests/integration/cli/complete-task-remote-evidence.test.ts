@@ -10,6 +10,7 @@ import type { PlatformChangeRequestSnapshot } from "../../../lib/platform/adapte
 import { platformResult } from "../../../lib/platform/types.ts";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { gitSafeEnv } from "../../helpers.ts";
+import { buildBoundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 
 const TASK_A_ID = "TASK-20260731-000001";
 const TASK_B_ID = "TASK-20260731-000002";
@@ -51,7 +52,9 @@ function writeTask(
     `id: ${taskId}`,
     "status: active",
     "current_step: code-review",
-    `pr_number: ${prNumber}`,
+    `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
+      identity: { repository: "fitlab-ai/agent-infra", number: prNumber, nodeId: `PR_${prNumber}`, url: `https://github.com/fitlab-ai/agent-infra/pull/${prNumber}`, head: { repository: "fitlab-ai/agent-infra", ref: "feature", sha: reviewedHead }, base: { repository: "fitlab-ai/agent-infra", ref: "main", sha: "b".repeat(40) } }, source: "reused", verifiedAt: "2026-01-01T00:00:00.000Z", remoteState: "open"
+    })))}`,
     `last_reviewed_commit: ${reviewedHead}`,
     "---",
     "",

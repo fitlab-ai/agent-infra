@@ -24,6 +24,7 @@ import {
   buildPrPayload,
   buildTaskComment,
   buildTaskContent,
+  boundFactValue,
   commitInWorktree,
   createHeadCommit,
   loadFixture,
@@ -718,7 +719,7 @@ for (const c of createPrCases) {
     const ctx = setupPlatformSyncEnv(tempRoot);
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
       issue_number: "65",
-      pr_number: "77",
+      pr_delivery_fact: boundFactValue(77),
       ...c.taskOverrides
     }));
     writeJson(ctx.issuePath, c.issuePayload || buildIssuePayload({ labels: [], body: "# Issue\n" }));
@@ -749,7 +750,7 @@ test("validate-artifact platform-sync passes for complete-manual-validation when
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({
       issue_number: "65",
-      pr_number: "77"
+      pr_delivery_fact: boundFactValue(77)
     });
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
@@ -788,7 +789,7 @@ test("validate-artifact platform-sync fails for complete-manual-validation when 
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({
       issue_number: "65",
-      pr_number: "77"
+      pr_delivery_fact: boundFactValue(77)
     });
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
@@ -828,11 +829,11 @@ test("validate-artifact platform-sync fails for complete-manual-validation when 
 
 const commitCases = [
   {
-    name: "validate-artifact platform-sync skips for commit when task has no pr_number",
+    name: "validate-artifact platform-sync skips for commit when task has no bound PR fact",
     taskOverrides: { issue_number: "65" },
     useFakeGh: false,
     expectedStatus: 0,
-    assertMessage: "Skipped: task has no pr_number"
+    assertMessage: "Skipped: task has no verified bound pull request"
   },
   {
     name: "validate-artifact platform-sync passes for commit when summary comment exists on the PR",
@@ -876,7 +877,7 @@ for (const c of commitCases) {
     const headSha = c.setupHead ? createHeadCommit(tempRoot) : "";
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
       issue_number: "65",
-      ...(c.useFakeGh === false ? {} : { pr_number: "77" }),
+      ...(c.useFakeGh === false ? {} : { pr_delivery_fact: boundFactValue(77) }),
       ...c.taskOverrides
     }));
     if (c.useFakeGh !== false) {
@@ -915,7 +916,7 @@ test("validate-artifact platform-sync passes for commit with last-commit from ta
     addWorktree(tempRoot, worktreePath, branch);
     const prSha = commitInWorktree(worktreePath, "sandbox commit");
     assert.notEqual(prSha, mainSha);
-    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ branch, issue_number: "65", pr_number: "77" }));
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ branch, issue_number: "65", pr_delivery_fact: boundFactValue(77, prSha) }));
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.prCommentsPath, [{ body: summaryCommentWithSha(prSha) }]);
 
@@ -935,7 +936,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
   withTempRoot("agent-infra-platform-sync-commit-no-branch-", (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const mainSha = createHeadCommit(tempRoot);
-    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_delivery_fact: boundFactValue(77, mainSha) }));
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.prCommentsPath, [{ body: summaryCommentWithSha(mainSha) }]);
 
@@ -957,7 +958,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
       branch: "agent-infra-feature-missing",
       issue_number: "65",
-      pr_number: "77"
+      pr_delivery_fact: boundFactValue(77, mainSha)
     }));
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.prCommentsPath, [{ body: summaryCommentWithSha(mainSha) }]);

@@ -7,6 +7,7 @@ import path from "node:path";
 import { registerPlatformAdapter } from "../../../lib/platform/adapters.ts";
 import { platformResult } from "../../../lib/platform/types.ts";
 import { check, evaluateRequiredChecks } from "../../../lib/platform/verification-required.ts";
+import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 
 const shared = {
   passResult: (type: string, message: string) => ({ type, status: "pass", message }),
@@ -15,10 +16,15 @@ const shared = {
 };
 
 const SHA = "a".repeat(40);
+const BOUND_FACT = encodePrDeliveryFact(buildBoundFact({
+  identity: { repository: "acme/widgets", number: 42, nodeId: "PR_42", url: "https://github.com/acme/widgets/pull/42", head: { repository: "acme/widgets", ref: "feature", sha: SHA }, base: { repository: "acme/widgets", ref: "main", sha: "b".repeat(40) } },
+  source: "created", verifiedAt: "2026-01-01T00:00:00.000Z", remoteState: "open"
+}));
+const UNBOUND_FACT = encodePrDeliveryFact(buildUnboundFact());
 
 function evaluate(overrides: Record<string, unknown> = {}) {
   return evaluateRequiredChecks({
-    metadata: { id: "TASK-20260101-000001", pr_number: 42, last_reviewed_commit: SHA },
+    metadata: { id: "TASK-20260101-000001", pr_delivery_fact: BOUND_FACT, last_reviewed_commit: SHA },
     localHead: SHA,
     inspection: {
       status: "no-op",
@@ -44,7 +50,7 @@ test("required-checks passes when the reviewed, local, and PR heads match a succ
 
 test("required-checks fails closed when any head differs", () => {
   assert.equal(evaluate({ localHead: "b".repeat(40) }).status, "fail");
-  assert.equal(evaluate({ metadata: { id: "TASK-20260101-000001", pr_number: 42, last_reviewed_commit: "b".repeat(40) } }).status, "fail");
+  assert.equal(evaluate({ metadata: { id: "TASK-20260101-000001", pr_delivery_fact: BOUND_FACT, last_reviewed_commit: "b".repeat(40) } }).status, "fail");
   assert.equal(evaluate({
     inspection: {
       status: "no-op",
@@ -124,9 +130,9 @@ test("required-checks reports failed and cancelled checks as failures", () => {
 });
 
 test("required-checks skips tasks without a PR or with PR flow disabled", () => {
-  assert.equal(evaluate({ metadata: { id: "TASK-20260101-000001" }, localHead: null, inspection: null }).status, "pass");
+  assert.equal(evaluate({ metadata: { id: "TASK-20260101-000001", pr_delivery_fact: UNBOUND_FACT }, localHead: null, inspection: null }).status, "pass");
   assert.equal(evaluate({
-    metadata: { id: "TASK-20260101-000001", pr_number: 42 },
+    metadata: { id: "TASK-20260101-000001", pr_delivery_fact: BOUND_FACT },
     prFlow: "disabled",
     localHead: null,
     inspection: null
@@ -157,7 +163,7 @@ test("required-checks fails closed when an applicable platform adapter lacks che
       ...shared,
       repoRoot: root,
       loadTask() {
-        return { ok: true, metadata: { id: "TASK-20260101-000001", pr_number: 42 } };
+        return { ok: true, metadata: { id: "TASK-20260101-000001", pr_delivery_fact: BOUND_FACT } };
       }
     });
     assert.equal(result.status, "blocked");

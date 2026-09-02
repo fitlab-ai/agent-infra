@@ -65,27 +65,27 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 ```
 
 - `mode=external`：只以本次 typed result 的 `authorization` 和 `selected` 作为外部交付授权与绑定身份，继续 required-PR、本地生命周期和终态校验；外围证据失败在 lifecycle 后记录为 warning。
-- `mode=normal`：走现有本地生命周期前置条件；历史 `pr_number` / `pr_status` 不构成外部授权。
+- `mode=normal`：走现有本地生命周期前置条件；历史 PR 字段不构成外部授权。
 - `status=failed|blocked`：立即停止并展示稳定错误；`--force` 不得绕过。
 
-**门控读取（项目级 PR 流程策略）**：在执行本步骤前，读取 `.agents/.airc.json` 的 `prFlow` 字段（三态：字段缺省 = 默认推荐 PR、允许跳过；`"required"` = 强制 PR；`"disabled"` = 强制无 PR），以及 `task.md` frontmatter 的 `pr_status`（`pending` / `created` / `skipped`）。
+**门控读取（项目级 PR 流程策略）**：在执行本步骤前，读取 `.agents/.airc.json` 的 `prFlow` 字段（三态：字段缺省 = 默认推荐 PR、允许跳过；`"required"` = 强制 PR；`"disabled"` = 强制无 PR），以及 `task.md` frontmatter 的 `pr_delivery_fact`（`unbound` / `bound` / `skipped`）。
 
-**PR 维度判定（先判 `prFlow` 强约束，后看 `pr_status`）**：
+**PR 维度判定（先判 `prFlow` 强约束，后看 `pr_delivery_fact.state`）**：
 
-| `prFlow` | `pr_status` | 判定 |
+| `prFlow` | `pr_delivery_fact.state` | 判定 |
 |---|---|---|
 | `disabled` | 任意 | 无 PR 路径 → PR 维度满足，继续其余前置条件 |
-| `required` | `created` | PR 维度满足，继续 |
-| `required` | `pending` / `skipped` | **停止**：强制 PR 下必须先 `/create-pr`；`--skip-pr` 不被接受（含既有/手动写入的 `skipped`） |
-| 缺省 | `created` / `skipped` | PR 维度满足，继续 |
-| 缺省 | `pending` | **默认停止**并输出下方二选一引导；除非用户提供 `--skip-pr`（写 `pr_status: skipped` 后继续）或 `--force` |
+| `required` | `bound` | PR 维度满足，继续 |
+| `required` | `unbound` / `skipped` | **停止**：强制 PR 下必须先 `/create-pr`；`--skip-pr` 不被接受（含既有/手动写入的 `skipped`） |
+| 缺省 | `bound` / `skipped` | PR 维度满足，继续 |
+| 缺省 | `unbound` | **默认停止**并输出下方二选一引导；除非用户提供 `--skip-pr`（通过当前 `platform-pr skip` 写入器写入 `pr_delivery_fact.state=skipped` 后继续）或 `--force` |
 
-- `--skip-pr` 处理：仅在 `prFlow` 非 `required` 时生效——把 `task.md` 的 `pr_status` 写为 `skipped` 后继续；`prFlow=required` 时忽略 `--skip-pr` 并按上表停止。
+- `--skip-pr` 处理：仅在 `prFlow` 非 `required` 时生效——通过当前 `platform-pr skip` 写入器把 `task.md` 的 `pr_delivery_fact.state` 写为 `skipped` 后继续；`prFlow=required` 时忽略 `--skip-pr` 并按上表停止。
 - 注：`--force` 可越过下方其余前置条件，但**不解除 `prFlow=required` 的 PR 强约束**（强约束的唯一出口是创建 PR）。
 
 缺省 + `pending` 的二选一引导消息：
 ```
-任务 {task-id} 尚未创建 PR（pr_status: pending）。请二选一：
+任务 {task-id} 尚未决定 PR 交付（pr_delivery_fact: unbound）。请二选一：
   - 走 PR 流程：/create-pr {task-ref}
   - 显式跳过并完成：/complete-task {task-ref} --skip-pr
 ```

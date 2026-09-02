@@ -1,6 +1,6 @@
 # Manual-validation PR Summary Update
 
-Run only for a valid `{task-id}` whose task.md binds a `pr_number`; any user-supplied PR identity must match it.
+Run only for a valid `{task-id}` whose task.md binds a verified `pr_delivery_fact`; any user-supplied PR identity must match it.
 
 Follow `.agents/rules/pr-sync.md` for the shared summary structure and failure semantics.
 
