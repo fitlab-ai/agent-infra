@@ -68,6 +68,17 @@ function fixture() {
   const hooks = '{"hooks":{}}\n';
   fs.mkdirSync(path.join(root, '.codex'), { recursive: true });
   fs.writeFileSync(path.join(root, '.codex', 'hooks.json'), hooks);
+  for (const file of [
+    '.codex/agents/agent-infra-lifecycle-executor.toml',
+    '.codex/agents/agent-infra-lifecycle-reviewer.toml',
+    '.agents/hooks/lifecycle-delegation.js',
+    '.agents/skills/run-task/SKILL.md',
+    '.agents/rules/lifecycle-orchestration.md'
+  ]) {
+    const target = path.join(root, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, 'managed lifecycle contract\n');
+  }
   return {
     root,
     env: envWithPrependedPath(sandboxControlSafeEnv({
@@ -86,6 +97,22 @@ function run(root: string, env: NodeJS.ProcessEnv, args: string[], input = '') {
     cwd: root, env, input, encoding: 'utf8'
   });
 }
+
+test('compiled codex-lifecycle CLI rechecks its generated executable identity', () => {
+  const { root, env } = fixture();
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.12-alpha.0\n---\n\n# Task\n`);
+
+  const result = run(root, env, ['capability-arm', '--task-id', taskId]);
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, 'armed');
+  assert.equal(payload.error, null);
+  assert.equal(payload.buildIdentity.protocolVersion, 3);
+  assert.match(payload.buildIdentity.internalExecutableBuildHash, /^[0-9a-f]{64}$/u);
+});
 
 test('codex-lifecycle CLI records normalized hook identity across invocations', () => {
   const { root, env } = fixture();
