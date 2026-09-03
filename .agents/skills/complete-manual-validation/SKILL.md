@@ -9,6 +9,8 @@ description: >
 # 完成人工验证
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
+生命周期事件必须携带显式触发信息：编排调用使用 `{trigger-initiator}=orchestrator`，否则使用 `model`；`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 使用 `user-request` 或 `validation-rerun`；started 与 completed 使用同一组值。
+
 
 ## 行为边界 / 关键规则
 
@@ -38,7 +40,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} manual-validation.started --agent {standard-agent-token}`，并以返回的 `artifactContext` 记录本轮身份。
+确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} manual-validation.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}`，并以返回的 `artifactContext` 记录本轮身份。
 
 ## 执行步骤
 
@@ -86,7 +88,7 @@ complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] {verification-su
 
 ### 6. 更新 task.md
 
-执行 `agent-infra-internal task-event {task-id} manual-validation.completed --agent {standard-agent-token} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`，由核心在保持 `current_step` 不变的同时原子登记实现备注链接、时间/版本和完成日志。
+执行 `agent-infra-internal task-event {task-id} manual-validation.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`，由核心在保持 `current_step` 不变的同时原子登记实现备注链接、时间/版本和完成日志。
 
 如任务存在有效 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`。
 

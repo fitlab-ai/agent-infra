@@ -787,6 +787,9 @@ function probeTaskEventFailure(taskRef: string, policy: FailurePolicy, resolved:
       event: candidate.event,
       agent: 'codex',
       dryRun: true,
+      initiator: 'model',
+      requestId: `override-probe:${taskRef}:${candidate.event}`,
+      reasonCode: 'user-request',
       ...(candidate.artifact ? { artifact: candidate.artifact } : {})
     }, { repoRoot: resolved.repoRoot, lockAlreadyHeld: true });
     const matched = probeResult(policy, result, resolved.state);

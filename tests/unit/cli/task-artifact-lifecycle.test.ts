@@ -15,6 +15,7 @@ import {
   validateCompletedArtifact
 } from '../../../lib/task/artifact-lifecycle.ts';
 import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { createInvalidationOperation, invalidationMutation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -91,6 +92,36 @@ test('read inventory returns canonical history plus topology diagnostics', () =>
   assert.equal(result.status, 'ready');
   assert.deepEqual(result.artifacts.map((item) => item.name), ['analysis.md', 'analysis-r3.md']);
   assert.deepEqual(result.diagnostics.map((item) => item.code).sort(), ['NONCANONICAL_NAME', 'ROUND_GAP']);
+});
+
+test('inventory excludes completed invalidation targets while preserving their round history', () => {
+  const f = fixture({ 'analysis.md': '# analysis\n' });
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const content = fs.readFileSync(taskPath, 'utf8');
+  const source = {
+    sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
+    sourceSha256: 'a'.repeat(64), createdAt: '2026-01-01 00:00:00+00:00', updatedAt: '2026-01-01 00:00:00+00:00'
+  };
+  const operation = createInvalidationOperation(source);
+  const shape = {
+    targetKind: 'artifact' as const, targetFamily: 'analysis', targetArtifact: 'analysis.md', targetRound: 1,
+    targetSha256: sha256File(path.join(f.taskDir, 'analysis.md'))
+  };
+  const target: InvalidationTarget = {
+    ...shape, targetId: targetIdFor(operation.operationId, shape), operationId: operation.operationId,
+    status: 'completed', reasonCode: 'upstream-replaced', updatedAt: source.updatedAt
+  };
+  const invalidation = {
+    operations: [{ ...operation, status: 'completed' as const, processed: 1, total: 1, completedAt: source.updatedAt }],
+    targets: [target]
+  };
+  fs.writeFileSync(taskPath, upsertSection(content, invalidationMutation(content, invalidation)).content);
+
+  const result = inspectTaskArtifacts(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.artifacts, []);
+  assert.equal(result.latest, null);
+  assert.deepEqual(result.next, { round: 2, name: 'analysis-r2.md' });
 });
 
 test('unknown families fail without resolving outside the catalog', () => {

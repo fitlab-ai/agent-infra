@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-import { canStart, recommendNext, type ExplicitTrigger, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
+import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
+import { invalidationMutation, createInvalidationOperation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
+import { upsertSection } from '../../../lib/task/sections.ts';
 
 const trigger: ExplicitTrigger = {
   initiator: 'model', requestId: 'request-1', requestedAction: 'analysis',
@@ -61,4 +66,49 @@ test('explicit source provenance requires a matching artifact hash', () => {
   });
   assert.equal(result.allowed, false);
   assert.equal(result.reasonCode, 'SOURCE_ARTIFACT_HASH_MISMATCH');
+});
+
+test('completed invalidation removes stale review approvals from lifecycle facts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-invalidation-'));
+  try {
+    const taskDir = path.join(root, 'task');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const taskPath = path.join(taskDir, 'task.md');
+    let content = '---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: code-review\n---\n\n# Task\n';
+    for (const [name, value] of [
+      ['analysis.md', '# Analysis\n'],
+      ['review-analysis.md', '# Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n'],
+      ['plan.md', '# Plan\n'],
+      ['review-plan.md', '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n']
+    ] as const) {
+      fs.writeFileSync(path.join(taskDir, name), value);
+    }
+    const source = {
+      sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
+      sourceSha256: 'a'.repeat(64), createdAt: '2026-01-01 00:00:00+00:00', updatedAt: '2026-01-01 00:00:00+00:00'
+    };
+    const operation = createInvalidationOperation(source);
+    const targetShape = {
+      targetKind: 'artifact' as const, targetFamily: 'review-plan', targetArtifact: 'review-plan.md', targetRound: 1,
+      targetSha256: 'b'.repeat(64)
+    };
+    const target: InvalidationTarget = {
+      ...targetShape, targetId: targetIdFor(operation.operationId, targetShape), operationId: operation.operationId,
+      status: 'completed', reasonCode: 'upstream-replaced', updatedAt: source.updatedAt
+    };
+    content = upsertSection(content, invalidationMutation(content, {
+      operations: [{ ...operation, status: 'completed', processed: 1, total: 1, completedAt: source.updatedAt }],
+      targets: [target]
+    })).content;
+    fs.writeFileSync(taskPath, content);
+
+    const result = buildLifecycleFacts(taskDir, content, 'active');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.facts.artifacts['review-plan'], []);
+    assert.equal(result.facts.reviews['review-plan'], undefined);
+    assert.equal(canStart('code', result.facts, { ...trigger, requestedAction: 'code' }).reasonCode, 'PLAN_REVIEW_REQUIRED');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -13,7 +13,7 @@ import {
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
 import type { ArtifactContextResult, ArtifactErrorCode, ArtifactFamily, ArtifactIdentity } from './artifact-lifecycle.ts';
-import { ArtifactReceiptError, sha256File, upsertArtifactReceipt } from './artifact-receipts.ts';
+import { ArtifactReceiptError, parseArtifactReceipts, sha256File, upsertArtifactReceipt } from './artifact-receipts.ts';
 import type { ArtifactReceipt } from './artifact-receipts.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import {
@@ -46,6 +46,7 @@ import { loadVerificationConfig } from './verification-config.ts';
 import { buildLifecycleFacts, canStart } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
 import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
+import type { InvalidationTargetKind } from './invalidation.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
 
 const eventCatalog = [
@@ -62,6 +63,7 @@ type TaskEventName = (typeof eventCatalog)[number];
 type Verdict = 'approved' | 'changes-requested' | 'rejected';
 type TaskEventErrorCode =
   | 'EVENT_UNKNOWN' | 'EVENT_PAYLOAD_INVALID' | 'EVENT_TRANSITION_INVALID'
+  | 'EVENT_TRIGGER_REQUIRED'
   | 'EVENT_LOG_MISSING' | 'EVENT_START_MISSING' | 'EVENT_ALREADY_COMPLETED'
   | 'EVENT_LOG_CONFLICT' | 'EVENT_ARTIFACT_CONFLICT' | 'EVENT_FINDING_COUNT_MISMATCH'
   | 'EVENT_VERDICT_INVALID'
@@ -173,19 +175,23 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
   if (request.semanticDigest !== undefined && !/^[0-9a-f]{64}$/i.test(request.semanticDigest)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'semanticDigest must be a 64-character hexadecimal digest' };
   if (request.fixFor && request.implementationInput) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor and implementationInput are mutually exclusive' };
   if (request.summaryResult !== undefined && (!request.summaryResult.trim() || /[\r\n]/.test(request.summaryResult))) return { code: 'EVENT_PAYLOAD_INVALID', message: 'summaryResult must be a non-empty single line' };
+  if (request.event !== 'analyze.awaiting-input' && /\.(?:started|completed)$/.test(request.event)) {
+    if (!request.initiator || !request.requestId || !request.reasonCode) {
+      return { code: 'EVENT_TRIGGER_REQUIRED', message: `${request.event} requires --initiator, --request-id, and --reason-code` };
+    }
+  }
   return null;
 }
 
 const FAMILY = {
-  analyze: { artifact: 'analysis', started: ['requirement-analysis', 'requirement-analysis-review', 'code'], completed: ['requirement-analysis', 'requirement-analysis-review', 'code'], target: 'requirement-analysis', label: 'Analyze Task' },
-  'review-analysis': { artifact: 'review-analysis', started: ['requirement-analysis', 'requirement-analysis-review'], completed: ['requirement-analysis', 'requirement-analysis-review'], target: 'requirement-analysis-review', label: 'Review Analysis' },
-  // TODO(flow): Remove the temporary code-review replan allowance once the lifecycle has a first-class replan transition.
-  plan: { artifact: 'plan', started: ['requirement-analysis-review', 'technical-design-review', 'code-review', 'commit'], completed: ['requirement-analysis-review', 'technical-design-review', 'code-review', 'commit'], target: 'technical-design', label: 'Plan Task' },
-  'review-plan': { artifact: 'review-plan', started: ['technical-design', 'technical-design-review'], completed: ['technical-design', 'technical-design-review'], target: 'technical-design-review', label: 'Review Plan' },
-  code: { artifact: 'code', started: ['technical-design-review', 'code-review'], completed: ['technical-design-review', 'code-review'], target: 'code', label: 'Code Task' },
-  'review-code': { artifact: 'review-code', started: ['code', 'code-review', 'commit'], completed: ['code', 'code-review', 'commit'], target: 'code-review', label: 'Review Code' },
-  'manual-validation': { artifact: 'manual-validation', started: ['code-review', 'commit'], completed: ['code-review', 'commit'], target: null, label: 'Complete Manual Validation' },
-  'validation-run': { artifact: 'validation-run', started: ['code-review', 'commit'], completed: ['code-review', 'commit'], target: null, label: 'Run Manual Validation' }
+  analyze: { artifact: 'analysis', target: 'requirement-analysis', label: 'Analyze Task' },
+  'review-analysis': { artifact: 'review-analysis', target: 'requirement-analysis-review', label: 'Review Analysis' },
+  plan: { artifact: 'plan', target: 'technical-design', label: 'Plan Task' },
+  'review-plan': { artifact: 'review-plan', target: 'technical-design-review', label: 'Review Plan' },
+  code: { artifact: 'code', target: 'code', label: 'Code Task' },
+  'review-code': { artifact: 'review-code', target: 'code-review', label: 'Review Code' },
+  'manual-validation': { artifact: 'manual-validation', target: null, label: 'Complete Manual Validation' },
+  'validation-run': { artifact: 'validation-run', target: null, label: 'Run Manual Validation' }
 } as const;
 type EventFamily = keyof typeof FAMILY;
 
@@ -354,6 +360,7 @@ function eventTrigger(request: TaskEventRequest, family: EventFamily): ExplicitT
     ...(request.sourceFinding ? { sourceFinding: request.sourceFinding } : {}),
     ...(request.sourceArtifact ? { sourceArtifact: request.sourceArtifact } : {}),
     ...(request.sourceSha256 ? { sourceSha256: request.sourceSha256 } : {}),
+    ...(request.implementationInput ? { implementationInput: request.implementationInput } : {}),
     explicitRequest: request.requestId !== undefined || request.reasonCode !== undefined || request.initiator !== undefined || request.orchestrated === true
   };
 }
@@ -374,6 +381,12 @@ function invalidationMutationForCompletion(
     code: ['review-code']
   };
   const sourceFamily = family as 'analyze' | 'plan' | 'code';
+  let receipts: readonly ArtifactReceipt[] = [];
+  try {
+    receipts = parseArtifactReceipts(content).rows;
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
   const targets = downstream[sourceFamily].flatMap((targetFamily: string) => {
     const names = fs.readdirSync(taskDir).filter((name) => {
       const pattern = targetFamily === 'review-analysis' ? /^review-analysis(?:-r\d+)?\.md$/
@@ -387,12 +400,26 @@ function invalidationMutationForCompletion(
         const stat = fs.lstatSync(path.join(taskDir, name));
         if (!stat.isFile() || stat.isSymbolicLink()) return [];
         const targetRound = parseArtifactName(name)?.round ?? 1;
-        const targetShape = { targetKind: 'artifact' as const, targetFamily, targetArtifact: name, targetRound, targetSha256: sha256File(path.join(taskDir, name)) };
-        return [{
+        const targetSha256 = sha256File(path.join(taskDir, name));
+        const shapes: Array<{ targetKind: InvalidationTargetKind; targetFamily: string; targetArtifact: string; targetRound: number; targetSha256: string }> = [
+          { targetKind: 'artifact', targetFamily, targetArtifact: name, targetRound, targetSha256 }
+        ];
+        const receipt = receipts.find((candidate) => candidate.output === name);
+        if (receipt) shapes.push({
+          targetKind: 'receipt', targetFamily, targetArtifact: name, targetRound,
+          targetSha256: receipt.inputSha256
+        });
+        if (targetFamily.startsWith('review-')) {
+          shapes.push({ targetKind: 'approval', targetFamily, targetArtifact: name, targetRound, targetSha256 });
+        }
+        if (targetFamily === 'review-code') {
+          shapes.push({ targetKind: 'reviewed-snapshot', targetFamily, targetArtifact: name, targetRound, targetSha256 });
+        }
+        return shapes.map((targetShape) => ({
           ...targetShape,
           targetId: targetIdFor('pending', targetShape), operationId: 'pending', status: 'pending' as const,
           reasonCode: 'upstream-replaced', updatedAt: timestamp
-        }];
+        }));
       } catch (error) {
         throw new Error(`cannot inspect invalidation target '${name}': ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -633,23 +660,18 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const existing = section.entries.find((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)!;
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, existing.time, frontmatter, artifactContext);
   }
-  if (eventIdentity.phase === 'started') {
+  if (eventIdentity.phase === 'started' && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
     const trigger = eventTrigger(normalized, eventIdentity.family);
-    if (trigger.explicitRequest) {
-      const facts = buildLifecycleFacts(resolved.taskDir, content, resolved.state);
-      if (!facts.ok) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${facts.code}: ${facts.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      const capability = canStart(lifecycleAction(eventIdentity.family), facts.facts, trigger);
-      if (!capability.allowed && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_TRANSITION_INVALID')) {
-        return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${capability.reasonCode}: ${capability.evidence.join(', ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-    } else {
-      const allowed = FAMILY[eventIdentity.family].started;
-      if (!(allowed as readonly string[]).includes(currentStep) && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_TRANSITION_INVALID')) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${normalized.event} is not allowed from '${currentStep}'` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+    const facts = buildLifecycleFacts(resolved.taskDir, content, resolved.state);
+    if (!facts.ok) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${facts.code}: ${facts.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+    const capability = canStart(lifecycleAction(eventIdentity.family), facts.facts, trigger);
+    const capabilityOverride = capability.reasonCode === 'TASK_NOT_ACTIVE'
+      ? stateOverride
+      : allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_TRANSITION_INVALID');
+    if (!capability.allowed && !capabilityOverride) {
+      const code = capability.reasonCode === 'INVALIDATION_INCOMPLETE' ? 'TASK_INVALIDATION_BLOCKED' : 'EVENT_TRANSITION_INVALID';
+      return failed(normalized, { code, message: `${capability.reasonCode}: ${capability.evidence.join(', ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
-  }
-  if (eventIdentity.phase === 'completed' && !eventTrigger(normalized, eventIdentity.family).explicitRequest) {
-    const allowed = FAMILY[eventIdentity.family].completed;
-    if (!(allowed as readonly string[]).includes(currentStep) && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_TRANSITION_INVALID')) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${normalized.event} is not allowed from '${currentStep}'` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   }
   const findingCountError = validateReviewFindingCounts(
     normalized,

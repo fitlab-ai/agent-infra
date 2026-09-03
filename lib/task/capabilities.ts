@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { InvalidationDocument } from './invalidation.ts';
-import { invalidationBlocks, parseInvalidationDocument } from './invalidation.ts';
+import { invalidationBlocks, isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
+import { receiptForOutput } from './artifact-receipts.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.ts';
@@ -23,6 +24,7 @@ type ExplicitTrigger = {
   sourceFinding?: string;
   sourceArtifact?: string;
   sourceSha256?: string;
+  implementationInput?: string;
   /** False marks the ordinary recommended workflow event; it is not an authorization fact. */
   explicitRequest?: boolean;
 };
@@ -30,6 +32,8 @@ type LifecycleFacts = {
   taskState: string;
   currentStep: string;
   artifacts: Partial<Record<LifecycleAction, readonly string[]>>;
+  staleArtifacts?: Partial<Record<LifecycleAction, readonly string[]>>;
+  reviewedInputs?: Partial<Record<'review-analysis' | 'review-plan' | 'review-code', string>>;
   artifactHashes: Readonly<Record<string, string>>;
   reviews: Partial<Record<'review-analysis' | 'review-plan' | 'review-code', 'approved' | 'changes-requested' | 'rejected'>>;
   invalidation: InvalidationDocument;
@@ -101,6 +105,11 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
     return hasArtifact(facts, 'plan') ? allow('plan-artifact') : deny('PLAN_ARTIFACT_REQUIRED');
   }
   if (action === 'code') {
+    if (trigger.implementationInput) {
+      if (!hasArtifact(facts, 'review-code')) return deny('CODE_REVIEW_REQUIRED');
+      if (facts.reviews['review-code'] !== 'approved') return deny('CODE_REVIEW_NOT_APPROVED');
+      return allow('implementation-input');
+    }
     if (!hasArtifact(facts, 'review-plan')) return deny('PLAN_REVIEW_REQUIRED');
     if (facts.reviews['review-plan'] !== 'approved') return deny('PLAN_REVIEW_NOT_APPROVED');
     if (facts.unresolvedLedger.plan > 0) return deny('PLAN_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.plan}`);
@@ -127,23 +136,42 @@ function latestArtifact(names: readonly string[]): string | null {
   return [...names].sort((left, right) => artifactRound(right) - artifactRound(left) || left.localeCompare(right))[0] ?? null;
 }
 
+function reviewedInputName(content: string, expectedFamily: 'analysis' | 'plan' | 'code'): string | null {
+  const header = content.split(/\r?\n/).findIndex((line) => /\*\*(?:审查输入|Review Input)\*\*[:：]/.test(line));
+  if (header < 0) return null;
+  const referenceBlock = content.split(/\r?\n/).slice(header, header + 12).join('\n');
+  const expected = new RegExp('`' + expectedFamily + '(?:-r[2-9]|-r[1-9]\\d+)?\\.md`');
+  return expected.exec(referenceBlock)?.[0].slice(1, -1) ?? null;
+}
+
+function reviewMatchesLatest(facts: LifecycleFacts, source: 'analysis' | 'plan' | 'code', review: 'review-analysis' | 'review-plan' | 'review-code'): boolean {
+  const latestSource = latestArtifact(facts.artifacts[source] ?? []);
+  return Boolean(latestSource && facts.reviewedInputs?.[review] === latestSource);
+}
+
 function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
   if (invalidationBlocks(facts.invalidation)) return { action: null, reasonCode: 'INVALIDATION_INCOMPLETE', evidence: ['reconcile task invalidation before routing'] };
   const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
   if (pendingIntent) return { action: pendingIntent.target, reasonCode: 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
   if (!hasArtifact(facts, 'analysis')) return { action: 'analysis', reasonCode: 'ANALYSIS_ARTIFACT_MISSING', evidence: ['analysis artifact is absent'] };
-  if (!hasArtifact(facts, 'review-analysis')) return { action: 'review-analysis', reasonCode: 'ANALYSIS_REVIEW_MISSING', evidence: ['analysis review artifact is absent'] };
+  if (!hasArtifact(facts, 'review-analysis') || !reviewMatchesLatest(facts, 'analysis', 'review-analysis')) {
+    return { action: 'review-analysis', reasonCode: 'ANALYSIS_REVIEW_MISSING', evidence: ['analysis review does not bind the latest analysis artifact'] };
+  }
   if (facts.reviews['review-analysis'] !== 'approved' || facts.unresolvedLedger.analysis > 0) {
     return { action: 'analysis', reasonCode: 'ANALYSIS_REWORK_REQUIRED', evidence: ['analysis review or ledger is not clear'] };
   }
   if (!hasArtifact(facts, 'plan')) return { action: 'plan', reasonCode: 'PLAN_ARTIFACT_MISSING', evidence: ['plan artifact is absent'] };
-  if (!hasArtifact(facts, 'review-plan')) return { action: 'review-plan', reasonCode: 'PLAN_REVIEW_MISSING', evidence: ['plan review artifact is absent'] };
+  if (!hasArtifact(facts, 'review-plan') || !reviewMatchesLatest(facts, 'plan', 'review-plan')) {
+    return { action: 'review-plan', reasonCode: 'PLAN_REVIEW_MISSING', evidence: ['plan review does not bind the latest plan artifact'] };
+  }
   if (facts.reviews['review-plan'] !== 'approved' || facts.unresolvedLedger.plan > 0) {
     return { action: 'plan', reasonCode: 'PLAN_REWORK_REQUIRED', evidence: ['plan review or ledger is not clear'] };
   }
   if (!hasArtifact(facts, 'code')) return { action: 'code', reasonCode: 'CODE_ARTIFACT_MISSING', evidence: ['code artifact is absent'] };
-  if (!hasArtifact(facts, 'review-code')) return { action: 'review-code', reasonCode: 'CODE_REVIEW_MISSING', evidence: ['code review artifact is absent'] };
-  if (facts.reviews['review-code'] !== 'approved' || facts.unresolvedLedger.code > 0) {
+  if (!hasArtifact(facts, 'review-code') || !reviewMatchesLatest(facts, 'code', 'review-code')) {
+    return { action: 'review-code', reasonCode: 'CODE_REVIEW_MISSING', evidence: ['code review does not bind the latest code artifact'] };
+  }
+  if (facts.reviews['review-code'] !== 'approved') {
     return { action: 'code', reasonCode: 'CODE_REWORK_REQUIRED', evidence: ['code review or ledger is not clear'] };
   }
   return { action: null, reasonCode: 'LIFECYCLE_REVIEWED', evidence: ['latest code review is approved'] };
@@ -166,21 +194,44 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       const stat = fs.lstatSync(path.join(taskDir, name));
       return stat.isFile() && !stat.isSymbolicLink();
     });
+    const artifactFamilies = {
+      analysis: /^analysis(?:-r\d+)?\.md$/,
+      'review-analysis': /^review-analysis(?:-r\d+)?\.md$/,
+      plan: /^plan(?:-r\d+)?\.md$/,
+      'review-plan': /^review-plan(?:-r\d+)?\.md$/,
+      code: /^code(?:-r\d+)?\.md$/,
+      'review-code': /^review-code(?:-r\d+)?\.md$/
+    } as const;
+    const familyFor = (name: string): keyof typeof artifactFamilies | null =>
+      (Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>)
+        .find((family) => artifactFamilies[family].test(name)) ?? null;
+    const activeFiles = files.filter((name) => {
+      const family = familyFor(name);
+      return !family || !isArtifactInvalidated(invalidation.document, family, name);
+    });
     const artifactHashes: Record<string, string> = {};
-    for (const name of files) artifactHashes[name] = sha256File(path.join(taskDir, name));
-    const artifacts: Partial<Record<LifecycleAction, readonly string[]>> = {
-      analysis: files.filter((name) => /^analysis(?:-r\d+)?\.md$/.test(name)),
-      'review-analysis': files.filter((name) => /^review-analysis(?:-r\d+)?\.md$/.test(name)),
-      plan: files.filter((name) => /^plan(?:-r\d+)?\.md$/.test(name)),
-      'review-plan': files.filter((name) => /^review-plan(?:-r\d+)?\.md$/.test(name)),
-      code: files.filter((name) => /^code(?:-r\d+)?\.md$/.test(name)),
-      'review-code': files.filter((name) => /^review-code(?:-r\d+)?\.md$/.test(name))
-    };
+    for (const name of activeFiles) artifactHashes[name] = sha256File(path.join(taskDir, name));
+    const artifacts: Partial<Record<LifecycleAction, readonly string[]>> = Object.fromEntries(
+      (Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>).map((family) => [
+        family, activeFiles.filter((name) => artifactFamilies[family].test(name))
+      ])
+    ) as Partial<Record<LifecycleAction, readonly string[]>>;
+    const staleArtifacts: Partial<Record<LifecycleAction, readonly string[]>> = Object.fromEntries(
+      (Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>).map((family) => [
+        family, files.filter((name) => artifactFamilies[family].test(name) && isArtifactInvalidated(invalidation.document, family, name))
+      ])
+    ) as Partial<Record<LifecycleAction, readonly string[]>>;
     const reviews: LifecycleFacts['reviews'] = {};
+    const reviewedInputs: NonNullable<LifecycleFacts['reviewedInputs']> = {};
     for (const family of ['review-analysis', 'review-plan', 'review-code'] as const) {
       const latest = latestArtifact(artifacts[family] ?? []);
       if (!latest) continue;
-      const parsed = parseReviewSummary(fs.readFileSync(path.join(taskDir, latest), 'utf8'));
+      const reviewContent = fs.readFileSync(path.join(taskDir, latest), 'utf8');
+      const expectedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
+      const input = reviewedInputName(reviewContent, expectedFamily);
+      const receipt = input ? receiptForOutput(content, latest) : null;
+      if (input && receipt?.input === input && artifactHashes[input] === receipt.inputSha256) reviewedInputs[family] = input;
+      const parsed = parseReviewSummary(reviewContent);
       if (!parsed.ok) continue;
       const verdict = resolveCanonicalVerdict(parsed.summary);
       if (verdict.ok) reviews[family] = verdict.verdict === 'Approved' ? 'approved' : verdict.verdict === 'Changes Requested' ? 'changes-requested' : 'rejected';
@@ -191,7 +242,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
     }
     const facts: LifecycleFacts = {
       taskState, currentStep: String(metadata.current_step ?? ''), artifacts, reviews,
-      artifactHashes,
+      staleArtifacts, reviewedInputs, artifactHashes,
       invalidation: invalidation.document, reworkIntents: rework.intents,
       unresolvedLedger, executionBusy, recommendedAction: null
     };

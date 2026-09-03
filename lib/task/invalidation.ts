@@ -287,6 +287,15 @@ function invalidationBlocks(document: InvalidationDocument): boolean {
     || document.targets.some((target) => target.status !== 'completed');
 }
 
+function isArtifactInvalidated(document: InvalidationDocument, family: string, artifact: string): boolean {
+  return document.targets.some((target) =>
+    target.status === 'completed'
+    && target.targetKind === 'artifact'
+    && target.targetFamily === family
+    && target.targetArtifact === artifact
+  );
+}
+
 function invalidationMutation(content: string, document: InvalidationDocument) {
   const existing = sectionBody(content) !== null;
   return {
@@ -302,6 +311,7 @@ export {
   OPERATION_COLUMNS,
   TARGET_COLUMNS,
   createInvalidationOperation,
+  isArtifactInvalidated,
   invalidationBlocks,
   invalidationMutation,
   operationIdFor,

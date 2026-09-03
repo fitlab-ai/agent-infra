@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { sha256File } from './artifact-receipts.ts';
+import { parseArtifactReceipts, sha256File } from './artifact-receipts.ts';
 import { invalidationMutation, parseInvalidationDocument, reconcileInvalidation } from './invalidation.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { writeTask } from './write.ts';
@@ -27,8 +27,29 @@ function reconcileTaskInvalidation(taskRef: string, options: InvalidationCommand
   if (!parsed.ok) return { status: 'failed', changed: false, taskId: resolved.taskId, processed: 0, remaining: 0, error: { code: parsed.code, message: parsed.message } };
   if (!parsed.present) return { status: 'no-op', changed: false, taskId: resolved.taskId, processed: 0, remaining: 0, error: null };
   const beforePending = parsed.document.targets.filter((target) => target.status !== 'completed').length;
+  let receipts;
+  try { receipts = parseArtifactReceipts(content).rows; }
+  catch (error) {
+    if (parsed.document.targets.some((target) => target.status !== 'completed' && target.targetKind === 'receipt')) {
+      return {
+        status: 'failed', changed: false, taskId: resolved.taskId, processed: 0, remaining: beforePending,
+        error: { code: 'INVALIDATION_TARGET_HASH_CONFLICT', message: error instanceof Error ? error.message : String(error) }
+      };
+    }
+    receipts = [];
+  }
   for (const target of parsed.document.targets) {
-    if (target.status === 'completed' || target.targetKind !== 'artifact') continue;
+    if (target.status === 'completed') continue;
+    if (target.targetKind === 'receipt') {
+      const receipt = receipts.find((candidate) => candidate.output === target.targetArtifact);
+      if (!receipt || receipt.inputSha256 !== target.targetSha256) {
+        return {
+          status: 'failed', changed: false, taskId: resolved.taskId, processed: 0, remaining: beforePending,
+          error: { code: 'INVALIDATION_TARGET_HASH_CONFLICT', message: `invalidation receipt target '${target.targetArtifact}' changed before reconcile` }
+        };
+      }
+      continue;
+    }
     const targetPath = path.join(resolved.taskDir, target.targetArtifact);
     try {
       const stat = fs.lstatSync(targetPath);
