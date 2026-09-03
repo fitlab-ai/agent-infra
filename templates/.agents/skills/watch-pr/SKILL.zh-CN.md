@@ -48,7 +48,7 @@ description: >
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 与 `.agents/rules/pr-checks-commands.md`。
 
-进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。每轮 readiness 前先调用 `platform-pr summary-context`，按共享 PR change-report contract 以当前权威 PR head 重建任务绑定的 `pr-change-report.json`，再用含唯一 `<!-- canonical-pr-change-report -->` 占位符的正文调用 `summary-sync --change-report-file ... --result no_op` 刷新同一条摘要。报告或摘要刷新失败时不得进入 ready/complete 出口，按步骤 4 记录阻塞。刷新完成后调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，只按结构化 `readiness.state` 分流：`ready` 进入步骤 7，`conflicting` 或 `checks-failed` 进入步骤 3，`pending|timed-out|cancelled` 进入步骤 4。
+进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。每轮 readiness 前先调用 `platform-pr summary-context`，按共享 PR change-report contract 以当前权威 PR head 重建任务绑定的 `pr-change-report.json`，再用含唯一 `<!-- canonical-pr-change-report -->` 占位符的正文调用 `summary-sync --change-report-file ... --result no_op --strict` 刷新同一条摘要。`--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不得把 warning 当作成功；刷新失败时不得进入 ready/complete 出口，按步骤 4 记录阻塞。刷新完成后调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，只按结构化 `readiness.state` 分流：`ready` 进入步骤 7，`conflicting` 或 `checks-failed` 进入步骤 3，`pending|timed-out|cancelled` 进入步骤 4。
 
 ### 3. 自愈循环
 

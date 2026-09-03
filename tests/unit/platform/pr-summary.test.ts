@@ -402,6 +402,95 @@ test('summary-sync re-reads task semantics inside the execution lock', async () 
   }
 });
 
+test('summary-sync strict mode preserves report failures for watch-pr callers', async () => {
+  const fixture = summaryFixture();
+  try {
+    fs.writeFileSync(fixture.reportPath, '{}');
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: 'Summary\n<!-- canonical-pr-change-report -->',
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      strict: true,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha)
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PR_CHANGE_REPORT_INVALID');
+    assert.equal(result.result, null);
+    assert.equal(result.warnings.length, 0);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('summary-sync strict mode preserves a stale report failure for watch-pr callers', async () => {
+  const fixture = summaryFixture();
+  try {
+    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const updatedTask = fs.readFileSync(taskPath, 'utf8').replace('Implement the canonical report.', 'Implement the updated canonical report.');
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: 'Summary\n<!-- canonical-pr-change-report -->',
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      strict: true,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
+        onContextResolved: () => fs.writeFileSync(taskPath, updatedTask)
+      })
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PR_CHANGE_REPORT_STALE');
+    assert.equal(result.result, null);
+    assert.equal(result.warnings.length, 0);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+for (const scenario of [
+  {
+    name: 'comment API failure',
+    code: 'COMMENT_LIST_FAILED',
+    status: 'blocked' as const,
+    client: (root: string, baseSha: string, headSha: string): GitHubClient => resolvedContextClient(root, 'comments', baseSha, headSha)
+  },
+  {
+    name: 'HEAD resolution failure',
+    code: 'PR_CHANGE_REPORT_GIT_FAILED',
+    status: 'failed' as const,
+    client: (root: string, baseSha: string, headSha: string): GitHubClient => resolvedContextClient(root, 'head', baseSha, headSha)
+  },
+  {
+    name: 'duplicate summary marker',
+    code: 'PR_SUMMARY_MARKER_AMBIGUOUS',
+    status: 'failed' as const,
+    client: (root: string, baseSha: string, headSha: string): GitHubClient => resolvedContextClient(root, 'duplicate', baseSha, headSha)
+  }
+] as const) {
+  test(`summary-sync strict mode preserves ${scenario.name}`, async () => {
+    const fixture = summaryFixture();
+    try {
+      const result = await syncPullRequestSummary(fixture.taskId, {
+        cwd: fixture.root,
+        agent: 'codex',
+        body: 'Summary\n<!-- canonical-pr-change-report -->',
+        changeReportFile: fixture.reportPath,
+        primaryResult: 'no_op',
+        strict: true,
+        client: scenario.client(fixture.root, fixture.baseSha, fixture.headSha)
+      });
+      assert.equal(result.status, scenario.status);
+      assert.equal(result.error?.code, scenario.code);
+      assert.equal(result.result, null);
+      assert.equal(result.warnings.length, 0);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+}
+
 for (const scenario of [
   {
     name: 'context authentication failure',

@@ -62,6 +62,30 @@ test('platform-pr summary-sync validates required report input before invoking t
   }
 });
 
+test('platform-pr summary-sync strict mode keeps report failures non-zero without changing default warnings', () => {
+  const fixture = createFixture(boundFixture(1));
+  try {
+    const args = [
+      'summary-sync', fixture.taskId, '--agent', 'codex', '--body-file', 'body.md',
+      '--change-report-file', `.agents/workspace/active/${fixture.taskId}/pr-change-report.json`, '--result', 'no_op'
+    ];
+    const relaxed = run(args, { cwd: fixture.root, env: fixture.env });
+    assert.equal(relaxed.status, 0, relaxed.stderr || relaxed.stdout);
+    const relaxedPayload = JSON.parse(relaxed.stdout);
+    assert.equal(relaxedPayload.status, 'applied');
+    assert.equal(relaxedPayload.warnings[0].code, 'PR_CHANGE_REPORT_MISSING');
+
+    const strict = run([...args, '--strict'], { cwd: fixture.root, env: fixture.env });
+    assert.equal(strict.status, 1, strict.stderr || strict.stdout);
+    const strictPayload = JSON.parse(strict.stdout);
+    assert.equal(strictPayload.status, 'failed');
+    assert.equal(strictPayload.error.code, 'PR_CHANGE_REPORT_MISSING');
+    assert.equal(strictPayload.warnings.length, 0);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 function externalFixture(taskContent: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-external-'));
   execFileSync('git', ['init', '-q'], { cwd: root });

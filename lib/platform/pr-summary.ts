@@ -452,7 +452,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
 
 async function syncPullRequestSummary(
   taskRef: string,
-  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string }
+  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
@@ -482,21 +482,24 @@ async function syncPullRequestSummary(
       }
       : { ...output, result: null, warnings: [] };
   };
+  const preserveFailure = (output: PlatformResult): PullRequestSummaryResult => options.strict
+    ? { ...output, result: null, warnings: [] }
+    : softenFailure(output);
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return softenFailure(platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }));
   const fail = (status: PlatformResult['status'], context: PlatformResult, error: PlatformResult['error'], prNumber = knownPrNumber): PullRequestSummaryResult => {
     const output = basePlatformResult(status, context, resolved.taskId, prNumber, error);
-    return isHardSummaryFailure(error)
+    return options.strict || isHardSummaryFailure(error)
       ? { ...output, result: null, warnings: [] }
       : { ...softenFailure(output) };
   };
-  if (!options.changeReportFile) return softenFailure(platformResult('failed', { error: { code: 'PR_CHANGE_REPORT_MISSING', message: 'summary-sync requires --change-report-file', retryable: false } }));
+  if (!options.changeReportFile) return preserveFailure(platformResult('failed', { error: { code: 'PR_CHANGE_REPORT_MISSING', message: 'summary-sync requires --change-report-file', retryable: false } }));
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!loaded.ok || !context.platform.repository || !['no-op', 'degraded'].includes(context.status)) {
     // This diagnostic-only read preserves the known PR target when context resolution fails before the execution lock.
     knownPrNumber = boundPrNumberForWarning(resolved.taskMdPath);
-    return softenFailure(context);
+    return preserveFailure(context);
   }
   try {
     return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, async () => {

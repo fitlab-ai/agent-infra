@@ -13,7 +13,7 @@ After the watch command, route by structured `readiness.state`:
 
 ## Summary Refresh Boundary
 
-Before readiness in every round, and after an external push, self-heal commit, or successful rebase changes the PR head, rerun `summary-context` → mechanical report and six-check precheck → `platform-pr change-report` → `summary-sync --change-report-file ... --result no_op` with exactly one `<!-- canonical-pr-change-report -->` placeholder. The core revalidates the sidecar against the authoritative PR snapshot, task-intent digest, and complete patch; missing, stale, invalid, bypassed, or raced publication must not continue to a ready/complete route and must enter the help exit with a warning.
+Before readiness in every round, and after an external push, self-heal commit, or successful rebase changes the PR head, rerun `summary-context` → mechanical report and six-check precheck → `platform-pr change-report` → `summary-sync --change-report-file ... --result no_op --strict` with exactly one `<!-- canonical-pr-change-report -->` placeholder. `--strict` preserves report or summary refresh failures as `failed/blocked` so warnings cannot reach the ready/complete route. The core revalidates the sidecar against the authoritative PR snapshot, task-intent digest, and complete patch; missing, stale, invalid, bypassed, or raced publication must not continue to a ready/complete route and must enter the help exit with a warning.
 
 ## Self-Heal Decision Tree
 
