@@ -7,15 +7,16 @@ import { renderHumanOverrideAudit } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
+import type { PrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import { resolvePlatformProviderContext } from './context.ts';
-import type { PlatformClient } from './context.ts';
+import type { LoadedContext, PlatformClient } from './context.ts';
 import { normalizeCommentContent } from './issue-comments.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
 import { providerError, providerOperationContext, providerStatus, providerResourceToken, resourceIdentityNumber, unsupportedProviderOperation } from './provider-bridge.ts';
-import { inspectPlatformPullRequestByNumber } from './pull-requests.ts';
 import type { PlatformChangeRequestSnapshot } from './adapters.ts';
+import type { ChangeRequestSnapshot } from './provider-contract.ts';
 import {
   buildPrChangeReport,
   readPrChangeReport,
@@ -57,6 +58,23 @@ function summaryMarker(taskId: string): string {
 
 function taskReportPath(taskDir: string): string {
   return path.join(taskDir, 'pr-change-report.json');
+}
+
+function readBoundTaskSnapshot(taskMdPath: string): { taskContent: string; boundFact: Extract<PrDeliveryFact, { state: 'bound' }> | null } {
+  const taskContent = fs.readFileSync(taskMdPath, 'utf8');
+  const frontmatter = parseTypedTaskFrontmatter(taskContent);
+  const fact = readPrDeliveryFact(frontmatter);
+  const boundFact = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact : null;
+  return { taskContent, boundFact };
+}
+
+function boundPrNumberForWarning(taskMdPath: string): number | null {
+  try {
+    const { boundFact } = readBoundTaskSnapshot(taskMdPath);
+    return boundFact ? resourceIdentityNumber(boundFact.identity.resource) : null;
+  } catch {
+    return null;
+  }
 }
 
 function warningResultForPrimary(primaryResult: PullRequestPrimaryResult): NonNullable<PullRequestSummaryResult['result']> {
@@ -116,6 +134,12 @@ function basePlatformResult(
   });
 }
 
+function isHardSummaryFailure(error: PlatformResult['error']): boolean {
+  return error?.code === 'PR_SUMMARY_HEAD_RACE'
+    || error?.code === 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED'
+    || error?.code === 'PR_SUMMARY_RACE_COMPENSATION_FAILED';
+}
+
 function inspectionError(error: { code: string; message: string; retryable: boolean }): PlatformResult['status'] {
   return error.retryable ? 'blocked' : 'failed';
 }
@@ -124,17 +148,48 @@ async function inspectBoundPullRequest(
   context: PlatformResult,
   repoRoot: string,
   prNumber: number,
-  client?: PlatformClient
+  loadedContext?: LoadedContext
 ): Promise<{ ok: true; value: PlatformChangeRequestSnapshot } | { ok: false; error: PlatformResult['error']; status: PlatformResult['status'] }> {
   if (!context.platform.repository) {
     return { ok: false, status: context.status, error: context.error };
   }
-  const inspected = await inspectPlatformPullRequestByNumber(prNumber, { cwd: repoRoot, client });
-  if (!inspected.pullRequest) {
-    const error = inspected.error || { code: 'PR_INSPECTION_INVALID', message: 'Platform provider returned no change-request snapshot', retryable: false };
+  const loaded = loadedContext
+    ? { ok: true as const, value: loadedContext }
+    : await resolvePlatformProviderContext({ cwd: repoRoot });
+  if (!loaded.ok) return { ok: false, status: loaded.context.status, error: loaded.context.error };
+  const target = providerResourceToken(loaded.value.provider, 'pull-request', String(prNumber));
+  const inspected = loaded.value.provider.changeRequests?.inspect
+    ? await loaded.value.provider.changeRequests.inspect({ context: providerOperationContext(loaded.value), target })
+    : unsupportedProviderOperation(loaded.value.provider, 'changeRequests.inspect');
+  if (!inspected.ok) {
+    const error = providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED');
     return { ok: false, status: inspectionError(error), error };
   }
-  return { ok: true, value: inspected.pullRequest };
+  const remote: ChangeRequestSnapshot = inspected.value;
+  const number = remote.number ?? resourceIdentityNumber(remote.identity) ?? prNumber;
+  const head = remote.head || { repository: context.platform.repository, ref: '', sha: remote.headSha || '' };
+  const base = remote.base || { repository: context.platform.repository, ref: '', sha: remote.baseSha || '' };
+  return {
+    ok: true,
+    value: {
+      repository: context.platform.repository,
+      number,
+      nodeId: remote.id,
+      url: remote.displayUrl || '',
+      state: remote.state === 'closed' ? 'closed' : 'open',
+      title: remote.title,
+      body: remote.body,
+      draft: remote.draft ?? false,
+      head: { ...head, sha: remote.headSha || head.sha },
+      base: { ...base, sha: remote.baseSha || base.sha },
+      mergedAt: remote.mergedAt ?? null,
+      mergeCommitSha: remote.mergeCommitSha ?? null,
+      labels: [...(remote.labels || [])].sort(),
+      assignees: [...(remote.assignees || [])].sort(),
+      milestone: remote.milestone ?? null,
+      mergeability: remote.mergeability || { state: 'unknown', detail: null }
+    }
+  };
 }
 
 function sameIdentity(left: PlatformChangeRequestSnapshot, right: PlatformChangeRequestSnapshot): boolean {
@@ -252,8 +307,8 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   let pullRequest: PlatformChangeRequestSnapshot | null = null;
-  if (prNumber && context.platform.repository && ['no-op', 'degraded'].includes(context.status)) {
-    const inspected = await inspectBoundPullRequest(context, resolved.repoRoot, prNumber, options.client);
+  if (loaded.ok && prNumber && context.platform.repository && ['no-op', 'degraded'].includes(context.status)) {
+    const inspected = await inspectBoundPullRequest(context, resolved.repoRoot, prNumber, loaded.value);
     if (inspected.ok) pullRequest = inspected.value;
   }
   const report = summaryReportStatus(reportPath, pullRequest, taskContent, resolved.repoRoot);
@@ -283,25 +338,24 @@ type ReportWriteOptions = {
 async function reportWrite(taskRef: string, options: ReportWriteOptions): Promise<ReportWriteResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ...platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }), report: null };
-  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const frontmatter = parseTypedTaskFrontmatter(taskContent);
-  const fact = readPrDeliveryFact(frontmatter);
-  const boundFact = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact : null;
-  if (!boundFact) return {
-    ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }),
-    report: null
-  };
-  const boundPrNumber = resourceIdentityNumber(boundFact.identity.resource);
-  if (!boundPrNumber) return {
-    ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NUMBER_INVALID', message: 'Bound pull request has no numeric identifier', retryable: false } }),
-    report: null
-  };
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!loaded.ok || !context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ...context, report: null };
+  let knownPrNumber: number | null = null;
   try {
     return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, async () => {
-      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, options.client);
+      const { taskContent, boundFact } = readBoundTaskSnapshot(resolved.taskMdPath);
+      if (!boundFact) return {
+        ...basePlatformResult('failed', context, resolved.taskId, null, { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false }),
+        report: null
+      };
+      const boundPrNumber = resourceIdentityNumber(boundFact.identity.resource);
+      if (!boundPrNumber) return {
+        ...basePlatformResult('failed', context, resolved.taskId, null, { code: 'PR_NUMBER_INVALID', message: 'Bound pull request has no numeric identifier', retryable: false }),
+        report: null
+      };
+      knownPrNumber = boundPrNumber;
+      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
       if (!initial.ok) return { ...basePlatformResult(initial.status, context, resolved.taskId, boundPrNumber, initial.error), report: null };
       const digest = taskIntentDigest(taskContent);
       if (!digest.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, platformError(digest.error)), report: null };
@@ -325,7 +379,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
       };
       const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, mechanical.value, candidate.value);
       if (!built.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, platformError(built.error)), report: null };
-      const final = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, options.client);
+      const final = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
       if (!final.ok) return { ...basePlatformResult(final.status, context, resolved.taskId, boundPrNumber, final.error), report: null };
       if (!sameIdentity(initial.value, final.value)) return {
         ...basePlatformResult('blocked', context, resolved.taskId, boundPrNumber, { code: 'PR_CHANGE_REPORT_HEAD_RACE', message: 'Pull request identity changed while generating the change report', retryable: true }),
@@ -362,7 +416,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
     const lockError = error instanceof TaskExecutionLockError
       ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }
       : { code: 'PR_CHANGE_REPORT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false };
-    return { ...basePlatformResult(lockError.retryable ? 'blocked' : 'failed', context, resolved.taskId, boundPrNumber, lockError), report: null };
+    return { ...basePlatformResult(lockError.retryable ? 'blocked' : 'failed', context, resolved.taskId, knownPrNumber, lockError), report: null };
   }
 }
 
@@ -400,26 +454,36 @@ async function syncPullRequestSummary(
   };
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return softenFailure(platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }));
-  const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
-  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
-  if (fact.status === 'invalid') return softenFailure(platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }));
-  const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
-  const prNumber = resourceIdentityNumber(prIdentity);
-  if (!prIdentity) return softenFailure(platformResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }));
-  if (!prNumber) return softenFailure(platformResult('failed', { error: { code: 'PR_NUMBER_INVALID', message: 'Bound pull request has no numeric identifier', retryable: false } }));
-  knownPrNumber = prNumber;
+  const fail = (status: PlatformResult['status'], context: PlatformResult, error: PlatformResult['error'], prNumber = knownPrNumber): PullRequestSummaryResult => {
+    const output = basePlatformResult(status, context, resolved.taskId, prNumber, error);
+    return isHardSummaryFailure(error)
+      ? { ...output, result: null, warnings: [] }
+      : { ...softenFailure(output) };
+  };
+  if (!options.changeReportFile) return softenFailure(platformResult('failed', { error: { code: 'PR_CHANGE_REPORT_MISSING', message: 'summary-sync requires --change-report-file', retryable: false } }));
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
-  if (!loaded.ok) return softenFailure(context);
-  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const fail = (status: PlatformResult['status'], context: PlatformResult, error: PlatformResult['error']): PullRequestSummaryResult => ({
-    ...softenFailure(basePlatformResult(status, context, resolved.taskId, prNumber, error))
-  });
-  if (!options.changeReportFile) return softenFailure(platformResult('failed', { resource: { kind: 'pull-request', number: prNumber }, error: { code: 'PR_CHANGE_REPORT_MISSING', message: 'summary-sync requires --change-report-file', retryable: false } }));
-  if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return softenFailure(context);
+  if (!loaded.ok || !context.platform.repository || !['no-op', 'degraded'].includes(context.status)) {
+    // This diagnostic-only read preserves the known PR target when context resolution fails before the execution lock.
+    knownPrNumber = boundPrNumberForWarning(resolved.taskMdPath);
+    return softenFailure(context);
+  }
   try {
     return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, async () => {
-      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, prNumber, options.client);
+      const { taskContent, boundFact } = readBoundTaskSnapshot(resolved.taskMdPath);
+      if (!boundFact) return {
+        ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }),
+        result: null, warnings: []
+      };
+      const prIdentity = boundFact.identity.resource;
+      const boundPrNumber = resourceIdentityNumber(prIdentity);
+      if (!boundPrNumber) return {
+        ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NUMBER_INVALID', message: 'Bound pull request has no numeric identifier', retryable: false } }),
+        result: null, warnings: []
+      };
+      knownPrNumber = boundPrNumber;
+      const prNumber = boundPrNumber;
+      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
       if (!initial.ok) return fail(initial.status, context, initial.error);
       const expectedReportPath = taskReportPath(resolved.taskDir);
       const suppliedReportPath = path.resolve(resolved.repoRoot, options.changeReportFile!);
@@ -439,6 +503,9 @@ async function syncPullRequestSummary(
       if (!listed.ok) return fail(providerStatus(listed.error) === 'blocked' ? 'blocked' : 'failed', context, providerError(listed.error, 'PLATFORM_PROVIDER_OPERATION_FAILED'));
       const reconciliation = reconcileSummaryComment(listed.value, resolved.taskId, desired);
       if (reconciliation.action === 'conflict') return fail('failed', context, { code: 'PR_SUMMARY_MARKER_AMBIGUOUS', message: 'Multiple PR comments contain the summary marker', retryable: false });
+      const previousBody = reconciliation.action === 'update'
+        ? listed.value.find((comment) => comment.id === reconciliation.commentId)?.body ?? null
+        : null;
       const info = { precheckVerdict: report.value.precheck.verdict, nextAction: report.value.precheck.route } as const;
       if (reconciliation.action === 'no-op') return {
         ...basePlatformResult('no-op', context, resolved.taskId, prNumber),
@@ -450,6 +517,13 @@ async function syncPullRequestSummary(
         operations: [{ name: `summary:${reconciliation.action}`, status: 'planned', reasonCode: null }],
         result: null, warnings: [], ...info
       };
+      const beforeWrite = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
+      if (!beforeWrite.ok) return fail(beforeWrite.status, context, beforeWrite.error, prNumber);
+      if (!sameIdentity(initial.value, beforeWrite.value)) return fail('blocked', context, {
+        code: 'PR_SUMMARY_HEAD_RACE',
+        message: 'Pull request head changed before publishing the summary',
+        retryable: true
+      }, prNumber);
       const existingComment = reconciliation.commentId === null
         ? undefined
         : providerResourceToken(loaded.value.provider, 'comment', String(reconciliation.commentId));
@@ -462,11 +536,44 @@ async function syncPullRequestSummary(
           mutation: { idempotencyKey: `pr-summary:${resolved.taskId}` }
         })
         : unsupportedProviderOperation(loaded.value.provider, 'comments.write');
-      if (!written.ok) return fail(providerStatus(written.error) === 'blocked' ? 'blocked' : 'failed', context, providerError(written.error, 'PLATFORM_PROVIDER_OPERATION_FAILED'));
-      const after = await inspectBoundPullRequest(context, resolved.repoRoot, prNumber, options.client);
-      if (!after.ok) return fail(after.status, context, after.error);
-      if (!sameIdentity(initial.value, after.value)) return fail('blocked', context, { code: 'PR_SUMMARY_HEAD_RACE', message: 'Pull request head changed while publishing the summary', retryable: true });
+      if (!written.ok) return fail(providerStatus(written.error) === 'blocked' ? 'blocked' : 'failed', context, providerError(written.error, 'PLATFORM_PROVIDER_OPERATION_FAILED'), prNumber);
+      const after = await inspectBoundPullRequest(context, resolved.repoRoot, prNumber, loaded.value);
       const id = /^\d+$/.test(written.value.remoteId) ? Number(written.value.remoteId) : written.value.remoteId;
+      if (!after.ok) return fail('blocked', context, {
+        code: 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED',
+        message: `Summary was written but pull-request verification failed: ${after.error?.message || 'unknown verification error'}`,
+        retryable: true
+      }, prNumber);
+      if (!sameIdentity(initial.value, after.value)) {
+        const compensated = reconciliation.action === 'create'
+          ? id && loaded.value.provider.comments?.delete
+            ? await loaded.value.provider.comments.delete({
+              context: providerOperationContext(loaded.value),
+              parent: prIdentity,
+              comment: providerResourceToken(loaded.value.provider, 'comment', String(written.value.remoteId)),
+              mutation: { idempotencyKey: `pr-summary-delete:${resolved.taskId}:${written.value.remoteId}` }
+            })
+            : { ok: false as const, error: { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: 'Created summary comment has no valid id', retryable: true } }
+          : reconciliation.commentId && previousBody !== null && loaded.value.provider.comments?.write
+            ? await loaded.value.provider.comments.write({
+              context: providerOperationContext(loaded.value),
+              parent: prIdentity,
+              body: previousBody,
+              existingComment: providerResourceToken(loaded.value.provider, 'comment', String(reconciliation.commentId)),
+              mutation: { idempotencyKey: `pr-summary-restore:${resolved.taskId}` }
+            })
+            : { ok: false as const, error: { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: 'Previous summary body is unavailable for restoration', retryable: true } };
+        if (!compensated.ok) return fail('blocked', context, {
+          code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED',
+          message: `Pull-request head changed and summary compensation failed: ${compensated.error.message}`,
+          retryable: true
+        }, prNumber);
+        return fail('blocked', context, {
+          code: 'PR_SUMMARY_HEAD_RACE',
+          message: 'Pull-request head changed while publishing; the previous summary was restored or the new comment was deleted; rerun report and summary sync',
+          retryable: true
+        }, prNumber);
+      }
       return {
         ...basePlatformResult('applied', context, resolved.taskId, prNumber),
         comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: Number.isInteger(id) ? [id] : [], parts: 1 },

@@ -116,6 +116,30 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function containsControlMarker(value: string): boolean {
+  return /<!--\s*(?:canonical-pr-change-report\b|sync-pr:|last-commit:)/i.test(value);
+}
+
+function isSafeRenderedText(value: unknown): value is string {
+  return isNonEmptyString(value) && !containsControlMarker(value);
+}
+
+function escapeMarkdownText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n/g, ' ');
+}
+
+function renderCodeSpan(value: string): string {
+  const safe = escapeMarkdownText(value);
+  const longestRun = Math.max(0, ...(safe.match(/`+/g) || []).map((run) => run.length));
+  const delimiter = '`'.repeat(longestRun + 1);
+  return `${delimiter} ${safe} ${delimiter}`;
+}
+
 function isIntegerOrNull(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
 }
@@ -124,9 +148,9 @@ function parseChangeFile(value: unknown, index: number): ValidationResult<Change
   if (!isRecord(value)) return invalid(`diff.files[${index}] must be an object`);
   const pathValue = value.oldPath ?? value.newPath;
   if (!isNonEmptyString(pathValue)) return invalid(`diff.files[${index}] must have a path`);
-  if (typeof value.status !== 'string' || !value.status.trim()) return invalid(`diff.files[${index}].status is invalid`);
-  if (!(value.oldPath === null || isNonEmptyString(value.oldPath))) return invalid(`diff.files[${index}].oldPath is invalid`);
-  if (!(value.newPath === null || isNonEmptyString(value.newPath))) return invalid(`diff.files[${index}].newPath is invalid`);
+  if (!isSafeRenderedText(value.status)) return invalid(`diff.files[${index}].status is invalid`);
+  if (!(value.oldPath === null || isSafeRenderedText(value.oldPath))) return invalid(`diff.files[${index}].oldPath is invalid`);
+  if (!(value.newPath === null || isSafeRenderedText(value.newPath))) return invalid(`diff.files[${index}].newPath is invalid`);
   if (!isIntegerOrNull(value.additions) || !isIntegerOrNull(value.deletions)) return invalid(`diff.files[${index}] line counts are invalid`);
   if ((value.additions === null) !== (value.deletions === null)) return invalid(`diff.files[${index}] line counts must both be null or integers`);
   for (const field of ['oldBytes', 'newBytes', 'netBytes']) {
@@ -153,11 +177,13 @@ function parseChangeFile(value: unknown, index: number): ValidationResult<Change
 
 function parseTotals(value: unknown): ValidationResult<ChangeTotals> {
   if (!isRecord(value)) return invalid('diff.totals must be an object');
-  const fields = ['files', 'textFiles', 'binaryFiles', 'additions', 'deletions', 'oldBytes', 'newBytes', 'netBytes'];
-  for (const field of fields) {
+  const nonNegativeFields = ['files', 'textFiles', 'binaryFiles', 'additions', 'deletions', 'oldBytes', 'newBytes'];
+  for (const field of [...nonNegativeFields, 'netBytes']) {
     const number = value[field];
-    if (typeof number !== 'number' || !Number.isSafeInteger(number) || number < 0) return invalid(`diff.totals.${field} is invalid`);
+    const invalidNumber = typeof number !== 'number' || !Number.isSafeInteger(number) || (nonNegativeFields.includes(field) && number < 0);
+    if (invalidNumber) return invalid(`diff.totals.${field} is invalid`);
   }
+  const fields = [...nonNegativeFields, 'netBytes'];
   return {
     ok: true,
     value: Object.fromEntries(fields.map((field) => [field, value[field]])) as unknown as ChangeTotals
@@ -183,7 +209,7 @@ function totalsMatchFiles(totals: ChangeTotals, files: ChangeFile[]): boolean {
 
 function parseEvidence(value: unknown, checkId: string, index: number): ValidationResult<Evidence> {
   if (!isRecord(value)) return invalid(`precheck.checks.${checkId}.evidence[${index}] must be an object`);
-  if (!isNonEmptyString(value.path) || !isNonEmptyString(value.detail)) return invalid(`precheck.checks.${checkId}.evidence[${index}] path/detail is required`);
+  if (!isSafeRenderedText(value.path) || !isSafeRenderedText(value.detail)) return invalid(`precheck.checks.${checkId}.evidence[${index}] path/detail is required`);
   const startLine = value.startLine;
   const endLine = value.endLine;
   if (!(startLine === null || (typeof startLine === 'number' && Number.isSafeInteger(startLine) && startLine > 0))) return invalid(`precheck.checks.${checkId}.evidence[${index}].startLine is invalid`);
@@ -208,7 +234,7 @@ function parseChecks(value: unknown, prefix = 'precheck.checks'): ValidationResu
       if (!parsed.ok) return parsed;
       evidence.push(parsed.value);
     }
-    if (!isNonEmptyString(raw.rationale)) return invalid(`${prefix}.${expectedId}.rationale is required`);
+    if (!isSafeRenderedText(raw.rationale)) return invalid(`${prefix}.${expectedId}.rationale is required`);
     checks.push({ id: expectedId, verdict: raw.verdict, evidence, rationale: raw.rationale });
   }
   return { ok: true, value: checks };
@@ -413,14 +439,14 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
   const rows = report.diff.files.map((file) => {
     const filePath = file.newPath || file.oldPath || '(unknown)';
     const lines = file.additions === null || file.deletions === null ? 'binary' : `+${file.additions}/-${file.deletions}`;
-    return `| \`${filePath}\` | ${file.status} | ${lines} | ${file.netBytes >= 0 ? '+' : ''}${file.netBytes} |`;
+    return `| ${renderCodeSpan(filePath)} | ${renderCodeSpan(file.status)} | ${lines} | ${file.netBytes >= 0 ? '+' : ''}${file.netBytes} |`;
   });
   const checks = report.precheck.checks.map((check) => {
     const evidence = check.evidence.map((item) => {
-      const location = item.startLine === null ? `\`${item.path}\`` : `\`${item.path}:${item.startLine}${item.endLine && item.endLine !== item.startLine ? `-${item.endLine}` : ''}\``;
-      return `${location} — ${item.detail}`;
+      const location = item.startLine === null ? renderCodeSpan(item.path) : renderCodeSpan(`${item.path}:${item.startLine}${item.endLine && item.endLine !== item.startLine ? `-${item.endLine}` : ''}`);
+      return `${location} — ${renderCodeSpan(item.detail)}`;
     }).join('; ');
-    return `- **${check.id}**: ${check.verdict} — ${check.rationale}（${evidence}）`;
+    return `- **${check.id}**: ${check.verdict} — ${renderCodeSpan(check.rationale)}（${evidence}）`;
   });
   return [
     CANONICAL_REPORT_HEADING,
@@ -444,7 +470,11 @@ function replaceCanonicalReportPlaceholder(body: string, report: PrChangeReport)
       body.includes(REPORT_FILE_NAME) || /"(?:identity|precheck|diff)"\s*:\s*\{/.test(body)) {
     return invalid('summary body must contain exactly one canonical report placeholder and no report bypass content', 'PR_SUMMARY_BODY_CONTRACT_INVALID');
   }
-  return { ok: true, value: body.replace(CANONICAL_REPORT_PLACEHOLDER, renderCanonicalChangeReport(report)) };
+  const rendered = renderCanonicalChangeReport(report);
+  if (containsControlMarker(rendered)) return invalid('canonical report contains a reserved control marker', 'PR_SUMMARY_RENDER_INVALID');
+  const value = body.replace(CANONICAL_REPORT_PLACEHOLDER, rendered);
+  if (containsControlMarker(value)) return invalid('summary contains a reserved control marker', 'PR_SUMMARY_RENDER_INVALID');
+  return { ok: true, value };
 }
 
 export {

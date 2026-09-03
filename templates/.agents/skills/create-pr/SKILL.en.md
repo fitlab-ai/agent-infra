@@ -147,7 +147,7 @@ Next step (alternative) - Skip active monitoring and attempt completion:
 
 - No commits found between `{target}` and `HEAD`
 - Push rejected: suggest `git pull --rebase`
-- Existing PR found: show the current PR URL and stop
+- Existing PR found: continue through binding, report generation, summary synchronization, and result verification before showing the current PR URL
 - Inaccessible Issue metadata: skip inheritance and continue
 - PR creation failed with an associated `{task-id}`: run `agent-infra-internal task-warning {task-id} add --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "Fix push, permission, or platform issues and rerun create-pr"` to submit a structured warning intent, and do not write an incomplete `pr_delivery_fact`
 - PR summary comment failed with an associated `{task-id}`: record a `COMMENT_SYNC_FAILED` warning per `.agents/rules/pr-sync.md`, without rolling back an already-created PR

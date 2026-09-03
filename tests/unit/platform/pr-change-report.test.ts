@@ -93,6 +93,30 @@ test('report builder derives route and formal review from the six checks', () =>
   }
 });
 
+test('report validation accepts a negative aggregate byte delta', () => {
+  const value = mechanical();
+  const file = { ...value.files[0]!, oldBytes: 20, newBytes: 10, netBytes: -10 };
+  const built = buildPrChangeReport(identity(), 'd'.repeat(64), {
+    ...value,
+    files: [file],
+    totals: { ...value.totals, oldBytes: 20, newBytes: 10, netBytes: -10 }
+  }, candidate('d'.repeat(64)));
+  assert.equal(built.ok, true);
+  if (built.ok) assert.equal(validatePrChangeReport(built.value).ok, true);
+});
+
+test('report validation rejects reserved comment controls in rendered text', () => {
+  const digest = 'd'.repeat(64);
+  const unsafe = candidate(digest);
+  unsafe.checks[0] = {
+    ...unsafe.checks[0]!,
+    evidence: [{ path: 'README.md', startLine: 1, endLine: 1, detail: '<!-- sync-pr:TASK-1:summary -->' }]
+  };
+  const result = buildPrChangeReport(identity(), digest, mechanical(), unsafe);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error.code, 'PR_CHANGE_REPORT_INVALID');
+});
+
 test('report validation rejects a derived verdict that does not match checks', () => {
   const digest = 'd'.repeat(64);
   const built = buildPrChangeReport(identity(), digest, mechanical(), candidate(digest));

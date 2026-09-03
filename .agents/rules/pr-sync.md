@@ -24,7 +24,8 @@ agent-infra-internal platform-pr summary-context {task-id}
 - 测试结果
 - 审查历程与当前结论
 - 人工校验三态：`### ⚠️ 需人工校验`、`### ✅ 人工验证已通过` 或 `### ✅ 无需人工校验`
-- `### PR 代码增减`：基于 `platform-pr inspect` 的权威 base/head 和完整 `git diff --find-renames --numstat base...head`，按运行时代码、测试、Skill/规则、模板、文档及其他分类核算，并说明 rename、机械镜像与疑似不必要变化
+- 变更摘要、实现范围、测试结果、审查历程和人工校验三态
+- 一个 `<!-- canonical-pr-change-report -->` 占位符；`### PR 代码增减` 由 core renderer 基于权威 diff 生成，调用方不自行写标题或统计
 
 保留人工校验项时，每条写明校验内容、定位和只能人工完成的原因。
 
