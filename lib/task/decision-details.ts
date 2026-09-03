@@ -270,11 +270,15 @@ export {
   normalizeDecisionDetailForDisplay,
   parseDecisionDetailBlocks,
   parseDecisionEvidence,
-  resolveDecisionDetail
+  resolveDecisionDetail,
+  scanVisibleMarkdown
 };
 export type {
   DecisionDetailBlock,
   DecisionDetailDuplicate,
   DecisionDetailInspection,
-  DecisionDetailResolution
+  DecisionDetailResolution,
+  SourceLine,
+  VisibleHeading,
+  VisibleMarkdown
 };

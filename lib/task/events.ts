@@ -33,6 +33,12 @@ import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 import { allowsManualOverride } from './guard-override.ts';
+import {
+  LOCAL_ARTIFACT_REQUIRED_PATTERNS,
+  LOCAL_ARTIFACT_REQUIRED_SECTIONS,
+  validateLocalArtifact
+} from './local-artifact-finalization.ts';
+import { loadVerificationConfig } from './verification-config.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -57,6 +63,7 @@ type TaskEventRequest = {
   taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean; orchestrated?: boolean;
   overrideTicket?: string; overrideTarget?: string; overrideScope?: string;
   round?: number; question?: number; artifact?: string; fixFor?: string; implementationInput?: string;
+  artifactSha256?: string; semanticDigest?: string;
   verdict?: Verdict; blockers?: number; major?: number; minor?: number;
   manualValidation?: number; filesModified?: number; testsPassed?: number;
   summaryResult?: string;
@@ -81,11 +88,11 @@ const BASE_FIELDS = new Set(['taskRef', 'event', 'agent', 'dryRun', 'overrideTic
 const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] }> = {
   'analyze.started': { optional: ['round'] },
   'analyze.awaiting-input': { required: ['question'] },
-  'analyze.completed': { required: ['artifact'], optional: ['round', 'orchestrated'] },
+  'analyze.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'orchestrated'] },
   'review-analysis.started': { optional: ['round'] },
   'review-analysis.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'plan.started': { optional: ['round'] },
-  'plan.completed': { required: ['artifact'], optional: ['round', 'orchestrated'] },
+  'plan.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'orchestrated'] },
   'review-plan.started': { optional: ['round'] },
   'review-plan.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'code.started': { optional: ['round', 'fixFor', 'implementationInput'] },
@@ -97,6 +104,30 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'validation-run.started': { optional: ['round'] },
   'validation-run.completed': { required: ['artifact'], optional: ['round'] }
 };
+
+function localArtifactValidationConfig(repoRoot: string, family: 'analysis' | 'plan') {
+  const fallback = {
+    requiredSections: LOCAL_ARTIFACT_REQUIRED_SECTIONS[family],
+    requiredPatterns: LOCAL_ARTIFACT_REQUIRED_PATTERNS
+  };
+  const skillName = family === 'analysis' ? 'analyze-task' : 'plan-task';
+  try {
+    const artifact = loadVerificationConfig(repoRoot, skillName).checks.artifact;
+    if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return fallback;
+    const sections = artifact.required_sections;
+    const patterns = artifact.required_patterns;
+    return {
+      requiredSections: Array.isArray(sections)
+        ? sections.filter((value): value is string => typeof value === 'string')
+        : fallback.requiredSections,
+      requiredPatterns: Array.isArray(patterns)
+        ? patterns.filter((value): value is string => typeof value === 'string')
+        : fallback.requiredPatterns
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | null {
   if (!eventCatalog.includes(request.event as TaskEventName)) return { code: 'EVENT_UNKNOWN', message: `unknown task event '${request.event}'` };
@@ -121,6 +152,8 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
   }
   if (request.fixFor && !/^review-code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/.test(request.fixFor)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor must reference a canonical review-code artifact' };
   if (request.implementationInput && !/^II-[1-9]\d*$/.test(request.implementationInput)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'implementationInput must be a canonical II-N id' };
+  if (request.artifactSha256 !== undefined && !/^[0-9a-f]{64}$/i.test(request.artifactSha256)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'artifactSha256 must be a 64-character hexadecimal digest' };
+  if (request.semanticDigest !== undefined && !/^[0-9a-f]{64}$/i.test(request.semanticDigest)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'semanticDigest must be a 64-character hexadecimal digest' };
   if (request.fixFor && request.implementationInput) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor and implementationInput are mutually exclusive' };
   if (request.summaryResult !== undefined && (!request.summaryResult.trim() || /[\r\n]/.test(request.summaryResult))) return { code: 'EVENT_PAYLOAD_INVALID', message: 'summaryResult must be a non-empty single line' };
   return null;
@@ -420,6 +453,39 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     completedArtifact = validated.artifact;
+    if (eventIdentity.family === 'analyze' || eventIdentity.family === 'plan') {
+      const localFamily = eventIdentity.family === 'analyze' ? 'analysis' : 'plan';
+      let artifactContent: string;
+      try { artifactContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
+      catch (error) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read ${completedArtifact.name}: ${String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      const validationConfig = localArtifactValidationConfig(resolved.repoRoot, localFamily);
+      const local = validateLocalArtifact(artifactContent, {
+        family: localFamily,
+        requiredSections: validationConfig.requiredSections,
+        requiredPatterns: validationConfig.requiredPatterns
+      });
+      if (!local.ok) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `LOCAL_ARTIFACT_INVALID: ${local.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      const actualSha256 = sha256File(completedArtifact.path);
+      if (actualSha256 !== normalized.artifactSha256) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `artifact SHA-256 does not match finalizer result for ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      if (local.semanticDigest !== normalized.semanticDigest) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `semantic digest does not match finalizer result for ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+    }
   }
   if (eventIdentity.phase === 'waiting' && section.entries.some((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)) {
     const existing = section.entries.find((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)!;

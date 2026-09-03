@@ -19,6 +19,21 @@ test('event payload validation rejects fields outside an event schema', () => {
   assert.equal(result?.code, 'EVENT_PAYLOAD_INVALID');
 });
 
+test('local analysis and plan completions require both artifact digests', () => {
+  for (const event of ['analyze.completed', 'plan.completed'] as const) {
+    const missing = validateTaskEventRequest({
+      taskRef: '1', event, agent: 'codex', artifact: event.startsWith('analyze') ? 'analysis.md' : 'plan.md'
+    });
+    assert.equal(missing?.code, 'EVENT_PAYLOAD_INVALID');
+
+    const malformed = validateTaskEventRequest({
+      taskRef: '1', event, agent: 'codex', artifact: event.startsWith('analyze') ? 'analysis.md' : 'plan.md',
+      artifactSha256: '0', semanticDigest: '0'
+    });
+    assert.equal(malformed?.code, 'EVENT_PAYLOAD_INVALID');
+  }
+});
+
 test('code fix completion requires its review identity', () => {
   const result = validateTaskEventRequest({
     taskRef: '1', event: 'code.completed', agent: 'codex', round: 2,

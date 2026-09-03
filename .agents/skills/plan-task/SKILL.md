@@ -114,7 +114,14 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
   - 用新值覆盖 frontmatter 的 `effort` 字段
   - 在本轮方案产物 `{plan-artifact}` 中追加 `## 工作量重估` 段，记录一条：`effort {old} → {new} (rationale: {基于本轮方案的简短依据})`
   若重估值与当前值一致，跳过：不写入 `## 工作量重估` 段。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
-- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact} {execution-flag}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
+- 完成本地产物后，先执行本地完成前门禁：
+  ```bash
+  agent-infra-internal task-artifact {task-id} finalize-local --family plan --artifact {plan-artifact}
+  ```
+  - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`。
+  - `status=failed` 且 `repairable=true`：仅按诊断中的 `replace-line` 操作做一次最小修改，然后完整重跑同一命令；实际字节发生变化才计一次 `repairAttempts`，最多 8 次。
+  - 其他失败、无进展或重复诊断：停止，不发布 completed 事件。
+- 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status pending-design-work --fields`
