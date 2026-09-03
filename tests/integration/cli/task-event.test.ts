@@ -128,14 +128,21 @@ function localArtifact(family: LocalArtifactFamily, suffix = '') {
         ['技术方法', '实现方法'], ['实施步骤', '步骤一'], ['文件清单', '文件列表'],
         ['验证策略', '验证方法']
       ]
-    : [
-        ['需求来源', '用户描述'], ['需求理解', '范围说明'], ['相关文件', '文件列表'],
-        ['影响评估', '影响说明'], ['技术风险', '风险说明'], ['工作量和复杂度评估', '复杂度说明']
-      ];
+    : family === 'code'
+      ? [
+          ['实现输入', '本轮实现输入'], ['变更文件', '文件列表'], ['关键代码说明', '实现说明'],
+          ['测试结果', '测试通过'], ['与方案的差异', '无'], ['供审查关注的内容', '完成门禁'],
+        ]
+      : [
+          ['需求来源', '用户描述'], ['需求理解', '范围说明'], ['相关文件', '文件列表'],
+          ['影响评估', '影响说明'], ['技术风险', '风险说明'], ['工作量和复杂度评估', '复杂度说明']
+        ];
   return [
-    family === 'plan' ? '# 技术方案' : '# 需求分析报告', '',
+    family === 'plan' ? '# 技术方案' : family === 'code' ? '# 实现报告' : '# 需求分析报告', '',
     ...sections.flatMap(([heading, body]) => [`## ${heading}`, body, '']),
-    '## 状态核对', '```text', '$ git status -s', '```', suffix
+    ...(family === 'code' ? [] : ['## 状态核对']),
+    ...(family === 'code' ? ['## 状态核对', '```text', '$ git status -s', '```', '## 证据原文', '验证输出'] : ['```text', '$ git status -s', '```']),
+    suffix
   ].join('\n');
 }
 
@@ -158,7 +165,7 @@ function addReceipt(file: string, receipt: ArtifactReceipt) {
 }
 
 function codeReport(plan = 'plan.md') {
-  return `# Implementation Report\n\n## Implementation Input\n\n- **Plan Input**: \`${plan}\`\n`;
+  return localArtifact('code').replace('本轮实现输入', `- **模式**：init\n- **方案输入**：\`${plan}\`\n- **审查输入**：\`N/A\`\n- **裁决输入**：N/A\n- **账本 ID**：N/A\n- **裁决证据**：N/A\n- **需求摘要**：完成实现报告门禁\n`);
 }
 
 type ReviewCounts = { blockers: number; major: number; minor: number };
@@ -1220,9 +1227,10 @@ test('decision code event clears the review baseline and consumes its input on c
   assert.match(content, /\| II-1 .*\| pending \|\s*\|/);
 
   fs.writeFileSync(path.join(f.dir, 'code-r2.md'), codeReport());
+  const digests = completionDigestArgs(f.dir, 'code-r2.md', 'code');
   const completed = run(f.root, [
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
-    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4'
+    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4', ...digests
   ]);
   assert.equal(completed.status, 0, completed.stderr);
   assert.equal(JSON.parse(completed.stdout).implementationInput, 'II-1');
@@ -1233,7 +1241,7 @@ test('decision code event clears the review baseline and consumes its input on c
 
   const repeated = run(f.root, [
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
-    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4'
+    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4', ...digests
   ]);
   assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
 });
@@ -1242,11 +1250,12 @@ test('code completion rejects a report without a canonical plan input', () => {
   const f = decisionFixture();
   const started = run(f.root, [f.id, 'code.started', '--agent', 'codex', '--implementation-input', 'II-1']);
   assert.equal(started.status, 0, started.stderr);
-  fs.writeFileSync(path.join(f.dir, 'code-r2.md'), '# Code round 2\n');
+  fs.writeFileSync(path.join(f.dir, 'code-r2.md'), codeReport('missing-plan.md'));
+  const digests = completionDigestArgs(f.dir, 'code-r2.md', 'code');
   const before = fs.readFileSync(f.file);
   const completed = run(f.root, [
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
-    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '1'
+    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '1', ...digests
   ]);
   assert.equal(completed.status, 1);
   assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
@@ -1265,12 +1274,47 @@ test('code completion rejects a plan changed after code started', () => {
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan v2\n');
   fs.writeFileSync(path.join(f.dir, 'code.md'), codeReport());
+  const digests = completionDigestArgs(f.dir, 'code.md', 'code');
   const before = fs.readFileSync(f.file);
   const completed = run(f.root, [
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code.md',
-    '--files-modified', '1', '--tests-passed', '1'
+    '--files-modified', '1', '--tests-passed', '1', ...digests
   ]);
   assert.equal(completed.status, 1);
   assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('code completion requires current finalizer provenance and rejects a semantic mutation', () => {
+  const f = decisionFixture();
+  const started = run(f.root, [f.id, 'code.started', '--agent', 'codex', '--implementation-input', 'II-1']);
+  assert.equal(started.status, 0, started.stderr);
+  const artifact = path.join(f.dir, 'code-r2.md');
+  fs.writeFileSync(artifact, codeReport());
+  const content = fs.readFileSync(artifact, 'utf8');
+  const local = validateLocalArtifact(content, { family: 'code' });
+  assert.equal(local.ok, true, local.diagnostics.map((item) => item.message).join('; '));
+
+  const withoutProvenance = run(f.root, [
+    f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
+    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '1',
+    '--artifact-sha256', sha256File(artifact), '--semantic-digest', local.semanticDigest
+  ]);
+  assert.equal(withoutProvenance.status, 1);
+  assert.equal(JSON.parse(withoutProvenance.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+
+  const finalized = finalizeLocalArtifact({
+    taskRef: f.id, repoRoot: f.root, family: 'code', artifact: 'code-r2.md'
+  });
+  assert.equal(finalized.status, 'passed', finalized.error?.message);
+  fs.appendFileSync(artifact, '\nsemantic mutation\n');
+  const before = fs.readFileSync(f.file);
+  const changed = run(f.root, [
+    f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
+    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '1',
+    '--artifact-sha256', finalized.artifactSha256!, '--semantic-digest', finalized.semanticDigest!
+  ]);
+  assert.equal(changed.status, 1);
+  assert.equal(JSON.parse(changed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
   assert.deepEqual(fs.readFileSync(f.file), before);
 });

@@ -19,6 +19,7 @@ Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill 
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”
 - Fix mode verifies each finding of the latest `review-code` one by one: fix it if it holds, or rebut it and record it under unresolved if it is unfounded/hallucinated; do not expand to issues the review did not list; manual-validation items are out of scope
+- Before `code.completed`, the implementation report must pass `task-artifact ... finalize-local --family code`; follow `.agents/rules/local-artifact-repair.md` for any provably safe minimal structural repair in that same report, and pass only that successful call's digests to the completion event
 - If implementation encounters a key design decision not covered by the plan, run `agent-infra-internal task-ledger {task-id} decision-next-id`, write the returned `HD-N` detail block per `.agents/rules/human-decision-context.md` and determine whether implementation is required, then run `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`. Do not scan ids, assemble ledger rows, ask mid-flow, or silently expand scope
 - Do not invoke the `commit` skill or push to a remote; after tests pass, call the shared commit core with `delivery: { mode: 'local' }` to create the local checkpoint. The durable intent must close only after the checkpoint and task state sync succeed; only then emit `code.completed`
 - Create a new code artifact for each round and never overwrite an older one
@@ -60,7 +61,7 @@ Read `reference/branch-management.md`, ensure the current branch matches the tas
 
 **Mandatory; do not skip.** If task.md has a valid `issue_number`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone specific`.
 
-> If the milestone remains `X.Y.x`, step 11 `task-verify code.completed` blocks through the typed milestone check.
+> If the milestone remains `X.Y.x`, step 12 `task-verify code.completed` blocks through the typed milestone check.
 
 ### 4. Determine Mode and Round
 
@@ -112,22 +113,38 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 > Read `reference/report-template.md` before writing the report.
 
-### 10. Update Task Status
+### 10. Pre-completion Report Gate
 
-After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n} {execution-flag}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
+After writing the report and before publishing `code.completed`, read and follow `.agents/rules/local-artifact-repair.md` and run:
+
+```bash
+finalizer=$(agent-infra-internal task-artifact {task-id} finalize-local --family code --artifact {code-artifact})
+status=$?
+echo "$finalizer"
+```
+
+- `status=0` with `finalizer.status="passed"`: bind `{artifact-sha256}` and `{semantic-digest}` from this result.
+- `status=1` with `repairable=true` and a diagnostic explicitly describing a one-line replacement: confirm task, round, artifact, and provenance are unchanged; edit only that `code*.md` once, confirm the bytes changed, then rerun the same command completely.
+- For any other failure, lack of progress, repeated diagnostic, or eight actual report edits, stop without publishing `code.completed`.
+
+Do not rescan or manually write digest data; the completion event must include `--artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}` from the successful finalizer result.
+
+### 11. Update Task Status
+
+After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --files-modified {n} --tests-passed {n} {execution-flag}`; in fix mode add `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {standard-agent-token}`
 
-### 11. Run Completion Gate
+### 12. Run Completion Gate
 
 ```bash
 agent-infra-internal task-verify {task-id} code.completed --artifact {code-artifact} --format text
 ```
 
-### 12. Tell the User
+### 13. Tell the User
 
 Use `reference/output-template.md` (or `reference/fix-mode.md` in fix mode) and render the selected next-step commands through the shared helper. Do not push, create a PR, or invoke the `commit` skill here.
 

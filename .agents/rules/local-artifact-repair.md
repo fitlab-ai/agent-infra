@@ -1,10 +1,10 @@
 # 通用规则 - 模型驱动的本地产物修复
 
-本规则适用于 `analyze-task`、`plan-task` 在 completed 事件前处理**同一个受控本地产物**，以及 `review-analysis`、`review-plan`、`review-code` 在 finalizer 失败后处理**同一个受控 review artifact** 的场景。它不适用于 task.md、账本、receipt、源码、Git、平台资源或生命周期状态。
+本规则适用于 `analyze-task`、`plan-task`、`code-task` 在 completed 事件前处理**同一个受控本地产物**，以及 `review-analysis`、`review-plan`、`review-code` 在 finalizer 失败后处理**同一个受控 review artifact** 的场景。它不适用于 task.md、账本、receipt、源码、Git、平台资源或生命周期状态。
 
-## 分析和方案产物完成前门禁
+## 分析、方案和代码产物完成前门禁
 
-- `analyze-task` 和 `plan-task` 必须在发布 completed 事件前调用 `task-artifact ... finalize-local`；只有同一次返回的 `artifactSha256` 和 `semanticDigest` 才能传给 completed 事件。
+- `analyze-task`、`plan-task` 和 `code-task` 必须在发布 completed 事件前调用 `task-artifact ... finalize-local`；只有同一次返回的 `artifactSha256` 和 `semanticDigest` 才能传给 completed 事件。
 - `finalize-local` 不修改产物或任务状态，但会在仓库工作区写入一次性的本地 provenance intent。返回 `failed` 时，只有 `repairable=true` 且诊断明确为单行替换，模型才可在同一产物中执行一次最小编辑，然后完整重跑同一调用；每次实际字节修改计一次，最多 8 次。
 - 首次可修复失败的 semantic digest 会保存在该 intent 中；后续 `passed` 必须匹配该基线，completed event 还必须在任务锁内验证并在写 task.md 前原子转换为 `consumed` 状态。消费失败时不得写任务；转换后的 intent 是可重试的 durable 记录，成功写入后不再执行可能失败的后置删除。不得用重新计算的新摘要替换失败基线，也不得绕过 finalizer 直接发布 completed event。
 - 返回 `failed`、无进展、诊断或指纹重复时不得发布 completed 事件；返回 `passed` 后也不得重新扫描或手工补写摘要。

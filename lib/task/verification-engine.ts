@@ -600,7 +600,9 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
 
   const content = fs.readFileSync(artifactPath, "utf8");
   const requiredSections = config.required_sections || [];
-  const localFamily = skillName === "analyze-task" ? "analysis" : skillName === "plan-task" ? "plan" : null;
+  const localFamily = skillName === "analyze-task"
+    ? "analysis"
+    : skillName === "plan-task" ? "plan" : skillName === "code-task" ? "code" : null;
   if (localFamily) {
     const local = validateLocalArtifact(content, {
       family: localFamily,

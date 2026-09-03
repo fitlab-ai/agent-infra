@@ -4,7 +4,7 @@ import type { LocalArtifactFamily } from '../task/local-artifact-finalization.ts
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { loadVerificationConfig } from '../task/verification-config.ts';
 
-const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> finalize-local --family <analysis|plan> --artifact <artifact>\n\nInspect workflow artifact context or finalize a local analysis/plan artifact without changing task state.\n`;
+const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> finalize-local --family <analysis|plan|code> --artifact <artifact>\n\nInspect workflow artifact context or finalize a local analysis/plan/code artifact without changing task state.\n`;
 
 function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'ARTIFACT_PAYLOAD_INVALID', message } })}\n`);
@@ -54,11 +54,11 @@ function taskArtifact(args: string[] = []): void {
     return;
   }
   if (!artifact) { failUsage("option '--artifact' is required"); return; }
-  if (family !== 'analysis' && family !== 'plan') {
-    failUsage("finalize-local only supports 'analysis' and 'plan'");
+  if (family !== 'analysis' && family !== 'plan' && family !== 'code') {
+    failUsage("finalize-local only supports 'analysis', 'plan', and 'code'");
     return;
   }
-  const skillName = family === 'analysis' ? 'analyze-task' : 'plan-task';
+  const skillName = family === 'analysis' ? 'analyze-task' : family === 'plan' ? 'plan-task' : 'code-task';
   const resolved = resolveTaskRef(args[0]!);
   const repositoryRoot = resolved.ok ? resolved.repoRoot : process.cwd();
   let config: { requiredSections?: readonly string[]; requiredPatterns?: readonly string[] } = {};

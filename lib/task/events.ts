@@ -40,7 +40,7 @@ import {
   readLocalArtifactFinalizationIntent,
   validateLocalArtifact
 } from './local-artifact-finalization.ts';
-import type { LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
+import type { LocalArtifactFamily, LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
 import { loadVerificationConfig } from './verification-config.ts';
 
 const eventCatalog = [
@@ -99,7 +99,7 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'review-plan.started': { optional: ['round'] },
   'review-plan.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'code.started': { optional: ['round', 'fixFor', 'implementationInput'] },
-  'code.completed': { required: ['artifact'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation', 'orchestrated'] },
+  'code.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation', 'orchestrated'] },
   'review-code.started': { optional: ['round'] },
   'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'manual-validation.started': { optional: ['round'] },
@@ -108,12 +108,12 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'validation-run.completed': { required: ['artifact'], optional: ['round'] }
 };
 
-function localArtifactValidationConfig(repoRoot: string, family: 'analysis' | 'plan') {
+function localArtifactValidationConfig(repoRoot: string, family: LocalArtifactFamily) {
   const fallback = {
     requiredSections: LOCAL_ARTIFACT_REQUIRED_SECTIONS[family],
     requiredPatterns: LOCAL_ARTIFACT_REQUIRED_PATTERNS
   };
-  const skillName = family === 'analysis' ? 'analyze-task' : 'plan-task';
+  const skillName = family === 'analysis' ? 'analyze-task' : family === 'plan' ? 'plan-task' : 'code-task';
   try {
     const artifact = loadVerificationConfig(repoRoot, skillName).checks.artifact;
     if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return fallback;
@@ -457,8 +457,10 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     completedArtifact = validated.artifact;
-    if (eventIdentity.family === 'analyze' || eventIdentity.family === 'plan') {
-      const localFamily = eventIdentity.family === 'analyze' ? 'analysis' : 'plan';
+    if (eventIdentity.family === 'analyze' || eventIdentity.family === 'plan' || eventIdentity.family === 'code') {
+      const localFamily = eventIdentity.family === 'analyze'
+        ? 'analysis'
+        : eventIdentity.family === 'plan' ? 'plan' : 'code';
       let artifactContent: string;
       try { artifactContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
       catch (error) {

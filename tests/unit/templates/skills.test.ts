@@ -1317,10 +1317,11 @@ test("artifact lifecycle skills use core context and events in every language va
   }
 });
 
-test("analysis and plan skills hand finalizer digests to their completed events", () => {
+test("executor skills hand finalizer digests to their completed events", () => {
   const stages = [
     { skill: "analyze-task", family: "analysis", artifact: "analysis-artifact", event: "analyze.completed" },
-    { skill: "plan-task", family: "plan", artifact: "plan-artifact", event: "plan.completed" }
+    { skill: "plan-task", family: "plan", artifact: "plan-artifact", event: "plan.completed" },
+    { skill: "code-task", family: "code", artifact: "code-artifact", event: "code.completed" }
   ];
 
   for (const { skill, family, artifact, event } of stages) {

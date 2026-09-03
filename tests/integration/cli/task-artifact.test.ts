@@ -22,16 +22,16 @@ function run(root: string, args: string[]) {
   return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], { cwd: root, encoding: 'utf8' });
 }
 
-function localArtifact(family: 'analysis' | 'plan', suffix = ''): string {
+function localArtifact(family: 'analysis' | 'plan' | 'code', suffix = ''): string {
   const sections = family === 'analysis'
     ? ['需求来源', '需求理解', '相关文件', '影响评估', '技术风险', '工作量和复杂度评估', '状态核对']
-    : ['问题理解', '约束条件', '方案对比', '技术方法', '实施步骤', '文件清单', '验证策略', '状态核对'];
+    : family === 'plan'
+      ? ['问题理解', '约束条件', '方案对比', '技术方法', '实施步骤', '文件清单', '验证策略', '状态核对']
+      : ['实现输入', '变更文件', '关键代码说明', '测试结果', '与方案的差异', '供审查关注的内容'];
   return [
     `# ${family}`,
     ...sections.flatMap((section) => [`## ${section}`, '内容']),
-    '```text',
-    '$ git status -s',
-    '```',
+    ...(family === 'code' ? ['## 状态核对', '```text', '$ git status -s', '```', '## 证据原文', '验证输出'] : ['```text', '$ git status -s', '```']),
     suffix
   ].join('\n');
 }
@@ -119,6 +119,25 @@ test('task-artifact finalize-local reports one-line heading repair and revalidat
 
   fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('## 需求来源：\n', '## 需求来源\n'));
   const passed = run(f.root, [f.id, 'finalize-local', '--family', 'analysis', '--artifact', 'analysis.md']);
+  assert.equal(passed.status, 0, passed.stderr);
+  const success = JSON.parse(passed.stdout);
+  assert.equal(success.status, 'passed');
+  assert.equal(success.semanticDigest, failure.semanticDigest);
+});
+
+test('task-artifact finalize-local supports code reports and preserves the repair baseline', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'code.md');
+  fs.writeFileSync(artifact, localArtifact('code').replace('## 测试结果\n', '## 测试结果：\n'));
+
+  const failed = run(f.root, [f.id, 'finalize-local', '--family', 'code', '--artifact', 'code.md']);
+  assert.equal(failed.status, 1);
+  const failure = JSON.parse(failed.stdout);
+  assert.equal(failure.repairable, true);
+  assert.equal(failure.diagnostics[0].code, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
+
+  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('## 测试结果：', '## 测试结果'));
+  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'code', '--artifact', 'code.md']);
   assert.equal(passed.status, 0, passed.stderr);
   const success = JSON.parse(passed.stdout);
   assert.equal(success.status, 'passed');

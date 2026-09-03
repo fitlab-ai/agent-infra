@@ -13,7 +13,7 @@ import {
 } from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 
-type LocalArtifactFamily = 'analysis' | 'plan';
+type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
 const LOCAL_ARTIFACT_REQUIRED_SECTIONS: Readonly<Record<LocalArtifactFamily, readonly string[]>> = {
   analysis: [
@@ -23,6 +23,10 @@ const LOCAL_ARTIFACT_REQUIRED_SECTIONS: Readonly<Record<LocalArtifactFamily, rea
   plan: [
     '问题理解', '约束条件', '方案对比', '技术方法', '实施步骤',
     '文件清单', '验证策略', '状态核对'
+  ],
+  code: [
+    '实现输入', '变更文件', '关键代码说明', '测试结果', '与方案的差异',
+    '供审查关注的内容', '状态核对', '证据原文'
   ]
 };
 
@@ -110,7 +114,7 @@ function isFinalizationIntent(value: unknown): value is LocalArtifactFinalizatio
   const intent = value as Record<string, unknown>;
   return intent.version === 1
     && typeof intent.taskId === 'string' && intent.taskId.length > 0
-    && (intent.family === 'analysis' || intent.family === 'plan')
+    && (intent.family === 'analysis' || intent.family === 'plan' || intent.family === 'code')
     && typeof intent.artifact === 'string' && intent.artifact.length > 0
     && (intent.state === 'awaiting-repair' || intent.state === 'passed' || intent.state === 'consumed')
     && (intent.baselineSemanticDigest === null || (typeof intent.baselineSemanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.baselineSemanticDigest)))

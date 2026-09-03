@@ -17,7 +17,21 @@ const PLAN_SECTIONS = [
   ['状态核对', '```text\n$ git status -s\n```']
 ] as const;
 
+const CODE_SECTIONS = [
+  ['实现输入', '本轮实现输入'],
+  ['变更文件', '文件列表'],
+  ['关键代码说明', '实现说明'],
+  ['测试结果', '测试通过'],
+  ['与方案的差异', '无'],
+  ['供审查关注的内容', '完成门禁'],
+  ['状态核对', '```text\n$ git status -s\n```'],
+  ['证据原文', '验证输出']
+] as const;
+
 function artifact(family: LocalArtifactFamily = 'plan'): string {
+  if (family === 'code') {
+    return ['# 实现报告', '', ...CODE_SECTIONS.flatMap(([heading, body]) => [`## ${heading}`, body, ''])].join('\n');
+  }
   const title = family === 'plan' ? '# 技术方案' : '# 需求分析报告';
   return [title, '', ...PLAN_SECTIONS.flatMap(([heading, body]) => [`## ${heading}`, body, ''])].join('\n');
 }
@@ -78,4 +92,18 @@ test('non-whitelisted content changes and ambiguous candidates fail closed', () 
   const duplicate = validateLocalArtifact(duplicateCandidate, { family: 'plan' });
   const duplicateDiagnostic = diagnostic(duplicate, 'LOCAL_ARTIFACT_DUPLICATE_SECTION');
   assert.equal(duplicateDiagnostic.repairable, false);
+});
+
+test('code reports support the same one-line heading repair and semantic baseline', () => {
+  const malformed = artifact('code').replace('## 测试结果\n', '## 测试结果：\n');
+  const failed = validateLocalArtifact(malformed, { family: 'code' });
+  const repair = diagnostic(failed, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
+
+  assert.equal(repair.repairable, true);
+  assert.equal(repair.from, '测试结果：');
+  assert.equal(repair.to, '测试结果');
+
+  const repaired = validateLocalArtifact(malformed.replace('## 测试结果：', '## 测试结果'), { family: 'code' });
+  assert.equal(repaired.ok, true);
+  assert.equal(repaired.semanticDigest, failed.semanticDigest);
 });
