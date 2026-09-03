@@ -210,7 +210,18 @@ function syncTaskCommit(
     );
     const metadata = captureTaskWriteMetadata();
     const commitNote = gitText(task.repoRoot, ['show', '-s', '--format=%h %s', committedHead]);
-    const alreadyLogged = activity.entries.some((entry) => entry.step === 'Commit' && entry.note === commitNote);
+    let matchingCommitIndex = -1;
+    for (let index = activity.entries.length - 1; index >= 0; index -= 1) {
+      const entry = activity.entries[index]!;
+      if (entry.step === 'Commit' && entry.note === commitNote) {
+        matchingCommitIndex = index;
+        break;
+      }
+    }
+    const reviewedAfterCommit = matchingCommitIndex >= 0 && activity.entries
+      .slice(matchingCommitIndex + 1)
+      .some((entry) => /^Review Code \(Round \d+\)$/.test(entry.step));
+    const alreadyLogged = matchingCommitIndex >= 0 && !reviewedAfterCommit;
     const mutations: TaskMutation[] = [];
     if (!alreadyLogged) mutations.push({
       kind: 'section',

@@ -369,6 +369,29 @@ test('no-op task retry does not duplicate a Commit activity after an intervening
   }
 });
 
+test('no-op task retry records a fresh Commit activity after a later code review', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000007';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  try {
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
+
+    const first = executeCommitOperation(input(root, { taskRef: taskId, agent: 'codex' }));
+    assert.equal(first.result, 'committed');
+    fs.appendFileSync(path.join(taskDir, 'task.md'), '- 2099-01-01 00:01:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md\n');
+
+    const retry = executeCommitOperation(input(root, { taskRef: taskId, agent: 'codex' }));
+    assert.equal(retry.result, 'no_op');
+    assert.equal(retry.warnings.length, 0);
+    const activity = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    assert.equal((activity.match(/\*\*Commit\*\*/g) ?? []).length, 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('orchestrated commit is rejected because lifecycle commit delegation was removed', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000002';

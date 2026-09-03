@@ -68,7 +68,7 @@ function sectionMutation(content: string): TaskMutation[] {
   const english = /^##\s+Activity Log\s*$/m.test(content);
   return [{
     kind: 'section', aliases: WORKFLOW_WARNING_HEADINGS, heading: english ? 'Workflow Warnings' : '工作流告警',
-    body: `| ${WORKFLOW_WARNING_COLUMNS.join(' | ')} |\n|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|`
+    body: `| ${WORKFLOW_WARNING_COLUMNS.join(' | ')} |\n|----|------|------|----------|------|--------|---------|--------|-------------|------------|------------|`
   }];
 }
 

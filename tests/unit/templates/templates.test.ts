@@ -244,6 +244,7 @@ test("task templates include workflow warning sections", () => {
     const content = read(relativePath);
     assert.match(content, new RegExp(`^${escapeRegExp(heading)}$`, "m"));
     assert.match(content, /^\| id \| time \| step \| severity \| code \| status \| target \| message \| action \| resolved_at \| resolution \|$/m);
+    assert.match(content, /^\|----\|------\|------\|----------\|------\|--------\|---------\|--------\|-------------\|------------\|------------\|$/m);
   }
 });
 
