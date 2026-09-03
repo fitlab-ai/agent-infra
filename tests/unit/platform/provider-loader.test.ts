@@ -14,7 +14,7 @@ import {
 const fixtureRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../fixtures/platform-providers');
 
 function repository(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-provider-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'platform-provider-')));
   execFileSync('git', ['init', '-q'], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.mkdirSync(path.join(root, 'one'));
