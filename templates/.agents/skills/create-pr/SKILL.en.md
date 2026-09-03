@@ -74,7 +74,7 @@ If `{task-id}` is available and the related task provides `issue_number`, keep `
 
 ### 6. Sync PR Metadata
 
-Capture the `result` field from `platform-pr create` (`pr_created`, `pr_reused`, or `no_op`), then run `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue --result {primary-result}`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse. After the PR identity is bound, metadata or summary sync failures produce `pr_created_with_warnings`, `pr_reused_with_warnings`, or `no_op_with_warnings` from that primary result, preserve the primary-action fact, and retry only unfinished sync steps.
+Capture the `result` field from `platform-pr create` (`pr_created`, `pr_reused`, or `no_op`), then run `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue --result {primary-result}`. The shared core computes one `in:` target from task-bound diff/PR evidence and the repository mapping, converges a unique closing Issue before the PR, and syncs other metadata from the Issue. It never copies `in:` labels back from the Issue or removes unrelated labels. Permission failures degrade independently; partial side effects return blocked/`IN_LABEL_SYNC_PARTIAL`.
 
 ### 7. Generate the PR Code Change Report
 

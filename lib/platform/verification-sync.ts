@@ -9,6 +9,7 @@ import { hasCheckedRequirement, resolveRequirementSection } from "./issue-metada
 import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "./issues.ts";
 import { listRemoteComments } from "./issue-comments.ts";
 import { taskTypeLabel } from "./metadata-labels.ts";
+import { planInLabelUpdate, validateInLabelMapping, validateRepositoryLabelPayload } from "./in-label-sync.ts";
 import { inspectGitHubPullRequest } from "./pull-requests.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 
@@ -715,7 +716,7 @@ function checkInLabelsComputed(context: any, remoteData: any): any {
     return null;
   }
 
-  const expectedInLabels = computeExpectedInLabels(context.taskDir);
+  const expectedInLabels = computeExpectedInLabels(context.taskDir, context.upstreamRepo);
   if (!expectedInLabels.ok) {
     return expectedInLabels.type === "check_failed"
       ? failResult(CHECK_TYPE, expectedInLabels.message, expectedInLabels.type)
@@ -1127,10 +1128,18 @@ function formatLabelList(labels: any): any {
   return labels.length > 0 ? labels.join(", ") : "none";
 }
 
-function computeExpectedInLabels(taskDir: any): any {
-  const changedFilesResult = gitText(["diff", "main...HEAD", "--name-only"], taskDir);
+function computeExpectedInLabels(taskDir: any, repository: any): any {
+  const task = loadTask(taskDir);
+  if (!task.ok) {
+    return task;
+  }
+  const baseRef = String(task.metadata?.delivery_base_ref || "").trim();
+  if (!baseRef) {
+    return { ok: false, type: "check_failed", message: "Task has no delivery_base_ref for in-label evidence" };
+  }
+  const changedFilesResult = gitText(["diff", `${baseRef}...HEAD`, "--name-only"], taskDir);
   if (!changedFilesResult.ok) {
-    return changedFilesResult;
+    return { ...changedFilesResult, type: "network_error" };
   }
 
   const changedFiles = String(changedFilesResult.value || "")
@@ -1143,55 +1152,31 @@ function computeExpectedInLabels(taskDir: any): any {
     return mapping;
   }
 
-  if (Object.keys(mapping.value ?? {}).length > 0) {
-    const labels = new Set();
-
-    for (const file of changedFiles) {
-      for (const [label, prefixes] of Object.entries(mapping.value ?? {}) as Array<[string, string[]]>) {
-        if (prefixes.some((prefix: any) => file.startsWith(prefix))) {
-          labels.add(`in: ${label}`);
-        }
-      }
-    }
-
-    return { ok: true, labels: Array.from(labels).sort(), mode: "mapped" };
+  if (Object.keys(mapping.value ?? {}).length === 0) {
+    return { ok: true, labels: [], mode: "mapped" };
   }
 
-  const repoLabelsResult = withRetry(() => ghJson([
-    "label",
-    "list",
-    "--limit",
-    "200",
-    "--json",
-    "name"
+  const repoLabelsResult = withRetry(() => ghPaginatedJson([
+    "api", "--paginate", "--slurp", `repos/${repository}/labels?per_page=100`
   ], taskDir));
   if (!repoLabelsResult.ok) {
     return repoLabelsResult;
   }
 
-  const repoInLabels = new Set(
-    extractLabelNames(repoLabelsResult.value)
-      .filter((label: any) => label.startsWith("in:"))
-  );
-
-  if (repoInLabels.size === 0) {
-    return { ok: true, labels: [], mode: "fallback" };
+  const repositoryLabels = validateRepositoryLabelPayload(repoLabelsResult.value);
+  if (!repositoryLabels.ok) {
+    return { ok: false, type: "check_failed", message: repositoryLabels.error.message };
   }
-
-  const labels = new Set();
-  for (const file of changedFiles) {
-    const topLevel = file.split("/")[0];
-    if (!topLevel) {
-      continue;
-    }
-
-    const candidate = `in: ${topLevel}`;
-    if (repoInLabels.has(candidate)) {
-      labels.add(candidate);
-    }
+  const planned = planInLabelUpdate({
+    changedFiles,
+    currentLabels: [],
+    mapping: mapping.value ?? {},
+    repositoryLabels: new Set(repositoryLabels.value)
+  });
+  if (planned.error) {
+    return { ok: false, type: "check_failed", message: planned.error.message };
   }
-
-  return { ok: true, labels: Array.from(labels).sort(), mode: "fallback" };
+  return { ok: true, labels: planned.target, mode: "mapped" };
 }
 
 function loadInLabelMapping(): any {
@@ -1202,26 +1187,10 @@ function loadInLabelMapping(): any {
 
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const mapping = config?.labels?.in;
-    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) {
-      return { ok: true, value: {} };
-    }
-
-    const normalized: Record<string, string[]> = {};
-    for (const [label, prefixes] of Object.entries(mapping)) {
-      if (!Array.isArray(prefixes)) {
-        continue;
-      }
-
-      const cleaned = prefixes
-        .map((value) => String(value || "").trim())
-        .filter(Boolean);
-      if (cleaned.length > 0) {
-        normalized[label] = cleaned;
-      }
-    }
-
-    return { ok: true, value: normalized };
+    const mapping = validateInLabelMapping(config?.labels?.in);
+    return mapping.ok
+      ? { ok: true, value: mapping.value }
+      : { ok: false, type: "check_failed", message: mapping.error.message };
   } catch (error: any) {
     return { ok: false, type: "check_failed", message: `Unable to parse .agents/.airc.json: ${error.message}` };
   }

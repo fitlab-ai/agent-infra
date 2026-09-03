@@ -8,7 +8,7 @@ import type { PlatformError } from './types.ts';
 type RunResult = { status: number | null; stdout: string; stderr: string; error?: Error };
 type RunOptions = { cwd?: string; input?: string };
 type Runner = (args: string[], options: RunOptions) => RunResult;
-type RequestOptions = RunOptions & { method?: 'GET' | 'PATCH' | 'POST' | 'DELETE' };
+type RequestOptions = RunOptions & { method?: 'GET' | 'PATCH' | 'POST' | 'PUT' | 'DELETE' };
 type ClientResult<T> = { ok: true; value: T } | { ok: false; error: PlatformError };
 type ResponseMetadata = {
   status: number;
@@ -158,7 +158,7 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
 
   function run(args: string[], request: RequestOptions = {}): ClientResult<string> {
     const method = request.method || 'GET';
-    const retryableMethod = method === 'GET' || method === 'PATCH';
+    const retryableMethod = method === 'GET' || method === 'PATCH' || method === 'PUT';
     let attempt = 0;
     while (true) {
       const result = runner(args, request);

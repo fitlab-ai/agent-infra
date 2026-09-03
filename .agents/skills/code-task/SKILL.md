@@ -144,6 +144,8 @@ echo "$result"
 
 测试通过后，通过 `agent-infra-internal git-workflow commit --input {checkpoint-input}` 调用共享 commit core，输入 `delivery: { "mode": "local" }`、明确 paths、expected HEAD/tree、task ref、agent 和 code round。该调用只创建本地 checkpoint，不访问远端；core 会在 commit 前写入 durable intent，并在 task writer 成功后清理 intent。checkpoint 失败或 task 状态未闭合时，不得发送 `code.completed`。
 
+checkpoint 成功后，若任务存在 `issue_number`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`，由 task-bound `delivery_base_ref` 产生 Issue 的 `in:` target；该同步失败时记录 warning 并停止本轮，不发送 `code.completed`。
+
 排查测试失败或行为不符合预期时，先读取 `.agents/rules/debugging-guide.md`，按其四阶段流程定位根因，禁止盲目改代码重试。
 
 ### 9. 编写实现报告
@@ -162,7 +164,7 @@ echo "$result"
   - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}`
   - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --implementation-input {input-id} --files-modified {n} --tests-passed {n} {execution-flag}`
 
-如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则记录 warning 并继续；Issue 元数据边界仍见 `.agents/rules/issue-sync.md`）：
+如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（状态/评论失败按规则记录 warning；Issue `in:` evidence 同步失败不得发送 `code.completed`；边界见 `.agents/rules/issue-sync.md`）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {standard-agent-token}`

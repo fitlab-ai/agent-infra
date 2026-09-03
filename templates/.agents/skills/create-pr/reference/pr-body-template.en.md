@@ -42,7 +42,7 @@ Type label mapping:
 
 Metadata sync order:
 1. query Issue labels and milestone via the Issue read command in `.agents/rules/issue-pr-commands.md`
-2. build `{label-args}` from the mapped type label, non-`type:` / non-`status:` Issue labels, and the current Issue `in:` labels (commit already computed them, so do not recompute them here and do not write back to the Issue)
+2. build `{label-args}` from the mapped type label and non-`type:` / non-`status:` Issue labels; `in:` labels are computed once by the shared platform core from task-bound diff/PR evidence, so do not recompute them here or copy them back from the Issue
 3. build `{milestone-arg}` by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md` and reusing the Issue milestone directly
 4. pass `{label-args}` and `{milestone-arg}` atomically by using the create-PR command template and permission-degradation rules in `.agents/rules/issue-pr-commands.md`
 5. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword

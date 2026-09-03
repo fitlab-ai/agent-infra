@@ -702,6 +702,7 @@ const createPrCases = [
   },
   {
     name: "validate-artifact platform-sync fails when PR and Issue in: labels diverge",
+    changedPath: "tests/unit/core/fixture.txt",
     issuePayload: buildIssuePayload({ labels: [{ name: "in: core" }], body: "# Issue\n" }),
     prPayload: buildPrPayload({ labels: [{ name: "type: enhancement" }, { name: "in: cli" }, { name: "in: core" }] }),
     expectedStatus: 1,
@@ -709,6 +710,7 @@ const createPrCases = [
   },
   {
     name: "validate-artifact platform-sync fails when create-pr is missing the expected type label",
+    changedPath: "tests/unit/core/fixture.txt",
     taskOverrides: { type: "feature" },
     issuePayload: buildIssuePayload({ labels: [{ name: "in: core" }], body: "# Issue\n" }),
     prPayload: buildPrPayload({ labels: [{ name: "in: core" }] }),
@@ -717,6 +719,7 @@ const createPrCases = [
   },
   {
     name: "validate-artifact platform-sync passes when create-pr includes the expected type label",
+    changedPath: "tests/unit/core/fixture.txt",
     taskOverrides: { type: "feature" },
     issuePayload: buildIssuePayload({ labels: [{ name: "in: core" }], body: "# Issue\n" }),
     prPayload: buildPrPayload({ labels: [{ name: "type: feature" }, { name: "in: core" }] }),
@@ -759,6 +762,22 @@ const createPrCases = [
 for (const c of createPrCases) {
   test(c.name, () => withTempRoot("agent-infra-platform-sync-pr-", (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
+    const changedPath = "changedPath" in c ? c.changedPath : undefined;
+    if (changedPath) {
+      write(path.join(tempRoot, changedPath), "fixture\n");
+      const addResult = spawnSync("git", ["add", changedPath], {
+        cwd: tempRoot,
+        encoding: "utf8",
+        env: gitSafeEnv()
+      });
+      assert.equal(addResult.status, 0, addResult.stderr);
+      const commitResult = spawnSync("git", ["commit", "-qm", "fixture change"], {
+        cwd: tempRoot,
+        encoding: "utf8",
+        env: gitSafeEnv()
+      });
+      assert.equal(commitResult.status, 0, commitResult.stderr);
+    }
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
       issue_number: "65",
       pr_delivery_fact: boundFactValue(77),

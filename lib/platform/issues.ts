@@ -14,7 +14,6 @@ import type { GitHubClient } from './github-client.ts';
 import {
   DEFAULT_REQUIREMENT_SECTION_ANCHORS,
   chooseMilestone,
-  computeInLabels,
   desiredIssueType,
   normalizeOption,
   planIssueMetadata
@@ -22,6 +21,13 @@ import {
 import type { IssueDesiredState, PlannedOperation, Requirement, RequirementSectionAnchor } from './issue-metadata.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
+import {
+  labelDelta,
+  planInLabelUpdate,
+  syncLabelDelta,
+  validateInLabelMapping,
+  validateRepositoryLabelPayload
+} from './in-label-sync.ts';
 
 type IssueSnapshot = {
   repository: string;
@@ -462,31 +468,23 @@ function milestoneBasis(repoRoot: string, current: string | null): string | null
 
 function applyRestOperations(snapshot: IssueSnapshot, operations: PlannedOperation[]) {
   const payload: Record<string, unknown> = {};
-  let labels = [...snapshot.labels];
-  let labelsChanged = false;
   for (const operation of operations) {
     if (operation.status !== 'planned') continue;
-    if (operation.name === 'labels:status') {
-      labels = [
-        ...labels.filter((label) => !label.startsWith('status:')),
-        ...(operation.value as string[]).filter((label) => label.startsWith('status:'))
-      ];
-      labelsChanged = true;
-    }
-    if (operation.name === 'labels:in') {
-      labels = [
-        ...labels.filter((label) => !label.startsWith('in:')),
-        ...(operation.value as string[]).filter((label) => label.startsWith('in:'))
-      ];
-      labelsChanged = true;
-    }
     if (operation.name === 'assignees') payload.assignees = operation.value;
     if (operation.name === 'requirements') payload.body = operation.value;
     if (operation.name === 'state') payload.state = operation.value;
     if (operation.name === 'milestone') payload.milestone = operation.value;
   }
-  if (labelsChanged) payload.labels = [...new Set(labels)].sort();
   return payload;
+}
+
+function applyLabelDeltaToSnapshot(current: string[], target: readonly string[], prefix: string): string[] {
+  const delta = labelDelta(current, target, prefix);
+  const targetLabels = [...new Set(target.filter((label) => label.startsWith(prefix)))];
+  return [...new Set([
+    ...current.filter((label) => !delta.remove.includes(label)),
+    ...targetLabels
+  ])].sort();
 }
 
 type DesiredFieldValue = {
@@ -600,7 +598,9 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
   if (options.status !== undefined || options.inLabels !== undefined) {
     const labels = base.client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository}/labels?per_page=100`], { cwd: base.resolved.repoRoot });
     if (!labels.ok) return result(labels.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, error: labels.error });
-    repositoryLabels = listNames(labels.value).flatMap((name) => name);
+    const validated = validateRepositoryLabelPayload(labels.value);
+    if (!validated.ok) return result('failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, error: validated.error });
+    repositoryLabels = validated.value;
   }
   let milestones: Array<{ title: string; number: number }> = [];
   if (options.milestone !== undefined) {
@@ -634,16 +634,44 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
         : { name: 'labels:in', status: 'skipped', reasonCode: 'TRIAGE_REQUIRED' });
   }
   if (options.inLabels === 'from-diff') {
-    try {
-      const changed = execFileSync('git', ['diff', `${options.base}...HEAD`, '--name-only'], { cwd: base.resolved.repoRoot, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-      const config = JSON.parse(fs.readFileSync(`${base.resolved.repoRoot}/.agents/.airc.json`, 'utf8'));
-      const targets = computeInLabels(changed, config?.labels?.in || {}, new Set(repositoryLabels));
-      const labels = [...snapshot.labels.filter((label) => !label.startsWith('in:')), ...targets].sort();
-      plan.operations.push(labels.join('\0') === snapshot.labels.join('\0')
-        ? { name: 'labels:in', status: 'no-op', reasonCode: null }
-        : { name: 'labels:in', status: 'planned', reasonCode: null, value: labels });
-    } catch {
-      plan.operations.push({ name: 'labels:in', status: 'skipped', reasonCode: 'DIFF_UNAVAILABLE' });
+    const taskBase = typeof base.frontmatter.delivery_base_ref === 'string'
+      ? base.frontmatter.delivery_base_ref.trim()
+      : '';
+    if (!taskBase) {
+      plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISSING' });
+    } else if (options.base && options.base !== taskBase) {
+      plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_BASE_MISMATCH' });
+    } else {
+      try {
+        const changed = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+          cwd: base.resolved.repoRoot, encoding: 'utf8'
+        }).trim().split(/\r?\n/).filter(Boolean);
+        const config = JSON.parse(fs.readFileSync(`${base.resolved.repoRoot}/.agents/.airc.json`, 'utf8')) as {
+          labels?: { in?: Record<string, unknown> };
+        };
+        const mapping = validateInLabelMapping(config.labels?.in);
+        if (!mapping.ok) {
+          plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: mapping.error.code });
+        } else {
+          const planned = planInLabelUpdate({
+            changedFiles: changed,
+            currentLabels: snapshot.labels,
+            mapping: mapping.value,
+            repositoryLabels: new Set(repositoryLabels)
+          });
+          if (planned.error) {
+            plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: planned.error.code });
+          } else {
+            plan.operations.push(planned.changed
+              ? { name: 'labels:in', status: 'planned', reasonCode: null, value: planned.labels }
+              : { name: 'labels:in', status: 'no-op', reasonCode: null });
+          }
+        }
+      } catch {
+        if (!plan.operations.some((operation) => operation.name === 'labels:in' && operation.status === 'failed')) {
+          plan.operations.push({ name: 'labels:in', status: 'failed', reasonCode: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE' });
+        }
+      }
     }
   }
   const graph = planGraphMetadata(
@@ -662,20 +690,70 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
   const payload = applyRestOperations(snapshot, restPlanned);
   if (typeof payload.milestone === 'string') payload.milestone = milestones.find((item) => item.title === payload.milestone)?.number ?? payload.milestone;
   if (options.closeReason) payload.state_reason = options.closeReason;
+  let currentLabels = [...snapshot.labels];
+  let labelsChanged = false;
+  for (const operation of restPlanned.filter((item) => item.name === 'labels:status' || item.name === 'labels:in')) {
+    const prefix = operation.name === 'labels:status' ? 'status:' : 'in:';
+    const synced = syncLabelDelta(base.client, repository, base.issueNumber, base.resolved.repoRoot, currentLabels, operation.value as string[], prefix);
+    if (synced.status === 'failed' || synced.status === 'blocked') {
+      const partial = labelsChanged || synced.status === 'blocked';
+      const error = partial && synced.error
+        ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
+        : synced.error;
+      return result(partial ? 'blocked' : synced.status, base.resolved.taskId, base.issueNumber, {
+        changed: labelsChanged || synced.changed, issue: snapshot, operations: plan.operations, error
+      });
+    }
+    currentLabels = applyLabelDeltaToSnapshot(currentLabels, operation.value as string[], prefix);
+    labelsChanged ||= synced.changed;
+  }
   if (Object.keys(payload).length > 0) {
     const patched = base.client.json<unknown>(['api', `repos/${repository}/issues/${base.issueNumber}`, '-X', 'PATCH', '--input', '-'], {
       cwd: base.resolved.repoRoot, method: 'PATCH', input: JSON.stringify(payload)
     });
-    if (!patched.ok) return result(patched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: patched.error });
+    if (!patched.ok) {
+      const error = labelsChanged || patched.error.retryable
+        ? { ...patched.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${patched.error.message}` }
+        : patched.error;
+      return result(labelsChanged || error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { changed: labelsChanged, issue: snapshot, operations: plan.operations, error });
+    }
+  }
+  let finalSnapshot = snapshot;
+  const inLabelWrite = restPlanned.find((operation) => operation.name === 'labels:in' && operation.status === 'planned');
+  if (inLabelWrite) {
+    const reread = inspectGitHubIssue(base.client, repository, base.issueNumber, base.resolved.repoRoot);
+    if (!reread.ok) return result('blocked', base.resolved.taskId, base.issueNumber, {
+      changed: labelsChanged, issue: snapshot, operations: plan.operations,
+      error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
+    });
+    const expected = (inLabelWrite.value as string[]).filter((label) => label.startsWith('in:')).sort();
+    const actual = reread.value.labels.filter((label) => label.startsWith('in:')).sort();
+    if (expected.join('\0') !== actual.join('\0')) return result('blocked', base.resolved.taskId, base.issueNumber, {
+      issue: reread.value, operations: plan.operations,
+      error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue in: labels did not converge after update', retryable: true }
+    });
+    finalSnapshot = reread.value;
+  } else if (labelsChanged) {
+    const reread = inspectGitHubIssue(base.client, repository, base.issueNumber, base.resolved.repoRoot);
+    if (!reread.ok) return result('blocked', base.resolved.taskId, base.issueNumber, {
+      changed: labelsChanged, issue: snapshot, operations: plan.operations,
+      error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `Label synchronization is partial or unknown: ${reread.error.message}` }
+    });
+    finalSnapshot = reread.value;
   }
   for (const operation of graphPlanned) {
     if (!graph.issueId) return result('failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: { code: 'ISSUE_GRAPH_IDENTITY_INVALID', message: 'Issue GraphQL identity is unavailable', retryable: false } });
     const written = executeGraphOperation(base.client, base.resolved.repoRoot, graph.issueId, operation);
-    if (!written.ok) return result(written.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: written.error });
+    if (!written.ok) {
+      const error = labelsChanged || written.error.retryable
+        ? { ...written.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${written.error.message}` }
+        : written.error;
+      return result(labelsChanged || error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { changed: labelsChanged, issue: finalSnapshot, operations: plan.operations, error });
+    }
   }
   return result(skipped ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, {
-    changed: true, platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'issue', number: base.issueNumber }, issue: snapshot,
+    changed: labelsChanged || Object.keys(payload).length > 0 || graphPlanned.length > 0, platform: base.context.platform, capabilities: base.context.capabilities,
+    resource: { kind: 'issue', number: base.issueNumber }, issue: finalSnapshot,
     operations: plan.operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
   });
 }

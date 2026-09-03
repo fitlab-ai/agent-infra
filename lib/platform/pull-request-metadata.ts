@@ -36,13 +36,14 @@ function planPullRequestMetadata(input: {
   taskType: string;
   issueNumber: number;
   capabilities: PlatformCapabilities;
+  inLabels?: string[];
 }): { operations: PullRequestMetadataOperation[] } {
   const typeLabel = taskTypeLabel(input.taskType);
-  const copiedLabels = input.issue.labels.filter((label) => label.startsWith('in:'));
+  const targetInLabels = input.inLabels || input.pullRequest.labels.filter((label) => label.startsWith('in:'));
   const desiredLabels = [...new Set([
     ...input.pullRequest.labels.filter((label) => !label.startsWith('type:') && !label.startsWith('in:')),
     ...(typeLabel ? [typeLabel] : []),
-    ...copiedLabels
+    ...targetInLabels.filter((label) => label.startsWith('in:'))
   ])].sort();
   const body = ensureClosingReference(input.pullRequest.body, input.issueNumber);
   return { operations: [
