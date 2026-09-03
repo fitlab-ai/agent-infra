@@ -64,6 +64,10 @@ test('non-whitelisted content changes and ambiguous candidates fail closed', () 
   assert.equal(changed.ok, true);
   assert.notEqual(changed.semanticDigest, valid.semanticDigest);
 
+  const changedWhitespace = validateLocalArtifact(artifact().replace('$ git status -s', '$ git status  -s'), { family: 'plan' });
+  assert.equal(changedWhitespace.ok, true);
+  assert.notEqual(changedWhitespace.semanticDigest, valid.semanticDigest);
+
   const duplicateCandidate = artifact().replace(
     '## 验证策略\n',
     '## 验证策略：\n'

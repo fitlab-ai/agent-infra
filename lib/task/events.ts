@@ -36,8 +36,11 @@ import { allowsManualOverride } from './guard-override.ts';
 import {
   LOCAL_ARTIFACT_REQUIRED_PATTERNS,
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
+  readLocalArtifactFinalizationIntent,
+  removeLocalArtifactFinalizationIntent,
   validateLocalArtifact
 } from './local-artifact-finalization.ts';
+import type { LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
 import { loadVerificationConfig } from './verification-config.ts';
 
 const eventCatalog = [
@@ -440,6 +443,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const completedRows = matchingRows.filter((item) => item.done);
   const row = manual ? openRows.at(-1) : matchingRows[0];
   let completedArtifact: ArtifactIdentity | null = null;
+  let localFinalizationIntent: LocalArtifactFinalizationIntent | null = null;
   if (eventIdentity.phase === 'started' && row) {
     if (row.agent !== normalized.agent) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, row.started, frontmatter, artifactContext);
@@ -483,6 +487,28 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
         return failed(normalized, {
           code: 'EVENT_ARTIFACT_CONFLICT',
           message: `semantic digest does not match finalizer result for ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      try {
+        localFinalizationIntent = readLocalArtifactFinalizationIntent(
+          resolved.repoRoot, resolved.taskId, localFamily, completedArtifact.name
+        );
+      } catch (error) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `cannot read local finalizer provenance for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      if (!localFinalizationIntent || localFinalizationIntent.state !== 'passed') {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `local finalizer provenance is missing or incomplete for ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      if (localFinalizationIntent.artifactSha256 !== actualSha256 || localFinalizationIntent.semanticDigest !== local.semanticDigest) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `local finalizer provenance does not match ${completedArtifact.name}`
         }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
     }
@@ -606,6 +632,32 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       return failed(normalized, {
         code: 'EVENT_ORCHESTRATION_COMMIT_FAILED',
         message: `task.md was written but orchestration completion could not be persisted; manual recovery is required: ${error instanceof Error ? error.message : String(error)}`
+      }, {
+        taskId: result.taskId,
+        taskMdPath: result.taskMdPath,
+        fromStep: currentStep,
+        toStep: step,
+        action: eventIdentity.action,
+        phase: eventIdentity.phase,
+        timestamp: result.timestamp,
+        agentInfraVersion: result.agentInfraVersion,
+        operations: result.operations,
+        artifactContext
+      });
+    }
+  }
+  if (!normalized.dryRun && localFinalizationIntent && completedArtifact) {
+    try {
+      removeLocalArtifactFinalizationIntent(
+        resolved.repoRoot,
+        resolved.taskId,
+        localFinalizationIntent.family,
+        completedArtifact.name
+      );
+    } catch (error) {
+      return failed(normalized, {
+        code: 'EVENT_ARTIFACT_CONFLICT',
+        message: `local finalizer provenance could not be consumed for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
       }, {
         taskId: result.taskId,
         taskMdPath: result.taskMdPath,

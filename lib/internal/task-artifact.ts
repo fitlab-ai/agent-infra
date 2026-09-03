@@ -1,6 +1,7 @@
 import { resolveArtifactContext } from '../task/artifact-lifecycle.ts';
 import { finalizeLocalArtifact } from '../task/local-artifact-finalization.ts';
 import type { LocalArtifactFamily } from '../task/local-artifact-finalization.ts';
+import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { loadVerificationConfig } from '../task/verification-config.ts';
 
 const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> finalize-local --family <analysis|plan> --artifact <artifact>\n\nInspect workflow artifact context or finalize a local analysis/plan artifact without changing task state.\n`;
@@ -58,9 +59,11 @@ function taskArtifact(args: string[] = []): void {
     return;
   }
   const skillName = family === 'analysis' ? 'analyze-task' : 'plan-task';
+  const resolved = resolveTaskRef(args[0]!);
+  const repositoryRoot = resolved.ok ? resolved.repoRoot : process.cwd();
   let config: { requiredSections?: readonly string[]; requiredPatterns?: readonly string[] } = {};
   try {
-    const loaded = loadVerificationConfig(process.cwd(), skillName);
+    const loaded = loadVerificationConfig(repositoryRoot, skillName);
     const artifactConfig = loaded.checks.artifact;
     if (artifactConfig && typeof artifactConfig === 'object' && !Array.isArray(artifactConfig)) {
       const sections = artifactConfig.required_sections;
@@ -77,6 +80,7 @@ function taskArtifact(args: string[] = []): void {
     taskRef: args[0]!,
     family: family as LocalArtifactFamily,
     artifact,
+    repoRoot: repositoryRoot,
     ...config
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);

@@ -11,7 +11,11 @@ import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
 import { upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
-import { validateLocalArtifact, type LocalArtifactFamily } from '../../../lib/task/local-artifact-finalization.ts';
+import {
+  finalizeLocalArtifact,
+  validateLocalArtifact,
+  type LocalArtifactFamily
+} from '../../../lib/task/local-artifact-finalization.ts';
 
 function fixture(step = 'requirement-analysis-review') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-'));
@@ -137,9 +141,14 @@ function localArtifact(family: LocalArtifactFamily, suffix = '') {
 
 function completionDigestArgs(dir: string, artifact: string, family: LocalArtifactFamily): string[] {
   const file = path.join(dir, artifact);
-  const result = validateLocalArtifact(fs.readFileSync(file, 'utf8'), { family });
-  assert.equal(result.ok, true, result.diagnostics.map((item) => item.message).join('; '));
-  return ['--artifact-sha256', sha256File(file), '--semantic-digest', result.semanticDigest];
+  const result = finalizeLocalArtifact({
+    taskRef: path.basename(dir),
+    repoRoot: path.resolve(dir, '../../../..'),
+    family,
+    artifact
+  });
+  assert.equal(result.status, 'passed', result.error?.message);
+  return ['--artifact-sha256', result.artifactSha256!, '--semantic-digest', result.semanticDigest!];
 }
 
 function addReceipt(file: string, receipt: ArtifactReceipt) {
@@ -397,6 +406,57 @@ test('local completion rejects a stale finalizer digest before mutating task sta
   }
 });
 
+test('local completion rejects a valid artifact without finalizer provenance', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, localArtifact('plan'));
+  const local = validateLocalArtifact(fs.readFileSync(artifact, 'utf8'), { family: 'plan' });
+  assert.equal(local.ok, true);
+  const before = fs.readFileSync(f.file);
+
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md',
+    '--artifact-sha256', sha256File(artifact), '--semantic-digest', local.semanticDigest
+  ]);
+
+  assert.equal(completed.status, 1);
+  assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('local repair provenance rejects semantic mutation between finalizer retries and completion', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, localArtifact('plan').replace('## 验证策略\n', '## 验证策略：\n'));
+
+  const first = inspect(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(first.status, 1, first.stderr);
+  const firstResult = JSON.parse(first.stdout);
+  assert.equal(firstResult.repairable, true);
+
+  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8')
+    .replace('## 验证策略：', '## 验证策略')
+    .replace('$ git status -s', '$ git status --porcelain'));
+  const second = inspect(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(second.status, 1, second.stderr);
+  const secondResult = JSON.parse(second.stdout);
+  assert.equal(secondResult.repairable, false);
+  assert.ok(secondResult.diagnostics.some((item: { code: string }) => item.code === 'LOCAL_REPAIR_BASELINE_MISMATCH'));
+
+  const before = fs.readFileSync(f.file);
+  const local = validateLocalArtifact(fs.readFileSync(artifact, 'utf8'), { family: 'plan' });
+  assert.equal(local.ok, true);
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md',
+    '--artifact-sha256', sha256File(artifact), '--semantic-digest', local.semanticDigest
+  ]);
+  assert.equal(completed.status, 1);
+  assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
 test('local completion uses the repository verification config for its language', () => {
   const f = fixture();
   const sections = ['Problem Understanding', 'Constraints', 'Options Comparison', 'Technical Approach', 'Implementation Steps', 'File List', 'Verification Strategy', 'State Check'];
@@ -411,10 +471,19 @@ test('local completion uses the repository verification config for its language'
   const content = fs.readFileSync(artifact, 'utf8');
   const local = validateLocalArtifact(content, { family: 'plan', requiredSections: sections, requiredPatterns: ['^\\$ '] });
   assert.equal(local.ok, true, local.diagnostics.map((item) => item.message).join('; '));
+  const finalized = finalizeLocalArtifact({
+    taskRef: f.id,
+    repoRoot: f.root,
+    family: 'plan',
+    artifact: 'plan.md',
+    requiredSections: sections,
+    requiredPatterns: ['^\\$ ']
+  });
+  assert.equal(finalized.status, 'passed', finalized.error?.message);
 
   const completed = run(f.root, [
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md',
-    '--artifact-sha256', sha256File(artifact), '--semantic-digest', local.semanticDigest
+    '--artifact-sha256', finalized.artifactSha256!, '--semantic-digest', finalized.semanticDigest!
   ]);
 
   assert.equal(completed.status, 0, completed.stderr || completed.stdout);
@@ -581,6 +650,13 @@ test('orchestrated completion reports a distinct partial-write error when the ru
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
     pendingDelegation: orchestrationReceipt(f.id)
   }), null, 2)}\n`);
+  const finalized = finalizeLocalArtifact({
+    taskRef: f.id,
+    repoRoot: f.root,
+    family: 'plan',
+    artifact: 'plan.md'
+  });
+  assert.equal(finalized.status, 'passed', finalized.error?.message);
   const taskBefore = fs.readFileSync(f.file);
 
   const result = applyTaskEvent({
@@ -588,8 +664,8 @@ test('orchestrated completion reports a distinct partial-write error when the ru
     event: 'plan.completed',
     agent: 'codex',
     artifact: 'plan.md',
-    artifactSha256: sha256File(path.join(f.dir, 'plan.md')),
-    semanticDigest: validateLocalArtifact(fs.readFileSync(path.join(f.dir, 'plan.md'), 'utf8'), { family: 'plan' }).semanticDigest,
+    artifactSha256: finalized.artifactSha256!,
+    semanticDigest: finalized.semanticDigest!,
     orchestrated: true
   }, {
     repoRoot: f.root,

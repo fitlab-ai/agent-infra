@@ -40,7 +40,7 @@ test('task-artifact inspect returns one read-only JSON context', () => {
   const f = fixture();
   const before = fs.readdirSync(f.dir).sort();
   const out = run(f.root, [f.id, 'inspect', '--family', 'plan']);
-  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.status, 0, `${out.stderr}\n${out.stdout}`);
   const result = JSON.parse(out.stdout);
   assert.equal(result.status, 'ready');
   assert.equal(result.changed, false);
@@ -74,6 +74,32 @@ test('task-artifact finalize-local returns stable digests without mutating a val
   assert.match(result.artifactSha256, /^[0-9a-f]{64}$/);
   assert.match(result.semanticDigest, /^[0-9a-f]{64}$/);
   assert.deepEqual(fs.readFileSync(artifact), before);
+});
+
+test('task-artifact finalize-local uses repository config from a nested working directory', () => {
+  const f = fixture();
+  const sections = ['Problem Understanding', 'Constraints', 'Options Comparison', 'Technical Approach', 'Implementation Steps', 'File List', 'Verification Strategy', 'State Check'];
+  const configDir = path.join(f.root, '.agents', 'skills', 'plan-task', 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
+    checks: { artifact: { required_sections: sections, required_patterns: ['^\\$ '] } }
+  }));
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), [
+    '# Technical Plan',
+    ...sections.flatMap((section) => [`## ${section}`, 'content']),
+    '```text',
+    '$ git status -s',
+    '```'
+  ].join('\n'));
+  const nested = path.join(f.root, 'nested');
+  fs.mkdirSync(nested);
+
+  const out = run(nested, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+
+  assert.equal(out.status, 0, `${out.stderr}\n${out.stdout}`);
+  const result = JSON.parse(out.stdout);
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(result.diagnostics, []);
 });
 
 test('task-artifact finalize-local reports one-line heading repair and revalidates after the edit', () => {

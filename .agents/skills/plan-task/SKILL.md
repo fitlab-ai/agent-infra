@@ -118,9 +118,9 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
   ```bash
   agent-infra-internal task-artifact {task-id} finalize-local --family plan --artifact {plan-artifact}
   ```
-  - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`。
+  - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`；finalizer 已记录对应的一次性本地 provenance intent。
   - `status=failed` 且 `repairable=true`：仅按诊断中的 `replace-line` 操作做一次最小修改，然后完整重跑同一命令；实际字节发生变化才计一次 `repairAttempts`，最多 8 次。
-  - 其他失败、无进展或重复诊断：停止，不发布 completed 事件。
+  - 首次可修复失败的 `semanticDigest` 由 finalizer 保留为基线；重试后的 `status=passed` 必须匹配该基线。基线不匹配、其他失败、无进展或重复诊断：停止，不发布 completed 事件。
 - 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：

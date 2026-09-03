@@ -5,7 +5,8 @@ This rule applies when `analyze-task` or `plan-task` handles **the same controll
 ## Pre-completion gate for analysis and plan artifacts
 
 - `analyze-task` and `plan-task` must call `task-artifact ... finalize-local` before publishing a completed event; pass only that call's `artifactSha256` and `semanticDigest` to the completed event.
-- `finalize-local` is read-only validation. After `failed`, the model may make one minimal edit in the same artifact only when `repairable=true` and the diagnostic explicitly describes a one-line replacement, then rerun the same call completely; count each byte-changing edit, up to 8.
+- `finalize-local` does not modify the artifact or task state, but it writes a one-shot local provenance intent in the repository workspace. After `failed`, the model may make one minimal edit in the same artifact only when `repairable=true` and the diagnostic explicitly describes a one-line replacement, then rerun the same call completely; count each byte-changing edit, up to 8.
+- The first repairable failure's semantic digest is retained in that intent; a later `passed` result must match the baseline, and the completed event must verify and consume the same intent under the task lock. Do not replace a failed baseline with a newly computed digest or publish a completed event without the finalizer.
 - After `failed`, no progress, or a repeated diagnostic or fingerprint, do not publish a completed event. After `passed`, do not rescan or manually write summary data.
 
 ## Authorization Boundary

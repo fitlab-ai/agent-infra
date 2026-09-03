@@ -209,9 +209,9 @@ After writing the local artifact, run the pre-completion gate:
 agent-infra-internal task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact}
 ```
 
-- On `status=passed`, save that result's `artifactSha256` and `semanticDigest`.
+- On `status=passed`, save that result's `artifactSha256` and `semanticDigest`; the finalizer has recorded the matching one-shot local provenance intent.
 - On `status=failed` with `repairable=true`, apply only the diagnostic's `replace-line` operation once, then rerun the same command completely; count an attempt only after bytes change, up to 8 attempts.
-- On any other failure, no progress, or a repeated diagnostic, stop without publishing a completed event.
+- The first repairable failure's `semanticDigest` is retained as the baseline; a retried `status=passed` result must match it. On baseline mismatch, any other failure, no progress, or a repeated diagnostic, stop without publishing a completed event.
 
 Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}

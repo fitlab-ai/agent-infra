@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 
 import {
   inspectDecisionDetailDuplicates,
@@ -34,7 +35,9 @@ type LocalArtifactDiagnosticCode =
   | 'LOCAL_STATUS_COMMAND_MISSING'
   | 'LOCAL_DECISION_DETAIL_DUPLICATE'
   | 'LOCAL_REQUIRED_PATTERN_MISSING'
-  | 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION';
+  | 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION'
+  | 'LOCAL_REPAIR_PROVENANCE_CONFLICT'
+  | 'LOCAL_REPAIR_BASELINE_MISMATCH';
 
 type LocalArtifactDiagnostic = {
   code: LocalArtifactDiagnosticCode;
@@ -83,6 +86,80 @@ type LocalArtifactFinalizationResult = {
   error: { code: string; message: string } | null;
 };
 
+type LocalArtifactFinalizationIntent = Readonly<{
+  version: 1;
+  taskId: string;
+  family: LocalArtifactFamily;
+  artifact: string;
+  state: 'awaiting-repair' | 'passed';
+  baselineSemanticDigest: string | null;
+  artifactSha256: string;
+  semanticDigest: string;
+}>;
+
+function finalizationIntentRoot(repoRoot: string): string {
+  return path.join(repoRoot, '.agents', 'workspace', '.local-artifact-finalization-intents');
+}
+
+function finalizationIntentPath(repoRoot: string, taskId: string, family: LocalArtifactFamily, artifact: string): string {
+  return path.join(finalizationIntentRoot(repoRoot), `${taskId}-${family}-${artifact}.json`);
+}
+
+function isFinalizationIntent(value: unknown): value is LocalArtifactFinalizationIntent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const intent = value as Record<string, unknown>;
+  return intent.version === 1
+    && typeof intent.taskId === 'string' && intent.taskId.length > 0
+    && (intent.family === 'analysis' || intent.family === 'plan')
+    && typeof intent.artifact === 'string' && intent.artifact.length > 0
+    && (intent.state === 'awaiting-repair' || intent.state === 'passed')
+    && (intent.baselineSemanticDigest === null || (typeof intent.baselineSemanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.baselineSemanticDigest)))
+    && typeof intent.artifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(intent.artifactSha256)
+    && typeof intent.semanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.semanticDigest)
+    && (intent.state === 'awaiting-repair' ? intent.baselineSemanticDigest === intent.semanticDigest : true);
+}
+
+function readLocalArtifactFinalizationIntent(
+  repoRoot: string,
+  taskId: string,
+  family: LocalArtifactFamily,
+  artifact: string
+): LocalArtifactFinalizationIntent | null {
+  const target = finalizationIntentPath(repoRoot, taskId, family, artifact);
+  if (!fs.existsSync(target)) return null;
+  const value = JSON.parse(fs.readFileSync(target, 'utf8')) as unknown;
+  if (!isFinalizationIntent(value) || value.taskId !== taskId || value.family !== family || value.artifact !== artifact) {
+    throw new Error('LOCAL_FINALIZATION_INTENT_INVALID: finalization provenance schema is invalid');
+  }
+  return value;
+}
+
+function writeLocalArtifactFinalizationIntent(repoRoot: string, value: LocalArtifactFinalizationIntent): void {
+  if (!isFinalizationIntent(value)) throw new Error('LOCAL_FINALIZATION_INTENT_INVALID: finalization provenance schema is invalid');
+  const directory = finalizationIntentRoot(repoRoot);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const target = finalizationIntentPath(repoRoot, value.taskId, value.family, value.artifact);
+  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  try { fs.renameSync(temporary, target); }
+  catch (error) {
+    try { fs.unlinkSync(temporary); } catch { /* preserve primary error */ }
+    throw error;
+  }
+}
+
+function removeLocalArtifactFinalizationIntent(
+  repoRoot: string,
+  taskId: string,
+  family: LocalArtifactFamily,
+  artifact: string
+): void {
+  const target = finalizationIntentPath(repoRoot, taskId, family, artifact);
+  try { fs.unlinkSync(target); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+
 function requiredSections(family: LocalArtifactFamily): readonly string[] {
   return LOCAL_ARTIFACT_REQUIRED_SECTIONS[family];
 }
@@ -108,7 +185,7 @@ function semanticDigest(content: string, candidate?: VisibleHeading): string {
       normalized = `${content.slice(0, candidate.start)}${canonical}${content.slice(candidate.end)}`;
     }
   }
-  return createHash('sha256').update(normalized.replace(/\s+/g, ''), 'utf8').digest('hex');
+  return createHash('sha256').update(normalized, 'utf8').digest('hex');
 }
 
 function sha256Content(content: string): string {
@@ -280,6 +357,24 @@ function failedFinalization(
   };
 }
 
+function provenanceFailure(
+  request: LocalArtifactFinalizationRequest,
+  resolved: { taskId: string; taskDir: string },
+  content: string,
+  artifactSha256: string,
+  semanticDigestValue: string,
+  code: LocalArtifactDiagnosticCode,
+  message: string
+): LocalArtifactFinalizationResult {
+  return failedFinalization(request, { code, message }, {
+    taskId: resolved.taskId,
+    taskDir: resolved.taskDir,
+    artifactSha256,
+    semanticDigest: semanticDigestValue,
+    diagnostics: [diagnostic(code, message, content)]
+  });
+}
+
 function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): LocalArtifactFinalizationResult {
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: request.repoRoot });
   if (!resolved.ok) return failedFinalization(request, { code: resolved.code, message: resolved.message });
@@ -307,6 +402,108 @@ function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): Local
     requiredPatterns: request.requiredPatterns
   });
   const artifactSha256 = sha256Content(content);
+  let intent: LocalArtifactFinalizationIntent | null;
+  try {
+    intent = readLocalArtifactFinalizationIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
+  } catch (error) {
+    return failedFinalization(request, {
+      code: 'LOCAL_FINALIZATION_INTENT_INVALID',
+      message: error instanceof Error ? error.message : String(error)
+    }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest: result.semanticDigest });
+  }
+  if (result.repairable) {
+    if (intent && (intent.state !== 'awaiting-repair' || intent.baselineSemanticDigest !== result.semanticDigest)) {
+      return provenanceFailure(
+        request, resolved, content, artifactSha256, result.semanticDigest,
+        'LOCAL_REPAIR_PROVENANCE_CONFLICT',
+        'a different local repair baseline is already recorded for this artifact'
+      );
+    }
+    if (!intent) {
+      try {
+        writeLocalArtifactFinalizationIntent(resolved.repoRoot, {
+          version: 1,
+          taskId: resolved.taskId,
+          family: request.family,
+          artifact: request.artifact,
+          state: 'awaiting-repair',
+          baselineSemanticDigest: result.semanticDigest,
+          artifactSha256,
+          semanticDigest: result.semanticDigest
+        });
+      } catch (error) {
+        return failedFinalization(request, {
+          code: 'LOCAL_FINALIZATION_INTENT_WRITE_FAILED',
+          message: error instanceof Error ? error.message : String(error)
+        }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest: result.semanticDigest });
+      }
+    }
+    return {
+      status: 'failed',
+      changed: false,
+      taskId: resolved.taskId,
+      taskDir: resolved.taskDir,
+      family: request.family,
+      artifact: request.artifact,
+      artifactSha256,
+      semanticDigest: result.semanticDigest,
+      repairable: true,
+      diagnostics: result.diagnostics,
+      error: {
+        code: 'LOCAL_ARTIFACT_INVALID',
+        message: result.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
+      }
+    };
+  }
+  if (!result.ok) {
+    return {
+      status: 'failed',
+      changed: false,
+      taskId: resolved.taskId,
+      taskDir: resolved.taskDir,
+      family: request.family,
+      artifact: request.artifact,
+      artifactSha256,
+      semanticDigest: result.semanticDigest,
+      repairable: false,
+      diagnostics: result.diagnostics,
+      error: {
+        code: 'LOCAL_ARTIFACT_INVALID',
+        message: result.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
+      }
+    };
+  }
+  if (intent?.state === 'awaiting-repair' && intent.baselineSemanticDigest !== result.semanticDigest) {
+    return provenanceFailure(
+      request, resolved, content, artifactSha256, result.semanticDigest,
+      'LOCAL_REPAIR_BASELINE_MISMATCH',
+      'the repaired artifact semantic digest does not match the recorded repair baseline'
+    );
+  }
+  if (intent?.state === 'passed' && (intent.artifactSha256 !== artifactSha256 || intent.semanticDigest !== result.semanticDigest)) {
+    return provenanceFailure(
+      request, resolved, content, artifactSha256, result.semanticDigest,
+      'LOCAL_REPAIR_PROVENANCE_CONFLICT',
+      'the artifact changed after its finalization provenance was recorded'
+    );
+  }
+  try {
+    writeLocalArtifactFinalizationIntent(resolved.repoRoot, {
+      version: 1,
+      taskId: resolved.taskId,
+      family: request.family,
+      artifact: request.artifact,
+      state: 'passed',
+      baselineSemanticDigest: intent?.baselineSemanticDigest ?? null,
+      artifactSha256,
+      semanticDigest: result.semanticDigest
+    });
+  } catch (error) {
+    return failedFinalization(request, {
+      code: 'LOCAL_FINALIZATION_INTENT_WRITE_FAILED',
+      message: error instanceof Error ? error.message : String(error)
+    }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest: result.semanticDigest });
+  }
   return {
     status: result.ok ? 'passed' : 'failed',
     changed: false,
@@ -329,6 +526,8 @@ export {
   LOCAL_ARTIFACT_REQUIRED_PATTERNS,
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
   finalizeLocalArtifact,
+  readLocalArtifactFinalizationIntent,
+  removeLocalArtifactFinalizationIntent,
   semanticDigest,
   sha256Content,
   validateLocalArtifact
@@ -339,6 +538,7 @@ export type {
   LocalArtifactFamily,
   LocalArtifactFinalizationRequest,
   LocalArtifactFinalizationResult,
+  LocalArtifactFinalizationIntent,
   LocalArtifactValidationOptions,
   LocalArtifactValidationResult
 };
