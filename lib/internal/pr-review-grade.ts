@@ -13,7 +13,7 @@ import { inspectPlatformPullRequestByNumber } from '../platform/pull-requests.ts
 import { verifyInProcess } from '../task/verification-engine.ts';
 
 const USAGE = `Usage: agent-infra-internal pr-review-grade decide --input-file <path|-> [--cwd <path>]
-       agent-infra-internal pr-review-grade resolve-host --pr <N> [--cwd <path>]
+       agent-infra-internal pr-review-grade resolve-host --pr <token> [--cwd <path>]
        agent-infra-internal pr-review-grade verify-artifact --artifact-file <path> [--cwd <path>]
 `;
 
@@ -85,8 +85,8 @@ async function prReviewGrade(args: string[] = []): Promise<void> {
   }
 
   if (operation === 'resolve-host') {
-    const pr = Number(values.pr);
-    if (!Number.isInteger(pr) || pr <= 0) { fail('resolve-host requires a positive --pr'); return; }
+    const pr = typeof values.pr === 'string' ? values.pr : '';
+    if (!pr) { fail('resolve-host requires --pr <token>'); return; }
     const inspected = await inspectPlatformPullRequestByNumber(pr, { cwd });
     if (!inspected.pullRequest) {
       finish({
@@ -95,12 +95,14 @@ async function prReviewGrade(args: string[] = []): Promise<void> {
       }, inspected.status === 'blocked' ? 2 : 1);
       return;
     }
+    const prNumber = inspected.pullRequest.number;
+    const prIdentity = inspected.pullRequest.identity || { kind: 'number' as const, value: prNumber };
     const closingIssues = extractClosingIssueNumbers(inspected.pullRequest.body);
-    const candidates = collectHostCandidates({ prNumber: pr, closingIssues, workspaceRoot: cwd });
+    const candidates = collectHostCandidates({ prNumber, prIdentity, closingIssues, workspaceRoot: cwd });
     const host: HostResolution = resolveHostFromCandidates(candidates);
     finish({
       status: 'ok', changed: false,
-      pr: { number: pr, baseSha: inspected.pullRequest.base.sha, headSha: inspected.pullRequest.head.sha, state: inspected.pullRequest.state },
+      pr: { number: prNumber, identity: prIdentity, baseSha: inspected.pullRequest.base.sha, headSha: inspected.pullRequest.head.sha, state: inspected.pullRequest.state },
       closingIssues, candidates, host,
       taskIssueMatches: deriveTaskIssueMatches(host, closingIssues), error: null
     });

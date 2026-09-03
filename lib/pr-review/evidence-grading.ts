@@ -3,6 +3,9 @@ import path from 'node:path';
 
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
+import { resourceIdentityEquals, resourceIdentityNumber } from '../platform/resource-identity.ts';
+import type { ResourceIdentity } from '../platform/resource-identity.ts';
+import { taskIssueIdentity } from '../platform/task-identities.ts';
 
 // ---------------------------------------------------------------------------
 // Host resolution (PL-4): PR -> unique / ambiguous / none.
@@ -13,10 +16,12 @@ export type HostCandidate = {
   taskDir: string;
   issueNumber: number | null;
   prNumber: number | null;
+  issueIdentity?: ResourceIdentity;
+  prIdentity?: ResourceIdentity;
 };
 
 export type HostResolution =
-  | { kind: 'unique'; taskId: string; taskDir: string; issueNumber: number; prNumber: number }
+  | { kind: 'unique'; taskId: string; taskDir: string; issueNumber: number; prNumber: number; issueIdentity?: ResourceIdentity; prIdentity?: ResourceIdentity }
   | { kind: 'ambiguous'; candidates: Array<{ taskId: string; issueNumber: number }> }
   | { kind: 'none' };
 
@@ -66,7 +71,8 @@ export function extractClosingIssueNumbers(body: string): number[] {
  * a verified fact identity hit takes priority over the issue-number reverse lookup.
  */
 export function collectHostCandidates(input: {
-  prNumber: number;
+  prNumber?: number;
+  prIdentity?: ResourceIdentity;
   closingIssues: number[];
   workspaceRoot: string;
 }): HostCandidate[] {
@@ -90,13 +96,22 @@ export function collectHostCandidates(input: {
     }
     let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
     try { frontmatter = parseTypedTaskFrontmatter(content); } catch { continue; }
-    const issueNumber = toPositiveNumber(frontmatter.issue_number);
+    const issueIdentity = taskIssueIdentity(frontmatter);
+    const issueNumber = resourceIdentityNumber(issueIdentity) ?? toPositiveNumber(frontmatter.issue_number);
     const fact = readPrDeliveryFact(frontmatter);
-    const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null;
-    if (prNumber === input.prNumber) {
-      candidates.push({ taskId: entry.name, taskDir, issueNumber, prNumber });
+    const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
+    const prNumber = resourceIdentityNumber(prIdentity);
+    const matchesPr = input.prIdentity
+      ? Boolean(prIdentity && resourceIdentityEquals(prIdentity, input.prIdentity))
+      : input.prNumber !== undefined && prNumber === input.prNumber;
+    const identityDetails = {
+      ...(issueIdentity && issueIdentity.kind !== 'number' ? { issueIdentity } : {}),
+      ...(prIdentity && prIdentity.kind !== 'number' ? { prIdentity } : {})
+    };
+    if (matchesPr) {
+      candidates.push({ taskId: entry.name, taskDir, issueNumber, prNumber, ...identityDetails });
     } else if (issueNumber !== null && input.closingIssues.includes(issueNumber)) {
-      candidates.push({ taskId: entry.name, taskDir, issueNumber, prNumber });
+      candidates.push({ taskId: entry.name, taskDir, issueNumber, prNumber, ...identityDetails });
     }
   }
   return candidates;
@@ -116,7 +131,9 @@ export function resolveHostFromCandidates(candidates: HostCandidate[]): HostReso
       taskId: candidate.taskId,
       taskDir: candidate.taskDir,
       issueNumber: candidate.issueNumber ?? 0,
-      prNumber: candidate.prNumber ?? 0
+      prNumber: candidate.prNumber ?? 0,
+      ...(candidate.issueIdentity ? { issueIdentity: candidate.issueIdentity } : {}),
+      ...(candidate.prIdentity ? { prIdentity: candidate.prIdentity } : {})
     };
   }
   return {

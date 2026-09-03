@@ -11,7 +11,7 @@ import type { IssueResult } from '../platform/issues.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-issue inspect <task-ref> [--cwd <path>]
        agent-infra-internal platform-issue create <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
-       agent-infra-internal platform-issue bind <task-ref> --issue <N> --agent <agent> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-issue bind <task-ref> --issue <token> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-issue sync <task-ref> --agent <agent> [--status <suffix|none>] [--assignees current|none] [--milestone initial|specific|none] [--issue-type] [--fields] [--requirements] [--in-labels from-diff|none] [--base <branch>] [--state open|closed] [--close-reason completed|not_planned] [--dry-run] [--cwd <path>]
 `;
 
@@ -84,9 +84,8 @@ async function platformIssue(args: string[] = []): Promise<void> {
     finish(await createPlatformIssue(taskRef, { cwd, agent: values.agent, dryRun: values.dryRun === true })); return;
   }
   if (operation === 'bind') {
-    const issue = Number(values.issue);
-    if (!Number.isInteger(issue) || issue <= 0) { fail('bind requires a positive --issue'); return; }
-    finish(await bindPlatformIssue(taskRef, { cwd, agent: values.agent, issue, dryRun: values.dryRun === true })); return;
+    if (typeof values.issue !== 'string' || !values.issue) { fail('bind requires --issue <token>'); return; }
+    finish(await bindPlatformIssue(taskRef, { cwd, agent: values.agent, issue: values.issue, dryRun: values.dryRun === true })); return;
   }
   try {
     const assignees = oneOf(values, 'assignees', ['current', 'none']);

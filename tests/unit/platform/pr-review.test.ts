@@ -74,6 +74,7 @@ const IDENTITY = { scope: 'TASK-20260101-000001', round: 1, commitSha: 'a'.repea
 test('reviewMarker and reviewedCommitMarker define the marker contract', () => {
   assert.equal(reviewMarker({ scope: 'TASK-20260101-000001', round: 1, commitSha: 'a' }), '<!-- review-pr:TASK-20260101-000001:r1 -->');
   assert.equal(reviewMarker({ scope: 'pr42', round: 2, commitSha: 'b' }), '<!-- review-pr:pr42:r2 -->');
+  assert.match(reviewMarker({ scope: 'TASK-20260101-000001', round: 3, commitSha: 'c', resource: { kind: 'id', value: 'type:42' } }), /^<!-- review-pr:pr:[A-Za-z0-9_-]+:r3 -->$/);
   assert.equal(reviewedCommitMarker('a'.repeat(40)), `<!-- reviewed-commit: ${'a'.repeat(40)} -->`);
 });
 

@@ -17,13 +17,14 @@ import type {
   PlatformProviderFactoryInput
 } from './provider-contract.ts';
 import { createGitHubProvider } from './github-provider.ts';
-import type { GitHubClient } from './github-client.ts';
 import { createNoneProvider } from './none-provider.ts';
+import { wrapProviderOperations } from './provider-validation.ts';
+import type { PlatformClient } from './context.ts';
 
 type ProviderLoaderOptions = {
   cwd?: string;
   platformType?: string;
-  client?: GitHubClient;
+  client?: PlatformClient;
 };
 
 type LoadedPlatformProvider = {
@@ -149,7 +150,7 @@ async function instantiateProvider(
   repositoryRoot: string,
   importUrl: string | null,
   config: Readonly<Record<string, JsonValue>>,
-  client?: GitHubClient
+  client?: PlatformClient
 ): Promise<PlatformProvider> {
   const input: PlatformProviderFactoryInput = {
     providerType,
@@ -157,7 +158,7 @@ async function instantiateProvider(
     repositoryRoot,
     config
   };
-  if (providerType === 'github') return createGitHubProvider(input, client);
+  if (providerType === 'github') return createGitHubProvider(input, client as never);
   if (providerType === 'none') return createNoneProvider(input);
 
   let moduleValue: Record<string, unknown>;
@@ -207,7 +208,7 @@ async function instantiateProvider(
       code: validated.error.code
     });
   }
-  return validated.value;
+  return wrapProviderOperations(validated.value);
 }
 
 async function loadPlatformProvider(options: ProviderLoaderOptions = {}): Promise<ProviderLoadResult> {

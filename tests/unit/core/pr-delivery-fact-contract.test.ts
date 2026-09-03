@@ -18,7 +18,7 @@ for (const templatePath of taskTemplates) {
     assert.ok(line);
     const value = line!.slice("pr_delivery_fact:".length).trim();
     const fact = decodePrDeliveryFact(value.startsWith("'") && value.endsWith("'") ? value.slice(1, -1) : JSON.parse(value));
-    assert.deepEqual(fact, { version: 1, state: "unbound", reason: "initial" });
+    assert.deepEqual(fact, { version: 2, state: "unbound", reason: "initial" });
   });
 }
 

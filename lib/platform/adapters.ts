@@ -1,4 +1,5 @@
 import type { PlatformError, PlatformResult } from './types.ts';
+import type { ResourceIdentity } from './resource-identity.ts';
 
 type PlatformAdapterContext = {
   cwd: string;
@@ -28,6 +29,7 @@ type PlatformChangeRequestSnapshot = {
   assignees: string[];
   milestone: string | null;
   mergeability?: PlatformMergeability;
+  identity?: ResourceIdentity;
 };
 
 type PlatformCheckSnapshot = {

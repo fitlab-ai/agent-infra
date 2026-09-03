@@ -262,7 +262,7 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
     localTagAncestor: local.localTagAncestor,
     localTagConflict: local.localTagConflict,
     remoteBranch: Boolean(remoteBranch && remoteBranch.split(/\s+/)[0] === head), remoteTag: Boolean(remoteTag),
-    githubRelease: platform.platform.type !== 'github'
+    githubRelease: platform.error?.code === 'PLATFORM_CAPABILITY_UNSUPPORTED'
       ? true
       : platform.status === 'blocked' ? null : Boolean(platform.release?.published),
     npm: npm.published, homebrew: homebrew.published, smoke,

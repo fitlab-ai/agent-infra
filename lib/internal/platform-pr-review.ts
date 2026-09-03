@@ -6,9 +6,9 @@ import { listPrReviews, publishPrReview } from '../platform/pr-review.ts';
 import type { PrReviewEvent } from '../platform/pr-review.ts';
 import type { PlatformResult } from '../platform/types.ts';
 
-const USAGE = `Usage: agent-infra-internal platform-pr-review inspect --pr <N> [--cwd <path>]
-       agent-infra-internal platform-pr-review list --pr <N> [--cwd <path>]
-       agent-infra-internal platform-pr-review publish --pr <N> --scope <taskId|pr{N}> --round <N> --commit <sha> --event <COMMENT|APPROVE|REQUEST_CHANGES> --body-file <path|-> [--dry-run] [--cwd <path>]
+const USAGE = `Usage: agent-infra-internal platform-pr-review inspect --pr <token> [--cwd <path>]
+       agent-infra-internal platform-pr-review list --pr <token> [--cwd <path>]
+       agent-infra-internal platform-pr-review publish --pr <token> --scope <taskId|pr{N}> --round <N> --commit <sha> --event <COMMENT|APPROVE|REQUEST_CHANGES> --body-file <path|-> [--dry-run] [--cwd <path>]
 `;
 
 const BOOLEAN_FLAGS = new Set(['--dry-run']);
@@ -65,8 +65,8 @@ async function platformPrReview(args: string[] = []): Promise<void> {
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
-  const pr = Number(values.pr);
-  if (!Number.isInteger(pr) || pr <= 0) { fail(`${operation} requires a positive --pr`); return; }
+  const pr = values.pr;
+  if (typeof pr !== 'string' || !pr) { fail(`${operation} requires --pr <token>`); return; }
   if (operation === 'inspect') {
     finish(await inspectPlatformPullRequestByNumber(pr, { cwd }));
     return;

@@ -6,14 +6,13 @@ import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { renderHumanOverrideAudit } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { resolvePlatformProviderContext } from './context.ts';
-import { createGitHubClient } from './github-client.ts';
-import type { GitHubClient } from './github-client.ts';
-import { listRemoteComments, normalizeCommentContent, writeComment } from './issue-comments.ts';
+import type { PlatformClient } from './context.ts';
+import { normalizeCommentContent } from './issue-comments.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
-import { providerError, providerOperationContext, providerStatus, unsupportedProviderOperation } from './provider-bridge.ts';
+import { providerError, providerOperationContext, providerStatus, resourceIdentityNumber, unsupportedProviderOperation } from './provider-bridge.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type SummaryContextResult = PlatformResult & {
@@ -66,16 +65,16 @@ function canonicalArtifacts(taskDir: string) {
   return [...byFamily.values()].map(({ family, name, path }) => ({ family, name, path }));
 }
 
-function summaryContext(taskRef: string, options: { cwd?: string; client?: GitHubClient } = {}): SummaryContextResult {
+function summaryContext(taskRef: string, options: { cwd?: string; client?: PlatformClient } = {}): SummaryContextResult {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ...platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }), task: { id: resolved.taskId, prNumber: null }, artifacts: [] };
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
   const fact = readPrDeliveryFact(frontmatter);
-  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null;
+  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? resourceIdentityNumber(fact.fact.identity.resource) : null;
   return { ...platformResult('no-op'), task: { id: resolved.taskId, prNumber }, artifacts: canonicalArtifacts(resolved.taskDir) };
 }
 
-async function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult }): Promise<PullRequestSummaryResult> {
+async function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult }): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
   const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
@@ -110,11 +109,11 @@ async function syncPullRequestSummary(taskRef: string, options: { agent: string;
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
   const fact = readPrDeliveryFact(frontmatter);
   if (fact.status === 'invalid') return softenFailure(platformResult('failed', { error: { code: 'PR_DELIVERY_FACT_INVALID', message: fact.error.message, retryable: false } }));
-  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null;
-  if (!prNumber) return softenFailure(platformResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }));
+  const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
+  const prNumber = resourceIdentityNumber(prIdentity);
+  if (!prIdentity) return softenFailure(platformResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }));
   knownPrNumber = prNumber;
-  const client = options.client || createGitHubClient();
-  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client });
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return softenFailure(context);
   let headSha: string;
@@ -129,35 +128,28 @@ async function syncPullRequestSummary(taskRef: string, options: { agent: string;
     headSha,
     renderHumanOverrideAudit(fs.readFileSync(resolved.taskMdPath, 'utf8'))
   );
-  const listed = loaded.ok
-    ? (loaded.value.provider.comments?.list
-      ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: { number: prNumber } }).then((response) => response.ok
-        ? { ok: true as const, value: response.value.map((comment) => ({ id: loaded.value.providerType === 'github' && /^\d+$/.test(comment.id) ? Number(comment.id) : comment.id, body: comment.body })) }
-        : response)
-      : unsupportedProviderOperation(loaded.value.provider, 'comments.list'))
-    : listRemoteComments(client, context.platform.repository, prNumber, resolved.repoRoot);
+  const listed = loaded.ok && loaded.value.provider.comments?.list
+    ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: prIdentity }).then((response) => response.ok
+      ? { ok: true as const, value: response.value.map((comment) => ({ id: /^\d+$/.test(comment.id) ? Number(comment.id) : comment.id, body: comment.body })) }
+      : response)
+    : loaded.ok ? unsupportedProviderOperation(loaded.value.provider, 'comments.list') : { ok: false as const, error: context.error || { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false } };
   if (!listed.ok) return softenFailure(platformResult(listed.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: listed.error }));
   const reconciliation = reconcileSummaryComment(listed.value, resolved.taskId, desired);
   if (reconciliation.action === 'conflict') return softenFailure(platformResult('failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: { code: 'PR_SUMMARY_MARKER_AMBIGUOUS', message: 'Multiple PR comments contain the summary marker', retryable: false } }));
   if (reconciliation.action === 'no-op') return softenFailure(platformResult('no-op', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: [reconciliation.commentId!], parts: 1 }, error: null }));
   if (options.dryRun) return softenFailure(platformResult('planned', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, operations: [{ name: `summary:${reconciliation.action}`, status: 'planned', reasonCode: null }], error: null }));
-  const written = loaded.ok
-    ? (loaded.value.provider.comments?.write
-      ? await loaded.value.provider.comments.write({
-        context: providerOperationContext(loaded.value),
-        parent: { number: prNumber },
-        body: desired,
-        ...(reconciliation.commentId !== null ? { existingComment: { id: String(reconciliation.commentId) } } : {}),
-        mutation: { idempotencyKey: `pr-summary:${resolved.taskId}` }
-      })
-      : unsupportedProviderOperation(loaded.value.provider, 'comments.write'))
-    : writeComment(client, context.platform.repository, prNumber, resolved.repoRoot, desired, typeof reconciliation.commentId === 'number' ? reconciliation.commentId : undefined);
+  const written = loaded.ok && loaded.value.provider.comments?.write
+    ? await loaded.value.provider.comments.write({
+      context: providerOperationContext(loaded.value),
+      parent: prIdentity,
+      body: desired,
+      ...(reconciliation.commentId !== null ? { existingComment: { kind: 'id' as const, value: String(reconciliation.commentId) } } : {}),
+      mutation: { idempotencyKey: `pr-summary:${resolved.taskId}` }
+    })
+    : loaded.ok ? unsupportedProviderOperation(loaded.value.provider, 'comments.write') : { ok: false as const, error: context.error || { code: 'PLATFORM_PROVIDER_LOAD_FAILED', message: 'Selected provider failed to load', retryable: false } };
   if (!written.ok) return softenFailure(platformResult(written.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: written.error }));
-  const id = loaded.ok
-    ? (loaded.value.providerType === 'github' && /^\d+$/.test((written.value as { remoteId: string }).remoteId)
-      ? Number((written.value as { remoteId: string }).remoteId)
-      : (written.value as { remoteId: string }).remoteId)
-    : Number((written.value as { id?: number }).id || reconciliation.commentId);
+  const remoteId = (written.value as { remoteId: string }).remoteId;
+  const id = /^\d+$/.test(remoteId) ? Number(remoteId) : remoteId;
   return softenFailure(platformResult('applied', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: id ? [id] : [], parts: 1 }, operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }], error: null }));
 }
 

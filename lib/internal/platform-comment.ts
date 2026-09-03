@@ -11,7 +11,7 @@ import type { CommentKind } from '../platform/issue-comments.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { backfillCompletionComments } from '../platform/completion-backfill.ts';
 
-const USAGE = `Usage: agent-infra-internal platform-comment list --issue <N> [--cwd <path>]
+const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment owner <task-ref> [--cwd <path>]
        agent-infra-internal platform-comment backfill <task-ref> --agent <agent> [--cwd <path>]
        agent-infra-internal platform-comment sync <task-ref> --kind <kind> --agent <agent> [--artifact <file>] [--body-file <path|->] [--status-label <label>] [--backfill] [--cwd <path>]
@@ -63,8 +63,8 @@ async function platformComment(args: string[] = []): Promise<void> {
   if (parsed.error) { fail(parsed.error); return; }
   const cwd = path.resolve(typeof parsed.values.cwd === 'string' ? parsed.values.cwd : process.cwd());
   if (operation === 'list') {
-    const issue = Number(parsed.values.issue);
-    if (!Number.isInteger(issue) || issue <= 0) { fail('list requires a positive --issue'); return; }
+    const issue = parsed.values.issue;
+    if (typeof issue !== 'string' || !issue) { fail('list requires --issue <token>'); return; }
     const unexpected = Object.keys(parsed.values).find((key) => !['issue', 'cwd'].includes(key));
     if (unexpected) { fail(`list does not accept '--${unexpected}'`); return; }
     finish(await listPlatformComments(issue, cwd));

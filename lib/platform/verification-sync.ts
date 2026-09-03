@@ -3,16 +3,15 @@ import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
 
-import { createGitHubClient } from "./github-client.ts";
-import { resolvePlatformContext, resolvePlatformProviderContext } from "./context.ts";
+import { resolvePlatformProviderContext } from "./context.ts";
 import { hasCheckedRequirement, resolveRequirementSection } from "./issue-metadata.ts";
-import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "./issues.ts";
-import { listRemoteComments } from "./issue-comments.ts";
+import { requirementSectionAnchors } from "./issues.ts";
 import { taskTypeLabel } from "./metadata-labels.ts";
 import { planInLabelUpdate, validateInLabelMapping, validateRepositoryLabelPayload } from "./in-label-sync.ts";
 import { inspectGitHubPullRequest } from "./pull-requests.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
-import { providerError, providerOperationContext, providerStatus, unsupportedProviderOperation } from "./provider-bridge.ts";
+import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
+import { taskIssueIdentity } from "./task-identities.ts";
 
 const CHECK_TYPE = "platform-sync";
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
@@ -31,7 +30,6 @@ const OPTION_LOCALIZATION: Record<string, string> = {
 
 let activeShared: any = null;
 let repoRoot = "";
-const githubClient = createGitHubClient();
 
 export function getDefaults(): any {
   return {
@@ -97,14 +95,6 @@ function safeStat(...args: any[]): any {
   return getShared().safeStat(...args);
 }
 
-function parseIssueNumber(...args: any[]): any {
-  return getShared().parseIssueNumber(...args);
-}
-
-function parsePrNumber(...args: any[]): any {
-  return getShared().parsePrNumber(...args);
-}
-
 export async function check({ taskDir, config, artifactFile }: any, shared: any): Promise<any> {
   activeShared = shared;
   repoRoot = shared.repoRoot;
@@ -144,7 +134,7 @@ export async function check({ taskDir, config, artifactFile }: any, shared: any)
     }
   }
 
-  return passResult(CHECK_TYPE, `GitHub sync checks passed for Issue #${context.issueNumber}`);
+  return passResult(CHECK_TYPE, `Platform sync checks passed for Issue ${context.issueNumber || "identity"}`);
 }
 
 async function buildSyncContext({ taskDir, config, artifactFile }: any): Promise<any> {
@@ -153,24 +143,26 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any): Promise
     return { earlyReturn: failResult(CHECK_TYPE, task.message) };
   }
 
-  const issueNumber = parseIssueNumber(task.metadata.issue_number);
+  const issueIdentity = taskIssueIdentity(task.metadata);
+  const issueNumber = resourceIdentityNumber(issueIdentity);
   const fact = readPrDeliveryFact(task.metadata);
   if (fact.status === "invalid") {
     return { earlyReturn: failResult(CHECK_TYPE, fact.error.message, "check_failed") };
   }
-  const prNumber = fact.status === "valid" && fact.fact.state === "bound" ? fact.fact.identity.number : null;
-  if (config.when === "issue_number_exists" && !issueNumber) {
+  const prIdentity = fact.status === "valid" && fact.fact.state === "bound" ? fact.fact.identity.resource : null;
+  const prNumber = resourceIdentityNumber(prIdentity);
+  if (config.when === "issue_number_exists" && !issueIdentity) {
     return { earlyReturn: passResult(CHECK_TYPE, "Skipped: task has no issue_number") };
   }
-  if (config.when === "pr_fact_bound" && !prNumber) {
+  if (config.when === "pr_fact_bound" && !prIdentity) {
     return { earlyReturn: passResult(CHECK_TYPE, "Skipped: task has no verified bound pull request") };
   }
 
-  if (!issueNumber) {
+  if (!issueIdentity) {
     return { earlyReturn: passResult(CHECK_TYPE, "Skipped: platform-sync not required for this task") };
   }
 
-  const loaded = await resolvePlatformProviderContext({ cwd: repoRoot, client: githubClient });
+  const loaded = await resolvePlatformProviderContext({ cwd: repoRoot });
   const platformContext = loaded.ok ? loaded.value.context : loaded.context;
   if (platformContext.status === "failed") {
     return { earlyReturn: failResult(CHECK_TYPE, platformContext.error?.message || "Platform context failed", "check_failed") };
@@ -184,7 +176,6 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any): Promise
     }
     return { earlyReturn: passResult(CHECK_TYPE, `Skipped: ${platformContext.error?.message || "platform unavailable"}`) };
   }
-  const repoOwnerType = detectRepoOwnerType(platformContext.platform.repository, taskDir);
   const expectedValues = resolveExpectedValues(config);
   if (!expectedValues.ok) {
     return { earlyReturn: failResult(CHECK_TYPE, expectedValues.message, "check_failed") };
@@ -204,10 +195,12 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any): Promise
     config,
     artifactFile,
     artifactPath,
+    issueIdentity,
+    prIdentity,
     issueNumber,
     prNumber,
     upstreamRepo: platformContext.platform.repository,
-    repoOwnerType,
+    repoOwnerType: String(loaded.ok ? loaded.value.snapshot.metadata?.ownerType || "unknown" : "unknown"),
     hasTriage: platformContext.capabilities.triage,
     hasPush: platformContext.capabilities.push,
     expectedStatusLabel: expectedValues.statusLabel,
@@ -272,224 +265,68 @@ function resolveDefaultValue({ collection, key, value, configKey }: any): any {
   return { ok: true, value: resolvedValue };
 }
 
-export async function fetchGitHubRemoteData(context: any, client: any = githubClient): Promise<any> {
-  return fetchRemoteData({ ...context, providerType: "github", provider: null }, client);
-}
-
-async function fetchRemoteData(context: any, client: any = githubClient): Promise<any> {
-  if (context.providerType && context.providerType !== "github") {
-    const provider = context.provider;
-    const facts = provider?.verification?.fetchRemoteFacts
-      ? await provider.verification.fetchRemoteFacts({
-        context: providerOperationContext(context.loadedContext),
-        taskId: context.task?.id || "",
-        ...(context.issueNumber ? { issue: { number: context.issueNumber } } : {}),
-        ...(context.prNumber ? { changeRequest: { number: context.prNumber } } : {}),
-        includeComments: shouldFetchComments(context.config),
-        includeFields: Boolean(context.config.verify_issue_fields)
-      })
-      : unsupportedProviderOperation(provider, "verification.fetchRemoteFacts");
-    if (!facts.ok) {
-      return {
-        earlyReturn: facts.error.retryable
-          ? blockedResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "network_error")
-          : failResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "check_failed")
-      };
-    }
-    const issue = facts.value.issue
-      ? {
-        state: facts.value.issue.state.toUpperCase(),
-        labels: facts.value.issue.labels.map((name: string) => ({ name })),
-        body: facts.value.issue.body,
-        milestone: facts.value.issue.milestone ? { title: facts.value.issue.milestone } : null
-      }
-      : null;
-    let prComments = null;
-    if (context.prMarker && context.prNumber && shouldFetchComments(context.config) && provider?.comments?.list) {
-      const listed = await provider.comments.list({ context: providerOperationContext(context.loadedContext), parent: { number: context.prNumber } });
-      if (!listed.ok) return {
-        earlyReturn: listed.error.retryable
-          ? blockedResult(CHECK_TYPE, listed.error.message, "network_error")
-          : failResult(CHECK_TYPE, listed.error.message, "check_failed")
-      };
-      prComments = listed.value.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body }));
-    }
-    const changeRequest = facts.value.changeRequest;
+async function fetchRemoteData(context: any): Promise<any> {
+  const provider = context.provider;
+  const operationContext = providerOperationContext(context.loadedContext, context.taskDir);
+  const facts = provider?.verification?.fetchRemoteFacts
+    ? await provider.verification.fetchRemoteFacts({
+      context: operationContext,
+      taskId: context.task?.metadata?.id || context.task?.id || "",
+      ...(context.issueIdentity ? { issue: context.issueIdentity } : {}),
+      ...(context.prIdentity ? { changeRequest: context.prIdentity } : {}),
+      includeComments: shouldFetchComments(context.config),
+      includeFields: Boolean(context.config.verify_issue_fields)
+    })
+    : unsupportedProviderOperation(provider, "verification.fetchRemoteFacts");
+  if (!facts.ok) {
     return {
-      issue,
-      comments: facts.value.comments.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body })),
-      prComments,
-      prLabels: changeRequest?.labels || null,
-      issueType: null,
-      issueFields: facts.value.fields,
-      prMilestone: changeRequest?.milestone ? { title: changeRequest.milestone } : undefined,
-      prAssignees: changeRequest?.assignees,
-      prHeadSha: changeRequest?.headSha
+      earlyReturn: facts.error.retryable
+        ? blockedResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "network_error")
+        : failResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "check_failed")
     };
   }
-  const sharedIssue = inspectGitHubIssueMetadata(
-    client,
-    context.upstreamRepo,
-    context.issueNumber,
-    context.taskDir
-  );
-  const issueResult = sharedIssue.ok
+  const issueSnapshot = facts.value.issue;
+  const issue = issueSnapshot
     ? {
-        ok: true,
-        value: {
-          state: sharedIssue.value.state.toUpperCase(),
-          labels: sharedIssue.value.labels.map((name) => ({ name })),
-          body: sharedIssue.value.body,
-          milestone: sharedIssue.value.milestone ? { title: sharedIssue.value.milestone } : null
-        }
-      }
-    : {
-        ok: false,
-        type: sharedIssue.error.retryable ? "network_error" : "check_failed",
-        message: sharedIssue.error.message
-      };
-  if (!issueResult.ok) {
-    return {
-      earlyReturn: issueResult.type === "check_failed"
-        ? failResult(CHECK_TYPE, issueResult.message, issueResult.type)
-        : blockedResult(CHECK_TYPE, issueResult.message, issueResult.type)
-    };
-  }
-
-  const issue = issueResult.value;
-  if (context.config.issue_must_exist !== false && !issue) {
-    return {
-      earlyReturn: failResult(CHECK_TYPE, `Issue #${context.issueNumber} not found`, "check_failed")
-    };
-  }
-
-  let comments = null;
-  if (shouldFetchComments(context.config)) {
-    const commentsResult = withRetry(() => ghPaginatedJson([
-      "api",
-      "--paginate",
-      "--slurp",
-      `repos/${context.upstreamRepo}/issues/${context.issueNumber}/comments?per_page=100`
-    ], context.taskDir, client));
-
-    if (!commentsResult.ok) {
-      return {
-        earlyReturn: commentsResult.type === "check_failed"
-          ? failResult(CHECK_TYPE, commentsResult.message, commentsResult.type)
-          : blockedResult(CHECK_TYPE, commentsResult.message, commentsResult.type)
-      };
+      state: issueSnapshot.state.toUpperCase(),
+      labels: issueSnapshot.labels.map((name: string) => ({ name })),
+      body: issueSnapshot.body,
+      milestone: issueSnapshot.milestone ? { title: issueSnapshot.milestone } : null
     }
-
-    comments = flattenComments(commentsResult.value);
+    : null;
+  let issueFields: any;
+  if (context.config.verify_issue_fields && issueSnapshot?.issueType) {
+    const fieldKinds = new Map(issueSnapshot.issueType.fields.map((field: { name: string; kind: string }) => [field.name, field.kind]));
+    issueFields = {
+      pinnedNames: new Set(issueSnapshot.issueType.fields.map((field: { name: string }) => field.name)),
+      values: new Map(Object.entries(issueSnapshot.fields).map(([name, value]) => [name, { kind: fieldKinds.get(name) || (typeof value === "number" ? "number" : "single-select"), value }]))
+    };
   }
-
   let prComments = null;
-  if (context.prMarker) {
-    if (!context.prNumber) {
-      return {
-        earlyReturn: failResult(CHECK_TYPE, "Expected a verified bound pull request for PR comment verification", "check_failed")
-      };
-    }
-
-    const prCommentsResult = listRemoteComments(
-      client,
-      context.upstreamRepo,
-      context.prNumber,
-      context.taskDir
-    );
-
-    if (!prCommentsResult.ok) {
-      return {
-        earlyReturn: prCommentsResult.error.retryable
-          ? blockedResult(CHECK_TYPE, prCommentsResult.error.message, "network_error")
-          : failResult(CHECK_TYPE, prCommentsResult.error.message, "check_failed")
-      };
-    }
-
-    prComments = prCommentsResult.value;
+  if (context.prMarker && context.prIdentity && shouldFetchComments(context.config) && provider?.comments?.list) {
+    const listed = await provider.comments.list({ context: operationContext, parent: context.prIdentity });
+    if (!listed.ok) return {
+      earlyReturn: listed.error.retryable
+        ? blockedResult(CHECK_TYPE, listed.error.message, "network_error")
+        : failResult(CHECK_TYPE, listed.error.message, "check_failed")
+    };
+    prComments = listed.value.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body }));
   }
-
-  let issueType;
-  if (context.config.verify_issue_type && context.hasPush) {
-    const issueTypeResult = withRetry(() => ghText([
-      "api",
-      `repos/${context.upstreamRepo}/issues/${context.issueNumber}`,
-      "--jq",
-      ".type.name // empty"
-    ], context.taskDir, client));
-
-    if (issueTypeResult.ok) {
-      issueType = issueTypeResult.value || null;
-    }
-  }
-
-  let issueFields;
-  if (context.config.verify_issue_fields && context.hasPush) {
-    const [owner, name] = context.upstreamRepo.split("/");
-    const issueFieldsResult = withRetry(() => ghJson([
-      "api",
-      "graphql",
-      "-f",
-      `query=${ISSUE_FIELDS_QUERY}`,
-      "-F",
-      `owner=${owner}`,
-      "-F",
-      `name=${name}`,
-      "-F",
-      `number=${context.issueNumber}`
-    ], context.taskDir, client));
-
-    if (issueFieldsResult.ok) {
-      issueFields = normalizeIssueFields(issueFieldsResult.value);
-    }
-  }
-
-  let prLabels = null;
-  let prMilestone;
-  let prAssignees;
-  let prHeadSha;
-  if (((context.config.verify_in_labels_match_pr && context.hasTriage)
-    || (context.config.verify_pr_type_label && context.hasTriage)
-    || (context.config.verify_milestone && context.hasTriage)
-    || (context.config.verify_pr_assignee && context.hasPush)
-    || context.config.verify_pr_comment_last_commit_matches_head) && context.prNumber) {
-    const prResult = inspectGitHubPullRequest(
-      client,
-      context.upstreamRepo,
-      context.prNumber,
-      context.taskDir
-    );
-
-    if (!prResult.ok) {
-      return {
-        earlyReturn: prResult.error.retryable
-          ? blockedResult(CHECK_TYPE, prResult.error.message, "network_error")
-          : failResult(CHECK_TYPE, prResult.error.message, "check_failed")
-      };
-    }
-
-    prLabels = (context.config.verify_in_labels_match_pr || context.config.verify_pr_type_label)
-      ? prResult.value.labels
-      : null;
-    prMilestone = context.config.verify_milestone
-      ? prResult.value.milestone ? { title: prResult.value.milestone } : null
-      : undefined;
-    prAssignees = context.config.verify_pr_assignee
-      ? prResult.value.assignees
-      : undefined;
-    prHeadSha = prResult.value.head.sha;
-  }
-
+  const changeRequest = facts.value.changeRequest;
   return {
     issue,
-    comments,
+    comments: facts.value.comments.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body })),
     prComments,
-    prLabels,
-    issueType,
+    prLabels: changeRequest?.labels || null,
+    issueType: issueSnapshot
+      ? (issueSnapshot.issueType ? issueSnapshot.issueType.name : null)
+      : undefined,
     issueFields,
-    prMilestone,
-    prAssignees,
-    prHeadSha
+    prMilestone: changeRequest
+      ? (changeRequest.milestone ? { title: changeRequest.milestone } : null)
+      : undefined,
+    prAssignees: changeRequest?.assignees,
+    prHeadSha: changeRequest?.headSha
   };
 }
 
@@ -507,14 +344,6 @@ function shouldFetchComments(config: any): any {
     || config.verify_comment_content
     || config.verify_task_comment_content
   );
-}
-
-function flattenComments(value: any): any {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((page) => Array.isArray(page) ? page : []);
 }
 
 function checkStatusLabel(context: any, remoteData: any): any {
@@ -1112,8 +941,6 @@ function mapTaskTypeToIssueType(taskType: any): any {
   return mapping[taskType] || "Task";
 }
 
-const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){issueType{name pinnedFields{__typename ... on IssueFieldSingleSelect{id name} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{name}}}}}}}}`;
-
 function normalizeIssueFields(payload: any): any {
   const issue = payload?.data?.repository?.issue;
   const pinnedFields = Array.isArray(issue?.issueType?.pinnedFields)
@@ -1256,43 +1083,6 @@ function loadInLabelMapping(): any {
 }
 
 // === GitHub API ===
-
-function detectRepoOwnerType(upstreamRepo: any, taskDir: any): any {
-  const ownerTypeResult = withRetry(() => ghText([
-    "api",
-    `repos/${upstreamRepo}`,
-    "--jq",
-    ".owner.type // empty"
-  ], taskDir));
-
-  if (!ownerTypeResult.ok) {
-    return "unknown";
-  }
-
-  return ownerTypeResult.value || "unknown";
-}
-
-function ghJson(args: any, cwd: any, client: any = githubClient): any {
-  return mapClientResult(client.json(args, { cwd }));
-}
-
-function ghText(args: any, cwd: any, client: any = githubClient): any {
-  return mapClientResult(client.text(args, { cwd }));
-}
-
-function ghPaginatedJson(args: any, cwd: any, client: any = githubClient): any {
-  return ghJson(args, cwd, client);
-}
-
-function mapClientResult(result: any): any {
-  if (result.ok) return result;
-  const checkFailed = ["RESOURCE_NOT_FOUND", "PERMISSION_DENIED", "PLATFORM_REQUEST_INVALID"].includes(result.error.code);
-  return {
-    ok: false,
-    type: checkFailed ? "check_failed" : "network_error",
-    message: result.error.message
-  };
-}
 
 function gitText(args: any, cwd: any): any {
   try {

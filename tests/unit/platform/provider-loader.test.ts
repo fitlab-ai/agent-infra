@@ -151,3 +151,80 @@ test('loads built-in none without external source', async () => {
   if (result.ok) assert.equal(result.value.sourceIdentity, 'builtin:none@1');
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('validates selected provider operation results at the invocation boundary', async () => {
+  const root = repository();
+  configure(root, 'trae', path.join(fixtureRoot, 'invalid-context-result-provider.mjs'));
+  const loaded = await loadPlatformProvider({ cwd: root });
+  assert.equal(loaded.ok, true);
+  if (loaded.ok) {
+    const resolved = await loaded.value.provider.context.resolve({
+      repositoryRoot: root,
+      workingDirectory: root,
+      scopeId: root,
+      gitRemote: null
+    });
+    assert.equal(resolved.ok, false);
+    if (!resolved.ok) assert.equal(resolved.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('loads an opaque provider with its declared string identity contract', async () => {
+  const root = repository();
+  configure(root, 'trae', path.join(fixtureRoot, 'opaque-identity-provider.mjs'));
+  const loaded = await loadPlatformProvider({ cwd: root });
+  assert.equal(loaded.ok, true);
+  if (loaded.ok) {
+    const context = await loaded.value.provider.context.resolve({
+      repositoryRoot: root,
+      workingDirectory: root,
+      scopeId: root,
+      gitRemote: null
+    });
+    assert.equal(context.ok, true);
+    const issue = await loaded.value.provider.issues!.inspect({
+      context: { repositoryRoot: root, workingDirectory: root, scopeId: root },
+      target: { kind: 'id', value: 'issue-42' }
+    });
+    assert.equal(issue.ok, true);
+    if (issue.ok) assert.deepEqual(issue.value.identity, { kind: 'id', value: 'issue-42' });
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('routes an external capability provider without initializing GitHub transport', async () => {
+  const root = repository();
+  configure(root, 'trae', path.join(fixtureRoot, 'external-capability-provider.mjs'));
+  const loaded = await loadPlatformProvider({ cwd: root });
+  assert.equal(loaded.ok, true);
+  if (loaded.ok) {
+    const inspected = await loaded.value.provider.changeRequests!.inspect({
+      context: { repositoryRoot: root, workingDirectory: root, scopeId: 'external/project' },
+      target: { kind: 'id', value: 'cr-1' }
+    });
+    assert.equal(inspected.ok, true);
+    if (inspected.ok) assert.deepEqual(inspected.value.identity, { kind: 'id', value: 'cr-1' });
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('loads an external release-note provider through the normalized facts contract', async () => {
+  const root = repository();
+  configure(root, 'trae', path.join(fixtureRoot, 'external-release-notes-provider.mjs'));
+  const loaded = await loadPlatformProvider({ cwd: root });
+  assert.equal(loaded.ok, true);
+  if (loaded.ok) {
+    const notes = await loaded.value.provider.releases!.collectNotes({
+      context: { repositoryRoot: root, workingDirectory: root, scopeId: root },
+      fromTime: '2026-09-01T00:00:00.000Z',
+      toTime: '2026-09-02T00:00:00.000Z',
+      commitOids: ['1111111'],
+      branch: 'main',
+      historyLimit: 3
+    });
+    assert.equal(notes.ok, true);
+    if (notes.ok) assert.equal(notes.value.history[0]?.authoredAt, '2026-09-02T00:00:00.000Z');
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});

@@ -3,9 +3,8 @@ import fs from 'node:fs';
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import type { PlatformCheckSnapshot } from './adapters.ts';
-import { resolvePlatformContext, resolvePlatformProviderContext } from './context.ts';
-import { createGitHubClient } from './github-client.ts';
-import type { GitHubClient } from './github-client.ts';
+import { resolvePlatformProviderContext } from './context.ts';
+import type { PlatformClient } from './context.ts';
 import { inspectPlatformPullRequest } from './pull-requests.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
@@ -16,6 +15,7 @@ import {
   providerOperationContext,
   providerStatus,
   resourceIdentity,
+  resourceIdentityNumber,
   unsupportedProviderOperation
 } from './provider-bridge.ts';
 
@@ -33,8 +33,9 @@ type ChecksResult = PlatformResult & {
   resolution?: { status: 'resolved' | 'missing' | 'ambiguous'; runId: number | null; jobId: number | null };
   logs?: { runId: number; jobId?: number; text: string };
 };
-type InspectionOptions = { cwd?: string; client?: unknown };
-type SharedOptions = { cwd?: string; client?: GitHubClient };
+type GitHubClient = PlatformClient;
+type InspectionOptions = { cwd?: string; client?: PlatformClient };
+type SharedOptions = { cwd?: string; client?: PlatformClient };
 
 function classifyRequiredChecks(required: CheckSnapshot[]): ChecksSnapshot {
   if (required.length === 0) return { state: 'no-required', required };
@@ -125,16 +126,16 @@ async function resolvedTask(taskRef: string, options: InspectionOptions) {
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
   const fact = readPrDeliveryFact(frontmatter);
   if (fact.status === 'invalid') return { ok: false as const, output: checksResult('failed', { error: { code: 'PR_DELIVERY_FACT_INVALID', message: fact.error.message, retryable: false } }) };
-  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null;
-  if (!prNumber) return { ok: false as const, output: checksResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }) };
-  const client = (options.client as GitHubClient | undefined) || createGitHubClient();
-  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client });
+  const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
+  const prNumber = resourceIdentityNumber(prIdentity);
+  if (!prIdentity) return { ok: false as const, output: checksResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }) };
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ok: false as const, output: checksResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error }) };
-  const inspected = await inspectPlatformPullRequest(taskRef, { cwd: resolved.repoRoot, client });
+  const inspected = await inspectPlatformPullRequest(taskRef, { cwd: resolved.repoRoot, client: options.client });
   if (!inspected.pullRequest) return { ok: false as const, output: checksResult(inspected.status, { platform: context.platform, capabilities: context.capabilities, error: inspected.error }) };
   if (!loaded.ok) return { ok: false as const, output: checksResult('failed', { platform: context.platform, capabilities: context.capabilities, error: context.error }) };
-  return { ok: true as const, resolved, prNumber, client, context, pullRequest: inspected.pullRequest, provider: loaded.value.provider, loadedContext: loaded.value };
+  return { ok: true as const, resolved, prNumber, prIdentity, client: options.client, context, pullRequest: inspected.pullRequest, provider: loaded.value.provider, loadedContext: loaded.value };
 }
 
 async function inspectRequiredChecks(taskRef: string, options: InspectionOptions = {}): Promise<ChecksResult> {
@@ -152,7 +153,7 @@ async function inspectChecksForResolvedTask(
     const inspected = base.provider.checks?.inspectRequired
       ? await base.provider.checks.inspectRequired({
         context: providerOperationContext(base.loadedContext),
-        changeRequest: resourceIdentity(base.prNumber),
+        changeRequest: base.prIdentity,
         headSha: base.pullRequest.head.sha
       })
       : unsupportedProviderOperation(base.provider, 'checks.inspectRequired');
@@ -245,7 +246,7 @@ async function resolvePlatformCheckRun(taskRef: string, options: SharedOptions &
     const resolved = base.provider.checks?.resolveRun
       ? await base.provider.checks.resolveRun({
         context: providerOperationContext(base.loadedContext),
-        changeRequest: resourceIdentity(base.prNumber),
+        changeRequest: base.prIdentity,
         checkName: options.checkName,
         ...(options.detailsUrl ? { detailsUrl: options.detailsUrl } : {})
       })
@@ -271,6 +272,7 @@ async function resolvePlatformCheckRun(taskRef: string, options: SharedOptions &
 }
 
 function fetchCheckLogText(client: GitHubClient, args: string[], cwd: string) {
+  if (!client.text) return { ok: false as const, error: { code: 'PLATFORM_CLIENT_TEXT_UNAVAILABLE', message: 'Platform client does not support text responses', retryable: false } };
   const fetched = client.text(args, { cwd });
   if (fetched.ok || args[0] !== 'api' || !/response contains terminal escape sequences/i.test(fetched.error.message)) {
     return fetched;

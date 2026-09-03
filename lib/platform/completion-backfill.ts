@@ -9,11 +9,12 @@ import { getOpenWorkflowWarnings } from '../task/workflow-warnings.ts';
 import { applyWorkflowWarningIntent } from '../task/workflow-warning-intents.ts';
 import { captureTaskWriteMetadata } from '../task/write.ts';
 import { syncPlatformComment } from './issue-comments.ts';
-import type { GitHubClient } from './github-client.ts';
+import type { PlatformClient } from './context.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
+import { taskIssueIdentity } from './task-identities.ts';
 
-type CompletionBackfillOptions = { agent: string; cwd?: string; client?: GitHubClient };
+type CompletionBackfillOptions = { agent: string; cwd?: string; client?: PlatformClient };
 type CompletionBackfillResult = PlatformResult & {
   artifacts: Array<{ artifact: string; status: PlatformResult['status'] }>;
   warnings: Array<{ id: string; status: string }>;
@@ -59,9 +60,9 @@ async function backfillCompletionComments(
     }
   }), [], []);
   const initialContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const issueNumber = Number(parseTaskFrontmatter(initialContent).issue_number);
-  if (!Number.isInteger(issueNumber) || issueNumber <= 0) return result(platformResult('no-op', {
-    error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false }
+  const issueIdentity = taskIssueIdentity(parseTaskFrontmatter(initialContent));
+  if (!issueIdentity) return result(platformResult('no-op', {
+    error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
   }), [], []);
 
   const artifacts: CompletionBackfillResult['artifacts'] = [];

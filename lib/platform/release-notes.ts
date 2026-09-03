@@ -3,22 +3,22 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
-import { resolvePlatformContext, resolvePlatformProviderContext } from './context.ts';
-import {
-  fetchGitHubReleaseNoteData,
-  publishGitHubReleaseNotes
-} from './github-release-notes.ts';
-import type { ReleaseNoteActor } from './github-release-notes.ts';
-import type { GitHubClient } from './github-client.ts';
+import { resolvePlatformProviderContext } from './context.ts';
+import type { PlatformClient } from './context.ts';
 import { providerError, providerOperationContext, providerStatus, unsupportedProviderOperation } from './provider-bridge.ts';
+import { resourceIdentityNumber } from './resource-identity.ts';
+import type { ResourceIdentity } from './resource-identity.ts';
 
 type ReleaseNoteOptions = {
   cwd?: string;
   platformType?: string;
-  client?: GitHubClient;
+  client?: PlatformClient;
 };
 
+type ReleaseNoteActor = { id?: string; name?: string };
 type ReleaseNoteCommit = { oid: string; title: string; authors: ReleaseNoteActor[] };
+type ReleaseNoteIssue = { number: number; identity?: ResourceIdentity; title: string; url: string; labels: string[]; author: { login: string; bot: boolean } | null };
+type ReleaseNotePullRequest = { number: number; identity?: ResourceIdentity; title: string; body: string; url: string; mergedAt: string; labels: string[]; author: { login: string; bot: boolean } | null; closingIssues: ReleaseNoteIssue[] };
 
 const unsupportedError = {
   code: 'PLATFORM_RELEASE_NOTES_UNSUPPORTED',
@@ -141,19 +141,13 @@ async function releaseNoteContext(
   }
   const cwd = path.resolve(options.cwd || process.cwd());
   const platformType = options.platformType ?? configuredPlatform(cwd);
-  if (platformType !== 'github') {
-    const loaded = await resolvePlatformProviderContext({ cwd, platformType: platformType || undefined, client: options.client });
-    if (!loaded.ok) {
-      if (loaded.context.status === 'no-op') return baseResult('no-op');
-      const status = loaded.context.status === 'blocked'
-        ? 'blocked'
-        : 'failed';
-      return { ...baseResult(status), error: loaded.context.error };
-    }
-    return loaded.value.providerType !== 'github'
-      ? { ...baseResult('no-op'), error: { ...unsupportedError, message: `Platform '${loaded.value.providerType}' does not provide release-note collection` } }
-      : baseResult('no-op');
+  const loaded = await resolvePlatformProviderContext({ cwd, platformType: platformType || undefined, client: options.client });
+  if (!loaded.ok) {
+    if (loaded.context.status === 'no-op') return baseResult('no-op');
+    const status = loaded.context.status === 'blocked' ? 'blocked' : 'failed';
+    return { ...baseResult(status), error: loaded.context.error };
   }
+  if (!loaded.value.context.platform.repository) return baseResult('no-op');
   let fromOid: string;
   let toOid: string;
   let fromTime: string;
@@ -173,68 +167,54 @@ async function releaseNoteContext(
   } catch {
     return { ...baseResult('failed'), error: { code: 'RELEASE_NOTES_RANGE_INVALID', message: 'The release tag range is missing or is not ancestral', retryable: false } };
   }
-  const context = await resolvePlatformContext({ cwd, platformType, client: options.client });
-  if (!context.platform.repository) {
-    return {
-      ...baseResult(context.status === 'blocked' ? 'blocked' : 'failed'),
-      error: context.error || { code: 'PLATFORM_CONTEXT_UNAVAILABLE', message: 'Platform repository is unavailable', retryable: context.status === 'blocked' }
-    };
-  }
-  const platform = fetchGitHubReleaseNoteData(
-    {
-      repository: context.platform.repository,
+  const platform = loaded.value.provider.releases?.collectNotes
+    ? await loaded.value.provider.releases.collectNotes({
+      context: providerOperationContext(loaded.value),
       commitOids: commitFacts.map((item) => item.oid),
       branch: input.branch,
       historyLimit,
       fromTime,
       toTime
-    },
-    { cwd, client: options.client }
-  );
-  if (platform.status === 'blocked' || platform.status === 'failed' || !('authors' in platform)) {
-    return { ...baseResult(platform.status), error: platform.error };
-  }
+    })
+    : unsupportedProviderOperation(loaded.value.provider, 'releases.collectNotes');
+  if (!platform.ok) return { ...baseResult(platform.error.retryable ? 'blocked' : 'failed'), error: providerError(platform.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') };
   const commits = commitFacts.map((commit) => {
     const seen = new Set<string>();
-    const authors = (platform.authors.get(commit.oid) || []).filter((actor) => {
-      const key = actor.login || actor.email?.toLowerCase() || actor.name.toLowerCase();
+    const authors = platform.value.history.filter((item) => item.sha === commit.oid).flatMap((item) => item.author ? [item.author] : [])
+      .concat(platform.value.actors)
+      .filter((actor) => {
+      const key = actor.id || actor.name || '';
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    });
+      });
     return { ...commit, authors };
   });
-  const pullRequests = platform.pullRequests
+  const pullRequests: ReleaseNotePullRequest[] = platform.value.mergedPullRequests
     .map((item) => ({
-      number: Number(item.number),
-      title: String(item.title || ''),
-      body: String(item.body || ''),
-      url: String(item.url || ''),
-      mergedAt: String(item.mergedAt || ''),
-      labels: Array.isArray(item.labels) ? item.labels.map((label) => String((label as { name?: string }).name || label)) : [],
-      author: item.author && typeof item.author === 'object'
-        ? { login: String((item.author as { login?: string }).login || '').toLowerCase(), bot: String((item.author as { login?: string }).login || '').endsWith('[bot]') }
-        : null,
-      closingIssues: Array.isArray(item.closingIssuesReferences)
-        ? item.closingIssuesReferences.map((issue) => {
-          const value = issue as Record<string, unknown>;
-          return {
-            number: Number(value.number),
-            title: String(value.title || ''),
-            url: String(value.url || ''),
-            labels: Array.isArray(value.labels) ? value.labels.map((label) => String((label as { name?: string }).name || label)) : [],
-            author: value.author && typeof value.author === 'object'
-              ? { login: String((value.author as { login?: string }).login || '').toLowerCase(), bot: String((value.author as { login?: string }).login || '').endsWith('[bot]') }
-              : null
-          };
-        }) : []
+      number: item.number || resourceIdentityNumber(item.identity) || 0,
+      ...(item.identity ? { identity: item.identity } : {}),
+      title: item.title,
+      body: item.body,
+      url: item.displayUrl || '',
+      mergedAt: item.mergedAt || '',
+      labels: item.labels || [],
+      author: item.author ? { login: item.author.name || item.author.id || '', bot: false } : null,
+      closingIssues: platform.value.closingIssues.filter((issue) => issue.id === item.id).map((issue) => ({
+        number: issue.number || resourceIdentityNumber(issue.identity) || 0,
+        ...(issue.identity ? { identity: issue.identity } : {}),
+        title: issue.title,
+        url: issue.displayUrl || '',
+        labels: issue.labels || [],
+        author: issue.author ? { login: issue.author.name || issue.author.id || '', bot: false } : null
+      }))
     }))
     .sort((left, right) => left.number - right.number);
   return {
     status: 'no-op' as const,
     changed: false,
     range: { fromTag: input.fromTag, toTag: input.toTag, fromOid, toOid },
-    history: platform.history,
+    history: platform.value.history,
     pullRequests,
     commits,
     error: null

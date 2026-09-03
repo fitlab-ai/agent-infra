@@ -22,14 +22,19 @@ import type {
   PlatformProvider,
   PlatformProviderFactoryInput,
   ProviderResult,
+  ReleaseNotesFacts,
+  RepositoryMetadataSnapshot,
   ReleaseSnapshot,
   RemoteCommentSnapshot,
   RequiredCheckSnapshot,
   ReviewSnapshot,
   VerificationRemoteFacts
 } from './provider-contract.ts';
+import { resourceIdentityNumber, resourceIdentityString } from './resource-identity.ts';
 
 const CURRENT_USER_QUERY = 'query { viewer { login } }';
+const ISSUE_TYPES_QUERY = `query($owner:String!){organization(login:$owner){issueTypes(first:20){nodes{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}}}}}`;
+const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id issueType{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{id name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{id name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{id name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{id name}}}}}}}}`;
 
 function parseGitHubRemote(remote: string): string | null {
   const trimmed = remote.trim().replace(/\.git$/, '');
@@ -175,7 +180,7 @@ function resolveContext(
   }
   const repository = client.json(['api', 'repos/' + ownerRepo], { cwd });
   if (!repository.ok) return failure(repository.error);
-  const repositoryValue = repository.value as { fork?: boolean; full_name?: string; parent?: { full_name?: string } } | null;
+  const repositoryValue = repository.value as { fork?: boolean; full_name?: string; owner?: { type?: string }; parent?: { full_name?: string } } | null;
   const upstream = repositoryValue?.fork ? repositoryValue.parent?.full_name : repositoryValue?.full_name;
   if (!upstream) return failure({
     code: 'UPSTREAM_UNRESOLVED',
@@ -204,13 +209,61 @@ function resolveContext(
       scope: { id: upstream, label: upstream },
       currentUser: currentUser ? { id: currentUser, name: currentUser } : null,
       capabilities,
-      authenticated: capabilities.authenticated
+      authenticated: capabilities.authenticated,
+      ...(repositoryValue?.owner?.type ? { metadata: { ownerType: repositoryValue.owner.type } } : {})
     }
   };
 }
 
 function repository(context: ProviderOperationContext): string {
   return context.scopeId;
+}
+
+function expectedHeadRepository(repositoryName: string, head: string): { repository: string; ref: string } {
+  const colon = head.indexOf(':');
+  if (colon === -1) return { repository: repositoryName, ref: head };
+  const repoName = repositoryName.split('/')[1] || '';
+  return { repository: `${head.slice(0, colon)}/${repoName}`, ref: head.slice(colon + 1) };
+}
+
+function repositoryHead(cwd: string): string {
+  return execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  }).trim();
+}
+
+function verifyRemoteBranch(cwd: string, repositoryName: string, head: string):
+  | { ok: true; value: string }
+  | { ok: false; error: { code: string; message: string; retryable: boolean } } {
+  const wanted = expectedHeadRepository(repositoryName, head);
+  if (!wanted.ref || !/^[A-Za-z0-9._/-]+$/.test(wanted.ref)) return {
+    ok: false,
+    error: { code: 'PR_HEAD_INVALID', message: 'Pull request head ref is invalid', retryable: false }
+  };
+  const remotes = configuredGitRemotes(cwd);
+  const remote = remotes.find((item) => item.repository.toLowerCase() === wanted.repository.toLowerCase())
+    ?? remotes.find((item) => item.name === 'origin');
+  if (!remote) return {
+    ok: false,
+    error: { code: 'PR_REMOTE_BRANCH_MISSING', message: `No configured remote can verify ${wanted.repository}:${wanted.ref}`, retryable: false }
+  };
+  try {
+    const output = execFileSync('git', ['ls-remote', '--refs', remote.name, `refs/heads/${wanted.ref}`], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+    }).trim();
+    const match = output.split(/\r?\n/).map((line) => line.trim()).find((line) => line.endsWith(`refs/heads/${wanted.ref}`));
+    const sha = match?.split(/\s+/)[0] || null;
+    if (!sha || !/^[a-f0-9]{40}$/i.test(sha)) return {
+      ok: false,
+      error: { code: 'PR_REMOTE_BRANCH_MISSING', message: `Remote branch ${wanted.repository}:${wanted.ref} does not exist`, retryable: false }
+    };
+    return { ok: true, value: sha };
+  } catch (error) {
+    return {
+      ok: false,
+      error: { code: 'PR_REMOTE_BRANCH_UNAVAILABLE', message: error instanceof Error ? error.message : String(error), retryable: true }
+    };
+  }
 }
 
 function invalid(code: string, message: string): ProviderResult<never> {
@@ -220,6 +273,7 @@ function invalid(code: string, message: string): ProviderResult<never> {
 function changeRequestSnapshot(value: any): ChangeRequestSnapshot {
   return {
     id: value.nodeId,
+    identity: { kind: 'number', value: value.number },
     number: value.number,
     state: value.state,
     title: value.title,
@@ -239,9 +293,24 @@ function changeRequestSnapshot(value: any): ChangeRequestSnapshot {
   };
 }
 
-function issueSnapshot(value: any): IssueSnapshot {
+function issueSnapshot(value: any, graph?: { type: any; values: Array<{ name: string; value: string | number | null }> }): IssueSnapshot {
+  const issueType = graph?.type ? {
+    identity: { kind: 'id' as const, value: String(graph.type.id) },
+    name: String(graph.type.name),
+    fields: (graph.type.fields || []).map((field: any) => ({
+      identity: { kind: 'id' as const, value: String(field.id) },
+      name: String(field.name),
+      kind: field.kind,
+      options: (field.options || []).map((option: any) => ({ identity: { kind: 'id' as const, value: String(option.id) }, name: String(option.name) }))
+    }))
+  } : value.issueType ? {
+    identity: { kind: 'key' as const, value: String(value.issueType) },
+    name: String(value.issueType),
+    fields: []
+  } : null;
   return {
     id: value.nodeId,
+    identity: { kind: 'number', value: value.number },
     number: value.number,
     state: value.state,
     title: value.title,
@@ -249,7 +318,8 @@ function issueSnapshot(value: any): IssueSnapshot {
     labels: value.labels,
     assignees: value.assignees,
     milestone: value.milestone,
-    fields: value.fields,
+    fields: graph ? Object.fromEntries(graph.values.map((field) => [field.name, field.value])) : value.fields,
+    issueType,
     displayUrl: value.url
   };
 }
@@ -270,13 +340,52 @@ function createReceipt(remoteId: string, url?: string): ProviderResult<MutationR
 
 function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'verification'> {
   const issues: NonNullable<PlatformProvider['issues']> = {
+    async describeRepository({ context }): Promise<ProviderResult<RepositoryMetadataSnapshot>> {
+      const repositoryName = repository(context);
+      const info = client.json<any>(['api', `repos/${repositoryName}`], { cwd: context.workingDirectory });
+      if (!info.ok) return info;
+      const labels = client.json<any>(['api', '--paginate', '--slurp', `repos/${repositoryName}/labels?per_page=100`], { cwd: context.workingDirectory });
+      if (!labels.ok) return labels;
+      const milestones = client.json<any>(['api', '--paginate', '--slurp', `repos/${repositoryName}/milestones?state=open&per_page=100`], { cwd: context.workingDirectory });
+      if (!milestones.ok) return milestones;
+      const [owner] = repositoryName.split('/');
+      const issueTypes = client.json<any>(['api', 'graphql', '-f', `query=${ISSUE_TYPES_QUERY}`, '-F', `owner=${owner}`], { cwd: context.workingDirectory });
+      if (!issueTypes.ok) return issueTypes;
+      const flatten = (value: unknown): any[] => Array.isArray(value) ? value.flatMap((entry) => Array.isArray(entry) ? entry : [entry]) : [];
+      const fields = (raw: any): any[] => (raw || []).flatMap((field: any) => {
+        const kind = field.__typename === 'IssueFieldSingleSelect' ? 'single-select'
+          : field.__typename === 'IssueFieldDate' ? 'date'
+            : field.__typename === 'IssueFieldText' ? 'text'
+              : field.__typename === 'IssueFieldNumber' ? 'number' : null;
+        return field.id && field.name && kind ? [{
+          identity: { kind: 'id', value: String(field.id) }, name: String(field.name), kind,
+          options: (field.options || []).filter((option: any) => option?.id && option?.name).map((option: any) => ({ identity: { kind: 'id', value: String(option.id) }, name: String(option.name) }))
+        }] : [];
+      });
+      const typeNodes = issueTypes.value?.data?.organization?.issueTypes?.nodes || [];
+      return {
+        ok: true,
+        value: {
+          repository: {
+            identity: { kind: 'key', value: repositoryName },
+            name: String(info.value?.full_name || repositoryName),
+            url: info.value?.html_url ? String(info.value.html_url) : null
+          },
+          labels: flatten(labels.value).filter((item) => item?.name).map((item) => ({ identity: { kind: 'key', value: String(item.name) }, name: String(item.name) })),
+          milestones: flatten(milestones.value).filter((item) => item?.title).map((item) => ({ identity: { kind: 'key', value: String(item.title) }, title: String(item.title), state: item.state === 'closed' ? 'closed' : 'open' })),
+          issueTypes: typeNodes.filter((item: any) => item?.id && item?.name).map((item: any) => ({ identity: { kind: 'id', value: String(item.id) }, name: String(item.name), fields: fields(item.pinnedFields) })),
+          fields: []
+        }
+      };
+    },
     async inspect({ context, target }) {
-      const number = target.number;
+      const number = resourceIdentityNumber(target);
       if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
       const module = await import('./issues.ts');
       const fetched = module.inspectGitHubIssue(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
-      return { ok: true, value: issueSnapshot(fetched.value) };
+      const graph = module.graphState(client, repository(context), number, context.workingDirectory);
+      return { ok: true, value: issueSnapshot(fetched.value, graph || undefined) };
     },
     async create({ context, desired }) {
       const response = client.json<any>(['api', `repos/${repository(context)}/issues`, '-X', 'POST', '--input', '-'], {
@@ -296,29 +405,101 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       return createReceipt(String(number), response.value?.html_url);
     },
     async update({ context, target, patch }) {
-      if (!target.number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
-      const response = client.json<any>(['api', `repos/${repository(context)}/issues/${target.number}`, '-X', 'PATCH', '--input', '-'], {
-        cwd: context.workingDirectory,
-        method: 'PATCH',
-        input: JSON.stringify(patch)
-      });
-      if (!response.ok) return response;
-      return createReceipt(String(target.number));
+      const number = resourceIdentityNumber(target);
+      if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
+      const { issueType, fields, ...restPatch } = patch;
+      let requestPatch = restPatch;
+      if (typeof patch.milestone === 'string') {
+        const milestones = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=open&per_page=100`], { cwd: context.workingDirectory });
+        if (!milestones.ok) return milestones;
+        const values = Array.isArray(milestones.value)
+          ? milestones.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
+          : [];
+        const selected = values.find((item: any) => item?.title === patch.milestone);
+        if (!Number.isSafeInteger(selected?.number) || selected.number <= 0) {
+          return invalid('MILESTONE_IDENTITY_INVALID', 'Milestone title does not resolve to a positive number');
+        }
+        requestPatch = { ...restPatch, milestone: selected.number } as typeof restPatch;
+      }
+      let changed = false;
+      if (issueType !== undefined || fields !== undefined) {
+        const [owner, name] = repository(context).split('/');
+        const current = client.json<any>(['api', 'graphql', '-f', `query=${ISSUE_FIELDS_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`], { cwd: context.workingDirectory });
+        if (!current.ok) return current;
+        const currentIssue = current.value?.data?.repository?.issue;
+        const issueId = currentIssue?.id;
+        if (!issueId) return invalid('ISSUE_GRAPH_IDENTITY_INVALID', 'Issue GraphQL response lacks issue identity');
+        let targetType = currentIssue.issueType;
+        if (issueType !== undefined) {
+          const types = client.json<any>(['api', 'graphql', '-f', `query=${ISSUE_TYPES_QUERY}`, '-F', `owner=${owner}`], { cwd: context.workingDirectory });
+          if (!types.ok) return types;
+          targetType = (types.value?.data?.organization?.issueTypes?.nodes || []).find((item: any) => item?.name === issueType);
+          if (!targetType) return invalid('ISSUE_TYPE_NOT_FOUND', 'Issue type was not found');
+          if (targetType.id !== currentIssue.issueType?.id) {
+            const updatedType = client.json(['api', 'graphql', '--input', '-'], {
+              cwd: context.workingDirectory,
+              method: 'POST',
+              input: JSON.stringify({
+                query: 'mutation($issueId:ID!,$issueTypeId:ID){updateIssueIssueType(input:{issueId:$issueId,issueTypeId:$issueTypeId}){issue{id}}}',
+                variables: { issueId, issueTypeId: targetType.id }
+              })
+            });
+            if (!updatedType.ok) return updatedType;
+            changed = true;
+          }
+        }
+        if (fields !== undefined) {
+          const values = Object.entries(fields).flatMap(([name, value]) => {
+            const field = (targetType?.pinnedFields || []).find((candidate: any) => candidate?.name === name);
+            if (!field?.id) return [];
+            if (field.__typename === 'IssueFieldSingleSelect') {
+              const option = (field.options || []).find((candidate: any) => candidate?.name === value);
+              return option?.id ? [{ fieldId: field.id, singleSelectOptionId: option.id }] : [];
+            }
+            const key = field.__typename === 'IssueFieldDate' ? 'dateValue' : field.__typename === 'IssueFieldNumber' ? 'numberValue' : 'textValue';
+            return [{ fieldId: field.id, [key]: value }];
+          });
+          if (values.length > 0) {
+            const updatedFields = client.json(['api', 'graphql', '--input', '-'], {
+              cwd: context.workingDirectory,
+              method: 'POST',
+              input: JSON.stringify({
+                query: 'mutation($issueId:ID!,$issueFields:[IssueFieldCreateOrUpdateInput!]!){setIssueFieldValue(input:{issueId:$issueId,issueFields:$issueFields}){issue{id}}}',
+                variables: { issueId, issueFields: values }
+              })
+            });
+            if (!updatedFields.ok) return updatedFields;
+            changed = true;
+          }
+        }
+      }
+      if (Object.keys(requestPatch).length > 0) {
+        const response = client.json<any>(['api', `repos/${repository(context)}/issues/${number}`, '-X', 'PATCH', '--input', '-'], {
+          cwd: context.workingDirectory,
+          method: 'PATCH',
+          input: JSON.stringify(requestPatch)
+        });
+        if (!response.ok) return response;
+        changed = true;
+      }
+      return { ok: true, value: { changed, remoteId: String(number) } };
     }
   };
 
   const comments: NonNullable<PlatformProvider['comments']> = {
     async list({ context, parent }) {
-      if (!parent.number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
-      const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/issues/${parent.number}/comments?per_page=100`], { cwd: context.workingDirectory });
+      const number = resourceIdentityNumber(parent);
+      if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
+      const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/issues/${number}/comments?per_page=100`], { cwd: context.workingDirectory });
       if (!response.ok) return response;
       const values = Array.isArray(response.value) ? response.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry]) : [];
       return { ok: true, value: values.filter((entry: any) => entry && entry.id !== undefined).map(commentSnapshot) };
     },
     async write({ context, parent, body, existingComment }) {
-      if (!parent.number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
-      const commentId = existingComment?.id;
-      const endpoint = commentId ? `repos/${repository(context)}/issues/comments/${commentId}` : `repos/${repository(context)}/issues/${parent.number}/comments`;
+      const number = resourceIdentityNumber(parent);
+      if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
+      const commentId = resourceIdentityString(existingComment);
+      const endpoint = commentId ? `repos/${repository(context)}/issues/comments/${commentId}` : `repos/${repository(context)}/issues/${number}/comments`;
       const response = client.json<any>(['api', endpoint, '-X', commentId ? 'PATCH' : 'POST', '--input', '-'], {
         cwd: context.workingDirectory,
         method: commentId ? 'PATCH' : 'POST',
@@ -336,17 +517,34 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
   };
 
   const changeRequests: NonNullable<PlatformProvider['changeRequests']> = {
+    async verifyHead({ context, head }) {
+      let localHead: string;
+      try {
+        localHead = repositoryHead(context.workingDirectory);
+      } catch (error) {
+        return { ok: false, error: { code: 'PR_LOCAL_HEAD_UNAVAILABLE', message: error instanceof Error ? error.message : String(error), retryable: false } };
+      }
+      const remote = verifyRemoteBranch(context.workingDirectory, repository(context), head);
+      if (!remote.ok) return remote;
+      if (remote.value !== localHead) return {
+        ok: false,
+        error: { code: 'PR_REMOTE_HEAD_MISMATCH', message: `Remote head ${remote.value} does not match local HEAD ${localHead}`, retryable: false }
+      };
+      return { ok: true, value: { sha: localHead } };
+    },
     async inspect({ context, target }) {
-      if (!target.number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const number = resourceIdentityNumber(target);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
       const module = await import('./pull-requests.ts');
-      const fetched = module.inspectGitHubPullRequest(client, repository(context), target.number, context.workingDirectory);
+      const fetched = module.inspectGitHubPullRequest(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
       return { ok: true, value: changeRequestSnapshot(fetched.value) };
     },
     async listClosing({ context, issue }) {
-      if (!issue.number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
+      const number = resourceIdentityNumber(issue);
+      if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
       const module = await import('./pull-requests.ts');
-      const fetched = module.inspectGitHubIssueClosingChangeRequests(client, repository(context), issue.number, context.workingDirectory);
+      const fetched = module.inspectGitHubIssueClosingChangeRequests(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
       return { ok: true, value: fetched.value.map(changeRequestSnapshot) };
     },
@@ -362,22 +560,52 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       return createReceipt(String(number), response.value?.html_url);
     },
     async update({ context, target, patch }) {
-      if (!target.number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const response = client.json<any>(['api', `repos/${repository(context)}/pulls/${target.number}`, '-X', 'PATCH', '--input', '-'], {
-        cwd: context.workingDirectory,
-        method: 'PATCH',
-        input: JSON.stringify(patch)
-      });
-      if (!response.ok) return response;
-      return createReceipt(String(target.number));
+      const number = resourceIdentityNumber(target);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const { labels, assignees, milestone, ...pullRequestPatch } = patch;
+      let changed = false;
+      if (Object.keys(pullRequestPatch).length > 0) {
+        const response = client.json<any>(['api', `repos/${repository(context)}/pulls/${number}`, '-X', 'PATCH', '--input', '-'], {
+          cwd: context.workingDirectory,
+          method: 'PATCH',
+          input: JSON.stringify(pullRequestPatch)
+        });
+        if (!response.ok) return response;
+        changed = true;
+      }
+      const issuePatch: Record<string, unknown> = {};
+      if (labels !== undefined) issuePatch.labels = labels;
+      if (assignees !== undefined) issuePatch.assignees = assignees;
+      if (milestone !== undefined) {
+        if (milestone === null) issuePatch.milestone = null;
+        else {
+          const milestones = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=open&per_page=100`], { cwd: context.workingDirectory });
+          if (!milestones.ok) return milestones;
+          const values = Array.isArray(milestones.value) ? milestones.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry]) : [];
+          const selected = values.find((entry: any) => entry?.title === milestone);
+          if (!Number.isSafeInteger(selected?.number) || selected.number <= 0) return invalid('MILESTONE_IDENTITY_INVALID', 'Milestone title does not resolve to a positive number');
+          issuePatch.milestone = selected.number;
+        }
+      }
+      if (Object.keys(issuePatch).length > 0) {
+        const response = client.json<any>(['api', `repos/${repository(context)}/issues/${number}`, '-X', 'PATCH', '--input', '-'], {
+          cwd: context.workingDirectory,
+          method: 'PATCH',
+          input: JSON.stringify(issuePatch)
+        });
+        if (!response.ok) return response;
+        changed = true;
+      }
+      return { ok: true, value: { changed, remoteId: String(number) } };
     },
     async resolveGitEvidence({ context, target, expected }) {
-      if (!target.number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const number = resourceIdentityNumber(target);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
       const module = await import('./github-provider.ts');
       return module.resolveGitHubChangeRequestGitEvidence({
         cwd: context.workingDirectory,
         repository: repository(context),
-        number: target.number,
+        number,
         baseRepository: repository(context),
         baseRef: expected.targetBranch || 'main'
       });
@@ -386,14 +614,16 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
 
   const checks: NonNullable<PlatformProvider['checks']> = {
     async inspectRequired({ context, changeRequest }) {
-      if (!changeRequest.number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const number = resourceIdentityNumber(changeRequest);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
       const module = await import('./pr-checks.ts');
-      const fetched = module.inspectGitHubRequiredChecks(client, repository(context), changeRequest.number, context.workingDirectory);
+      const fetched = module.inspectGitHubRequiredChecks(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
       return { ok: true, value: fetched.value.map((check: any): RequiredCheckSnapshot => ({ name: check.name, status: check.bucket, conclusion: check.conclusion, detailsUrl: check.detailsUrl })) };
     },
     async resolveRun({ context, changeRequest, checkName, detailsUrl }) {
-      if (!changeRequest.number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const number = resourceIdentityNumber(changeRequest);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
       const module = await import('./pr-checks.ts');
       const direct = detailsUrl ? module.parseRunJobIdentity(detailsUrl) : null;
       if (direct) {
@@ -401,7 +631,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
         if (!run.ok) return run;
         return { ok: true, value: { runId: String(direct.runId), jobId: direct.jobId ? String(direct.jobId) : undefined } } as ProviderResult<CheckRunSnapshot>;
       }
-      const listed = client.json<any>(['api', `repos/${repository(context)}/commits/${changeRequest.number}/check-runs`], { cwd: context.workingDirectory });
+      const listed = client.json<any>(['api', `repos/${repository(context)}/commits/${number}/check-runs`], { cwd: context.workingDirectory });
       if (!listed.ok) return listed;
       const candidate = (listed.value?.check_runs || []).find((run: any) => run.name === checkName && run.id);
       return candidate
@@ -421,15 +651,17 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
 
   const reviews: NonNullable<PlatformProvider['reviews']> = {
     async list({ context, changeRequest }) {
-      if (!changeRequest.number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const response = client.json<any[]>(['api', '--paginate', '--slurp', `repos/${repository(context)}/pulls/${changeRequest.number}/reviews?per_page=100`], { cwd: context.workingDirectory });
+      const number = resourceIdentityNumber(changeRequest);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const response = client.json<any[]>(['api', '--paginate', '--slurp', `repos/${repository(context)}/pulls/${number}/reviews?per_page=100`], { cwd: context.workingDirectory });
       if (!response.ok) return response;
       const values = Array.isArray(response.value) ? response.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry]) : [];
       return { ok: true, value: values.filter((review: any) => review?.body).map((review: any): ReviewSnapshot => ({ id: String(review.id || review.node_id || ''), author: review.user?.login ? { id: String(review.user.login), name: String(review.user.login) } : null, commitSha: String(review.commit_id || ''), body: String(review.body), state: String(review.state || ''), submittedAt: String(review.submitted_at || ''), displayUrl: review.html_url })) };
     },
     async publish({ context, changeRequest, identity, event, body }) {
-      if (!changeRequest.number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const response = client.json<any>(['api', `repos/${repository(context)}/pulls/${changeRequest.number}/reviews`, '-X', 'POST', '--input', '-'], {
+      const number = resourceIdentityNumber(changeRequest);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const response = client.json<any>(['api', `repos/${repository(context)}/pulls/${number}/reviews`, '-X', 'POST', '--input', '-'], {
         cwd: context.workingDirectory,
         method: 'POST',
         input: JSON.stringify({ commit_id: identity.commitSha, body, event })
@@ -443,7 +675,9 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async inspect({ context, tag }) {
       const response = client.json<any>(['release', 'view', tag, '--repo', repository(context), '--json', 'tagName,isDraft,url'], { cwd: context.workingDirectory });
       if (!response.ok) return response;
-      const value: ReleaseSnapshot = { id: String(response.value?.id || tag), tag: String(response.value?.tagName || tag), title: String(response.value?.name || tag), body: String(response.value?.body || ''), draft: Boolean(response.value?.isDraft), prerelease: Boolean(response.value?.isPrerelease), publishedAt: response.value?.publishedAt ? String(response.value.publishedAt) : null, displayUrl: response.value?.url ? String(response.value.url) : undefined };
+      const runs = client.json<any[]>(['run', 'list', '--repo', repository(context), '--limit', '100', '--json', 'name,workflowName,displayTitle,event,headBranch,headSha,status,conclusion,createdAt,databaseId,attempt,url'], { cwd: context.workingDirectory });
+      if (!runs.ok) return runs;
+      const value: ReleaseSnapshot = { id: String(response.value?.id || tag), tag: String(response.value?.tagName || tag), title: String(response.value?.name || tag), body: String(response.value?.body || ''), draft: Boolean(response.value?.isDraft), prerelease: Boolean(response.value?.isPrerelease), publishedAt: response.value?.publishedAt ? new Date(String(response.value.publishedAt)).toISOString() : null, displayUrl: response.value?.url ? String(response.value.url) : undefined, workflows: Array.isArray(runs.value) ? runs.value as Array<Record<string, import('./provider-contract.ts').JsonValue>> : [] };
       return { ok: true, value };
     },
     async create({ context, tag, title, notes }) {
@@ -496,51 +730,66 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       } finally {
         fs.rmSync(temporaryRoot, { recursive: true, force: true });
       }
+    },
+    async collectNotes({ context, fromTime, toTime, commitOids, branch, historyLimit }): Promise<ProviderResult<ReleaseNotesFacts>> {
+      const module = await import('./github-release-notes.ts');
+      const collected = module.fetchGitHubReleaseNoteData({
+        repository: repository(context), commitOids, branch, historyLimit, fromTime, toTime
+      }, { cwd: context.workingDirectory, client });
+      if (collected.status === 'failed' || collected.status === 'blocked' || !('pullRequests' in collected)) {
+        return { ok: false, error: collected.error || { code: 'RELEASE_NOTES_COLLECTION_FAILED', message: 'Release notes could not be collected', retryable: false } };
+      }
+      const mergedPullRequests = collected.pullRequests.map((item: any): ChangeRequestSnapshot => ({
+        id: String(item.number), identity: { kind: 'number', value: Number(item.number) }, number: Number(item.number),
+        state: 'closed', title: String(item.title || ''), body: String(item.body || ''),
+        mergedAt: new Date(String(item.mergedAt)).toISOString(), displayUrl: String(item.url || ''),
+        labels: Array.isArray(item.labels) ? item.labels.map((label: any) => String(label.name || label)) : [],
+        assignees: [], mergeCommitSha: null
+      }));
+      const closingIssues: IssueSnapshot[] = collected.pullRequests.flatMap((item: any) =>
+        Array.isArray(item.closingIssuesReferences) ? item.closingIssuesReferences.map((issue: any) => ({
+          id: String(issue.number), identity: { kind: 'number', value: Number(issue.number) }, number: Number(issue.number),
+          state: 'closed' as const, title: String(issue.title || ''), body: '', labels: Array.isArray(issue.labels) ? issue.labels.map((label: any) => String(label.name || label)) : [],
+          assignees: [], milestone: null, fields: {}, displayUrl: String(issue.url || '')
+        })) : []
+      );
+      const actors = [...collected.authors.values()].flatMap((items) => items.map((item: any) => ({
+        ...(item.login ? { id: String(item.login) } : {}), ...(item.name ? { name: String(item.name) } : {})
+      })));
+      return {
+        ok: true,
+        value: {
+          history: commitOids.map((sha) => ({ sha, message: '', authoredAt: toTime, author: actors.find((actor) => actor.id) || null })),
+          mergedPullRequests,
+          closingIssues,
+          actors
+        }
+      };
     }
   };
 
   const verification: NonNullable<PlatformProvider['verification']> = {
     async fetchRemoteFacts(input) {
-      const module = await import('./verification-sync.ts');
-      const result = await module.fetchGitHubRemoteData({
-        ...input,
-        providerType: 'github',
-        provider: null,
-        loadedContext: null,
-        upstreamRepo: repository(input.context),
-        taskDir: input.context.workingDirectory,
-        issueNumber: input.issue?.number || null,
-        prNumber: input.changeRequest?.number || null,
-        config: { verify_issue_fields: input.includeFields }
-      }, client);
-      if (result.earlyReturn) return { ok: false, error: { code: 'PLATFORM_PROVIDER_OPERATION_FAILED', message: result.earlyReturn.message || 'GitHub verification data could not be fetched', retryable: result.earlyReturn.status === 'blocked' } };
+      const issue = input.issue && issues.inspect
+        ? await issues.inspect({ context: input.context, target: input.issue })
+        : { ok: true as const, value: null };
+      if (!issue.ok) return issue;
+      const commentFacts = input.includeComments && input.issue && comments.list
+        ? await comments.list({ context: input.context, parent: input.issue })
+        : { ok: true as const, value: [] as RemoteCommentSnapshot[] };
+      if (!commentFacts.ok) return commentFacts;
+      const changeRequest = input.changeRequest && changeRequests.inspect
+        ? await changeRequests.inspect({ context: input.context, target: input.changeRequest })
+        : { ok: true as const, value: null };
+      if (!changeRequest.ok) return changeRequest;
       return {
         ok: true,
         value: {
-          issue: result.issue ? {
-            id: String(input.issue?.number || ''),
-            number: input.issue?.number,
-            state: String(result.issue.state || '').toLowerCase() === 'closed' ? 'closed' : 'open',
-            title: '',
-            body: String(result.issue.body || ''),
-            labels: (result.issue.labels || []).map((item: any) => String(item.name || item)),
-            assignees: [],
-            milestone: result.issue.milestone?.title || null,
-            fields: result.issueFields || {}
-          } : null,
-          comments: (result.comments || []).map((comment: any) => commentSnapshot(comment)),
-          changeRequest: input.changeRequest ? {
-            id: String(input.changeRequest.number || ''),
-            number: input.changeRequest.number,
-            state: '',
-            title: '',
-            body: '',
-            headSha: result.prHeadSha,
-            labels: result.prLabels || [],
-            assignees: result.prAssignees || []
-          } : null,
+          issue: issue.value,
+          comments: commentFacts.value,
+          changeRequest: changeRequest.value,
           commit: null,
-          fields: result.issueFields || {}
+          fields: input.includeFields ? issue.value?.fields || {} : {}
         }
       } as ProviderResult<VerificationRemoteFacts>;
     }
@@ -556,6 +805,7 @@ function createGitHubProvider(
   return {
     type: input.providerType,
     contractVersion: 1,
+    identity: { issue: 'number', 'pull-request': 'number', comment: 'number', release: 'key' },
     ...createGitHubOperations(client),
     context: {
       async resolve(contextInput) {

@@ -102,6 +102,8 @@ source 可以是包名，也可以是相对于仓库根目录解析的本地 ESM
 
 `context.resolve` 是必需操作，会在加载阶段校验。其他 operation group 可以缺失，但声明的 group 必须完整实现全部方法。缺失 group 返回结构化的 `PLATFORM_CAPABILITY_UNSUPPORTED`；选定 provider 缺失、无法解析/导入、导出形状错误、factory 抛错、type/version 不匹配或 contract 校验失败时，返回稳定的不可重试错误，且绝不回退到 GitHub。错误信息不会包含 provider config、token 或不必要的绝对路径。私有 provider 的包访问和认证由部署环境负责。
 
+资源身份统一使用 canonical `{ "kind": "id" | "number" | "key", "value": string | number }` 形状。每个 provider 为每类资源声明一个 primary kind，core 不使用全局 `id > number > key` 回退。`--issue`、`--pr` 等 CLI 参数仍接收直观的原始字符串 token，并在选定 provider 加载后再解析。旧 `issue_number` 和 v1 PR fact 只在读取边界转换；新写入使用 `platform_issue_identity` 和 v2 PR fact，不重复写入旧字段。数字 identity 的 review marker 保留 `pr<N>`，不透明 identity 使用 `pr:<base64url-canonical-identity>`。provider 时间戳和 release-note facts 统一使用 UTC `Z`；本地时间只在展示层转换。
+
 ## Agent Client 契约
 
 **AI Coding Agent Client**（简称 **Agent Client**）是受支持的编码代理应用，例如 Claude Code、Codex、Antigravity CLI、OpenCode 或 TraeCode CLI。Canonical `agentClients` 数组必须按固定顺序 `claude-code`、`codex`、`antigravity-cli`、`opencode`、`traecli` 恰好包含每个内建客户端一次。

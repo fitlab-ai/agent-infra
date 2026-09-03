@@ -16,9 +16,9 @@ import { summaryContext, syncPullRequestSummary } from '../platform/pr-summary.t
 import type { PlatformResult } from '../platform/types.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd <path>]
-       agent-infra-internal platform-pr resolve-external <task-ref> --agent <agent> [--pr <N>] [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr resolve-external <task-ref> --agent <agent> [--pr <token>] [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr create <task-ref> --agent <agent> --base <branch> --head <branch> --title-file <path|-> --body-file <path|-> [--draft] [--dry-run] [--cwd <path>]
-       agent-infra-internal platform-pr bind <task-ref> --pr <N> --agent <agent> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr bind <task-ref> --pr <token> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr skip <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync <task-ref> --agent <agent> [--metadata] [--closing-issue] --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync-in-labels --pr <N> [--dry-run] [--cwd <path>]
@@ -116,14 +116,14 @@ async function platformPr(args: string[] = []): Promise<void> {
     return;
   }
   if (operation === 'resolve-external') {
-    const pr = values.pr === undefined ? undefined : Number(values.pr);
-    if (pr !== undefined && (!Number.isInteger(pr) || pr <= 0)) { fail('resolve-external requires a positive --pr'); return; }
+    const pr = values.pr === undefined ? undefined : values.pr;
+    if (pr !== undefined && (typeof pr !== 'string' || !pr)) { fail('resolve-external requires --pr <token>'); return; }
     finish(await resolveExternalPullRequest(taskRef, { cwd, agent: values.agent, pr, dryRun: values.dryRun === true }));
     return;
   }
   if (operation === 'bind') {
-    const pr = Number(values.pr);
-    if (!Number.isInteger(pr) || pr <= 0) { fail('bind requires a positive --pr'); return; }
+    const pr = values.pr;
+    if (typeof pr !== 'string' || !pr) { fail('bind requires --pr <token>'); return; }
     finish(await bindPlatformPullRequest(taskRef, { cwd, agent: values.agent, pr, dryRun: values.dryRun === true }));
     return;
   }

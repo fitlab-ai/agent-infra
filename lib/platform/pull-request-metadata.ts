@@ -34,7 +34,7 @@ function planPullRequestMetadata(input: {
   pullRequest: PullRequestMetadataSnapshot;
   issue: IssueMetadataSource;
   taskType: string;
-  issueNumber: number;
+  issueNumber: number | null;
   capabilities: PlatformCapabilities;
   inLabels?: string[];
 }): { operations: PullRequestMetadataOperation[] } {
@@ -45,7 +45,7 @@ function planPullRequestMetadata(input: {
     ...(typeLabel ? [typeLabel] : []),
     ...targetInLabels.filter((label) => label.startsWith('in:'))
   ])].sort();
-  const body = ensureClosingReference(input.pullRequest.body, input.issueNumber);
+  const body = input.issueNumber === null ? input.pullRequest.body : ensureClosingReference(input.pullRequest.body, input.issueNumber);
   return { operations: [
     input.capabilities.triage
       ? equalStrings(input.pullRequest.labels, desiredLabels)
@@ -60,9 +60,11 @@ function planPullRequestMetadata(input: {
         ? { name: 'milestone', status: 'no-op', reasonCode: null }
         : { name: 'milestone', status: 'planned', reasonCode: null, value: input.issue.milestone }
       : { name: 'milestone', status: 'skipped', reasonCode: 'TRIAGE_REQUIRED' },
-    body === input.pullRequest.body
-      ? { name: 'closing-issue', status: 'no-op', reasonCode: null }
-      : { name: 'closing-issue', status: 'planned', reasonCode: null, value: body }
+    input.issueNumber === null
+      ? { name: 'closing-issue', status: 'skipped', reasonCode: 'ISSUE_REFERENCE_UNSUPPORTED' }
+      : body === input.pullRequest.body
+        ? { name: 'closing-issue', status: 'no-op', reasonCode: null }
+        : { name: 'closing-issue', status: 'planned', reasonCode: null, value: body }
   ] };
 }
 

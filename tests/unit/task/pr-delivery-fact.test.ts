@@ -44,7 +44,7 @@ test('PR delivery fact rejects state-specific omissions and call-level fields', 
   });
   assert.throws(() => decodePrDeliveryFact(JSON.stringify({ ...valid, createdByCurrentOperation: true })), /PR_DELIVERY_FACT_INVALID/);
   assert.throws(() => decodePrDeliveryFact(JSON.stringify({ version: 1, state: 'skipped', reason: 'initial' })), /PR_DELIVERY_FACT_INVALID/);
-  assert.throws(() => decodePrDeliveryFact(JSON.stringify({ version: 2, state: 'unbound', reason: 'initial' })), /PR_DELIVERY_FACT_INVALID/);
+  assert.deepEqual(decodePrDeliveryFact(JSON.stringify({ version: 2, state: 'unbound', reason: 'initial' })), { version: 2, state: 'unbound', reason: 'initial' });
   assert.throws(() => decodePrDeliveryFact(JSON.stringify({
     ...valid,
     provenance: { establishedBy: 'create-post' }
@@ -89,5 +89,5 @@ test('bound provenance remains stable across a later no-op result', () => {
 test('fact mutation stores one JSON scalar', () => {
   const mutation = factFrontmatterMutation(buildUnboundFact());
   assert.equal(typeof mutation.set.pr_delivery_fact, 'string');
-  assert.deepEqual(JSON.parse(mutation.set.pr_delivery_fact), { version: 1, state: 'unbound', reason: 'initial' });
+  assert.deepEqual(JSON.parse(mutation.set.pr_delivery_fact), { version: 2, state: 'unbound', reason: 'initial' });
 });

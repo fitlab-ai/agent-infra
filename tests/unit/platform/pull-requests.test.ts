@@ -9,7 +9,6 @@ import {
   inspectPlatformPullRequestByNumber,
   inspectGitHubIssueClosingChangeRequests,
   normalizePullRequest,
-  resolveGitHubChangeRequestGitEvidence,
   selectExternalPullRequest,
   selectPullRequest,
   syncPlatformPullRequest,
@@ -18,6 +17,7 @@ import {
 } from '../../../lib/platform/pull-requests.ts';
 import type { GitHubClient, RequestOptions } from '../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+import { resolveGitHubChangeRequestGitEvidence } from '../../../lib/platform/github-provider.ts';
 
 const remote = (number: number, head = 'feature', base = 'main') => ({
   number,
@@ -498,7 +498,7 @@ test('GitHub closing PR inspection exhausts cursor pagination and fails closed o
   const inspected = inspectGitHubIssueClosingChangeRequests(client, 'o/r', 7, process.cwd());
   assert.equal(inspected.ok, true);
   assert.equal(calls, 2);
-  assert.deepEqual(inspected.ok ? inspected.value.map((item) => item.number) : [], [7, 8]);
+  assert.deepEqual(inspected.ok ? inspected.value.map((item: { number: number }) => item.number) : [], [7, 8]);
 
   const invalidClient = {
     json() {
@@ -521,7 +521,8 @@ test('GitHub evidence prefers an exact upstream remote', () => {
     assert.equal(spawnSync('git', ['remote', 'add', 'upstream', 'https://github.com/o/r.git'], { cwd: root }).status, 0);
     const pullRequest = normalizePullRequest(remote(7), 'o/r')!;
     assert.deepEqual(resolveGitHubChangeRequestGitEvidence({
-      cwd: root, repository: 'o/r', pullRequest
+      cwd: root, repository: 'o/r', number: pullRequest.number,
+      baseRepository: pullRequest.base.repository, baseRef: pullRequest.base.ref
     }), {
       ok: true,
       value: {
@@ -542,7 +543,8 @@ test('GitHub evidence preserves origin transport when rewriting a fork remote', 
     assert.equal(spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fork/r.git'], { cwd: root }).status, 0);
     const pullRequest = normalizePullRequest(remote(7), 'o/r')!;
     assert.equal(resolveGitHubChangeRequestGitEvidence({
-      cwd: root, repository: 'o/r', pullRequest
+      cwd: root, repository: 'o/r', number: pullRequest.number,
+      baseRepository: pullRequest.base.repository, baseRef: pullRequest.base.ref
     }).value?.remoteUrl, 'git@github.com:o/r.git');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

@@ -666,8 +666,8 @@ test('platform-pr create does not require commit finalization evidence before re
 test('platform-pr CLI rejects incomplete and conflicting payloads before I/O', () => {
   for (const args of [
     ['create', 'TASK-1', '--agent', 'codex'],
-    ['bind', 'TASK-1', '--agent', 'codex', '--pr', 'x'],
-    ['resolve-external', 'TASK-1', '--agent', 'codex', '--pr', 'x'],
+    ['bind', 'TASK-1', '--agent', 'codex'],
+    ['resolve-external', 'TASK-1'],
     ['sync', 'TASK-1', '--agent', 'codex'],
     ['summary-sync', 'TASK-1', '--agent', 'codex']
   ]) {

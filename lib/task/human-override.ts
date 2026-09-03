@@ -15,7 +15,7 @@ import { inspectLifecycleExecution } from './lifecycle-execution.ts';
 import { applyLedgerIntent } from './ledger-intents.ts';
 import { bindPlatformIssue } from '../platform/issues.ts';
 import { bindPlatformPullRequest } from '../platform/pull-requests.ts';
-import type { GitHubClient } from '../platform/github-client.ts';
+import type { PlatformClient } from '../platform/context.ts';
 import { finalizeReviewSummary } from './review-finalization.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { DocumentMutationError, parseTable } from './sections.ts';
@@ -25,6 +25,9 @@ import { verifyInProcess } from './verification-engine.ts';
 import { canonicalTimestamp, writeTask } from './write.ts';
 import type { TaskFileSystem, TaskWriteMetadata, TaskWriteResult } from './write.ts';
 import { readPrDeliveryFact } from './pr-delivery-fact.ts';
+import { resourceIdentity, resourceIdentityNumber } from '../platform/provider-bridge.ts';
+import type { ResourceIdentity } from '../platform/resource-identity.ts';
+import { taskIssueIdentity } from '../platform/task-identities.ts';
 
 type Eligibility = 'eligible' | 'repair-only' | 'runtime-recovery-only' | 'never-overridable';
 type OutcomeEffect = 'apply-target' | 'retry-same-intent' | 'record-only' | 'no-write';
@@ -96,7 +99,7 @@ type HumanOverrideOptions = Readonly<{
   probeIssueNumber?: number;
   probePullRequestNumber?: number;
   probeStagingDir?: string;
-  platformClient?: GitHubClient;
+  platformClient?: PlatformClient;
   effectExecutor?: (capability: ManualOverrideCapability) => OverrideError | null | Promise<OverrideError | null>;
 }>;
 
@@ -584,7 +587,7 @@ function snapshotEvidence(
   content: string,
   frontmatter: Record<string, unknown> | null,
   producer: ProducerFailure,
-  resource: Readonly<{ kind: 'issue' | 'pull-request'; number: number }> | null
+  resource: Readonly<{ kind: 'issue' | 'pull-request'; identity: ResourceIdentity; number: number | null }> | null
 ): string {
   const stableFrontmatter = frontmatter
     ? Object.fromEntries(Object.entries(frontmatter).filter(([key]) => !['updated_at', 'agent_infra_version', 'status', 'blocked_at', 'completed_at', 'cancelled_at'].includes(key)))
@@ -609,15 +612,22 @@ function resourceForSnapshot(
   policy: FailurePolicy,
   options: HumanOverrideOptions,
   frontmatter: Record<string, unknown> | null
-): Readonly<{ kind: 'issue' | 'pull-request'; number: number }> | null {
+): Readonly<{ kind: 'issue' | 'pull-request'; identity: ResourceIdentity; number: number | null }> | null {
   if (policy.producerId === 'platform.issue') {
-    const number = options.probeIssueNumber ?? toPositiveInteger(frontmatter?.issue_number);
-    return number === null ? null : { kind: 'issue', number };
+    const identity = options.probeIssueNumber !== undefined
+      ? resourceIdentity(options.probeIssueNumber)
+      : taskIssueIdentity((frontmatter || {}) as Record<string, string | number | boolean | null>) || (() => {
+        const number = toPositiveInteger(frontmatter?.issue_number);
+        return number === null ? null : resourceIdentity(number);
+      })();
+    return identity ? { kind: 'issue', identity, number: resourceIdentityNumber(identity) } : null;
   }
   if (policy.producerId === 'platform.pull-request') {
     const fact = frontmatter ? readPrDeliveryFact(frontmatter) : null;
-    const number = options.probePullRequestNumber ?? (fact?.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null);
-    return number === null ? null : { kind: 'pull-request', number };
+    const identity = options.probePullRequestNumber !== undefined
+      ? resourceIdentity(options.probePullRequestNumber)
+      : fact?.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
+    return identity ? { kind: 'pull-request', identity, number: resourceIdentityNumber(identity) } : null;
   }
   return null;
 }
@@ -706,30 +716,40 @@ async function probePlatformFailure(
   } catch (cause) {
     return error('OVERRIDE_DOCUMENT_INVALID', cause instanceof Error ? cause.message : String(cause));
   }
-  const issueNumber = options.probeIssueNumber ?? toPositiveInteger(frontmatter.issue_number);
+  const issueIdentity = options.probeIssueNumber !== undefined
+    ? resourceIdentity(options.probeIssueNumber)
+    : taskIssueIdentity(frontmatter) || (() => {
+      const number = toPositiveInteger(frontmatter.issue_number);
+      return number === null ? null : resourceIdentity(number);
+    })();
   const fact = readPrDeliveryFact(frontmatter);
-  const pullRequestNumber = options.probePullRequestNumber ?? (fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.number : null);
+  const pullRequestIdentity = options.probePullRequestNumber !== undefined
+    ? resourceIdentity(options.probePullRequestNumber)
+    : fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
+  const token = (identity: ResourceIdentity | null): string | null => identity ? String(identity.value) : null;
+  const issueToken = token(issueIdentity);
+  const pullRequestToken = token(pullRequestIdentity);
   const operation = await (policy.producerId === 'platform.issue'
-    ? issueNumber === null
+    ? issueToken === null
       ? null
       : bindPlatformIssue(taskRef, {
-        issue: issueNumber,
+        issue: issueToken,
         agent: options.probeOperator ?? 'local-operator',
         dryRun: true,
         cwd: resolved.repoRoot,
         ...(options.platformClient ? { client: options.platformClient } : {})
       })
-    : pullRequestNumber === null
+    : pullRequestToken === null
       ? null
       : bindPlatformPullRequest(taskRef, {
-        pr: pullRequestNumber,
+        pr: pullRequestToken,
         agent: options.probeOperator ?? 'local-operator',
         dryRun: true,
         cwd: resolved.repoRoot,
         ...(options.platformClient ? { client: options.platformClient } : {})
       })
   );
-  if (!operation) return error('OVERRIDE_PROBE_INPUT_MISSING', `${policy.producerId} requires a bound issue or pull request number`);
+  if (!operation) return error('OVERRIDE_PROBE_INPUT_MISSING', `${policy.producerId} requires a bound issue or pull request identity`);
   if (operation.status !== 'failed' && operation.status !== 'blocked') return probeNotObserved(policy);
   if (!operation.error) return error('OVERRIDE_PROBE_INPUT_MISSING', `${policy.producerId} returned no platform error evidence`);
   return {

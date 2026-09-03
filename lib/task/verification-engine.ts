@@ -504,9 +504,10 @@ async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): 
   if (factRead.status === 'invalid') return failResult('required-pr-delivery', factRead.error.message);
   const fact = factRead.status === 'valid' ? factRead.fact : null;
   const status = fact?.state || 'unbound';
-  const prNumber = fact?.state === 'bound' ? fact.identity.number : null;
+  const prIdentity = fact?.state === 'bound' ? fact.identity.resource : null;
+  const prNumber = prIdentity?.kind === 'number' ? prIdentity.value : null;
   if (flow === 'disabled') return passResult('required-pr-delivery', 'Pull request delivery is disabled by project policy');
-  if (flow === 'required' && (status !== 'bound' || prNumber === null)) {
+  if (flow === 'required' && (status !== 'bound' || !prIdentity)) {
     return failResult('required-pr-delivery', 'Project policy requires a bound pull request before completion');
   }
   if (flow !== 'required' && status === 'unbound') {
@@ -528,7 +529,7 @@ async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): 
     const repository = inspected.platform.repository?.toLowerCase() || '';
     const taskBranch = String(task.metadata.branch || '').trim();
     const deliveryBaseRef = String(task.metadata.delivery_base_ref || projectConfig.delivery?.baseRef || '').trim();
-    if (inspected.status !== 'no-op' || !pullRequest || pullRequest.number !== prNumber) {
+    if (inspected.status !== 'no-op' || !pullRequest) {
       return failResult('required-pr-delivery', 'Bound pull request identity could not be verified');
     }
     if (
@@ -543,7 +544,7 @@ async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): 
     if (pullRequest.state !== 'closed' || !pullRequest.mergedAt || !pullRequest.mergeCommitSha) {
       return failResult('required-pr-delivery', 'Project policy requires the bound pull request to be merged');
     }
-    return passResult('required-pr-delivery', `Pull request delivery policy satisfied (merged PR #${prNumber})`);
+    return passResult('required-pr-delivery', `Pull request delivery policy satisfied (merged PR ${prNumber === null ? 'identity' : `#${prNumber}`})`);
   }
   return passResult('required-pr-delivery', `Pull request delivery policy satisfied (${status})`);
 }

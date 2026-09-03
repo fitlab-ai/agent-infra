@@ -5,15 +5,20 @@ import { defaultGitRemote, parseGitHubRemote } from './github-provider.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { PlatformProvider, PlatformContextSnapshot, PlatformError } from './provider-contract.ts';
-import type { GitHubClient } from './github-client.ts';
+
+type PlatformClientResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: { code: string; message: string; retryable: boolean } };
+type PlatformClient = {
+  version(options?: { cwd?: string }): unknown;
+  json<T = unknown>(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
+  text?<T = string>(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
+};
 
 type ContextOptions = {
   cwd?: string;
   gitRemote?: (cwd: string) => string | null;
-  client?: {
-    version(options?: Parameters<GitHubClient['version']>[0]): ReturnType<GitHubClient['version']>;
-    json(args: string[], options?: Parameters<GitHubClient['json']>[1]): ReturnType<GitHubClient['json']>;
-  };
+  client?: PlatformClient;
   platformType?: string;
 };
 
@@ -76,7 +81,7 @@ async function resolvePlatformProviderContext(options: ContextOptions = {}): Pro
   const loaded = await loadPlatformProvider({
     cwd: workingDirectory,
     platformType: options.platformType,
-    client: options.client as GitHubClient | undefined
+    client: options.client
   });
   if (!loaded.ok) {
     if (!loaded.error.providerType && options.platformType === undefined) {
@@ -122,4 +127,4 @@ async function resolvePlatformContext(options: ContextOptions = {}): Promise<Pla
 }
 
 export { defaultGitRemote, parseGitHubRemote, resolvePlatformContext, resolvePlatformProviderContext };
-export type { ContextOptions, LoadedContext };
+export type { ContextOptions, LoadedContext, PlatformClient, PlatformClientResult };

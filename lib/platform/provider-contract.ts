@@ -1,3 +1,9 @@
+import type {
+  PlatformResourceKind,
+  ProviderIdentityDeclaration,
+  ResourceIdentity
+} from './resource-identity.ts';
+
 type JsonValue =
   | string
   | number
@@ -25,12 +31,6 @@ type ProviderOperationContext = {
   scopeLabel?: string;
 };
 
-type ResourceIdentity = {
-  id?: string;
-  number?: number;
-  key?: string;
-};
-
 type MutationIdentity = {
   idempotencyKey: string;
   target?: ResourceIdentity;
@@ -55,6 +55,7 @@ type PlatformContextSnapshot = {
 
 type IssueSnapshot = {
   id: string;
+  identity?: ResourceIdentity;
   number?: number;
   title: string;
   body: string;
@@ -63,6 +64,16 @@ type IssueSnapshot = {
   assignees: string[];
   milestone: string | null;
   fields: Record<string, string | number | null>;
+  issueType?: {
+    identity: ResourceIdentity;
+    name: string;
+    fields: Array<{
+      identity: ResourceIdentity;
+      name: string;
+      kind: 'single-select' | 'date' | 'text' | 'number';
+      options: Array<{ identity: ResourceIdentity; name: string }>;
+    }>;
+  } | null;
   author?: { id?: string; name?: string } | null;
   displayUrl?: string;
 };
@@ -77,6 +88,7 @@ type RemoteCommentSnapshot = {
 
 type ChangeRequestSnapshot = {
   id: string;
+  identity?: ResourceIdentity;
   number?: number;
   state: string;
   title: string;
@@ -141,12 +153,47 @@ type ReleaseSnapshot = {
   publishedAt: string | null;
   milestone?: string | null;
   displayUrl?: string;
+  workflows?: Array<Record<string, JsonValue>>;
 };
 
 type MutationReceipt = {
   remoteId: string;
   changed: boolean;
   operationId?: string;
+};
+
+type RepositoryMetadataSnapshot = {
+  repository: { identity: ResourceIdentity; name: string; url: string | null };
+  labels: Array<{ identity: ResourceIdentity; name: string }>;
+  milestones: Array<{ identity: ResourceIdentity; title: string; state: 'open' | 'closed' }>;
+  issueTypes: Array<{
+    identity: ResourceIdentity;
+    name: string;
+    fields: Array<{
+      identity: ResourceIdentity;
+      name: string;
+      kind: 'single-select' | 'date' | 'text' | 'number';
+      options: Array<{ identity: ResourceIdentity; name: string }>;
+    }>;
+  }>;
+  fields: Array<{
+    identity: ResourceIdentity;
+    name: string;
+    kind: 'single-select' | 'date' | 'text' | 'number';
+    options: Array<{ identity: ResourceIdentity; name: string }>;
+  }>;
+};
+
+type ReleaseNotesFacts = {
+  history: Array<{
+    sha: string;
+    message: string;
+    authoredAt: string;
+    author: { id?: string; name?: string } | null;
+  }>;
+  mergedPullRequests: Array<ChangeRequestSnapshot>;
+  closingIssues: Array<IssueSnapshot>;
+  actors: Array<{ id?: string; name?: string }>;
 };
 
 type MilestoneReconciliation = {
@@ -173,6 +220,7 @@ type PlatformProviderFactoryInput = {
 type PlatformProvider = {
   type: string;
   contractVersion: 1;
+  identity?: ProviderIdentityDeclaration;
   context: {
     resolve(input: {
       repositoryRoot: string;
@@ -183,6 +231,7 @@ type PlatformProvider = {
     }): Promise<ProviderResult<PlatformContextSnapshot>>;
   };
   issues?: {
+    describeRepository(input: { context: ProviderOperationContext }): Promise<ProviderResult<RepositoryMetadataSnapshot>>;
     inspect(input: { context: ProviderOperationContext; target: ResourceIdentity }): Promise<ProviderResult<IssueSnapshot>>;
     create(input: {
       context: ProviderOperationContext;
@@ -207,6 +256,7 @@ type PlatformProvider = {
         milestone: string | null;
         state: 'open' | 'closed';
         fields: Record<string, string | number | null>;
+        issueType?: string | null;
       }>;
       mutation: MutationIdentity;
     }): Promise<ProviderResult<MutationReceipt>>;
@@ -228,6 +278,10 @@ type PlatformProvider = {
     }): Promise<ProviderResult<MutationReceipt>>;
   };
   changeRequests?: {
+    verifyHead?(input: {
+      context: ProviderOperationContext;
+      head: string;
+    }): Promise<ProviderResult<{ sha: string }>>;
     inspect(input: { context: ProviderOperationContext; target: ResourceIdentity }): Promise<ProviderResult<ChangeRequestSnapshot>>;
     listClosing(input: { context: ProviderOperationContext; issue: ResourceIdentity }): Promise<ProviderResult<ChangeRequestSnapshot[]>>;
     create(input: {
@@ -242,7 +296,15 @@ type PlatformProvider = {
     update(input: {
       context: ProviderOperationContext;
       target: ResourceIdentity;
-      patch: Partial<{ title: string; body: string; base: string; state: string }>;
+      patch: Partial<{
+        title: string;
+        body: string;
+        base: string;
+        state: string;
+        labels: string[];
+        assignees: string[];
+        milestone: string | null;
+      }>;
       mutation: MutationIdentity;
     }): Promise<ProviderResult<MutationReceipt>>;
     resolveGitEvidence(input: {
@@ -274,7 +336,7 @@ type PlatformProvider = {
     publish(input: {
       context: ProviderOperationContext;
       changeRequest: ResourceIdentity;
-      identity: { scope: string; round: number; commitSha: string };
+      identity: { scope: string; round: number; commitSha: string; resource?: ResourceIdentity };
       event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
       body: string;
       mutation: MutationIdentity;
@@ -308,6 +370,14 @@ type PlatformProvider = {
       notes: { text: string; sha256: string; byteLength: number };
       mutation: MutationIdentity;
     }): Promise<ProviderResult<MutationReceipt>>;
+    collectNotes(input: {
+      context: ProviderOperationContext;
+      fromTime: string;
+      toTime: string;
+      commitOids: string[];
+      branch: string;
+      historyLimit: number;
+    }): Promise<ProviderResult<ReleaseNotesFacts>>;
   };
   verification?: {
     fetchRemoteFacts(input: {
@@ -340,12 +410,12 @@ function validatePlatformProvider(
   providerType: string
 ): ProviderResult<PlatformProvider> {
   const operationGroups: Record<string, string[]> = {
-    issues: ['inspect', 'create', 'update'],
+    issues: ['inspect', 'create', 'update', 'describeRepository'],
     comments: ['list', 'write', 'delete'],
     changeRequests: ['inspect', 'listClosing', 'create', 'update', 'resolveGitEvidence'],
     checks: ['inspectRequired', 'resolveRun', 'fetchLogs'],
     reviews: ['list', 'publish'],
-    releases: ['inspect', 'create', 'update', 'reconcileMilestones', 'publishNotes'],
+    releases: ['inspect', 'create', 'update', 'reconcileMilestones', 'publishNotes', 'collectNotes'],
     verification: ['fetchRemoteFacts']
   };
   if (!isRecord(value)
@@ -363,6 +433,23 @@ function validatePlatformProvider(
         phase: 'provider-validation'
       }
     };
+  }
+  if (value.identity !== undefined) {
+    if (!isRecord(value.identity) || Object.entries(value.identity).some(([resourceKind, kind]) =>
+      !(['issue', 'pull-request', 'comment', 'release'] as PlatformResourceKind[]).includes(resourceKind as PlatformResourceKind)
+      || !(['id', 'number', 'key'] as const).includes(kind as 'id' | 'number' | 'key')
+    )) {
+      return {
+        ok: false,
+        error: {
+          code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
+          message: 'Provider identity declaration is invalid',
+          retryable: false,
+          providerType,
+          phase: 'provider-validation'
+        }
+      };
+    }
   }
   for (const [groupName, methods] of Object.entries(operationGroups)) {
     const group = value[groupName];
@@ -409,6 +496,8 @@ export type {
   ReleaseSnapshot,
   RemoteCommentSnapshot,
   RequiredCheckSnapshot,
+  RepositoryMetadataSnapshot,
+  ReleaseNotesFacts,
   ResourceIdentity,
   ReviewSnapshot,
   VerificationRemoteFacts

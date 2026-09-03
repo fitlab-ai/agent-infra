@@ -4,6 +4,7 @@ export default async function createPlatformProvider(input) {
   return {
     type: input.providerType,
     contractVersion: input.contractVersion,
+    identity: { 'pull-request': 'number' },
     context: {
       async resolve() {
         return {
@@ -26,9 +27,14 @@ export default async function createPlatformProvider(input) {
     },
     changeRequests: {
       async inspect(request) {
-        const value = pullRequests[String(request.target.number)];
+        const value = pullRequests[String(request.target.value)];
         return value
-          ? { ok: true, value }
+          ? { ok: true, value: {
+            ...value,
+            id: String(value.id || value.nodeId),
+            identity: value.identity || { kind: 'number', value: value.number },
+            displayUrl: value.displayUrl || value.url
+          } }
           : { ok: false, error: { code: 'PR_NOT_FOUND', message: 'Pull request was not found', retryable: false } };
       },
       async listClosing() { return { ok: true, value: [] }; },
@@ -49,7 +55,7 @@ export default async function createPlatformProvider(input) {
           ok: true,
           value: {
             remoteUrl: String(input.config.remoteUrl || ''),
-            reviewedHeadRef: `refs/pull/${request.target.number}/head`,
+            reviewedHeadRef: `refs/pull/${request.target.value}/head`,
             targetHeadRef: `refs/heads/${request.expected.targetBranch || 'main'}`
           }
         };
