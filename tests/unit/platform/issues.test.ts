@@ -29,10 +29,31 @@ function clientFor(handler: (args: string[], input?: string, method?: string) =>
     version() { return { ok: true, value: '2.72.0' }; },
     json(args, options = {}) {
       const value = handler(args, options.input, options.method);
+      if (value && typeof value === 'object' && (value as { ok?: unknown }).ok === false) return value as never;
       return { ok: true, value } as never;
     },
     text() { return { ok: true, value: '' }; }
   };
+}
+
+function inLabelIssueFixture() {
+  const root = fixture('7');
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+    platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
+  }));
+  fs.writeFileSync(path.join(root, 'base.txt'), 'base\n');
+  execFileSync('git', ['add', '.'], { cwd: root });
+  execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+  fs.mkdirSync(path.join(root, 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'lib', 'core.ts'), 'change\n');
+  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  const task = fs.readFileSync(taskPath, 'utf8').replace('issue_number: 7\n---', 'issue_number: 7\ndelivery_base_ref: HEAD~1\n---');
+  fs.writeFileSync(taskPath, task);
+  execFileSync('git', ['add', '.'], { cwd: root });
+  execFileSync('git', ['commit', '-qm', 'change'], { cwd: root });
+  return root;
 }
 
 function contextResponse(args: string[]) {
@@ -182,6 +203,73 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
     assert.equal(result.status, 'applied');
     assert.equal((payload as Record<string, unknown> | null)?.labels, undefined);
     assert.deepEqual(currentLabels, ['keep', 'in: core']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('issue sync upgrades a deterministic in-label failure after status success to partial', () => {
+  const root = inLabelIssueFixture();
+  let labels = ['status: blocked', 'keep'];
+  try {
+    const client = clientFor((args, input) => {
+      const context = contextResponse(args);
+      if (context) return context;
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint.endsWith('/labels?per_page=100')) return [
+        { name: 'status: blocked' }, { name: 'status: in-progress' }, { name: 'in: core' }
+      ];
+      if (args.includes('DELETE') && endpoint.includes('/labels/')) {
+        labels = labels.filter((label) => label !== decodeURIComponent(endpoint.split('/labels/')[1]!));
+        return {};
+      }
+      if (args.includes('POST') && endpoint.endsWith('/labels')) {
+        const posted = JSON.parse(input || '{}').labels as string[];
+        if (posted.includes('in: core')) return { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } };
+        labels.push(...posted);
+        return {};
+      }
+      return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: labels.map((name) => ({ name })), assignees: [], milestone: null };
+    });
+    const result = syncPlatformIssue('TASK-20260101-000001', {
+      cwd: root, agent: 'codex', status: 'in-progress', inLabels: 'from-diff', client
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.equal(result.changed, true);
+    assert.deepEqual(labels.sort(), ['keep', 'status: in-progress']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('issue sync reports changed when the post-write in-label reread fails', () => {
+  const root = inLabelIssueFixture();
+  let labels = ['keep'];
+  let issueReads = 0;
+  try {
+    const client = clientFor((args, input) => {
+      const context = contextResponse(args);
+      if (context) return context;
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint.endsWith('/labels?per_page=100')) return [{ name: 'in: core' }];
+      if (args.includes('POST') && endpoint.endsWith('/labels')) {
+        labels.push(...(JSON.parse(input || '{}').labels as string[]));
+        return {};
+      }
+      if (/issues\/7$/.test(endpoint)) {
+        issueReads += 1;
+        if (issueReads === 2) return { ok: false, error: { code: 'PLATFORM_READ_FAILED', message: 'reread failed', retryable: true } };
+      }
+      return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: labels.map((name) => ({ name })), assignees: [], milestone: null };
+    });
+    const result = syncPlatformIssue('TASK-20260101-000001', {
+      cwd: root, agent: 'codex', inLabels: 'from-diff', client
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.equal(result.changed, true);
+    assert.deepEqual(labels, ['keep', 'in: core']);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

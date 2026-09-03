@@ -695,9 +695,15 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
   for (const operation of restPlanned.filter((item) => item.name === 'labels:status' || item.name === 'labels:in')) {
     const prefix = operation.name === 'labels:status' ? 'status:' : 'in:';
     const synced = syncLabelDelta(base.client, repository, base.issueNumber, base.resolved.repoRoot, currentLabels, operation.value as string[], prefix);
-    if (synced.status === 'failed' || synced.status === 'blocked') return result(synced.status, base.resolved.taskId, base.issueNumber, {
-      changed: labelsChanged || synced.changed, issue: snapshot, operations: plan.operations, error: synced.error
-    });
+    if (synced.status === 'failed' || synced.status === 'blocked') {
+      const partial = labelsChanged || synced.status === 'blocked';
+      const error = partial && synced.error
+        ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
+        : synced.error;
+      return result(partial ? 'blocked' : synced.status, base.resolved.taskId, base.issueNumber, {
+        changed: labelsChanged || synced.changed, issue: snapshot, operations: plan.operations, error
+      });
+    }
     currentLabels = applyLabelDeltaToSnapshot(currentLabels, operation.value as string[], prefix);
     labelsChanged ||= synced.changed;
   }
@@ -717,7 +723,7 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
   if (inLabelWrite) {
     const reread = inspectGitHubIssue(base.client, repository, base.issueNumber, base.resolved.repoRoot);
     if (!reread.ok) return result('blocked', base.resolved.taskId, base.issueNumber, {
-      issue: snapshot, operations: plan.operations,
+      changed: labelsChanged, issue: snapshot, operations: plan.operations,
       error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
     });
     const expected = (inLabelWrite.value as string[]).filter((label) => label.startsWith('in:')).sort();

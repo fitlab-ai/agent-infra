@@ -182,13 +182,13 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
   }
 });
 
-function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; injectConcurrentUnrelatedLabel?: boolean } = {}) {
+function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPullRequestWrite?: boolean; failPullRequestDeterministic?: boolean; injectConcurrentUnrelatedLabel?: boolean; prLabels?: string[] } = {}) {
   const root = prByNumberFixture();
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
     platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
   }));
   let issueLabels = ['in: stale', 'keep'];
-  let prLabels = ['in: stale', 'type: feature'];
+  let prLabels = fixtureOptions.prLabels || ['in: stale', 'type: feature'];
   const calls: string[] = [];
   const client: GitHubClient = {
     version() { return { ok: true, value: '2.72.0' }; },
@@ -224,7 +224,11 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
         return { ok: true, value: {} };
       }
       if (args.includes('POST') && /issues\/(7|42)\/labels$/.test(endpoint)) {
-        if (fixtureOptions.failPullRequestWrite && endpoint.includes('/issues/42/')) return { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'network timeout', retryable: true } };
+        if (fixtureOptions.failPullRequestWrite && endpoint.includes('/issues/42/')) {
+          return fixtureOptions.failPullRequestDeterministic
+            ? { ok: false, error: { code: 'PLATFORM_REQUEST_INVALID', message: 'label rejected', retryable: false } }
+            : { ok: false, error: { code: 'NETWORK_TRANSIENT', message: 'network timeout', retryable: true } };
+        }
         const labels = JSON.parse(request.input || '{}').labels as string[];
         if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
         else prLabels.push(...labels);
@@ -394,6 +398,23 @@ test('in-label PR sync blocks with partial evidence when the PR write is uncerta
     assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
     assert.deepEqual([...fixture.getIssueLabels()].sort(), ['in: core', 'keep']);
     assert.deepEqual(result.resources?.map((resource) => resource.effect), ['applied', 'unknown']);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('in-label PR sync upgrades a deterministic PR failure after Issue convergence to partial', () => {
+  const fixture = prOnlyInLabelFixture([7], {
+    failPullRequestWrite: true, failPullRequestDeterministic: true, prLabels: ['type: feature']
+  });
+  try {
+    const result = syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.equal(result.changed, true);
+    assert.deepEqual([...fixture.getIssueLabels()].sort(), ['in: core', 'keep']);
+    assert.deepEqual(fixture.getPrLabels(), ['type: feature']);
+    assert.deepEqual(result.resources?.map((resource) => resource.effect), ['applied', 'no-op']);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

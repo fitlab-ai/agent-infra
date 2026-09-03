@@ -1004,10 +1004,14 @@ function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOption
       const state = resourcesState.find((resource) => resource.kind === item.kind && resource.number === item.number)!;
       state.effect = synced.status === 'blocked' ? 'unknown' : 'no-op';
       state.after = synced.status === 'blocked' ? null : item.snapshot.labels;
-      return result(synced.status, null, issueNumber, prNumber, {
+      const partial = successfulWrites > 0 || synced.status === 'blocked';
+      const error = partial && synced.error
+        ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
+        : synced.error;
+      return result(partial ? 'blocked' : synced.status, null, issueNumber, prNumber, {
         changed: successfulWrites > 0 || synced.changed, platform: context.platform, capabilities: context.capabilities,
         pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
-        evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error: synced.error
+        evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error
       });
     }
     successfulWrites += synced.changed ? 1 : 0;
