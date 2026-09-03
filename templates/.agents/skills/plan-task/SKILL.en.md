@@ -115,7 +115,17 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - Overwrite the `effort` field in frontmatter with the new value
   - Append a `## Effort Re-estimate` section to this round's plan artifact `{plan-artifact}`, recording: `effort {old} → {new} (rationale: {short basis grounded in this plan})`
   If the re-estimated value matches the current value, skip it: do not write the `## Effort Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
-After the business fields are updated, run `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact} {execution-flag}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
+After writing the local artifact, run the pre-completion gate:
+
+```bash
+agent-infra-internal task-artifact {task-id} finalize-local --family plan --artifact {plan-artifact}
+```
+
+- On `status=passed`, save that result's `artifactSha256` and `semanticDigest`; the finalizer has recorded the matching one-shot local provenance intent.
+- On `status=failed` with `repairable=true`, apply only the diagnostic's `replace-line` operation once, then rerun the same command completely; count an attempt only after bytes change, up to 8 attempts.
+- The first repairable failure's `semanticDigest` is retained as the baseline; a retried `status=passed` result must match it. On baseline mismatch, any other failure, no progress, or a repeated diagnostic, stop without publishing a completed event.
+
+Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 

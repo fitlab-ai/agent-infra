@@ -52,6 +52,38 @@ test('internal task-verify resolves task identity and invokes the typed engine',
   }
 });
 
+test('code artifact verification applies the local structural contract', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verify-code-artifact-'));
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    const id = 'TASK-20260101-000001';
+    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
+    fs.writeFileSync(path.join(dir, 'code.md'), fs.readFileSync('tests/fixtures/validate-artifact/valid-code.md'));
+    writeJson(path.join(root, '.agents/skills/code-task/config/verify.json'), {
+      skill: 'code-task', checks: {
+        artifact: {
+          file_pattern: 'code.md|code-r{N}.md',
+          required_sections: ['实现输入', '变更文件', '关键代码说明', '测试结果', '与方案的差异', '供审查关注的内容', '状态核对', '证据原文'],
+          required_patterns: ['^\\$ ']
+        }
+      }
+    });
+
+    const passed = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
+    assert.equal(passed.status, 0, passed.stderr);
+    assert.match(passed.stdout, /Verification: pass \| Skill: code-task/);
+
+    fs.writeFileSync(path.join(dir, 'code.md'), fs.readFileSync(path.join(dir, 'code.md'), 'utf8').replace('## 测试结果', '## 测试结果：'));
+    const failed = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
+    assert.equal(failed.status, 1);
+    assert.match(failed.stdout, /LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('required PR delivery gates on normalized merged state and platform availability', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'required-pr-delivery-'));
   const id = 'TASK-20260101-000001';

@@ -1317,6 +1317,30 @@ test("artifact lifecycle skills use core context and events in every language va
   }
 });
 
+test("executor skills hand finalizer digests to their completed events", () => {
+  const stages = [
+    { skill: "analyze-task", family: "analysis", artifact: "analysis-artifact", event: "analyze.completed" },
+    { skill: "plan-task", family: "plan", artifact: "plan-artifact", event: "plan.completed" },
+    { skill: "code-task", family: "code", artifact: "code-artifact", event: "code.completed" }
+  ];
+
+  for (const { skill, family, artifact, event } of stages) {
+    for (const relativePath of skillDocPaths(skill)) {
+      const content = read(relativePath);
+      const finalizer = `agent-infra-internal task-artifact {task-id} finalize-local --family ${family} --artifact {${artifact}}`;
+      const completion = `agent-infra-internal task-event {task-id} ${event}`;
+      const finalizerIndex = content.indexOf(finalizer);
+      const completionIndex = content.indexOf(completion);
+
+      assert.equal(content.split(finalizer).length - 1, 1, `${relativePath} should declare one local finalizer`);
+      assert.ok(finalizerIndex >= 0 && completionIndex > finalizerIndex, `${relativePath} should finalize before completion`);
+      const completionLine = content.slice(completionIndex, content.indexOf("\n", completionIndex));
+      assert.match(completionLine, /--artifact-sha256 \{artifact-sha256\}/, `${relativePath} should pass the byte digest`);
+      assert.match(completionLine, /--semantic-digest \{semantic-digest\}/, `${relativePath} should pass the semantic digest`);
+    }
+  }
+});
+
 test("review handshake skills submit ledger changes through structured intents", () => {
   for (const skill of ["review-analysis", "review-plan", "review-code"]) {
     for (const relativePath of skillDocPaths(skill)) {

@@ -1,12 +1,19 @@
 # General Rule - Model-Driven Local Artifact Repair
 
-This rule applies only when `review-analysis`, `review-plan`, or `review-code` handles a finalizer failure for **the same controlled review artifact**. It does not apply to `task.md`, the ledger, receipts, source code, Git, platform resources, or lifecycle state.
+This rule applies when `analyze-task`, `plan-task`, or `code-task` handles **the same controlled local artifact** before its completed event, and when `review-analysis`, `review-plan`, or `review-code` handles a finalizer failure for **the same controlled review artifact**. It does not apply to `task.md`, the ledger, receipts, source code, Git, platform resources, or lifecycle state.
+
+## Pre-completion gate for analysis, plan, and code artifacts
+
+- `analyze-task`, `plan-task`, and `code-task` must call `task-artifact ... finalize-local` before publishing a completed event; pass only that call's `artifactSha256` and `semanticDigest` to the completed event.
+- `finalize-local` does not modify the artifact or task state, but it writes a one-shot local provenance intent in the repository workspace. After `failed`, the model may make one minimal edit in the same artifact only when `repairable=true` and the diagnostic explicitly describes a one-line replacement, then rerun the same call completely; count each byte-changing edit, up to 8.
+- The first repairable failure's semantic digest is retained in that intent; a later `passed` result must match the baseline, and the completed event must verify and atomically transition the same intent to `consumed` before writing `task.md` under the task lock. A consumption failure must not write the task; the consumed intent is durable and retryable, so no failure-prone post-write deletion is attempted. Do not replace a failed baseline with a newly computed digest or publish a completed event without the finalizer.
+- After `failed`, no progress, or a repeated diagnostic or fingerprint, do not publish a completed event. After `passed`, do not rescan or manually write summary data.
 
 ## Authorization Boundary
 
 - The finalizer only reads facts, validates state, normalizes successful results, and performs atomic writes. It does not maintain a recoverable-error allowlist, infer repairability, or choose report content to delete.
 - The initial finalizer call is not counted as a repair attempt. Editing is allowed only after the mechanical safety gates pass and the model explicitly determines that the current problem can be solved by a minimal, explainable artifact change.
-- The model may edit only the one ordinary review artifact declared by the current review skill, and the file must be inside the current task directory. It must not edit `task.md`, the review disagreement ledger, receipts, source code, other reports, or remote resources.
+- The model may edit only the one ordinary local artifact declared by the current skill, and the file must be inside the current task directory. It must not edit `task.md`, the review disagreement ledger, receipts, source code, other reports, or remote resources.
 - `changed=false`, an error code, or a format shape is diagnostic evidence, not automatic authorization. The model must judge each case using the complete diagnostic, artifact content, and context.
 
 ## Non-bypassable Mechanical Safety Gates

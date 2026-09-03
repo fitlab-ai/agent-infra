@@ -33,6 +33,15 @@ import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 import { allowsManualOverride } from './guard-override.ts';
+import {
+  LOCAL_ARTIFACT_REQUIRED_PATTERNS,
+  LOCAL_ARTIFACT_REQUIRED_SECTIONS,
+  consumeLocalArtifactFinalizationIntent,
+  readLocalArtifactFinalizationIntent,
+  validateLocalArtifact
+} from './local-artifact-finalization.ts';
+import type { LocalArtifactFamily, LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
+import { loadVerificationConfig } from './verification-config.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -57,6 +66,7 @@ type TaskEventRequest = {
   taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean; orchestrated?: boolean;
   overrideTicket?: string; overrideTarget?: string; overrideScope?: string;
   round?: number; question?: number; artifact?: string; fixFor?: string; implementationInput?: string;
+  artifactSha256?: string; semanticDigest?: string;
   verdict?: Verdict; blockers?: number; major?: number; minor?: number;
   manualValidation?: number; filesModified?: number; testsPassed?: number;
   summaryResult?: string;
@@ -81,15 +91,15 @@ const BASE_FIELDS = new Set(['taskRef', 'event', 'agent', 'dryRun', 'overrideTic
 const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] }> = {
   'analyze.started': { optional: ['round'] },
   'analyze.awaiting-input': { required: ['question'] },
-  'analyze.completed': { required: ['artifact'], optional: ['round', 'orchestrated'] },
+  'analyze.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'orchestrated'] },
   'review-analysis.started': { optional: ['round'] },
   'review-analysis.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'plan.started': { optional: ['round'] },
-  'plan.completed': { required: ['artifact'], optional: ['round', 'orchestrated'] },
+  'plan.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'orchestrated'] },
   'review-plan.started': { optional: ['round'] },
   'review-plan.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'code.started': { optional: ['round', 'fixFor', 'implementationInput'] },
-  'code.completed': { required: ['artifact'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation', 'orchestrated'] },
+  'code.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation', 'orchestrated'] },
   'review-code.started': { optional: ['round'] },
   'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'manual-validation.started': { optional: ['round'] },
@@ -97,6 +107,30 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'validation-run.started': { optional: ['round'] },
   'validation-run.completed': { required: ['artifact'], optional: ['round'] }
 };
+
+function localArtifactValidationConfig(repoRoot: string, family: LocalArtifactFamily) {
+  const fallback = {
+    requiredSections: LOCAL_ARTIFACT_REQUIRED_SECTIONS[family],
+    requiredPatterns: LOCAL_ARTIFACT_REQUIRED_PATTERNS
+  };
+  const skillName = family === 'analysis' ? 'analyze-task' : family === 'plan' ? 'plan-task' : 'code-task';
+  try {
+    const artifact = loadVerificationConfig(repoRoot, skillName).checks.artifact;
+    if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return fallback;
+    const sections = artifact.required_sections;
+    const patterns = artifact.required_patterns;
+    return {
+      requiredSections: Array.isArray(sections)
+        ? sections.filter((value): value is string => typeof value === 'string')
+        : fallback.requiredSections,
+      requiredPatterns: Array.isArray(patterns)
+        ? patterns.filter((value): value is string => typeof value === 'string')
+        : fallback.requiredPatterns
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | null {
   if (!eventCatalog.includes(request.event as TaskEventName)) return { code: 'EVENT_UNKNOWN', message: `unknown task event '${request.event}'` };
@@ -121,6 +155,8 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
   }
   if (request.fixFor && !/^review-code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/.test(request.fixFor)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor must reference a canonical review-code artifact' };
   if (request.implementationInput && !/^II-[1-9]\d*$/.test(request.implementationInput)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'implementationInput must be a canonical II-N id' };
+  if (request.artifactSha256 !== undefined && !/^[0-9a-f]{64}$/i.test(request.artifactSha256)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'artifactSha256 must be a 64-character hexadecimal digest' };
+  if (request.semanticDigest !== undefined && !/^[0-9a-f]{64}$/i.test(request.semanticDigest)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'semanticDigest must be a 64-character hexadecimal digest' };
   if (request.fixFor && request.implementationInput) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor and implementationInput are mutually exclusive' };
   if (request.summaryResult !== undefined && (!request.summaryResult.trim() || /[\r\n]/.test(request.summaryResult))) return { code: 'EVENT_PAYLOAD_INVALID', message: 'summaryResult must be a non-empty single line' };
   return null;
@@ -407,6 +443,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const completedRows = matchingRows.filter((item) => item.done);
   const row = manual ? openRows.at(-1) : matchingRows[0];
   let completedArtifact: ArtifactIdentity | null = null;
+  let localFinalizationIntent: LocalArtifactFinalizationIntent | null = null;
   if (eventIdentity.phase === 'started' && row) {
     if (row.agent !== normalized.agent) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, row.started, frontmatter, artifactContext);
@@ -420,6 +457,63 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     completedArtifact = validated.artifact;
+    if (eventIdentity.family === 'analyze' || eventIdentity.family === 'plan' || eventIdentity.family === 'code') {
+      const localFamily = eventIdentity.family === 'analyze'
+        ? 'analysis'
+        : eventIdentity.family === 'plan' ? 'plan' : 'code';
+      let artifactContent: string;
+      try { artifactContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
+      catch (error) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read ${completedArtifact.name}: ${String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      const validationConfig = localArtifactValidationConfig(resolved.repoRoot, localFamily);
+      const local = validateLocalArtifact(artifactContent, {
+        family: localFamily,
+        requiredSections: validationConfig.requiredSections,
+        requiredPatterns: validationConfig.requiredPatterns
+      });
+      if (!local.ok) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `LOCAL_ARTIFACT_INVALID: ${local.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      const actualSha256 = sha256File(completedArtifact.path);
+      if (actualSha256 !== normalized.artifactSha256) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `artifact SHA-256 does not match finalizer result for ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      if (local.semanticDigest !== normalized.semanticDigest) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `semantic digest does not match finalizer result for ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      try {
+        localFinalizationIntent = readLocalArtifactFinalizationIntent(
+          resolved.repoRoot, resolved.taskId, localFamily, completedArtifact.name
+        );
+      } catch (error) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `cannot read local finalizer provenance for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      if (!localFinalizationIntent || !['passed', 'consumed'].includes(localFinalizationIntent.state)) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `local finalizer provenance is missing or incomplete for ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      if (localFinalizationIntent.artifactSha256 !== actualSha256 || localFinalizationIntent.semanticDigest !== local.semanticDigest) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `local finalizer provenance does not match ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+    }
   }
   if (eventIdentity.phase === 'waiting' && section.entries.some((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)) {
     const existing = section.entries.find((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)!;
@@ -531,6 +625,24 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     });
   }
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
+  if (!normalized.dryRun && localFinalizationIntent && completedArtifact && localFinalizationIntent.state === 'passed') {
+    try {
+      localFinalizationIntent = consumeLocalArtifactFinalizationIntent(resolved.repoRoot, localFinalizationIntent);
+    } catch (error) {
+      return failed(normalized, {
+        code: 'EVENT_ARTIFACT_CONFLICT',
+        message: `local finalizer provenance could not be consumed before task write for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
+      }, {
+        taskId: resolved.taskId,
+        taskMdPath: resolved.taskMdPath,
+        fromStep: currentStep,
+        toStep: step,
+        action: eventIdentity.action,
+        phase: eventIdentity.phase,
+        artifactContext
+      });
+    }
+  }
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: stateOverride ? resolved.state : 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
   if (!normalized.dryRun && orchestrationCompletion) {

@@ -34,6 +34,7 @@ import { snapshotReview } from "../git/review-snapshot.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
 import { resolveDeliveryTarget } from "./delivery-target.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
+import { validateLocalArtifact } from "./local-artifact-finalization.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -581,7 +582,7 @@ function loadProjectName(): any {
   }
 }
 
-function checkArtifact({ taskDir, config, artifactFile }: any): any {
+function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
   const resolvedArtifact = resolveArtifactPath(taskDir, config.file_pattern, artifactFile);
   if (!resolvedArtifact.ok) {
     return failResult("artifact", resolvedArtifact.message);
@@ -599,6 +600,26 @@ function checkArtifact({ taskDir, config, artifactFile }: any): any {
 
   const content = fs.readFileSync(artifactPath, "utf8");
   const requiredSections = config.required_sections || [];
+  const localFamily = skillName === "analyze-task"
+    ? "analysis"
+    : skillName === "plan-task" ? "plan" : skillName === "code-task" ? "code" : null;
+  if (localFamily) {
+    const local = validateLocalArtifact(content, {
+      family: localFamily,
+      requiredSections: requiredSections.filter((section: unknown): section is string => typeof section === "string"),
+      requiredPatterns: (config.required_patterns || []).filter((pattern: unknown): pattern is string => typeof pattern === "string")
+    });
+    if (!local.ok) {
+      return failResult(
+        "artifact",
+        `${path.basename(artifactPath)} has local structural errors: ${local.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}`
+      );
+    }
+    return passResult(
+      "artifact",
+      `${path.basename(artifactPath)} passed (${requiredSections.length} sections)`
+    );
+  }
   const missingSections = requiredSections.filter(
     (section: any) => !new RegExp(`^##\\s+${escapeRegExp(section)}\\s*$`, "m").test(content)
   );
