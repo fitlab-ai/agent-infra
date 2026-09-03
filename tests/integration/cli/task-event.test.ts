@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
 import { upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
@@ -367,6 +367,8 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   const done = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
   assert.equal(done.status, 0, done.stderr);
   assert.equal(JSON.parse(done.stdout).toStep, 'technical-design');
+  const intentPath = path.join(f.root, '.agents', 'workspace', '.local-artifact-finalization-intents', `${f.id}-plan-plan.md.json`);
+  assert.equal(JSON.parse(fs.readFileSync(intentPath, 'utf8')).state, 'consumed');
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
   assert.match(content, /current_step: technical-design/);
@@ -423,6 +425,37 @@ test('local completion rejects a valid artifact without finalizer provenance', (
   assert.equal(completed.status, 1);
   assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
   assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('local completion rejects intent consumption failure before mutating task state', onPlatforms('linux', 'darwin'), () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, localArtifact('plan'));
+  const finalized = finalizeLocalArtifact({
+    taskRef: f.id,
+    repoRoot: f.root,
+    family: 'plan',
+    artifact: 'plan.md'
+  });
+  assert.equal(finalized.status, 'passed', finalized.error?.message);
+  const intentDir = path.join(f.root, '.agents', 'workspace', '.local-artifact-finalization-intents');
+  const before = fs.readFileSync(f.file);
+
+  fs.chmodSync(intentDir, 0o500);
+  try {
+    const completed = run(f.root, [
+      f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md',
+      '--artifact-sha256', finalized.artifactSha256!, '--semantic-digest', finalized.semanticDigest!
+    ]);
+
+    assert.equal(completed.status, 1);
+    assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+    assert.deepEqual(fs.readFileSync(f.file), before);
+    assert.equal(fs.readdirSync(intentDir).length, 1);
+  } finally {
+    fs.chmodSync(intentDir, 0o700);
+  }
 });
 
 test('local repair provenance rejects semantic mutation between finalizer retries and completion', () => {

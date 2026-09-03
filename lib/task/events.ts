@@ -36,8 +36,8 @@ import { allowsManualOverride } from './guard-override.ts';
 import {
   LOCAL_ARTIFACT_REQUIRED_PATTERNS,
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
+  consumeLocalArtifactFinalizationIntent,
   readLocalArtifactFinalizationIntent,
-  removeLocalArtifactFinalizationIntent,
   validateLocalArtifact
 } from './local-artifact-finalization.ts';
 import type { LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
@@ -499,7 +499,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
           message: `cannot read local finalizer provenance for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
         }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
-      if (!localFinalizationIntent || localFinalizationIntent.state !== 'passed') {
+      if (!localFinalizationIntent || !['passed', 'consumed'].includes(localFinalizationIntent.state)) {
         return failed(normalized, {
           code: 'EVENT_ARTIFACT_CONFLICT',
           message: `local finalizer provenance is missing or incomplete for ${completedArtifact.name}`
@@ -623,6 +623,24 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     });
   }
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
+  if (!normalized.dryRun && localFinalizationIntent && completedArtifact && localFinalizationIntent.state === 'passed') {
+    try {
+      localFinalizationIntent = consumeLocalArtifactFinalizationIntent(resolved.repoRoot, localFinalizationIntent);
+    } catch (error) {
+      return failed(normalized, {
+        code: 'EVENT_ARTIFACT_CONFLICT',
+        message: `local finalizer provenance could not be consumed before task write for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
+      }, {
+        taskId: resolved.taskId,
+        taskMdPath: resolved.taskMdPath,
+        fromStep: currentStep,
+        toStep: step,
+        action: eventIdentity.action,
+        phase: eventIdentity.phase,
+        artifactContext
+      });
+    }
+  }
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: stateOverride ? resolved.state : 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
   if (!normalized.dryRun && orchestrationCompletion) {
@@ -632,32 +650,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       return failed(normalized, {
         code: 'EVENT_ORCHESTRATION_COMMIT_FAILED',
         message: `task.md was written but orchestration completion could not be persisted; manual recovery is required: ${error instanceof Error ? error.message : String(error)}`
-      }, {
-        taskId: result.taskId,
-        taskMdPath: result.taskMdPath,
-        fromStep: currentStep,
-        toStep: step,
-        action: eventIdentity.action,
-        phase: eventIdentity.phase,
-        timestamp: result.timestamp,
-        agentInfraVersion: result.agentInfraVersion,
-        operations: result.operations,
-        artifactContext
-      });
-    }
-  }
-  if (!normalized.dryRun && localFinalizationIntent && completedArtifact) {
-    try {
-      removeLocalArtifactFinalizationIntent(
-        resolved.repoRoot,
-        resolved.taskId,
-        localFinalizationIntent.family,
-        completedArtifact.name
-      );
-    } catch (error) {
-      return failed(normalized, {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: `local finalizer provenance could not be consumed for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
       }, {
         taskId: result.taskId,
         taskMdPath: result.taskMdPath,

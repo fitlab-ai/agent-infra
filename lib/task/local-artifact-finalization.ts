@@ -91,7 +91,7 @@ type LocalArtifactFinalizationIntent = Readonly<{
   taskId: string;
   family: LocalArtifactFamily;
   artifact: string;
-  state: 'awaiting-repair' | 'passed';
+  state: 'awaiting-repair' | 'passed' | 'consumed';
   baselineSemanticDigest: string | null;
   artifactSha256: string;
   semanticDigest: string;
@@ -112,7 +112,7 @@ function isFinalizationIntent(value: unknown): value is LocalArtifactFinalizatio
     && typeof intent.taskId === 'string' && intent.taskId.length > 0
     && (intent.family === 'analysis' || intent.family === 'plan')
     && typeof intent.artifact === 'string' && intent.artifact.length > 0
-    && (intent.state === 'awaiting-repair' || intent.state === 'passed')
+    && (intent.state === 'awaiting-repair' || intent.state === 'passed' || intent.state === 'consumed')
     && (intent.baselineSemanticDigest === null || (typeof intent.baselineSemanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.baselineSemanticDigest)))
     && typeof intent.artifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(intent.artifactSha256)
     && typeof intent.semanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.semanticDigest)
@@ -148,16 +148,15 @@ function writeLocalArtifactFinalizationIntent(repoRoot: string, value: LocalArti
   }
 }
 
-function removeLocalArtifactFinalizationIntent(
+function consumeLocalArtifactFinalizationIntent(
   repoRoot: string,
-  taskId: string,
-  family: LocalArtifactFamily,
-  artifact: string
-): void {
-  const target = finalizationIntentPath(repoRoot, taskId, family, artifact);
-  try { fs.unlinkSync(target); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
+  intent: LocalArtifactFinalizationIntent
+): LocalArtifactFinalizationIntent {
+  if (intent.state === 'consumed') return intent;
+  if (intent.state !== 'passed') throw new Error('LOCAL_FINALIZATION_INTENT_INVALID: only passed provenance can be consumed');
+  const consumed = { ...intent, state: 'consumed' as const };
+  writeLocalArtifactFinalizationIntent(repoRoot, consumed);
+  return consumed;
 }
 
 function requiredSections(family: LocalArtifactFamily): readonly string[] {
@@ -480,12 +479,28 @@ function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): Local
       'the repaired artifact semantic digest does not match the recorded repair baseline'
     );
   }
-  if (intent?.state === 'passed' && (intent.artifactSha256 !== artifactSha256 || intent.semanticDigest !== result.semanticDigest)) {
+  if ((intent?.state === 'passed' || intent?.state === 'consumed')
+    && (intent.artifactSha256 !== artifactSha256 || intent.semanticDigest !== result.semanticDigest)) {
     return provenanceFailure(
       request, resolved, content, artifactSha256, result.semanticDigest,
       'LOCAL_REPAIR_PROVENANCE_CONFLICT',
       'the artifact changed after its finalization provenance was recorded'
     );
+  }
+  if (intent?.state === 'consumed') {
+    return {
+      status: 'passed',
+      changed: false,
+      taskId: resolved.taskId,
+      taskDir: resolved.taskDir,
+      family: request.family,
+      artifact: request.artifact,
+      artifactSha256,
+      semanticDigest: result.semanticDigest,
+      repairable: false,
+      diagnostics: result.diagnostics,
+      error: null
+    };
   }
   try {
     writeLocalArtifactFinalizationIntent(resolved.repoRoot, {
@@ -525,9 +540,9 @@ function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): Local
 export {
   LOCAL_ARTIFACT_REQUIRED_PATTERNS,
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
+  consumeLocalArtifactFinalizationIntent,
   finalizeLocalArtifact,
   readLocalArtifactFinalizationIntent,
-  removeLocalArtifactFinalizationIntent,
   semanticDigest,
   sha256Content,
   validateLocalArtifact
