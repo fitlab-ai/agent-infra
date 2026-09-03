@@ -385,7 +385,7 @@ test("validate-artifact artifact check fails when a required section is missing"
 
     const result = runValidator(["check", "artifact", taskDir, "code.md", "--skill", "code-task"]);
     assert.equal(result.status, 1);
-    assertPayloadStatus(result, { type: "artifact", status: "fail", message: /missing sections/i });
+    assertPayloadStatus(result, { type: "artifact", status: "fail", message: /LOCAL_ARTIFACT_MISSING_SECTION/ });
   })
 ));
 
