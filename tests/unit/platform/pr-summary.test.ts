@@ -15,7 +15,14 @@ import {
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 import type { PrecheckCandidate } from '../../../lib/platform/pr-change-report.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
-import { buildPrChangeReport, runMechanicalChangeReport, taskIntentDigest, writePrChangeReportAtomic } from '../../../lib/platform/pr-change-report.ts';
+import {
+  buildPrChangeReport,
+  readPrChangeReport,
+  replaceCanonicalReportPlaceholder,
+  runMechanicalChangeReport,
+  taskIntentDigest,
+  writePrChangeReportAtomic
+} from '../../../lib/platform/pr-change-report.ts';
 import { filePath } from '../../helpers.ts';
 
 function git(cwd: string, args: string[]): string {
@@ -90,6 +97,9 @@ type ResolvedContextClientOptions = {
   onContextResolved?: () => void;
   headSequence?: string[];
   deleteCalls?: { value: number };
+  commentWrites?: { value: number };
+  comments?: Array<{ id: number; body: string }>;
+  pullRequestFailureAt?: number;
 };
 
 function resolvedContextClient(
@@ -112,7 +122,11 @@ function resolvedContextClient(
         return { ok: true, value: { full_name: 'acme/widgets', fork: false, permissions: { triage: true, push: true, admin: true } } };
       }
       if (args.some((value: string) => value.includes('/pulls/42'))) {
-        const currentHead = options.headSequence?.[Math.min(pullRequestCalls++, (options.headSequence?.length || 1) - 1)] || headSha;
+        const pullRequestCall = pullRequestCalls++;
+        if (options.pullRequestFailureAt === pullRequestCall + 1) {
+          return { ok: false, error: { code: 'PR_INSPECTION_FAILED', message: 'pull-request inspect failed', retryable: true } };
+        }
+        const currentHead = options.headSequence?.[Math.min(pullRequestCall, (options.headSequence?.length || 1) - 1)] || headSha;
         return { ok: true, value: {
           number: 42, node_id: 'PR_42', html_url: 'https://github.com/acme/widgets/pull/42',
           state: 'open', title: 'Canonical report', body: '', draft: false,
@@ -122,14 +136,17 @@ function resolvedContextClient(
         } };
       }
       if (args.some((value: string) => value.includes('/issues/42/comments'))) {
-        if (args.includes('POST')) return { ok: true, value: { id: 9 } };
+        if (args.includes('POST') || args.includes('PATCH')) {
+          if (options.commentWrites) options.commentWrites.value += 1;
+          return { ok: true, value: { id: 9 } };
+        }
         if (failure === 'duplicate') {
           const marker = '<!-- sync-pr:TASK-20260101-000042:summary -->';
           return { ok: true, value: [[{ id: 1, body: `${marker}\nfirst` }, { id: 2, body: `${marker}\nsecond` }]] };
         }
         return failure === 'comments'
           ? { ok: false, error: { code: 'COMMENT_LIST_FAILED', message: 'comment API failed', retryable: true } }
-          : { ok: true, value: [[]] };
+          : { ok: true, value: [options.comments || []] };
       }
       throw new Error(`unexpected GitHub call: ${args.join(' ')}`);
     },
@@ -148,6 +165,17 @@ test('PR summary envelope owns marker and current HEAD', () => {
     'Summary',
     ''
   ].join('\n'));
+});
+
+test('PR summary escapes control markers in the human override audit', () => {
+  const summary = buildPullRequestSummary(
+    'TASK-1',
+    'Summary',
+    'abc123',
+    '## Human Override Audit\n\n- reason=<!-- sync-pr:TASK-1:summary -->'
+  );
+  assert.equal((summary.match(/<!--\s*sync-pr:/gi) || []).length, 1);
+  assert.match(summary, /&lt;!-- sync-pr:TASK-1:summary --&gt;/);
 });
 
 test('PR summary warning result preserves the primary lifecycle outcome', () => {
@@ -284,6 +312,67 @@ test('summary-sync compensates a published comment when the PR head races', asyn
     assert.equal(result.result, null);
     assert.equal(result.warnings.length, 0);
     assert.equal(deleteCalls.value, 1);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('summary-sync compensates a published comment when post-write inspection fails', async () => {
+  const fixture = summaryFixture();
+  const deleteCalls = { value: 0 };
+  const commentWrites = { value: 0 };
+  try {
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: `## Summary\n\n${'<!-- canonical-pr-change-report -->'}`,
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
+        pullRequestFailureAt: 3,
+        deleteCalls,
+        commentWrites
+      })
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED');
+    assert.equal(result.result, null);
+    assert.equal(result.warnings.length, 0);
+    assert.equal(commentWrites.value, 1);
+    assert.equal(deleteCalls.value, 1);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('summary-sync rechecks the PR head before returning no-op', async () => {
+  const fixture = summaryFixture();
+  const commentWrites = { value: 0 };
+  try {
+    const report = readPrChangeReport(fixture.reportPath);
+    assert.equal(report.ok, true);
+    if (!report.ok) return;
+    const replaced = replaceCanonicalReportPlaceholder('Summary\n<!-- canonical-pr-change-report -->', report.value);
+    assert.equal(replaced.ok, true);
+    if (!replaced.ok) return;
+    const desired = buildPullRequestSummary(fixture.taskId, replaced.value, fixture.headSha);
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: 'Summary\n<!-- canonical-pr-change-report -->',
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, {
+        headSequence: [fixture.headSha, 'd'.repeat(40)],
+        comments: [{ id: 7, body: desired }],
+        commentWrites
+      })
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'PR_SUMMARY_HEAD_RACE');
+    assert.equal(result.result, null);
+    assert.equal(result.warnings.length, 0);
+    assert.equal(commentWrites.value, 0);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
