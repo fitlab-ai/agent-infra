@@ -30,10 +30,23 @@ export default async function createPlatformProvider(input) {
         const value = pullRequests[String(request.target.value)];
         return value
           ? { ok: true, value: {
-            ...value,
             id: String(value.id || value.nodeId),
             identity: value.identity || { kind: 'number', value: value.number },
-            displayUrl: value.displayUrl || value.url
+            number: value.number,
+            state: value.state,
+            title: value.title,
+            body: value.body,
+            baseSha: value.base?.sha,
+            headSha: value.head?.sha,
+            mergedAt: value.mergedAt,
+            displayUrl: value.displayUrl || value.url,
+            draft: value.draft,
+            labels: value.labels,
+            assignees: value.assignees,
+            milestone: value.milestone,
+            mergeCommitSha: value.mergeCommitSha,
+            head: value.head,
+            base: value.base
           } }
           : { ok: false, error: { code: 'PR_NOT_FOUND', message: 'Pull request was not found', retryable: false } };
       },

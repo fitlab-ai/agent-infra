@@ -17,7 +17,7 @@ const shared = {
 
 const SHA = "a".repeat(40);
 const BOUND_FACT = encodePrDeliveryFact(buildBoundFact({
-  identity: { repository: "acme/widgets", number: 42, nodeId: "PR_42", url: "https://github.com/acme/widgets/pull/42", head: { repository: "acme/widgets", ref: "feature", sha: SHA }, base: { repository: "acme/widgets", ref: "main", sha: "b".repeat(40) } },
+  identity: { resource: { kind: "number", value: 42 }, repository: "acme/widgets", url: "https://github.com/acme/widgets/pull/42", head: { repository: "acme/widgets", ref: "feature", sha: SHA }, base: { repository: "acme/widgets", ref: "main", sha: "b".repeat(40) } },
   source: "created", verifiedAt: "2026-01-01T00:00:00.000Z", remoteState: "open"
 }));
 const UNBOUND_FACT = encodePrDeliveryFact(buildUnboundFact());

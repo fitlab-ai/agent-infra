@@ -1,18 +1,9 @@
 type ResourceIdentityKind = 'id' | 'number' | 'key';
-type ResourceIdentity = {
-  kind?: ResourceIdentityKind;
-  value?: string | number;
-  /** @deprecated Internal callers must use kind/value; removed from serialized identities. */
-  id?: string;
-  /** @deprecated Internal callers must use kind/value; removed from serialized identities. */
-  number?: number;
-  /** @deprecated Internal callers must use kind/value; removed from serialized identities. */
-  key?: string;
-};
-type CanonicalResourceIdentity =
+type ResourceIdentity =
   | { kind: 'id'; value: string }
   | { kind: 'number'; value: number }
   | { kind: 'key'; value: string };
+type CanonicalResourceIdentity = ResourceIdentity;
 
 type PlatformResourceKind = 'issue' | 'pull-request' | 'comment' | 'release';
 type ProviderIdentityDeclaration = Partial<Record<PlatformResourceKind, ResourceIdentityKind>>;
@@ -99,12 +90,11 @@ function identityFromRemoteValue(
 }
 
 function resourceIdentityNumber(identity: ResourceIdentity | null | undefined): number | null {
-  return identity?.kind === 'number' && typeof identity.value === 'number' ? identity.value : identity?.number ?? null;
+  return identity?.kind === 'number' ? identity.value : null;
 }
 
 function resourceIdentityString(identity: ResourceIdentity | null | undefined): string | null {
-  return identity && (identity.kind === 'id' || identity.kind === 'key') && typeof identity.value === 'string'
-    ? identity.value : identity?.id ?? identity?.key ?? null;
+  return identity && (identity.kind === 'id' || identity.kind === 'key') ? identity.value : null;
 }
 
 function reviewMarker(identity: ResourceIdentity): string {

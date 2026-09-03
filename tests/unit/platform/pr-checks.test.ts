@@ -34,7 +34,7 @@ test('PR readiness watcher reaches injected deadline and preserves the observed 
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
     fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
-      identity: { repository: 'o/r', number: 5, nodeId: 'PR_5', url: 'https://github.com/o/r/pull/5', head: { repository: 'o/r', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'o/r', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+      identity: { resource: { kind: 'number', value: 5 }, repository: 'o/r', url: 'https://github.com/o/r/pull/5', head: { repository: 'o/r', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'o/r', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
     })))}`, '---', ''].join('\n'));
     const client = {
       version() { return { ok: true as const, value: '2.72.0' }; },

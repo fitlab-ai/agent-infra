@@ -52,7 +52,7 @@ function writeTask(
     "status: active",
     "current_step: code-review",
     `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
-      identity: { repository: "fitlab-ai/agent-infra", number: prNumber, nodeId: `PR_${prNumber}`, url: `https://github.com/fitlab-ai/agent-infra/pull/${prNumber}`, head: { repository: "fitlab-ai/agent-infra", ref: "feature", sha: reviewedHead }, base: { repository: "fitlab-ai/agent-infra", ref: "main", sha: "b".repeat(40) } }, source: "reused", verifiedAt: "2026-01-01T00:00:00.000Z", remoteState: "open"
+      identity: { resource: { kind: "number", value: prNumber }, repository: "fitlab-ai/agent-infra", url: `https://github.com/fitlab-ai/agent-infra/pull/${prNumber}`, head: { repository: "fitlab-ai/agent-infra", ref: "feature", sha: reviewedHead }, base: { repository: "fitlab-ai/agent-infra", ref: "main", sha: "b".repeat(40) } }, source: "reused", verifiedAt: "2026-01-01T00:00:00.000Z", remoteState: "open"
     })))}`,
     `last_reviewed_commit: ${reviewedHead}`,
     "---",

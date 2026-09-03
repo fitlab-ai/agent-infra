@@ -131,8 +131,7 @@ function boundFactValue(number = 77, headSha = "a".repeat(40)) {
   return factValue(buildBoundFact({
     identity: {
       repository: "fitlab-ai/agent-infra",
-      number,
-      nodeId: `PR_${number}`,
+      resource: { kind: "number", value: number },
       url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`,
       head: { repository: "fitlab-ai/agent-infra", ref: "agent-infra-feature-pr", sha: headSha },
       base: { repository: "fitlab-ai/agent-infra", ref: "main", sha: "b".repeat(40) }

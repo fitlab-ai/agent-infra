@@ -4,6 +4,7 @@ export default async function createPlatformProvider(input) {
   return {
     type: input.providerType,
     contractVersion: input.contractVersion,
+    identity: { 'pull-request': 'number' },
     context: {
       async resolve(operation) {
         return {

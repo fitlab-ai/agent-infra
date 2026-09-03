@@ -16,7 +16,7 @@ function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } 
 
 function boundFactLine(number = 5) {
   return `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
-    identity: { repository: 'fitlab-ai/agent-infra', number, nodeId: `PR_${number}`, url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`, head: { repository: 'fitlab-ai/agent-infra', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+    identity: { resource: { kind: 'number', value: number }, repository: 'fitlab-ai/agent-infra', url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`, head: { repository: 'fitlab-ai/agent-infra', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
   })))}`;
 }
 

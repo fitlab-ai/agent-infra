@@ -14,9 +14,6 @@ type PrDeliveryIdentity = {
   url: string;
   head: { repository: string; ref: string; sha: string };
   base: { repository: string; ref: string; sha: string };
-  /** @deprecated Use resource.kind/value. Retained as a non-serialized read accessor during the prerelease window. */
-  readonly number: number | null;
-  readonly nodeId: string;
 };
 
 type LegacyPrDeliveryIdentity = {
@@ -34,7 +31,7 @@ type CurrentPrDeliveryIdentityInput = {
   head: { repository: string; ref: string; sha: string };
   base: { repository: string; ref: string; sha: string };
 };
-type PrDeliveryIdentityInput = CurrentPrDeliveryIdentityInput | PrDeliveryIdentity | LegacyPrDeliveryIdentity;
+type PrDeliveryIdentityInput = CurrentPrDeliveryIdentityInput;
 
 type PrDeliveryBindingSource = 'created' | 'reused' | 'explicit-bind' | 'external-unique' | 'external-explicit';
 type PrDeliveryProvenance = 'create-post' | 'reuse' | 'explicit-bind' | 'external-unique' | 'external-explicit';
@@ -100,33 +97,37 @@ function parseRef(value: unknown, label: string): { repository: string; ref: str
   return { repository: text(value.repository, `${label}.repository`), ref: text(value.ref, `${label}.ref`), sha: text(value.sha, `${label}.sha`) };
 }
 
-function withLegacyAliases(identity: PrDeliveryIdentity): PrDeliveryIdentity {
-  Object.defineProperty(identity, 'number', { configurable: false, enumerable: false, get: () => resourceIdentityNumber(identity.resource) });
-  Object.defineProperty(identity, 'nodeId', { configurable: false, enumerable: false, get: () => identity.resource.kind === 'id' ? identity.resource.value : '' });
-  return identity;
-}
-
 function canonicalIdentity(value: unknown): PrDeliveryIdentity {
   if (!isRecord(value)) throw factError('identity must be an object');
-  if (Object.hasOwn(value, 'resource')) {
-    exactKeys(value, ['resource', 'repository', 'url', 'head', 'base'], 'identity');
-    return withLegacyAliases({
-      resource: parseResourceIdentity(value.resource, 'identity.resource'),
-      repository: text(value.repository, 'identity.repository'),
-      url: text(value.url, 'identity.url'),
-      head: parseRef(value.head, 'identity.head'),
-      base: parseRef(value.base, 'identity.base')
-    } as PrDeliveryIdentity);
-  }
-  // TODO(compat): Remove the v1 identity decoder before the first stable v1.0.0 release.
-  exactKeys(value, ['repository', 'number', 'nodeId', 'url', 'head', 'base'], 'legacy identity');
-  return withLegacyAliases({
-    resource: { kind: 'number', value: positiveNumber(value.number, 'legacy identity.number') },
+  exactKeys(value, ['resource', 'repository', 'url', 'head', 'base'], 'identity');
+  return {
+    resource: parseResourceIdentity(value.resource, 'identity.resource'),
     repository: text(value.repository, 'identity.repository'),
     url: text(value.url, 'identity.url'),
     head: parseRef(value.head, 'identity.head'),
     base: parseRef(value.base, 'identity.base')
-  } as PrDeliveryIdentity);
+  };
+}
+
+function decodeLegacyIdentity(value: unknown): PrDeliveryIdentity {
+  if (!isRecord(value)) throw factError('legacy identity must be an object');
+  // TODO(compat): Remove the v1 identity decoder before the first stable v1.0.0 release.
+  exactKeys(value, ['repository', 'number', 'nodeId', 'url', 'head', 'base'], 'legacy identity');
+  const legacy = {
+    number: positiveNumber(value.number, 'legacy identity.number'),
+    repository: text(value.repository, 'identity.repository'),
+    nodeId: text(value.nodeId, 'legacy identity.nodeId'),
+    url: text(value.url, 'identity.url'),
+    head: parseRef(value.head, 'identity.head'),
+    base: parseRef(value.base, 'identity.base')
+  } satisfies LegacyPrDeliveryIdentity;
+  return {
+    resource: { kind: 'number', value: legacy.number },
+    repository: legacy.repository,
+    url: legacy.url,
+    head: legacy.head,
+    base: legacy.base
+  };
 }
 
 function provenanceForSource(source: PrDeliveryBindingSource): PrDeliveryProvenance { return source === 'created' ? 'create-post' : source === 'reused' ? 'reuse' : source; }
@@ -154,7 +155,7 @@ function parseFact(value: unknown): PrDeliveryFact {
     return parseFact({
       version: 2,
       state: 'bound',
-      identity: canonicalIdentity(value.identity),
+      identity: decodeLegacyIdentity(value.identity),
       binding: {
         status: 'verified', source: value.binding.source, verifiedAt: timestamp(value.binding.verifiedAt, 'binding.verifiedAt'),
         issueIdentity: issueNumber === null ? null : { kind: 'number', value: issueNumber }, remoteState: value.binding.remoteState,
@@ -202,26 +203,24 @@ function buildUnboundFact(): PrDeliveryFact { return { version: 2, state: 'unbou
 function buildSkippedFact(decidedAt: string): PrDeliveryFact { return parseFact({ version: 2, state: 'skipped', reason: 'explicit', decidedAt }); }
 
 function buildBoundFact(input: {
-  identity: PrDeliveryIdentityInput;
+  identity: CurrentPrDeliveryIdentityInput;
   source: PrDeliveryBindingSource;
   verifiedAt: string;
   issueIdentity?: ResourceIdentity | null;
-  issueNumber?: number | null;
   remoteState: 'open' | 'closed';
   mergedAt?: string | null;
   mergeCommitSha?: string | null;
 }): PrDeliveryFact {
-  const identity = 'resource' in input.identity ? input.identity : { resource: { kind: 'number' as const, value: input.identity.number }, repository: input.identity.repository, url: input.identity.url, head: input.identity.head, base: input.identity.base };
-  return parseFact({ version: 2, state: 'bound', identity, binding: {
+  return parseFact({ version: 2, state: 'bound', identity: input.identity, binding: {
     status: 'verified', source: input.source, verifiedAt: input.verifiedAt,
-    issueIdentity: input.issueIdentity !== undefined ? input.issueIdentity : input.issueNumber === undefined || input.issueNumber === null ? null : { kind: 'number', value: input.issueNumber },
+    issueIdentity: input.issueIdentity === undefined ? null : input.issueIdentity,
     remoteState: input.remoteState, mergedAt: input.mergedAt ?? null, mergeCommitSha: input.mergeCommitSha ?? null
   }, provenance: { establishedBy: provenanceForSource(input.source) } });
 }
 function factFrontmatterMutation(fact: PrDeliveryFact): { set: { [PR_DELIVERY_FACT_KEY]: string } } { return { set: { [PR_DELIVERY_FACT_KEY]: encodePrDeliveryFact(fact) } }; }
 function identityFromPullRequest(pullRequest: PrDeliveryIdentityInput): PrDeliveryIdentity {
-  return canonicalIdentity('resource' in pullRequest ? pullRequest : { ...pullRequest, resource: { kind: 'number', value: pullRequest.number } });
+  return canonicalIdentity(pullRequest);
 }
 
 export { PR_DELIVERY_FACT_KEY, buildBoundFact, buildSkippedFact, buildUnboundFact, decodePrDeliveryFact, encodePrDeliveryFact, factFrontmatterMutation, identityFromPullRequest, readPrDeliveryFact, serializeResourceIdentity };
-export type { CreationOutcome, LegacyPrDeliveryIdentity, PrDeliveryBindingSource, PrDeliveryFact, PrDeliveryFactReadResult, PrDeliveryIdentity, PrDeliveryIdentityInput, PrDeliveryProvenance };
+export type { CreationOutcome, PrDeliveryBindingSource, PrDeliveryFact, PrDeliveryFactReadResult, PrDeliveryIdentity, PrDeliveryIdentityInput, PrDeliveryProvenance };

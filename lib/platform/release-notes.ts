@@ -255,7 +255,7 @@ async function publishReleaseNotes(
     const published = loaded.value.provider.releases?.publishNotes
       ? await loaded.value.provider.releases.publishNotes({
         context: providerOperationContext(loaded.value),
-        release: { key: input.tag },
+        release: { kind: 'key', value: input.tag },
         title: input.title,
         notes: {
           text: fs.readFileSync(input.notesFile, 'utf8'),

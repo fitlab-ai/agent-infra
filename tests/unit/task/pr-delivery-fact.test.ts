@@ -12,9 +12,8 @@ import {
 } from '../../../lib/task/pr-delivery-fact.ts';
 
 const identity = {
+  resource: { kind: 'number' as const, value: 42 },
   repository: 'acme/widgets',
-  number: 42,
-  nodeId: 'PR_42',
   url: 'https://github.com/acme/widgets/pull/42',
   head: { repository: 'acme/widgets', ref: 'feature/fact', sha: 'a'.repeat(40) },
   base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) }
@@ -28,7 +27,7 @@ test('PR delivery fact round-trips each legal state', () => {
       identity,
       source: 'created',
       verifiedAt: '2026-09-01T00:00:00.000Z',
-      issueNumber: 7,
+      issueIdentity: { kind: 'number', value: 7 } as const,
       remoteState: 'open'
     })
   ];

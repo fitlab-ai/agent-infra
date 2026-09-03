@@ -36,7 +36,7 @@ function summaryFixture(): { root: string; taskId: string } {
     'status: active',
     `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
       identity: {
-        repository: 'acme/widgets', number: 42, nodeId: 'PR_42', url: 'https://github.com/acme/widgets/pull/42',
+        resource: { kind: 'number', value: 42 }, repository: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/42',
         head: { repository: 'acme/widgets', ref: 'feature', sha: 'a'.repeat(40) },
         base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) }
       }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'

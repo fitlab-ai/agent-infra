@@ -334,8 +334,8 @@ function commentSnapshot(value: any): RemoteCommentSnapshot {
   };
 }
 
-function createReceipt(remoteId: string, url?: string): ProviderResult<MutationReceipt> {
-  return { ok: true, value: { changed: true, remoteId, ...(url ? { url } : {}) } };
+function createReceipt(remoteId: string): ProviderResult<MutationReceipt> {
+  return { ok: true, value: { changed: true, remoteId } };
 }
 
 function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'verification'> {
@@ -402,7 +402,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (!response.ok) return response;
       const number = Number(response.value?.number);
       if (!Number.isInteger(number) || number <= 0) return invalid('ISSUE_CREATE_RESPONSE_INVALID', 'Issue create response lacks issue number');
-      return createReceipt(String(number), response.value?.html_url);
+      return createReceipt(String(number));
     },
     async update({ context, target, patch }) {
       const number = resourceIdentityNumber(target);
@@ -509,10 +509,11 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       return createReceipt(String(response.value?.id || commentId || ''));
     },
     async delete({ context, comment }) {
-      if (!comment.id) return invalid('COMMENT_ID_INVALID', 'Comment id is required');
-      const response = client.text(['api', `repos/${repository(context)}/issues/comments/${comment.id}`, '-X', 'DELETE'], { cwd: context.workingDirectory, method: 'DELETE' });
+      const commentId = resourceIdentityString(comment);
+      if (!commentId) return invalid('COMMENT_ID_INVALID', 'Comment id is required');
+      const response = client.text(['api', `repos/${repository(context)}/issues/comments/${commentId}`, '-X', 'DELETE'], { cwd: context.workingDirectory, method: 'DELETE' });
       if (!response.ok) return response;
-      return createReceipt(String(comment.id));
+      return createReceipt(commentId);
     }
   };
 
@@ -557,7 +558,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (!response.ok) return response;
       const number = Number(response.value?.number);
       if (!Number.isInteger(number) || number <= 0) return invalid('PR_CREATE_RESPONSE_INVALID', 'Pull request create response lacks number');
-      return createReceipt(String(number), response.value?.html_url);
+      return createReceipt(String(number));
     },
     async update({ context, target, patch }) {
       const number = resourceIdentityNumber(target);
@@ -685,16 +686,16 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (notes) args.push('--notes', notes.text);
       const response = client.text(args, { cwd: context.workingDirectory, method: 'POST' });
       if (!response.ok) return response;
-      return createReceipt(tag, response.value || undefined);
+      return createReceipt(tag);
     },
     async update({ context, release, patch }) {
-      const tag = release.key || String(release.id || '');
+      const tag = resourceIdentityString(release) || '';
       const args = ['release', 'edit', tag, '--repo', repository(context)];
       if (patch.title) args.push('--title', patch.title);
       if (patch.body) args.push('--notes', patch.body);
       const response = client.text(args, { cwd: context.workingDirectory, method: 'PATCH' });
       if (!response.ok) return response;
-      return createReceipt(tag, response.value || undefined);
+      return createReceipt(tag);
     },
     async reconcileMilestones({ context, desired }) {
       const listed = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=all&per_page=100`], { cwd: context.workingDirectory });
@@ -724,9 +725,10 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       const notesFile = path.join(temporaryRoot, 'notes.md');
       fs.writeFileSync(notesFile, notes.text);
       try {
-        const result = module.publishGitHubReleaseNotes({ repository: repository(context), tag: release.key || String(release.id || ''), title, notesFile }, { cwd: context.workingDirectory, client });
+        const tag = resourceIdentityString(release) || '';
+        const result = module.publishGitHubReleaseNotes({ repository: repository(context), tag, title, notesFile }, { cwd: context.workingDirectory, client });
         if (result.status === 'failed' || result.status === 'blocked') return { ok: false, error: result.error || { code: 'RELEASE_NOTES_PUBLISH_FAILED', message: 'Release notes publish failed', retryable: false } };
-        return { ok: true, value: { changed: result.changed, remoteId: release.key || String(release.id || '') } };
+        return { ok: true, value: { changed: result.changed, remoteId: tag } };
       } finally {
         fs.rmSync(temporaryRoot, { recursive: true, force: true });
       }

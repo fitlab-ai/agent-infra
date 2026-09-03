@@ -67,7 +67,7 @@ test('compiled preflight does not require a checks snapshot for a bound historic
       '---', `id: ${TASK_ID}`, 'status: active', 'current_step: code-review',
       'updated_at: 2026-01-01 00:00:00+00:00', 'agent_infra_version: v0.0.0',
       `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
-        identity: { repository: 'acme/demo', number: 42, nodeId: 'PR_42', url: 'https://github.com/acme/demo/pull/42', head: { repository: 'acme/demo', ref: 'feature', sha: head }, base: { repository: 'acme/demo', ref: 'main', sha: 'b'.repeat(40) } }, source: 'reused', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'closed', mergedAt: '2026-08-01T00:00:00Z', mergeCommitSha: 'c'.repeat(40)
+        identity: { resource: { kind: 'number', value: 42 }, repository: 'acme/demo', url: 'https://github.com/acme/demo/pull/42', head: { repository: 'acme/demo', ref: 'feature', sha: head }, base: { repository: 'acme/demo', ref: 'main', sha: 'b'.repeat(40) } }, source: 'reused', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'closed', mergedAt: '2026-08-01T00:00:00Z', mergeCommitSha: 'c'.repeat(40)
       })))}`, `last_reviewed_commit: ${head}`,
       'target_date:', '---', '', '# Task', '', '## Review Disagreement Ledger', '',
       '| id | stage | round | severity | status | evidence |',

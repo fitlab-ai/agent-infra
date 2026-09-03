@@ -18,7 +18,7 @@ function factLine(fact: ReturnType<typeof buildUnboundFact> | ReturnType<typeof 
 function boundFixture(number: number, headSha = 'a'.repeat(40)) {
   return buildBoundFact({
     identity: {
-      repository: 'fitlab-ai/agent-infra', number, nodeId: `PR_${number}`,
+      resource: { kind: 'number', value: number }, repository: 'fitlab-ai/agent-infra',
       url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`,
       head: { repository: 'fitlab-ai/agent-infra', ref: 'feature', sha: headSha },
       base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) }
@@ -331,7 +331,7 @@ for (const [label, mutation] of [
 test('platform-pr skip refuses a bound fact without mutation', () => {
   const current = createFixture(buildBoundFact({
     identity: {
-      repository: 'fitlab-ai/agent-infra', number: 1, nodeId: 'PR_1',
+      resource: { kind: 'number', value: 1 }, repository: 'fitlab-ai/agent-infra',
       url: 'https://github.com/fitlab-ai/agent-infra/pull/1',
       head: { repository: 'fitlab-ai/agent-infra', ref: 'feature', sha: 'a'.repeat(40) },
       base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) }
@@ -467,7 +467,7 @@ test('platform-pr resolve-external paginates, binds one merged fork PR, audits e
     const fact = readPrDeliveryFact(parseTypedTaskFrontmatter(content));
     assert.equal(fact.status, 'valid');
     assert.equal(fact.fact.state, 'bound');
-    assert.equal(fact.fact.identity.number, 771);
+    assert.deepEqual(fact.fact.identity.resource, { kind: 'number', value: 771 });
     assert.equal((content.match(/\*\*Bind External PR\*\*/g) || []).length, 1);
 
     const replay = run(['resolve-external', f.taskId, '--agent', 'claude'], { cwd: f.root, env: f.env });

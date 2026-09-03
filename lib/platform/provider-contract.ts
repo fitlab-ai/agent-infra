@@ -409,14 +409,23 @@ function validatePlatformProvider(
   value: unknown,
   providerType: string
 ): ProviderResult<PlatformProvider> {
-  const operationGroups: Record<string, string[]> = {
-    issues: ['inspect', 'create', 'update', 'describeRepository'],
-    comments: ['list', 'write', 'delete'],
-    changeRequests: ['inspect', 'listClosing', 'create', 'update', 'resolveGitEvidence'],
-    checks: ['inspectRequired', 'resolveRun', 'fetchLogs'],
-    reviews: ['list', 'publish'],
-    releases: ['inspect', 'create', 'update', 'reconcileMilestones', 'publishNotes', 'collectNotes'],
-    verification: ['fetchRemoteFacts']
+  const operationGroups: Record<string, { required: string[]; optional: string[] }> = {
+    issues: { required: ['inspect', 'create', 'update', 'describeRepository'], optional: [] },
+    comments: { required: ['list', 'write', 'delete'], optional: [] },
+    changeRequests: { required: ['inspect', 'listClosing', 'create', 'update', 'resolveGitEvidence'], optional: ['verifyHead'] },
+    checks: { required: ['inspectRequired', 'resolveRun', 'fetchLogs'], optional: [] },
+    reviews: { required: ['list', 'publish'], optional: [] },
+    releases: { required: ['inspect', 'create', 'update', 'reconcileMilestones', 'publishNotes', 'collectNotes'], optional: [] },
+    verification: { required: ['fetchRemoteFacts'], optional: [] }
+  };
+  const resourceKindsByGroup: Record<string, PlatformResourceKind[]> = {
+    issues: ['issue'],
+    comments: ['comment'],
+    changeRequests: ['pull-request'],
+    checks: ['pull-request'],
+    reviews: ['pull-request'],
+    releases: ['release'],
+    verification: ['issue', 'comment', 'pull-request']
   };
   if (!isRecord(value)
     || value.type !== providerType
@@ -451,9 +460,11 @@ function validatePlatformProvider(
       };
     }
   }
-  for (const [groupName, methods] of Object.entries(operationGroups)) {
+  for (const [groupName, groupDefinition] of Object.entries(operationGroups)) {
     const group = value[groupName];
-    if (group !== undefined && (!isRecord(group) || methods.some((method) => typeof group[method] !== 'function'))) {
+    if (group !== undefined && (!isRecord(group)
+      || groupDefinition.required.some((method) => typeof group[method] !== 'function')
+      || Object.keys(group).some((method) => ![...groupDefinition.required, ...groupDefinition.optional].includes(method)))) {
       return {
         ok: false,
         error: {
@@ -464,6 +475,23 @@ function validatePlatformProvider(
           phase: 'provider-validation'
         }
       };
+    }
+    if (group !== undefined) {
+      for (const resourceKind of resourceKindsByGroup[groupName] || []) {
+        const declaration = isRecord(value.identity) ? value.identity[resourceKind] : undefined;
+        if (declaration !== 'id' && declaration !== 'number' && declaration !== 'key') {
+          return {
+            ok: false,
+            error: {
+              code: 'PLATFORM_PROVIDER_CONTRACT_INVALID',
+              message: `Provider operation group ${groupName} requires an identity declaration for ${resourceKind}`,
+              retryable: false,
+              providerType,
+              phase: 'provider-validation'
+            }
+          };
+        }
+      }
     }
   }
   return { ok: true, value: value as unknown as PlatformProvider };
