@@ -1,4 +1,5 @@
-import { parseResourceIdentity } from './resource-identity.ts';
+import { parseResourceIdentity, serializeResourceIdentity } from './resource-identity.ts';
+import type { ProviderIdentityDeclaration, ResourceIdentityKind } from './resource-identity.ts';
 import type {
   ChangeRequestSnapshot,
   CheckLogSnapshot,
@@ -112,8 +113,18 @@ function stableUnique<T>(values: T[], key: (value: T) => string, label: string):
   return [...values].sort((left, right) => key(left).localeCompare(key(right)));
 }
 
-function identity(value: unknown, label: string): ReturnType<typeof parseResourceIdentity> {
-  return parseResourceIdentity(value, label);
+function declaredIdentityKind(
+  declaration: ProviderIdentityDeclaration | undefined,
+  resourceKind: 'issue' | 'pull-request' | 'comment' | 'release'
+): ResourceIdentityKind | undefined {
+  const kind = declaration?.[resourceKind];
+  return kind === 'id' || kind === 'number' || kind === 'key' ? kind : undefined;
+}
+
+function identity(value: unknown, label: string, expectedKind?: ResourceIdentityKind): ReturnType<typeof parseResourceIdentity> {
+  const parsed = parseResourceIdentity(value, label);
+  if (expectedKind !== undefined && parsed.kind !== expectedKind) throw new Error(`${label} kind does not match provider declaration`);
+  return parsed;
 }
 
 function author(value: unknown, label: string): { id?: string; name?: string } | null {
@@ -155,12 +166,12 @@ function validateContext(value: unknown, expectedProviderType?: string): Platfor
   };
 }
 
-function validateIssue(value: unknown): IssueSnapshot {
+function validateIssue(value: unknown, expectedKind?: ResourceIdentityKind, requireIdentity = false): IssueSnapshot {
   const item = record(value, 'issue');
   exactKeys(item, ['id', 'identity', 'number', 'title', 'body', 'state', 'labels', 'assignees', 'milestone', 'fields', 'issueType', 'author', 'displayUrl'], 'issue');
   const result: IssueSnapshot = {
     id: item.id === undefined ? '' : stringValue(item.id, 'issue.id'),
-    ...(item.identity === undefined ? {} : { identity: identity(item.identity, 'issue.identity') }),
+    ...(item.identity === undefined ? {} : { identity: identity(item.identity, 'issue.identity', expectedKind) }),
     ...(item.number === undefined ? {} : { number: Number.isSafeInteger(item.number) && (item.number as number) > 0 ? item.number as number : (() => { throw new Error('issue.number is invalid'); })() }),
     title: stringValue(item.title, 'issue.title', true),
     body: stringValue(item.body, 'issue.body', true),
@@ -174,6 +185,7 @@ function validateIssue(value: unknown): IssueSnapshot {
     ...(item.displayUrl === undefined ? {} : { displayUrl: stringValue(item.displayUrl, 'issue.displayUrl') })
   };
   if (!result.id && !result.identity) throw new Error('issue must expose id or identity');
+  if (requireIdentity && !result.identity) throw new Error('issue identity is required');
   if (result.number !== undefined && (!Number.isSafeInteger(result.number) || result.number <= 0)) throw new Error('issue.number is invalid');
   return result;
 }
@@ -188,14 +200,14 @@ function issueType(value: unknown, label: string): NonNullable<IssueSnapshot['is
       identity: identity(field.identity, `${label}.field.identity`),
       name: stringValue(field.name, `${label}.field.name`),
       kind: fieldKind(field.kind, `${label}.field.kind`),
-      options: arrayValue(field.options, `${label}.field.options`).map((rawOption) => {
+      options: stableUnique(arrayValue(field.options, `${label}.field.options`).map((rawOption) => {
         const option = record(rawOption, `${label}.field.option`);
         exactKeys(option, ['identity', 'name'], `${label}.field.option`);
         return { identity: identity(option.identity, `${label}.field.option.identity`), name: stringValue(option.name, `${label}.field.option.name`) };
-      })
+      }), (entry) => serializeResourceIdentity(entry.identity), `${label}.field.options`)
     };
   });
-  return { identity: identity(item.identity, `${label}.identity`), name: stringValue(item.name, `${label}.name`), fields };
+  return { identity: identity(item.identity, `${label}.identity`), name: stringValue(item.name, `${label}.name`), fields: stableUnique(fields, (entry) => serializeResourceIdentity(entry.identity), `${label}.fields`) };
 }
 
 function validateComment(value: unknown): RemoteCommentSnapshot {
@@ -210,12 +222,12 @@ function validateComment(value: unknown): RemoteCommentSnapshot {
   };
 }
 
-function validateChangeRequest(value: unknown): ChangeRequestSnapshot {
+function validateChangeRequest(value: unknown, expectedKind?: ResourceIdentityKind, requireIdentity = false): ChangeRequestSnapshot {
   const item = record(value, 'changeRequest');
   exactKeys(item, ['id', 'identity', 'number', 'state', 'title', 'body', 'baseSha', 'headSha', 'author', 'mergedAt', 'displayUrl', 'draft', 'labels', 'assignees', 'milestone', 'mergeCommitSha', 'mergeability', 'head', 'base'], 'changeRequest');
   const result = {
     id: item.id === undefined ? '' : stringValue(item.id, 'changeRequest.id'),
-    ...(item.identity === undefined ? {} : { identity: identity(item.identity, 'changeRequest.identity') }),
+    ...(item.identity === undefined ? {} : { identity: identity(item.identity, 'changeRequest.identity', expectedKind) }),
     ...(item.number === undefined ? {} : { number: Number.isSafeInteger(item.number) && (item.number as number) > 0 ? item.number as number : (() => { throw new Error('changeRequest.number is invalid'); })() }),
     state: stringValue(item.state, 'changeRequest.state'),
     title: stringValue(item.title, 'changeRequest.title', true),
@@ -235,6 +247,7 @@ function validateChangeRequest(value: unknown): ChangeRequestSnapshot {
     ...(item.base === undefined ? {} : { base: validateRef(item.base, 'changeRequest.base') })
   } as ChangeRequestSnapshot;
   if (!result.id && !result.identity) throw new Error('changeRequest must expose id or identity');
+  if (requireIdentity && !result.identity) throw new Error('changeRequest identity is required');
   if (result.number !== undefined && (!Number.isSafeInteger(result.number) || result.number <= 0)) throw new Error('changeRequest.number is invalid');
   if (result.mergedAt && Number.isNaN(Date.parse(result.mergedAt))) throw new Error('changeRequest.mergedAt is invalid');
   return result;
@@ -272,38 +285,38 @@ function validateMetadata(value: unknown): RepositoryMetadataSnapshot {
       identity: identity(field.identity, `${label}.identity`),
       name: stringValue(field.name, `${label}.name`),
       kind: fieldKind(field.kind, `${label}.kind`),
-      options: arrayValue(field.options, `${label}.options`).map((rawOption) => {
+      options: stableUnique(arrayValue(field.options, `${label}.options`).map((rawOption) => {
         const option = record(rawOption, `${label}.option`);
         exactKeys(option, ['identity', 'name'], `${label}.option`);
         return { identity: identity(option.identity, `${label}.option.identity`), name: stringValue(option.name, `${label}.option.name`) };
-      })
+      }), (entry) => serializeResourceIdentity(entry.identity), `${label}.options`)
     };
   });
-  const fields = stableUnique(mapFields(item.fields, 'metadata.fields'), (entry) => JSON.stringify(entry.identity), 'metadata.fields');
+  const fields = stableUnique(mapFields(item.fields, 'metadata.fields'), (entry) => serializeResourceIdentity(entry.identity), 'metadata.fields');
   const issueTypes = stableUnique(arrayValue(item.issueTypes, 'metadata.issueTypes').map((raw, index) => {
     const issueType = record(raw, `metadata.issueTypes[${index}]`);
     exactKeys(issueType, ['identity', 'name', 'fields'], `metadata.issueTypes[${index}]`);
-    return { identity: identity(issueType.identity, `metadata.issueTypes[${index}].identity`), name: stringValue(issueType.name, `metadata.issueTypes[${index}].name`), fields: stableUnique(mapFields(issueType.fields, `metadata.issueTypes[${index}].fields`), (entry) => JSON.stringify(entry.identity), `metadata.issueTypes[${index}].fields`) };
-  }), (entry) => JSON.stringify(entry.identity), 'metadata.issueTypes');
+    return { identity: identity(issueType.identity, `metadata.issueTypes[${index}].identity`), name: stringValue(issueType.name, `metadata.issueTypes[${index}].name`), fields: stableUnique(mapFields(issueType.fields, `metadata.issueTypes[${index}].fields`), (entry) => serializeResourceIdentity(entry.identity), `metadata.issueTypes[${index}].fields`) };
+  }), (entry) => serializeResourceIdentity(entry.identity), 'metadata.issueTypes');
   return {
     repository: { identity: identity(repository.identity, 'metadata.repository.identity'), name: stringValue(repository.name, 'metadata.repository.name'), url: repository.url === null ? null : stringValue(repository.url, 'metadata.repository.url') },
     labels: stableUnique(arrayValue(item.labels, 'metadata.labels').map((raw) => {
       const label = record(raw, 'metadata.label');
       exactKeys(label, ['identity', 'name'], 'metadata.label');
       return { identity: identity(label.identity, 'metadata.label.identity'), name: stringValue(label.name, 'metadata.label.name') };
-    }), (entry) => JSON.stringify(entry.identity), 'metadata.labels'),
+    }), (entry) => serializeResourceIdentity(entry.identity), 'metadata.labels'),
     milestones: stableUnique(arrayValue(item.milestones, 'metadata.milestones').map((raw) => {
       const milestone = record(raw, 'metadata.milestone');
       exactKeys(milestone, ['identity', 'title', 'state'], 'metadata.milestone');
       if (milestone.state !== 'open' && milestone.state !== 'closed') throw new Error('metadata.milestone.state is invalid');
       return { identity: identity(milestone.identity, 'metadata.milestone.identity'), title: stringValue(milestone.title, 'metadata.milestone.title'), state: milestone.state };
-    }), (entry) => JSON.stringify(entry.identity), 'metadata.milestones'),
+    }), (entry) => serializeResourceIdentity(entry.identity), 'metadata.milestones'),
     issueTypes,
     fields
   };
 }
 
-function validateReleaseNotes(value: unknown): ReleaseNotesFacts {
+function validateReleaseNotes(value: unknown, declaration?: ProviderIdentityDeclaration): ReleaseNotesFacts {
   const item = record(value, 'release notes');
   exactKeys(item, ['history', 'mergedPullRequests', 'closingIssues', 'actors'], 'release notes');
   return {
@@ -312,8 +325,8 @@ function validateReleaseNotes(value: unknown): ReleaseNotesFacts {
       exactKeys(entry, ['sha', 'message', 'authoredAt', 'author'], 'release notes.history[]');
       return { sha: stringValue(entry.sha, 'history.sha'), message: stringValue(entry.message, 'history.message', true), authoredAt: utcTimestamp(entry.authoredAt, 'history.authoredAt'), author: author(entry.author, 'history.author') };
     }), (entry) => entry.sha, 'release notes.history'),
-    mergedPullRequests: stableUnique(arrayValue(item.mergedPullRequests, 'release notes.mergedPullRequests').map(validateChangeRequest), (entry) => JSON.stringify(entry.identity || { kind: 'id', value: entry.id }), 'release notes.mergedPullRequests'),
-    closingIssues: stableUnique(arrayValue(item.closingIssues, 'release notes.closingIssues').map(validateIssue), (entry) => JSON.stringify(entry.identity || { kind: 'id', value: entry.id }), 'release notes.closingIssues'),
+    mergedPullRequests: stableUnique(arrayValue(item.mergedPullRequests, 'release notes.mergedPullRequests').map((entry) => validateChangeRequest(entry, declaredIdentityKind(declaration, 'pull-request'), true)), (entry) => serializeResourceIdentity(entry.identity!), 'release notes.mergedPullRequests'),
+    closingIssues: stableUnique(arrayValue(item.closingIssues, 'release notes.closingIssues').map((entry) => validateIssue(entry, declaredIdentityKind(declaration, 'issue'), true)), (entry) => serializeResourceIdentity(entry.identity!), 'release notes.closingIssues'),
     actors: stableUnique(arrayValue(item.actors, 'release notes.actors').map((entry) => {
       const actor = author(entry, 'release notes.actor');
       if (!actor) throw new Error('release notes.actor must identify an actor');
@@ -384,10 +397,10 @@ function safeProviderError(providerType: string, operation: string, value: unkno
   };
 }
 
-function validators(providerType: string): Record<string, ResultValidator<unknown>> {
+function validators(providerType: string, declaration?: ProviderIdentityDeclaration): Record<string, ResultValidator<unknown>> {
   return {
     'context.resolve': (value) => validateContext(value, providerType),
-    'issues.inspect': validateIssue,
+    'issues.inspect': (value) => validateIssue(value, declaredIdentityKind(declaration, 'issue'), true),
     'issues.describeRepository': validateMetadata,
     'issues.create': validateReceipt,
     'issues.update': validateReceipt,
@@ -399,8 +412,8 @@ function validators(providerType: string): Record<string, ResultValidator<unknow
       exactKeys(item, ['sha'], 'change request head');
       return { sha: stringValue(item.sha, 'change request head.sha') };
     },
-    'changeRequests.inspect': validateChangeRequest,
-    'changeRequests.listClosing': (value) => arrayValue(value, 'changeRequests').map(validateChangeRequest),
+    'changeRequests.inspect': (value) => validateChangeRequest(value, declaredIdentityKind(declaration, 'pull-request'), true),
+    'changeRequests.listClosing': (value) => arrayValue(value, 'changeRequests').map((entry) => validateChangeRequest(entry, declaredIdentityKind(declaration, 'pull-request'), true)),
     'changeRequests.create': validateReceipt,
     'changeRequests.update': validateReceipt,
     'changeRequests.resolveGitEvidence': (value) => {
@@ -442,7 +455,7 @@ function validators(providerType: string): Record<string, ResultValidator<unknow
       return { changed: booleanValue(item.changed, 'milestone reconciliation.changed'), created: arrayValue(item.created, 'created').map((entry) => stringValue(entry, 'created[]')), closed: arrayValue(item.closed, 'closed').map((entry) => stringValue(entry, 'closed[]')) } satisfies MilestoneReconciliation;
     },
     'releases.publishNotes': validateReceipt,
-    'releases.collectNotes': validateReleaseNotes,
+    'releases.collectNotes': (value) => validateReleaseNotes(value, declaration),
     'verification.fetchRemoteFacts': (value) => {
       const item = record(value, 'verification facts');
       exactKeys(item, ['issue', 'comments', 'changeRequest', 'commit', 'fields'], 'verification facts');
@@ -451,7 +464,7 @@ function validators(providerType: string): Record<string, ResultValidator<unknow
         exactKeys(value, ['sha', 'message'], 'verification.commit');
         return { sha: stringValue(value.sha, 'verification.commit.sha'), ...(value.message === undefined ? {} : { message: stringValue(value.message, 'verification.commit.message', true) }) };
       })();
-      return { issue: item.issue === undefined ? undefined : item.issue === null ? null : validateIssue(item.issue), comments: arrayValue(item.comments, 'verification.comments').map(validateComment), changeRequest: item.changeRequest === undefined ? undefined : item.changeRequest === null ? null : validateChangeRequest(item.changeRequest), commit, fields: scalarFields(item.fields, 'verification.fields') } satisfies VerificationRemoteFacts;
+      return { issue: item.issue === undefined ? undefined : item.issue === null ? null : validateIssue(item.issue, declaredIdentityKind(declaration, 'issue'), true), comments: arrayValue(item.comments, 'verification.comments').map(validateComment), changeRequest: item.changeRequest === undefined ? undefined : item.changeRequest === null ? null : validateChangeRequest(item.changeRequest, declaredIdentityKind(declaration, 'pull-request'), true), commit, fields: scalarFields(item.fields, 'verification.fields') } satisfies VerificationRemoteFacts;
     }
   };
 }
@@ -492,7 +505,7 @@ async function invokeProviderOperation<T>(
 }
 
 function wrapProviderOperations(provider: PlatformProvider): PlatformProvider {
-  const map = validators(provider.type);
+  const map = validators(provider.type, provider.identity);
   const wrapped: PlatformProvider = { ...provider, context: { ...provider.context } };
   wrapped.context.resolve = (input) => invokeProviderOperation(provider.type, 'context.resolve', () => provider.context.resolve(input), map['context.resolve']! as ResultValidator<PlatformContextSnapshot>);
   for (const groupName of ['issues', 'comments', 'changeRequests', 'checks', 'reviews', 'releases', 'verification'] as const) {

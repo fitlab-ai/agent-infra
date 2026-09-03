@@ -420,11 +420,11 @@ function validatePlatformProvider(
   };
   const resourceKindsByGroup: Record<string, PlatformResourceKind[]> = {
     issues: ['issue'],
-    comments: ['comment'],
-    changeRequests: ['pull-request'],
+    comments: ['issue', 'pull-request', 'comment'],
+    changeRequests: ['issue', 'pull-request'],
     checks: ['pull-request'],
     reviews: ['pull-request'],
-    releases: ['release'],
+    releases: ['release', 'issue', 'pull-request'],
     verification: ['issue', 'comment', 'pull-request']
   };
   if (!isRecord(value)

@@ -29,7 +29,9 @@ function isResourceIdentity(value: unknown): value is CanonicalResourceIdentity 
 
 function parseResourceIdentity(value: unknown, label = 'identity'): CanonicalResourceIdentity {
   if (!isResourceIdentity(value)) throw identityError(`${label} must contain exactly one valid kind/value pair`);
-  return value;
+  if (value.kind === 'number') return { kind: 'number', value: value.value };
+  if (value.kind === 'id') return { kind: 'id', value: value.value };
+  return { kind: 'key', value: value.value };
 }
 
 function serializeResourceIdentity(identity: ResourceIdentity): string {

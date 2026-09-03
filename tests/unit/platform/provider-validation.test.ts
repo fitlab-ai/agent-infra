@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { validatePlatformProvider } from '../../../lib/platform/provider-contract.ts';
 import { invokeProviderOperation, wrapProviderOperations } from '../../../lib/platform/provider-validation.ts';
+import { serializeResourceIdentity } from '../../../lib/platform/resource-identity.ts';
 
 test('provider invocation maps throws and malformed envelopes to stable failures', async () => {
   const thrown = await invokeProviderOperation('trae', 'issues.inspect', async () => { throw new Error('secret token'); }, (value) => value as never);
@@ -63,6 +64,83 @@ test('provider groups require a primary identity declaration for their resources
   }, 'trae');
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.error.code, 'PLATFORM_PROVIDER_CONTRACT_INVALID');
+});
+
+test('provider identity serialization is canonical and declarations cover operation resource closure', () => {
+  const left = { value: 'issue-42', kind: 'id' } as const;
+  const right = { kind: 'id', value: 'issue-42' } as const;
+  assert.equal(serializeResourceIdentity(left), '{"kind":"id","value":"issue-42"}');
+  assert.equal(serializeResourceIdentity(left), serializeResourceIdentity(right));
+
+  const noop = async () => ({ ok: true, value: {} });
+  const result = validatePlatformProvider({
+    type: 'trae',
+    contractVersion: 1,
+    identity: { comment: 'id' },
+    context: { resolve: noop },
+    comments: { list: noop, write: noop, delete: noop }
+  }, 'trae');
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error.code, 'PLATFORM_PROVIDER_CONTRACT_INVALID');
+});
+
+test('provider result validation rejects duplicate nested options, mismatched identities, and missing release identities', async () => {
+  const metadata = {
+    repository: { identity: { kind: 'id', value: 'repo' }, name: 'project', url: null },
+    labels: [], milestones: [], issueTypes: [],
+    fields: [{
+      identity: { kind: 'id', value: 'field' }, name: 'Status', kind: 'single-select',
+      options: [
+        { identity: { kind: 'id', value: 'open' }, name: 'Open' },
+        { identity: { kind: 'id', value: 'open' }, name: 'Duplicate' }
+      ]
+    }]
+  };
+  const issue = {
+    id: 'issue-1', identity: { kind: 'id', value: 'issue-1' }, number: 1, title: '', body: '', state: 'open',
+    labels: [], assignees: [], milestone: null, fields: {}
+  };
+  const provider = wrapProviderOperations({
+    type: 'trae', contractVersion: 1,
+    identity: { issue: 'number', 'pull-request': 'id', release: 'key' },
+    context: { async resolve() { return { ok: true, value: {} }; } },
+    issues: {
+      async describeRepository() { return { ok: true, value: metadata }; },
+      async inspect() { return { ok: true, value: issue }; },
+      async create() { return { ok: true, value: { remoteId: 'issue-1', changed: false } }; },
+      async update() { return { ok: true, value: { remoteId: 'issue-1', changed: false } }; }
+    },
+    releases: {
+      async inspect() { return { ok: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'not found', retryable: false } }; },
+      async create() { return { ok: true, value: { remoteId: 'release-1', changed: false } }; },
+      async update() { return { ok: true, value: { remoteId: 'release-1', changed: false } }; },
+      async reconcileMilestones() { return { ok: true, value: { changed: false, created: [], closed: [] } }; },
+      async publishNotes() { return { ok: true, value: { remoteId: 'notes-1', changed: false } }; },
+      async collectNotes() {
+        return {
+          ok: true,
+          value: {
+            history: [],
+            mergedPullRequests: [{ id: 'pr-1', state: 'merged', title: '', body: '' }],
+            closingIssues: [],
+            actors: []
+          }
+        };
+      }
+    }
+  } as never);
+
+  const duplicateOptions = await provider.issues!.describeRepository({} as never);
+  assert.equal(duplicateOptions.ok, false);
+  if (!duplicateOptions.ok) assert.equal(duplicateOptions.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
+
+  const mismatchedIdentity = await provider.issues!.inspect({} as never);
+  assert.equal(mismatchedIdentity.ok, false);
+  if (!mismatchedIdentity.ok) assert.equal(mismatchedIdentity.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
+
+  const missingReleaseIdentity = await provider.releases!.collectNotes({} as never);
+  assert.equal(missingReleaseIdentity.ok, false);
+  if (!missingReleaseIdentity.ok) assert.equal(missingReleaseIdentity.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
 });
 
 test('provider operation validation rejects coercion, context mismatch, and raw error details', async () => {
