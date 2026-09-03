@@ -315,6 +315,14 @@ test("workflow skills document state check gates", () => {
   });
 });
 
+test("check-task consumes the status recommendation for next-step display", () => {
+  skillDocPaths("check-task").forEach((relativePath) => {
+    const content = read(relativePath);
+    assert.match(content, /Recommendation\.action|canonical recommendation/i, `${relativePath} should use the canonical recommendation`);
+    assert.match(content, /agent-client next-steps/, `${relativePath} should render next steps through the shared helper`);
+  });
+});
+
 test("workflow state-check consumers use the typed task snapshot entrypoint", () => {
   [
     "analyze-task",

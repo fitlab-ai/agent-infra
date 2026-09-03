@@ -1053,6 +1053,7 @@ function checkManualValidation({ taskDir }: any): any {
   // 1. Latest review-code artifact; none -> pass (no review, check not applicable).
   const review = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!review.ok) {
+    if (review.error) return failResult("manual-validation", `Review-code artifact is unavailable: ${review.error}`);
     return passResult("manual-validation", "No review-code artifact; manual validation not applicable");
   }
   // 2. Parse the numeric manual-validation count; unparseable/null -> fail closed
@@ -1121,6 +1122,7 @@ function checkManualValidation({ taskDir }: any): any {
 async function checkPostReviewCommit({ taskDir, config }: any): Promise<any> {
   const reviewArtifact = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!reviewArtifact.ok) {
+    if (reviewArtifact.error) return failResult("post-review-commit", `Review-code artifact is unavailable: ${reviewArtifact.error}`);
     return passResult("post-review-commit", "No review-code artifact; check inactive");
   }
 
@@ -1319,6 +1321,17 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
   );
   if (!resolvedArtifact.ok) {
     return failResult("review-fact", resolvedArtifact.message);
+  }
+
+  const authoritative = findAuthoritativeReviewCodeArtifact(taskDir);
+  if (!authoritative.ok) {
+    return failResult("review-fact", authoritative.error ?? "No active review-code artifact is available");
+  }
+  if (path.basename(resolvedArtifact.path) !== authoritative.fileName) {
+    return failResult(
+      "review-fact",
+      `review-code artifact ${path.basename(resolvedArtifact.path)} is not the current active artifact ${authoritative.fileName}; re-run review-code`
+    );
   }
 
   const task = loadTask(taskDir);

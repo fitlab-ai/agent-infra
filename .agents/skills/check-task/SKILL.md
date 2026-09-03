@@ -11,7 +11,7 @@ description: >
 ## 行为边界 / 关键规则
 
 - 本技能是**只读**操作 —— 不修改任何文件
-- 机械数据（frontmatter 元数据、产物分组、Git/Platform 状态，以及跨 active、blocked、completed 三目录定位任务）一律委托给确定性的 `ai task status` 命令。本技能只负责 CLI 无法产出的语义层：工作流阶段解读、审查结论解析、下一步建议。
+- 机械数据（frontmatter 元数据、产物分组、Git/Platform 状态，以及跨 active、blocked、completed 三目录定位任务）一律委托给确定性的 `ai task status` 命令。本技能只负责 CLI 无法产出的语义层：工作流阶段解读和审查结论解析；下一步 action 直接使用 CLI 的 canonical recommendation。
 
 ## 任务上下文解析
 
@@ -45,7 +45,7 @@ ai task status --task {task-id}
   - `[pending]` - 尚未开始
   - `[blocked]` - 被阻塞
   - `[skipped]` - 已跳过
-- 对各阶段最新的审查产物（`review-analysis`、`review-plan`、`review-code`），读取报告正文并解析结论：总体结论（通过 / 需要修改 / 拒绝）与阻塞项 / 主要问题 / 次要问题计数。CLI 不解析审查正文，因此这一步是步骤 3 选择下一步操作的必要输入。
+- 对各阶段最新的审查产物（`review-analysis`、`review-plan`、`review-code`），读取报告正文并解析结论：总体结论（通过 / 需要修改 / 拒绝）与阻塞项 / 主要问题 / 次要问题计数。这些结论只用于阶段状态展示和解释，不得用于重算下一步 action。
 
 把工作流进度作为 CLI 输出之上的叠加层呈现，标注最新轮次与解析出的审查结论，例如：
 
@@ -57,41 +57,20 @@ ai task status --task {task-id}
   [pending]    技术方案审查
 ```
 
-### 3. 建议下一步操作
+### 3. 展示 canonical recommendation
 
-根据当前工作流状态，建议合适的下一个技能：
+只读取 `ai task status --task {task-id}` 输出中的 `Recommendation.action`，将其作为唯一下一步来源。不要根据 `current_step`、目录中的最新产物、审查正文或 Activity Log 再计算 action。
 
-> **⚠️ 条件判断 — 你必须先根据 `status`、`current_step`、最新产物和最新审查结果，选择下表中唯一匹配的一行：**
->
-> - `status = blocked` → 选择「任务被阻塞」
-> - `status = completed` → 选择「任务已完成」
-> - `current_step = requirement-analysis` 且最新分析产物已完成 → 选择「分析完成」
-> - `current_step = requirement-analysis-review` 且最新需求分析审查产物通过 → 选择「需求分析审查通过」
-> - `current_step = requirement-analysis-review` 且最新需求分析审查产物存在但未通过或有问题 → 选择「需求分析审查有问题」
-> - `current_step = technical-design` 且最新计划产物已完成 → 选择「计划完成」
-> - `current_step = technical-design-review` 且最新技术方案审查产物通过 → 选择「技术方案审查通过」
-> - `current_step = technical-design-review` 且最新技术方案审查产物存在但未通过或有问题 → 选择「技术方案审查有问题」
-> - 最新实现产物已存在，且尚无最新审查产物 → 选择「实现完成」
-> - `current_step = code-review` 且最新代码审查产物存在，且结论为 `Approved`，同时 `Blocker = 0`、`Major = 0`、`Minor = 0` → 选择「代码审查通过」
-> - `current_step = code-review` 且最新代码审查产物存在，但仍有任何 `Blocker`、`Major` 或 `Minor` 问题，或结论不是无问题通过 → 选择「代码审查有问题」
->
-> **特别注意：只要最新审查报告中存在任何问题，就不能使用对应「审查通过」行。必须改用对应「审查有问题」行。**
->
-> 渲染最终输出前先读取 `.agents/rules/next-step-output.md`。选中可执行行后只调用一次 `agent-infra-internal agent-client next-steps --skill {next-skill} [--task-ref {task-ref}]`，将 stdout 原样输出为 `{next-step-commands}`；`任务被阻塞` 与 `任务已完成` 不调用 helper。最后追加 `Completed at` 收尾行。
+当 action 非空时，仅做以下 action 到 skill 的字面转换，然后调用一次统一 helper：
 
-| 当前状态           | next skill        | task ref |
-|--------------------|-------------------|----------|
-| 分析完成           | `review-analysis` | required |
-| 需求分析审查通过   | `plan-task`       | required |
-| 需求分析审查有问题 | `analyze-task`    | required |
-| 计划完成           | `review-plan`     | required |
-| 技术方案审查通过   | `code-task`       | required |
-| 技术方案审查有问题 | `plan-task`       | required |
-| 实现完成           | `review-code`     | required |
-| 代码审查通过       | `commit`          | omitted  |
-| 代码审查有问题     | `code-task`       | required |
-| 任务被阻塞         | —                 | —        |
-| 任务已完成         | —                 | —        |
+| Recommendation.action | next skill |
+|-----------------------|------------|
+| `analysis` | `analyze-task` |
+| `plan` | `plan-task` |
+| `code` | `code-task` |
+| 其他 action | 同名 skill |
+
+`action` 为空时不调用 helper，只说明当前没有可推荐的下一技能。渲染最终输出前先读取 `.agents/rules/next-step-output.md`；helper 命令为 `agent-infra-internal agent-client next-steps --skill {next-skill} --task-ref {task-ref}`，stdout 原样作为 `{next-step-commands}` 下一步命令。最后追加 `Completed at` 收尾行。
 
 ## 注意事项
 
