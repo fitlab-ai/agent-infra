@@ -579,6 +579,32 @@ test('plan event reopens technical design after commit preparation', () => {
   assert.match(content, /`plan-r2\.md`/);
 });
 
+test('plan event reopens technical design after code review', () => {
+  const f = fixture('code-review');
+
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  const startedResult = JSON.parse(started.stdout);
+  assert.equal(startedResult.status, 'applied');
+  assert.equal(startedResult.fromStep, 'code-review');
+  assert.equal(startedResult.toStep, 'code-review');
+  assert.equal(startedResult.round, 1);
+  assert.equal(startedResult.artifact, 'plan.md');
+
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan round 1\n');
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md'
+  ]);
+  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+  const completedResult = JSON.parse(completed.stdout);
+  assert.equal(completedResult.fromStep, 'code-review');
+  assert.equal(completedResult.toStep, 'technical-design');
+  const content = fs.readFileSync(f.file, 'utf8');
+  assert.match(content, /current_step: technical-design/);
+  assert.match(content, /Plan Task \(Round 1\) \[started\]/);
+  assert.match(content, /`plan\.md`/);
+});
+
 test('completed event validates orchestration provenance before writing task state', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']).status, 0);
