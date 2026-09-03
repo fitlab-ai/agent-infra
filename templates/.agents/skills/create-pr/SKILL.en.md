@@ -78,15 +78,15 @@ Capture the `result` field from `platform-pr create` (`pr_created`, `pr_reused`,
 
 ### 7. Generate the PR Code Change Report
 
-After creating or uniquely reusing the PR, run `agent-infra-internal platform-pr inspect {task-id}` to obtain the authoritative base/head SHAs, then follow `reference/change-report.md` to classify the complete PR line counts, Git blob byte sizes, renames, and potentially unnecessary changes. Read that reference before this step.
+After creating or uniquely reusing the PR, run `agent-infra-internal platform-pr inspect {task-id}` to obtain the authoritative base/head SHAs, then follow `reference/change-report.md` for the mechanical complete-PR report. Combine the task goal with the complete three-dot diff to produce a six-check precheck candidate with file evidence, then run `platform-pr change-report` to write the task-bound `pr-change-report.json` sidecar. Read that reference before this step.
 
-The report is part of the reviewer summary below and must also appear in the final user response. Do not provide only total lines, omit byte changes, or inspect only the last commit.
+The core renderer owns the report section. It is part of the reviewer summary below and must also appear in the final user response. Do not provide only total lines, omit byte changes, inspect only the last commit, or let the caller assemble the report section.
 
 ### 8. Publish the Review Summary
 
 Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md`.
 
-Aggregate a reviewer-facing summary from those artifacts, append the `### PR Code Changes` section generated in step 7, and maintain a single idempotent summary comment via the hidden marker. Pass the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
+Aggregate a reviewer-facing summary from those artifacts with exactly one `<!-- canonical-pr-change-report -->` placeholder, and maintain a single idempotent summary comment via the hidden marker. Pass `--change-report-file .agents/workspace/active/{task-id}/pr-change-report.json` and the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
 
 > Canonical context, aggregation, and the `summary-sync` call live in `reference/comment-publish.md`, which points to `.agents/rules/pr-sync.md`. Read that reference before publishing.
 
@@ -139,7 +139,8 @@ Next step (alternative) - Skip active monitoring and attempt completion:
 
 - Review every commit in the branch, not only the latest one
 - `create-pr` must not defer type-label mapping to another skill; inline the mapping here when `{task-id}` is available
-- The summary marker and current HEAD are wrapped by `platform-pr summary-sync`
+- The summary marker, authoritative PR head, and `### PR Code Changes` section are wrapped by `platform-pr summary-sync`
+- An existing PR still goes through binding, report generation, summary synchronization, and result verification; reuse must not end the flow early
 - When metadata inheritance from the Issue fails, continue with task.md and branch-based fallbacks
 
 ## Error Handling

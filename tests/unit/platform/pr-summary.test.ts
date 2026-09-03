@@ -7,18 +7,34 @@ import { execFileSync } from 'node:child_process';
 
 import {
   buildPullRequestSummary,
+  reportWrite,
   reconcileSummaryComment,
   syncPullRequestSummary,
   warningResultForPrimary
 } from '../../../lib/platform/pr-summary.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
+import type { PrecheckCandidate } from '../../../lib/platform/pr-change-report.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+import { buildPrChangeReport, runMechanicalChangeReport, taskIntentDigest, writePrChangeReportAtomic } from '../../../lib/platform/pr-change-report.ts';
+import { filePath } from '../../helpers.ts';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
-function summaryFixture(): { root: string; taskId: string } {
+function candidate(taskIntentSha256: string): PrecheckCandidate {
+  return {
+    taskIntentSha256,
+    checks: ['target-alignment', 'change-composition', 'compatibility-policy', 'legacy-path-cleanup', 'redundancy', 'scope-discipline'].map((id) => ({
+      id: id as PrecheckCandidate['checks'][number]['id'],
+      verdict: 'pass' as const,
+      evidence: [{ path: 'README.md', startLine: 1, endLine: 1, detail: 'Matches the approved task scope.' }],
+      rationale: 'The complete diff is within the approved scope.'
+    }))
+  };
+}
+
+function summaryFixture(): { root: string; taskId: string; reportPath: string; baseSha: string; headSha: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-summary-'));
   const taskId = 'TASK-20260101-000042';
   git(root, ['init', '-q', '-b', 'feature']);
@@ -27,7 +43,14 @@ function summaryFixture(): { root: string; taskId: string } {
   fs.writeFileSync(path.join(root, 'README.md'), 'fixture\n');
   git(root, ['add', 'README.md']);
   git(root, ['commit', '-qm', 'initial']);
+  const baseSha = git(root, ['rev-parse', 'HEAD']);
+  fs.appendFileSync(path.join(root, 'README.md'), 'change\n');
+  git(root, ['add', 'README.md']);
+  git(root, ['commit', '-qm', 'change']);
+  const headSha = git(root, ['rev-parse', 'HEAD']);
   git(root, ['remote', 'add', 'origin', 'https://github.com/acme/widgets.git']);
+  fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-pr', 'scripts'), { recursive: true });
+  fs.copyFileSync(filePath('.agents/skills/create-pr/scripts/change-report.mjs'), path.join(root, '.agents', 'skills', 'create-pr', 'scripts', 'change-report.mjs'));
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active', taskId), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}\n');
   fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md'), [
@@ -37,18 +60,33 @@ function summaryFixture(): { root: string; taskId: string } {
     `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
       identity: {
         resource: { kind: 'number', value: 42 }, repository: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/42',
-        head: { repository: 'acme/widgets', ref: 'feature', sha: 'a'.repeat(40) },
-        base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) }
+        head: { repository: 'acme/widgets', ref: 'feature', sha: headSha },
+        base: { repository: 'acme/widgets', ref: 'main', sha: baseSha }
       }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
     })))}`,
     'branch: feature',
-    '---',
-    ''
+    '---', '', '# Task: Canonical report', '', '## Description', '', 'Implement the canonical report.', '', '## Context', '', '- branch: feature'
   ].join('\n'));
-  return { root, taskId };
+  const taskPath = path.join(root, '.agents', 'workspace', 'active', taskId, 'task.md');
+  const taskContent = fs.readFileSync(taskPath, 'utf8');
+  const digest = taskIntentDigest(taskContent);
+  if (!digest.ok) throw new Error(digest.error.message);
+  assert.equal(digest.ok, true);
+  const mechanical = runMechanicalChangeReport(root, baseSha, headSha);
+  const candidateValue = candidate(digest.value.sha256);
+  const report = buildPrChangeReport({
+    repository: 'acme/widgets', number: 42,
+    base: { repository: 'acme/widgets', ref: 'main', sha: baseSha },
+    head: { repository: 'acme/widgets', ref: 'feature', sha: headSha }
+  }, digest.value.sha256, mechanical, candidateValue);
+  if (!report.ok) throw new Error(report.error.message);
+  assert.equal(report.ok, true);
+  const reportPath = path.join(root, '.agents', 'workspace', 'active', taskId, 'pr-change-report.json');
+  writePrChangeReportAtomic(reportPath, report.value);
+  return { root, taskId, reportPath, baseSha, headSha };
 }
 
-function resolvedContextClient(root: string, failure: 'head' | 'comments' | 'duplicate'): GitHubClient {
+function resolvedContextClient(root: string, failure: 'success' | 'head' | 'comments' | 'duplicate', baseSha: string, headSha: string): GitHubClient {
   let repositoryCalls = 0;
   return {
     version: () => ({ ok: true, value: '2.72.0' }),
@@ -59,7 +97,17 @@ function resolvedContextClient(root: string, failure: 'head' | 'comments' | 'dup
         if (failure === 'head' && repositoryCalls === 2) fs.rmSync(path.join(root, '.git', 'HEAD'));
         return { ok: true, value: { full_name: 'acme/widgets', fork: false, permissions: { triage: true, push: true, admin: true } } };
       }
+      if (args.some((value: string) => value.includes('/pulls/42'))) {
+        return { ok: true, value: {
+          number: 42, node_id: 'PR_42', html_url: 'https://github.com/acme/widgets/pull/42',
+          state: 'open', title: 'Canonical report', body: '', draft: false,
+          head: { ref: 'feature', sha: headSha, repo: { full_name: 'acme/widgets' } },
+          base: { ref: 'main', sha: baseSha, repo: { full_name: 'acme/widgets' } },
+          merged_at: null, merge_commit_sha: null
+        } };
+      }
       if (args.some((value: string) => value.includes('/issues/42/comments'))) {
+        if (args.includes('POST')) return { ok: true, value: { id: 9 } };
         if (failure === 'duplicate') {
           const marker = '<!-- sync-pr:TASK-20260101-000042:summary -->';
           return { ok: true, value: [[{ id: 1, body: `${marker}\nfirst` }, { id: 2, body: `${marker}\nsecond` }]] };
@@ -118,6 +166,59 @@ test('PR summary reconciliation creates, updates, converges and rejects duplicat
   assert.equal(reconcileSummaryComment([{ id: 2, body: desired }, { id: 3, body: desired }], 'TASK-1', desired).action, 'conflict');
 });
 
+test('change-report writes a task-bound sidecar and converges on replay', async () => {
+  const fixture = summaryFixture();
+  try {
+    fs.rmSync(fixture.reportPath);
+    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const taskContent = fs.readFileSync(taskPath, 'utf8');
+    const digest = taskIntentDigest(taskContent);
+    if (!digest.ok) throw new Error(digest.error.message);
+    assert.equal(digest.ok, true);
+    const mechanical = runMechanicalChangeReport(fixture.root, fixture.baseSha, fixture.headSha);
+    const mechanicalFile = path.join(fixture.root, 'mechanical.json');
+    const precheckFile = path.join(fixture.root, 'precheck.json');
+    fs.writeFileSync(mechanicalFile, JSON.stringify(mechanical));
+    fs.writeFileSync(precheckFile, JSON.stringify(candidate(digest.value.sha256)));
+
+    const first = await reportWrite(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
+      client: resolvedContextClient(fixture.root, 'comments', fixture.baseSha, fixture.headSha)
+    });
+    assert.equal(first.status, 'applied');
+    assert.equal(first.report?.status, 'written');
+    const replay = await reportWrite(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', mechanicalFile, precheckFile,
+      client: resolvedContextClient(fixture.root, 'comments', fixture.baseSha, fixture.headSha)
+    });
+    assert.equal(replay.status, 'no-op');
+    assert.equal(replay.report?.status, 'no-op');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('summary-sync renders the task-bound report and publishes one canonical comment', async () => {
+  const fixture = summaryFixture();
+  try {
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: `## Summary\n\n${'<!-- canonical-pr-change-report -->'}`,
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha)
+    });
+    assert.equal(result.status, 'applied');
+    assert.equal(result.error, null);
+    assert.deepEqual(result.comment?.ids, [9]);
+    assert.equal(result.precheckVerdict, 'clear');
+    assert.equal(result.nextAction, 'watch-pr');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 for (const scenario of [
   {
     name: 'context authentication failure',
@@ -131,21 +232,21 @@ for (const scenario of [
   },
   {
     name: 'HEAD resolution failure',
-    code: 'GIT_HEAD_UNRESOLVED',
+    code: 'PR_CHANGE_REPORT_GIT_FAILED',
     messagePattern: /not a git repository/,
-    client: (root: string): GitHubClient => resolvedContextClient(root, 'head')
+    client: (root: string, baseSha: string, headSha: string): GitHubClient => resolvedContextClient(root, 'head', baseSha, headSha)
   },
   {
     name: 'comment API failure',
     code: 'COMMENT_LIST_FAILED',
     messagePattern: /comment API failed/,
-    client: (root: string): GitHubClient => resolvedContextClient(root, 'comments')
+    client: (root: string, baseSha: string, headSha: string): GitHubClient => resolvedContextClient(root, 'comments', baseSha, headSha)
   },
   {
     name: 'duplicate summary marker',
     code: 'PR_SUMMARY_MARKER_AMBIGUOUS',
     messagePattern: /Multiple PR comments contain the summary marker/,
-    client: (root: string): GitHubClient => resolvedContextClient(root, 'duplicate')
+    client: (root: string, baseSha: string, headSha: string): GitHubClient => resolvedContextClient(root, 'duplicate', baseSha, headSha)
   }
 ] as const) {
   test(`PR summary ${scenario.name} preserves a known primary PR result as a warning`, async () => {
@@ -154,9 +255,10 @@ for (const scenario of [
       const result = await syncPullRequestSummary(fixture.taskId, {
         cwd: fixture.root,
         agent: 'codex',
-        body: 'Summary',
+        body: `Summary\n${'<!-- canonical-pr-change-report -->'}`,
+        changeReportFile: fixture.reportPath,
         primaryResult: 'pr_created',
-        client: scenario.client(fixture.root)
+      client: scenario.client(fixture.root, fixture.baseSha, fixture.headSha)
       });
 
       assert.equal(result.status, 'applied');

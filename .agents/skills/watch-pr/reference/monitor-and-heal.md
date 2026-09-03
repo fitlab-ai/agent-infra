@@ -11,6 +11,10 @@
 - `conflicting`：平台明确当前 head 与 base 冲突 → SKILL 步骤 3 的 rebase 自愈。
 - `pending|timed-out|cancelled`：mergeability/checks 未形成可靠成功事实 → SKILL 步骤 4。
 
+## 摘要刷新边界
+
+每轮 readiness 之前，以及外部 push、自愈 commit 或 rebase 成功改变 PR head 之后，必须重新执行 `summary-context` → 机械报告与六项 precheck → `platform-pr change-report` → 含一次 `<!-- canonical-pr-change-report -->` 的 `summary-sync --change-report-file ... --result no_op`。core 以权威 PR snapshot、任务意图 digest 和完整 patch 重新校验 sidecar；报告缺失、stale、invalid、占位符绕过或发布竞态时，不得继续 ready/complete 路由，转入求助出口并登记 warning。
+
 ## 自愈决策树
 
 ```text
