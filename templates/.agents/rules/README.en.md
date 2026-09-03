@@ -30,7 +30,7 @@ so you can quickly find "which ones to read" without opening each file.
 - [`lifecycle-orchestration.md`](lifecycle-orchestration.md) — Fresh executor/reviewer, one-use receipt, pause/recovery, and safe endpoint rules for `run-task`.
 - [`review-handshake.md`](review-handshake.md) — Three-stage bidirectional review handshake: four-state disposition, symmetric evidence, disagreement ledger, convergence and post-review commit gate.
 - [`review-method.md`](review-method.md) — Shared three-stage review method: multi-pass review, risk lenses, traceability, and finding evidence.
-- [`local-artifact-repair.md`](local-artifact-repair.md) — Pre-completion local artifact validation for analysis/plan and model-per-case repair, safety gates, and convergence for failed review artifacts.
+- [`local-artifact-repair.md`](local-artifact-repair.md) — Pre-completion local artifact validation for analysis/plan/code and model-per-case repair, safety gates, and convergence for failed review artifacts.
 - [`human-decision-context.md`](human-decision-context.md) — Self-contained context and canonical structure for new human-decision details.
 - [`task-short-id.md`](task-short-id.md) — Resolution, allocation and lifecycle of bare-number short ids.
 - [`milestone-inference.md`](milestone-inference.md) — Milestone inference for create-task / code-task / create-pr.
