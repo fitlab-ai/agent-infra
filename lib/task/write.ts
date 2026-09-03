@@ -16,6 +16,7 @@ import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
+import { invalidationBlocks, parseInvalidationDocument } from './invalidation.ts';
 import type {
   TableRowDeleteMutation,
   TableRowUpsertMutation
@@ -86,6 +87,8 @@ type TaskWriteErrorCode =
   | ResolveTaskRefErrorCode
   | 'TASK_STATE_MISMATCH'
   | 'TASK_CURRENT_CONTRACT_INVALID'
+  | 'TASK_INVALIDATION_INVALID'
+  | 'TASK_INVALIDATION_BLOCKED'
   | 'TASK_READ_FAILED'
   | 'TASK_DOCUMENT_INVALID'
   | 'MUTATION_INVALID'
@@ -161,6 +164,7 @@ type TaskWriteOptions = {
   randomSuffix?: () => string;
   fileSystem?: Partial<TaskFileSystem>;
   manualOverride?: ManualOverrideCapability;
+  invalidationContext?: 'standard' | 'source-completion' | 'reconcile';
 };
 
 const DEFAULT_FILE_SYSTEM: TaskFileSystem = {
@@ -275,6 +279,21 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
     if (!contract.ok) {
       return failure(request, identity, contract.code, contract.message);
     }
+    if (
+      invalidationBlocks(contract.invalidation)
+      && options.invalidationContext !== 'source-completion'
+      && options.invalidationContext !== 'reconcile'
+    ) {
+      return failure(
+        request,
+        identity,
+        'TASK_INVALIDATION_BLOCKED',
+        'task has an incomplete artifact invalidation operation; reconcile it before writing downstream state'
+      );
+    }
+  } else {
+    const invalidation = parseInvalidationDocument(original);
+    if (!invalidation.ok) return failure(request, identity, 'TASK_INVALIDATION_INVALID', invalidation.message);
   }
 
   let candidate = original;

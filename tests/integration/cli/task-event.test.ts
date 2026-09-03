@@ -16,6 +16,7 @@ import {
   validateLocalArtifact,
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
+import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 
 function fixture(step = 'requirement-analysis-review') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-'));
@@ -886,6 +887,32 @@ test('analysis can restart from code when task requirements expand', () => {
   assert.match(content, /`analysis-r2\.md`/);
 });
 
+test('source completion records resumable invalidation and downstream writers fail closed until reconcile', () => {
+  const f = fixture('code');
+  for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+    fs.writeFileSync(path.join(f.dir, name), `# ${name}\n`);
+  }
+  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), '# Analysis round 2\n');
+  const completed = run(f.root, [f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md']);
+  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+  const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+  assert.equal(invalidation.ok, true);
+  if (!invalidation.ok) return;
+  assert.equal(invalidation.document.operations[0]?.status, 'pending');
+  assert.equal(invalidation.document.targets.every((target) => target.status === 'pending'), true);
+
+  const blocked = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+  assert.equal(blocked.status, 1);
+  assert.equal(JSON.parse(blocked.stdout).error.code, 'TASK_INVALIDATION_BLOCKED');
+
+  const reconciled = spawnSync('node', [INTERNAL_CLI_PATH, 'task-invalidation', f.id, 'reconcile'], { cwd: f.root, encoding: 'utf8' });
+  assert.equal(reconciled.status, 0, reconciled.stdout || reconciled.stderr);
+  const retried = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+  assert.equal(retried.status, 0, retried.stdout || retried.stderr);
+});
+
 test('analysis restart still rejects an unrelated workflow stage without changing task bytes', () => {
   const f = fixture('technical-design');
   const before = fs.readFileSync(f.file);
@@ -894,6 +921,16 @@ test('analysis restart still rejects an unrelated workflow stage without changin
   assert.notEqual(started.status, 0);
   assert.equal(JSON.parse(started.stdout).error.code, 'EVENT_TRANSITION_INVALID');
   assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('explicit trigger can start analysis without a current_step adjacency match', () => {
+  const f = fixture('technical-design');
+  const started = run(f.root, [
+    f.id, 'analyze.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'req-new-requirement', '--reason-code', 'new-requirement'
+  ]);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  assert.equal(JSON.parse(started.stdout).artifact, 'analysis-r2.md');
 });
 
 for (const scenario of [

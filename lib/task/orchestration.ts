@@ -53,6 +53,10 @@ import { hasActiveCodexLifecycleEvidence } from '../agent-clients/adapters/codex
 import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead } from './review-fingerprint.ts';
 import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
+import { buildLifecycleFacts, canStart } from './capabilities.ts';
+import { invalidationBlocks } from './invalidation.ts';
+import type { InvalidationDocument } from './invalidation.ts';
+import type { LifecycleAction } from './capabilities.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type ModelPolicySource = Readonly<{
@@ -108,7 +112,7 @@ type OrchestrationRun = Readonly<{
   updatedAt: string;
 }>;
 type OrchestrationNext = Readonly<{
-  action: 'analyze-task' | 'review-analysis' | 'plan-task' | 'review-plan' | 'code-task' | 'review-code' | 'commit';
+  action: 'analyze-task' | 'review-analysis' | 'plan-task' | 'review-plan' | 'code-task' | 'review-code';
   role: DelegationRole;
   stage: DelegationStage;
   round: number;
@@ -583,7 +587,7 @@ function latestReviewApproved(taskDir: string, family: 'review-analysis' | 'revi
   return { approved: verdict.verdict === 'Approved', error: null };
 }
 
-function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | { error: string } | null {
+function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | { completion: true } | { error: string } | null {
   const analysisRound = highestRound(taskDir, 'analysis');
   const analysisReviewRound = highestRound(taskDir, 'review-analysis');
   const planRound = highestRound(taskDir, 'plan');
@@ -632,7 +636,7 @@ function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedMode
     const round = codeRound + 1;
     return { action: 'code-task', role: 'executor', stage: 'code', round, artifact: artifactName('code', round) };
   }
-  return { action: 'commit', role: 'executor', stage: 'commit', round: 1, artifact: 'commit' };
+  return { completion: true };
 }
 
 function routeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -652,11 +656,13 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   }
   let metadata: ReturnType<typeof parseTypedTaskFrontmatter>;
   let currentLedger: LedgerDocument | null = null;
+  let currentInvalidation: InvalidationDocument = { operations: [], targets: [] };
   if (resolved.state === 'active') {
     const contract = validateCurrentTaskContract(content);
     if (!contract.ok) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', contract.message, resolved.taskId);
     metadata = contract.metadata;
     currentLedger = contract.ledger;
+    currentInvalidation = contract.invalidation;
   } else {
     try {
       metadata = parseTypedTaskFrontmatter(content);
@@ -667,14 +673,11 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   const routed = routeFromFacts(resolved.taskDir);
   if (routed && 'error' in routed) return failed('ORCHESTRATION_REVIEW_INVALID', routed.error, resolved.taskId);
   if (!routed) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
+  if (invalidationBlocks(currentInvalidation)) {
+    return failed('ORCHESTRATION_INVALIDATION_INCOMPLETE', 'artifact invalidation is incomplete; reconcile task.md before routing downstream work', resolved.taskId);
+  }
   const run = readRun(resolved.taskDir);
-  const policy = run ? rolePolicy(run, routed.role) : null;
-  const next: OrchestrationNext = {
-    ...routed,
-    requestedModel: policy?.model ?? null,
-    requestedReasoningEffort: policy?.reasoningEffort ?? null
-  };
-  if (next.stage === 'commit') {
+  if ('completion' in routed) {
     const reviewRound = highestRound(resolved.taskDir, 'review-code');
     const review = parseReviewSummary(fs.readFileSync(
       path.join(resolved.taskDir, artifactName('review-code', reviewRound)),
@@ -756,6 +759,20 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     saveRun(resolved.taskDir, completed);
     return { status: 'completed', changed: true, taskId: resolved.taskId, run: completed, next: null, error: null };
   }
+  const facts = buildLifecycleFacts(resolved.taskDir, content, resolved.state);
+  if (!facts.ok) return failed('ORCHESTRATION_CAPABILITY_FACTS_INVALID', facts.message, resolved.taskId);
+  const action = routed.stage as LifecycleAction;
+  const capability = canStart(action, facts.facts, {
+    initiator: 'orchestrator', requestId: `orchestration:${resolved.taskId}:${routed.stage}:${routed.round}`,
+    requestedAction: action, reasonCode: 'user-request', explicitRequest: true
+  });
+  if (!capability.allowed) return failed('ORCHESTRATION_CAPABILITY_DENIED', `${capability.reasonCode}: ${capability.evidence.join(', ')}`, resolved.taskId);
+  const policy = run ? rolePolicy(run, routed.role) : null;
+  const next: OrchestrationNext = {
+    ...routed,
+    requestedModel: policy?.model ?? null,
+    requestedReasoningEffort: policy?.reasoningEffort ?? null
+  };
   return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
 }
 

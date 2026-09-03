@@ -7,12 +7,14 @@ import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, isReviewSt
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 
-const USAGE = `Usage: agent-infra-internal task-ledger <task-ref> <intent> [intent flags] [--dry-run]\n\nIntents: finding-upsert, finding-respond, finding-review, decision-next-id, decision-upsert, stage-status\n`;
+const USAGE = `Usage: agent-infra-internal task-ledger <task-ref> <intent> [intent flags] [--dry-run]\n\nIntents: finding-upsert, finding-respond, finding-review, decision-next-id, decision-upsert, rework-intent-upsert, stage-status\n`;
 const FLAGS: Record<string, string> = {
   '--stage': 'stage', '--review-artifact': 'reviewArtifact', '--ordinal': 'ordinal',
   '--severity': 'severity', '--evidence': 'evidence', '--id': 'id', '--round': 'round',
-  '--status': 'status', '--artifact': 'artifact', '--needs-implementation': 'needsImplementation'
-  , '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
+  '--status': 'status', '--artifact': 'artifact', '--needs-implementation': 'needsImplementation',
+  '--intent-id': 'intentId', '--finding-id': 'findingId', '--source-artifact': 'sourceArtifact',
+  '--source-sha256': 'sourceSha256', '--target': 'target',
+  '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
 };
 const NUMERIC = new Set(['ordinal', 'round']);
 const BOOLEAN = new Set(['needsImplementation']);
@@ -27,7 +29,7 @@ async function taskLedger(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
   if (!taskRef || !kind) { usageFailure('task ref and intent are required'); return; }
-  if (!['finding-upsert', 'finding-respond', 'finding-review', 'decision-next-id', 'decision-upsert', 'stage-status'].includes(kind)) {
+  if (!['finding-upsert', 'finding-respond', 'finding-review', 'decision-next-id', 'decision-upsert', 'rework-intent-upsert', 'stage-status'].includes(kind)) {
     usageFailure(`unknown ledger intent '${kind}'`); return;
   }
   const values: Record<string, unknown> = { kind, taskRef };
@@ -55,13 +57,14 @@ async function taskLedger(args: string[] = []): Promise<void> {
     'finding-review': ['id', 'status', 'evidence'],
     'decision-next-id': [],
     'decision-upsert': ['id', 'stage', 'artifact'],
+    'rework-intent-upsert': ['intentId', 'findingId', 'sourceArtifact', 'sourceSha256', 'target'],
     'stage-status': ['stage']
   };
   const optional: Record<string, string[]> = {
     'finding-review': ['needsImplementation'],
     'decision-upsert': ['needsImplementation']
   };
-  const overrideFields = kind === 'stage-status' || kind === 'decision-next-id'
+  const overrideFields = kind === 'stage-status' || kind === 'decision-next-id' || kind === 'rework-intent-upsert'
     ? []
     : ['overrideTicket', 'overrideTarget', 'overrideScope'];
   const allowed = new Set(['kind', 'taskRef', 'dryRun', ...required[kind]!, ...(optional[kind] ?? []), ...overrideFields]);

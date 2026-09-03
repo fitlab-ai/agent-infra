@@ -49,6 +49,7 @@ function assertCoreSections(stdout: string, taskId: string): void {
   assert.match(stdout, /^Artifacts \(\d+\)$/m);
   assert.match(stdout, /^Workflow$/m);
   assert.match(stdout, /^Runtime$/m);
+  assert.match(stdout, /^Recommendation$/m);
   assert.match(stdout, /^Git$/m);
 }
 

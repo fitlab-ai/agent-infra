@@ -12,6 +12,9 @@ import { parseActivityLog, pairEntries, startedBackedRows } from '../activity-lo
 import { readRun, type OrchestrationRun } from '../orchestration.ts';
 import type { DelegationReceipt } from '../delegation-receipts.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
+import { invalidationBlocks, parseInvalidationDocument } from '../invalidation.ts';
+import { parseReworkIntentDocument } from '../rework-intent.ts';
+import { buildLifecycleFacts, recommendNext } from '../capabilities.ts';
 
 const USAGE = `Usage: ai task status [--task <ref> | -t <ref>]
 
@@ -381,6 +384,8 @@ type StatusModel = {
   workflow: WorkflowInfo;
   runtime: RuntimeInfo;
   orchestration: OrchestrationInfo;
+  invalidation?: { status: string; processed: number; total: number; pendingIntents: number };
+  recommendation?: string;
   git: GitInfo;
 };
 
@@ -428,6 +433,18 @@ function renderStatus(model: StatusModel): string[] {
   } else {
     lines.push(...renderPairs(model.artifacts.groups.map((group) => [group.stage, group.files.join(', ')])));
   }
+
+  lines.push(
+    '',
+    'Invalidation',
+    ...renderPairs([
+      ['status', model.invalidation?.status ?? 'unknown'],
+      ['processed', `${model.invalidation?.processed ?? 0}/${model.invalidation?.total ?? 0}`],
+      ['pending_intents', String(model.invalidation?.pendingIntents ?? 0)]
+    ])
+  );
+
+  lines.push('', 'Recommendation', ...renderPairs([['action', model.recommendation ?? DASH]]));
 
   lines.push(
     '',
@@ -494,6 +511,8 @@ function renderStatus(model: StatusModel): string[] {
 }
 
 function modelTone(model: StatusModel): 'info' | 'success' | 'warning' | 'danger' | 'running' {
+  if (model.invalidation?.status === 'invalid') return 'danger';
+  if (model.invalidation?.status === 'pending' || model.invalidation?.status === 'in-progress') return 'warning';
   if (model.orchestration.status === 'paused') return 'warning';
   if (model.orchestration.status === 'running') return 'running';
   if (model.orchestration.status === 'completed') return 'success';
@@ -511,6 +530,23 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
   const run = input.run ?? makeRunner(input.repoRoot);
   const artifacts = enumerateArtifacts(input.taskDir);
   const workflow = collectWorkflow(content, input.now);
+  const invalidation = parseInvalidationDocument(content);
+  const rework = parseReworkIntentDocument(content);
+  const pendingIntents = rework.ok ? rework.intents.filter((intent) => intent.status === 'pending').length : 0;
+  const invalidationInfo = !invalidation.ok
+    ? { status: 'invalid', processed: 0, total: 0, pendingIntents }
+    : {
+        status: invalidation.present
+          ? invalidationBlocks(invalidation.document)
+            ? invalidation.document.operations.some((operation) => operation.status === 'in-progress') ? 'in-progress' : 'pending'
+            : 'completed'
+          : 'none',
+        processed: invalidation.document.operations.reduce((sum, operation) => sum + operation.processed, 0),
+        total: invalidation.document.operations.reduce((sum, operation) => sum + operation.total, 0),
+        pendingIntents
+      };
+  const facts = buildLifecycleFacts(input.taskDir, content, fm.status ?? 'active');
+  const recommendation = facts.ok ? (recommendNext(facts.facts).action ?? DASH) : DASH;
 
   return {
     taskId: input.taskId,
@@ -522,6 +558,8 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
     workflow,
     runtime: collectRuntime(input.taskDir, workflow, run),
     orchestration: collectOrchestration(input.taskDir),
+    invalidation: invalidationInfo,
+    recommendation,
     git: collectGit(fm.branch ?? '', run)
   };
 }

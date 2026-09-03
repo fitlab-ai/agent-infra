@@ -2,6 +2,8 @@ import { isValidAgentInfraVersion } from '../version.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, validateLedgerRows } from './ledger.ts';
 import type { LedgerDocument } from './ledger.ts';
+import { parseInvalidationDocument } from './invalidation.ts';
+import type { InvalidationDocument } from './invalidation.ts';
 
 type CurrentTaskContractErrorCode = 'TASK_DOCUMENT_INVALID' | 'TASK_CURRENT_CONTRACT_INVALID';
 type CurrentTaskContractResult =
@@ -9,6 +11,7 @@ type CurrentTaskContractResult =
       ok: true;
       metadata: ReturnType<typeof parseTypedTaskFrontmatter>;
       ledger: LedgerDocument;
+      invalidation: InvalidationDocument;
     }
   | {
       ok: false;
@@ -42,7 +45,9 @@ function validateCurrentTaskContract(content: string): CurrentTaskContractResult
   }
   const invalid = validateLedgerRows(ledger.rows);
   if (invalid) return { ok: false, code: 'TASK_CURRENT_CONTRACT_INVALID', message: `${invalid.code}: ${invalid.message}` };
-  return { ok: true, metadata, ledger };
+  const invalidation = parseInvalidationDocument(content);
+  if (!invalidation.ok) return { ok: false, code: 'TASK_CURRENT_CONTRACT_INVALID', message: `${invalidation.code}: ${invalidation.message}` };
+  return { ok: true, metadata, ledger, invalidation: invalidation.document };
 }
 
 export { validateCurrentTaskContract };

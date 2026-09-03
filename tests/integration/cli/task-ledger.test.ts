@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 
@@ -77,6 +78,28 @@ test('task-ledger parses implementation intent for code decisions', () => {
     ]);
     assert.equal(invalid.status, 1);
     assert.equal(JSON.parse(invalid.stdout).error.code, 'LEDGER_PAYLOAD_INVALID');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('task-ledger records a hash-bound rework intent and replays it idempotently', () => {
+  const f = fixture();
+  try {
+    const reviewArtifact = 'review-plan.md';
+    const reviewPath = path.join(path.dirname(f.file), reviewArtifact);
+    fs.writeFileSync(reviewPath, '# Review Plan\n\n- PL-1\n');
+    fs.appendFileSync(f.file, `| PL-1 | plan | 1 | major | open | ${reviewArtifact}#PL-1 |\n`);
+    const sourceSha256 = createHash('sha256').update(fs.readFileSync(reviewPath)).digest('hex');
+    const args = [f.id, 'rework-intent-upsert', '--intent-id', 'RI-1', '--finding-id', 'PL-1',
+      '--source-artifact', reviewArtifact, '--source-sha256', sourceSha256, '--target', 'plan'];
+    const applied = run(f.root, args);
+    assert.equal(applied.status, 0, applied.stderr || applied.stdout);
+    assert.equal(JSON.parse(applied.stdout).status, 'applied');
+    assert.match(fs.readFileSync(f.file, 'utf8'), /\| RI-1 \| PL-1 \| review-plan\.md \|/);
+    assert.equal(JSON.parse(run(f.root, args).stdout).status, 'no-op');
+
+    const conflict = run(f.root, [...args.slice(0, -2), '--target', 'code']);
+    assert.equal(conflict.status, 1);
+    assert.equal(JSON.parse(conflict.stdout).error.code, 'LEDGER_IDENTITY_CONFLICT');
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 

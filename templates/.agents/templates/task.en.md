@@ -98,6 +98,23 @@ delivery_remote_head:          # Most recent successfully delivered task branch 
 | id | time | step | severity | code | status | target | message | action | resolved_at | resolution |
 |----|------|------|----------|------|--------|---------|--------|-------------|------------|------------|
 
+## Rework Intent
+
+| intent_id | finding_id | source_artifact | source_sha256 | target | status | declared_at | consumed_at |
+|-----------|------------|----------------|---------------|--------|--------|-------------|-------------|
+
+## Artifact Invalidation
+
+### Operations
+
+| operation_id | source_family | source_artifact | source_round | source_sha256 | status | processed | total | created_at | updated_at | completed_at | error |
+|--------------|---------------|-----------------|--------------|---------------|--------|-----------|-------|------------|------------|--------------|-------|
+
+### Targets
+
+| target_id | operation_id | target_kind | target_family | target_artifact | target_round | target_sha256 | status | reason_code | updated_at |
+|-----------|--------------|-------------|---------------|-----------------|--------------|---------------|--------|-------------|------------|
+
 ## Activity Log
 
 <!-- Append a new entry for each workflow step. Do NOT overwrite previous entries. -->
