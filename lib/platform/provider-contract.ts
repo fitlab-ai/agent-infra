@@ -425,7 +425,7 @@ function validatePlatformProvider(
     checks: ['pull-request'],
     reviews: ['pull-request'],
     releases: ['release', 'issue', 'pull-request'],
-    verification: ['issue', 'comment', 'pull-request']
+    verification: ['issue', 'pull-request']
   };
   if (!isRecord(value)
     || value.type !== providerType

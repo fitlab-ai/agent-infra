@@ -84,6 +84,18 @@ test('provider identity serialization is canonical and declarations cover operat
   if (!result.ok) assert.equal(result.error.code, 'PLATFORM_PROVIDER_CONTRACT_INVALID');
 });
 
+test('verification providers only declare identities consumed by verification', () => {
+  const noop = async () => ({ ok: true, value: {} });
+  const result = validatePlatformProvider({
+    type: 'trae',
+    contractVersion: 1,
+    identity: { issue: 'id', 'pull-request': 'id' },
+    context: { resolve: noop },
+    verification: { fetchRemoteFacts: noop }
+  }, 'trae');
+  assert.equal(result.ok, true);
+});
+
 test('provider result validation rejects duplicate nested options, mismatched identities, and missing release identities', async () => {
   const metadata = {
     repository: { identity: { kind: 'id', value: 'repo' }, name: 'project', url: null },
