@@ -591,9 +591,9 @@ test('plan event reopens technical design after code review', () => {
   assert.equal(startedResult.round, 1);
   assert.equal(startedResult.artifact, 'plan.md');
 
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan round 1\n');
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md'
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')
   ]);
   assert.equal(completed.status, 0, completed.stdout || completed.stderr);
   const completedResult = JSON.parse(completed.stdout);

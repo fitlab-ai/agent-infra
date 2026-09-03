@@ -204,7 +204,8 @@ function planProviderMetadata(
 
 function providerIssueError(base: Awaited<ReturnType<typeof resolvedContext>> & { ok: true }, error: { code: string; message: string; retryable: boolean }, issueIdentity: ResourceIdentity | null): IssueResult {
   const issueNumber = resourceIdentityNumber(issueIdentity);
-  return result(providerStatus(error), base.resolved.taskId, issueNumber, {
+  return result(error.code.startsWith('IN_LABEL_SYNC') ? 'blocked' : providerStatus(error), base.resolved.taskId, issueNumber, {
+    changed: error.code === 'IN_LABEL_SYNC_PARTIAL',
     platform: base.context.platform,
     capabilities: base.context.capabilities,
     resource: { kind: 'issue', number: issueNumber, ...(issueIdentity ? { identity: issueIdentity } : {}) },
@@ -574,15 +575,26 @@ function milestoneBasis(repoRoot: string, current: string | null): string | null
 
 function applyRestOperations(snapshot: IssueSnapshot, operations: PlannedOperation[]) {
   const payload: Record<string, unknown> = {};
+  let labels = [...snapshot.labels];
+  let labelsChanged = false;
   for (const operation of operations) {
     if (operation.status !== 'planned') continue;
     if (operation.name === 'assignees') payload.assignees = operation.value;
     if (operation.name === 'requirements') payload.body = operation.value;
     if (operation.name === 'state') payload.state = operation.value;
     if (operation.name === 'milestone') payload.milestone = operation.value;
+    if (operation.name === 'labels:status') {
+      labels = applyLabelDeltaToSnapshot(labels, operation.value as string[], 'status:');
+      labelsChanged = true;
+    }
+    if (operation.name === 'labels:in') {
+      labels = applyLabelDeltaToSnapshot(labels, operation.value as string[], 'in:');
+      labelsChanged = true;
+    }
     if (operation.name === 'issue-type') payload.issueType = operation.value;
     if (operation.name === 'fields') payload.fields = operation.value;
   }
+  if (labelsChanged) payload.labels = labels;
   return payload;
 }
 
@@ -797,12 +809,38 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     milestone: string | null; state: 'open' | 'closed'; fields: Record<string, string | number | null>;
   }>;
   const updated = base.provider.issues?.update
-    ? await base.provider.issues.update({ context: providerOperationContext(base.loadedContext), target: base.issueIdentity, patch: payload, mutation: { idempotencyKey: `issue:update:${base.resolved.taskId}` } })
+    ? await base.provider.issues.update({ context: providerOperationContext(base.loadedContext), target: base.issueIdentity, currentLabels: snapshot.labels, patch: payload, mutation: { idempotencyKey: `issue:update:${base.resolved.taskId}` } })
     : unsupportedProviderOperation(base.provider, 'issues.update');
   if (!updated.ok) return providerIssueError(base, updated.error, base.issueIdentity);
+  const labelOperations = planned.filter((operation) => operation.name === 'labels:status' || operation.name === 'labels:in');
+  let finalIssue = snapshot;
+  if (labelOperations.length > 0) {
+    const reread = base.provider.issues?.inspect
+      ? await base.provider.issues.inspect({ context: providerOperationContext(base.loadedContext), target: base.issueIdentity })
+      : unsupportedProviderOperation(base.provider, 'issues.inspect');
+    if (!reread.ok) return result('blocked', base.resolved.taskId, base.issueNumber, {
+      changed: updated.value.changed,
+      issue: snapshot,
+      operations: plan.operations,
+      error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
+    });
+    finalIssue = normalizeProviderIssue(reread.value, repository, resourceIdentityNumber(base.issueIdentity));
+    let expectedLabels = [...snapshot.labels];
+    for (const operation of labelOperations) {
+      expectedLabels = applyLabelDeltaToSnapshot(expectedLabels, operation.value as string[], operation.name === 'labels:status' ? 'status:' : 'in:');
+    }
+    const expected = expectedLabels.filter((label) => label.startsWith('status:') || label.startsWith('in:')).sort();
+    const actual = finalIssue.labels.filter((label) => label.startsWith('status:') || label.startsWith('in:')).sort();
+    if (expected.join('\0') !== actual.join('\0')) return result('blocked', base.resolved.taskId, base.issueNumber, {
+      changed: updated.value.changed,
+      issue: finalIssue,
+      operations: plan.operations,
+      error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue labels did not converge after update', retryable: true }
+    });
+  }
   return result(skipped ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, {
     changed: updated.value.changed, platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity }, issue: snapshot,
+    resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity }, issue: finalIssue,
     operations: plan.operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
   });
 }

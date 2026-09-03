@@ -400,6 +400,8 @@ function safeProviderError(providerType: string, operation: string, value: unkno
 function validators(providerType: string, declaration?: ProviderIdentityDeclaration): Record<string, ResultValidator<unknown>> {
   return {
     'context.resolve': (value) => validateContext(value, providerType),
+    'issues.listLabels': (value) => arrayValue(value, 'issue labels').map((entry) => stringValue(entry, 'issue labels[]')),
+    'issues.listMilestones': (value) => arrayValue(value, 'issue milestones').map((entry) => stringValue(entry, 'issue milestones[]')),
     'issues.inspect': (value) => validateIssue(value, declaredIdentityKind(declaration, 'issue'), true),
     'issues.describeRepository': validateMetadata,
     'issues.create': validateReceipt,

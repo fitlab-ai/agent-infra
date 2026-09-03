@@ -121,7 +121,7 @@ test('inspectPlatformPullRequestByNumber reads a bare PR number without a task b
   }
 });
 
-test('in-label PR sync derives one target from PR files, updates Issue before PR, and re-reads both', () => {
+test('in-label PR sync derives one target from PR files, updates Issue before PR, and re-reads both', async () => {
   const root = prByNumberFixture();
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
     platform: { type: 'github' }, labels: { in: { core: ['lib/'] } }
@@ -170,7 +170,7 @@ test('in-label PR sync derives one target from PR files, updates Issue before PR
     text() { return { ok: true, value: '' }; }
   } as unknown as GitHubClient;
   try {
-    const result = syncPlatformPullRequestInLabels(42, { cwd: root, client });
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: root, client });
     assert.equal(result.status, 'applied', JSON.stringify({ error: result.error, operations: result.operations, resources: result.resources, calls }));
     assert.deepEqual([...issueLabels].sort(), ['in: core', 'keep']);
     assert.deepEqual([...prLabels].sort(), ['in: core', 'type: feature']);
@@ -260,10 +260,10 @@ function boundPullRequestFixture(options: { milestoneFailure?: boolean; failPull
   fs.mkdirSync(taskDir, { recursive: true });
   const fact = buildBoundFact({
     identity: {
-      repository: 'o/r', number: 42, nodeId: 'PR_42', url: 'https://github.com/o/r/pull/42',
+      repository: 'o/r', resource: { kind: 'number', value: 42 }, url: 'https://github.com/o/r/pull/42',
       head: { repository: 'o/r', ref: 'feature', sha: 'sha-42' },
       base: { repository: 'o/r', ref: 'main', sha: 'base-42' }
-    }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open', issueNumber: 7
+    }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open', issueIdentity: { kind: 'number', value: 7 }
   });
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
     '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7',
@@ -325,10 +325,10 @@ function boundPullRequestFixture(options: { milestoneFailure?: boolean; failPull
   return { root, taskId, client, writes, getIssueLabels: () => issueLabels, getPrLabels: () => prLabels };
 }
 
-test('task-bound PR sync reads milestone prerequisites before writing Issue labels', () => {
+test('task-bound PR sync reads milestone prerequisites before writing Issue labels', async () => {
   const fixture = boundPullRequestFixture({ milestoneFailure: true });
   try {
-    const result = syncPlatformPullRequest(fixture.taskId, {
+    const result = await syncPlatformPullRequest(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
     });
     assert.equal(result.status, 'blocked');
@@ -339,10 +339,10 @@ test('task-bound PR sync reads milestone prerequisites before writing Issue labe
   }
 });
 
-test('task-bound PR sync blocks with partial evidence on a nonretryable PR label failure', () => {
+test('task-bound PR sync blocks with partial evidence on a nonretryable PR label failure', async () => {
   const fixture = boundPullRequestFixture({ failPullRequestLabel: true, prLabels: ['type: feature'] });
   try {
-    const result = syncPlatformPullRequest(fixture.taskId, {
+    const result = await syncPlatformPullRequest(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
     });
     assert.equal(result.status, 'blocked');
@@ -356,15 +356,15 @@ test('task-bound PR sync blocks with partial evidence on a nonretryable PR label
   }
 });
 
-test('task-bound PR metadata and in-label sync replay as no-op after convergence', () => {
+test('task-bound PR metadata and in-label sync replay as no-op after convergence', async () => {
   const fixture = boundPullRequestFixture();
   try {
-    const first = syncPlatformPullRequest(fixture.taskId, {
+    const first = await syncPlatformPullRequest(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
     });
     assert.equal(first.status, 'applied', JSON.stringify({ error: first.error, writes: fixture.writes }));
     const writes = fixture.writes.length;
-    const second = syncPlatformPullRequest(fixture.taskId, {
+    const second = await syncPlatformPullRequest(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
     });
     assert.equal(second.status, 'no-op');
@@ -374,11 +374,11 @@ test('task-bound PR metadata and in-label sync replay as no-op after convergence
   }
 });
 
-test('in-label PR sync updates only the PR when no unique closing Issue exists', () => {
+test('in-label PR sync updates only the PR when no unique closing Issue exists', async () => {
   for (const closingIssues of [[], [7, 8]]) {
     const fixture = prOnlyInLabelFixture(closingIssues);
     try {
-      const result = syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+      const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
       assert.equal(result.status, 'degraded');
       assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature']);
       assert.equal(fixture.calls.some((call) => /issues\/7|issues\/8/.test(call)), false);
@@ -390,10 +390,10 @@ test('in-label PR sync updates only the PR when no unique closing Issue exists',
   }
 });
 
-test('in-label PR sync blocks with partial evidence when the PR write is uncertain after Issue convergence', () => {
+test('in-label PR sync blocks with partial evidence when the PR write is uncertain after Issue convergence', async () => {
   const fixture = prOnlyInLabelFixture([7], { failPullRequestWrite: true });
   try {
-    const result = syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
     assert.equal(result.status, 'blocked');
     assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
     assert.deepEqual([...fixture.getIssueLabels()].sort(), ['in: core', 'keep']);
@@ -403,12 +403,12 @@ test('in-label PR sync blocks with partial evidence when the PR write is uncerta
   }
 });
 
-test('in-label PR sync upgrades a deterministic PR failure after Issue convergence to partial', () => {
+test('in-label PR sync upgrades a deterministic PR failure after Issue convergence to partial', async () => {
   const fixture = prOnlyInLabelFixture([7], {
     failPullRequestWrite: true, failPullRequestDeterministic: true, prLabels: ['type: feature']
   });
   try {
-    const result = syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
     assert.equal(result.status, 'blocked');
     assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
     assert.equal(result.changed, true);
@@ -420,10 +420,10 @@ test('in-label PR sync upgrades a deterministic PR failure after Issue convergen
   }
 });
 
-test('in-label PR sync preserves an unrelated label added after the initial read', () => {
+test('in-label PR sync preserves an unrelated label added after the initial read', async () => {
   const fixture = prOnlyInLabelFixture([], { injectConcurrentUnrelatedLabel: true });
   try {
-    const result = syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
+    const result = await syncPlatformPullRequestInLabels(42, { cwd: fixture.root, client: fixture.client });
     assert.equal(result.status, 'degraded');
     assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature', 'unrelated: concurrent']);
   } finally {

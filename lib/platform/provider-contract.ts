@@ -231,6 +231,8 @@ type PlatformProvider = {
     }): Promise<ProviderResult<PlatformContextSnapshot>>;
   };
   issues?: {
+    listLabels?(input: { context: ProviderOperationContext }): Promise<ProviderResult<string[]>>;
+    listMilestones?(input: { context: ProviderOperationContext }): Promise<ProviderResult<string[]>>;
     describeRepository(input: { context: ProviderOperationContext }): Promise<ProviderResult<RepositoryMetadataSnapshot>>;
     inspect(input: { context: ProviderOperationContext; target: ResourceIdentity }): Promise<ProviderResult<IssueSnapshot>>;
     create(input: {
@@ -248,6 +250,7 @@ type PlatformProvider = {
     update(input: {
       context: ProviderOperationContext;
       target: ResourceIdentity;
+      currentLabels?: string[];
       patch: Partial<{
         title: string;
         body: string;
@@ -296,6 +299,7 @@ type PlatformProvider = {
     update(input: {
       context: ProviderOperationContext;
       target: ResourceIdentity;
+      currentLabels?: string[];
       patch: Partial<{
         title: string;
         body: string;

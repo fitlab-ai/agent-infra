@@ -9,6 +9,7 @@ import { requirementSectionAnchors } from "./issues.ts";
 import { taskTypeLabel } from "./metadata-labels.ts";
 import { planInLabelUpdate, validateInLabelMapping, validateRepositoryLabelPayload } from "./in-label-sync.ts";
 import { inspectGitHubPullRequest } from "./pull-requests.ts";
+import { createGitHubClient } from "./github-client.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
@@ -1042,9 +1043,10 @@ function computeExpectedInLabels(taskDir: any, repository: any): any {
     return { ok: true, labels: [], mode: "mapped" };
   }
 
-  const repoLabelsResult = withRetry(() => ghPaginatedJson([
+  const client = createGitHubClient();
+  const repoLabelsResult = withRetry(() => client.json([
     "api", "--paginate", "--slurp", `repos/${repository}/labels?per_page=100`
-  ], taskDir));
+  ], { cwd: taskDir }));
   if (!repoLabelsResult.ok) {
     return repoLabelsResult;
   }

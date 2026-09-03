@@ -134,20 +134,19 @@ test('issue sync plans dry-run without writes and applies incremental label writ
   assert.equal(applied.status, 'applied');
   assert.equal(patches, 0);
   assert.deepEqual(labels.sort(), ['status: in-progress']);
-  const replay = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
   const replay = await syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
   assert.equal(replay.status, 'no-op');
   assert.equal(patches, 0);
 });
 
-test('issue in-label sync requires the task-bound base and uses it for diff evidence', () => {
+test('issue in-label sync requires the task-bound base and uses it for diff evidence', async () => {
   const missingBase = fixture('7');
   try {
     const client = clientFor((args) => contextResponse(args) || (args.some((arg) => arg.endsWith('/labels?per_page=100')) ? [{ name: 'in: core' }] : {
       number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
       state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: null
     }));
-    const result = syncPlatformIssue('TASK-20260101-000001', {
+    const result = await syncPlatformIssue('TASK-20260101-000001', {
       cwd: missingBase, agent: 'codex', client, inLabels: 'from-diff'
     });
     assert.equal(result.status, 'failed');
@@ -198,7 +197,7 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
         state: 'open', title: 'x', body: '', labels: currentLabels.map((name) => ({ name })), assignees: [], milestone: null
       };
     });
-    const result = syncPlatformIssue('TASK-20260101-000001', {
+    const result = await syncPlatformIssue('TASK-20260101-000001', {
       cwd: root, agent: 'codex', client, inLabels: 'from-diff'
     });
     assert.equal(result.status, 'applied');
@@ -209,7 +208,7 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
   }
 });
 
-test('issue sync upgrades a deterministic in-label failure after status success to partial', () => {
+test('issue sync upgrades a deterministic in-label failure after status success to partial', async () => {
   const root = inLabelIssueFixture();
   let labels = ['status: blocked', 'keep'];
   try {
@@ -232,7 +231,7 @@ test('issue sync upgrades a deterministic in-label failure after status success 
       }
       return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: labels.map((name) => ({ name })), assignees: [], milestone: null };
     });
-    const result = syncPlatformIssue('TASK-20260101-000001', {
+    const result = await syncPlatformIssue('TASK-20260101-000001', {
       cwd: root, agent: 'codex', status: 'in-progress', inLabels: 'from-diff', client
     });
     assert.equal(result.status, 'blocked');
@@ -244,7 +243,7 @@ test('issue sync upgrades a deterministic in-label failure after status success 
   }
 });
 
-test('issue sync reports changed when the post-write in-label reread fails', () => {
+test('issue sync reports changed when the post-write in-label reread fails', async () => {
   const root = inLabelIssueFixture();
   let labels = ['keep'];
   let issueReads = 0;
@@ -264,7 +263,7 @@ test('issue sync reports changed when the post-write in-label reread fails', () 
       }
       return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: labels.map((name) => ({ name })), assignees: [], milestone: null };
     });
-    const result = syncPlatformIssue('TASK-20260101-000001', {
+    const result = await syncPlatformIssue('TASK-20260101-000001', {
       cwd: root, agent: 'codex', inLabels: 'from-diff', client
     });
     assert.equal(result.status, 'blocked');

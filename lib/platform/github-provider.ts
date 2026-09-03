@@ -31,6 +31,7 @@ import type {
   VerificationRemoteFacts
 } from './provider-contract.ts';
 import { resourceIdentityNumber, resourceIdentityString } from './resource-identity.ts';
+import { syncLabelDelta } from './in-label-sync.ts';
 
 const CURRENT_USER_QUERY = 'query { viewer { login } }';
 const ISSUE_TYPES_QUERY = `query($owner:String!){organization(login:$owner){issueTypes(first:20){nodes{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}}}}}`;
@@ -338,8 +339,57 @@ function createReceipt(remoteId: string): ProviderResult<MutationReceipt> {
   return { ok: true, value: { changed: true, remoteId } };
 }
 
+function syncLabels(
+  client: GitHubClient,
+  repositoryName: string,
+  number: number,
+  cwd: string,
+  current: readonly string[],
+  target: readonly string[],
+  prefixes: readonly string[]
+) {
+  let changed = false;
+  for (const prefix of prefixes) {
+    const synced = syncLabelDelta(client, repositoryName, number, cwd, current, target, prefix);
+    if (synced.status === 'failed' || synced.status === 'blocked') {
+      if (changed || synced.changed) return {
+        status: 'blocked' as const,
+        changed: true,
+        error: synced.error
+          ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
+          : { code: 'IN_LABEL_SYNC_PARTIAL', message: 'In-label synchronization is partial or unknown', retryable: true }
+      };
+      return synced;
+    }
+    changed ||= synced.changed;
+  }
+  return { status: changed ? 'applied' as const : 'no-op' as const, changed, error: null };
+}
+
 function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'verification'> {
   const issues: NonNullable<PlatformProvider['issues']> = {
+    async listLabels({ context }) {
+      const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/labels?per_page=100`], { cwd: context.workingDirectory });
+      if (!response.ok) return response;
+      const values = Array.isArray(response.value)
+        ? response.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
+        : [];
+      if (values.some((entry: any) => !entry || typeof entry.name !== 'string' || !entry.name.trim())) {
+        return invalid('IN_LABEL_SYNC_LABELS_INVALID', 'Repository labels response contains an entry without a valid name');
+      }
+      return { ok: true, value: [...new Set(values.map((entry: any) => String(entry.name)))].sort() };
+    },
+    async listMilestones({ context }) {
+      const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=open&per_page=100`], { cwd: context.workingDirectory });
+      if (!response.ok) return response;
+      const values = Array.isArray(response.value)
+        ? response.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
+        : [];
+      if (values.some((entry: any) => !entry || typeof entry.title !== 'string' || !entry.title.trim())) {
+        return invalid('MILESTONE_IDENTITY_INVALID', 'Milestones response contains an entry without a valid title');
+      }
+      return { ok: true, value: [...new Set(values.map((entry: any) => String(entry.title)))].sort() };
+    },
     async describeRepository({ context }): Promise<ProviderResult<RepositoryMetadataSnapshot>> {
       const repositoryName = repository(context);
       const info = client.json<any>(['api', `repos/${repositoryName}`], { cwd: context.workingDirectory });
@@ -404,11 +454,27 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (!Number.isInteger(number) || number <= 0) return invalid('ISSUE_CREATE_RESPONSE_INVALID', 'Issue create response lacks issue number');
       return createReceipt(String(number));
     },
-    async update({ context, target, patch }) {
+    async update({ context, target, currentLabels, patch }) {
       const number = resourceIdentityNumber(target);
       if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
-      const { issueType, fields, ...restPatch } = patch;
+      const { issueType, fields, labels, ...restPatch } = patch;
       let requestPatch = restPatch;
+      let changed = false;
+      if (labels !== undefined) {
+        let before = currentLabels;
+        if (!before) {
+          const current = client.json<any>(['api', `repos/${repository(context)}/issues/${number}`], { cwd: context.workingDirectory });
+          if (!current.ok) return current;
+          before = Array.isArray(current.value?.labels)
+            ? current.value.labels.map((label: any) => typeof label === 'string' ? label : label?.name).filter((label: any): label is string => typeof label === 'string')
+            : [];
+        }
+        const synced = syncLabels(client, repository(context), number, context.workingDirectory, before || [], labels!, ['status:', 'in:']);
+        if (synced.status === 'failed' || synced.status === 'blocked') return synced.error
+          ? { ok: false, error: synced.error }
+          : invalid('IN_LABEL_SYNC_FAILED', 'Issue label synchronization failed');
+        changed ||= synced.changed;
+      }
       if (typeof patch.milestone === 'string') {
         const milestones = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=open&per_page=100`], { cwd: context.workingDirectory });
         if (!milestones.ok) return milestones;
@@ -421,7 +487,6 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
         }
         requestPatch = { ...restPatch, milestone: selected.number } as typeof restPatch;
       }
-      let changed = false;
       if (issueType !== undefined || fields !== undefined) {
         const [owner, name] = repository(context).split('/');
         const current = client.json<any>(['api', 'graphql', '-f', `query=${ISSUE_FIELDS_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`], { cwd: context.workingDirectory });
@@ -560,11 +625,26 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (!Number.isInteger(number) || number <= 0) return invalid('PR_CREATE_RESPONSE_INVALID', 'Pull request create response lacks number');
       return createReceipt(String(number));
     },
-    async update({ context, target, patch }) {
+    async update({ context, target, currentLabels, patch }) {
       const number = resourceIdentityNumber(target);
       if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
       const { labels, assignees, milestone, ...pullRequestPatch } = patch;
       let changed = false;
+      if (labels !== undefined) {
+        let before = currentLabels;
+        if (!before) {
+          const current = client.json<any>(['api', `repos/${repository(context)}/pulls/${number}`], { cwd: context.workingDirectory });
+          if (!current.ok) return current;
+          before = Array.isArray(current.value?.labels)
+            ? current.value.labels.map((label: any) => typeof label === 'string' ? label : label?.name).filter((label: any): label is string => typeof label === 'string')
+            : [];
+        }
+        const synced = syncLabels(client, repository(context), number, context.workingDirectory, before || [], labels!, ['in:', 'type:']);
+        if (synced.status === 'failed' || synced.status === 'blocked') return synced.error
+          ? { ok: false, error: synced.error }
+          : invalid('IN_LABEL_SYNC_FAILED', 'Pull request label synchronization failed');
+        changed ||= synced.changed;
+      }
       if (Object.keys(pullRequestPatch).length > 0) {
         const response = client.json<any>(['api', `repos/${repository(context)}/pulls/${number}`, '-X', 'PATCH', '--input', '-'], {
           cwd: context.workingDirectory,

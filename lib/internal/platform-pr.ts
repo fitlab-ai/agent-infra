@@ -78,7 +78,7 @@ async function platformPr(args: string[] = []): Promise<void> {
     const pr = Number(values.pr);
     if (!Number.isInteger(pr) || pr <= 0) { fail('sync-in-labels requires a positive --pr'); return; }
     const cwd = path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd());
-    finish(syncPlatformPullRequestInLabels(pr, { cwd, dryRun: values.dryRun === true }));
+    finish(await syncPlatformPullRequestInLabels(pr, { cwd, dryRun: values.dryRun === true }));
     return;
   }
   const taskRef = args[1];
