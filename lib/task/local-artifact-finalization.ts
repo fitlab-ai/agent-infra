@@ -11,7 +11,6 @@ import {
   parseArtifactName,
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
-import { receiptForOutput } from './artifact-receipts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
@@ -91,30 +90,6 @@ type LocalArtifactFinalizationResult = {
   error: { code: string; message: string } | null;
 };
 
-type LocalArtifactRebindRequest = Readonly<{
-  taskRef: string;
-  family: LocalArtifactFamily;
-  artifact: string;
-  reason: string;
-  repoRoot?: string;
-}>;
-
-type LocalArtifactRebindResult = Readonly<{
-  status: 'passed' | 'failed';
-  changed: boolean;
-  rebound: boolean;
-  taskId: string | null;
-  taskDir: string | null;
-  family: LocalArtifactFamily;
-  artifact: string;
-  artifactSha256: string | null;
-  semanticDigest: string | null;
-  previousArtifactSha256: string | null;
-  previousSemanticDigest: string | null;
-  recovery: Readonly<{ at: string; reason: string }> | null;
-  error: { code: string; message: string } | null;
-}>;
-
 type LocalArtifactFinalizationIntent = Readonly<{
   version: 1;
   taskId: string;
@@ -124,12 +99,6 @@ type LocalArtifactFinalizationIntent = Readonly<{
   baselineSemanticDigest: string | null;
   artifactSha256: string;
   semanticDigest: string;
-  recovery?: Readonly<{
-    at: string;
-    reason: string;
-    previousArtifactSha256: string;
-    previousSemanticDigest: string;
-  }>;
 }>;
 
 function finalizationIntentRoot(repoRoot: string): string {
@@ -143,17 +112,6 @@ function finalizationIntentPath(repoRoot: string, taskId: string, family: LocalA
 function isFinalizationIntent(value: unknown): value is LocalArtifactFinalizationIntent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const intent = value as Record<string, unknown>;
-  const recovery = intent.recovery;
-  const recoveryRecord = recovery !== null && typeof recovery === 'object' && !Array.isArray(recovery)
-    ? recovery as Record<string, unknown>
-    : null;
-  const recoveryValid = recovery === undefined || (
-    recoveryRecord !== null
-    && typeof recoveryRecord.at === 'string' && !Number.isNaN(Date.parse(recoveryRecord.at))
-    && typeof recoveryRecord.reason === 'string' && recoveryRecord.reason.length > 0 && recoveryRecord.reason.length <= 200 && !/[\r\n]/.test(recoveryRecord.reason)
-    && typeof recoveryRecord.previousArtifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(recoveryRecord.previousArtifactSha256)
-    && typeof recoveryRecord.previousSemanticDigest === 'string' && /^[a-f0-9]{64}$/.test(recoveryRecord.previousSemanticDigest)
-  );
   return intent.version === 1
     && typeof intent.taskId === 'string' && intent.taskId.length > 0
     && (intent.family === 'analysis' || intent.family === 'plan' || intent.family === 'code')
@@ -162,8 +120,7 @@ function isFinalizationIntent(value: unknown): value is LocalArtifactFinalizatio
     && (intent.baselineSemanticDigest === null || (typeof intent.baselineSemanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.baselineSemanticDigest)))
     && typeof intent.artifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(intent.artifactSha256)
     && typeof intent.semanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.semanticDigest)
-    && (intent.state === 'awaiting-repair' ? intent.baselineSemanticDigest === intent.semanticDigest : true)
-    && recoveryValid;
+    && (intent.state === 'awaiting-repair' ? intent.baselineSemanticDigest === intent.semanticDigest : true);
 }
 
 function readLocalArtifactFinalizationIntent(
@@ -584,121 +541,11 @@ function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): Local
   };
 }
 
-function rebindLocalArtifactFinalization(request: LocalArtifactRebindRequest): LocalArtifactRebindResult {
-  const failed = (code: string, message: string, taskId: string | null = null, taskDir: string | null = null): LocalArtifactRebindResult => ({
-    status: 'failed',
-    changed: false,
-    rebound: false,
-    taskId,
-    taskDir,
-    family: request.family,
-    artifact: request.artifact,
-    artifactSha256: null,
-    semanticDigest: null,
-    previousArtifactSha256: null,
-    previousSemanticDigest: null,
-    recovery: null,
-    error: { code, message }
-  });
-
-  if (!request.reason || request.reason !== request.reason.trim() || request.reason.length > 200 || /[\r\n]/.test(request.reason)) {
-    return failed('LOCAL_REBIND_REASON_INVALID', 'rebind reason must be a non-empty single line of at most 200 characters');
-  }
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: request.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  if (resolved.state !== 'active') return failed('LOCAL_REBIND_TASK_STATE_INVALID', 'local provenance rebind requires an active task', resolved.taskId, resolved.taskDir);
-  const parsed = parseArtifactName(request.artifact);
-  if (!parsed || parsed.family !== request.family) return failed('ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${request.family}`, resolved.taskId, resolved.taskDir);
-  const validated = validateCompletedArtifact(resolved.taskDir, request.family, request.artifact, parsed.round);
-  if (!validated.ok) return failed(validated.error.code, validated.error.message, resolved.taskId, resolved.taskDir);
-
-  let content: string;
-  let taskContent: string;
-  try {
-    content = fs.readFileSync(validated.artifact.path, 'utf8');
-    taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  } catch (error) {
-    return failed('ARTIFACT_NOT_READABLE', String(error), resolved.taskId, resolved.taskDir);
-  }
-  const local = validateLocalArtifact(content, { family: request.family });
-  if (!local.ok) return failed('LOCAL_ARTIFACT_INVALID', local.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), resolved.taskId, resolved.taskDir);
-  try {
-    if (receiptForOutput(taskContent, request.artifact)) {
-      return failed('LOCAL_REBIND_ALREADY_COMPLETED', `cannot rebind completed artifact '${request.artifact}'`, resolved.taskId, resolved.taskDir);
-    }
-  } catch (error) {
-    return failed('LOCAL_REBIND_TASK_INVALID', `cannot inspect artifact receipts: ${error instanceof Error ? error.message : String(error)}`, resolved.taskId, resolved.taskDir);
-  }
-
-  let intent: LocalArtifactFinalizationIntent | null;
-  try {
-    intent = readLocalArtifactFinalizationIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
-  } catch (error) {
-    return failed('LOCAL_FINALIZATION_INTENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, resolved.taskDir);
-  }
-  if (!intent || intent.state !== 'passed' || intent.baselineSemanticDigest !== null) {
-    return failed('LOCAL_REBIND_PROVENANCE_INVALID', 'rebind requires an existing passed provenance without a repair baseline', resolved.taskId, resolved.taskDir);
-  }
-
-  const artifactSha256 = sha256Content(content);
-  const currentSemanticDigest = local.semanticDigest;
-  if (intent.artifactSha256 === artifactSha256 && intent.semanticDigest === currentSemanticDigest) {
-    return {
-      status: 'passed',
-      changed: false,
-      rebound: false,
-      taskId: resolved.taskId,
-      taskDir: resolved.taskDir,
-      family: request.family,
-      artifact: request.artifact,
-      artifactSha256,
-      semanticDigest: currentSemanticDigest,
-      previousArtifactSha256: intent.artifactSha256,
-      previousSemanticDigest: intent.semanticDigest,
-      recovery: intent.recovery ? { at: intent.recovery.at, reason: intent.recovery.reason } : null,
-      error: null
-    };
-  }
-
-  const recovery = {
-    at: new Date().toISOString(),
-    reason: request.reason,
-    previousArtifactSha256: intent.artifactSha256,
-    previousSemanticDigest: intent.semanticDigest
-  };
-  try {
-    writeLocalArtifactFinalizationIntent(resolved.repoRoot, {
-      ...intent,
-      artifactSha256,
-      semanticDigest: currentSemanticDigest,
-      recovery
-    });
-  } catch (error) {
-    return failed('LOCAL_FINALIZATION_INTENT_WRITE_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId, resolved.taskDir);
-  }
-  return {
-    status: 'passed',
-    changed: true,
-    rebound: true,
-    taskId: resolved.taskId,
-    taskDir: resolved.taskDir,
-    family: request.family,
-    artifact: request.artifact,
-    artifactSha256,
-    semanticDigest: currentSemanticDigest,
-    previousArtifactSha256: intent.artifactSha256,
-    previousSemanticDigest: intent.semanticDigest,
-    recovery: { at: recovery.at, reason: recovery.reason },
-    error: null
-  };
-}
-
 export {
   LOCAL_ARTIFACT_REQUIRED_PATTERNS,
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
   consumeLocalArtifactFinalizationIntent,
   finalizeLocalArtifact,
-  rebindLocalArtifactFinalization,
   readLocalArtifactFinalizationIntent,
   semanticDigest,
   sha256Content,
@@ -710,8 +557,6 @@ export type {
   LocalArtifactFamily,
   LocalArtifactFinalizationRequest,
   LocalArtifactFinalizationResult,
-  LocalArtifactRebindRequest,
-  LocalArtifactRebindResult,
   LocalArtifactFinalizationIntent,
   LocalArtifactValidationOptions,
   LocalArtifactValidationResult

@@ -231,10 +231,12 @@ control-root/
 │   ├── requests/<request-id>.json
 │   └── responses/
 │       ├── <request-id>.accepted.json
+│       ├── <request-id>.payload.json   (optional output payload)
 │       └── <request-id>.json
 ├── processing/<request-id>/
 │   ├── request.json
 │   ├── execution.json
+│   ├── reservation.json
 │   └── result.json
 ├── consumed/<request-id>
 ├── public/status.json
@@ -290,6 +292,7 @@ The commit order is:
 ```text
 child close
   → result.json atomic publish + read-back
+  → optional redacted payload atomic publish + read-back
   → terminal response publish + read-back
   → remove processing evidence
 ```
@@ -308,7 +311,9 @@ The authority and lifetime of each record are intentionally different:
 | --- | --- | --- | --- |
 | `request.json` | client, then broker by claim rename | until claim cleanup | input only |
 | `execution.json` | broker | while the child is prepared/running | process identity/recovery hint |
+| `reservation.json` | broker | from admission until terminal cleanup | generation quota reservation |
 | `result.json` | broker parent | until terminal commit | process-outcome evidence |
+| payload record | broker | generation lifetime, only when terminal references it | redacted output body |
 | terminal response | broker | generation retention | transport commit point |
 | finalization receipt | host finalization | task lifecycle | business completion authority |
 
@@ -334,16 +339,29 @@ The three profile limits are independent:
 - `maxTerminalRecordBytes = 1 MiB`: the upper bound for the compact terminal
   envelope. It is separate from optional output payload storage.
 
-Result evidence is compact and participates in the response budget, but is not
-a fourth public capacity metric. Terminal records are retained for the
+Result evidence is compact and covered by each request's base reservation; it
+is not a fourth public capacity metric. Terminal records are retained for the
 generation. Processing/result evidence is temporary and may be removed only
 after terminal publication and verification. During recovery, temporary files
 are never treated as authoritative records.
 
-In this release, the broker enforces the compact terminal bound and the
-per-execution response bound at the transport edge. Generation-wide reservation
-accounting and payload storage are deliberately not synthesized from these
-constants; adding that layer must preserve the record meanings above.
+Before writing the accepted marker, the broker reserves the fixed base budget
+for the request's accepted marker, compact terminal, and result evidence. The
+reservation is one logical record and cannot be bypassed by a later payload.
+The broker rejects admission when the generation would exceed either 1024
+logical records or 64 MiB of retained terminal, payload, and reservation
+storage. A result larger than the 1 MiB compact envelope may be stored as a
+separate redacted payload, provided the remaining generation budget permits it;
+the terminal then contains only its byte counts and SHA-256 references. If the
+payload cannot be retained, the terminal is still committed with
+`outputState: "unavailable"`.
+
+Logical records are counted once: a terminal record or an in-flight reservation
+for the same request occupies one slot. On successful terminal commit, the
+temporary request, execution, result, and reservation records are removed;
+only a terminal and its referenced payload remain. An unreferenced payload is
+removed during the same cleanup. This makes the quota restart-safe and keeps a
+payload from becoming an independent result authority.
 
 For maintenance, inspect only the metadata needed to diagnose a request. Do not
 copy request tokens, execution nonces, PIDs, environment values, host paths, or
@@ -355,9 +373,9 @@ finalization.
 The current protocol uses request version 3 and response version 2. Older
 response layouts are not adapted or dual-written; an invalid or mixed
 generation must fail closed and the sandbox should be recreated from its
-current manifest. The compact result evidence described above is the current
-broker behavior; optional payload records and generation-wide quota accounting
-remain separate concerns and must not be inferred from `result.json`.
+current manifest. Payload records are addressed only by the same request ID
+and generation as their terminal reference; they are not inferred from
+`result.json` and cannot authorize a task mutation.
 
 ## User-level dotfiles channel
 

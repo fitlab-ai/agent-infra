@@ -1,10 +1,10 @@
 import { resolveArtifactContext } from '../task/artifact-lifecycle.ts';
-import { finalizeLocalArtifact, rebindLocalArtifactFinalization } from '../task/local-artifact-finalization.ts';
+import { finalizeLocalArtifact } from '../task/local-artifact-finalization.ts';
 import type { LocalArtifactFamily } from '../task/local-artifact-finalization.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { loadVerificationConfig } from '../task/verification-config.ts';
 
-const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> finalize-local --family <analysis|plan|code> --artifact <artifact>\n       agent-infra-internal task-artifact <N | TASK-id> rebind-local --family <analysis|plan|code> --artifact <artifact> --reason <reason>\n\nInspect workflow artifact context, finalize a local artifact, or explicitly rebind passed local provenance after a controlled artifact correction.\n`;
+const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> finalize-local --family <analysis|plan|code> --artifact <artifact>\n\nInspect workflow artifact context or finalize a local analysis/plan/code artifact without changing task state.\n`;
 
 function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'ARTIFACT_PAYLOAD_INVALID', message } })}\n`);
@@ -16,25 +16,23 @@ function taskArtifact(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (args.length < 2) { failUsage('task ref and operation are required'); return; }
   const operation = args[1];
-  if (operation !== 'inspect' && operation !== 'finalize-local' && operation !== 'rebind-local') { failUsage(`unknown operation '${operation}'`); return; }
+  if (operation !== 'inspect' && operation !== 'finalize-local') { failUsage(`unknown operation '${operation}'`); return; }
   let family = '';
   let artifact = '';
-  let reason = '';
   const seen = new Set<string>();
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
-    if (flag !== '--family' && flag !== '--artifact' && flag !== '--reason') { failUsage(`unknown option '${flag}'`); return; }
+    if (flag !== '--family' && flag !== '--artifact') { failUsage(`unknown option '${flag}'`); return; }
     if (seen.has(flag)) { failUsage(`duplicate option '${flag}'`); return; }
     const value = args[++index];
     if (!value || value.startsWith('--')) { failUsage(`option '${flag}' requires a value`); return; }
     seen.add(flag);
     if (flag === '--family') family = value;
-    else if (flag === '--artifact') artifact = value;
-    else reason = value;
+    else artifact = value;
   }
   if (!family) { failUsage("option '--family' is required"); return; }
   if (operation === 'inspect') {
-    if (artifact || reason) { failUsage("option '--artifact' and '--reason' are only valid for finalize-local or rebind-local"); return; }
+    if (artifact) { failUsage("option '--artifact' is only valid for finalize-local"); return; }
     const result = resolveArtifactContext(args[0]!, family);
     const output = family === 'code' && result.codeMode ? {
       ...result,
@@ -58,20 +56,6 @@ function taskArtifact(args: string[] = []): void {
   const resolved = resolveTaskRef(args[0]!);
   const repositoryRoot = resolved.ok ? resolved.repoRoot : process.cwd();
   if (!artifact) { failUsage("option '--artifact' is required"); return; }
-  if (operation === 'rebind-local') {
-    if (!reason) { failUsage("option '--reason' is required for rebind-local"); return; }
-    const result = rebindLocalArtifactFinalization({
-      taskRef: args[0]!,
-      family: family as LocalArtifactFamily,
-      artifact,
-      reason,
-      repoRoot: repositoryRoot
-    });
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-    if (result.status === 'failed') process.exitCode = 1;
-    return;
-  }
-  if (reason) { failUsage("option '--reason' is only valid for rebind-local"); return; }
   if (family !== 'analysis' && family !== 'plan' && family !== 'code') {
     failUsage("finalize-local only supports 'analysis', 'plan', and 'code'");
     return;

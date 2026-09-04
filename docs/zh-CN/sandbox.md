@@ -201,10 +201,12 @@ control-root/
 │   ├── requests/<request-id>.json
 │   └── responses/
 │       ├── <request-id>.accepted.json
+│       ├── <request-id>.payload.json   （可选输出 payload）
 │       └── <request-id>.json
 ├── processing/<request-id>/
 │   ├── request.json
 │   ├── execution.json
+│   ├── reservation.json
 │   └── result.json
 ├── consumed/<request-id>
 ├── public/status.json
@@ -254,6 +256,7 @@ executor 子进程退出后，由 broker 父进程先从 stdout/stderr 中去除
 ```text
 child close
   → result.json 原子发布并 read-back
+  → 可选的已脱敏 payload 原子发布并 read-back
   → terminal response 发布并 read-back
   → 删除 processing evidence
 ```
@@ -270,7 +273,9 @@ authority。如果 result evidence 缺失或格式错误，broker 会保持 unce
 | --- | --- | --- | --- |
 | `request.json` | client，随后由 broker 通过 claim rename 接管 | claim 后清理 | 仅作为输入 |
 | `execution.json` | broker | child prepared/running 期间 | 进程身份/恢复提示 |
+| `reservation.json` | broker | admission 到 terminal cleanup | generation quota reservation |
 | `result.json` | broker 父进程 | terminal commit 前 | 进程结果证据 |
+| payload record | broker | generation 生命周期，仅在 terminal 引用时保留 | 已脱敏输出正文 |
 | terminal response | broker | generation 生命周期 | transport 提交点 |
 | finalization receipt | 宿主 finalization | task 生命周期 | 业务完成 authority |
 
@@ -292,13 +297,24 @@ family 有有效 result 时可以生成 output-unavailable terminal；finalizati
 - `maxTerminalRecordBytes = 1 MiB`：紧凑 terminal envelope 的上限，与可选输出 payload
   的存储空间分开计算。
 
-result evidence 很小，但仍计入 response 总预算；它不是第四个公开容量指标。terminal
+result evidence 很小，由每个请求的 base reservation 覆盖；它不是第四个公开容量指标。terminal
 在 generation 生命周期内保留。processing/result evidence 是临时数据，只有 terminal
 发布并验证后才能删除。恢复时，临时文件永远不能被当作权威记录。
 
-本版本 broker 在 transport 边界执行 compact terminal 上限和单次 execution 的结果上限。
-整个 generation 的 reservation accounting 与 payload 存储不会从这些常量臆造出来；后续
-增加该层时仍必须保持上面的记录语义。
+broker 在写入 accepted marker 之前，会为本次请求的 accepted marker、紧凑 terminal 和
+result evidence 预留固定的 base budget。reservation 自身占用一个 logical record，后续
+payload 不能绕过这项预留。如果 generation 会超过 1024 个 logical record，或持久化的
+terminal、payload 与 reservation 总量会超过 64 MiB，broker 会在 admission 阶段拒绝请求。
+如果结果超过 1 MiB 的紧凑 envelope，且 generation 仍有余量，broker 可以把它写成单独的
+已脱敏 payload；terminal 只保存 payload 的字节数和 SHA-256 引用，并设置
+`outputState: "available"`。payload 无法保留时，terminal 仍会提交，但设置
+`outputState: "unavailable"`。
+
+logical record 只计数一次：同一请求的 terminal 或尚未完成的 reservation 占用一个 slot。
+terminal 成功提交后，临时的 request、execution、result 和 reservation 会被删除；只有
+terminal 及其引用的 payload 保留在 generation 内。没有被 terminal 引用的 payload 也会
+在同一清理阶段删除。这样 quota 在 broker 重启后仍然可计算，并且 payload 不会独立成为
+任务 mutation 的 authority。
 
 维护排障时只读取所需的元数据。不要把 request token、execution nonce、PID、环境值、宿主
 路径或原始 terminal 输出复制到 Issue、审计附件或普通日志中。client 在 accepted 后超时，
@@ -306,8 +322,8 @@ result evidence 很小，但仍计入 response 总预算；它不是第四个公
 
 当前协议使用 request version 3 和 response version 2。旧 response layout 不做 adapter、
 双写或长期迁移；invalid 或 generation 混用必须 fail closed，并根据当前 manifest 重建
-沙箱。上面的 compact result evidence 是当前 broker 行为；可选 payload record 和整个
-generation 的 quota accounting 是独立关注点，不能从 `result.json` 推断出来。
+沙箱。payload 只能通过同一 request ID 和 generation 的 terminal 引用定位；它不能从
+`result.json` 推断出来，也不能授权任何 task mutation。
 
 ## 用户级 dotfiles 通道
 

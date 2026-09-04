@@ -9,13 +9,19 @@ import type {
   SandboxControlExecution,
   SandboxControlLease,
   SandboxControlManifest,
+  SandboxControlPayload,
+  SandboxControlReservation,
   SandboxControlResultEvidence,
   SandboxControlStatus
 } from './protocol.ts';
 import {
   parseSandboxControlResultEvidence,
+  parseSandboxControlPayload,
+  parseSandboxControlReservation,
   SANDBOX_CONTROL_MAX_RESPONSE_BYTES,
-  SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES
+  SANDBOX_CONTROL_MAX_LOGICAL_RECORDS,
+  SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
+  SANDBOX_CONTROL_RESERVATION_BYTES
 } from './protocol.ts';
 
 export const SANDBOX_CONTROL_AUDIT_MAX_BYTES = 1024 * 1024;
@@ -80,6 +86,16 @@ export function resultEvidencePath(manifest: SandboxControlManifest, requestId: 
   return path.join(manifest.processingDir, requestId, 'result.json');
 }
 
+export function payloadPath(manifest: SandboxControlManifest, requestId: string): string {
+  if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) throw new Error('SANDBOX_CONTROL_PAYLOAD_INVALID');
+  return path.join(manifest.channelDir, 'responses', `${requestId}.payload.json`);
+}
+
+export function reservationPath(manifest: SandboxControlManifest, requestId: string): string {
+  if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) throw new Error('SANDBOX_CONTROL_RESERVATION_INVALID');
+  return path.join(manifest.processingDir, requestId, 'reservation.json');
+}
+
 export function readSandboxControlResultEvidence(filePath: string): SandboxControlResultEvidence {
   assertRegularFile(filePath);
   const raw = fs.readFileSync(filePath, 'utf8');
@@ -98,13 +114,25 @@ export function sanitizeSandboxControlOutput(manifest: SandboxControlManifest, o
   return manifest.token.length === 0 ? output : output.split(manifest.token).join('[REDACTED]');
 }
 
+export function sanitizeSandboxControlResult(
+  manifest: SandboxControlManifest,
+  result: Readonly<{ exitCode: number; stdout: string; stderr: string }>
+): { exitCode: number; stdout: string; stderr: string } {
+  return {
+    exitCode: result.exitCode,
+    stdout: sanitizeSandboxControlOutput(manifest, result.stdout),
+    stderr: sanitizeSandboxControlOutput(manifest, result.stderr)
+  };
+}
+
 export function writeSandboxControlResultEvidence(
   manifest: SandboxControlManifest,
   requestId: string,
   result: Readonly<{ exitCode: number; stdout: string; stderr: string }>
 ): SandboxControlResultEvidence {
-  const stdout = sanitizeSandboxControlOutput(manifest, result.stdout);
-  const stderr = sanitizeSandboxControlOutput(manifest, result.stderr);
+  const normalized = sanitizeSandboxControlResult(manifest, result);
+  const stdout = normalized.stdout;
+  const stderr = normalized.stderr;
   if (!/^[a-f0-9-]{16,64}$/u.test(requestId)
     || !Number.isSafeInteger(result.exitCode)
     || Buffer.byteLength(stdout, 'utf8') + Buffer.byteLength(stderr, 'utf8') > SANDBOX_CONTROL_MAX_RESPONSE_BYTES) {
@@ -129,6 +157,113 @@ export function writeSandboxControlResultEvidence(
     'SANDBOX_CONTROL_RESULT_EVIDENCE_ALREADY_EXISTS'
   );
   return readSandboxControlResultEvidence(resultEvidencePath(manifest, requestId));
+}
+
+export function writeSandboxControlPayload(
+  manifest: SandboxControlManifest,
+  requestId: string,
+  result: Readonly<{ stdout: string; stderr: string }>
+): SandboxControlPayload {
+  const payload = createSandboxControlPayload(manifest, requestId, result);
+  atomicCreateJson(payloadPath(manifest, requestId), payload, 'SANDBOX_CONTROL_PAYLOAD_ALREADY_EXISTS');
+  return readSandboxControlPayload(payloadPath(manifest, requestId));
+}
+
+export function createSandboxControlPayload(
+  manifest: SandboxControlManifest,
+  requestId: string,
+  result: Readonly<{ stdout: string; stderr: string }>
+): SandboxControlPayload {
+  const stdout = sanitizeSandboxControlOutput(manifest, result.stdout);
+  const stderr = sanitizeSandboxControlOutput(manifest, result.stderr);
+  const payload: SandboxControlPayload = {
+    version: 1,
+    id: requestId,
+    generation: manifest.generation,
+    stdout,
+    stderr,
+    stdoutBytes: Buffer.byteLength(stdout, 'utf8'),
+    stderrBytes: Buffer.byteLength(stderr, 'utf8'),
+    stdoutSha256: createHash('sha256').update(stdout, 'utf8').digest('hex'),
+    stderrSha256: createHash('sha256').update(stderr, 'utf8').digest('hex')
+  };
+  if (payload.stdoutBytes + payload.stderrBytes > SANDBOX_CONTROL_MAX_RESPONSE_BYTES) {
+    throw new Error('SANDBOX_CONTROL_PAYLOAD_TOO_LARGE');
+  }
+  return payload;
+}
+
+export function readSandboxControlPayload(filePath: string): SandboxControlPayload {
+  assertRegularFile(filePath);
+  const raw = fs.readFileSync(filePath, 'utf8');
+  if (Buffer.byteLength(raw, 'utf8') > SANDBOX_CONTROL_MAX_RESPONSE_BYTES) {
+    throw new Error('SANDBOX_CONTROL_PAYLOAD_TOO_LARGE');
+  }
+  try {
+    return parseSandboxControlPayload(JSON.parse(raw));
+  } catch {
+    throw new Error('SANDBOX_CONTROL_PAYLOAD_INVALID');
+  }
+}
+
+export function writeSandboxControlReservation(
+  manifest: SandboxControlManifest,
+  requestId: string,
+  usage: Readonly<{ logicalRecords: number; bytes: number }>,
+  now = Date.now()
+): SandboxControlReservation {
+  if (usage.logicalRecords >= SANDBOX_CONTROL_MAX_LOGICAL_RECORDS
+    || usage.bytes + SANDBOX_CONTROL_RESERVATION_BYTES > SANDBOX_CONTROL_MAX_RESPONSE_BYTES) {
+    throw new Error('SANDBOX_CONTROL_CAPACITY_EXHAUSTED');
+  }
+  const reservation: SandboxControlReservation = {
+    version: 1,
+    id: requestId,
+    generation: manifest.generation,
+    logicalRecords: 1,
+    bytes: SANDBOX_CONTROL_RESERVATION_BYTES,
+    createdAt: now
+  };
+  atomicCreateJson(reservationPath(manifest, requestId), reservation, 'SANDBOX_CONTROL_RESERVATION_ALREADY_EXISTS');
+  return parseSandboxControlReservation(readJsonFile(reservationPath(manifest, requestId)));
+}
+
+export function readSandboxControlReservation(filePath: string): SandboxControlReservation {
+  return parseSandboxControlReservation(readJsonFile(filePath));
+}
+
+export function sandboxControlGenerationUsage(manifest: SandboxControlManifest): { logicalRecords: number; bytes: number } {
+  const records = new Map<string, { bytes: number; logical: boolean }>();
+  const responsesDir = path.join(manifest.channelDir, 'responses');
+  if (fs.existsSync(responsesDir)) {
+    for (const entry of fs.readdirSync(responsesDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const terminal = entry.name.match(/^([a-f0-9-]{16,64})\.json$/u);
+      const payload = entry.name.match(/^([a-f0-9-]{16,64})\.payload\.json$/u);
+      if (!terminal && !payload) continue;
+      const id = (terminal ?? payload)![1]!;
+      const previous = records.get(id) ?? { bytes: 0, logical: false };
+      previous.bytes += fs.statSync(path.join(responsesDir, entry.name)).size;
+      previous.logical ||= Boolean(terminal);
+      records.set(id, previous);
+    }
+  }
+  if (fs.existsSync(manifest.processingDir)) {
+    for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/u.test(entry.name)) continue;
+      const filePath = reservationPath(manifest, entry.name);
+      if (!fs.existsSync(filePath)) continue;
+      const reservation = readSandboxControlReservation(filePath);
+      const previous = records.get(entry.name) ?? { bytes: 0, logical: false };
+      previous.bytes = Math.max(previous.bytes, reservation.bytes);
+      previous.logical = true;
+      records.set(entry.name, previous);
+    }
+  }
+  return {
+    logicalRecords: [...records.values()].filter((record) => record.logical).length,
+    bytes: [...records.values()].reduce((total, record) => total + record.bytes, 0)
+  };
 }
 
 export function statusPath(manifest: SandboxControlManifest): string {

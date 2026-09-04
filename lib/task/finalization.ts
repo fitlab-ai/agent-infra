@@ -55,6 +55,7 @@ type TaskFinalizationRequest = Readonly<{
 
 type TaskFinalizationOptions = Readonly<{
   repoRoot: string;
+  controlBinding?: Readonly<{ generation: string; requestId: string }>;
   metadataProvider?: TaskLifecycleOptions['metadataProvider'];
   lifecycle?: typeof applyTaskLifecycle;
   commentSync?: typeof syncPlatformComment;
@@ -73,6 +74,7 @@ type TaskFinalizationReceipt = Readonly<{
   verification: FinalizationStepState;
   warningProjection: WarningProjectionState;
   warnings: readonly FinalizationWarning[];
+  controlBinding?: Readonly<{ generation: string; requestId: string }>;
   updatedAt: string;
   lastError: FinalizationError | null;
 }>;
@@ -146,7 +148,7 @@ function failed(
   };
 }
 
-function emptyReceipt(taskId: string): TaskFinalizationReceipt {
+function emptyReceipt(taskId: string, controlBinding?: Readonly<{ generation: string; requestId: string }>): TaskFinalizationReceipt {
   return {
     version: RECEIPT_VERSION,
     taskId,
@@ -158,6 +160,7 @@ function emptyReceipt(taskId: string): TaskFinalizationReceipt {
     verification: 'pending',
     warningProjection: 'done',
     warnings: [],
+    ...(controlBinding ? { controlBinding } : {}),
     updatedAt: now(),
     lastError: null
   };
@@ -182,6 +185,7 @@ function validWarning(value: unknown): value is FinalizationWarning {
 function validateReceipt(value: unknown, taskId: string): TaskFinalizationReceipt {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('receipt must be an object');
   const receipt = value as Record<string, unknown>;
+  const controlBinding = receipt.controlBinding as Record<string, unknown> | null | undefined;
   const states = ['pending', 'done', 'skipped'];
   if (
     receipt.version !== RECEIPT_VERSION || receipt.taskId !== taskId || receipt.intent !== 'complete'
@@ -194,6 +198,10 @@ function validateReceipt(value: unknown, taskId: string): TaskFinalizationReceip
     || !Array.isArray(receipt.warnings) || receipt.warnings.some((warning) => !validWarning(warning))
     || typeof receipt.updatedAt !== 'string'
     || (receipt.lastError !== null && (typeof receipt.lastError !== 'object' || Array.isArray(receipt.lastError)))
+    || (receipt.controlBinding !== undefined && (!controlBinding || typeof controlBinding !== 'object'
+      || Array.isArray(controlBinding)
+      || typeof controlBinding.generation !== 'string' || controlBinding.generation.length === 0
+      || typeof controlBinding.requestId !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(controlBinding.requestId)))
   ) throw new Error('receipt schema is invalid');
   return receipt as TaskFinalizationReceipt;
 }
@@ -203,6 +211,10 @@ function readReceipt(repoRoot: string, taskId: string): TaskFinalizationReceipt 
   if (!fs.existsSync(file)) return null;
   const value = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
   return validateReceipt(value, taskId);
+}
+
+function readTaskFinalizationReceipt(repoRoot: string, taskId: string): TaskFinalizationReceipt | null {
+  return readReceipt(path.resolve(repoRoot), taskId);
 }
 
 function writeReceipt(repoRoot: string, receipt: TaskFinalizationReceipt): void {
@@ -583,7 +595,7 @@ async function applyUnderLock(
   try {
     const file = receiptPath(repoRoot, taskId);
     const existed = fs.existsSync(file);
-    receipt = readReceipt(repoRoot, taskId) ?? emptyReceipt(taskId);
+    receipt = readReceipt(repoRoot, taskId) ?? emptyReceipt(taskId, options.controlBinding);
     if (!existed) writeReceipt(repoRoot, receipt);
   } catch (error) {
     return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
@@ -746,7 +758,12 @@ async function applyTaskFinalization(request: TaskFinalizationRequest, options: 
   }
 }
 
-export { applyFinalizationReceiptMutation, applyTaskFinalization, issueCapability as createFinalizationCapability };
+export {
+  applyFinalizationReceiptMutation,
+  applyTaskFinalization,
+  issueCapability as createFinalizationCapability,
+  readTaskFinalizationReceipt
+};
 export type {
   FinalizationError,
   FinalizationCapability,

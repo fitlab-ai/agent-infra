@@ -20,7 +20,7 @@ import type {
 } from './controller-registration.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
-import { readSandboxControlStatus } from './state.ts';
+import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
@@ -77,10 +77,32 @@ function parseResponse(raw: string, id: string): SandboxControlResponse {
   const response = JSON.parse(raw) as SandboxControlResponse;
   if (response.version !== 2 || response.id !== id
     || !['completed', 'rejected'].includes(response.phase)
-    || (response.phase === 'completed' && !Number.isInteger(response.exitCode))) {
+    || (response.phase === 'completed' && !Number.isInteger(response.exitCode))
+    || (response.outputState !== undefined && response.outputState !== 'available' && response.outputState !== 'unavailable')
+    || (response.outputState === 'available' && !response.payload)
+    || (response.outputState === 'unavailable' && response.payload !== null && response.payload !== undefined)) {
     clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response is invalid', false, false, id);
   }
   return response;
+}
+
+function readPublishedResponse(raw: string, id: string, channelDir: string): SandboxControlResponse {
+  const response = parseResponse(raw, id);
+  if (response.outputState !== 'available') return response;
+  const filePath = path.join(channelDir, 'responses', `${id}.payload.json`);
+  let payload;
+  try {
+    payload = readSandboxControlPayload(filePath);
+  } catch {
+    clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker payload is missing or invalid', false, true, id);
+  }
+  if (!response.payload || response.payload.version !== payload.version
+    || response.payload.id !== payload.id || response.payload.generation !== payload.generation
+    || response.payload.stdoutBytes !== payload.stdoutBytes || response.payload.stderrBytes !== payload.stderrBytes
+    || response.payload.stdoutSha256 !== payload.stdoutSha256 || response.payload.stderrSha256 !== payload.stderrSha256) {
+    clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker payload reference is invalid', false, true, id);
+  }
+  return { ...response, stdout: payload.stdout, stderr: payload.stderr };
 }
 
 function cancelPendingRequest(requestPath: string): boolean {
@@ -132,7 +154,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       }
       let response: SandboxControlResponse;
       try {
-        response = parseResponse(raw, request.id);
+        response = readPublishedResponse(raw, request.id, channelDir);
         malformedResponseRaw = null;
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
@@ -214,7 +236,7 @@ export function recoverSandboxControl(requestId: string, params: Readonly<{
       }
       let response: SandboxControlResponse;
       try {
-        response = parseResponse(raw, requestId);
+        response = readPublishedResponse(raw, requestId, channelDir);
         malformedResponseRaw = null;
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;

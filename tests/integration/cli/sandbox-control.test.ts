@@ -20,7 +20,12 @@ import {
 } from '../../../lib/sandbox/control/lifecycle.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
 import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
-import { atomicWriteJson, writeSandboxControlResultEvidence } from '../../../lib/sandbox/control/state.ts';
+import {
+  atomicWriteJson,
+  writeSandboxControlPayload,
+  writeSandboxControlReservation,
+  writeSandboxControlResultEvidence
+} from '../../../lib/sandbox/control/state.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
@@ -1449,20 +1454,25 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     child: { pid: 999_999_999, startTime: 0, processGroupId: null },
     phase: 'running', updatedAt: Date.now()
   })}\n`);
-  fs.writeFileSync(path.join(processingDir, recoverableId, 'request.json'), `${JSON.stringify({ family: 'task-orchestration' })}\n`);
+  fs.writeFileSync(path.join(processingDir, recoverableId, 'request.json'), `${JSON.stringify({
+    version: 3, id: recoverableId, token: 'recovery-secret', generation, issuedAt: Date.now() - 1_000,
+    expiresAt: Date.now() + 1_000, family: 'task-orchestration', args: ['task-orchestration', 'verify'],
+    controllerProcess: null, controllerProof: null
+  })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'execution.json'), `${JSON.stringify({
     version: 2, generation, requestId: recoverableId, nonce: 'recoverable-nonce',
     child: { pid: 999_999_999, startTime: 0, processGroupId: null },
     phase: 'running', updatedAt: Date.now()
   })}\n`);
-  writeSandboxControlResultEvidence(
-    { engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
-      containerIdentity: { id: 'container-id', labels: {} }, branch, mode: 'task-bound', taskId: 'TASK-20260809-010203',
-      token: 'recovery-secret', generation, channelDir, publicStatusDir: statusDir, processingDir,
-      runtimeDir: path.join(root, 'runtime') },
-    recoverableId,
-    { exitCode: 0, stdout: 'lost output', stderr: '' }
-  );
+  const controlManifest = {
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    containerIdentity: { id: 'container-id', labels: {} }, branch, mode: 'task-bound' as const, taskId: 'TASK-20260809-010203',
+    token: 'recovery-secret', generation, channelDir, publicStatusDir: statusDir, processingDir,
+    runtimeDir: path.join(root, 'runtime')
+  };
+  writeSandboxControlReservation(controlManifest, recoverableId, { logicalRecords: 1, bytes: 0 });
+  writeSandboxControlResultEvidence(controlManifest, recoverableId, { exitCode: 0, stdout: 'lost output', stderr: '' });
+  writeSandboxControlPayload(controlManifest, recoverableId, { stdout: 'lost output', stderr: '' });
   const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
@@ -1477,7 +1487,10 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     const recovered = JSON.parse(fs.readFileSync(path.join(responsesDir, `${recoverableId}.json`), 'utf8'));
     assert.equal(recovered.phase, 'completed');
     assert.equal(recovered.exitCode, 0);
-    assert.match(recovered.stderr, /OUTPUT_UNAVAILABLE/);
+    assert.equal(recovered.outputState, 'available');
+    assert.equal(recovered.stdout, '');
+    assert.equal(recovered.stderr, '');
+    assert.equal(recoverSandboxControl(recoverableId, { channelDir, timeoutMs: 100 }).stdout, 'lost output');
     assert.equal(fs.existsSync(path.join(processingDir, recoverableId)), false);
   } finally {
     child.kill();
@@ -1487,4 +1500,112 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     });
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+async function runFinalizationRecoveryCase(
+  label: 'success' | 'warnings' | 'missing-receipt' | 'binding-conflict',
+  receiptBinding: { generation: string; requestId: string } | null
+): Promise<{ response: Record<string, unknown> | null; retained: boolean }> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-finalization-recovery-${label}-`));
+  const taskId = 'TASK-20260809-010203';
+  const requestId = label === 'success'
+    ? '44444444-4444-4444-4444-444444444444'
+    : label === 'warnings'
+      ? '55555555-5555-5555-5555-555555555555'
+      : label === 'missing-receipt'
+        ? '66666666-6666-6666-6666-666666666666'
+        : '77777777-7777-7777-7777-777777777777';
+  const generation = 'finalization-recovery-generation';
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    const manifest = readSandboxControlManifest(manifestPath);
+    fs.mkdirSync(path.join(manifest.channelDir, 'responses'), { recursive: true });
+    const completedTaskDir = path.join(root, '.agents', 'workspace', 'completed', taskId);
+    fs.mkdirSync(completedTaskDir, { recursive: true });
+    fs.writeFileSync(path.join(completedTaskDir, 'task.md'), `---\nid: ${taskId}\nstatus: completed\n---\n\n# Task\n`);
+    const processingDir = path.join(manifest.processingDir, requestId);
+    fs.mkdirSync(processingDir, { recursive: true });
+    const issuedAt = Date.now() - 1_000;
+    fs.writeFileSync(path.join(processingDir, 'request.json'), `${JSON.stringify({
+      version: 3, id: requestId, token: manifest.token, generation, issuedAt,
+      expiresAt: issuedAt + 1_000, family: 'task-finalization', operation: 'complete', agent: 'codex', args: [],
+      controllerProcess: null, controllerProof: null
+    })}\n`);
+    fs.writeFileSync(path.join(processingDir, 'execution.json'), `${JSON.stringify({
+      version: 2, generation, requestId, nonce: 'recovery-finalization-nonce',
+      child: { pid: 999_999_999, startTime: 0, processGroupId: null }, phase: 'running', updatedAt: Date.now()
+    })}\n`);
+    writeSandboxControlReservation(manifest, requestId, { logicalRecords: 0, bytes: 0 });
+    writeSandboxControlResultEvidence(manifest, requestId, { exitCode: 0, stdout: 'finalization output', stderr: '' });
+    fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`), `${JSON.stringify({
+      version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
+    })}\n`);
+    if (receiptBinding) {
+      const receiptDir = path.join(root, '.agents', 'workspace', '.task-finalization');
+      fs.mkdirSync(receiptDir, { recursive: true });
+      fs.writeFileSync(path.join(receiptDir, `${taskId}.json`), `${JSON.stringify({
+        version: 2, taskId, intent: 'complete', receiptId: `receipt-${label}`, revision: 1,
+        lifecycle: 'done', taskComment: label === 'warnings' ? 'pending' : 'done', verification: 'done',
+        warningProjection: 'done',
+        warnings: label === 'warnings' ? [{
+          code: 'COMMENT_SYNC_FAILED', message: 'comment sync needs retry', retryable: true,
+          step: 'task-comment', target: 'issue', severity: 'ACTION_REQUIRED', status: 'open', resolvedAt: null
+        }] : [],
+        controlBinding: receiptBinding, updatedAt: new Date().toISOString(), lastError: null
+      })}\n`);
+    }
+    const controller = new AbortController();
+    const server = serveSandboxControl(manifestPath, controller.signal, {
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', 5_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
+    const response = fs.existsSync(responsePath)
+      ? JSON.parse(fs.readFileSync(responsePath, 'utf8')) as Record<string, unknown>
+      : null;
+    const retained = fs.existsSync(processingDir);
+    controller.abort();
+    await server;
+    return { response, retained };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test('broker recovery accepts a finalization result only with the matching completed receipt', async () => {
+  const result = await runFinalizationRecoveryCase('success', {
+    generation: 'finalization-recovery-generation',
+    requestId: '44444444-4444-4444-4444-444444444444'
+  });
+  assert.equal(result.response?.phase, 'completed');
+  assert.equal((JSON.parse(String(result.response?.stdout)) as { result: { result: string } }).result.result, 'completed');
+  assert.equal(result.retained, false);
+});
+
+test('broker recovery preserves the finalization warning result projection', async () => {
+  const result = await runFinalizationRecoveryCase('warnings', {
+    generation: 'finalization-recovery-generation',
+    requestId: '55555555-5555-5555-5555-555555555555'
+  });
+  assert.equal(result.response?.phase, 'completed');
+  assert.equal((JSON.parse(String(result.response?.stdout)) as { result: { result: string } }).result.result, 'completed_with_warnings');
+  assert.equal(result.retained, false);
+});
+
+test('broker recovery retains finalization evidence when the canonical receipt is missing', async () => {
+  const result = await runFinalizationRecoveryCase('missing-receipt', null);
+  assert.equal(result.response, null);
+  assert.equal(result.retained, true);
+});
+
+test('broker recovery retains finalization evidence when the receipt binding conflicts', async () => {
+  const result = await runFinalizationRecoveryCase('binding-conflict', {
+    generation: 'other-generation',
+    requestId: '88888888-8888-4888-8888-888888888888'
+  });
+  assert.equal(result.response, null);
+  assert.equal(result.retained, true);
 });

@@ -7,12 +7,16 @@ import test from 'node:test';
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
 import {
   sandboxControlSafeEnv,
-  serveSandboxControl
+  serveSandboxControl,
+  writeSandboxControlResponse
 } from '../../../lib/sandbox/control/server.ts';
 import {
   bindSandboxControlTask,
   controlError,
   parseSandboxControlResultEvidence,
+  SANDBOX_CONTROL_MAX_LOGICAL_RECORDS,
+  SANDBOX_CONTROL_MAX_RESPONSE_BYTES,
+  SANDBOX_CONTROL_RESERVATION_BYTES,
   validateSandboxControlRequest,
   type SandboxControlManifest
 } from '../../../lib/sandbox/control/protocol.ts';
@@ -20,10 +24,14 @@ import {
   appendSandboxControlAudit,
   cleanupStaleSandboxControlLease,
   readActiveLease,
+  readSandboxControlPayload,
   readSandboxControlResultEvidence,
   resultEvidencePath,
+  sandboxControlGenerationUsage,
   sanitizeSandboxControlOutput,
   terminateSandboxControlExecution,
+  writeSandboxControlPayload,
+  writeSandboxControlReservation,
   writeSandboxControlResultEvidence,
   SANDBOX_CONTROL_AUDIT_MAX_BYTES
 } from '../../../lib/sandbox/control/state.ts';
@@ -106,6 +114,116 @@ test('sandbox result evidence is strict, durable, and metadata-only', () => {
     () => writeSandboxControlResultEvidence(boundManifest, requestId, result),
     /SANDBOX_CONTROL_RESULT_EVIDENCE_ALREADY_EXISTS/
   );
+});
+
+test('sandbox payload and reservation records enforce generation accounting and output redaction', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-capacity-'));
+  const boundManifest = {
+    ...manifest,
+    token: 'capacity-secret',
+    channelDir: path.join(root, 'channel'),
+    processingDir: path.join(root, 'processing')
+  };
+  const requestId = '0123456789abcdef0123456789abcdef';
+  fs.mkdirSync(path.join(boundManifest.channelDir, 'responses'), { recursive: true });
+  fs.mkdirSync(path.join(boundManifest.processingDir, requestId), { recursive: true });
+  try {
+    const reservation = writeSandboxControlReservation(boundManifest, requestId, { logicalRecords: 0, bytes: 0 });
+    assert.equal(reservation.logicalRecords, 1);
+    assert.equal(sandboxControlGenerationUsage(boundManifest).logicalRecords, 1);
+    const payload = writeSandboxControlPayload(boundManifest, requestId, {
+      stdout: `printed ${boundManifest.token}\n`, stderr: ''
+    });
+    assert.equal(readSandboxControlPayload(path.join(boundManifest.channelDir, 'responses', `${requestId}.payload.json`)).stdout, 'printed [REDACTED]\n');
+    assert.equal(payload.stdoutBytes, Buffer.byteLength(payload.stdout, 'utf8'));
+    assert.equal(sandboxControlGenerationUsage(boundManifest).logicalRecords, 1);
+    assert.throws(
+      () => writeSandboxControlReservation(boundManifest, 'fedcba9876543210fedcba9876543210', {
+        logicalRecords: 1024, bytes: 0
+      }),
+      /CAPACITY_EXHAUSTED/
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox terminal publication redacts output before durable write', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-terminal-redaction-'));
+  const boundManifest = {
+    ...manifest,
+    token: 'terminal-secret',
+    channelDir: path.join(root, 'channel')
+  };
+  const requestId = 'abcdefabcdefabcdefabcdefabcdefab';
+  fs.mkdirSync(path.join(boundManifest.channelDir, 'responses'), { recursive: true });
+  try {
+    writeSandboxControlResponse(boundManifest, {
+      version: 2, id: requestId, phase: 'completed', exitCode: 0,
+      stdout: `result ${boundManifest.token}\n`, stderr: `error ${boundManifest.token}\n`, error: null
+    });
+    const persisted = JSON.parse(fs.readFileSync(path.join(boundManifest.channelDir, 'responses', `${requestId}.json`), 'utf8')) as Record<string, string>;
+    assert.equal(persisted.stdout, 'result [REDACTED]\n');
+    assert.equal(persisted.stderr, 'error [REDACTED]\n');
+    assert.doesNotMatch(JSON.stringify(persisted), /terminal-secret/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox generation quota counts retained records once and rejects byte overflow after restart scan', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-generation-quota-'));
+  const boundManifest = {
+    ...manifest,
+    channelDir: path.join(root, 'channel'),
+    processingDir: path.join(root, 'processing')
+  };
+  const responsesDir = path.join(boundManifest.channelDir, 'responses');
+  fs.mkdirSync(responsesDir, { recursive: true });
+  try {
+    for (let index = 0; index < SANDBOX_CONTROL_MAX_LOGICAL_RECORDS - 1; index += 1) {
+      const id = index.toString(16).padStart(32, '0');
+      fs.writeFileSync(path.join(responsesDir, `${id}.json`), `${JSON.stringify({ version: 2, id, phase: 'completed', exitCode: 0 })}\n`);
+    }
+    assert.equal(sandboxControlGenerationUsage(boundManifest).logicalRecords, SANDBOX_CONTROL_MAX_LOGICAL_RECORDS - 1);
+    const finalId = (SANDBOX_CONTROL_MAX_LOGICAL_RECORDS - 1).toString(16).padStart(32, '0');
+    writeSandboxControlReservation(boundManifest, finalId, sandboxControlGenerationUsage(boundManifest));
+    assert.equal(sandboxControlGenerationUsage(boundManifest).logicalRecords, SANDBOX_CONTROL_MAX_LOGICAL_RECORDS);
+    assert.throws(
+      () => writeSandboxControlReservation(boundManifest, 'fedcba9876543210fedcba9876543210', sandboxControlGenerationUsage(boundManifest)),
+      /SANDBOX_CONTROL_CAPACITY_EXHAUSTED/
+    );
+
+    const byteRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-byte-quota-'));
+    const byteManifest = {
+      ...manifest,
+      channelDir: path.join(byteRoot, 'channel'),
+      processingDir: path.join(byteRoot, 'processing')
+    };
+    try {
+      const byteResponses = path.join(byteManifest.channelDir, 'responses');
+      fs.mkdirSync(byteResponses, { recursive: true });
+      const terminalId = '0123456789abcdef0123456789abcdef';
+      const descriptor = fs.openSync(path.join(byteResponses, `${terminalId}.json`), 'w');
+      try {
+        fs.ftruncateSync(descriptor, SANDBOX_CONTROL_MAX_RESPONSE_BYTES - SANDBOX_CONTROL_RESERVATION_BYTES);
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      assert.equal(sandboxControlGenerationUsage(byteManifest).bytes, SANDBOX_CONTROL_MAX_RESPONSE_BYTES - SANDBOX_CONTROL_RESERVATION_BYTES);
+      const reservationId = 'abcdefabcdefabcdefabcdefabcdefab';
+      assert.doesNotThrow(() => writeSandboxControlReservation(byteManifest, reservationId, sandboxControlGenerationUsage(byteManifest)));
+      assert.equal(sandboxControlGenerationUsage(byteManifest).bytes, SANDBOX_CONTROL_MAX_RESPONSE_BYTES);
+      assert.throws(
+        () => writeSandboxControlReservation(byteManifest, 'fedcba9876543210fedcba9876543210', sandboxControlGenerationUsage(byteManifest)),
+        /SANDBOX_CONTROL_CAPACITY_EXHAUSTED/
+      );
+    } finally {
+      fs.rmSync(byteRoot, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('sandbox executor authority revalidates the gate-bound broker owner and handoff lease', () => {

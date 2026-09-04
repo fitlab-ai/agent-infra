@@ -6,6 +6,7 @@ import { assertGitWorktreeBinding } from '../../git/worktree-identity.ts';
 import {
   controlError,
   DEFAULT_SANDBOX_CONTROL_TIMING,
+  SANDBOX_CONTROL_MAX_RESPONSE_BYTES,
   SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
   type SandboxControlManifest,
   type SandboxControlRequest,
@@ -16,12 +17,20 @@ import { prepareSandboxControlExecution, type PreparedSandboxControlExecution, t
 import {
   appendSandboxControlAudit,
   atomicWriteJsonNoReplace,
+  createSandboxControlPayload,
   cleanupStaleSandboxControlLease,
   executionPath,
   readJsonFile,
   readActiveLease,
   readExecution,
+  readSandboxControlPayload,
   readSandboxControlResultEvidence,
+  sandboxControlGenerationUsage,
+  sanitizeSandboxControlOutput,
+  sanitizeSandboxControlResult,
+  payloadPath,
+  writeSandboxControlPayload,
+  writeSandboxControlReservation,
   writeSandboxControlResultEvidence,
   terminateSandboxControlExecution,
   writeSandboxControlStatus
@@ -36,6 +45,8 @@ import {
 } from './lifecycle.ts';
 import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
+import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
+import { resolveTaskRef } from '../../task/resolve-ref.ts';
 
 type ActiveExecution = {
   request: SandboxControlRequest;
@@ -62,12 +73,17 @@ function acceptedResponsePath(manifest: SandboxControlManifest, id: string): str
   return path.join(manifest.channelDir, 'responses', `${id}.accepted.json`);
 }
 
-function writeResponse(manifest: SandboxControlManifest, response: SandboxControlResponse): void {
+export function writeSandboxControlResponse(manifest: SandboxControlManifest, response: SandboxControlResponse): void {
   const filePath = responsePath(manifest, response.id);
-  const terminal = Buffer.byteLength(JSON.stringify(response), 'utf8') <= SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES
-    ? response
+  const normalized = {
+    ...response,
+    stdout: sanitizeSandboxControlOutput(manifest, response.stdout),
+    stderr: sanitizeSandboxControlOutput(manifest, response.stderr)
+  } satisfies SandboxControlResponse;
+  const terminal = Buffer.byteLength(JSON.stringify(normalized), 'utf8') <= SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES
+    ? normalized
     : {
-      ...response,
+      ...normalized,
       stdout: '',
       stderr: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: terminal output exceeded the compact record limit\n',
       error: {
@@ -91,6 +107,121 @@ function writeResponse(manifest: SandboxControlManifest, response: SandboxContro
   if (JSON.stringify(persisted) !== JSON.stringify(terminal)) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_READBACK_FAILED');
   }
+}
+
+function finalizationRecoveryResponse(
+  manifest: SandboxControlManifest,
+  requestId: string,
+  exitCode: number
+): SandboxControlResponse | null {
+  if (!manifest.taskId || exitCode !== 0) return null;
+  let receipt;
+  try {
+    receipt = readTaskFinalizationReceipt(manifest.repoRoot, manifest.taskId);
+    if (!receipt?.controlBinding
+      || receipt.controlBinding.generation !== manifest.generation
+      || receipt.controlBinding.requestId !== requestId) return null;
+    const resolved = resolveTaskRef(manifest.taskId, { repoRoot: manifest.repoRoot });
+    if (!resolved.ok || resolved.state !== 'completed' || receipt.lifecycle !== 'done') return null;
+  } catch {
+    return null;
+  }
+  const pendingSteps = [
+    receipt.taskComment === 'pending' ? 'task-comment' : null,
+    receipt.verification === 'pending' ? 'verification' : null
+  ].filter((step): step is string => step !== null);
+  const completedSteps = ['lifecycle', receipt.taskComment === 'pending' ? null : 'task-comment', receipt.verification === 'pending' ? null : 'verification']
+    .filter((step): step is string => step !== null);
+  const warnings = receipt.warnings
+    .filter((warning) => warning.status === 'open')
+    .map(({ status: _status, resolvedAt: _resolvedAt, ...warning }) => warning);
+  const result = {
+    status: 'completed', changed: false, taskId: manifest.taskId,
+    lifecycle: { status: 'no-op', changed: false, error: null },
+    taskComment: receipt.taskComment === 'pending' ? null : { status: 'no-op', changed: false, error: null },
+    verification: receipt.verification === 'pending' ? null : { status: 'no-op', changed: false, error: null },
+    completedSteps, pendingSteps,
+    result: pendingSteps.length > 0 || receipt.warningProjection === 'pending' || warnings.length > 0
+      ? 'completed_with_warnings' : 'completed',
+    warnings, error: null
+  };
+  return {
+    version: 2, id: requestId, phase: 'completed', exitCode: 0,
+    stdout: `${JSON.stringify({ version: 1, status: 'completed', changed: false, accepted: true, result, error: null })}\n`,
+    stderr: '', error: null
+  };
+}
+
+function payloadReference(payload: ReturnType<typeof createSandboxControlPayload>) {
+  return {
+    version: payload.version,
+    id: payload.id,
+    generation: payload.generation,
+    stdoutBytes: payload.stdoutBytes,
+    stderrBytes: payload.stderrBytes,
+    stdoutSha256: payload.stdoutSha256,
+    stderrSha256: payload.stderrSha256
+  };
+}
+
+function payloadMatchesEvidence(
+  payload: ReturnType<typeof readSandboxControlPayload>,
+  evidence: ReturnType<typeof readSandboxControlResultEvidence>
+): boolean {
+  return payload.id === evidence.id
+    && payload.generation === evidence.generation
+    && payload.stdoutBytes === evidence.stdoutBytes
+    && payload.stderrBytes === evidence.stderrBytes
+    && payload.stdoutSha256 === evidence.stdoutSha256
+    && payload.stderrSha256 === evidence.stderrSha256;
+}
+
+function publishExecutionResult(
+  manifest: SandboxControlManifest,
+  request: SandboxControlRequest,
+  result: SandboxControlExecutionResult,
+  brokerOwns: () => boolean
+): void {
+  const normalized = sanitizeSandboxControlResult(manifest, result);
+  let terminal: SandboxControlResponse | null = request.family === 'task-finalization'
+    ? finalizationRecoveryResponse(manifest, request.id, normalized.exitCode)
+    : null;
+  if (!terminal) {
+    const inline: SandboxControlResponse = {
+      version: 2, id: request.id, phase: 'completed', exitCode: normalized.exitCode,
+      stdout: normalized.stdout, stderr: normalized.stderr, error: null
+    };
+    if (Buffer.byteLength(JSON.stringify(inline), 'utf8') <= SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES) {
+      terminal = inline;
+    }
+    let payload = null;
+    if (!terminal) {
+      try {
+        payload = createSandboxControlPayload(manifest, request.id, normalized);
+        const usage = sandboxControlGenerationUsage(manifest);
+        if (usage.bytes + Buffer.byteLength(JSON.stringify(payload), 'utf8') <= SANDBOX_CONTROL_MAX_RESPONSE_BYTES) {
+          writeSandboxControlPayload(manifest, request.id, normalized);
+        } else {
+          payload = null;
+        }
+      } catch {
+        payload = null;
+      }
+      terminal = {
+        version: 2,
+        id: request.id,
+        phase: 'completed',
+        exitCode: normalized.exitCode,
+        stdout: '',
+        stderr: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n',
+        error: null,
+        outputState: payload ? 'available' : 'unavailable',
+        payload: payload ? payloadReference(payload) : null
+      };
+    }
+  }
+  if (!brokerOwns()) return;
+  writeSandboxControlResponse(manifest, terminal);
 }
 
 function writeAcceptedResponse(manifest: SandboxControlManifest, response: SandboxControlResponse): void {
@@ -161,13 +292,19 @@ function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => b
     if (!brokerOwns()) return false;
     const descriptor = executionPath(manifest, entry.name);
     const existingResponse = responsePath(manifest, entry.name);
+    const processingDirectory = path.join(manifest.processingDir, entry.name);
+    let payloadReferenced = false;
     if (fs.existsSync(descriptor)) {
       const execution = readExecution(descriptor);
       let resultEvidence: ReturnType<typeof readSandboxControlResultEvidence> | null = null;
-      let isFinalization = false;
+      let payload: ReturnType<typeof readSandboxControlPayload> | null = null;
+      let payloadInvalid = false;
+      let request: SandboxControlRequest | null = null;
       try {
-        const request = JSON.parse(fs.readFileSync(path.join(manifest.processingDir, entry.name, 'request.json'), 'utf8')) as { family?: unknown };
-        isFinalization = request.family === 'task-finalization';
+        const rawRequest = JSON.parse(fs.readFileSync(path.join(processingDirectory, 'request.json'), 'utf8')) as Record<string, unknown>;
+        request = validateSandboxControlRequest(rawRequest, manifest, {
+          now: typeof rawRequest.issuedAt === 'number' ? rawRequest.issuedAt : undefined
+        });
       } catch {
         // Missing or malformed request evidence remains fail-closed below.
       }
@@ -182,6 +319,18 @@ function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => b
           resultEvidence = null;
         }
       }
+      const publishedPayloadPath = payloadPath(manifest, entry.name);
+      if (fs.existsSync(publishedPayloadPath)) {
+        try {
+          payload = readSandboxControlPayload(publishedPayloadPath);
+          if (payload.id !== entry.name || payload.generation !== manifest.generation
+            || (resultEvidence !== null && !payloadMatchesEvidence(payload, resultEvidence))) {
+            payloadInvalid = true;
+          }
+        } catch {
+          payloadInvalid = true;
+        }
+      }
       if (!terminateSandboxControlExecution(execution)) {
         throw new Error(`SANDBOX_CONTROL_EXECUTION_STILL_RUNNING: ${entry.name}`);
       }
@@ -193,6 +342,20 @@ function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => b
           const response = JSON.parse(fs.readFileSync(existingResponse, 'utf8')) as SandboxControlResponse;
           terminal = response.version === 2 && response.id === entry.name
             && (response.phase === 'completed' || response.phase === 'rejected');
+          if (terminal && response.outputState === 'available') {
+            if (!response.payload || payloadInvalid || !payload
+              || response.payload.version !== payload.version
+              || response.payload.id !== payload.id
+              || response.payload.generation !== payload.generation
+              || response.payload.stdoutBytes !== payload.stdoutBytes
+              || response.payload.stderrBytes !== payload.stderrBytes
+              || response.payload.stdoutSha256 !== payload.stdoutSha256
+              || response.payload.stderrSha256 !== payload.stderrSha256) throw new Error('payload missing or mismatched');
+            payloadReferenced = true;
+          } else if (terminal && (response.outputState !== undefined
+            || response.payload !== undefined && response.payload !== null)) {
+            throw new Error('payload state invalid');
+          }
           if (!terminal) throw new Error('SANDBOX_CONTROL_RESPONSE_LAYOUT_INVALID');
         } catch {
           throw new Error('SANDBOX_CONTROL_RESPONSE_LAYOUT_INVALID');
@@ -200,27 +363,34 @@ function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => b
       }
       if (!terminal) {
         if (!brokerOwns()) return false;
-        if (resultEvidence && !isFinalization) {
-          writeResponse(manifest, {
+        if (!resultEvidence || !request || payloadInvalid) continue;
+        if (request.family === 'task-finalization') {
+          const recovered = finalizationRecoveryResponse(manifest, entry.name, resultEvidence.exitCode);
+          if (!recovered) continue;
+          writeSandboxControlResponse(manifest, recovered);
+        } else {
+          writeSandboxControlResponse(manifest, {
             version: 2,
             id: entry.name,
             phase: 'completed',
             exitCode: resultEvidence.exitCode,
             stdout: '',
-            stderr: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
-            error: null
+            stderr: payload ? '' : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
+            error: null,
+            outputState: payload ? 'available' : 'unavailable',
+            payload: payload ? payloadReference(payload) : null
           });
-        } else {
-          writeResponse(manifest, unknown(entry.name));
         }
+        payloadReferenced = Boolean(payload) && request.family !== 'task-finalization';
       }
     } else {
       if (!brokerOwns()) return false;
-      writeResponse(manifest, notExecuted(entry.name));
+      writeSandboxControlResponse(manifest, notExecuted(entry.name));
     }
     if (!brokerOwns()) return false;
     removeAcceptedResponse(manifest, entry.name);
-    fs.rmSync(path.join(manifest.processingDir, entry.name), { recursive: true, force: true });
+    fs.rmSync(processingDirectory, { recursive: true, force: true });
+    if (!payloadReferenced) fs.rmSync(payloadPath(manifest, entry.name), { force: true });
   }
   return true;
 }
@@ -316,6 +486,7 @@ export async function serveSandboxControl(
       if (current.token !== manifest.token || current.generation !== manifest.generation) break;
       if (active?.result && !active.resultEvidenceWritten) {
         try {
+          active.result = sanitizeSandboxControlResult(manifest, active.result);
           writeSandboxControlResultEvidence(manifest, active.request.id, active.result);
           active.resultEvidenceWritten = true;
           active.failure = null;
@@ -407,12 +578,9 @@ export async function serveSandboxControl(
       if (settledExecution) {
         if (!brokerOwns()) break;
         if (settledExecution.result && settledExecution.resultEvidenceWritten) {
-          writeResponse(manifest, {
-            version: 2, id: settledExecution.request.id, phase: 'completed', exitCode: settledExecution.result.exitCode,
-            stdout: settledExecution.result.stdout, stderr: settledExecution.result.stderr, error: null
-          });
+          publishExecutionResult(manifest, settledExecution.request, settledExecution.result, brokerOwns);
         } else {
-          writeResponse(manifest, unknown(settledExecution.request.id));
+          writeSandboxControlResponse(manifest, unknown(settledExecution.request.id));
         }
         if (!brokerOwns()) break;
         removeAcceptedResponse(manifest, settledExecution.request.id);
@@ -445,6 +613,7 @@ export async function serveSandboxControl(
           const request = validateSandboxControlRequest(JSON.parse(fs.readFileSync(claimed, 'utf8')), manifest);
           if (bindingCheck(manifest)) throw new Error('SANDBOX_WORKTREE_BINDING_LOST');
           if (readActiveLease(manifest)) throw new Error('SANDBOX_CONTROL_HANDOFF_ACTIVE');
+          writeSandboxControlReservation(manifest, request.id, sandboxControlGenerationUsage(manifest));
           const prepared = await prepareSandboxControlExecution({
             manifest, manifestPath, request, requestPath: claimed, internalCliPath: process.argv[1]!
           });
@@ -454,9 +623,9 @@ export async function serveSandboxControl(
           active = execution;
           prepared.completion.then(
             (result) => {
-              execution.result = result;
+              execution.result = sanitizeSandboxControlResult(manifest, result);
               try {
-                writeSandboxControlResultEvidence(manifest, request.id, result);
+                writeSandboxControlResultEvidence(manifest, request.id, execution.result);
                 execution.resultEvidenceWritten = true;
                 execution.settled = true;
               } catch (error) {
@@ -496,7 +665,7 @@ export async function serveSandboxControl(
               retiring = true;
               break;
             }
-            writeResponse(manifest, unknown(id));
+            writeSandboxControlResponse(manifest, unknown(id));
             if (!brokerOwns()) {
               active = null;
               retiring = true;
@@ -518,7 +687,7 @@ export async function serveSandboxControl(
             retiring = true;
             break;
           }
-          writeResponse(manifest, rejected(id, error));
+          writeSandboxControlResponse(manifest, rejected(id, error));
           if (!brokerOwns()) {
             retiring = true;
             break;
@@ -533,7 +702,7 @@ export async function serveSandboxControl(
     if (active) {
       const owned = brokerOwns();
       active.prepared.terminate(owned);
-      if (owned && brokerOwns()) writeResponse(manifest, unknown(active.request.id));
+      if (owned && brokerOwns()) writeSandboxControlResponse(manifest, unknown(active.request.id));
     }
     if (brokerOwns()) {
       appendSandboxControlAudit(manifest, 'broker-stop', { pid: broker.pid, brokerId: broker.brokerId });
