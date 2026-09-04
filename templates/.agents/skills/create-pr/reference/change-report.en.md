@@ -41,7 +41,7 @@ Using the repository's actual structure, assign every file to exactly one closes
 
 The table must contain component, file count, added lines, deleted lines, net lines, old bytes, new bytes, and net bytes, followed by a total row. Byte columns describe the blob content size of files involved in this change, not disk usage for the entire repository or worktree. Use exact integers; optional KiB/MiB values may aid readability but must not replace byte counts.
 
-Category line and byte totals must each reconcile exactly with the script's `totals`. Then list the largest files by line change and absolute net-byte change, distinguishing source, tests, template mirrors, and pure renames.
+Category line and byte totals must each reconcile exactly with the script's `totals`. Then, for text files only, list the largest files by line change and absolute net-byte change, distinguishing source, tests, and template mirrors. Keep binary files in the category totals only; do not rank or interpret their content. Show renames as path changes without inferring a "pure rename" label.
 
 ## Required Analysis
 

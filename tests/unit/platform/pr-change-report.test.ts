@@ -202,7 +202,7 @@ test('canonical report renders high-level change categories and a Chinese preche
   assert.equal(rendered.split('#### 适宜性预检\n')[1], '- 结论：**通过**（6/6 项通过）；继续监控 PR；正式审查：否。\n- 高层分析：各项适宜性检查均通过，当前变更可继续进入后续流程。 详细证据保留在结构化报告中。');
 });
 
-test('canonical report lists bounded representative files with stable tie ordering and classifications', () => {
+test('canonical report lists bounded text representatives with stable tie ordering and classifications', () => {
   const digest = 'd'.repeat(64);
   const built = buildPrChangeReport(identity(), digest, representativeMechanical(), candidate(digest));
   assert.equal(built.ok, true);
@@ -210,11 +210,11 @@ test('canonical report lists bounded representative files with stable tie orderi
 
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /#### 代表性变更文件/);
-  assert.match(rendered, /- 行数变化最大（按新增行\+删除行，最多展示 3 个）：\n  - <code>lib\/large\.ts<\/code>（运行时代码）：新增 8 行、删除 4 行，共变更 12 行。\n  - <code>tests\/large\.test\.ts<\/code>（测试与校验）：新增 6 行、删除 6 行，共变更 12 行。/);
-  assert.match(rendered, /- 绝对净字节变化最大（最多展示 3 个）：\n  - <code>README\.md<\/code>（文档与其他）：净字节 -300，绝对变化 300（二进制）。\n  - <code>tests\/removed\.test\.ts<\/code>（测试与校验）：净字节 -300，绝对变化 300（文本）。/);
+  assert.match(rendered, /- 行数变化最大（仅文本文件，按新增行\+删除行，最多展示 3 个）：\n  - <code>lib\/large\.ts<\/code>（运行时代码）：新增 8 行、删除 4 行，共变更 12 行。\n  - <code>tests\/large\.test\.ts<\/code>（测试与校验）：新增 6 行、删除 6 行，共变更 12 行。\n  - <code>tests\/removed\.test\.ts<\/code>（测试与校验）：新增 0 行、删除 10 行，共变更 10 行。/);
+  assert.match(rendered, /- 绝对净字节变化最大（仅文本文件，最多展示 3 个）：\n  - <code>tests\/removed\.test\.ts<\/code>（测试与校验）：净字节 -300，绝对变化 300。\n  - <code>templates\/large\.md<\/code>（模板与生成内容）：净字节 \+90，绝对变化 90。\n  - <code>lib\/large\.ts<\/code>（运行时代码）：净字节 \+10，绝对变化 10。/);
 });
 
-test('canonical report identifies a pure rename when it is the representative byte change', () => {
+test('canonical report renders a text rename as a path change without content labels', () => {
   const digest = 'd'.repeat(64);
   const value = representativeMechanical();
   value.files = [{ status: 'R100', oldPath: 'lib/old.ts', newPath: 'tests/new.test.ts', additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 }];
@@ -224,8 +224,22 @@ test('canonical report identifies a pure rename when it is the representative by
   if (!built.ok) return;
 
   const rendered = renderCanonicalChangeReport(built.value);
-  assert.match(rendered, /- 行数变化最大（按新增行\+删除行，最多展示 3 个）：\n  - <code>lib\/old\.ts<\/code> → <code>tests\/new\.test\.ts<\/code>（测试与校验（纯 rename））：新增 0 行、删除 0 行，共变更 0 行。/);
-  assert.match(rendered, /- 绝对净字节变化最大（最多展示 3 个）：\n  - <code>lib\/old\.ts<\/code> → <code>tests\/new\.test\.ts<\/code>（测试与校验（纯 rename））：净字节 \+0，绝对变化 0（文本）。/);
+  assert.match(rendered, /- 行数变化最大（仅文本文件，按新增行\+删除行，最多展示 3 个）：\n  - <code>lib\/old\.ts<\/code> → <code>tests\/new\.test\.ts<\/code>（测试与校验）：新增 0 行、删除 0 行，共变更 0 行。/);
+  assert.match(rendered, /- 绝对净字节变化最大（仅文本文件，最多展示 3 个）：\n  - <code>lib\/old\.ts<\/code> → <code>tests\/new\.test\.ts<\/code>（测试与校验）：净字节 \+0，绝对变化 0。/);
+});
+
+test('canonical report omits binary-only changes from representative summaries', () => {
+  const digest = 'd'.repeat(64);
+  const value = representativeMechanical();
+  value.files = [{ status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 }];
+  value.totals = { files: 1, textFiles: 0, binaryFiles: 1, additions: 0, deletions: 0, oldBytes: 600, newBytes: 300, netBytes: -300 };
+  const built = buildPrChangeReport(identity(), digest, value, candidate(digest));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /- 行数变化最大（仅文本文件，按新增行\+删除行，最多展示 3 个）：\n  - 无可比较的文本文件。/);
+  assert.match(rendered, /- 绝对净字节变化最大（仅文本文件，最多展示 3 个）：\n  - 无可比较的文本文件。/);
 });
 
 test('canonical report summarizes a precheck review route in Chinese', () => {

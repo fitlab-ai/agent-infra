@@ -493,18 +493,13 @@ function renderRepresentativePath(file: ChangeFile): string {
   return paths.map((filePath) => `<code>${escapeHtml(filePath)}</code>`).join(' → ');
 }
 
-function isPureRename(file: ChangeFile): boolean {
-  if (!file.status.startsWith('R') || !file.oldPath || !file.newPath || file.oldPath === file.newPath) return false;
-  return file.additions === null ? file.netBytes === 0 : file.additions === 0 && file.deletions === 0;
-}
-
 function representativeScore(file: ChangeFile, metric: 'lines' | 'bytes'): number {
   return metric === 'lines' ? file.additions! + file.deletions! : Math.abs(file.netBytes);
 }
 
 function representativeFiles(files: ChangeFile[], metric: 'lines' | 'bytes'): ChangeFile[] {
   return files
-    .filter((file) => metric === 'bytes' || (file.additions !== null && file.deletions !== null))
+    .filter((file) => file.additions !== null && file.deletions !== null)
     .slice()
     .sort((left, right) => {
       const scoreDifference = representativeScore(right, metric) - representativeScore(left, metric);
@@ -517,16 +512,14 @@ function representativeFiles(files: ChangeFile[], metric: 'lines' | 'bytes'): Ch
 }
 
 function renderRepresentativeFile(file: ChangeFile, metric: 'lines' | 'bytes'): string {
-  const rename = isPureRename(file) ? '（纯 rename）' : '';
-  const category = `${categoryForChangeFile(file).label}${rename}`;
+  const category = categoryForChangeFile(file).label;
   const pathValue = renderRepresentativePath(file);
   if (metric === 'lines') {
     const additions = file.additions!;
     const deletions = file.deletions!;
     return `  - ${pathValue}（${category}）：新增 ${additions} 行、删除 ${deletions} 行，共变更 ${additions + deletions} 行。`;
   }
-  const kind = file.additions === null ? '二进制' : '文本';
-  return `  - ${pathValue}（${category}）：净字节 ${signedNumber(file.netBytes)}，绝对变化 ${Math.abs(file.netBytes)}（${kind}）。`;
+  return `  - ${pathValue}（${category}）：净字节 ${signedNumber(file.netBytes)}，绝对变化 ${Math.abs(file.netBytes)}。`;
 }
 
 function renderRepresentativeFiles(files: ChangeFile[]): string[] {
@@ -535,10 +528,10 @@ function renderRepresentativeFiles(files: ChangeFile[]): string[] {
   return [
     '#### 代表性变更文件',
     '',
-    '- 行数变化最大（按新增行+删除行，最多展示 3 个）：',
+    '- 行数变化最大（仅文本文件，按新增行+删除行，最多展示 3 个）：',
     ...(lineFiles.length > 0 ? lineFiles.map((file) => renderRepresentativeFile(file, 'lines')) : ['  - 无可比较的文本文件。']),
-    '- 绝对净字节变化最大（最多展示 3 个）：',
-    ...(byteFiles.length > 0 ? byteFiles.map((file) => renderRepresentativeFile(file, 'bytes')) : ['  - 无文件可比较。'])
+    '- 绝对净字节变化最大（仅文本文件，最多展示 3 个）：',
+    ...(byteFiles.length > 0 ? byteFiles.map((file) => renderRepresentativeFile(file, 'bytes')) : ['  - 无可比较的文本文件。'])
   ];
 }
 
