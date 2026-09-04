@@ -241,7 +241,12 @@ function prOnlyInLabelFixture(closingIssues: number[], fixtureOptions: { failPul
   return { root, client, calls, getPrLabels: () => prLabels, getIssueLabels: () => issueLabels };
 }
 
-function boundPullRequestFixture(options: { milestoneFailure?: boolean; failPullRequestLabel?: boolean; prLabels?: string[] } = {}) {
+function boundPullRequestFixture(options: {
+  milestoneFailure?: boolean;
+  failPullRequestLabel?: boolean;
+  injectConcurrentUnrelatedLabel?: boolean;
+  prLabels?: string[];
+} = {}) {
   const root = prByNumberFixture();
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
@@ -274,6 +279,7 @@ function boundPullRequestFixture(options: { milestoneFailure?: boolean; failPull
   let prBody = 'Body';
   const issueMilestone = options.milestoneFailure ? '1.0.1' : '1.0.0';
   const writes: string[] = [];
+  const issuePatchPayloads: Array<Record<string, unknown>> = [];
   const client: GitHubClient = {
     version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], request: RequestOptions = {}) {
@@ -308,21 +314,31 @@ function boundPullRequestFixture(options: { milestoneFailure?: boolean; failPull
         }
         const labels = JSON.parse(request.input || '{}').labels as string[];
         if (endpoint.includes('/issues/7/')) issueLabels.push(...labels);
-        else prLabels.push(...labels);
+        else {
+          prLabels.push(...labels);
+          if (options.injectConcurrentUnrelatedLabel && !prLabels.includes('unrelated: concurrent')) {
+            prLabels.push('unrelated: concurrent');
+          }
+        }
         writes.push(`POST ${endpoint}`);
         return { ok: true, value: {} };
       }
       if (args.includes('PATCH') && /issues\/42$/.test(endpoint)) {
         writes.push(`PATCH ${endpoint}`);
-        const payload = JSON.parse(request.input || '{}') as { body?: string };
-        if (payload.body !== undefined) prBody = payload.body;
+        const payload = JSON.parse(request.input || '{}') as Record<string, unknown>;
+        issuePatchPayloads.push(payload);
+        if (typeof payload.body === 'string') prBody = payload.body;
+        if (Array.isArray(payload.labels)) prLabels = [...payload.labels.filter((label): label is string => typeof label === 'string')];
         return { ok: true, value: {} };
       }
       return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: args.join(' '), retryable: false } };
     },
     text() { return { ok: true, value: '' }; }
   } as unknown as GitHubClient;
-  return { root, taskId, client, writes, getIssueLabels: () => issueLabels, getPrLabels: () => prLabels };
+  return {
+    root, taskId, client, writes, issuePatchPayloads,
+    getIssueLabels: () => issueLabels, getPrLabels: () => prLabels
+  };
 }
 
 test('task-bound PR sync reads milestone prerequisites before writing Issue labels', async () => {
@@ -369,6 +385,21 @@ test('task-bound PR metadata and in-label sync replay as no-op after convergence
     });
     assert.equal(second.status, 'no-op');
     assert.equal(fixture.writes.length, writes);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound PR sync preserves an unrelated label added between incremental and metadata writes', async () => {
+  const fixture = boundPullRequestFixture({ injectConcurrentUnrelatedLabel: true });
+  try {
+    const result = await syncPlatformPullRequest(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature', 'unrelated: concurrent']);
+    assert.equal(fixture.issuePatchPayloads.some((payload) => Object.hasOwn(payload, 'labels')), false);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

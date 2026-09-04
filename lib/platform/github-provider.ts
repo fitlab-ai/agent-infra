@@ -655,7 +655,6 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
         changed = true;
       }
       const issuePatch: Record<string, unknown> = {};
-      if (labels !== undefined) issuePatch.labels = labels;
       if (assignees !== undefined) issuePatch.assignees = assignees;
       if (milestone !== undefined) {
         if (milestone === null) issuePatch.milestone = null;
