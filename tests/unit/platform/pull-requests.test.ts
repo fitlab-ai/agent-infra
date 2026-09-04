@@ -396,8 +396,8 @@ test('task-bound PR sync preserves an unrelated label added between incremental 
     const result = await syncPlatformPullRequest(fixture.taskId, {
       cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client: fixture.client
     });
-    assert.equal(result.status, 'blocked');
-    assert.equal(result.error?.code, 'IN_LABEL_SYNC_PARTIAL');
+    assert.equal(result.status, 'applied');
+    assert.equal(result.error, null);
     assert.deepEqual([...fixture.getPrLabels()].sort(), ['in: core', 'type: feature', 'unrelated: concurrent']);
     assert.equal(fixture.issuePatchPayloads.some((payload) => Object.hasOwn(payload, 'labels')), false);
   } finally {

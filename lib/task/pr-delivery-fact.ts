@@ -1,4 +1,5 @@
 import type { ResourceIdentity } from '../platform/resource-identity.ts';
+import { isLegacyCompatibilityEnabled, legacyCompatibilityError, VERSION } from '../version.ts';
 import {
   isResourceIdentity,
   parseResourceIdentity,
@@ -132,9 +133,12 @@ function decodeLegacyIdentity(value: unknown): PrDeliveryIdentity {
 
 function provenanceForSource(source: PrDeliveryBindingSource): PrDeliveryProvenance { return source === 'created' ? 'create-post' : source === 'reused' ? 'reuse' : source; }
 
-function parseFact(value: unknown): PrDeliveryFact {
+function parseFact(value: unknown, runtimeVersion = VERSION): PrDeliveryFact {
   if (!isRecord(value)) throw factError('fact must be an object');
   if ((value.version !== 1 && value.version !== 2) || typeof value.state !== 'string') throw factError('version or state is invalid');
+  if (value.version === 1 && !isLegacyCompatibilityEnabled(runtimeVersion)) {
+    throw legacyCompatibilityError('v1 PR delivery fact', runtimeVersion);
+  }
   if (value.state === 'unbound') {
     exactKeys(value, ['version', 'state', 'reason'], 'unbound fact');
     if (value.reason !== 'initial') throw factError('unbound reason is invalid');
@@ -162,7 +166,7 @@ function parseFact(value: unknown): PrDeliveryFact {
         mergedAt: value.binding.mergedAt === null ? null : timestamp(value.binding.mergedAt, 'binding.mergedAt'), mergeCommitSha: nullableText(value.binding.mergeCommitSha, 'binding.mergeCommitSha')
       },
       provenance: value.provenance
-    });
+    }, runtimeVersion);
   }
   exactKeys(value, ['version', 'state', 'identity', 'binding', 'provenance'], 'bound fact');
   if (!isRecord(value.binding) || !isRecord(value.provenance)) throw factError('binding or provenance is invalid');
@@ -186,17 +190,17 @@ function parseFact(value: unknown): PrDeliveryFact {
   };
 }
 
-function decodePrDeliveryFact(value: unknown): PrDeliveryFact {
+function decodePrDeliveryFact(value: unknown, runtimeVersion = VERSION): PrDeliveryFact {
   if (typeof value === 'string') {
-    try { return parseFact(JSON.parse(value)); }
+    try { return parseFact(JSON.parse(value), runtimeVersion); }
     catch (error) { throw error instanceof Error && error.message.startsWith('PR_DELIVERY_FACT_INVALID:') ? error : factError('value is not valid JSON'); }
   }
-  return parseFact(value);
+  return parseFact(value, runtimeVersion);
 }
 function encodePrDeliveryFact(fact: PrDeliveryFact): string { return JSON.stringify(parseFact(fact)); }
-function readPrDeliveryFact(metadata: Record<string, unknown>): PrDeliveryFactReadResult {
+function readPrDeliveryFact(metadata: Record<string, unknown>, runtimeVersion = VERSION): PrDeliveryFactReadResult {
   if (!Object.hasOwn(metadata, PR_DELIVERY_FACT_KEY) || metadata[PR_DELIVERY_FACT_KEY] === '') return { status: 'missing', fact: null };
-  try { return { status: 'valid', fact: decodePrDeliveryFact(metadata[PR_DELIVERY_FACT_KEY]) }; }
+  try { return { status: 'valid', fact: decodePrDeliveryFact(metadata[PR_DELIVERY_FACT_KEY], runtimeVersion) }; }
   catch (error) { return { status: 'invalid', fact: null, error: error instanceof Error ? error : factError(String(error)) }; }
 }
 function buildUnboundFact(): PrDeliveryFact { return { version: 2, state: 'unbound', reason: 'initial' }; }

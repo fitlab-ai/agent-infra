@@ -1588,8 +1588,10 @@ async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): P
         message: `In-label synchronization is partial or unknown: ${reread.error.message}`
       }, base.prNumber));
       finalPullRequest = normalizeProviderPullRequest(reread.value, base.context.platform.repository!, base.prNumber || 0, inspected.pullRequest);
-      const expected = (planned.find((operation) => operation.name === 'labels')?.value as string[] || []).sort();
-      if (finalPullRequest.labels.join('\0') !== expected.join('\0')) return softenFailure(providerPullRequestError(base, {
+      const expected = ((planned.find((operation) => operation.name === 'labels')?.value as string[] || [])
+        .filter((label) => label.startsWith('in:') || label.startsWith('type:'))).sort();
+      const actual = finalPullRequest.labels.filter((label) => label.startsWith('in:') || label.startsWith('type:')).sort();
+      if (actual.join('\0') !== expected.join('\0')) return softenFailure(providerPullRequestError(base, {
         code: 'IN_LABEL_SYNC_PARTIAL',
         message: 'Pull request labels did not converge after update',
         retryable: true
