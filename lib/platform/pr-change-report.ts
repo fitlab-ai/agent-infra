@@ -464,15 +464,19 @@ function signedNumber(value: number): string {
   return `${value >= 0 ? '+' : ''}${value}`;
 }
 
-function renderLineDelta(totals: ChangeTotals): string {
-  return totals.textFiles === 0 ? '—' : `+${totals.additions}/-${totals.deletions}`;
+function renderLineCounts(totals: ChangeTotals): [string, string, string] {
+  if (totals.textFiles === 0) return ['—', '—', '—'];
+  return [String(totals.additions), String(totals.deletions), signedNumber(totals.additions - totals.deletions)];
 }
 
 function renderCanonicalChangeReport(report: PrChangeReport): string {
   const totals = report.diff.totals;
   const categories = summarizeChangeCategories(report.diff.files);
-  const rows = categories.map(({ label, totals: categoryTotals }) =>
-    `| ${label} | ${categoryTotals.files} | ${categoryTotals.textFiles} / ${categoryTotals.binaryFiles} | ${renderLineDelta(categoryTotals)} | ${signedNumber(categoryTotals.netBytes)} |`);
+  const rows = categories.map(({ label, totals: categoryTotals }) => {
+    const [additions, deletions, netLines] = renderLineCounts(categoryTotals);
+    return `| ${label} | ${categoryTotals.files} | ${additions} | ${deletions} | ${netLines} | ${categoryTotals.oldBytes} | ${categoryTotals.newBytes} | ${signedNumber(categoryTotals.netBytes)} | ${categoryTotals.textFiles} / ${categoryTotals.binaryFiles} |`;
+  });
+  const [additions, deletions, netLines] = renderLineCounts(totals);
   const passedChecks = report.precheck.checks.filter((check) => check.verdict === 'pass').length;
   const needsReviewChecks = report.precheck.checks.length - passedChecks;
   const precheckSummary = report.precheck.verdict === 'clear'
@@ -485,10 +489,10 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
   return [
     CANONICAL_REPORT_HEADING,
     '',
-    '| 变更类别 | 文件数 | 文本 / 二进制 | 行增减 | 净字节 |',
-    '| --- | ---: | ---: | ---: | ---: |',
+    '| 变更类别 | 文件数 | 新增行 | 删除行 | 净增行 | 旧字节 | 新字节 | 净字节 | 文本 / 二进制 |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ...rows,
-    `| **合计** | ${totals.files} | ${totals.textFiles} / ${totals.binaryFiles} | ${renderLineDelta(totals)} | ${signedNumber(totals.netBytes)} |`,
+    `| **合计** | ${totals.files} | ${additions} | ${deletions} | ${netLines} | ${totals.oldBytes} | ${totals.newBytes} | ${signedNumber(totals.netBytes)} | ${totals.textFiles} / ${totals.binaryFiles} |`,
     '',
     `- 总体统计：新增 ${totals.additions} 行、删除 ${totals.deletions} 行；旧字节 ${totals.oldBytes}，新字节 ${totals.newBytes}。`,
     `- 变更明细按高层类别聚合展示；完整逐文件事实保留在结构化报告中供审计。`,

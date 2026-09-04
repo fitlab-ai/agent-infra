@@ -172,9 +172,10 @@ test('canonical report renders high-level change categories and a Chinese preche
   if (!built.ok) return;
 
   const rendered = renderCanonicalChangeReport(built.value);
-  assert.match(rendered, /\| 运行时代码 \| 1 \| 1 \/ 0 \| \+4\/-1 \| \+3 \|/);
-  assert.match(rendered, /\| 模板与生成内容 \| 1 \| 1 \/ 0 \| \+3\/-0 \| \+20 \|/);
-  assert.match(rendered, /\| \*\*合计\*\* \| 5 \| 4 \/ 1 \| \+9\/-3 \| \+19 \|/);
+  assert.match(rendered, /\| 运行时代码 \| 1 \| 4 \| 1 \| \+3 \| 10 \| 13 \| \+3 \| 1 \/ 0 \|/);
+  assert.match(rendered, /\| 技能与协作配置 \| 1 \| 0 \| 2 \| -2 \| 10 \| 0 \| -10 \| 1 \/ 0 \|/);
+  assert.match(rendered, /\| 文档与其他 \| 1 \| — \| — \| — \| 0 \| 4 \| \+4 \| 0 \/ 1 \|/);
+  assert.match(rendered, /\| \*\*合计\*\* \| 5 \| 9 \| 3 \| \+6 \| 25 \| 44 \| \+19 \| 4 \/ 1 \|/);
   assert.equal(rendered.split('#### 适宜性预检\n')[1], '- 结论：**通过**（6/6 项通过）；继续监控 PR；正式审查：否。\n- 高层分析：各项适宜性检查均通过，当前变更可继续进入后续流程。 详细证据保留在结构化报告中。');
 });
 
