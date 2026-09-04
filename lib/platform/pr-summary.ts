@@ -493,6 +493,9 @@ async function syncPullRequestSummary(
       ? { ...output, result: null, warnings: [] }
       : { ...softenFailure(output) };
   };
+  const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
+  if (fact.status === 'invalid') return preserveFailure(platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }));
   if (!options.changeReportFile) return preserveFailure(platformResult('failed', { error: { code: 'PR_CHANGE_REPORT_MISSING', message: 'summary-sync requires --change-report-file', retryable: false } }));
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
