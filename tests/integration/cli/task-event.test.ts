@@ -940,8 +940,11 @@ test('source completion records resumable invalidation and downstream writers fa
   });
   const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stdout || started.stderr);
-  fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), '# Analysis round 2\n');
-  const completed = run(f.root, [f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md']);
+  fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
+  const completed = run(f.root, [
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
+    ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+  ]);
   assert.equal(completed.status, 0, completed.stdout || completed.stderr);
   const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
   assert.equal(invalidation.ok, true);
