@@ -8,6 +8,8 @@ description: >
 
 # Run Manual Validation
 
+Lifecycle events require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` or `validation-rerun`. Reuse the same values for started and completed.
+
 ## Task Context Resolution
 
 The entry point may omit the task ref; explicit task scope accepts only `--task <ref>` or `-t <ref>`, and positional task refs are not interpreted. Parse `--scope`, `--timeout`, and `--format` before `--`, preserve the user command after `--` verbatim, then call `agent-infra-internal task-context resolve {task-scope}`. Pass through resolution failures without scanning tasks locally. The internal `task-validate` protocol continues to use a positional task ref.
@@ -32,10 +34,10 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 1. Read `reference/discovery-and-execution.md` and parse the input mode. Stop before started without an artifact for invalid or partial input.
 2. Run `agent-infra-internal task-artifact {task-id} inspect --family validation-run` and read the latest review-code manual-validation items. Then run `agent-infra-internal platform-pr inspect {task-id}` and use the reference status matrix to discover, merge, and number items. Only automatic mode stops before started when reliable sources are empty or the sole possible source is unreadable; valid explicit mode always continues with the user command as effective work.
-3. Take the round and artifact name from the core result. After confirming valid explicit work or a non-empty discovered list, run `agent-infra-internal task-event {task-id} validation-run.started --agent {standard-agent-token}` and classify each item as `executable|unavailable|unknown|unsafe|unresolved`.
+3. Take the round and artifact name from the core result. After confirming valid explicit work or a non-empty discovered list, run `agent-infra-internal task-event {task-id} validation-run.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}` and classify each item as `executable|unavailable|unknown|unsafe|unresolved`.
 4. Invoke every executable item separately with `agent-infra-internal task-validate {task-ref} --scope snapshot --format json -- {command...}`. Only make a second explicit inplace invocation for that item when evidence proves it is required. If no item is executable, run no fabricated command but still produce coverage-gap evidence.
 5. Read `reference/report-template.md`, create `validation-run.md|validation-run-r{N}.md`, and record the input mode, discovered list, per-item results, CLI JSON allowlist, and sanitized summaries.
-6. Run `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --artifact {artifact}`. When an Issue exists, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` and then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}`.
+6. Run `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {artifact}`. When an Issue exists, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` and then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}`.
 7. Run `agent-infra-internal task-verify {task-id} validation-run.completed --artifact {artifact} --format text`; fix failures and rerun it.
 8. Report the evidence path, coverage gaps, and verification result; explicitly leave the decision to run `complete-manual-validation` to the maintainer. Read `.agents/rules/next-step-output.md` and end with `Completed at`.
 

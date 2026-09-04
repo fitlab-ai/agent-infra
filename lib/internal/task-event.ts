@@ -14,6 +14,8 @@ Events: ${eventCatalog.join(', ')}
 const FLAGS: Record<string, keyof TaskEventRequest> = {
   '--agent': 'agent', '--round': 'round', '--question': 'question', '--artifact': 'artifact',
   '--artifact-sha256': 'artifactSha256', '--semantic-digest': 'semanticDigest',
+  '--initiator': 'initiator', '--request-id': 'requestId', '--reason-code': 'reasonCode',
+  '--source-finding': 'sourceFinding', '--source-artifact': 'sourceArtifact', '--source-sha256': 'sourceSha256',
   '--fix-for': 'fixFor', '--implementation-input': 'implementationInput',
   '--verdict': 'verdict', '--blockers': 'blockers', '--major': 'major',
   '--minor': 'minor', '--manual-validation': 'manualValidation', '--files-modified': 'filesModified',

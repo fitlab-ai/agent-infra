@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { artifactName, maxRound } from "./review-artifacts.ts";
+import { invalidationBlocks, isArtifactInvalidated, parseInvalidationDocument } from "./invalidation.ts";
 
 type ReviewedGitTree = string & { readonly __reviewedGitTree: unique symbol };
 const REVIEWED_TREE_RE = /^[a-f0-9]{40,64}$/;
@@ -46,15 +47,35 @@ export function findAuthoritativeReviewCodeArtifact(taskDir: string) {
   const entries = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
   const round = maxRound(entries, "review-code");
   if (round === 0) {
-    return { ok: false, round: 0, fileName: null, path: null };
+    return { ok: false, round: 0, fileName: null, path: null, error: null };
   }
 
   const fileName = artifactName("review-code", round);
+  let taskContent: string;
+  try {
+    taskContent = fs.readFileSync(path.join(taskDir, "task.md"), "utf8");
+  } catch (error) {
+    return {
+      ok: false, round, fileName, path: null,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+  const invalidation = parseInvalidationDocument(taskContent);
+  if (!invalidation.ok) {
+    return { ok: false, round, fileName, path: null, error: invalidation.message };
+  }
+  if (invalidationBlocks(invalidation.document)) {
+    return { ok: false, round, fileName, path: null, error: "artifact invalidation is incomplete; reconcile task.md before using review-code" };
+  }
+  if (isArtifactInvalidated(invalidation.document, "review-code", fileName)) {
+    return { ok: false, round, fileName, path: null, error: `${fileName} is invalidated; re-run review-code` };
+  }
   return {
     ok: true,
     round,
     fileName,
-    path: path.join(taskDir, fileName)
+    path: path.join(taskDir, fileName),
+    error: null
   };
 }
 

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import {
   declareImplementationInput,
@@ -13,6 +14,8 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
 import { allowsManualOverride } from './guard-override.ts';
+import { parseReworkIntentDocument, reworkIntentMutation, upsertReworkIntent } from './rework-intent.ts';
+import type { ReworkIntent, ReworkTarget } from './rework-intent.ts';
 
 type ReviewSeverity = 'blocker' | 'major' | 'minor';
 type ExecutorResponse = 'accepted' | 'adjusted' | 'refuted' | 'cannot-judge';
@@ -22,7 +25,8 @@ type LedgerIntent =
   | { kind: 'finding-respond'; taskRef: string; id: string; round: number; status: ExecutorResponse; evidence: string; dryRun?: boolean }
   | { kind: 'finding-review'; taskRef: string; id: string; status: ReviewDisposition; evidence: string; needsImplementation?: boolean; dryRun?: boolean }
   | { kind: 'decision-next-id'; taskRef: string }
-  | { kind: 'decision-upsert'; taskRef: string; id: string; stage: ReviewStage; artifact: string; needsImplementation?: boolean; dryRun?: boolean };
+  | { kind: 'decision-upsert'; taskRef: string; id: string; stage: ReviewStage; artifact: string; needsImplementation?: boolean; dryRun?: boolean }
+  | { kind: 'rework-intent-upsert'; taskRef: string; intentId: string; findingId: string; sourceArtifact: string; sourceSha256: string; target: ReworkTarget; dryRun?: boolean };
 
 type LedgerIntentError = { code: string; message: string };
 type LedgerIntentResult = {
@@ -134,6 +138,36 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
 
   if (intent.kind === 'decision-next-id') {
     return { status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: nextHdId(rows), before: null, after: null, operations: [], error: null };
+  }
+
+  if (intent.kind === 'rework-intent-upsert') {
+    if (!/^RI-[1-9]\d*$/.test(intent.intentId) || !/^(AN|PL|CD)-[1-9]\d*$/.test(intent.findingId) || !['analysis', 'plan', 'code'].includes(intent.target) || !/^[a-f0-9]{64}$/.test(intent.sourceSha256)) {
+      return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rework intent identity, target, or source hash is invalid', resolved.taskId, intent.intentId);
+    }
+    const finding = rows.find((row) => row.id === intent.findingId);
+    if (!finding || finding.severity === 'decision') return failed(intent, 'LEDGER_NOT_FOUND', `finding '${intent.findingId}' was not found`, resolved.taskId, intent.findingId);
+    const sourceFromEvidence = finding.evidence.split('#')[0];
+    if (sourceFromEvidence !== intent.sourceArtifact || !REVIEW_ARTIFACT[finding.stage as ReviewStage]?.test(intent.sourceArtifact)) {
+      return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact does not match finding evidence', resolved.taskId, intent.intentId);
+    }
+    try {
+      const actualHash = createHash('sha256').update(fs.readFileSync(path.join(resolved.taskDir, intent.sourceArtifact))).digest('hex');
+      if (actualHash !== intent.sourceSha256) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact hash does not match', resolved.taskId, intent.intentId);
+      const parsed = parseReworkIntentDocument(content);
+      if (!parsed.ok) return failed(intent, parsed.code, parsed.message, resolved.taskId, intent.intentId);
+      const nextIntent: ReworkIntent = {
+        intentId: intent.intentId, findingId: intent.findingId, sourceArtifact: intent.sourceArtifact,
+        sourceSha256: intent.sourceSha256, target: intent.target, status: 'pending',
+        declaredAt: new Date().toISOString(), consumedAt: ''
+      };
+      const next = upsertReworkIntent(parsed.intents, nextIntent);
+      if (!next.changed) return { status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: intent.intentId, before: null, after: null, operations: [], error: null };
+      const result = writeTask({ taskRef: intent.taskRef, expectedState: 'active', dryRun: intent.dryRun, mutations: [reworkIntentMutation(content, next.intents)] }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });
+      if (result.status === 'failed') return failed(intent, result.error.code, result.error.message, result.taskId, intent.intentId);
+      return { status: result.status, changed: result.changed, intent: intent.kind, taskId: result.taskId, entityId: intent.intentId, before: null, after: null, operations: result.operations, error: null };
+    } catch (error) {
+      return failed(intent, 'LEDGER_IDENTITY_CONFLICT', error instanceof Error ? error.message : String(error), resolved.taskId, intent.intentId);
+    }
   }
 
   let before: LedgerRow | null = null;

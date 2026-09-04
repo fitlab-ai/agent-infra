@@ -183,6 +183,11 @@ if (taskControlCommand) {
     await taskEvent(process.argv.slice(3));
     break;
   }
+  case 'task-invalidation': {
+    const { taskInvalidation } = await import('../lib/internal/task-invalidation.ts');
+    taskInvalidation(process.argv.slice(3));
+    break;
+  }
   case 'task-lifecycle': {
     const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
     await taskLifecycle(process.argv.slice(3));

@@ -5,6 +5,7 @@ const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 const ABORTED_SUFFIX_RE = /\s*\[aborted\]\s*$/;
 const ATTEMPT_RE = /(?:^|;\s*)attempt=([A-Za-z0-9-]{8,64})(?:;|$)/;
 const COMMIT_STARTED_RE = /^started; attempt=([A-Za-z0-9-]{8,64}); baseline=([a-f0-9]{40,64}); agent=([a-z-]+)$/;
+const LIFECYCLE_STEP_RE = /^(?:Complete Manual Validation|(?:Analyze Task|Review Analysis|Plan Task|Review Plan|Code Task|Review Code|Run Manual Validation) \(Round [1-9]\d*(?:(?:, fix for review-code(?:-r[2-9]|-r[1-9]\d+)?\.md)|(?:, decision II-[1-9]\d*))?\))$/;
 
 type LogEntry = { time: string; step: string; agent: string; note: string };
 type StepRow = { step: string; agent: string; started: string; done: string; note: string; attempt?: string };
@@ -93,9 +94,16 @@ function startedBackedRows(rows: StepRow[]): StepRow[] {
   return rows.filter((row) => row.started !== '');
 }
 
+function hasOpenLifecycleExecution(content: string): boolean {
+  const section = locateActivityLog(content);
+  if (!section) return false;
+  return pairEntries(section.entries).some((row) => row.done === '' && LIFECYCLE_STEP_RE.test(row.step));
+}
+
 export {
   activityAttempt,
   appendActivityEntry,
+  hasOpenLifecycleExecution,
   commitAttemptStartedNote,
   locateActivityLog,
   pairEntries,

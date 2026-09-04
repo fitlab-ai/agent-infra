@@ -8,6 +8,8 @@ import { parseImplementationInputs, selectPendingImplementationInput } from './i
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
 import { receiptForOutput, sha256File } from './artifact-receipts.ts';
+import { isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
+import type { InvalidationDocument } from './invalidation.ts';
 
 const artifactFamilyCatalog = [
   { family: 'analysis', sectionAliases: ['分析', 'Analysis'], heading: '分析', labels: ['需求分析报告', 'Requirements Analysis'] },
@@ -47,7 +49,7 @@ type ArtifactErrorCode =
   | 'ARTIFACT_REFERENCE_INVALID' | 'ARTIFACT_PATH_INVALID'
   | 'ARTIFACT_IDENTITY_INVALID' | 'ARTIFACT_NOT_FOUND'
   | 'ARTIFACT_NOT_REGULAR' | 'ARTIFACT_NOT_READABLE' | 'ARTIFACT_VERDICT_INVALID'
-  | 'ARTIFACT_MODE_REFUSED';
+  | 'ARTIFACT_MODE_REFUSED' | 'ARTIFACT_INVALIDATION_INVALID';
 type ArtifactError = { code: ArtifactErrorCode; message: string };
 type ArtifactInventoryResult = {
   status: 'ready' | 'failed';
@@ -154,7 +156,23 @@ function inspectArtifactDirectory(
       taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null
     });
   }
+  let invalidation: InvalidationDocument = { operations: [], targets: [] };
+  try {
+    const taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    const parsed = parseInvalidationDocument(taskContent);
+    if (!parsed.ok) {
+      return failure(requestRef, family, { code: 'ARTIFACT_INVALIDATION_INVALID', message: parsed.message }, {
+        taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null
+      });
+    }
+    invalidation = parsed.document;
+  } catch (error) {
+    return failure(requestRef, family, { code: 'ARTIFACT_INVALIDATION_INVALID', message: String(error) }, {
+      taskId: identity.taskId ?? null, taskDir, taskState: identity.taskState ?? null
+    });
+  }
   const artifacts: ArtifactIdentity[] = [];
+  const knownArtifacts: ArtifactIdentity[] = [];
   const diagnostics: ArtifactDiagnostic[] = [];
   for (const entry of entries) {
     const parsed = parseArtifactName(entry.name);
@@ -184,17 +202,20 @@ function inspectArtifactDirectory(
         diagnostics.push(diagnostic('FILESYSTEM_RACE', family, entry.name, `artifact is not readable: ${entry.name}`));
         continue;
       }
-      artifacts.push({ ...parsed, path: abs, size: stat.size, mtimeMs: stat.mtimeMs });
+      const identity = { ...parsed, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
+      knownArtifacts.push(identity);
+      if (!isArtifactInvalidated(invalidation, family, entry.name)) artifacts.push(identity);
     } catch (error) {
       diagnostics.push(diagnostic('FILESYSTEM_RACE', family, entry.name, String(error)));
     }
   }
   artifacts.sort((left, right) => left.round - right.round);
-  const rounds = new Set(artifacts.map((item) => item.round));
-  if (artifacts.length > 0 && !rounds.has(1)) diagnostics.push(diagnostic('MISSING_BASE', family, null, `${family}.md is missing`));
-  const max = artifacts.at(-1)?.round ?? 0;
+  knownArtifacts.sort((left, right) => left.round - right.round);
+  const knownRounds = new Set(knownArtifacts.map((item) => item.round));
+  if (knownArtifacts.length > 0 && !knownRounds.has(1)) diagnostics.push(diagnostic('MISSING_BASE', family, null, `${family}.md is missing`));
+  const max = knownArtifacts.at(-1)?.round ?? 0;
   for (let round = 1; round <= max; round += 1) {
-    if (!rounds.has(round)) diagnostics.push(diagnostic('ROUND_GAP', family, null, `${artifactName(family, round)} is missing`));
+    if (!knownRounds.has(round)) diagnostics.push(diagnostic('ROUND_GAP', family, null, `${artifactName(family, round)} is missing`));
   }
   const latest = artifacts.at(-1) ?? null;
   const reviewedInput = family.startsWith('review-') && latest
@@ -230,6 +251,11 @@ function resolveReviewedInput(
     const stat = fs.lstatSync(abs);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('referenced input is not a regular file');
     const taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    const invalidation = parseInvalidationDocument(taskContent);
+    if (!invalidation.ok) throw new Error(invalidation.message);
+    if (isArtifactInvalidated(invalidation.document, expectedFamily, parsed.name)) {
+      throw new Error(`${parsed.name} is invalidated`);
+    }
     const receipt = receiptForOutput(taskContent, review.name);
     if (!receipt) throw new Error(`receipt for ${review.name} is missing`);
     const expectedEvent = reviewEventName(review.family);

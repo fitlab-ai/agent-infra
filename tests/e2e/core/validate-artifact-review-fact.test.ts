@@ -1,10 +1,13 @@
 import test from "node:test";
+import fs from "node:fs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
 import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
+import { sha256File } from "../../../lib/task/artifact-receipts.ts";
+import { createInvalidationOperation, renderInvalidation, targetIdFor } from "../../../lib/task/invalidation.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
 import {
   buildTaskFrontmatter,
@@ -84,6 +87,35 @@ function artifactContent(
   ].join("\n");
 }
 
+function invalidateReview(taskDir: string): void {
+  const taskPath = path.join(taskDir, "task.md");
+  const reviewPath = path.join(taskDir, "review-code.md");
+  const now = "2026-03-28T00:01:00.000Z";
+  const operation = createInvalidationOperation({
+    sourceFamily: "code", sourceArtifact: "code-r2.md", sourceRound: 2,
+    sourceSha256: "a".repeat(64), createdAt: now, updatedAt: now
+  });
+  const shape = {
+    targetKind: "artifact" as const,
+    targetFamily: "review-code",
+    targetArtifact: "review-code.md",
+    targetRound: 1,
+    targetSha256: sha256File(reviewPath)
+  };
+  const target = {
+    ...shape,
+    targetId: targetIdFor(operation.operationId, shape),
+    operationId: operation.operationId,
+    status: "completed" as const,
+    reasonCode: "upstream-replaced",
+    updatedAt: now
+  };
+  write(taskPath, `${fs.readFileSync(taskPath, "utf8")}\n## 产物失效记录\n\n${renderInvalidation({
+    operations: [{ ...operation, status: "completed", processed: 1, total: 1, completedAt: now }],
+    targets: [target]
+  })}\n`);
+}
+
 test("review-fact accepts an approved clean committed range with an independent diff base", onPlatforms("linux", "darwin", "win32"), async () => {
   await withTempRoot("agent-infra-review-fact-committed-range-", async (tempRoot) => {
     const { taskDir, previous, baseline } = setupRepo(tempRoot);
@@ -123,6 +155,20 @@ test("review-fact rejects an approved report when last_reviewed_commit is stale"
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /last_reviewed_commit/);
+  });
+});
+
+test("review-fact rejects a completed-invalidated review artifact", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-review-fact-invalidated-", async (tempRoot) => {
+    const { taskDir, baseline } = setupRepo(tempRoot);
+    write(path.join(taskDir, "task.md"), taskContent(baseline));
+    write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
+    invalidateReview(taskDir);
+
+    const { result, payload } = await runCheck(taskDir);
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(payload.status, "fail");
+    assert.match(payload.message, /invalidated|active artifact/i);
   });
 });
 

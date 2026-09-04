@@ -9,7 +9,7 @@ description: >
 # Analyze Task
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to the completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts.
+If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to the completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts. Lifecycle events also require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request`, `new-requirement`, or `upstream-fact-doubt`. Reuse the same values for started and completed.
 
 ## Boundary / Critical Rules
 
@@ -41,7 +41,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Declare the started Event
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} analyze.started --agent {standard-agent-token}` and verify the returned `artifactContext`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} analyze.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}` and verify the returned `artifactContext`.
 
 ## Steps
 
@@ -213,7 +213,7 @@ agent-infra-internal task-artifact {task-id} finalize-local --family analysis --
 - On `status=failed` with `repairable=true`, apply only the diagnostic's `replace-line` operation once, then rerun the same command completely; count an attempt only after bytes change, up to 8 attempts.
 - The first repairable failure's `semanticDigest` is retained as the baseline; a retried `status=passed` result must match it. On baseline mismatch, any other failure, no progress, or a repeated diagnostic, stop without publishing a completed event.
 
-Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
+Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 

@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 
 import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts';
+import { sha256File } from '../../../lib/task/artifact-receipts.ts';
+import { createInvalidationOperation, renderInvalidation, targetIdFor } from '../../../lib/task/invalidation.ts';
 import { deliverTaskBranch } from '../../../lib/task/delivery.ts';
 
 const TASK_ID = 'TASK-20260831-000001';
@@ -161,4 +163,42 @@ test('task delivery refuses an unknown remote branch drift', () => {
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'DELIVERY_REMOTE_DRIFT');
   assert.notEqual(remoteHead(f.remote), nextHead);
+});
+
+test('task delivery rejects a completed invalidation target for the authoritative review', () => {
+  const f = fixture();
+  const now = '2026-08-31T00:01:00.000Z';
+  const source = {
+    sourceFamily: 'code', sourceArtifact: 'code-r2.md', sourceRound: 2,
+    sourceSha256: 'a'.repeat(64), createdAt: now, updatedAt: now
+  };
+  const operation = createInvalidationOperation(source);
+  const shape = {
+    targetKind: 'artifact' as const,
+    targetFamily: 'review-code',
+    targetArtifact: 'review-code.md',
+    targetRound: 1,
+    targetSha256: sha256File(path.join(f.taskDir, 'review-code.md'))
+  };
+  const target = {
+    ...shape,
+    targetId: targetIdFor(operation.operationId, shape),
+    operationId: operation.operationId,
+    status: 'completed' as const,
+    reasonCode: 'upstream-replaced',
+    updatedAt: now
+  };
+  const completed = {
+    ...operation,
+    status: 'completed' as const,
+    processed: 1,
+    total: 1,
+    completedAt: now
+  };
+  fs.appendFileSync(f.taskPath, `\n## 产物失效记录\n\n${renderInvalidation({ operations: [completed], targets: [target] })}\n`);
+
+  const result = deliverTaskBranch(TASK_ID, { repoRoot: f.root, agent: 'codex', dryRun: true });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'DELIVERY_REVIEW_REQUIRED');
+  assert.equal(fs.existsSync(path.join(f.taskDir, 'review-code.md')), true);
 });

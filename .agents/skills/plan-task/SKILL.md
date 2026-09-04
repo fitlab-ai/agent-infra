@@ -9,7 +9,7 @@ description: >
 # 设计技术方案
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
-若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。
+若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。生命周期事件还必须携带显式触发信息：编排调用使用 `{trigger-initiator}=orchestrator`，否则使用 `model`；`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 使用 `user-request`、`new-requirement` 或 `upstream-fact-doubt`；started 与 completed 使用同一组值。
 
 ## 行为边界 / 关键规则
 
@@ -44,7 +44,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 确认前置条件和轮次后、本轮第一个产出动作之前执行：
 
 ```bash
-agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-token}
+agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}
 ```
 
 ## 执行步骤
@@ -121,7 +121,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
   - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`；finalizer 已记录对应的一次性本地 provenance intent。
   - `status=failed` 且 `repairable=true`：仅按诊断中的 `replace-line` 操作做一次最小修改，然后完整重跑同一命令；实际字节发生变化才计一次 `repairAttempts`，最多 8 次。
   - 首次可修复失败的 `semanticDigest` 由 finalizer 保留为基线；重试后的 `status=passed` 必须匹配该基线。基线不匹配、其他失败、无进展或重复诊断：停止，不发布 completed 事件。
-- 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
+- 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {plan-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status pending-design-work --fields`

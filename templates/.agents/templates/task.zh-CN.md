@@ -98,6 +98,23 @@ delivery_remote_head:          # 最近一次成功交付到 remote 的任务分
 | id | time | step | severity | code | status | target | message | action | resolved_at | resolution |
 |----|------|------|----------|------|--------|---------|--------|-------------|------------|------------|
 
+## 返工意图
+
+| intent_id | finding_id | source_artifact | source_sha256 | target | status | declared_at | consumed_at |
+|-----------|------------|----------------|---------------|--------|--------|-------------|-------------|
+
+## 产物失效记录
+
+### Operations
+
+| operation_id | source_family | source_artifact | source_round | source_sha256 | status | processed | total | created_at | updated_at | completed_at | error |
+|--------------|---------------|-----------------|--------------|---------------|--------|-----------|-------|------------|------------|--------------|-------|
+
+### Targets
+
+| target_id | operation_id | target_kind | target_family | target_artifact | target_round | target_sha256 | status | reason_code | updated_at |
+|-----------|--------------|-------------|---------------|-----------------|--------------|---------------|--------|-------------|------------|
+
 ## 活动日志
 
 <!-- 每个工作流步骤追加一条新记录，不要覆盖之前的记录。 -->

@@ -9,6 +9,8 @@ description: >
 # Complete Manual Validation
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
+Lifecycle events require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` or `validation-rerun`. Reuse the same values for started and completed.
+
 
 ## Boundary / Critical Rules
 
@@ -38,7 +40,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## Step Start: Write the started Marker
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} manual-validation.started --agent {standard-agent-token}` and record the returned `artifactContext`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} manual-validation.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}` and record the returned `artifactContext`.
 
 ## Steps
 
@@ -86,7 +88,7 @@ Before this step, read `reference/report-template.md`. Create `{manual-validatio
 
 ### 6. Update task.md
 
-Run `agent-infra-internal task-event {task-id} manual-validation.completed --agent {standard-agent-token} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`. The core keeps `current_step` unchanged while atomically recording the implementation-notes link, metadata, and done log.
+Run `agent-infra-internal task-event {task-id} manual-validation.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`. The core keeps `current_step` unchanged while atomically recording the implementation-notes link, metadata, and done log.
 
 If the task has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`.
 

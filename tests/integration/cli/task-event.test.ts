@@ -16,8 +16,10 @@ import {
   validateLocalArtifact,
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
+import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 
 function fixture(step = 'requirement-analysis-review') {
+  const explicitStep = arguments.length > 0;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-'));
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
@@ -25,6 +27,21 @@ function fixture(step = 'requirement-analysis-review') {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
+  if ((!explicitStep && step === 'requirement-analysis-review') || step === 'commit') {
+    fs.writeFileSync(path.join(dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+    addReceipt(path.join(dir, 'task.md'), {
+      event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+      inputSha256: sha256File(path.join(dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+    });
+  }
+  if (step === 'code-review' || step === 'commit') {
+    fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
+    fs.writeFileSync(path.join(dir, 'review-code.md'), reviewCodeArtifact());
+    addReceipt(path.join(dir, 'task.md'), {
+      event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+      inputSha256: sha256File(path.join(dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00'
+    });
+  }
   return { root, id, dir, file: path.join(dir, 'task.md') };
 }
 
@@ -87,7 +104,14 @@ function currentRun(taskId: string, overrides: Record<string, unknown> = {}) {
 }
 
 function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
-  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8', env });
+  const event = args[1] ?? '';
+  const lifecycle = /^(?:analyze|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run)\.(?:started|completed)$/.test(event);
+  const hasTrigger = ['--initiator', '--request-id', '--reason-code'].some((flag) => args.includes(flag));
+  const family = event.split('.')[0] ?? 'event';
+  const trigger = lifecycle && !hasTrigger
+    ? ['--initiator', 'model', '--request-id', `${args[0]}:${family}`, '--reason-code', 'user-request']
+    : [];
+  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args, ...trigger], { cwd: root, encoding: 'utf8', env });
 }
 
 function finalizeReview(
@@ -235,7 +259,7 @@ function decisionFixture() {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
   fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
-  fs.writeFileSync(path.join(f.dir, 'review-code.md'), `## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n`);
+  fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
   fs.writeFileSync(f.file, `---
 id: ${f.id}
 status: active
@@ -271,6 +295,10 @@ last_reviewed_commit: abcdef1234567890
 
 - 2026-07-18 10:00:00+08:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md
 `);
+  addReceipt(f.file, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-07-18 10:00:00+08:00'
+  });
   return f;
 }
 
@@ -321,7 +349,8 @@ test('internal task-event consumes a producer-qualified override under one task 
     assert.equal(issued.status, 0, issued.stderr || issued.stdout);
     const ticket = (JSON.parse(issued.stdout) as { ticketId: string }).ticketId;
     const applied = spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', id, 'analyze.started',
-      '--agent', 'codex', '--override-ticket', ticket, '--override-target', 'continue-local', '--override-scope', 'task-event'
+      '--agent', 'codex', '--initiator', 'model', '--request-id', `override:${id}:analyze`, '--reason-code', 'user-request',
+      '--override-ticket', ticket, '--override-target', 'continue-local', '--override-scope', 'task-event'
     ], { cwd: root, encoding: 'utf8' });
     assert.equal(applied.status, 0, applied.stderr || applied.stdout);
     const result = JSON.parse(applied.stdout) as { status: string; humanOverride: { status: string } };
@@ -380,6 +409,75 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
   assert.match(content, /current_step: technical-design/);
   assert.match(content, /`plan\.md`/);
+});
+
+test('task-event rejects a different lifecycle start while one execution is open', () => {
+  const f = fixture();
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+
+  const beforeBlocked = fs.readFileSync(f.file);
+  const blocked = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+  assert.equal(blocked.status, 1);
+  const blockedResult = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+  assert.equal(blockedResult.error.code, 'EVENT_TRANSITION_INVALID');
+  assert.match(blockedResult.error.message, /EXECUTION_BUSY/);
+  assert.deepEqual(fs.readFileSync(f.file), beforeBlocked);
+
+  const replay = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(replay.status, 0, replay.stderr);
+  assert.equal(JSON.parse(replay.stdout).status, 'no-op');
+  assert.deepEqual(fs.readFileSync(f.file), beforeBlocked);
+});
+
+test('task-event applies the same execution lock to both manual validation families', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+
+  for (const event of ['manual-validation.started', 'validation-run.started']) {
+    const blocked = run(f.root, [f.id, event, '--agent', 'codex']);
+    assert.equal(blocked.status, 1, blocked.stderr);
+    const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+    assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
+    assert.match(result.error.message, /EXECUTION_BUSY/);
+  }
+});
+
+test('task-event blocks other lifecycle starts while either manual validation family is open', () => {
+  for (const event of ['manual-validation.started', 'validation-run.started']) {
+    const f = fixture('code-review');
+    const started = run(f.root, [f.id, event, '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stderr);
+
+    const blocked = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+    assert.equal(blocked.status, 1, blocked.stderr);
+    const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+    assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
+    assert.match(result.error.message, /EXECUTION_BUSY/);
+  }
+});
+
+test('task-event requires an approved code review before either manual validation family starts', () => {
+  for (const event of ['manual-validation.started', 'validation-run.started']) {
+    const f = fixture('code-review');
+    fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewArtifact('Code Review', 'code.md', '拒绝'));
+    const blocked = run(f.root, [f.id, event, '--agent', 'codex']);
+    assert.equal(blocked.status, 1, blocked.stderr);
+    const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+    assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
+    assert.match(result.error.message, /CODE_REVIEW_NOT_APPROVED/);
+  }
+});
+
+test('task-event requires an explicit trigger for lifecycle events', () => {
+  const f = fixture('technical-design');
+  const before = fs.readFileSync(f.file);
+  const out = spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', f.id, 'analyze.started', '--agent', 'codex'], {
+    cwd: f.root, encoding: 'utf8'
+  });
+  assert.equal(out.status, 1);
+  assert.equal(JSON.parse(out.stdout).error.code, 'EVENT_TRIGGER_REQUIRED');
+  assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
 test('started derives its round and completion rejects an unlanded artifact', () => {
@@ -581,6 +679,11 @@ test('plan event reopens technical design after commit preparation', () => {
 
 test('plan event reopens technical design after code review', () => {
   const f = fixture('code-review');
+  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+  addReceipt(f.file, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
 
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stdout || started.stderr);
@@ -605,10 +708,26 @@ test('plan event reopens technical design after code review', () => {
   assert.match(content, /`plan\.md`/);
 });
 
+test('plan event rejects an approved review whose input hash is stale', () => {
+  const f = fixture('code-review');
+  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+  addReceipt(f.file, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  fs.appendFileSync(path.join(f.dir, 'analysis.md'), '# Changed after review\n');
+
+  const before = fs.readFileSync(f.file);
+  const blocked = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(blocked.status, 1);
+  const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+  assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
+  assert.match(result.error.message, /ANALYSIS_REVIEW_NOT_LATEST/);
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
 test('completed event validates orchestration provenance before writing task state', () => {
   const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']).status, 0);
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: f.root });
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: f.root });
   spawnSync('git', ['add', '.'], { cwd: f.root });
@@ -624,17 +743,20 @@ test('completed event validates orchestration provenance before writing task sta
     '--reviewer-model', 'reviewer-model', '--reviewer-reasoning-effort', 'high'
   ]).status, 0);
   const prepared = prepareOrchestrationDelegation(f.id, {
-    client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
+    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, {
     repoRoot: f.root,
     supportsLifecycleDelegation: () => true
   });
   assert.equal(prepared.status, 'running');
   assert.equal(orchestrate([
-    'hook-start', '--native-agent', 'agent-infra-lifecycle-reviewer', '--child-id', 'child-1',
-    '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'reviewer-model',
-    '--actual-reasoning-effort', 'high'
+    'hook-start', '--native-agent', 'agent-infra-lifecycle-executor', '--child-id', 'child-1',
+    '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'executor-model',
+    '--actual-reasoning-effort', 'xhigh'
   ]).status, 0);
+
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']).status, 0);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
 
   const before = fs.readFileSync(f.file);
   const completed = run(f.root, [
@@ -729,6 +851,9 @@ test('orchestrated completion reports a distinct partial-write error when the ru
     taskRef: f.id,
     event: 'plan.completed',
     agent: 'codex',
+    initiator: 'model',
+    requestId: `test:${f.id}:plan`,
+    reasonCode: 'user-request',
     artifact: 'plan.md',
     artifactSha256: finalized.artifactSha256!,
     semanticDigest: finalized.semanticDigest!,
@@ -886,14 +1011,71 @@ test('analysis can restart from code when task requirements expand', () => {
   assert.match(content, /`analysis-r2\.md`/);
 });
 
-test('analysis restart still rejects an unrelated workflow stage without changing task bytes', () => {
-  const f = fixture('technical-design');
-  const before = fs.readFileSync(f.file);
-
+test('source completion records resumable invalidation and downstream writers fail closed until reconcile', () => {
+  const f = fixture('code');
+  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+  for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+    fs.writeFileSync(path.join(f.dir, name), `# ${name}\n`);
+  }
+  addReceipt(f.file, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f.file, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f.file, {
+    event: 'code.completed', output: 'code.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f.file, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
   const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
-  assert.notEqual(started.status, 0);
-  assert.equal(JSON.parse(started.stdout).error.code, 'EVENT_TRANSITION_INVALID');
-  assert.deepEqual(fs.readFileSync(f.file), before);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
+  const completed = run(f.root, [
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
+    ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+  ]);
+  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+  const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+  assert.equal(invalidation.ok, true);
+  if (!invalidation.ok) return;
+  assert.equal(invalidation.document.operations[0]?.status, 'pending');
+  assert.equal(invalidation.document.targets.every((target) => target.status === 'pending'), true);
+  assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'artifact').length, 5);
+  assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'receipt').length, 4);
+  assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'approval').length, 3);
+  assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'reviewed-snapshot').length, 1);
+
+  const blocked = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+  assert.equal(blocked.status, 1);
+  assert.equal(JSON.parse(blocked.stdout).error.code, 'TASK_INVALIDATION_BLOCKED');
+
+  const reconciled = spawnSync('node', [INTERNAL_CLI_PATH, 'task-invalidation', f.id, 'reconcile'], { cwd: f.root, encoding: 'utf8' });
+  assert.equal(reconciled.status, 0, reconciled.stdout || reconciled.stderr);
+  const retried = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+  assert.equal(retried.status, 0, retried.stdout || retried.stderr);
+});
+
+test('analysis restart is authorized by explicit intent without current-step adjacency', () => {
+  const f = fixture('technical-design');
+  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  assert.equal(JSON.parse(started.stdout).artifact, 'analysis-r2.md');
+});
+
+test('explicit trigger can start analysis without a current_step adjacency match', () => {
+  const f = fixture('technical-design');
+  const started = run(f.root, [
+    f.id, 'analyze.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'req-new-requirement', '--reason-code', 'new-requirement'
+  ]);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  assert.equal(JSON.parse(started.stdout).artifact, 'analysis-r2.md');
 });
 
 for (const scenario of [
@@ -937,15 +1119,12 @@ for (const scenario of [
   { family: 'review-analysis', step: 'technical-design', input: 'analysis.md' },
   { family: 'review-plan', step: 'requirement-analysis-review', input: 'plan.md' }
 ] as const) {
-  test(`${scenario.family} event still rejects an unrelated workflow stage without changing task bytes`, () => {
+  test(`${scenario.family} event is authorized by explicit intent without current-step adjacency`, () => {
     const f = fixture(scenario.step);
     fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input}\n`);
-    const before = fs.readFileSync(f.file);
 
     const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
-    assert.notEqual(started.status, 0);
-    assert.equal(JSON.parse(started.stdout).error.code, 'EVENT_TRANSITION_INVALID');
-    assert.deepEqual(fs.readFileSync(f.file), before);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
   });
 }
 
@@ -1225,15 +1404,12 @@ test('review-code event allows a supplemental round after commit preparation', (
   assert.equal(startedResult.artifact, 'review-code-r2.md');
 });
 
-test('review-code event still rejects an unrelated workflow stage without changing task bytes', () => {
+test('review-code event is authorized by explicit intent without current-step adjacency', () => {
   const f = fixture('technical-design');
   fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
-  const before = fs.readFileSync(f.file);
 
   const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
-  assert.notEqual(started.status, 0);
-  assert.equal(JSON.parse(started.stdout).error.code, 'EVENT_TRANSITION_INVALID');
-  assert.deepEqual(fs.readFileSync(f.file), before);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
 });
 
 test('decision code event clears the review baseline and consumes its input on completion', () => {

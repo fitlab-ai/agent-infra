@@ -9,7 +9,7 @@ description: >
 # Technical Plan Review
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to both the summary finalizer and completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts.
+If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to both the summary finalizer and completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts. Lifecycle events also require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` or `review-finding`. Reuse the same values for started and completed.
 
 Review the latest plan artifact and produce `review-plan.md` or `review-plan-r{N}.md`.
 
@@ -39,7 +39,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## Step Start: Write the started Marker
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-plan.started --agent {standard-agent-token}`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-plan.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}`.
 
 ## Steps
 
@@ -80,7 +80,7 @@ Bind and reuse this structured mapping from that one response:
 {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
 ```
 
-The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. After a failure, the model may edit the same controlled artifact and rerun the same intent only when the shared rule's mechanical gates pass; reassess convergence after every failure. The final complete result determines the verdict and counts from that same snapshot: `stageStatus.canAdvance=true` with an Approved conclusion permits cross-stage advancement; `stageStatus.canAdvance=false` still requires `agent-infra-internal task-event {task-id} review-plan.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`, using `changes-requested` and routing to same-stage revision/review (use `rejected` when the report explicitly rejects). On failure, model stop, lack of progress, or the emergency cap, do not publish a completion event or cross-stage command; use the `repair-stop` scenario in `reference/output-templates.md` to show existing summary/findings, the artifact, actual repair attempts, the last diagnostic, and the stop reason.
+The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. After a failure, the model may edit the same controlled artifact and rerun the same intent only when the shared rule's mechanical gates pass; reassess convergence after every failure. The final complete result determines the verdict and counts from that same snapshot: `stageStatus.canAdvance=true` with an Approved conclusion permits cross-stage advancement; `stageStatus.canAdvance=false` still requires `agent-infra-internal task-event {task-id} review-plan.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`, using `changes-requested` and routing to same-stage revision/review (use `rejected` when the report explicitly rejects). On failure, model stop, lack of progress, or the emergency cap, do not publish a completion event or cross-stage command; use the `repair-stop` scenario in `reference/output-templates.md` to show existing summary/findings, the artifact, actual repair attempts, the last diagnostic, and the stop reason.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 

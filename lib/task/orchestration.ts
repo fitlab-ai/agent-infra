@@ -4,8 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
-import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.ts';
-import { inspectArtifactDirectory } from './artifact-lifecycle.ts';
+import { parseReviewSummary } from './review-artifacts.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerDocument } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
@@ -53,6 +52,11 @@ import { hasActiveCodexLifecycleEvidence } from '../agent-clients/adapters/codex
 import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead } from './review-fingerprint.ts';
 import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
+import { buildLifecycleFacts, canStart, recommendNext } from './capabilities.ts';
+import { hasOpenLifecycleExecution } from './activity-log.ts';
+import { invalidationBlocks } from './invalidation.ts';
+import type { InvalidationDocument } from './invalidation.ts';
+import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type ModelPolicySource = Readonly<{
@@ -108,7 +112,7 @@ type OrchestrationRun = Readonly<{
   updatedAt: string;
 }>;
 type OrchestrationNext = Readonly<{
-  action: 'analyze-task' | 'review-analysis' | 'plan-task' | 'review-plan' | 'code-task' | 'review-code' | 'commit';
+  action: 'analyze-task' | 'review-analysis' | 'plan-task' | 'review-plan' | 'code-task' | 'review-code';
   role: DelegationRole;
   stage: DelegationStage;
   round: number;
@@ -561,78 +565,19 @@ function validateSavedCurrentDiffBase(
   return null;
 }
 
-function hasReviewAfterArtifact(taskDir: string, family: string, reviewFamily: string): boolean {
-  const artifact = inspectArtifactDirectory(taskDir, family as 'analysis' | 'plan' | 'code');
-  const review = inspectArtifactDirectory(taskDir, reviewFamily as 'review-analysis' | 'review-plan' | 'review-code');
-  return artifact.status === 'ready'
-    && review.status === 'ready'
-    && artifact.latest !== null
-    && review.reviewedInput?.name === artifact.latest.name;
-}
-
-function latestReviewApproved(taskDir: string, family: 'review-analysis' | 'review-plan' | 'review-code'): { approved: boolean; error: string | null } {
-  const round = highestRound(taskDir, family);
-  if (round === 0) return { approved: false, error: null };
-  let content: string;
-  try { content = fs.readFileSync(path.join(taskDir, artifactName(family, round)), 'utf8'); }
-  catch (error) { return { approved: false, error: String(error) }; }
-  const parsed = parseReviewSummary(content);
-  if (!parsed.ok) return { approved: false, error: `${parsed.code}: ${parsed.message}` };
-  const verdict = resolveCanonicalVerdict(parsed.summary);
-  if (!verdict.ok) return { approved: false, error: `${verdict.code}: ${verdict.message}` };
-  return { approved: verdict.verdict === 'Approved', error: null };
-}
-
-function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | { error: string } | null {
-  const analysisRound = highestRound(taskDir, 'analysis');
-  const analysisReviewRound = highestRound(taskDir, 'review-analysis');
-  const planRound = highestRound(taskDir, 'plan');
-  const planReviewRound = highestRound(taskDir, 'review-plan');
-  const codeRound = highestRound(taskDir, 'code');
-  const codeReviewRound = highestRound(taskDir, 'review-code');
-  if (analysisRound === 0) {
-    const round = analysisRound + 1;
-    return { action: 'analyze-task', role: 'executor', stage: 'analysis', round, artifact: artifactName('analysis', round) };
-  }
-  if (!hasReviewAfterArtifact(taskDir, 'analysis', 'review-analysis')) {
-    const round = analysisReviewRound + 1;
-    return { action: 'review-analysis', role: 'reviewer', stage: 'review-analysis', round, artifact: artifactName('review-analysis', round) };
-  }
-  const analysisVerdict = latestReviewApproved(taskDir, 'review-analysis');
-  if (analysisVerdict.error) return { error: analysisVerdict.error };
-  if (!analysisVerdict.approved) {
-    const round = analysisRound + 1;
-    return { action: 'analyze-task', role: 'executor', stage: 'analysis', round, artifact: artifactName('analysis', round) };
-  }
-  if (planRound === 0) {
-    const round = planRound + 1;
-    return { action: 'plan-task', role: 'executor', stage: 'plan', round, artifact: artifactName('plan', round) };
-  }
-  if (!hasReviewAfterArtifact(taskDir, 'plan', 'review-plan')) {
-    const round = planReviewRound + 1;
-    return { action: 'review-plan', role: 'reviewer', stage: 'review-plan', round, artifact: artifactName('review-plan', round) };
-  }
-  const planVerdict = latestReviewApproved(taskDir, 'review-plan');
-  if (planVerdict.error) return { error: planVerdict.error };
-  if (!planVerdict.approved) {
-    const round = planRound + 1;
-    return { action: 'plan-task', role: 'executor', stage: 'plan', round, artifact: artifactName('plan', round) };
-  }
-  if (codeRound === 0) {
-    const round = codeRound + 1;
-    return { action: 'code-task', role: 'executor', stage: 'code', round, artifact: artifactName('code', round) };
-  }
-  if (!hasReviewAfterArtifact(taskDir, 'code', 'review-code')) {
-    const round = codeReviewRound + 1;
-    return { action: 'review-code', role: 'reviewer', stage: 'review-code', round, artifact: artifactName('review-code', round) };
-  }
-  const codeVerdict = latestReviewApproved(taskDir, 'review-code');
-  if (codeVerdict.error) return { error: codeVerdict.error };
-  if (!codeVerdict.approved) {
-    const round = codeRound + 1;
-    return { action: 'code-task', role: 'executor', stage: 'code', round, artifact: artifactName('code', round) };
-  }
-  return { action: 'commit', role: 'executor', stage: 'commit', round: 1, artifact: 'commit' };
+function routeFromFacts(facts: LifecycleFacts): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | { completion: true } | null {
+  const recommendation = recommendNext(facts);
+  if (!recommendation.action) return { completion: true };
+  const action = recommendation.action;
+  if (action === 'manual-validation' || action === 'validation-run') return null;
+  const family = action === 'analysis' ? 'analysis' : action;
+  const round = Math.max(0, ...[...(facts.artifacts[family] ?? []), ...(facts.staleArtifacts?.[family] ?? [])].map((name) => {
+    const match = /-r(\d+)\.md$/.exec(name);
+    return match ? Number(match[1]) : 1;
+  })) + 1;
+  const command = action === 'analysis' ? 'analyze-task' : action === 'plan' ? 'plan-task' : action === 'code' ? 'code-task' : action;
+  const role = action.startsWith('review-') ? 'reviewer' : 'executor';
+  return { action: command, role, stage: action, round, artifact: artifactName(family, round) };
 }
 
 function routeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -652,11 +597,13 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   }
   let metadata: ReturnType<typeof parseTypedTaskFrontmatter>;
   let currentLedger: LedgerDocument | null = null;
+  let currentInvalidation: InvalidationDocument = { operations: [], targets: [] };
   if (resolved.state === 'active') {
     const contract = validateCurrentTaskContract(content);
     if (!contract.ok) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', contract.message, resolved.taskId);
     metadata = contract.metadata;
     currentLedger = contract.ledger;
+    currentInvalidation = contract.invalidation;
   } else {
     try {
       metadata = parseTypedTaskFrontmatter(content);
@@ -664,17 +611,25 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
       return failed('ORCHESTRATION_TASK_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
     }
   }
-  const routed = routeFromFacts(resolved.taskDir);
-  if (routed && 'error' in routed) return failed('ORCHESTRATION_REVIEW_INVALID', routed.error, resolved.taskId);
+  if (invalidationBlocks(currentInvalidation)) {
+    return failed('ORCHESTRATION_INVALIDATION_INCOMPLETE', 'artifact invalidation is incomplete; reconcile task.md before routing downstream work', resolved.taskId);
+  }
+  let run: OrchestrationRun | null;
+  try {
+    run = readRun(resolved.taskDir);
+  } catch (error) {
+    return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+  }
+  const facts = buildLifecycleFacts(
+    resolved.taskDir,
+    content,
+    resolved.state,
+    hasOpenLifecycleExecution(content) || Boolean(run?.pendingDelegation)
+  );
+  if (!facts.ok) return failed('ORCHESTRATION_CAPABILITY_FACTS_INVALID', facts.message, resolved.taskId);
+  const routed = routeFromFacts(facts.facts);
   if (!routed) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
-  const run = readRun(resolved.taskDir);
-  const policy = run ? rolePolicy(run, routed.role) : null;
-  const next: OrchestrationNext = {
-    ...routed,
-    requestedModel: policy?.model ?? null,
-    requestedReasoningEffort: policy?.reasoningEffort ?? null
-  };
-  if (next.stage === 'commit') {
+  if ('completion' in routed) {
     const reviewRound = highestRound(resolved.taskDir, 'review-code');
     const review = parseReviewSummary(fs.readFileSync(
       path.join(resolved.taskDir, artifactName('review-code', reviewRound)),
@@ -756,6 +711,18 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     saveRun(resolved.taskDir, completed);
     return { status: 'completed', changed: true, taskId: resolved.taskId, run: completed, next: null, error: null };
   }
+  const action = routed.stage as LifecycleAction;
+  const capability = canStart(action, facts.facts, {
+    initiator: 'orchestrator', requestId: `orchestration:${resolved.taskId}:${routed.stage}:${routed.round}`,
+    requestedAction: action, reasonCode: 'user-request', explicitRequest: true
+  });
+  if (!capability.allowed) return failed('ORCHESTRATION_CAPABILITY_DENIED', `${capability.reasonCode}: ${capability.evidence.join(', ')}`, resolved.taskId);
+  const policy = run ? rolePolicy(run, routed.role) : null;
+  const next: OrchestrationNext = {
+    ...routed,
+    requestedModel: policy?.model ?? null,
+    requestedReasoningEffort: policy?.reasoningEffort ?? null
+  };
   return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
 }
 

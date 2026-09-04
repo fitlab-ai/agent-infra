@@ -11,7 +11,7 @@ description: >
 ## Boundary / Critical Rules
 
 - This skill is **read-only** -- do not modify any files
-- Mechanical facts (frontmatter metadata, artifact grouping, git/platform state, and locating the task across the active, blocked, and completed directories) are delegated to the deterministic `ai task status` command. This skill only adds the semantic layer the CLI cannot produce: workflow-stage interpretation, review-verdict parsing, and the next-step recommendation.
+- Mechanical facts (frontmatter metadata, artifact grouping, git/platform state, and locating the task across the active, blocked, and completed directories) are delegated to the deterministic `ai task status` command. This skill only adds the semantic layer the CLI cannot produce: workflow-stage interpretation and review-verdict parsing; the next action comes directly from the CLI's canonical recommendation.
 
 ## Task Context Resolution
 
@@ -45,7 +45,7 @@ This is the semantic layer the CLI does not produce. Using the `Artifacts` group
   - `[pending]` - not started yet
   - `[blocked]` - blocked
   - `[skipped]` - skipped
-- For the latest review artifact of each stage (`review-analysis`, `review-plan`, `review-code`), read the report body and parse its conclusion: the overall verdict (Approved / Changes Requested / Rejected) and the blocker / major / minor counts. The CLI does not parse review bodies, so this reading is required to choose the next action in step 3.
+- For the latest review artifact of each stage (`review-analysis`, `review-plan`, `review-code`), read the report body and parse its conclusion: the overall verdict (Approved / Changes Requested / Rejected) and the blocker / major / minor counts. Use these conclusions only to explain stage status; do not recompute the next action from them.
 
 Present the workflow progress as an overlay on top of the CLI output, marking the latest round and the parsed review verdict, for example:
 
@@ -57,41 +57,20 @@ Workflow progress:
   [pending]    Plan Review
 ```
 
-### 3. Recommend Next Action
+### 3. Display the canonical recommendation
 
-Recommend the appropriate next skill based on the current workflow state.
+Read only `Recommendation.action` from the `ai task status --task {task-id}` output and use it as the sole source of the next action. Do not recompute an action from `current_step`, the latest files, review prose, or the Activity Log.
 
-> **⚠️ CONDITION CHECK — you must choose the single matching row in the table below based on `status`, `current_step`, the latest artifacts, and the latest review result:**
->
-> - `status = blocked` -> choose "Task Blocked"
-> - `status = completed` -> choose "Task Completed"
-> - `current_step = requirement-analysis` and the latest analysis artifact is complete -> choose "Analysis Complete"
-> - `current_step = requirement-analysis-review` and the latest analysis review artifact is approved -> choose "Analysis Review Passed"
-> - `current_step = requirement-analysis-review` and the latest analysis review artifact exists but is not approved or has findings -> choose "Analysis Review Has Issues"
-> - `current_step = technical-design` and the latest plan artifact is complete -> choose "Plan Complete"
-> - `current_step = technical-design-review` and the latest plan review artifact is approved -> choose "Plan Review Passed"
-> - `current_step = technical-design-review` and the latest plan review artifact exists but is not approved or has findings -> choose "Plan Review Has Issues"
-> - The latest code artifact exists and there is still no latest code review artifact -> choose "Code Complete"
-> - `current_step = code-review` and the latest code review artifact exists, the verdict is `Approved`, and `Blocker = 0`, `Major = 0`, `Minor = 0` -> choose "Code Review Passed"
-> - `current_step = code-review` and the latest code review artifact exists, but any `Blocker`, `Major`, or `Minor` issue remains, or the verdict is not a clean approval -> choose "Code Review Has Issues"
->
-> **Important: if the latest review report contains any issue at all, do not use the corresponding review-passed row. Use the corresponding has-issues row instead.**
->
-> Before rendering the final output, read `.agents/rules/next-step-output.md`. After selecting an actionable row, invoke `agent-infra-internal agent-client next-steps --skill {next-skill} [--task-ref {task-ref}]` exactly once and render stdout verbatim as `{next-step-commands}`. Do not invoke the helper for `Task Blocked` or `Task Completed`. Append the `Completed at` trailing line last.
+When the action is non-empty, perform only this literal action-to-skill conversion, then invoke the shared helper once:
 
-| Current State              | next skill        | task ref |
-|----------------------------|-------------------|----------|
-| Analysis Complete          | `review-analysis` | required |
-| Analysis Review Passed     | `plan-task`       | required |
-| Analysis Review Has Issues | `analyze-task`    | required |
-| Plan Complete              | `review-plan`     | required |
-| Plan Review Passed         | `code-task`       | required |
-| Plan Review Has Issues     | `plan-task`       | required |
-| Code Complete              | `review-code`     | required |
-| Code Review Passed         | `commit`          | omitted  |
-| Code Review Has Issues     | `code-task`       | required |
-| Task Blocked               | —                 | —        |
-| Task Completed             | —                 | —        |
+| Recommendation.action | next skill |
+|-----------------------|------------|
+| `analysis` | `analyze-task` |
+| `plan` | `plan-task` |
+| `code` | `code-task` |
+| any other action | same-named skill |
+
+When the action is empty, do not invoke the helper; state that no next skill is currently recommended. Before rendering the final output, read `.agents/rules/next-step-output.md`; invoke `agent-infra-internal agent-client next-steps --skill {next-skill} --task-ref {task-ref}` and render stdout verbatim as `{next-step-commands}`. Append the `Completed at` trailing line last.
 
 ## Notes
 

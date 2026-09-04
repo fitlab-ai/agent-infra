@@ -21,6 +21,7 @@ import {
 } from '../../../lib/task/orchestration.ts';
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
+import { reworkIntentMutation } from '../../../lib/task/rework-intent.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
@@ -469,6 +470,25 @@ test('route requires the latest review to bind the latest artifact structurally'
 
   assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).next, {
     action: 'review-code', role: 'reviewer', stage: 'review-code', round: 2, artifact: 'review-code-r2.md',
+    requestedModel: null, requestedReasoningEffort: null
+  });
+});
+
+test('route uses the same recommendation facts as lifecycle capability checks', () => {
+  const f = approvedCodeFixture();
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const content = fs.readFileSync(taskPath, 'utf8');
+  const intent = {
+    intentId: 'RI-1', findingId: 'CD-1', sourceArtifact: 'review-code.md',
+    sourceSha256: sha256File(path.join(f.taskDir, 'review-code.md')), target: 'code' as const,
+    status: 'pending' as const, declaredAt: '2026-01-01 00:00:00+00:00', consumedAt: ''
+  };
+  fs.writeFileSync(taskPath, upsertSection(content, reworkIntentMutation(content, [intent])).content);
+
+  const routed = routeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  assert.equal(routed.error, null);
+  assert.deepEqual(routed.next, {
+    action: 'code-task', role: 'executor', stage: 'code', round: 2, artifact: 'code-r2.md',
     requestedModel: null, requestedReasoningEffort: null
   });
 });
