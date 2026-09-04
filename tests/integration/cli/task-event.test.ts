@@ -417,6 +417,45 @@ test('task-event rejects a different lifecycle start while one execution is open
   assert.deepEqual(fs.readFileSync(f.file), beforeBlocked);
 });
 
+test('task-event applies the same execution lock to both manual validation families', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+
+  for (const event of ['manual-validation.started', 'validation-run.started']) {
+    const blocked = run(f.root, [f.id, event, '--agent', 'codex']);
+    assert.equal(blocked.status, 1, blocked.stderr);
+    const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+    assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
+    assert.match(result.error.message, /EXECUTION_BUSY/);
+  }
+});
+
+test('task-event blocks other lifecycle starts while either manual validation family is open', () => {
+  for (const event of ['manual-validation.started', 'validation-run.started']) {
+    const f = fixture('code-review');
+    const started = run(f.root, [f.id, event, '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stderr);
+
+    const blocked = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+    assert.equal(blocked.status, 1, blocked.stderr);
+    const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+    assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
+    assert.match(result.error.message, /EXECUTION_BUSY/);
+  }
+});
+
+test('task-event requires an approved code review before either manual validation family starts', () => {
+  for (const event of ['manual-validation.started', 'validation-run.started']) {
+    const f = fixture('code-review');
+    fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewArtifact('Code Review', 'code.md', '拒绝'));
+    const blocked = run(f.root, [f.id, event, '--agent', 'codex']);
+    assert.equal(blocked.status, 1, blocked.stderr);
+    const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+    assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
+    assert.match(result.error.message, /CODE_REVIEW_NOT_APPROVED/);
+  }
+});
+
 test('task-event requires an explicit trigger for lifecycle events', () => {
   const f = fixture('technical-design');
   const before = fs.readFileSync(f.file);

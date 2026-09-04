@@ -660,7 +660,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const existing = section.entries.find((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)!;
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, existing.time, frontmatter, artifactContext);
   }
-  if (eventIdentity.phase === 'started' && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
+  if (eventIdentity.phase === 'started') {
     const trigger = eventTrigger(normalized, eventIdentity.family);
     const facts = buildLifecycleFacts(resolved.taskDir, content, resolved.state);
     if (!facts.ok) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${facts.code}: ${facts.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });

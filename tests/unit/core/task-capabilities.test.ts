@@ -74,6 +74,13 @@ test('lifecycle facts derive execution busy from an open lifecycle activity', ()
     if (!busy.ok) return;
     assert.equal(busy.facts.executionBusy, true);
 
+    const manualOpen = open.replace('Plan Task (Round 1)', 'Complete Manual Validation');
+    fs.writeFileSync(path.join(taskDir, 'task.md'), manualOpen);
+    const manualBusy = buildLifecycleFacts(taskDir, manualOpen, 'active');
+    assert.equal(manualBusy.ok, true);
+    if (!manualBusy.ok) return;
+    assert.equal(manualBusy.facts.executionBusy, true);
+
     const completed = `${open}- 2026-01-01 00:01:00+00:00 — **Plan Task (Round 1)** by codex — Plan completed → plan.md\n`;
     fs.writeFileSync(path.join(taskDir, 'task.md'), completed);
     const idle = buildLifecycleFacts(taskDir, completed, 'active');
