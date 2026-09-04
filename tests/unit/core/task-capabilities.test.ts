@@ -48,6 +48,49 @@ test('pending invalidation blocks lifecycle authorization', () => {
   assert.equal(result.reasonCode, 'INVALIDATION_INCOMPLETE');
 });
 
+test('lifecycle facts derive execution busy from an open lifecycle activity', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-execution-'));
+  try {
+    const taskDir = path.join(root, 'task');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const open = [
+      '---',
+      'id: TASK-20260101-000001',
+      'status: active',
+      'current_step: requirement-analysis-review',
+      '---',
+      '',
+      '# Task',
+      '',
+      '## Activity Log',
+      '',
+      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started',
+      ''
+    ].join('\n');
+    fs.writeFileSync(path.join(taskDir, 'task.md'), open);
+
+    const busy = buildLifecycleFacts(taskDir, open, 'active');
+    assert.equal(busy.ok, true);
+    if (!busy.ok) return;
+    assert.equal(busy.facts.executionBusy, true);
+
+    const completed = `${open}- 2026-01-01 00:01:00+00:00 — **Plan Task (Round 1)** by codex — Plan completed → plan.md\n`;
+    fs.writeFileSync(path.join(taskDir, 'task.md'), completed);
+    const idle = buildLifecycleFacts(taskDir, completed, 'active');
+    assert.equal(idle.ok, true);
+    if (!idle.ok) return;
+    assert.equal(idle.facts.executionBusy, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('execution busy fact blocks capability authorization', () => {
+  const result = canStart('analysis', { ...facts('code'), executionBusy: true }, trigger);
+  assert.equal(result.allowed, false);
+  assert.equal(result.reasonCode, 'EXECUTION_BUSY');
+});
+
 test('recommendation is derived from lifecycle facts rather than current_step', () => {
   const first = recommendNext(facts('completed'));
   assert.equal(first.action, 'analysis');

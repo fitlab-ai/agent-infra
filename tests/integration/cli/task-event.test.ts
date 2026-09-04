@@ -398,6 +398,25 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.match(content, /`plan\.md`/);
 });
 
+test('task-event rejects a different lifecycle start while one execution is open', () => {
+  const f = fixture();
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+
+  const beforeBlocked = fs.readFileSync(f.file);
+  const blocked = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+  assert.equal(blocked.status, 1);
+  const blockedResult = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+  assert.equal(blockedResult.error.code, 'EVENT_TRANSITION_INVALID');
+  assert.match(blockedResult.error.message, /EXECUTION_BUSY/);
+  assert.deepEqual(fs.readFileSync(f.file), beforeBlocked);
+
+  const replay = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(replay.status, 0, replay.stderr);
+  assert.equal(JSON.parse(replay.stdout).status, 'no-op');
+  assert.deepEqual(fs.readFileSync(f.file), beforeBlocked);
+});
+
 test('task-event requires an explicit trigger for lifecycle events', () => {
   const f = fixture('technical-design');
   const before = fs.readFileSync(f.file);
@@ -634,8 +653,6 @@ test('plan event reopens technical design after code review', () => {
 
 test('completed event validates orchestration provenance before writing task state', () => {
   const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']).status, 0);
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: f.root });
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: f.root });
   spawnSync('git', ['add', '.'], { cwd: f.root });
@@ -662,6 +679,9 @@ test('completed event validates orchestration provenance before writing task sta
     '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'reviewer-model',
     '--actual-reasoning-effort', 'high'
   ]).status, 0);
+
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']).status, 0);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
 
   const before = fs.readFileSync(f.file);
   const completed = run(f.root, [

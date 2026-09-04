@@ -10,6 +10,7 @@ import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.
 import { parseReworkIntentDocument } from './rework-intent.ts';
 import type { ReworkIntent } from './rework-intent.ts';
 import { sha256File } from './artifact-receipts.ts';
+import { hasOpenLifecycleExecution } from './activity-log.ts';
 
 type LifecycleAction =
   | 'analysis' | 'review-analysis' | 'plan' | 'review-plan'
@@ -244,7 +245,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       taskState, currentStep: String(metadata.current_step ?? ''), artifacts, reviews,
       staleArtifacts, reviewedInputs, artifactHashes,
       invalidation: invalidation.document, reworkIntents: rework.intents,
-      unresolvedLedger, executionBusy, recommendedAction: null
+      unresolvedLedger, executionBusy: executionBusy || hasOpenLifecycleExecution(content), recommendedAction: null
     };
     facts.recommendedAction = recommendNext(facts).action;
     return { ok: true, facts };

@@ -53,6 +53,7 @@ import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/
 import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead } from './review-fingerprint.ts';
 import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
 import { buildLifecycleFacts, canStart, recommendNext } from './capabilities.ts';
+import { hasOpenLifecycleExecution } from './activity-log.ts';
 import { invalidationBlocks } from './invalidation.ts';
 import type { InvalidationDocument } from './invalidation.ts';
 import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
@@ -613,11 +614,21 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   if (invalidationBlocks(currentInvalidation)) {
     return failed('ORCHESTRATION_INVALIDATION_INCOMPLETE', 'artifact invalidation is incomplete; reconcile task.md before routing downstream work', resolved.taskId);
   }
-  const facts = buildLifecycleFacts(resolved.taskDir, content, resolved.state);
+  let run: OrchestrationRun | null;
+  try {
+    run = readRun(resolved.taskDir);
+  } catch (error) {
+    return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+  }
+  const facts = buildLifecycleFacts(
+    resolved.taskDir,
+    content,
+    resolved.state,
+    hasOpenLifecycleExecution(content) || Boolean(run?.pendingDelegation)
+  );
   if (!facts.ok) return failed('ORCHESTRATION_CAPABILITY_FACTS_INVALID', facts.message, resolved.taskId);
   const routed = routeFromFacts(facts.facts);
   if (!routed) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
-  const run = readRun(resolved.taskDir);
   if ('completion' in routed) {
     const reviewRound = highestRound(resolved.taskDir, 'review-code');
     const review = parseReviewSummary(fs.readFileSync(
