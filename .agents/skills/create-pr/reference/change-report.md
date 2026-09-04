@@ -24,6 +24,8 @@ agent-infra-internal platform-pr change-report {task-id} \
 
 core 校验任务意图 digest、PR identity、完整 patch SHA、统计合计和固定顺序的 `target-alignment`、`change-composition`、`compatibility-policy`、`legacy-path-cleanup`、`redundancy`、`scope-discipline`。任一项为 `needs-review` 时路由到 `review-code`，`formalReview` 仍为 `false`。
 
+生成 candidate 时，六项 `rationale` 必须分别写出实际检查结论：`target-alignment` 说明目标对应关系，`change-composition` 概括新增代码集中承担的职责，`compatibility-policy` 说明兼容策略，`legacy-path-cleanup` 说明旧路径处理，`redundancy` 说明冗余检查结果，`scope-discipline` 说明范围判断。不得六项复用“符合范围”等泛化套话；每项至少提供一条直接支持结论的路径、行号和简短 `detail`，并遵循当前已部署技能的语言。中文技能必须使用中文。这些高层理由和证据会直接展示在 canonical 摘要中。
+
 脚本在 merge base 与 head 之间同时计算 `numstat` 行数和 Git blob 的精确字节数。字节比字符具有稳定口径，也能覆盖二进制文件和同行内缩减；子模块不是 blob，按 0 字节贡献核算。新增文件的旧字节数为 0，删除文件的新字节数为 0，纯 rename 的净字节数为 0，copy 只计新增目标内容。
 
 `numstat` 中的二进制文件计入文件数，但不虚构行数。rename/copy 依据脚本的逐文件记录、`name-status` 与 `summary` 单独说明，避免把移动误报为整文件重写。

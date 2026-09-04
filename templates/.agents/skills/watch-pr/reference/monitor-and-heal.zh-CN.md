@@ -15,6 +15,8 @@
 
 每轮 readiness 之前，以及外部 push、自愈 commit 或 rebase 成功改变 PR head 之后，必须重新执行 `summary-context` → 机械报告与六项 precheck → `platform-pr change-report` → 含一次 `<!-- canonical-pr-change-report -->` 的 `summary-sync --change-report-file ... --result no_op --strict`。`--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不允许 warning 穿透到 ready/complete 路由。core 以权威 PR snapshot、任务意图 digest 和完整 patch 重新校验 sidecar；报告缺失、stale、invalid、占位符绕过或发布竞态时，不得继续 ready/complete 路由，转入求助出口并登记 warning。
 
+每轮重建 precheck 时，六项 `rationale` 都必须是对应检查的实际高层结论，并各带至少一条路径、行号和简短 `detail` 证据；`change-composition` 要说明职责集中位置，兼容、旧路径、冗余和范围检查要分别说明实际结果，禁止复用泛化套话。理由和证据详情遵循当前已部署技能的语言，中文技能必须使用中文。
+
 ## 自愈决策树
 
 ```text

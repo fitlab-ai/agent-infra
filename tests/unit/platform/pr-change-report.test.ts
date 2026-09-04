@@ -32,6 +32,21 @@ function candidate(taskIntentSha256: string): PrecheckCandidate {
   };
 }
 
+function detailedCandidate(taskIntentSha256: string): PrecheckCandidate {
+  return {
+    taskIntentSha256,
+    checks: PRECHECK_IDS.map((id, index) => ({
+      id,
+      verdict: 'pass' as const,
+      evidence: [{
+        path: `checks/${id}.ts`, startLine: index + 10, endLine: index + 11,
+        detail: `Evidence-${id}-<detail>`
+      }],
+      rationale: `Rationale-${id}-responsibility-${index}`
+    }))
+  };
+}
+
 function mechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
   return {
     version: 1,
@@ -187,10 +202,10 @@ test('summary body requires one placeholder and core renders the canonical repor
   }
 });
 
-test('canonical report renders high-level change categories and a Chinese precheck summary', () => {
+test('canonical report renders high-level change categories and all six precheck details', () => {
   const digest = 'd'.repeat(64);
   const value = categorizedMechanical();
-  const built = buildPrChangeReport(identity(), digest, value, candidate(digest));
+  const built = buildPrChangeReport(identity(), digest, value, detailedCandidate(digest));
   assert.equal(built.ok, true);
   if (!built.ok) return;
 
@@ -199,7 +214,32 @@ test('canonical report renders high-level change categories and a Chinese preche
   assert.match(rendered, /\| 技能与协作配置 \| 1 \| 0 \| 2 \| -2 \| 10 \| 0 \| -10 \| 1 \/ 0 \|/);
   assert.match(rendered, /\| 文档与其他 \| 1 \| — \| — \| — \| 0 \| 4 \| \+4 \| 0 \/ 1 \|/);
   assert.match(rendered, /\| \*\*合计\*\* \| 5 \| 9 \| 3 \| \+6 \| 25 \| 44 \| \+19 \| 4 \/ 1 \|/);
-  assert.equal(rendered.split('#### 适宜性预检\n')[1], '- 结论：**通过**（6/6 项通过）；继续监控 PR；正式审查：否。\n- 高层分析：各项适宜性检查均通过，当前变更可继续进入后续流程。 详细证据保留在结构化报告中。');
+  const precheckSection = rendered.split('#### 适宜性预检\n')[1]!;
+  assert.match(precheckSection, /^- 结论：\*\*通过\*\*（6\/6 项通过）；继续监控 PR；正式审查：否。/);
+  for (const id of PRECHECK_IDS) {
+    assert.match(precheckSection, new RegExp(`Rationale-${id}-responsibility-`));
+    assert.match(precheckSection, new RegExp(`checks/${id}\\.ts`));
+    assert.match(precheckSection, new RegExp(`Evidence-${id}-&lt;detail&gt;`));
+  }
+  assert.equal(rendered, renderCanonicalChangeReport(built.value));
+});
+
+test('canonical report escapes precheck paths, rationales, and evidence details', () => {
+  const digest = 'd'.repeat(64);
+  const precheck = candidate(digest);
+  precheck.checks[0] = {
+    ...precheck.checks[0]!,
+    rationale: 'Rationale <script> & "quote"',
+    evidence: [{ path: 'checks/<unsafe>.ts', startLine: 10, endLine: 11, detail: 'Detail <img alt="x"> & \'quote\'' }]
+  };
+  const built = buildPrChangeReport(identity(), digest, mechanical(), precheck);
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /Rationale &lt;script&gt; &amp; &quot;quote&quot;/);
+  assert.match(rendered, /<code>checks\/&lt;unsafe&gt;\.ts<\/code>:10-11：Detail &lt;img alt=&quot;x&quot;&gt; &amp; &#39;quote&#39;/);
+  assert.doesNotMatch(rendered, /<script>|<img/);
 });
 
 test('canonical report lists bounded text representatives with stable tie ordering and classifications', () => {
@@ -251,7 +291,10 @@ test('canonical report summarizes a precheck review route in Chinese', () => {
   if (!built.ok) return;
 
   const rendered = renderCanonicalChangeReport(built.value);
-  assert.equal(rendered.split('#### 适宜性预检\n')[1], '- 结论：**需复核**（5 项通过，1 项需复核）；转入代码审查；正式审查：否。\n- 高层分析：部分适宜性检查需要复核，当前变更应先进入正式代码审查。 详细证据保留在结构化报告中。');
+  const precheckSection = rendered.split('#### 适宜性预检\n')[1]!;
+  assert.match(precheckSection, /^- 结论：\*\*需复核\*\*（5 项通过，1 项需复核）；转入代码审查；正式审查：否。/);
+  assert.match(precheckSection, /\*\*目标对应（target-alignment）\*\*：需复核。/);
+  assert.match(precheckSection, /Matches the approved task scope\./);
 });
 
 test('atomic report writes are readable and reject symlink consumption', (t) => {

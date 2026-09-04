@@ -24,6 +24,8 @@ agent-infra-internal platform-pr change-report {task-id} \
 
 The core validates the task-intent digest, PR identity, complete patch SHA, totals, and the ordered checks `target-alignment`, `change-composition`, `compatibility-policy`, `legacy-path-cleanup`, `redundancy`, and `scope-discipline`. A `needs-review` check routes to `review-code`; `formalReview` remains `false`.
 
+When generating the candidate, each check's `rationale` must state its actual finding: `target-alignment` explains the goal relationship, `change-composition` summarizes where new code concentrates responsibilities, `compatibility-policy` states the compatibility result, `legacy-path-cleanup` states how legacy paths were handled, `redundancy` states the redundancy result, and `scope-discipline` states the scope judgment. Do not reuse generic phrases such as "within scope" across checks; each check must provide at least one directly relevant path, line range, and concise `detail`, using the deployed skill's language. Chinese skill deployments must use Chinese. These high-level rationales and evidence are rendered in the canonical summary.
+
 The script calculates both `numstat` line counts and exact Git blob byte sizes between the merge base and head. Bytes provide a stable unit, cover binary files, and reveal same-line compaction; submodules are not blobs and contribute zero bytes. Added files have zero old bytes, deleted files have zero new bytes, pure renames have zero net bytes, and copies count only the new destination content.
 
 Count binary files in the file total but do not invent line counts for `-` numstat values. Explain renames and copies from the script's per-file records, `name-status`, and `summary` so moves are not reported as full rewrites.

@@ -15,6 +15,14 @@ const PRECHECK_IDS = [
   'redundancy',
   'scope-discipline'
 ] as const;
+const PRECHECK_LABELS: Record<PrecheckId, string> = {
+  'target-alignment': '目标对应',
+  'change-composition': '变更构成',
+  'compatibility-policy': '兼容性策略',
+  'legacy-path-cleanup': '旧路径清理',
+  redundancy: '冗余检查',
+  'scope-discipline': '范围纪律'
+};
 
 type PrecheckId = typeof PRECHECK_IDS[number];
 type CheckVerdict = 'pass' | 'needs-review';
@@ -535,6 +543,22 @@ function renderRepresentativeFiles(files: ChangeFile[]): string[] {
   ];
 }
 
+function renderEvidence(evidence: Evidence): string {
+  const location = evidence.startLine === null
+    ? ''
+    : evidence.endLine === evidence.startLine
+      ? `:${evidence.startLine}`
+      : `:${evidence.startLine}-${evidence.endLine}`;
+  return `  - 证据：<code>${escapeHtml(evidence.path)}</code>${location}：${escapeHtml(evidence.detail)}`;
+}
+
+function renderPrechecks(checks: Precheck[]): string[] {
+  return checks.flatMap((check) => [
+    `- **${PRECHECK_LABELS[check.id]}（${check.id}）**：${check.verdict === 'pass' ? '通过' : '需复核'}。${escapeHtml(check.rationale)}`,
+    ...check.evidence.slice(0, 1).map(renderEvidence)
+  ]);
+}
+
 function renderCanonicalChangeReport(report: PrChangeReport): string {
   const totals = report.diff.totals;
   const categories = summarizeChangeCategories(report.diff.files);
@@ -549,9 +573,6 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     ? `**通过**（${passedChecks}/${report.precheck.checks.length} 项通过）`
     : `**需复核**（${passedChecks} 项通过，${needsReviewChecks} 项需复核）`;
   const route = report.precheck.route === 'watch-pr' ? '继续监控 PR' : '转入代码审查';
-  const analysis = report.precheck.verdict === 'clear'
-    ? '各项适宜性检查均通过，当前变更可继续进入后续流程。'
-    : '部分适宜性检查需要复核，当前变更应先进入正式代码审查。';
   return [
     CANONICAL_REPORT_HEADING,
     '',
@@ -568,7 +589,7 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     '',
     '#### 适宜性预检',
     `- 结论：${precheckSummary}；${route}；正式审查：否。`,
-    `- 高层分析：${analysis} 详细证据保留在结构化报告中。`
+    ...renderPrechecks(report.precheck.checks)
   ].join('\n');
 }
 
