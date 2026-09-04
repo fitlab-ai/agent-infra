@@ -1366,6 +1366,73 @@ test('task-finalization graceful shutdown recovers a receipt before result evide
   }
 });
 
+test('task-finalization graceful shutdown retains recovery identity when executor termination is unconfirmed', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-termination-unconfirmed-'));
+  const taskId = 'TASK-20260809-010203';
+  const generation = 'finalization-termination-unconfirmed-generation';
+  const controller = new AbortController();
+  let server: Promise<void> | undefined;
+  let clientResult: Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> | undefined;
+  let releaseResult!: () => void;
+  let terminateCalls = 0;
+  const resultGate = new Promise<void>((resolve) => { releaseResult = resolve; });
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    writeFinalizationTaskFixture(root, taskId);
+    const manifest = readSandboxControlManifest(manifestPath);
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      internalCliPath: path.resolve('bin/internal-cli.ts'),
+      prepareExecution: async (params) => {
+        const prepared = await prepareSandboxControlExecution(params);
+        return {
+          ...prepared,
+          completion: prepared.completion.then(async (result) => {
+            await resultGate;
+            return result;
+          }),
+          terminate(updateState = true) {
+            terminateCalls += 1;
+            prepared.terminate(updateState);
+            return false;
+          }
+        };
+      }
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    clientResult = runTaskFinalizationClient({
+      channelDir: manifest.channelDir,
+      statusDir: manifest.publicStatusDir,
+      token: manifest.token,
+      generation,
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+    });
+    const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
+    await waitForReceiptLifecycleDoneAsync(receiptPath, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const processingEntries = fs.readdirSync(manifest.processingDir);
+    assert.equal(processingEntries.length, 1);
+    const requestId = processingEntries[0]!;
+    assert.equal(fs.existsSync(path.join(manifest.processingDir, requestId, 'result.json')), false);
+    controller.abort();
+    await server;
+    const client = await clientResult;
+    assert.equal(client.exitCode, 0, `${client.stderr}\n${JSON.stringify(client.payload)}`);
+    assert.equal(client.payload.phase, 'completed');
+    assert.equal(terminateCalls, 1);
+    assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`)), true);
+    assert.equal(fs.existsSync(path.join(manifest.processingDir, requestId)), true);
+  } finally {
+    releaseResult();
+    controller.abort();
+    await server?.catch(() => undefined);
+    await clientResult?.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('sandbox control client and broker exchange a task-bound response', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
   const channelDir = path.join(root, 'channel');

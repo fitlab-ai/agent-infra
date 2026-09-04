@@ -827,11 +827,11 @@ export async function serveSandboxControl(
         }
       }
       if (active) {
-        active.prepared.terminate(owned);
+        const terminationConfirmed = active.prepared.terminate(owned);
         if (owned && brokerOwns() && active.request.family === 'task-finalization') {
           const recovered = finalizationRecoveryResponse(manifest, active.request.id, 0);
           if (recovered.status === 'matched' && recovered.response && writeSandboxControlResponse(manifest, recovered.response)) {
-            if (brokerOwns()) {
+            if (terminationConfirmed && brokerOwns()) {
               removeAcceptedResponse(manifest, active.request.id);
               fs.rmSync(path.join(manifest.processingDir, active.request.id), { recursive: true, force: true });
               active = null;
