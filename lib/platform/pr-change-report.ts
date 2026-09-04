@@ -544,11 +544,13 @@ function renderRepresentativeFiles(files: ChangeFile[]): string[] {
 }
 
 function renderEvidence(evidence: Evidence): string {
-  const location = evidence.startLine === null
+  const location = evidence.startLine === null && evidence.endLine === null
     ? ''
-    : evidence.endLine === evidence.startLine
-      ? `:${evidence.startLine}`
-      : `:${evidence.startLine}-${evidence.endLine}`;
+    : evidence.startLine !== null && evidence.endLine !== null
+      ? evidence.endLine === evidence.startLine
+        ? `:${evidence.startLine}`
+        : `:${evidence.startLine}-${evidence.endLine}`
+      : `:${evidence.startLine ?? evidence.endLine}`;
   return `  - 证据：<code>${escapeHtml(evidence.path)}</code>${location}：${escapeHtml(evidence.detail)}`;
 }
 

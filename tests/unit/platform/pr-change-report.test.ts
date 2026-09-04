@@ -242,6 +242,31 @@ test('canonical report escapes precheck paths, rationales, and evidence details'
   assert.doesNotMatch(rendered, /<script>|<img/);
 });
 
+test('canonical report renders nullable evidence line endpoints without null text', () => {
+  const digest = 'd'.repeat(64);
+  const precheck = candidate(digest);
+  precheck.checks[0] = {
+    ...precheck.checks[0]!,
+    evidence: [{ path: 'checks/no-lines.ts', startLine: null, endLine: null, detail: 'No line location.' }]
+  };
+  precheck.checks[1] = {
+    ...precheck.checks[1]!,
+    evidence: [{ path: 'checks/start-only.ts', startLine: 10, endLine: null, detail: 'Start line only.' }]
+  };
+  precheck.checks[2] = {
+    ...precheck.checks[2]!,
+    evidence: [{ path: 'checks/end-only.ts', startLine: null, endLine: 12, detail: 'End line only.' }]
+  };
+  const built = buildPrChangeReport(identity(), digest, mechanical(), precheck);
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /<code>checks\/no-lines\.ts<\/code>：No line location\./);
+  assert.match(rendered, /<code>checks\/start-only\.ts<\/code>:10：Start line only\./);
+  assert.match(rendered, /<code>checks\/end-only\.ts<\/code>:12：End line only\./);
+});
+
 test('canonical report lists bounded text representatives with stable tie ordering and classifications', () => {
   const digest = 'd'.repeat(64);
   const built = buildPrChangeReport(identity(), digest, representativeMechanical(), candidate(digest));
