@@ -29,9 +29,18 @@ function fixture(step = 'requirement-analysis-review') {
   fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
   if ((!explicitStep && step === 'requirement-analysis-review') || step === 'commit') {
     fs.writeFileSync(path.join(dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+    addReceipt(path.join(dir, 'task.md'), {
+      event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+      inputSha256: sha256File(path.join(dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+    });
   }
   if (step === 'code-review' || step === 'commit') {
+    fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
     fs.writeFileSync(path.join(dir, 'review-code.md'), reviewCodeArtifact());
+    addReceipt(path.join(dir, 'task.md'), {
+      event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+      inputSha256: sha256File(path.join(dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00'
+    });
   }
   return { root, id, dir, file: path.join(dir, 'task.md') };
 }
@@ -250,7 +259,7 @@ function decisionFixture() {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
   fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
-  fs.writeFileSync(path.join(f.dir, 'review-code.md'), `## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n`);
+  fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
   fs.writeFileSync(f.file, `---
 id: ${f.id}
 status: active
@@ -286,6 +295,10 @@ last_reviewed_commit: abcdef1234567890
 
 - 2026-07-18 10:00:00+08:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md
 `);
+  addReceipt(f.file, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-07-18 10:00:00+08:00'
+  });
   return f;
 }
 
@@ -666,6 +679,11 @@ test('plan event reopens technical design after commit preparation', () => {
 
 test('plan event reopens technical design after code review', () => {
   const f = fixture('code-review');
+  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+  addReceipt(f.file, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
 
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stdout || started.stderr);
@@ -690,6 +708,24 @@ test('plan event reopens technical design after code review', () => {
   assert.match(content, /`plan\.md`/);
 });
 
+test('plan event rejects an approved review whose input hash is stale', () => {
+  const f = fixture('code-review');
+  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+  addReceipt(f.file, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  fs.appendFileSync(path.join(f.dir, 'analysis.md'), '# Changed after review\n');
+
+  const before = fs.readFileSync(f.file);
+  const blocked = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(blocked.status, 1);
+  const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
+  assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
+  assert.match(result.error.message, /ANALYSIS_REVIEW_NOT_LATEST/);
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
 test('completed event validates orchestration provenance before writing task state', () => {
   const f = fixture();
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: f.root });
@@ -707,16 +743,16 @@ test('completed event validates orchestration provenance before writing task sta
     '--reviewer-model', 'reviewer-model', '--reviewer-reasoning-effort', 'high'
   ]).status, 0);
   const prepared = prepareOrchestrationDelegation(f.id, {
-    client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
+    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, {
     repoRoot: f.root,
     supportsLifecycleDelegation: () => true
   });
   assert.equal(prepared.status, 'running');
   assert.equal(orchestrate([
-    'hook-start', '--native-agent', 'agent-infra-lifecycle-reviewer', '--child-id', 'child-1',
-    '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'reviewer-model',
-    '--actual-reasoning-effort', 'high'
+    'hook-start', '--native-agent', 'agent-infra-lifecycle-executor', '--child-id', 'child-1',
+    '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'executor-model',
+    '--actual-reasoning-effort', 'xhigh'
   ]).status, 0);
 
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']).status, 0);

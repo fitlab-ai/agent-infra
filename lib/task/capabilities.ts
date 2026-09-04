@@ -98,6 +98,7 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   }
   if (action === 'plan') {
     if (!hasArtifact(facts, 'review-analysis')) return deny('ANALYSIS_REVIEW_REQUIRED');
+    if (!reviewMatchesLatest(facts, 'analysis', 'review-analysis')) return deny('ANALYSIS_REVIEW_NOT_LATEST');
     if (facts.reviews['review-analysis'] !== 'approved') return deny('ANALYSIS_REVIEW_NOT_APPROVED');
     if (facts.unresolvedLedger.analysis > 0) return deny('ANALYSIS_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.analysis}`);
     return allow('analysis-review-approved');
@@ -108,10 +109,12 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   if (action === 'code') {
     if (trigger.implementationInput) {
       if (!hasArtifact(facts, 'review-code')) return deny('CODE_REVIEW_REQUIRED');
+      if (!reviewMatchesLatest(facts, 'code', 'review-code')) return deny('CODE_REVIEW_NOT_LATEST');
       if (facts.reviews['review-code'] !== 'approved') return deny('CODE_REVIEW_NOT_APPROVED');
       return allow('implementation-input');
     }
     if (!hasArtifact(facts, 'review-plan')) return deny('PLAN_REVIEW_REQUIRED');
+    if (!reviewMatchesLatest(facts, 'plan', 'review-plan')) return deny('PLAN_REVIEW_NOT_LATEST');
     if (facts.reviews['review-plan'] !== 'approved') return deny('PLAN_REVIEW_NOT_APPROVED');
     if (facts.unresolvedLedger.plan > 0) return deny('PLAN_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.plan}`);
     return allow('plan-review-approved');
@@ -121,6 +124,7 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   }
   if (action === 'manual-validation' || action === 'validation-run') {
     if (!hasArtifact(facts, 'review-code')) return deny('CODE_REVIEW_REQUIRED');
+    if (!reviewMatchesLatest(facts, 'code', 'review-code')) return deny('CODE_REVIEW_NOT_LATEST');
     if (facts.reviews['review-code'] !== 'approved') return deny('CODE_REVIEW_NOT_APPROVED');
     if (facts.unresolvedLedger.code > 0) return deny('CODE_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.code}`);
     return allow('code-review-approved');

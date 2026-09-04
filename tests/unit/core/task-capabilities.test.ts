@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
+import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleAction, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
 import { invalidationMutation, createInvalidationOperation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 
@@ -116,6 +116,55 @@ test('explicit source provenance requires a matching artifact hash', () => {
   });
   assert.equal(result.allowed, false);
   assert.equal(result.reasonCode, 'SOURCE_ARTIFACT_HASH_MISMATCH');
+});
+
+test('approved reviews without latest input bindings cannot authorize downstream actions', () => {
+  const stale = {
+    ...facts('code-review'),
+    artifacts: {
+      analysis: ['analysis.md'], 'review-analysis': ['review-analysis.md'],
+      plan: ['plan.md'], 'review-plan': ['review-plan.md'],
+      code: ['code.md'], 'review-code': ['review-code.md']
+    },
+    reviews: {
+      'review-analysis': 'approved', 'review-plan': 'approved', 'review-code': 'approved'
+    } as LifecycleFacts['reviews'],
+    reviewedInputs: {}
+  } satisfies LifecycleFacts;
+
+  const cases: Array<{ action: LifecycleAction; trigger: ExplicitTrigger; reasonCode: string }> = [
+    {
+      action: 'plan',
+      trigger: { ...trigger, requestedAction: 'plan' },
+      reasonCode: 'ANALYSIS_REVIEW_NOT_LATEST'
+    },
+    {
+      action: 'code',
+      trigger: { ...trigger, requestedAction: 'code' },
+      reasonCode: 'PLAN_REVIEW_NOT_LATEST'
+    },
+    {
+      action: 'code',
+      trigger: { ...trigger, requestedAction: 'code', implementationInput: 'II-1' },
+      reasonCode: 'CODE_REVIEW_NOT_LATEST'
+    },
+    {
+      action: 'manual-validation',
+      trigger: { ...trigger, requestedAction: 'manual-validation' },
+      reasonCode: 'CODE_REVIEW_NOT_LATEST'
+    },
+    {
+      action: 'validation-run',
+      trigger: { ...trigger, requestedAction: 'validation-run' },
+      reasonCode: 'CODE_REVIEW_NOT_LATEST'
+    }
+  ];
+
+  for (const { action, trigger: actionTrigger, reasonCode } of cases) {
+    const result = canStart(action, stale, actionTrigger);
+    assert.equal(result.allowed, false, `${action} should reject a stale approval`);
+    assert.equal(result.reasonCode, reasonCode);
+  }
 });
 
 test('completed invalidation removes stale review approvals from lifecycle facts', () => {
