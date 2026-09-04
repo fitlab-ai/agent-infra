@@ -251,7 +251,7 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
   const local = inspectLocalReleaseFacts(cwd, version);
   const remoteBranch = branch ? git(cwd, ['ls-remote', '--heads', 'origin', branch]) : null;
   const remoteTag = git(cwd, ['ls-remote', '--tags', 'origin', `refs/tags/${tag}`]);
-  const platform = inspectPlatformRelease(tag, { cwd });
+  const platform = await inspectPlatformRelease(tag, { cwd });
   const npm = await inspectNpmChannel(pkg.name, version);
   const formulaUrl = `https://raw.githubusercontent.com/${config.org}/homebrew-tap/main/Formula/${config.project}.rb`;
   const homebrew = await inspectHomebrewChannel(formulaUrl, version);
@@ -262,7 +262,7 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
     localTagAncestor: local.localTagAncestor,
     localTagConflict: local.localTagConflict,
     remoteBranch: Boolean(remoteBranch && remoteBranch.split(/\s+/)[0] === head), remoteTag: Boolean(remoteTag),
-    githubRelease: platform.platform.type !== 'github'
+    githubRelease: platform.error?.code === 'PLATFORM_CAPABILITY_UNSUPPORTED'
       ? true
       : platform.status === 'blocked' ? null : Boolean(platform.release?.published),
     npm: npm.published, homebrew: homebrew.published, smoke,
@@ -324,7 +324,7 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   }
   if (action === 'prepare') {
     if (before.phase !== 'unprepared') {
-      const milestones = reconcileReleaseMilestones(version, { cwd });
+      const milestones = await reconcileReleaseMilestones(version, { cwd });
       process.stdout.write(`${JSON.stringify({ ...milestones, snapshot: before })}\n`);
       process.exitCode = milestones.status === 'failed' ? 1 : milestones.status === 'blocked' ? 2 : 0;
       return;
@@ -344,7 +344,7 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
     const committed = commitExplicitPaths({ cwd, paths: changedPaths(cwd), message: `chore: release v${version}` });
     if (committed.status === 'failed') { process.stdout.write(`${JSON.stringify(committed)}\n`); process.exitCode = 1; return; }
     const tagged = command(cwd, 'git', ['tag', '-a', `v${version}`, '-m', `Release v${version}`]);
-    const milestones = tagged.status === 0 ? reconcileReleaseMilestones(version, { cwd }) : null;
+    const milestones = tagged.status === 0 ? await reconcileReleaseMilestones(version, { cwd }) : null;
     const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
     const failed = tagged.status !== 0 || milestones?.status === 'failed';
     const blocked = milestones?.status === 'blocked';

@@ -96,7 +96,7 @@ delivery_remote_head:          # Most recent successfully delivered task branch 
 <!-- Workflow degradation, platform sync failures, permission gaps, and related events. Keep the header when empty. -->
 
 | id | time | step | severity | code | status | target | message | action | resolved_at | resolution |
-|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|
+|----|------|------|----------|------|--------|---------|--------|-------------|------------|------------|
 
 ## Activity Log
 

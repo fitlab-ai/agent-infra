@@ -6,9 +6,9 @@ import { listPrReviews, publishPrReview } from '../platform/pr-review.ts';
 import type { PrReviewEvent } from '../platform/pr-review.ts';
 import type { PlatformResult } from '../platform/types.ts';
 
-const USAGE = `Usage: agent-infra-internal platform-pr-review inspect --pr <N> [--cwd <path>]
-       agent-infra-internal platform-pr-review list --pr <N> [--cwd <path>]
-       agent-infra-internal platform-pr-review publish --pr <N> --scope <taskId|pr{N}> --round <N> --commit <sha> --event <COMMENT|APPROVE|REQUEST_CHANGES> --body-file <path|-> [--dry-run] [--cwd <path>]
+const USAGE = `Usage: agent-infra-internal platform-pr-review inspect --pr <token> [--cwd <path>]
+       agent-infra-internal platform-pr-review list --pr <token> [--cwd <path>]
+       agent-infra-internal platform-pr-review publish --pr <token> --scope <taskId|pr{N}> --round <N> --commit <sha> --event <COMMENT|APPROVE|REQUEST_CHANGES> --body-file <path|-> [--dry-run] [--cwd <path>]
 `;
 
 const BOOLEAN_FLAGS = new Set(['--dry-run']);
@@ -50,7 +50,7 @@ function readBodyFile(value: string, cwd: string): string {
   return value === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(path.resolve(cwd, value), 'utf8');
 }
 
-function platformPrReview(args: string[] = []): void {
+async function platformPrReview(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['inspect', 'list', 'publish'].includes(operation)) { fail('a valid operation is required'); return; }
@@ -65,14 +65,14 @@ function platformPrReview(args: string[] = []): void {
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
-  const pr = Number(values.pr);
-  if (!Number.isInteger(pr) || pr <= 0) { fail(`${operation} requires a positive --pr`); return; }
+  const pr = values.pr;
+  if (typeof pr !== 'string' || !pr) { fail(`${operation} requires --pr <token>`); return; }
   if (operation === 'inspect') {
-    finish(inspectPlatformPullRequestByNumber(pr, { cwd }));
+    finish(await inspectPlatformPullRequestByNumber(pr, { cwd }));
     return;
   }
   if (operation === 'list') {
-    finish(listPrReviews(pr, { cwd }));
+    finish(await listPrReviews(pr, { cwd }));
     return;
   }
   const scope = typeof values.scope === 'string' ? values.scope : '';
@@ -91,7 +91,7 @@ function platformPrReview(args: string[] = []): void {
     fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
-  finish(publishPrReview({
+  finish(await publishPrReview({
     cwd,
     prNumber: pr,
     identity: { scope, round, commitSha: commit },

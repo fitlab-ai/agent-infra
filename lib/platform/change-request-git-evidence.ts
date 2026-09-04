@@ -3,7 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 
-import { resolvePlatformChangeRequestGitEvidence } from "./adapters.ts";
+import { resolvePlatformProviderContext } from './context.ts';
+import {
+  providerError,
+  providerOperationContext,
+  unsupportedProviderOperation
+} from './provider-bridge.ts';
+import { isResourceIdentity } from './resource-identity.ts';
 import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
 import type { ReviewedHeadRelation } from "./merged-pr-equivalence.ts";
 import type { PullRequestSnapshot } from "./pull-requests.ts";
@@ -53,25 +59,46 @@ function validMergeIdentity(lastReviewedCommit: string, pullRequest: PullRequest
   return null;
 }
 
-function resolveMaterializedReviewedHeadRelation(input: {
+async function resolveMaterializedReviewedHeadRelation(input: {
   cwd: string;
   platformType: string | null;
   lastReviewedCommit: string;
   pullRequest: PullRequestSnapshot;
-}): ReviewedHeadRelation {
+}): Promise<ReviewedHeadRelation> {
   const identityFailure = validMergeIdentity(input.lastReviewedCommit, input.pullRequest);
   if (identityFailure) return identityFailure;
 
-  const source = resolvePlatformChangeRequestGitEvidence(input.platformType, {
+  const loaded = await resolvePlatformProviderContext({
     cwd: input.cwd,
-    repository: input.pullRequest.repository,
-    number: input.pullRequest.number,
-    pullRequest: input.pullRequest
+    platformType: input.platformType || undefined
   });
+  if (!loaded.ok) {
+    return blocked(
+      loaded.context.error?.code || 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
+      loaded.context.error?.message || 'Unable to resolve the configured platform provider'
+    );
+  }
+  const target = isResourceIdentity(input.pullRequest.identity)
+    ? input.pullRequest.identity
+    : { kind: 'number' as const, value: input.pullRequest.number };
+  const operation = loaded.value.provider.changeRequests?.resolveGitEvidence
+    ? await loaded.value.provider.changeRequests.resolveGitEvidence({
+      context: providerOperationContext(loaded.value),
+      target,
+      expected: {
+        baseSha: input.pullRequest.base.sha,
+        headSha: input.pullRequest.head.sha,
+        targetBranch: input.pullRequest.base.ref
+      }
+    })
+    : unsupportedProviderOperation(loaded.value.provider, 'changeRequests.resolveGitEvidence');
+  const source = operation.ok
+    ? operation
+    : { ok: false as const, error: providerError(operation.error, 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE') };
   if (!source.ok || !source.value) {
     return blocked(
-      source.error?.code || "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE",
-      source.error?.message || "Unable to resolve authoritative PR Git evidence"
+      ('error' in source && source.error?.code) || "PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE",
+      ('error' in source && source.error?.message) || "Unable to resolve authoritative PR Git evidence"
     );
   }
   if (

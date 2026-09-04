@@ -153,7 +153,7 @@ test("requirements sync converges before the complete-task platform gate", async
     comments.push({ id: 999, body: `<!-- sync-issue:${taskId}:summary -->\nSummary` });
     writeJson(commentsPath, comments);
 
-    const validation = runValidator(
+    const validation = await runValidator(
       ["check", "platform-sync", taskDir, "--skill", "complete-task"],
       { env }
     );
@@ -174,7 +174,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       const payload = parseValidatorPayload(result.stdout);
       assert.equal(payload.gate, "pass");
@@ -191,7 +191,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync",
@@ -210,7 +210,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent, { rawBody: true }) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync",
@@ -231,7 +231,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync",
@@ -250,7 +250,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync",
@@ -270,7 +270,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
@@ -288,7 +288,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
@@ -303,7 +303,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent, { summaryText: "Metadata (frontmatter)" }) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
@@ -318,7 +318,7 @@ const implementSyncCases = [
     comments() {
       return [];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync",
@@ -337,7 +337,7 @@ const implementSyncCases = [
     comments(taskContent: string) {
       return [{ body: buildTaskComment(taskId, taskContent) }];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
@@ -353,7 +353,7 @@ const implementSyncCases = [
     comments(taskContent: string) {
       return [{ body: buildTaskComment(taskId, taskContent) }];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync",
@@ -376,7 +376,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync",
@@ -399,7 +399,7 @@ const implementSyncCases = [
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
@@ -419,7 +419,7 @@ const implementSyncCases = [
       ];
     },
     extraEnv: { GH_FAKE_PERMISSIONS: JSON.stringify({ triage: false, push: false }) },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
@@ -439,7 +439,7 @@ const implementSyncCases = [
         { body: `<!-- sync-issue:${taskId}:summary -->\nSummary` }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "platform-sync-preflight", status: "pass" });
     }
@@ -459,7 +459,7 @@ const implementSyncCases = [
         { body: `<!-- sync-issue:${taskId}:summary -->\nSummary` }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync-preflight",
@@ -483,7 +483,7 @@ const implementSyncCases = [
         { body: `<!-- sync-issue:${taskId}:summary -->\nSummary` }
       ];
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
         type: "platform-sync-preflight",
@@ -495,7 +495,7 @@ const implementSyncCases = [
 ];
 
 for (const c of implementSyncCases) {
-  test(c.name, () => withTempRoot("agent-infra-platform-sync-", (tempRoot) => {
+  test(c.name, () => withTempRoot("agent-infra-platform-sync-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({ issue_number: "65", ...c.taskOverrides });
     const artifactContent = loadFixture("valid-code.md");
@@ -516,7 +516,7 @@ for (const c of implementSyncCases) {
           "--skill",
           c.skill
         ];
-    c.assertResult(runValidatorWithFakeGh(args, ctx, {
+    c.assertResult(await runValidatorWithFakeGh(args, ctx, {
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
       ...c.extraEnv
@@ -524,7 +524,7 @@ for (const c of implementSyncCases) {
   }));
 }
 
-test("validate-artifact platform-sync preserves source @ content when comparing artifact data", () => withTempRoot("agent-infra-platform-sync-content-policy-", (tempRoot) => {
+test("validate-artifact platform-sync preserves source @ content when comparing artifact data", () => withTempRoot("agent-infra-platform-sync-content-policy-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
   const taskContent = buildTaskContent({ issue_number: "65" });
   const artifactContent = "# Code\n\n@2x\n";
@@ -536,7 +536,7 @@ test("validate-artifact platform-sync preserves source @ content when comparing 
     { body: buildTaskComment(taskId, taskContent) }
   ]);
 
-  const result = runValidatorWithFakeGh(
+  const result = await runValidatorWithFakeGh(
     ["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"],
     ctx,
     { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
@@ -545,7 +545,7 @@ test("validate-artifact platform-sync preserves source @ content when comparing 
   assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
 }));
 
-test("validate-artifact platform-sync preserves source @ content when comparing task data", () => withTempRoot("agent-infra-platform-sync-task-content-policy-", (tempRoot) => {
+test("validate-artifact platform-sync preserves source @ content when comparing task data", () => withTempRoot("agent-infra-platform-sync-task-content-policy-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
   const taskContent = `${buildTaskContent({ issue_number: "65" })}\n@2x\n`;
   const artifactContent = loadFixture("valid-code.md");
@@ -557,7 +557,7 @@ test("validate-artifact platform-sync preserves source @ content when comparing 
     { body: buildTaskComment(taskId, taskContent) }
   ]);
 
-  const result = runValidatorWithFakeGh(
+  const result = await runValidatorWithFakeGh(
     ["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"],
     ctx,
     { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
@@ -760,7 +760,7 @@ const createPrCases = [
 ];
 
 for (const c of createPrCases) {
-  test(c.name, () => withTempRoot("agent-infra-platform-sync-pr-", (tempRoot) => {
+  test(c.name, () => withTempRoot("agent-infra-platform-sync-pr-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const changedPath = "changedPath" in c ? c.changedPath : undefined;
     if (changedPath) {
@@ -787,7 +787,7 @@ for (const c of createPrCases) {
     writeJson(ctx.prPath, c.prPayload);
     writeJson(ctx.prCommentsPath, c.prComments ?? [{ body: summaryComment }]);
 
-    const result = runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "create-pr"], ctx, {
+    const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "create-pr"], ctx, {
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_PR_PATH: ctx.prPath,
       GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
@@ -807,7 +807,7 @@ for (const c of createPrCases) {
 }
 
 test("validate-artifact platform-sync passes for complete-manual-validation when PR summary shows passed manual validation", () => (
-  withTempRoot("agent-infra-platform-sync-manual-validation-pass-", (tempRoot) => {
+  withTempRoot("agent-infra-platform-sync-manual-validation-pass-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({
       issue_number: "65",
@@ -827,7 +827,7 @@ test("validate-artifact platform-sync passes for complete-manual-validation when
       ].join("\n")
     }]);
 
-    const result = runValidatorWithFakeGh([
+    const result = await runValidatorWithFakeGh([
       "check",
       "platform-sync",
       ctx.taskDir,
@@ -846,7 +846,7 @@ test("validate-artifact platform-sync passes for complete-manual-validation when
 ));
 
 test("validate-artifact platform-sync fails for complete-manual-validation when PR summary lacks the passed heading", () => (
-  withTempRoot("agent-infra-platform-sync-manual-validation-fail-", (tempRoot) => {
+  withTempRoot("agent-infra-platform-sync-manual-validation-fail-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({
       issue_number: "65",
@@ -866,7 +866,7 @@ test("validate-artifact platform-sync fails for complete-manual-validation when 
       ].join("\n")
     }]);
 
-    const result = runValidatorWithFakeGh([
+    const result = await runValidatorWithFakeGh([
       "check",
       "platform-sync",
       ctx.taskDir,
@@ -933,7 +933,7 @@ const commitCases = [
 ];
 
 for (const c of commitCases) {
-  test(c.name, () => withTempRoot("agent-infra-platform-sync-commit-", (tempRoot) => {
+  test(c.name, () => withTempRoot("agent-infra-platform-sync-commit-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const headSha = c.setupHead ? createHeadCommit(tempRoot) : "";
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
@@ -947,8 +947,8 @@ for (const c of commitCases) {
     }
 
     const result = c.useFakeGh === false
-      ? runValidator(["check", "platform-sync", ctx.taskDir, "--skill", "commit"])
-      : runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "commit"], ctx, {
+      ? await runValidator(["check", "platform-sync", ctx.taskDir, "--skill", "commit"])
+      : await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "commit"], ctx, {
           GH_FAKE_ISSUE_PATH: ctx.issuePath,
           GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
           GH_FAKE_ISSUE_NUMBER: "65",
@@ -969,7 +969,7 @@ for (const c of commitCases) {
 }
 
 test("validate-artifact platform-sync passes for commit with last-commit from task branch worktree", () => (
-  withTempRoot("agent-infra-platform-sync-commit-worktree-pass-", (tempRoot) => {
+  withTempRoot("agent-infra-platform-sync-commit-worktree-pass-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const branch = "agent-infra-feature-pr";
     const worktreePath = path.join(tempRoot, "sandbox-worktree");
@@ -981,7 +981,7 @@ test("validate-artifact platform-sync passes for commit with last-commit from ta
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.prCommentsPath, [{ body: summaryCommentWithSha(prSha) }]);
 
-    const result = runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "commit"], ctx, {
+    const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "commit"], ctx, {
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
       GH_FAKE_ISSUE_NUMBER: "65",
@@ -994,14 +994,14 @@ test("validate-artifact platform-sync passes for commit with last-commit from ta
 ));
 
 test("validate-artifact platform-sync falls back to taskDir HEAD when task branch is missing", () => (
-  withTempRoot("agent-infra-platform-sync-commit-no-branch-", (tempRoot) => {
+  withTempRoot("agent-infra-platform-sync-commit-no-branch-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const mainSha = createHeadCommit(tempRoot);
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_delivery_fact: boundFactValue(77, mainSha) }));
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.prCommentsPath, [{ body: summaryCommentWithSha(mainSha) }]);
 
-    const result = runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "commit"], ctx, {
+    const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "commit"], ctx, {
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
       GH_FAKE_ISSUE_NUMBER: "65",
@@ -1013,7 +1013,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
 ));
 
 test("validate-artifact platform-sync falls back to taskDir HEAD when task branch worktree is unmatched", () => (
-  withTempRoot("agent-infra-platform-sync-commit-unmatched-branch-", (tempRoot) => {
+  withTempRoot("agent-infra-platform-sync-commit-unmatched-branch-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const mainSha = createHeadCommit(tempRoot);
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
@@ -1024,7 +1024,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.prCommentsPath, [{ body: summaryCommentWithSha(mainSha) }]);
 
-    const result = runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "commit"], ctx, {
+    const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", "commit"], ctx, {
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
       GH_FAKE_ISSUE_NUMBER: "65",
@@ -1036,7 +1036,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
 ));
 
 test("validate-artifact platform-sync blocks after retry exhaustion on gh network errors", () => (
-  withTempRoot("agent-infra-gate-blocked-", (tempRoot) => {
+  withTempRoot("agent-infra-gate-blocked-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, taskId);
     const binDir = path.join(tempRoot, "bin");
     const ghPath = path.join(binDir, "gh");
@@ -1046,7 +1046,7 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
     write(ghScriptPath, "console.error('network timeout');\nprocess.exit(1);\n");
     writeNodeCommandShim(ghPath, ghScriptPath);
 
-    const result = runValidator(["gate", "code-task", taskDir, "code.md"], {
+    const result = await runValidator(["gate", "code-task", taskDir, "code.md"], {
       env: {
         PATH: pathWithPrependedBin(binDir),
         AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: "0,0"
@@ -1078,7 +1078,7 @@ const retryCases = [
 ];
 
 for (const c of retryCases) {
-  test(c.name, () => withTempRoot(c.prefix, (tempRoot) => {
+  test(c.name, () => withTempRoot(c.prefix, async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const counterPath = path.join(tempRoot, "transient.count");
     const taskContent = buildTaskContent({ issue_number: "65" });
@@ -1092,7 +1092,7 @@ for (const c of retryCases) {
     ]);
     write(counterPath, "1");
 
-    const result = runValidatorWithFakeGh(["gate", "code-task", ctx.taskDir, "code.md"], ctx, {
+    const result = await runValidatorWithFakeGh(["gate", "code-task", ctx.taskDir, "code.md"], ctx, {
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
       GH_FAKE_TRANSIENT_FAIL_MATCHER: c.matcher,

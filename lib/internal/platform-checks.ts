@@ -70,17 +70,17 @@ async function platformChecks(args: string[] = []): Promise<void> {
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
-  if (operation === 'inspect') { finish(inspectPullRequestReadiness(taskRef, { cwd })); return; }
+  if (operation === 'inspect') { finish(await inspectPullRequestReadiness(taskRef, { cwd })); return; }
   if (operation === 'resolve-run') {
     if (!values.checkName) { fail('resolve-run requires --check-name'); return; }
-    finish(resolvePlatformCheckRun(taskRef, { cwd, checkName: values.checkName, detailsUrl: values.detailsUrl }));
+    finish(await resolvePlatformCheckRun(taskRef, { cwd, checkName: values.checkName, detailsUrl: values.detailsUrl }));
     return;
   }
   if (operation === 'logs') {
     const run = positive(values.run);
     const job = values.job === undefined ? undefined : positive(values.job);
     if (!run || values.job !== undefined && !job) { fail('logs requires a positive --run and optional positive --job'); return; }
-    finish(fetchPlatformCheckLogs(taskRef, { cwd, run, job: job || undefined }));
+    finish(await fetchPlatformCheckLogs(taskRef, { cwd, run, job: job || undefined }));
     return;
   }
   const intervalSeconds = positive(values.intervalSeconds);

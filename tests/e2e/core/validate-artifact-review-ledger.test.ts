@@ -37,17 +37,17 @@ function buildLedgerTask(rows: string[], { withSection = true } = {}) {
   ].join("\n");
 }
 
-function runLedger(skill: string, taskDir: string, repositoryRoot?: string) {
-  const result = runValidator(["check", "review-ledger", taskDir, "--skill", skill], { repositoryRoot });
+async function runLedger(skill: string, taskDir: string, repositoryRoot?: string) {
+  const result = await runValidator(["check", "review-ledger", taskDir, "--skill", skill], { repositoryRoot });
   return { result, payload: parseValidatorPayload(result.stdout) };
 }
 
 test("review-ledger fails when no ledger section exists", async () => {
-  await withTempRoot("agent-infra-ledger-none-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-none-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([], { withSection: false }));
 
-    const { result, payload } = runLedger("complete-task", taskDir);
+    const { result, payload } = await runLedger("complete-task", taskDir);
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /LEDGER_SECTION_MISSING/);
@@ -55,26 +55,26 @@ test("review-ledger fails when no ledger section exists", async () => {
 });
 
 test("review-ledger passes when every in-scope row is terminal", async () => {
-  await withTempRoot("agent-infra-ledger-clean-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-clean-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 2 | blocker | closed | fixed in code-r2, approved by review-code-r2 |",
       "| PL-1 | plan | 1 | major | confirmed | reviewer accepted refutation |"
     ]));
 
-    const { result } = runLedger("complete-task", taskDir);
+    const { result } = await runLedger("complete-task", taskDir);
     assert.equal(result.status, 0, result.stderr || result.stdout);
   });
 });
 
 test("review-ledger fails on an open (unresolved) row", async () => {
-  await withTempRoot("agent-infra-ledger-open-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-open-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 1 | blocker | open | review-code.md#1 |"
     ]));
 
-    const { result, payload } = runLedger("complete-task", taskDir);
+    const { result, payload } = await runLedger("complete-task", taskDir);
     assert.notEqual(result.status, 0, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /CD-1/);
@@ -82,46 +82,46 @@ test("review-ledger fails on an open (unresolved) row", async () => {
 });
 
 test("review-ledger fails when a non-open status carries no evidence", async () => {
-  await withTempRoot("agent-infra-ledger-evidence-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-evidence-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 1 | blocker | confirmed |  |"
     ]));
 
-    const { payload } = runLedger("complete-task", taskDir);
+    const { payload } = await runLedger("complete-task", taskDir);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /requires evidence/);
   });
 });
 
 test("review-ledger fails on an illegal status value", async () => {
-  await withTempRoot("agent-infra-ledger-illegal-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-illegal-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 1 | blocker | bogus | x |"
     ]));
 
-    const { payload } = runLedger("complete-task", taskDir);
+    const { payload } = await runLedger("complete-task", taskDir);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /illegal status/);
   });
 });
 
 test("review-ledger forces escalation once a finding reaches the round limit", async () => {
-  await withTempRoot("agent-infra-ledger-converge-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-converge-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 3 | blocker | refuted | still disputed |"
     ]));
 
-    const { payload } = runLedger("complete-task", taskDir);
+    const { payload } = await runLedger("complete-task", taskDir);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /without convergence|needs-human-decision/);
   });
 });
 
 test("review-ledger honors the project maxHandshakeRounds override", async () => {
-  await withTempRoot("agent-infra-ledger-configured-limit-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-configured-limit-", async (tempRoot) => {
     write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
       review: { maxHandshakeRounds: 2 }
     }));
@@ -134,51 +134,51 @@ test("review-ledger honors the project maxHandshakeRounds override", async () =>
       "| CD-1 | code | 2 | blocker | refuted | still disputed |"
     ]));
 
-    const { payload } = runLedger("complete-task", taskDir, tempRoot);
+    const { payload } = await runLedger("complete-task", taskDir, tempRoot);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /reached limit 2/);
   });
 });
 
 test("review-ledger keeps needs-human-decision blocking until ruled", async () => {
-  await withTempRoot("agent-infra-ledger-human-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-human-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 3 | blocker | needs-human-decision | escalated |"
     ]));
 
-    const blocked = runLedger("complete-task", taskDir);
+    const blocked = await runLedger("complete-task", taskDir);
     assert.equal(blocked.payload.status, "fail");
 
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 3 | blocker | human-decided | maintainer ruled in favor of executor |"
     ]));
-    const ruled = runLedger("complete-task", taskDir);
+    const ruled = await runLedger("complete-task", taskDir);
     assert.equal(ruled.payload.status, "pass");
   });
 });
 
 test("review-ledger keeps HD decision rows blocking until human-decided", async () => {
-  await withTempRoot("agent-infra-ledger-hd-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-hd-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |"
     ]));
 
-    const blocked = runLedger("code-task", taskDir);
+    const blocked = await runLedger("code-task", taskDir);
     assert.equal(blocked.payload.status, "fail");
     assert.match(blocked.payload.message, /HD-1/);
 
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| HD-1 | plan | - | decision | human-decided | 人工裁决#HD-1 |"
     ]));
-    const ruled = runLedger("code-task", taskDir);
+    const ruled = await runLedger("code-task", taskDir);
     assert.equal(ruled.payload.status, "pass", ruled.result.stdout);
   });
 });
 
 test("review-ledger recognizes the evidence written by the real decide command", async () => {
-  await withTempRoot("agent-infra-ledger-decide-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-decide-", async (tempRoot) => {
     spawnSync("git", ["init", "--quiet"], { cwd: tempRoot });
     write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: "demo" }));
     const taskDir = path.join(tempRoot, ".agents", "workspace", "active", TASK_ID);
@@ -198,7 +198,7 @@ test("review-ledger recognizes the evidence written by the real decide command",
     ].join("\n");
     write(path.join(taskDir, "task.md"), pending);
 
-    assert.equal(runLedger("complete-task", taskDir).payload.status, "fail");
+    assert.equal((await runLedger("complete-task", taskDir)).payload.status, "fail");
     const decided = spawnSync("node", [CLI_PATH, "decide", "--task", TASK_ID, "--item", "CD-1", "--needs-implementation", "false", "accept reviewer guidance"], {
       cwd: tempRoot,
       encoding: "utf8"
@@ -207,12 +207,12 @@ test("review-ledger recognizes the evidence written by the real decide command",
     const content = fs.readFileSync(path.join(taskDir, "task.md"), "utf8");
     assert.match(content, /\| CD-1 \| code \| 1 \| blocker \| human-decided \| task\.md#HDR-1 \|/);
     assert.match(content, /^### HDR-1$/m);
-    assert.equal(runLedger("complete-task", taskDir).payload.status, "pass");
+    assert.equal((await runLedger("complete-task", taskDir)).payload.status, "pass");
   });
 });
 
 test("review-ledger stage_scope only enforces stages before the caller", async () => {
-  await withTempRoot("agent-infra-ledger-scope-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-scope-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     // An open code-stage row is out of scope for plan-task (which only guards analysis).
     write(path.join(taskDir, "task.md"), buildLedgerTask([
@@ -220,18 +220,18 @@ test("review-ledger stage_scope only enforces stages before the caller", async (
       "| CD-1 | code | 1 | blocker | open | not yet handled |"
     ]));
 
-    const planScoped = runLedger("plan-task", taskDir);
+    const planScoped = await runLedger("plan-task", taskDir);
     assert.equal(planScoped.payload.status, "pass", planScoped.result.stdout);
 
     // complete-task guards all stages, so the same open code row must fail.
-    const allScoped = runLedger("complete-task", taskDir);
+    const allScoped = await runLedger("complete-task", taskDir);
     assert.equal(allScoped.payload.status, "fail");
     assert.match(allScoped.payload.message, /CD-1/);
   });
 });
 
 test("review-ledger and stage-status agree for open minor, terminal, and advisory-only stages", async () => {
-  await withTempRoot("agent-infra-ledger-parity-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-parity-", async (tempRoot) => {
     spawnSync("git", ["init", "--quiet"], { cwd: tempRoot });
     write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: "demo" }));
     const taskDir = path.join(tempRoot, ".agents", "workspace", "active", TASK_ID);
@@ -250,7 +250,7 @@ test("review-ledger and stage-status agree for open minor, terminal, and advisor
       });
       assert.equal(openStatus.status, 0, openStatus.stderr);
       assert.equal(JSON.parse(openStatus.stdout).stageStatus.canAdvance, false);
-      assert.equal(runLedger(item.skill, taskDir).payload.status, "fail");
+      assert.equal((await runLedger(item.skill, taskDir)).payload.status, "fail");
 
       write(path.join(taskDir, "task.md"), buildLedgerTask([
         `| ${item.id} | ${item.stage} | 1 | minor | closed | implementation evidence |`
@@ -259,7 +259,7 @@ test("review-ledger and stage-status agree for open minor, terminal, and advisor
         cwd: tempRoot, encoding: "utf8"
       });
       assert.equal(JSON.parse(terminalStatus.stdout).stageStatus.canAdvance, true);
-      assert.equal(runLedger(item.skill, taskDir).payload.status, "pass");
+      assert.equal((await runLedger(item.skill, taskDir)).payload.status, "pass");
     }
 
     write(path.join(taskDir, "task.md"), buildLedgerTask([]));
@@ -267,18 +267,18 @@ test("review-ledger and stage-status agree for open minor, terminal, and advisor
       cwd: tempRoot, encoding: "utf8"
     });
     assert.equal(JSON.parse(advisoryOnly.stdout).stageStatus.canAdvance, true);
-    assert.equal(runLedger("complete-task", taskDir).payload.status, "pass");
+    assert.equal((await runLedger("complete-task", taskDir)).payload.status, "pass");
   });
 });
 
 test("review-ledger fails on a malformed (wrong column count) row", async () => {
-  await withTempRoot("agent-infra-ledger-malformed-", (tempRoot) => {
+  await withTempRoot("agent-infra-ledger-malformed-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
       "| CD-1 | code | 1 | blocker |"
     ]));
 
-    const { payload } = runLedger("complete-task", taskDir);
+    const { payload } = await runLedger("complete-task", taskDir);
     assert.equal(payload.status, "fail");
     assert.equal(payload.type, "review-ledger");
   });

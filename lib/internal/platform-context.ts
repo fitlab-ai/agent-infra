@@ -10,7 +10,7 @@ function fail(message: string): void {
   process.exitCode = 1;
 }
 
-function platformContext(args: string[] = []): void {
+async function platformContext(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (args[0] !== 'resolve') { fail("operation must be 'resolve'"); return; }
   let cwd = process.cwd();
@@ -24,7 +24,7 @@ function platformContext(args: string[] = []): void {
     seen.add(flag);
     cwd = path.resolve(value);
   }
-  const result = resolvePlatformContext({ cwd });
+  const result = await resolvePlatformContext({ cwd });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
   if (result.status === 'blocked') process.exitCode = 2;

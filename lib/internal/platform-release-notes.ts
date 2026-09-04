@@ -36,14 +36,14 @@ function finish(result: { status: string; [key: string]: unknown }): void {
   process.exitCode = result.status === 'blocked' ? 2 : result.status === 'failed' ? 1 : 0;
 }
 
-function platformReleaseNotes(args: string[] = []): void {
+async function platformReleaseNotes(args: string[] = []): Promise<void> {
   const [action, ...rest] = args;
   if (action === 'context') {
     const parsed = parseOptions(rest, ['--cwd', '--history-limit', '--from-tag', '--to-tag', '--branch']);
     if (!parsed) return finish(invalidInput('invalid context options'));
     const cwd = path.resolve(parsed.values.get('--cwd') || process.cwd());
     const historyRaw = parsed.values.get('--history-limit') ?? null;
-    finish(releaseNoteContext({
+    finish(await releaseNoteContext({
       fromTag: parsed.values.get('--from-tag') || '',
       toTag: parsed.values.get('--to-tag') || '',
       branch: parsed.values.get('--branch') || '',
@@ -80,7 +80,7 @@ function platformReleaseNotes(args: string[] = []): void {
       fs.writeFileSync(resolvedNotesPath, fs.readFileSync(0));
     }
     try {
-      finish(publishReleaseNotes({
+      finish(await publishReleaseNotes({
         tag: parsed.values.get('--tag') || '',
         title: parsed.values.get('--title') || parsed.values.get('--tag') || '',
         notesFile: resolvedNotesPath,

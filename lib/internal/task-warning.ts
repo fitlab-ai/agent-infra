@@ -17,7 +17,7 @@ function usageFailure(message: string): void {
   process.exitCode = 1;
 }
 
-function taskWarning(args: string[] = []): void {
+async function taskWarning(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
   if (!taskRef || !kind || !['add', 'set-status', 'list'].includes(kind)) { usageFailure('task ref and a valid intent are required'); return; }
@@ -54,11 +54,11 @@ function taskWarning(args: string[] = []): void {
   let result;
   let humanOverride: unknown = null;
   try {
-    result = withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-warning.${kind}`, () => {
+    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-warning.${kind}`, async () => {
       let current = applyWorkflowWarningIntent(values as WorkflowWarningIntent);
       if (current.status !== 'failed' || !values.overrideTicket) return current;
       if (!values.overrideTarget || !values.overrideScope) { usageFailure('override ticket requires target and scope'); return current; }
-      const consumed = consumeHumanOverride({
+      const consumed = await consumeHumanOverride({
         taskRef, ticketId: String(values.overrideTicket),
         failureId: failureId('workflow-warning', current.error?.code ?? 'TASK_STATE_MISMATCH'),
         target: String(values.overrideTarget), scope: String(values.overrideScope)

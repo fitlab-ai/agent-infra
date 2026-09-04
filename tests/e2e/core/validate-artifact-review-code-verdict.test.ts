@@ -144,7 +144,7 @@ function buildReviewTask(baseline: string, overrides: Record<string, string | nu
 }
 
 test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async () => {
-  await withTempRoot("agent-infra-rcv-bad-", (tempRoot) => {
+  await withTempRoot("agent-infra-rcv-bad-", async (tempRoot) => {
     const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
     write(path.join(taskDir, "task.md"), buildReviewTask(baseline));
     write(
@@ -152,7 +152,7 @@ test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async ()
       buildReviewArtifact("**总体结论**：通过但有问题", baseline, reviewedFingerprint, reviewedTree)
     );
 
-    const result = runValidator(["gate", "review-code", taskDir, "review-code.md"]);
+    const result = await runValidator(["gate", "review-code", taskDir, "review-code.md"]);
 
     assert.notEqual(result.status, 0, result.stderr || result.stdout);
     const payload = parseValidatorPayload(result.stdout);
@@ -173,7 +173,7 @@ test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async ()
 });
 
 test("review-code gate accepts canonical zh-CN verdict (A-b-zh)", async () => {
-  await withTempRoot("agent-infra-rcv-good-", (tempRoot) => {
+  await withTempRoot("agent-infra-rcv-good-", async (tempRoot) => {
     const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
     write(path.join(taskDir, "task.md"), buildReviewTask(baseline));
     write(
@@ -181,7 +181,7 @@ test("review-code gate accepts canonical zh-CN verdict (A-b-zh)", async () => {
       buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint, reviewedTree)
     );
 
-    const result = runValidator(["gate", "review-code", taskDir, "review-code.md"]);
+    const result = await runValidator(["gate", "review-code", taskDir, "review-code.md"]);
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const payload = parseValidatorPayload(result.stdout);
@@ -192,7 +192,7 @@ test("review-code gate accepts canonical zh-CN verdict (A-b-zh)", async () => {
 });
 
 test("review-code gate fails when the baseline commit field is absent", async () => {
-  await withTempRoot("agent-infra-rcv-nobaseline-", (tempRoot) => {
+  await withTempRoot("agent-infra-rcv-nobaseline-", async (tempRoot) => {
     const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
     write(path.join(taskDir, "task.md"), buildReviewTask(baseline));
     const artifact = buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint, reviewedTree)
@@ -201,7 +201,7 @@ test("review-code gate fails when the baseline commit field is absent", async ()
       .join("\n");
     write(path.join(taskDir, "review-code.md"), artifact);
 
-    const result = runValidator(["gate", "review-code", taskDir, "review-code.md"]);
+    const result = await runValidator(["gate", "review-code", taskDir, "review-code.md"]);
 
     assert.notEqual(result.status, 0, result.stdout);
     const artifactCheck = parseValidatorPayload(result.stdout).checks.find((c) => c.type === "artifact");
@@ -211,7 +211,7 @@ test("review-code gate fails when the baseline commit field is absent", async ()
 });
 
 test("review-code gate fails when the ledger writeback section is absent", async () => {
-  await withTempRoot("agent-infra-rcv-noledger-", (tempRoot) => {
+  await withTempRoot("agent-infra-rcv-noledger-", async (tempRoot) => {
     const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
     write(path.join(taskDir, "task.md"), buildReviewTask(baseline));
     const lines = buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint, reviewedTree).split("\n");
@@ -219,7 +219,7 @@ test("review-code gate fails when the ledger writeback section is absent", async
     lines.splice(index, 3); // heading, blank line, body line
     write(path.join(taskDir, "review-code.md"), lines.join("\n"));
 
-    const result = runValidator(["gate", "review-code", taskDir, "review-code.md"]);
+    const result = await runValidator(["gate", "review-code", taskDir, "review-code.md"]);
 
     assert.notEqual(result.status, 0, result.stdout);
     const artifactCheck = parseValidatorPayload(result.stdout).checks.find((c) => c.type === "artifact");

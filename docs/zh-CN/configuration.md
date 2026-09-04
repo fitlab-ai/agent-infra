@@ -78,6 +78,32 @@
 | `files` | 针对具体路径配置 `managed`、`merged`、`ejected` 三类更新策略。 |
 | `files.managedBaselines` | 工具维护的内建 guarded managed 文件 SHA-256 来源基线。请勿手工编辑；该映射用于安全三方更新 GitHub 生命周期 workflows。 |
 
+## 平台 Provider
+
+`platform.type` 为一次 runtime 调用明确选定唯一 provider。`github` 与 `none` 由 core 内建；其他选定类型必须声明明确的 provider source。runtime 不会自动发现、安装私有包，也不负责私有认证。
+
+```json
+{
+  "platform": {
+    "type": "trae",
+    "providers": {
+      "trae": {
+        "source": "@company/agent-infra-trae-provider",
+        "config": { "endpoint": "https://private.example" }
+      }
+    }
+  }
+}
+```
+
+source 可以是包名，也可以是相对于仓库根目录解析的本地 ESM 模块路径。provider loader 会先 realpath，再将选定 source 规范化为 canonical file URL 后查找 session。只有仓库根目录、provider type、解析后的 source identity 和选定 JSON config fingerprint 全部相同才复用 session；修改 source 或 config 会创建新 session，改变单次 operation 的工作目录不会污染旧 session。
+
+私有 provider 只应从公共的 `@fitlab-ai/agent-infra/platform-provider` subpath 获取 contract version `1`、factory 与 operation 输入/输出类型、normalized snapshot 和 `ProviderResult`。默认导出必须是异步 factory，只接收 `providerType`、`contractVersion`、规范化的 `repositoryRoot` 和只读的选定 `config`，不会收到 `cwd`、GitHub client 或凭据。每个 operation 会收到新的 `ProviderOperationContext`，其中包含 `repositoryRoot`、当前 `workingDirectory` 和不透明的 scope identity。
+
+`context.resolve` 是必需操作，会在加载阶段校验。其他 operation group 可以缺失，但声明的 group 必须完整实现全部方法。缺失 group 返回结构化的 `PLATFORM_CAPABILITY_UNSUPPORTED`；选定 provider 缺失、无法解析/导入、导出形状错误、factory 抛错、type/version 不匹配或 contract 校验失败时，返回稳定的不可重试错误，且绝不回退到 GitHub。错误信息不会包含 provider config、token 或不必要的绝对路径。私有 provider 的包访问和认证由部署环境负责。
+
+资源身份统一使用 canonical `{ "kind": "id" | "number" | "key", "value": string | number }` 形状。每个 provider 为每类资源声明一个 primary kind，core 不使用全局 `id > number > key` 回退。`--issue`、`--pr` 等 CLI 参数仍接收直观的原始字符串 token，并在选定 provider 加载后再解析。旧 `issue_number` 和 v1 PR fact 只在读取边界转换；新写入使用 `platform_issue_identity` 和 v2 PR fact，不重复写入旧字段。数字 identity 的 review marker 保留 `pr<N>`，不透明 identity 使用 `pr:<base64url-canonical-identity>`。provider 时间戳和 release-note facts 统一使用 UTC `Z`；本地时间只在展示层转换。
+
 ## Agent Client 契约
 
 **AI Coding Agent Client**（简称 **Agent Client**）是受支持的编码代理应用，例如 Claude Code、Codex、Antigravity CLI、OpenCode 或 TraeCode CLI。Canonical `agentClients` 数组必须按固定顺序 `claude-code`、`codex`、`antigravity-cli`、`opencode`、`traecli` 恰好包含每个内建客户端一次。

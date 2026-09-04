@@ -1,5 +1,4 @@
 import { computeInLabels } from './metadata-labels.ts';
-import type { GitHubClient } from './github-client.ts';
 import type { PlatformError } from './types.ts';
 
 type InLabelPlan = {
@@ -33,6 +32,10 @@ type LabelDeltaResult = {
   status: 'applied' | 'no-op' | 'failed' | 'blocked';
   changed: boolean;
   error: PlatformError | null;
+};
+
+type LabelSyncClient = {
+  json<T = unknown>(args: string[], options?: { cwd?: string; method?: string; input?: string }): any;
 };
 
 function inLabels(labels: readonly string[]): string[] {
@@ -125,7 +128,7 @@ function labelDelta(current: readonly string[], target: readonly string[], prefi
 }
 
 function syncLabelDelta(
-  client: GitHubClient,
+  client: LabelSyncClient,
   repository: string,
   number: number,
   cwd: string,

@@ -236,11 +236,11 @@ test('local task creation preserves a lock owned by the current process', () => 
   }
 });
 
-test('platform failure preserves the local task and records a warning intent', () => {
+test('platform failure preserves the local task and records a warning intent', async () => {
   const root = fixture();
   let warningTask: string | null = null;
   try {
-    const result = createTask(candidate, {
+    const result = await createTask(candidate, {
       repoRoot: root,
       agentInfraVersion: 'v0.9.5',
       dependencies: {

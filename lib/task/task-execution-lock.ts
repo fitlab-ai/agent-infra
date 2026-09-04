@@ -224,6 +224,22 @@ function withTaskExecutionLock<T>(
   };
   const serialized = `${JSON.stringify(owner)}\n`;
   let ownsFixed = false;
+  let deferRelease = false;
+  const release = (): void => {
+    try {
+      unlinkIfPresent(candidate);
+    } catch {
+      // Candidate cleanup is best-effort and must not replace the primary result.
+    }
+    if (ownsFixed) {
+      try {
+        const current = parseOwner(fs.readFileSync(fixed, 'utf8'), key);
+        if (current.token === token) unlinkIfPresent(fixed);
+      } catch {
+        // A missing or replaced fixed lock is not owned by this invocation.
+      }
+    }
+  };
   try {
     fs.mkdirSync(lockRoot, { recursive: true });
     cleanStaleCandidates(lockRoot, key, options.identityMatches ?? processIdentityMatches);
@@ -269,7 +285,12 @@ function withTaskExecutionLock<T>(
       );
     }
     unlinkIfPresent(candidate);
-    return callback();
+    const value = callback();
+    if (value && typeof (value as { then?: unknown }).then === 'function') {
+      deferRelease = true;
+      return (value as unknown as Promise<unknown>).finally(release) as T;
+    }
+    return value;
   } catch (error) {
     if (error instanceof TaskExecutionLockError) throw error;
     if (error instanceof Error && error.name === 'OrchestrationStateError') throw error;
@@ -279,19 +300,7 @@ function withTaskExecutionLock<T>(
       { operation: ownsFixed ? 'callback' : 'acquire', errno: errno(error), key }
     );
   } finally {
-    try {
-      unlinkIfPresent(candidate);
-    } catch {
-      // Candidate cleanup is best-effort and must not replace the primary result.
-    }
-    if (ownsFixed) {
-      try {
-        const current = parseOwner(fs.readFileSync(fixed, 'utf8'), key);
-        if (current.token === token) unlinkIfPresent(fixed);
-      } catch {
-        // A missing or replaced fixed lock is not owned by this invocation.
-      }
-    }
+    if (!deferRelease) release();
   }
 }
 

@@ -40,7 +40,7 @@ type AgentConfig = {
   project: string;
   org: string;
   language: string;
-  platform: { type: string };
+  platform: { type: string; providers?: Record<string, unknown> };
   templateVersion: string;
   sandbox: Record<string, unknown>;
   task: { shortIdLength: number };

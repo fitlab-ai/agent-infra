@@ -36,7 +36,7 @@ function summaryFixture(): { root: string; taskId: string } {
     'status: active',
     `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({
       identity: {
-        repository: 'acme/widgets', number: 42, nodeId: 'PR_42', url: 'https://github.com/acme/widgets/pull/42',
+        resource: { kind: 'number', value: 42 }, repository: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/42',
         head: { repository: 'acme/widgets', ref: 'feature', sha: 'a'.repeat(40) },
         base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) }
       }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
@@ -90,6 +90,26 @@ test('PR summary warning result preserves the primary lifecycle outcome', () => 
   assert.equal(warningResultForPrimary('no_op'), 'no_op_with_warnings');
 });
 
+test('PR summary preserves the structured legacy cutoff error from a persisted fact', async () => {
+  const fixture = summaryFixture();
+  try {
+    const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
+    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(legacy)}`));
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: 'Summary',
+      primaryResult: 'pr_created',
+      runtimeVersion: 'v1.0.0'
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('PR summary reconciliation creates, updates, converges and rejects duplicate markers', () => {
   const desired = buildPullRequestSummary('TASK-1', 'Summary', 'abc');
   assert.deepEqual(reconcileSummaryComment([], 'TASK-1', desired), { action: 'create', commentId: null });
@@ -128,10 +148,10 @@ for (const scenario of [
     client: (root: string): GitHubClient => resolvedContextClient(root, 'duplicate')
   }
 ] as const) {
-  test(`PR summary ${scenario.name} preserves a known primary PR result as a warning`, () => {
+  test(`PR summary ${scenario.name} preserves a known primary PR result as a warning`, async () => {
     const fixture = summaryFixture();
     try {
-      const result = syncPullRequestSummary(fixture.taskId, {
+      const result = await syncPullRequestSummary(fixture.taskId, {
         cwd: fixture.root,
         agent: 'codex',
         body: 'Summary',

@@ -131,8 +131,7 @@ function boundFactValue(number = 77, headSha = "a".repeat(40)) {
   return factValue(buildBoundFact({
     identity: {
       repository: "fitlab-ai/agent-infra",
-      number,
-      nodeId: `PR_${number}`,
+      resource: { kind: "number", value: number },
       url: `https://github.com/fitlab-ai/agent-infra/pull/${number}`,
       head: { repository: "fitlab-ai/agent-infra", ref: "agent-infra-feature-pr", sha: headSha },
       base: { repository: "fitlab-ai/agent-infra", ref: "main", sha: "b".repeat(40) }
@@ -226,7 +225,7 @@ function buildCompletedTaskContent(checklistLines: string[], overrides: Frontmat
   ].join("\n");
 }
 
-function runValidator(args: string[], options: ValidatorOptions = {}): SpawnSyncReturns<string> {
+async function runValidator(args: string[], options: ValidatorOptions = {}): Promise<SpawnSyncReturns<string>> {
   const env = gitSafeEnv({
     ...(options.fakeGhPath ? {
       AGENT_INFRA_GH_BIN: process.execPath,
@@ -249,7 +248,7 @@ function runValidator(args: string[], options: ValidatorOptions = {}): SpawnSync
     const skillName = mode === "gate" ? args[1]! : args[args.indexOf("--skill") + 1]!;
     const taskDir = mode === "gate" ? args[2]! : args[2]!;
     const artifactFile = mode === "gate" ? args[3] && !args[3]!.startsWith("--") ? args[3] : undefined : args[3] && !args[3]!.startsWith("--") ? args[3] : undefined;
-    const payload = verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: mode === "checks" ? [args[1]!] : [], repositoryRoot: options.repositoryRoot ?? filePath(".") });
+    const payload = await verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: mode === "checks" ? [args[1]!] : [], repositoryRoot: options.repositoryRoot ?? filePath(".") });
     const statusName = mode === "gate" ? payload.gate : payload.status;
     const status = ({ pass: 0, fail: 1, blocked: 2 } as Record<string, number>)[statusName] ?? 1;
     return { pid: 0, output: [null, `${JSON.stringify(payload)}\n`, ""], stdout: `${JSON.stringify(payload)}\n`, stderr: "", status, signal: null, error: undefined } as SpawnSyncReturns<string>;
@@ -431,7 +430,7 @@ async function runPlatformSyncAdapter(
 
   try {
     const adapter = await import(pathToFileURL(filePath("lib/platform/verification-sync.ts")).href);
-    return adapter.check({ taskDir, config, artifactFile: undefined }, {
+    return await adapter.check({ taskDir, config, artifactFile: undefined }, {
       repoRoot: repositoryRoot,
       loadTask(dir: string) {
         const taskPath = path.join(dir, "task.md");
@@ -645,7 +644,7 @@ function setupPlatformSyncEnv(tempRoot: string): PlatformSyncEnv {
   };
 }
 
-function runValidatorWithFakeGh(args: string[], ctx: PlatformSyncEnv, env: NodeJS.ProcessEnv = {}) {
+async function runValidatorWithFakeGh(args: string[], ctx: PlatformSyncEnv, env: NodeJS.ProcessEnv = {}) {
   return runValidator(args, {
     fakeGhPath: ctx.ghPath,
     env: ctx.env(env)

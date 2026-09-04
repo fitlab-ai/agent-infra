@@ -50,12 +50,12 @@ if (taskControlCommand) {
       }
       case 'task-lifecycle': {
         const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
-        taskLifecycle(process.argv.slice(3));
+        await taskLifecycle(process.argv.slice(3));
         break;
       }
       case 'task-finalization': {
         const { taskFinalization } = await import('../lib/internal/task-finalization.ts');
-        taskFinalization(process.argv.slice(3));
+        await taskFinalization(process.argv.slice(3));
         break;
       }
     }
@@ -64,7 +64,7 @@ if (taskControlCommand) {
 
   case 'task-create': {
     const { taskCreate } = await import('../lib/internal/task-create.ts');
-    taskCreate(process.argv.slice(3));
+    await taskCreate(process.argv.slice(3));
     break;
   }
 
@@ -105,37 +105,37 @@ if (taskControlCommand) {
   }
   case 'platform-release-notes': {
     const { platformReleaseNotes } = await import('../lib/internal/platform-release-notes.ts');
-    platformReleaseNotes(process.argv.slice(3));
+    await platformReleaseNotes(process.argv.slice(3));
     break;
   }
   case 'platform-context': {
     const { platformContext } = await import('../lib/internal/platform-context.ts');
-    platformContext(process.argv.slice(3));
+    await platformContext(process.argv.slice(3));
     break;
   }
   case 'platform-comment': {
     const { platformComment } = await import('../lib/internal/platform-comment.ts');
-    platformComment(process.argv.slice(3));
+    await platformComment(process.argv.slice(3));
     break;
   }
   case 'platform-issue': {
     const { platformIssue } = await import('../lib/internal/platform-issue.ts');
-    platformIssue(process.argv.slice(3));
+    await platformIssue(process.argv.slice(3));
     break;
   }
   case 'platform-pr': {
     const { platformPr } = await import('../lib/internal/platform-pr.ts');
-    platformPr(process.argv.slice(3));
+    await platformPr(process.argv.slice(3));
     break;
   }
   case 'platform-pr-review': {
     const { platformPrReview } = await import('../lib/internal/platform-pr-review.ts');
-    platformPrReview(process.argv.slice(3));
+    await platformPrReview(process.argv.slice(3));
     break;
   }
   case 'pr-review-grade': {
     const { prReviewGrade } = await import('../lib/internal/pr-review-grade.ts');
-    prReviewGrade(process.argv.slice(3));
+    await prReviewGrade(process.argv.slice(3));
     break;
   }
   case 'platform-checks': {
@@ -150,17 +150,17 @@ if (taskControlCommand) {
   }
   case 'task-ledger': {
     const { taskLedger } = await import('../lib/internal/task-ledger.ts');
-    taskLedger(process.argv.slice(3));
+    await taskLedger(process.argv.slice(3));
     break;
   }
   case 'task-warning': {
     const { taskWarning } = await import('../lib/internal/task-warning.ts');
-    taskWarning(process.argv.slice(3));
+    await taskWarning(process.argv.slice(3));
     break;
   }
   case 'task-activity': {
     const { taskActivity } = await import('../lib/internal/task-activity.ts');
-    taskActivity(process.argv.slice(3));
+    await taskActivity(process.argv.slice(3));
     break;
   }
   case 'task-artifact': {
@@ -175,27 +175,27 @@ if (taskControlCommand) {
   }
   case 'task-review': {
     const { taskReview } = await import('../lib/internal/task-review.ts');
-    taskReview(process.argv.slice(3));
+    await taskReview(process.argv.slice(3));
     break;
   }
   case 'task-event': {
     const { taskEvent } = await import('../lib/internal/task-event.ts');
-    taskEvent(process.argv.slice(3));
+    await taskEvent(process.argv.slice(3));
     break;
   }
   case 'task-lifecycle': {
     const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
-    taskLifecycle(process.argv.slice(3));
+    await taskLifecycle(process.argv.slice(3));
     break;
   }
   case 'task-finalization': {
     const { taskFinalization } = await import('../lib/internal/task-finalization.ts');
-    taskFinalization(process.argv.slice(3));
+    await taskFinalization(process.argv.slice(3));
     break;
   }
   case 'task-override': {
     const { taskOverride } = await import('../lib/internal/task-override.ts');
-    taskOverride(process.argv.slice(3));
+    await taskOverride(process.argv.slice(3));
     break;
   }
   case 'task-short-id': {
@@ -210,7 +210,7 @@ if (taskControlCommand) {
   }
   case 'task-verify': {
     const { taskVerify } = await import('../lib/internal/task-verify.ts');
-    taskVerify(process.argv.slice(3));
+    await taskVerify(process.argv.slice(3));
     break;
   }
   case 'task-validate': {

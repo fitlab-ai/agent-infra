@@ -13,7 +13,7 @@ import { inspectPlatformPullRequestByNumber } from '../platform/pull-requests.ts
 import { verifyInProcess } from '../task/verification-engine.ts';
 
 const USAGE = `Usage: agent-infra-internal pr-review-grade decide --input-file <path|-> [--cwd <path>]
-       agent-infra-internal pr-review-grade resolve-host --pr <N> [--cwd <path>]
+       agent-infra-internal pr-review-grade resolve-host --pr <token> [--cwd <path>]
        agent-infra-internal pr-review-grade verify-artifact --artifact-file <path> [--cwd <path>]
 `;
 
@@ -49,7 +49,7 @@ function readInput(value: string, cwd: string): string {
   return value === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(path.resolve(cwd, value), 'utf8');
 }
 
-function prReviewGrade(args: string[] = []): void {
+async function prReviewGrade(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['decide', 'resolve-host', 'verify-artifact'].includes(operation)) { fail('a valid operation is required'); return; }
@@ -85,9 +85,9 @@ function prReviewGrade(args: string[] = []): void {
   }
 
   if (operation === 'resolve-host') {
-    const pr = Number(values.pr);
-    if (!Number.isInteger(pr) || pr <= 0) { fail('resolve-host requires a positive --pr'); return; }
-    const inspected = inspectPlatformPullRequestByNumber(pr, { cwd });
+    const pr = typeof values.pr === 'string' ? values.pr : '';
+    if (!pr) { fail('resolve-host requires --pr <token>'); return; }
+    const inspected = await inspectPlatformPullRequestByNumber(pr, { cwd });
     if (!inspected.pullRequest) {
       finish({
         status: 'failed', changed: false, host: null, candidates: [], closingIssues: [],
@@ -95,12 +95,14 @@ function prReviewGrade(args: string[] = []): void {
       }, inspected.status === 'blocked' ? 2 : 1);
       return;
     }
+    const prNumber = inspected.pullRequest.number;
+    const prIdentity = inspected.pullRequest.identity || { kind: 'number' as const, value: prNumber };
     const closingIssues = extractClosingIssueNumbers(inspected.pullRequest.body);
-    const candidates = collectHostCandidates({ prNumber: pr, closingIssues, workspaceRoot: cwd });
+    const candidates = collectHostCandidates({ prNumber, prIdentity, closingIssues, workspaceRoot: cwd });
     const host: HostResolution = resolveHostFromCandidates(candidates);
     finish({
       status: 'ok', changed: false,
-      pr: { number: pr, baseSha: inspected.pullRequest.base.sha, headSha: inspected.pullRequest.head.sha, state: inspected.pullRequest.state },
+      pr: { number: prNumber, identity: prIdentity, baseSha: inspected.pullRequest.base.sha, headSha: inspected.pullRequest.head.sha, state: inspected.pullRequest.state },
       closingIssues, candidates, host,
       taskIssueMatches: deriveTaskIssueMatches(host, closingIssues), error: null
     });
@@ -111,7 +113,7 @@ function prReviewGrade(args: string[] = []): void {
   const artifactPath = path.resolve(cwd, values.artifactFile);
   let result: Record<string, unknown>;
   try {
-    result = verifyInProcess({
+    result = await verifyInProcess({
       mode: 'checks',
       skillName: 'review-pr',
       taskDir: path.dirname(artifactPath),

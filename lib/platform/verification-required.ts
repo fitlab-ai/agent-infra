@@ -2,19 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { hasPlatformCapability } from "./adapters.ts";
 import { inspectRequiredChecks } from "./pr-checks.ts";
-import { resolvePlatformContext } from "./context.ts";
+import { resolvePlatformProviderContext } from "./context.ts";
 import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
+import { resourceIdentityNumber } from "./resource-identity.ts";
 
 const CHECK_TYPE = "required-checks";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
-
-function validPrNumber(value: any): any {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0;
-}
 
 function readPrFlow(repoRoot: any): any {
   try {
@@ -40,8 +35,9 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
     return shared.failResult(CHECK_TYPE, factRead.error.message, "check_failed");
   }
   const fact = factRead.status === "valid" ? factRead.fact : null;
-  const prNumber = fact?.state === "bound" ? fact.identity.number : null;
-  if (prFlow === "disabled" || fact?.state === "skipped" || !validPrNumber(prNumber)) {
+  const prIdentity = fact?.state === "bound" ? fact.identity.resource : null;
+  const prNumber = resourceIdentityNumber(prIdentity);
+  if (prFlow === "disabled" || fact?.state === "skipped" || !prIdentity) {
     return shared.passResult(CHECK_TYPE, "Skipped: required checks are not applicable to this task");
   }
 
@@ -90,7 +86,7 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
   return shared.failResult(CHECK_TYPE, inspection.error?.message || `Required checks are ${state || "unavailable"}`, "check_failed");
 }
 
-export function check({ taskDir }: any, shared: any): any {
+export async function check({ taskDir }: any, shared: any): Promise<any> {
   const task = shared.loadTask(taskDir);
   if (!task.ok) return shared.failResult(CHECK_TYPE, task.message);
   const prFlow = readPrFlow(shared.repoRoot);
@@ -100,8 +96,10 @@ export function check({ taskDir }: any, shared: any): any {
   if (prFlow === "disabled" || (factRead.status === "valid" && factRead.fact.state === "skipped") || !bound) {
     return evaluateRequiredChecks({ metadata: task.metadata, localHead: null, inspection: null, prFlow }, shared);
   }
-  const platform = resolvePlatformContext({ cwd: shared.repoRoot });
-  if (!hasPlatformCapability(platform.platform.type, "required-checks")) {
+  const loaded = await resolvePlatformProviderContext({ cwd: shared.repoRoot });
+  const platform = loaded.ok ? loaded.value.context : loaded.context;
+  const supportsChecks = loaded.ok && Boolean(loaded.value.provider.checks?.inspectRequired);
+  if (!supportsChecks) {
     return shared.blockedResult(
       CHECK_TYPE,
       `Platform '${platform.platform.type || "none"}' does not provide required-checks inspection`,
@@ -110,7 +108,7 @@ export function check({ taskDir }: any, shared: any): any {
   }
   const localHead = readHead(shared.repoRoot);
   if (!localHead) return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection: null, prFlow }, shared);
-  const inspection = inspectRequiredChecks(task.metadata.id, { cwd: shared.repoRoot });
+  const inspection = await inspectRequiredChecks(task.metadata.id, { cwd: shared.repoRoot });
   return evaluateRequiredChecks({
     metadata: task.metadata,
     localHead,

@@ -30,14 +30,14 @@ type TaskMetaCase = {
   name: string;
   skill: string;
   content(): string;
-  assertResult(result: ReturnType<typeof runValidator>): void;
+  assertResult(result: Awaited<ReturnType<typeof runValidator>>): void;
 };
 
 type ActivityLogCase = {
   name: string;
   issueNumber: number | string;
   activityLines(now: string): string[];
-  assertResult(result: ReturnType<typeof runValidator>): void;
+  assertResult(result: Awaited<ReturnType<typeof runValidator>>): void;
 };
 
 function writeCodeFixture(taskDir: string, fixture = "valid-code.md") {
@@ -68,7 +68,7 @@ const gateCases = [
       write(path.join(taskDir, "task.md"), buildTaskContent());
       writeCodeFixture(taskDir);
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       const payload = parseValidatorPayload(result.stdout);
       assert.equal(payload.gate, "pass");
@@ -98,7 +98,7 @@ const gateCases = [
         "- [x] PR 已创建"
       ], { pr_delivery_fact: boundFactValue(1) }));
     },
-    assertResult(result: ReturnType<typeof runValidator>) {
+    assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
       assert.equal(result.status, 0, result.stderr);
       const payload = parseValidatorPayload(result.stdout);
       assert.equal(payload.gate, "pass");
@@ -115,10 +115,10 @@ const gateCases = [
 ];
 
 for (const c of gateCases) {
-  test(c.name, () => withTempRoot(c.prefix, (tempRoot) => {
+  test(c.name, () => withTempRoot(c.prefix, async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     c.prepare(taskDir);
-    c.assertResult(runValidator(c.args(taskDir)));
+    c.assertResult(await runValidator(c.args(taskDir)));
   }));
 }
 
@@ -305,10 +305,10 @@ const taskMetaCases: TaskMetaCase[] = [
 ];
 
 for (const c of taskMetaCases) {
-  test(c.name, () => withTempRoot("agent-infra-task-meta-", (tempRoot) => {
+  test(c.name, () => withTempRoot("agent-infra-task-meta-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), c.content());
-    c.assertResult(runValidator(["check", "task-meta", taskDir, "--skill", c.skill]));
+    c.assertResult(await runValidator(["check", "task-meta", taskDir, "--skill", c.skill]));
   }));
 }
 
@@ -364,7 +364,7 @@ const activityLogCases: ActivityLogCase[] = [
 ];
 
 for (const c of activityLogCases) {
-  test(c.name, () => withTempRoot("agent-infra-create-task-activity-", (tempRoot) => {
+  test(c.name, () => withTempRoot("agent-infra-create-task-activity-", async (tempRoot) => {
     const now = formatTimestamp(new Date());
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     writeCreateTaskDocument(taskDir, {
@@ -373,38 +373,38 @@ for (const c of activityLogCases) {
       issue_number: c.issueNumber,
       updated_at: now
     }, c.activityLines(now));
-    c.assertResult(runValidator(["check", "activity-log", taskDir, "--skill", "create-task"]));
+    c.assertResult(await runValidator(["check", "activity-log", taskDir, "--skill", "create-task"]));
   }));
 }
 
 test("validate-artifact artifact check fails when a required section is missing", () => (
-  withTempRoot("agent-infra-gate-fail-", (tempRoot) => {
+  withTempRoot("agent-infra-gate-fail-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), buildTaskContent());
     writeCodeFixture(taskDir, "missing-section-code.md");
 
-    const result = runValidator(["check", "artifact", taskDir, "code.md", "--skill", "code-task"]);
+    const result = await runValidator(["check", "artifact", taskDir, "code.md", "--skill", "code-task"]);
     assert.equal(result.status, 1);
     assertPayloadStatus(result, { type: "artifact", status: "fail", message: /LOCAL_ARTIFACT_MISSING_SECTION/ });
   })
 ));
 
 test("validate-artifact artifact check accepts an old valid artifact", () => (
-  withTempRoot("agent-infra-gate-old-artifact-", (tempRoot) => {
+  withTempRoot("agent-infra-gate-old-artifact-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), buildTaskContent());
     writeCodeFixture(taskDir);
     const old = new Date(Date.now() - 45 * 60_000);
     fs.utimesSync(path.join(taskDir, "code.md"), old, old);
 
-    const result = runValidator(["check", "artifact", taskDir, "code.md", "--skill", "code-task"]);
+    const result = await runValidator(["check", "artifact", taskDir, "code.md", "--skill", "code-task"]);
     assert.equal(result.status, 0, result.stderr);
     assertPayloadStatus(result, { type: "artifact", status: "pass" });
   })
 ));
 
 test("validate-artifact activity-log accepts an old valid local timestamp", () => (
-  withTempRoot("agent-infra-gate-stale-", (tempRoot) => {
+  withTempRoot("agent-infra-gate-stale-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     const staleTimestamp = formatTimestampInTimeZone(new Date(Date.now() - 45 * 60_000), localTimeZone);
     write(path.join(taskDir, "task.md"), buildTaskContent(
@@ -413,7 +413,7 @@ test("validate-artifact activity-log accepts an old valid local timestamp", () =
     ));
     writeCodeFixture(taskDir);
 
-    const result = runValidator(["check", "activity-log", taskDir, "--skill", "code-task"], {
+    const result = await runValidator(["check", "activity-log", taskDir, "--skill", "code-task"], {
       env: { TZ: localTimeZone }
     });
     assert.equal(result.status, 0, result.stderr);
@@ -422,7 +422,7 @@ test("validate-artifact activity-log accepts an old valid local timestamp", () =
 ));
 
 test("validate-artifact completion-checklist fails when a complete-task item is unchecked", () => (
-  withTempRoot("agent-infra-complete-task-checklist-fail-", (tempRoot) => {
+  withTempRoot("agent-infra-complete-task-checklist-fail-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), buildCompletedTaskContent([
       "- [x] 所有需求已满足",
@@ -430,7 +430,7 @@ test("validate-artifact completion-checklist fails when a complete-task item is 
       "- [x] 代码已审查"
     ]));
 
-    const result = runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
+    const result = await runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
     assert.equal(result.status, 1, result.stderr);
     assertPayloadStatus(result, {
       type: "completion-checklist",
@@ -441,7 +441,7 @@ test("validate-artifact completion-checklist fails when a complete-task item is 
 ));
 
 test("validate-artifact completion-checklist ignores fenced historical checklists", () => (
-  withTempRoot("agent-infra-complete-task-fenced-checklist-", (tempRoot) => {
+  withTempRoot("agent-infra-complete-task-fenced-checklist-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     const fencedHistory = [
       "```text",
@@ -457,14 +457,14 @@ test("validate-artifact completion-checklist ignores fenced historical checklist
     ]);
     write(path.join(taskDir, "task.md"), content.replace("## 完成检查清单", `${fencedHistory}## 完成检查清单`));
 
-    const result = runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
+    const result = await runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assertPayloadStatus(result, { type: "completion-checklist", status: "pass" });
   })
 ));
 
 test("validate-artifact section parsing honors tilde, longer, and mismatched fence closers", () => (
-  withTempRoot("agent-infra-complete-task-fence-variants-", (tempRoot) => {
+  withTempRoot("agent-infra-complete-task-fence-variants-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     const checklist = [
       "- [x] 所有需求已满足",
@@ -480,14 +480,14 @@ test("validate-artifact section parsing honors tilde, longer, and mismatched fen
     for (const [index, history] of fencedHistories.entries()) {
       const content = buildCompletedTaskContent(checklist);
       write(path.join(taskDir, "task.md"), content.replace("## 完成检查清单", `${history}\n\n## 完成检查清单`));
-      const result = runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
+      const result = await runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
       assert.equal(result.status, 0, `case ${index}: ${result.stderr || result.stdout}`);
     }
   })
 ));
 
 test("validate-artifact task-meta accepts a valid workflow warning with escaped pipes", () => (
-  withTempRoot("agent-infra-workflow-warning-pass-", (tempRoot) => {
+  withTempRoot("agent-infra-workflow-warning-pass-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), [
       buildTaskContent(),
@@ -499,14 +499,14 @@ test("validate-artifact task-meta accepts a valid workflow warning with escaped 
       String.raw`| WW-1 | 2026-07-09 12:00:00+08:00 | issue-sync | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | task-comment | failed a\\\|b | retry a\\\|b |  |  |`
     ].join("\n"));
 
-    const result = runValidator(["check", "task-meta", taskDir, "--skill", "code-task"]);
+    const result = await runValidator(["check", "task-meta", taskDir, "--skill", "code-task"]);
     assert.equal(result.status, 0, result.stderr);
     assertPayloadStatus(result, { type: "task-meta", status: "pass" });
   })
 ));
 
 test("validate-artifact task-meta rejects invalid workflow warning lifecycle fields", () => (
-  withTempRoot("agent-infra-workflow-warning-fail-", (tempRoot) => {
+  withTempRoot("agent-infra-workflow-warning-fail-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), [
       buildTaskContent(),
@@ -519,7 +519,7 @@ test("validate-artifact task-meta rejects invalid workflow warning lifecycle fie
       "| WW-2 | 2026-07-09 12:01:00+08:00 | issue-sync | INFO | METADATA_SYNC_SKIPPED | resolved | label | skipped | none |  |  |"
     ].join("\n"));
 
-    const result = runValidator(["check", "task-meta", taskDir, "--skill", "code-task"]);
+    const result = await runValidator(["check", "task-meta", taskDir, "--skill", "code-task"]);
     assert.equal(result.status, 1);
     assert.match(result.stdout, /open warning requires action/);
     assert.match(result.stdout, /illegal severity 'INFO'/);

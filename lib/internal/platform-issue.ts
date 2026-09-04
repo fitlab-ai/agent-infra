@@ -11,7 +11,7 @@ import type { IssueResult } from '../platform/issues.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-issue inspect <task-ref> [--cwd <path>]
        agent-infra-internal platform-issue create <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
-       agent-infra-internal platform-issue bind <task-ref> --issue <N> --agent <agent> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-issue bind <task-ref> --issue <token> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-issue sync <task-ref> --agent <agent> [--status <suffix|none>] [--assignees current|none] [--milestone initial|specific|none] [--issue-type] [--fields] [--requirements] [--in-labels from-diff|none] [--base <branch>] [--state open|closed] [--close-reason completed|not_planned] [--dry-run] [--cwd <path>]
 `;
 
@@ -59,7 +59,7 @@ function oneOf(values: Record<string, string | boolean>, name: string, allowed: 
   return value;
 }
 
-function platformIssue(args: string[] = []): void {
+async function platformIssue(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['inspect', 'create', 'bind', 'sync'].includes(operation)) { fail('a valid operation is required'); return; }
@@ -75,18 +75,17 @@ function platformIssue(args: string[] = []): void {
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
-  if (operation === 'inspect') { finish(inspectPlatformIssue(taskRef, { cwd })); return; }
+  if (operation === 'inspect') { finish(await inspectPlatformIssue(taskRef, { cwd })); return; }
   if (typeof values.agent !== 'string' || !values.agent) { fail(`${operation} requires --agent`); return; }
   const agent = normalizeAgentToken(values.agent);
   if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
   if (operation === 'create') {
-    finish(createPlatformIssue(taskRef, { cwd, agent: values.agent, dryRun: values.dryRun === true })); return;
+    finish(await createPlatformIssue(taskRef, { cwd, agent: values.agent, dryRun: values.dryRun === true })); return;
   }
   if (operation === 'bind') {
-    const issue = Number(values.issue);
-    if (!Number.isInteger(issue) || issue <= 0) { fail('bind requires a positive --issue'); return; }
-    finish(bindPlatformIssue(taskRef, { cwd, agent: values.agent, issue, dryRun: values.dryRun === true })); return;
+    if (typeof values.issue !== 'string' || !values.issue) { fail('bind requires --issue <token>'); return; }
+    finish(await bindPlatformIssue(taskRef, { cwd, agent: values.agent, issue: values.issue, dryRun: values.dryRun === true })); return;
   }
   try {
     const assignees = oneOf(values, 'assignees', ['current', 'none']);
@@ -99,7 +98,7 @@ function platformIssue(args: string[] = []): void {
     if (closeReason && state !== 'closed') throw new Error('--close-reason requires --state closed');
     const desiredKeys = ['status', 'assignees', 'milestone', 'issueType', 'fields', 'requirements', 'inLabels', 'state'];
     if (!desiredKeys.some((name) => values[name] !== undefined)) throw new Error('sync requires at least one desired-state option');
-    finish(syncPlatformIssue(taskRef, {
+    finish(await syncPlatformIssue(taskRef, {
       cwd, agent: values.agent, dryRun: values.dryRun === true,
       status: typeof values.status === 'string' ? values.status : undefined,
       assignees: assignees as 'current' | 'none' | undefined,

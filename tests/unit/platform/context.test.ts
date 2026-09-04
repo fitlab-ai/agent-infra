@@ -4,9 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { listPlatformAdapters, registerPlatformAdapter } from '../../../lib/platform/adapters.ts';
 import { parseGitHubRemote, resolvePlatformContext } from '../../../lib/platform/context.ts';
-import { platformResult } from '../../../lib/platform/types.ts';
 
 test('GitHub remote parser accepts HTTPS and SCP-like remotes', () => {
   assert.equal(parseGitHubRemote('https://github.com/acme/widgets.git'), 'acme/widgets');
@@ -15,12 +13,12 @@ test('GitHub remote parser accepts HTTPS and SCP-like remotes', () => {
   assert.equal(parseGitHubRemote('https://gitlab.com/acme/widgets.git'), null);
 });
 
-test('platform context resolves fork parent and separated capabilities', () => {
+test('platform context resolves fork parent and separated capabilities', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-context-'));
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
   const requested: string[] = [];
-  const result = resolvePlatformContext({
+  const result = await resolvePlatformContext({
     cwd: root,
     gitRemote: () => 'git@github.com:contributor/widgets.git',
     client: {
@@ -48,8 +46,8 @@ test('platform context resolves fork parent and separated capabilities', () => {
   assert.ok(requested.some((entry) => entry.startsWith('api graphql ')));
 });
 
-test('platform context reports a fully resolved read-only probe as no-op', () => {
-  const result = resolvePlatformContext({
+test('platform context reports a fully resolved read-only probe as no-op', async () => {
+  const result = await resolvePlatformContext({
     cwd: process.cwd(),
     platformType: 'github',
     gitRemote: () => 'https://github.com/acme/widgets.git',
@@ -73,9 +71,9 @@ test('platform context reports a fully resolved read-only probe as no-op', () =>
   assert.equal(result.error, null);
 });
 
-test('GitHub platform rejects unsupported gh versions before API access', () => {
+test('GitHub platform rejects unsupported gh versions before API access', async () => {
   let apiCalls = 0;
-  const result = resolvePlatformContext({
+  const result = await resolvePlatformContext({
     cwd: process.cwd(),
     platformType: 'github',
     gitRemote: () => 'https://github.com/acme/widgets.git',
@@ -92,9 +90,9 @@ test('GitHub platform rejects unsupported gh versions before API access', () => 
   assert.equal(apiCalls, 0);
 });
 
-test('non-GitHub platform does not probe gh', () => {
+test('non-GitHub platform does not probe gh', async () => {
   let versionCalls = 0;
-  const result = resolvePlatformContext({
+  const result = await resolvePlatformContext({
     cwd: process.cwd(),
     platformType: 'custom',
     client: {
@@ -105,40 +103,30 @@ test('non-GitHub platform does not probe gh', () => {
       json() { throw new Error('GitHub API must not be called'); }
     }
   });
-  assert.equal(result.error?.code, 'PLATFORM_UNSUPPORTED');
+  assert.equal(result.error?.code, 'PLATFORM_PROVIDER_SOURCE_MISSING');
   assert.equal(versionCalls, 0);
 });
 
-test('platform context returns observable no-op for unsupported platform and missing remote', () => {
+test('platform context returns observable no-op for unsupported platform and missing remote', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-context-'));
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"custom"}}');
-  assert.equal(resolvePlatformContext({ cwd: root }).error?.code, 'PLATFORM_UNSUPPORTED');
+  assert.equal((await resolvePlatformContext({ cwd: root })).error?.code, 'PLATFORM_PROVIDER_SOURCE_MISSING');
 
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-  const missing = resolvePlatformContext({ cwd: root, gitRemote: () => null });
+  const missing = await resolvePlatformContext({ cwd: root, gitRemote: () => null });
   assert.equal(missing.status, 'no-op');
   assert.equal(missing.error?.code, 'REMOTE_MISSING');
 });
 
-test('platform context dispatches registered typed adapters without probing GitHub', () => {
-  registerPlatformAdapter({
-    type: 'gitlab-test',
-    resolveContext({ cwd }) {
-      return platformResult('no-op', {
-        platform: { type: 'gitlab-test', repository: `acme/${path.basename(cwd)}`, currentUser: 'tester' }
-      });
-    }
-  });
-  const result = resolvePlatformContext({ cwd: '/tmp/widgets', platformType: 'gitlab-test' });
+test('platform context reports an unconfigured external provider as selected-source failure', async () => {
+  const result = await resolvePlatformContext({ cwd: '/tmp/widgets', platformType: 'gitlab-test' });
   assert.equal(result.platform.type, 'gitlab-test');
-  assert.equal(result.platform.repository, 'acme/widgets');
-  assert.ok(listPlatformAdapters().includes('github'));
-  assert.ok(listPlatformAdapters().includes('gitlab-test'));
+  assert.equal(result.error?.code, 'PLATFORM_PROVIDER_SOURCE_MISSING');
 });
 
-test('none platform resolves through the built-in no-op strategy without probing GitHub', () => {
-  const result = resolvePlatformContext({
+test('none platform resolves through the built-in no-op strategy without probing GitHub', async () => {
+  const result = await resolvePlatformContext({
     cwd: '/tmp/widgets',
     platformType: 'none',
     client: {

@@ -89,7 +89,7 @@ let repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
 
 const PLATFORM_ADAPTERS: Record<string, (context: any, shared: any) => any> = {
   "platform-sync": checkPlatformSync,
-  "platform-sync-preflight": (context: any, shared: any) => ({ ...checkPlatformSync(context, shared), type: "platform-sync-preflight" }),
+  "platform-sync-preflight": async (context: any, shared: any) => ({ ...await checkPlatformSync(context, shared), type: "platform-sync-preflight" }),
   "required-checks": checkRequiredChecks
 };
 const OPTIONAL_PLATFORM_CHECKS = new Set(["platform-sync"]);
@@ -108,7 +108,7 @@ const sharedUtils = {
   parsePrNumber
 };
 
-function runCheck(type: any, context: any, shared: any): any {
+async function runCheck(type: any, context: any, shared: any): Promise<any> {
   switch (type) {
     case "task-meta":
       return checkTaskMeta(context);
@@ -148,7 +148,7 @@ function runCheck(type: any, context: any, shared: any): any {
         return failResult(type, `Unsupported check type '${type}'.`);
       }
 
-      return adapter(context, shared);
+      return await adapter(context, shared);
     }
   }
 }
@@ -489,7 +489,7 @@ function checkTaskMeta({ taskDir, config }: any): any {
   );
 }
 
-function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
+async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): Promise<any> {
   const task = loadTask(taskDir);
   if (!task.ok) return failResult('required-pr-delivery', task.message);
   let projectConfig: any = {};
@@ -504,9 +504,10 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
   if (factRead.status === 'invalid') return failResult('required-pr-delivery', factRead.error.message);
   const fact = factRead.status === 'valid' ? factRead.fact : null;
   const status = fact?.state || 'unbound';
-  const prNumber = fact?.state === 'bound' ? fact.identity.number : null;
+  const prIdentity = fact?.state === 'bound' ? fact.identity.resource : null;
+  const prNumber = prIdentity?.kind === 'number' ? prIdentity.value : null;
   if (flow === 'disabled') return passResult('required-pr-delivery', 'Pull request delivery is disabled by project policy');
-  if (flow === 'required' && (status !== 'bound' || prNumber === null)) {
+  if (flow === 'required' && (status !== 'bound' || !prIdentity)) {
     return failResult('required-pr-delivery', 'Project policy requires a bound pull request before completion');
   }
   if (flow !== 'required' && status === 'unbound') {
@@ -516,7 +517,7 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
     if (mode === 'gate') {
       return passResult('required-pr-delivery', 'Bound pull request shape is valid; merged-state inspection is reserved for hard preflight');
     }
-    const inspected = inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
+    const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
     if (inspected.status === 'blocked') {
       return blockedResult(
         'required-pr-delivery',
@@ -528,7 +529,7 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
     const repository = inspected.platform.repository?.toLowerCase() || '';
     const taskBranch = String(task.metadata.branch || '').trim();
     const deliveryBaseRef = String(task.metadata.delivery_base_ref || projectConfig.delivery?.baseRef || '').trim();
-    if (inspected.status !== 'no-op' || !pullRequest || pullRequest.number !== prNumber) {
+    if (inspected.status !== 'no-op' || !pullRequest) {
       return failResult('required-pr-delivery', 'Bound pull request identity could not be verified');
     }
     if (
@@ -543,7 +544,7 @@ function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
     if (pullRequest.state !== 'closed' || !pullRequest.mergedAt || !pullRequest.mergeCommitSha) {
       return failResult('required-pr-delivery', 'Project policy requires the bound pull request to be merged');
     }
-    return passResult('required-pr-delivery', `Pull request delivery policy satisfied (merged PR #${prNumber})`);
+    return passResult('required-pr-delivery', `Pull request delivery policy satisfied (merged PR ${prNumber === null ? 'identity' : `#${prNumber}`})`);
   }
   return passResult('required-pr-delivery', `Pull request delivery policy satisfied (${status})`);
 }
@@ -1117,7 +1118,7 @@ function checkManualValidation({ taskDir }: any): any {
   return passResult("manual-validation", `Manual validation completed → ${artifactName}`);
 }
 
-function checkPostReviewCommit({ taskDir, config }: any): any {
+async function checkPostReviewCommit({ taskDir, config }: any): Promise<any> {
   const reviewArtifact = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!reviewArtifact.ok) {
     return passResult("post-review-commit", "No review-code artifact; check inactive");
@@ -1138,9 +1139,9 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
   const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
   const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repoRoot));
   const hasPullRequest = fact?.state === 'bound';
-  let inspected: ReturnType<typeof inspectPlatformPullRequest> | null = null;
+  let inspected: Awaited<ReturnType<typeof inspectPlatformPullRequest>> | null = null;
   if (hasPullRequest) {
-    inspected = inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });
+    inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });
     if (!inspected.pullRequest) {
       const message = inspected.error?.message || "PR merge snapshot is unavailable";
       const code = inspected.error?.code || "PR_INSPECTION_INVALID";
@@ -1153,7 +1154,7 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
       inspected.pullRequest.mergedAt &&
       inspected.pullRequest.mergeCommitSha
     ) {
-      const relation = resolveMaterializedReviewedHeadRelation({
+      const relation = await resolveMaterializedReviewedHeadRelation({
         cwd: gitRoot,
         platformType: inspected.platform.type,
         lastReviewedCommit,
@@ -1676,7 +1677,7 @@ function isBlank(value: any): any {
   return value === undefined || value === null || String(value).trim() === "";
 }
 
-function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot }: any): any {
+async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot }: any): Promise<any> {
   if (repositoryRoot) repoRoot = path.resolve(repositoryRoot);
   else {
     let cursor = path.resolve(taskDir);
@@ -1689,7 +1690,7 @@ function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: reque
     const checks = [];
     for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
       if (checkConfig === null) continue;
-      const result = runCheck(type, {
+      const result = await runCheck(type, {
         mode,
         skillName,
         taskDir: path.resolve(taskDir),
@@ -1709,7 +1710,7 @@ function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: reque
   if (config === null) return { skill: skillName, ...passResult(type, `Check '${type}' is disabled for skill '${skillName}'.`) };
   return {
     skill: skillName,
-    ...runCheck(type, {
+    ...await runCheck(type, {
       skillName,
       taskDir: path.resolve(taskDir),
       artifactFile,

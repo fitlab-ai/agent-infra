@@ -38,24 +38,24 @@ id: TASK-20260101-000001
   return { root, taskDir };
 }
 
-function run(taskDir: string) {
+async function run(taskDir: string) {
   return verifyInProcess({
     mode: 'checks', skillName: 'code-task', taskDir, artifactFile: 'code-r2.md',
     checks: ['implementation-input'], repositoryRoot: process.cwd()
-  }) as { status: string };
+  });
 }
 
-test('implementation input gate accepts matching action, report, and task row', () => {
+test('implementation input gate accepts matching action, report, and task row', async () => {
   const f = fixture();
   try {
-    const result = run(f.taskDir);
+    const result = await run(f.taskDir);
     assert.equal(result.status, 'pass');
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
-test('implementation input gate rejects identity and consumption mismatches', () => {
+test('implementation input gate rejects identity and consumption mismatches', async () => {
   for (const replacement of [
     ['`II-1`', '`II-2`'],
     ['| consumed | code-r2.md |', '| pending | |'],
@@ -65,7 +65,7 @@ test('implementation input gate rejects identity and consumption mismatches', ()
     try {
       const report = path.join(f.taskDir, replacement[0].startsWith('`') ? 'code-r2.md' : 'task.md');
       fs.writeFileSync(report, fs.readFileSync(report, 'utf8').replace(replacement[0], replacement[1]));
-      const result = run(f.taskDir);
+      const result = await run(f.taskDir);
       assert.equal(result.status, 'fail');
     } finally {
       fs.rmSync(f.root, { recursive: true, force: true });

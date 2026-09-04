@@ -3,13 +3,21 @@ import path from 'node:path';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { createGitHubClient } from './github-client.ts';
-import type { GitHubClient } from './github-client.ts';
-import { resolvePlatformContext } from './context.ts';
+import { resolvePlatformProviderContext } from './context.ts';
+import type { PlatformClient } from './context.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
+import {
+  providerError,
+  providerOperationContext,
+  providerStatus,
+  providerResourceToken,
+  unsupportedProviderOperation
+} from './provider-bridge.ts';
+import { resourceIdentityNumber } from './resource-identity.ts';
+import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 
-type RemoteComment = { id: number; body: string; user?: { login?: string } };
+type RemoteComment = { id: number | string; body: string; user?: { login?: string } };
 type RenderedChunk = { marker: string; body: string; content: string; part: number; total: number };
 type CommentKind = 'task' | 'artifact' | 'summary' | 'cancel';
 type SyncOptions = {
@@ -19,8 +27,13 @@ type SyncOptions = {
   body?: string;
   cwd?: string;
   backfill?: boolean;
-  client?: GitHubClient;
+  client?: PlatformClient;
+  runtimeVersion?: string;
 };
+
+function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
+  return provider.identity?.comment === 'number' && /^\d+$/.test(id) ? Number(id) : id;
+}
 
 const MARKERS = {
   task: (taskId: string) => `<!-- sync-issue:${taskId}:task -->`,
@@ -181,7 +194,7 @@ function flattenComments(value: unknown): RemoteComment[] {
   if (!Array.isArray(value)) return [];
   const flattened = value.flatMap((entry) => Array.isArray(entry) ? entry : [entry]);
   return flattened.filter((entry): entry is RemoteComment =>
-    Boolean(entry && typeof entry === 'object' && typeof entry.id === 'number' && typeof entry.body === 'string')
+    Boolean(entry && typeof entry === 'object' && (typeof entry.id === 'number' || typeof entry.id === 'string') && typeof entry.body === 'string')
   );
 }
 
@@ -191,7 +204,7 @@ function issueNumberFromTask(content: string): number | null {
   return Number.isInteger(number) && number > 0 ? number : null;
 }
 
-function listRemoteComments(client: GitHubClient, repo: string, issue: number, cwd: string) {
+function listRemoteComments(client: PlatformClient, repo: string, issue: number, cwd: string) {
   const result = client.json<unknown>([
     'api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`
   ], { cwd });
@@ -291,7 +304,7 @@ function validateRelatedMarkerSet(comments: RemoteComment[], prefix: string): { 
 }
 
 function writeComment(
-  client: GitHubClient,
+  client: PlatformClient,
   repo: string,
   issue: number,
   cwd: string,
@@ -305,7 +318,7 @@ function writeComment(
   );
 }
 
-function syncPlatformComment(taskRef: string, options: SyncOptions): PlatformResult {
+async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) {
     return platformResult('failed', {
@@ -313,16 +326,30 @@ function syncPlatformComment(taskRef: string, options: SyncOptions): PlatformRes
     });
   }
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const issue = issueNumberFromTask(taskContent);
-  if (!issue) {
+  let issueIdentityFromTask: ReturnType<typeof taskIssueIdentity>;
+  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent), undefined, options.runtimeVersion); }
+  catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
+  if (!issueIdentityFromTask) {
     return platformResult('no-op', {
       error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false }
     });
   }
-  const context = resolvePlatformContext({ cwd: resolved.repoRoot, client: options.client });
-  if (!hasResolvedPlatformContext(context)) return context;
-  const client = options.client || createGitHubClient();
-  const listed = listRemoteComments(client, context.platform.repository!, issue, resolved.repoRoot);
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
+  if (!hasResolvedPlatformContext(context) || !loaded.ok) return context;
+  const issue = resourceIdentityNumber(issueIdentityFromTask);
+  const listed = loaded.value.provider.comments?.list
+      ? await loaded.value.provider.comments.list({
+        context: providerOperationContext(loaded.value),
+        parent: issueIdentityFromTask
+      }).then((response) => response.ok
+        ? { ok: true as const, value: response.value.map((comment) => ({
+          id: providerCommentId(comment.id, loaded.value.provider),
+          body: comment.body,
+          user: comment.author?.name ? { login: comment.author.name } : undefined
+        })) }
+        : response)
+      : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
   if (!listed.ok) {
     return platformResult(listed.error.retryable ? 'blocked' : 'failed', {
       ...contextFields(context), resource: { kind: 'issue', number: issue }, error: listed.error
@@ -370,9 +397,8 @@ function syncPlatformComment(taskRef: string, options: SyncOptions): PlatformRes
     });
   }
 
-  const repo = context.platform.repository!;
   const operations: PlatformOperation[] = [];
-  const ids: number[] = [];
+  const ids: Array<number | string> = [];
   for (const item of desired) {
     const current = existing.find((comment) => normalizeCommentContent(comment.body).split('\n', 1)[0] === item.marker);
     if (current && normalizeCommentContent(current.body) === normalizeCommentContent(item.body)) {
@@ -380,16 +406,18 @@ function syncPlatformComment(taskRef: string, options: SyncOptions): PlatformRes
       operations.push({ name: `comment:${item.marker}`, status: 'no-op', reasonCode: null });
       continue;
     }
-    const written = writeComment(client, repo, issue, resolved.repoRoot, item.body, current?.id);
+    const written = loaded.value.provider.comments?.write
+        ? await loaded.value.provider.comments.write({
+          context: providerOperationContext(loaded.value),
+          parent: issueIdentityFromTask,
+          body: item.body,
+          ...(current ? { existingComment: { kind: 'id' as const, value: String(current.id) } } : {}),
+          mutation: { idempotencyKey: `comment:${resolved.taskId}:${item.marker}` }
+        })
+        : unsupportedProviderOperation(loaded.value.provider, 'comments.write');
     if (!written.ok) {
       if (!current && written.error.retryable) {
-        const reconciled = listRemoteComments(client, repo, issue, resolved.repoRoot);
-        const found = reconciled.ok ? findMarkerComments(reconciled.value, item.marker) : [];
-        if (found.length === 1) {
-          ids.push(found[0]!.id);
-          operations.push({ name: `comment:${item.marker}`, status: 'applied', reasonCode: 'CREATE_RECONCILED' });
-          continue;
-        }
+        // A provider owns reconciliation because only it knows how to address the resource.
       }
       return platformResult(written.error.retryable ? 'blocked' : 'failed', {
         ...contextFields(context),
@@ -398,16 +426,21 @@ function syncPlatformComment(taskRef: string, options: SyncOptions): PlatformRes
         error: written.error
       });
     }
-    ids.push(current?.id || written.value.id || 0);
+    ids.push(providerCommentId((written.value as { remoteId: string }).remoteId, loaded.value.provider));
     operations.push({ name: `comment:${item.marker}`, status: 'applied', reasonCode: null });
   }
 
   const desiredMarkers = new Set(desired.map((item) => item.marker));
   const stale = existing.filter((comment) => !desiredMarkers.has(normalizeCommentContent(comment.body).split('\n', 1)[0]!));
   for (const comment of stale) {
-    const deleted = client.text(['api', `repos/${repo}/issues/comments/${comment.id}`, '-X', 'DELETE'], {
-      cwd: resolved.repoRoot, method: 'DELETE'
-    });
+    const deleted = loaded.value.provider.comments?.delete
+        ? await loaded.value.provider.comments.delete({
+          context: providerOperationContext(loaded.value),
+          parent: issueIdentityFromTask,
+          comment: { kind: 'id', value: String(comment.id) },
+          mutation: { idempotencyKey: `comment-delete:${resolved.taskId}:${comment.id}` }
+        })
+        : unsupportedProviderOperation(loaded.value.provider, 'comments.delete');
     if (!deleted.ok) {
       return platformResult(deleted.error.retryable ? 'blocked' : 'failed', {
         ...contextFields(context),
@@ -429,28 +462,45 @@ function syncPlatformComment(taskRef: string, options: SyncOptions): PlatformRes
   });
 }
 
-function listPlatformComments(issue: number, cwd = process.cwd(), client: GitHubClient = createGitHubClient()): PlatformResult & { comments?: RemoteComment[] } {
-  const context = resolvePlatformContext({ cwd, client });
-  if (!hasResolvedPlatformContext(context)) return context;
-  const result = listRemoteComments(client, context.platform.repository!, issue, cwd);
-  if (!result.ok) {
-    return platformResult(result.error.retryable ? 'blocked' : 'failed', {
-      ...contextFields(context), resource: { kind: 'issue', number: issue }, error: result.error
+async function listPlatformComments(issue: string | number, cwd = process.cwd(), client?: PlatformClient): Promise<PlatformResult & { comments?: RemoteComment[] }> {
+  const loaded = await resolvePlatformProviderContext({ cwd, client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
+  if (!hasResolvedPlatformContext(context) || !loaded.ok) return context;
+  let identity;
+  try { identity = loaded.ok ? providerResourceToken(loaded.value.provider, 'issue', String(issue)) : null; }
+  catch (error) {
+    return platformResult('failed', { ...contextFields(context), error: { code: 'PLATFORM_IDENTITY_TOKEN_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false } });
+  }
+  if (!loaded.ok || !identity) return context;
+  const listed = loaded.value.provider.comments?.list
+      ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: identity }).then((response) => response.ok
+        ? { ok: true as const, value: response.value.map((comment) => ({ id: comment.id, body: comment.body, user: comment.author?.name ? { login: comment.author.name } : undefined })) }
+        : response)
+      : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
+  if (!listed.ok) {
+    return platformResult(providerStatus(listed.error), {
+      ...contextFields(context), resource: { kind: 'issue', number: resourceIdentityNumber(identity), identity }, error: providerError(listed.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
     });
   }
-  return { ...platformResult('no-op', { ...contextFields(context), resource: { kind: 'issue', number: issue }, error: null }), comments: result.value };
+  return { ...platformResult('no-op', { ...contextFields(context), resource: { kind: 'issue', number: resourceIdentityNumber(identity), identity }, error: null }), comments: listed.value };
 }
 
-function checkPlatformCommentOwner(taskRef: string, options: { cwd?: string; client?: GitHubClient } = {}): PlatformResult {
+async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: string; client?: PlatformClient; runtimeVersion?: string } = {}): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } });
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const issue = issueNumberFromTask(content);
-  if (!issue) return platformResult('no-op', { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false } });
-  const client = options.client || createGitHubClient();
-  const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
-  if (!hasResolvedPlatformContext(context)) return context;
-  const listed = listRemoteComments(client, context.platform.repository!, issue, resolved.repoRoot);
+  let issueIdentity: ReturnType<typeof taskIssueIdentity>;
+  try { issueIdentity = taskIssueIdentity(parseTaskFrontmatter(content), undefined, options.runtimeVersion); }
+  catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
+  if (!issueIdentity) return platformResult('no-op', { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false } });
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
+  if (!hasResolvedPlatformContext(context) || !loaded.ok) return context;
+  const listed = loaded.value.provider.comments?.list
+      ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: issueIdentity }).then((response) => response.ok
+        ? { ok: true as const, value: response.value.map((comment) => ({ id: comment.id, body: comment.body, user: comment.author?.name ? { login: comment.author.name } : undefined })) }
+        : response)
+      : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
   if (!listed.ok) return platformResult(listed.error.retryable ? 'blocked' : 'failed', { ...contextFields(context), error: listed.error });
   const matches = findMarkerComments(listed.value, MARKERS.task(resolved.taskId));
   if (matches.length > 1) return platformResult('failed', { ...contextFields(context), error: { code: 'COMMENT_MARKER_CONFLICT', message: 'Multiple task comments use the registered marker', retryable: false } });
@@ -458,11 +508,11 @@ function checkPlatformCommentOwner(taskRef: string, options: { cwd?: string; cli
   if (owner && owner !== context.platform.currentUser && !context.capabilities.triage) {
     return platformResult('blocked', {
       ...contextFields(context),
-      resource: { kind: 'issue', number: issue },
+      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentity), identity: issueIdentity },
       error: { code: 'COMMENT_OWNER_CONFLICT', message: `Task comment is owned by '${owner}'`, retryable: false }
     });
   }
-  return platformResult('no-op', { ...contextFields(context), resource: { kind: 'issue', number: issue }, error: null });
+  return platformResult('no-op', { ...contextFields(context), resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentity), identity: issueIdentity }, error: null });
 }
 
 export {

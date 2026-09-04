@@ -78,6 +78,32 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
 | `files.managedBaselines` | Tool-maintained SHA-256 source baselines for built-in guarded managed files. Do not edit manually; they enable safe three-way updates for the GitHub lifecycle workflows. |
 
+## Platform providers
+
+`platform.type` selects exactly one provider for a runtime invocation. `github` and `none` are built in. Any other selected type must declare an explicit provider source; the runtime does not discover, install, or authenticate private packages automatically.
+
+```json
+{
+  "platform": {
+    "type": "trae",
+    "providers": {
+      "trae": {
+        "source": "@company/agent-infra-trae-provider",
+        "config": { "endpoint": "https://private.example" }
+      }
+    }
+  }
+}
+```
+
+The source may be a package name or a local ESM module path resolved from the repository root. The selected source is realpath-normalized to a canonical file URL before session lookup. A provider session is reused only for the same repository root, provider type, resolved source identity, and selected JSON config fingerprint. Changing the source or config creates a new session; changing the operation working directory does not.
+
+Private providers consume the public `@fitlab-ai/agent-infra/platform-provider` subpath. It exports contract version `1`, factory input types, operation input/output types, normalized snapshots, and `ProviderResult`. The default export is an async factory receiving only `providerType`, `contractVersion`, normalized `repositoryRoot`, and read-only selected `config`; it does not receive `cwd`, a GitHub client, or credentials. Each operation receives a fresh `ProviderOperationContext` with `repositoryRoot`, the current `workingDirectory`, and opaque scope identity.
+
+The required `context.resolve` operation is always checked. Other operation groups are optional, but a declared group must implement every method in that group. Missing groups return a structured `PLATFORM_CAPABILITY_UNSUPPORTED` result. A selected provider that is missing, cannot resolve/import, exports the wrong shape, throws during factory creation, has a mismatched type/version, or fails contract validation returns a stable non-retryable error and never falls back to GitHub. Error messages do not include provider config, tokens, or unnecessary absolute paths. Private provider authentication and package access remain the deployment's responsibility.
+
+Resource identities use the canonical `{ "kind": "id" | "number" | "key", "value": string | number }` shape. Each provider declares one primary kind per resource type; core does not apply a global `id > number > key` fallback. CLI options such as `--issue` and `--pr` remain raw string tokens and are parsed after the selected provider loads. Legacy `issue_number` and v1 pull-request facts are converted only at their read boundary; new writes use `platform_issue_identity` and the v2 pull-request fact without duplicate legacy fields. Review markers keep `pr<N>` for numeric identities and use `pr:<base64url-canonical-identity>` for opaque identities. Provider timestamps and release-note facts use UTC `Z`; local time conversion belongs only to presentation.
+
 ## Agent Client contract
 
 An **AI Coding Agent Client**, or **Agent Client** for short, is a supported coding-agent application such as Claude Code, Codex, Antigravity CLI, OpenCode, or TraeCode CLI. The canonical `agentClients` array contains each built-in client exactly once and in the fixed order `claude-code`, `codex`, `antigravity-cli`, `opencode`, `traecli`.

@@ -122,7 +122,7 @@ function syncFixture() {
   return root;
 }
 
-test('comment sync preserves source @ content', () => {
+test('comment sync preserves source @ content', async () => {
   const root = syncFixture();
   const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
   fs.appendFileSync(taskPath, '\n@2x\n');
@@ -144,7 +144,7 @@ test('comment sync preserves source @ content', () => {
     text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
 
-  const result = syncPlatformComment('TASK-20260101-000001', {
+  const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'task', agent: 'codex', cwd: root, client
   });
   assert.equal(result.status, 'applied');
@@ -152,7 +152,7 @@ test('comment sync preserves source @ content', () => {
   assert.equal(comments.length, 1);
 });
 
-test('comment sync transports artifact content without content validation', () => {
+test('comment sync transports artifact content without content validation', async () => {
   const root = syncFixture();
   const artifactPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md');
   fs.writeFileSync(artifactPath, '# Analysis\n\n[local](/workspace/file.md)\n');
@@ -174,7 +174,7 @@ test('comment sync transports artifact content without content validation', () =
     text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
 
-  const result = syncPlatformComment('TASK-20260101-000001', {
+  const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client
   });
   assert.equal(result.status, 'applied');
@@ -183,7 +183,7 @@ test('comment sync transports artifact content without content validation', () =
   assert.match(comments[0]!.body, /\[local\]\(\/workspace\/file\.md\)/);
 });
 
-test('comment sync creates once and becomes a no-op on replay', () => {
+test('comment sync creates once and becomes a no-op on replay', async () => {
   const root = syncFixture();
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   const client = {
@@ -203,17 +203,17 @@ test('comment sync creates once and becomes a no-op on replay', () => {
     text() { return { ok: true, value: '' }; }
   } as unknown as GitHubClient;
 
-  const first = syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
+  const first = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
   assert.equal(first.status, 'applied');
   assert.equal(first.changed, true);
   assert.equal(comments.length, 1);
-  const second = syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
+  const second = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
   assert.equal(second.status, 'no-op');
   assert.equal(second.changed, false);
   assert.equal(comments.length, 1);
 });
 
-test('comment sync refuses duplicate registered markers without writing', () => {
+test('comment sync refuses duplicate registered markers without writing', async () => {
   const root = syncFixture();
   const marker = MARKERS.task('TASK-20260101-000001');
   const client = {
@@ -230,12 +230,12 @@ test('comment sync refuses duplicate registered markers without writing', () => 
     },
     text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
-  const result = syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
+  const result = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'COMMENT_MARKER_CONFLICT');
 });
 
-test('artifact sync isolates sibling stems and becomes a no-op on replay', () => {
+test('artifact sync isolates sibling stems and becomes a no-op on replay', async () => {
   const root = syncFixture();
   const siblingBody = `${MARKERS.artifact('TASK-20260101-000001', 'analysis-r2')}\nexisting sibling`;
   const comments = [{ id: 20, body: siblingBody, user: { login: 'codex' } }];
@@ -257,18 +257,18 @@ test('artifact sync isolates sibling stems and becomes a no-op on replay', () =>
   } as unknown as GitHubClient;
 
   const options = { kind: 'artifact' as const, artifact: 'analysis.md', agent: 'codex', cwd: root, client };
-  const first = syncPlatformComment('TASK-20260101-000001', options);
+  const first = await syncPlatformComment('TASK-20260101-000001', options);
   assert.equal(first.status, 'applied');
   assert.equal(comments.length, 2);
   assert.deepEqual(comments[0], { id: 20, body: siblingBody, user: { login: 'codex' } });
 
-  const second = syncPlatformComment('TASK-20260101-000001', options);
+  const second = await syncPlatformComment('TASK-20260101-000001', options);
   assert.equal(second.status, 'no-op');
   assert.equal(comments.length, 2);
   assert.deepEqual(comments[0], { id: 20, body: siblingBody, user: { login: 'codex' } });
 });
 
-test('artifact backfill creates a missing comment with a timeline hint', () => {
+test('artifact backfill creates a missing comment with a timeline hint', async () => {
   const root = syncFixture();
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   const client = {
@@ -288,7 +288,7 @@ test('artifact backfill creates a missing comment with a timeline hint', () => {
     text() { throw new Error('delete must not be attempted'); }
   } as unknown as GitHubClient;
 
-  const result = syncPlatformComment('TASK-20260101-000001', {
+  const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client, backfill: true
   });
   assert.equal(result.status, 'applied');
@@ -298,7 +298,7 @@ test('artifact backfill creates a missing comment with a timeline hint', () => {
   assert.match(comments[0]!.body, /## 需求分析（Round 1）\n\n> 历史产物补发\n/);
 });
 
-test('artifact backfill preserves an existing normal comment without remote writes', () => {
+test('artifact backfill preserves an existing normal comment without remote writes', async () => {
   const root = syncFixture();
   const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
   const comments = [{ id: 31, body: `${marker}\nexisting normal-stage body`, user: { login: 'codex' } }];
@@ -314,7 +314,7 @@ test('artifact backfill preserves an existing normal comment without remote writ
     text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
 
-  const result = syncPlatformComment('TASK-20260101-000001', {
+  const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client, backfill: true
   });
   assert.equal(result.status, 'no-op');
@@ -323,7 +323,7 @@ test('artifact backfill preserves an existing normal comment without remote writ
   assert.equal(result.operations?.every((operation) => operation.status === 'no-op'), true);
 });
 
-test('artifact backfill preserves an existing valid chunk set without remote writes', () => {
+test('artifact backfill preserves an existing valid chunk set without remote writes', async () => {
   const root = syncFixture();
   const comments = [
     { id: 32, body: `${MARKERS.artifactChunk('TASK-20260101-000001', 'analysis', 1, 2)}\nold part 1`, user: { login: 'codex' } },
@@ -341,7 +341,7 @@ test('artifact backfill preserves an existing valid chunk set without remote wri
     text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
 
-  const result = syncPlatformComment('TASK-20260101-000001', {
+  const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client, backfill: true
   });
   assert.equal(result.status, 'no-op');
@@ -350,7 +350,7 @@ test('artifact backfill preserves an existing valid chunk set without remote wri
   assert.equal(result.comment?.parts, 2);
 });
 
-test('normal artifact sync still updates an existing comment when content changes', () => {
+test('normal artifact sync still updates an existing comment when content changes', async () => {
   const root = syncFixture();
   const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
   const comments = [{ id: 34, body: `${marker}\nstale body`, user: { login: 'codex' } }];
@@ -372,7 +372,7 @@ test('normal artifact sync still updates an existing comment when content change
     text() { throw new Error('delete must not be attempted'); }
   } as unknown as GitHubClient;
 
-  const result = syncPlatformComment('TASK-20260101-000001', {
+  const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client
   });
   assert.equal(result.status, 'applied');
@@ -381,7 +381,7 @@ test('normal artifact sync still updates an existing comment when content change
   assert.match(comments[0]!.body, /# Analysis/);
 });
 
-test('artifact sync refuses duplicate base markers without writing', () => {
+test('artifact sync refuses duplicate base markers without writing', async () => {
   const root = syncFixture();
   const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
   const client = {
@@ -399,7 +399,7 @@ test('artifact sync refuses duplicate base markers without writing', () => {
     text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
 
-  const result = syncPlatformComment('TASK-20260101-000001', {
+  const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client
   });
   assert.equal(result.status, 'failed');

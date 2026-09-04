@@ -85,41 +85,41 @@ function artifactContent(
 }
 
 test("review-fact accepts an approved clean committed range with an independent diff base", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-committed-range-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-committed-range-", async (tempRoot) => {
     const { taskDir, previous, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(baseline));
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline, previous), "通过", previous));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(payload.status, "pass");
   });
 });
 
-function runCheck(taskDir: string) {
-  const result = runValidator(["check", "review-fact", taskDir, "review-code.md", "--skill", "review-code"]);
+async function runCheck(taskDir: string) {
+  const result = await runValidator(["check", "review-fact", taskDir, "review-code.md", "--skill", "review-code"]);
   return { result, payload: parseValidatorPayload(result.stdout) };
 }
 
 test("review-fact accepts an approved report whose HEAD, baseline, fingerprint, and task fact agree", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-ok-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-ok-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(baseline));
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(payload.status, "pass");
   });
 });
 
 test("review-fact rejects an approved report when last_reviewed_commit is stale", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-stale-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-stale-", async (tempRoot) => {
     const { taskDir, previous, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(previous));
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /last_reviewed_commit/);
@@ -127,12 +127,12 @@ test("review-fact rejects an approved report when last_reviewed_commit is stale"
 });
 
 test("review-fact rejects an approved report when last_reviewed_commit is missing", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-missing-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-missing-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent());
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /last_reviewed_commit/);
@@ -140,12 +140,12 @@ test("review-fact rejects an approved report when last_reviewed_commit is missin
 });
 
 test("review-fact rejects a valid report when the task delivery target is missing", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-unbound-target-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-unbound-target-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(baseline, false));
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /delivery target/i);
@@ -153,7 +153,7 @@ test("review-fact rejects a valid report when the task delivery target is missin
 });
 
 test("review-fact rejects a report missing immutable target or reviewed head evidence", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-missing-mdr-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-missing-mdr-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(baseline));
     write(path.join(taskDir, "review-code.md"), [
@@ -167,7 +167,7 @@ test("review-fact rejects a report missing immutable target or reviewed head evi
       "- **Overall Verdict**: Approved"
     ].join("\n") + "\n");
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /target head|reviewed head|diff base/i);
@@ -175,12 +175,12 @@ test("review-fact rejects a report missing immutable target or reviewed head evi
 });
 
 test("review-fact rejects a report whose baseline does not match HEAD", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-head-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-head-", async (tempRoot) => {
     const { taskDir, previous } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(previous));
     write(path.join(taskDir, "review-code.md"), artifactContent(previous, snapshot(tempRoot, previous)));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /HEAD|baseline/i);
@@ -188,13 +188,13 @@ test("review-fact rejects a report whose baseline does not match HEAD", onPlatfo
 });
 
 test("review-fact rejects a report whose fingerprint does not match the reviewed worktree", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-fingerprint-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-fingerprint-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(baseline));
     const reviewed = snapshot(tempRoot, baseline);
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, { ...reviewed, fingerprint: `sha256:${"0".repeat(64)}` }));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /fingerprint/i);
@@ -202,13 +202,13 @@ test("review-fact rejects a report whose fingerprint does not match the reviewed
 });
 
 test("review-fact rejects a report whose snapshot tree does not match the reviewed worktree", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-tree-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-tree-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(baseline));
     const reviewed = snapshot(tempRoot, baseline);
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, { ...reviewed, tree: "0".repeat(40) }));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /snapshot tree/i);
@@ -216,25 +216,25 @@ test("review-fact rejects a report whose snapshot tree does not match the review
 });
 
 test("review-fact does not require a task review commit for a non-approved report", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-changes-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-changes-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent());
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline), "需要修改"));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(payload.status, "pass");
   });
 });
 
 test("review-fact accepts an approved uncommitted snapshot without a commit anchor", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-uncommitted-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-uncommitted-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(tempRoot, ".agents/skills/x.md"), "base\nreviewed\nuncommitted\n");
     write(path.join(taskDir, "task.md"), taskContent());
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(payload.status, "pass");
   });

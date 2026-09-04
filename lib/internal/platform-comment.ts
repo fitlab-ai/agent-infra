@@ -11,7 +11,7 @@ import type { CommentKind } from '../platform/issue-comments.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { backfillCompletionComments } from '../platform/completion-backfill.ts';
 
-const USAGE = `Usage: agent-infra-internal platform-comment list --issue <N> [--cwd <path>]
+const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment owner <task-ref> [--cwd <path>]
        agent-infra-internal platform-comment backfill <task-ref> --agent <agent> [--cwd <path>]
        agent-infra-internal platform-comment sync <task-ref> --kind <kind> --agent <agent> [--artifact <file>] [--body-file <path|->] [--status-label <label>] [--backfill] [--cwd <path>]
@@ -52,7 +52,7 @@ function readBodyFile(value: string, cwd: string): string {
   return fs.readFileSync(path.resolve(cwd, value), 'utf8');
 }
 
-function platformComment(args: string[] = []): void {
+async function platformComment(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['list', 'owner', 'backfill', 'sync'].includes(operation)) { fail('a valid operation is required'); return; }
@@ -63,17 +63,17 @@ function platformComment(args: string[] = []): void {
   if (parsed.error) { fail(parsed.error); return; }
   const cwd = path.resolve(typeof parsed.values.cwd === 'string' ? parsed.values.cwd : process.cwd());
   if (operation === 'list') {
-    const issue = Number(parsed.values.issue);
-    if (!Number.isInteger(issue) || issue <= 0) { fail('list requires a positive --issue'); return; }
+    const issue = parsed.values.issue;
+    if (typeof issue !== 'string' || !issue) { fail('list requires --issue <token>'); return; }
     const unexpected = Object.keys(parsed.values).find((key) => !['issue', 'cwd'].includes(key));
     if (unexpected) { fail(`list does not accept '--${unexpected}'`); return; }
-    finish(listPlatformComments(issue, cwd));
+    finish(await listPlatformComments(issue, cwd));
     return;
   }
   if (operation === 'owner') {
     const unexpected = Object.keys(parsed.values).find((key) => key !== 'cwd');
     if (unexpected) { fail(`owner does not accept '--${unexpected}'`); return; }
-    finish(checkPlatformCommentOwner(taskRef!, { cwd }));
+    finish(await checkPlatformCommentOwner(taskRef!, { cwd }));
     return;
   }
   if (operation === 'backfill') {
@@ -83,7 +83,7 @@ function platformComment(args: string[] = []): void {
     if (typeof agent !== 'string' || !agent) { fail('backfill requires --agent'); return; }
     const normalizedAgent = normalizeAgentToken(agent);
     if (!normalizedAgent) { fail(`invalid --agent '${agent}': ${AGENT_USAGE_HINT}`); return; }
-    finish(backfillCompletionComments(taskRef!, { cwd, agent: normalizedAgent }));
+    finish(await backfillCompletionComments(taskRef!, { cwd, agent: normalizedAgent }));
     return;
   }
   const kind = parsed.values.kind;
@@ -101,7 +101,7 @@ function platformComment(args: string[] = []): void {
     fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
-  finish(syncPlatformComment(taskRef!, {
+  finish(await syncPlatformComment(taskRef!, {
     kind: kind as CommentKind,
     agent: normalizedAgent,
     artifact: typeof parsed.values.artifact === 'string' ? parsed.values.artifact : undefined,

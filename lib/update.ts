@@ -19,7 +19,7 @@ type UpdateConfig = {
   project: string;
   org: string;
   language: string;
-  platform?: { type?: string };
+  platform?: { type?: string; providers?: Record<string, unknown> };
   prFlow?: 'required' | 'disabled';
   sandbox?: Record<string, unknown>;
   task?: { shortIdLength: number };

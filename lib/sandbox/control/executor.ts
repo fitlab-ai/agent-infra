@@ -218,7 +218,7 @@ function lifecycleFailure(code: string, message: string): SandboxControlExecutio
   };
 }
 
-function finalizationResult(result: ReturnType<typeof applyTaskFinalization>): SandboxControlExecutionResult {
+function finalizationResult(result: Awaited<ReturnType<typeof applyTaskFinalization>>): SandboxControlExecutionResult {
   const payload = {
     version: 1,
     status: result.status,
@@ -246,7 +246,7 @@ export async function executeRequest(
   options: ExecuteRequestOptions = {}
 ): Promise<SandboxControlExecutionResult> {
   if (request.family === 'task-create') {
-    const result = createTask(request.candidate, { repoRoot: manifest.repoRoot });
+    const result = await createTask(request.candidate, { repoRoot: manifest.repoRoot });
     return {
       exitCode: result.status === 'blocked' ? 2 : result.status === 'failed' ? 1 : 0,
       stdout: `${JSON.stringify(result)}\n`,
@@ -313,7 +313,7 @@ export async function executeRequest(
       }),
       operation
     );
-    return finalizationResult(result);
+    return finalizationResult(await result);
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
   if (request.family === 'task-orchestration') {
@@ -387,7 +387,7 @@ export async function executeRequest(
     return format(await dispatchTaskControlOperation(context, operation));
   }
   if (operation.family !== 'task-lifecycle') throw new Error('SANDBOX_CONTROL_LIFECYCLE_OPERATION_INVALID');
-  return format(dispatchTaskControlOperation(context, operation));
+    return format(await dispatchTaskControlOperation(context, operation));
 }
 
 export async function runSandboxControlExecutor(requestPath: string, nonce: string): Promise<void> {

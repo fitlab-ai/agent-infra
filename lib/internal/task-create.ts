@@ -18,7 +18,7 @@ function output(result: TaskCreateResult): void {
   process.exitCode = result.status === 'blocked' ? 2 : result.status === 'failed' ? 1 : 0;
 }
 
-function taskCreate(args: string[]): void {
+async function taskCreate(args: string[]): Promise<void> {
   const inputIndex = args.indexOf('--input');
   const input = inputIndex >= 0 ? args[inputIndex + 1] : undefined;
   if (!input || args.length !== 2 || inputIndex !== 0) {
@@ -46,7 +46,7 @@ function taskCreate(args: string[]): void {
       process.exitCode = response.exitCode;
       return;
     }
-    output(createTask(candidate, { repoRoot: process.cwd() }));
+    output(await createTask(candidate, { repoRoot: process.cwd() }));
   } catch (error) {
     if (error instanceof SandboxControlClientError) {
       output(failed(error.detail.code, error.detail.message, error.detail.retryable));

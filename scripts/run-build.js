@@ -10,6 +10,7 @@ const tsc = path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc');
 /** @type {Array<[string, string[]]>} */
 const commands = [
   [process.execPath, [tsc, '-p', 'tsconfig.json']],
+  [process.execPath, [tsc, '-p', 'tsconfig.provider.json']],
   [process.execPath, [path.join(projectRoot, 'scripts', 'build.js')]],
   [process.execPath, [path.join(projectRoot, 'scripts', 'build-inline.js')]]
 ];

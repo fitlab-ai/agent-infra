@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 
-function check(content: string) {
+async function check(content: string) {
   const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decision-detail-gate-'));
   fs.writeFileSync(path.join(taskDir, 'review-analysis.md'), content);
   return verifyInProcess({
@@ -19,8 +19,8 @@ function check(content: string) {
   });
 }
 
-test('decision-details gate passes when ids are unique and ignores fenced examples', () => {
-  const result = check(`~~~md
+test('decision-details gate passes when ids are unique and ignores fenced examples', async () => {
+  const result = await check(`~~~md
 ### AN-1：示例 [needs-human-decision]
 ~~~
 
@@ -30,8 +30,8 @@ test('decision-details gate passes when ids are unique and ignores fenced exampl
   assert.equal(result.status, 'pass');
 });
 
-test('decision-details gate does not hide a later duplicate behind a tilde fence', () => {
-  const result = check(`~~~~md \`example\`
+test('decision-details gate does not hide a later duplicate behind a tilde fence', async () => {
+  const result = await check(`~~~~md \`example\`
 ### AN-1：示例 [needs-human-decision]
 ~~~~
 
@@ -47,7 +47,7 @@ The earlier review recorded the cause and risk for this behavior.
   assert.match(result.message, /Duplicate decision detail ids/);
 });
 
-test('decision-details gate rejects duplicate ids', () => {
+test('decision-details gate rejects duplicate ids', async () => {
   const content = [
     '### AN-1：第一个 [needs-human-decision]',
     '- **要决定什么**：A',
@@ -60,7 +60,7 @@ test('decision-details gate rejects duplicate ids', () => {
   const artifact = path.join(taskDir, 'review-analysis.md');
   fs.writeFileSync(artifact, content);
   const before = fs.readFileSync(artifact);
-  const result = verifyInProcess({
+  const result = await verifyInProcess({
     mode: 'check', skillName: 'review-analysis', taskDir, artifactFile: 'review-analysis.md',
     checks: ['decision-details'], repositoryRoot: process.cwd()
   });

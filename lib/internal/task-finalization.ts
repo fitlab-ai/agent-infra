@@ -14,7 +14,7 @@ function envelope(
   status: 'completed' | 'failed' | 'blocked' | 'unknown',
   changed: boolean,
   accepted: boolean,
-  result: ReturnType<typeof applyTaskFinalization> | null,
+  result: Awaited<ReturnType<typeof applyTaskFinalization>> | null,
   error: FinalizationError | null
 ): string {
   return `${JSON.stringify({ version: 1, status, changed, accepted, result, error })}\n`;
@@ -36,7 +36,7 @@ function parseFailure(error: unknown): string {
   return message.replace(/^TASK_CONTROL_OPERATION_INVALID: /u, '');
 }
 
-function taskFinalization(args: string[] = []): void {
+async function taskFinalization(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
 
   let operation;
@@ -71,7 +71,7 @@ function taskFinalization(args: string[] = []): void {
     ...operation,
     request: { ...operation.request, taskRef: resolved.taskId }
   };
-  const result = dispatchTaskControlOperation(
+  const result = await dispatchTaskControlOperation(
     createDirectHostExecutionContext({ repoRoot }),
     boundOperation
   );

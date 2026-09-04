@@ -56,7 +56,7 @@ function removePullRequestColumn(content: string): string {
   return lines.join('\n');
 }
 
-test('outcome resolver returns the registered result for each context and fail-closes unknown facts', () => {
+test('outcome resolver returns the registered result for each context and fail-closes unknown facts', async () => {
   const safe = resolveOutcome(SHORT_ID_FAILURE, 'safe-close', ['identity-confirmed-and-safe-close-proven']);
   assert.deepEqual(safe, {
     effect: 'apply-target',
@@ -78,10 +78,10 @@ test('outcome resolver returns the registered result for each context and fail-c
   assert.equal(unknown.contextId, 'context-unmatched');
 });
 
-test('blocked task can issue and consume a local-declared override through task.md only', () => {
+test('blocked task can issue and consume a local-declared override through task.md only', async () => {
   const f = fixture();
   try {
-    const issue = issueHumanOverride({
+    const issue = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: SHORT_ID_FAILURE,
       target: 'safe-close',
@@ -96,7 +96,7 @@ test('blocked task can issue and consume a local-declared override through task.
     assert.equal(issue.identity.source, 'local-declared');
     assert.equal(issue.identity.verified, false);
 
-    const consumed = consumeHumanOverride({
+    const consumed = await consumeHumanOverride({
       taskRef: TASK_ID,
       ticketId: issue.ticketId,
       failureId: SHORT_ID_FAILURE,
@@ -118,10 +118,10 @@ test('blocked task can issue and consume a local-declared override through task.
   }
 });
 
-test('override tickets are one-time and expired tickets do not mutate the ledger', () => {
+test('override tickets are one-time and expired tickets do not mutate the ledger', async () => {
   const f = fixture('blocked');
   try {
-    const issue = issueHumanOverride({
+    const issue = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: SHORT_ID_FAILURE,
       target: 'safe-close',
@@ -140,16 +140,16 @@ test('override tickets are one-time and expired tickets do not mutate the ledger
       intent: 'activate' as const,
       scope: 'task-lifecycle',
     };
-    assert.equal(consumeHumanOverride(request, options(f.repoRoot)).status, 'applied');
+    assert.equal((await consumeHumanOverride(request, options(f.repoRoot))).status, 'applied');
     const completedTaskMd = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md');
     const beforeReplay = fs.readFileSync(completedTaskMd);
-    const replay = consumeHumanOverride(request, options(f.repoRoot));
+    const replay = await consumeHumanOverride(request, options(f.repoRoot));
     assert.equal(replay.status, 'failed');
     assert.equal(replay.error.code, 'OVERRIDE_REPLAY');
     assert.deepEqual(fs.readFileSync(completedTaskMd), beforeReplay);
 
     const expiredFixture = fixture('blocked');
-    const expired = issueHumanOverride({
+    const expired = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: SHORT_ID_FAILURE,
       target: 'safe-close',
@@ -160,7 +160,7 @@ test('override tickets are one-time and expired tickets do not mutate the ledger
       expiresAt: '2026-08-22 14:00:01+00:00'
     }, { ...options(expiredFixture.repoRoot), now: () => '2026-08-22 14:00:00+00:00' });
     assert.ok(expired.ticketId);
-    const expiredResult = consumeHumanOverride({
+    const expiredResult = await consumeHumanOverride({
       taskRef: TASK_ID,
       ticketId: expired.ticketId,
       failureId: SHORT_ID_FAILURE,
@@ -176,10 +176,10 @@ test('override tickets are one-time and expired tickets do not mutate the ledger
   }
 });
 
-test('consuming state recovers when the effect commits before the final ledger write', () => {
+test('consuming state recovers when the effect commits before the final ledger write', async () => {
   const f = fixture();
   try {
-    const issue = issueHumanOverride({
+    const issue = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: SHORT_ID_FAILURE,
       target: 'safe-close',
@@ -205,10 +205,10 @@ test('consuming state recovers when the effect commits before the final ledger w
       target: 'safe-close' as const,
       scope: 'task-lifecycle',
     };
-    const failed = consumeHumanOverride(request, { ...options(f.repoRoot), taskFileSystem: failingWrite });
+    const failed = await consumeHumanOverride(request, { ...options(f.repoRoot), taskFileSystem: failingWrite });
     assert.equal(failed.status, 'failed');
     assert.match(failed.error.code, /RENAME_FAILED|TEMP_WRITE_FAILED/);
-    const recovered = consumeHumanOverride(request, options(f.repoRoot));
+    const recovered = await consumeHumanOverride(request, options(f.repoRoot));
     assert.equal(recovered.status, 'applied');
     assert.equal(recovered.outcome.result, 'safe-closed');
     const content = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
@@ -218,10 +218,10 @@ test('consuming state recovers when the effect commits before the final ledger w
   }
 });
 
-test('caller cannot select a platform-verified identity through the core issue API', () => {
+test('caller cannot select a platform-verified identity through the core issue API', async () => {
   const f = fixture();
   try {
-    const result = issueHumanOverride({
+    const result = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: SHORT_ID_FAILURE,
       target: 'safe-close',
@@ -238,10 +238,10 @@ test('caller cannot select a platform-verified identity through the core issue A
   }
 });
 
-test('issue refuses a ticket when the requested failure is not produced by the original intent', () => {
+test('issue refuses a ticket when the requested failure is not produced by the original intent', async () => {
   const f = fixture();
   try {
-    const result = issueHumanOverride({
+    const result = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: SHORT_ID_FAILURE,
       target: 'safe-close',
@@ -258,10 +258,10 @@ test('issue refuses a ticket when the requested failure is not produced by the o
   }
 });
 
-test('task-event state guard is a real producer failure for a blocked task', () => {
+test('task-event state guard is a real producer failure for a blocked task', async () => {
   const f = fixture('blocked');
   try {
-    const issued = issueHumanOverride({
+    const issued = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: failureId('task-event', 'TASK_STATE_MISMATCH'),
       target: 'continue-local',
@@ -276,7 +276,7 @@ test('task-event state guard is a real producer failure for a blocked task', () 
   }
 });
 
-test('invalid orchestration state can be recorded without producing a manual capability', () => {
+test('invalid orchestration state can be recorded without producing a manual capability', async () => {
   const f = fixture('active');
   const orchestrationPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'orchestration.json');
   fs.writeFileSync(orchestrationPath, `${JSON.stringify({
@@ -286,7 +286,7 @@ test('invalid orchestration state can be recorded without producing a manual cap
   }, null, 2)}\n`);
   const failure = failureId('lifecycle-execution', 'ORCHESTRATION_STATE_INVALID');
   try {
-    const issued = issueHumanOverride({
+    const issued = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: failure,
       target: 'continue-local',
@@ -296,7 +296,7 @@ test('invalid orchestration state can be recorded without producing a manual cap
       expiresAt: '2026-08-22 15:00:00+00:00'
     }, options(f.repoRoot));
     assert.equal(issued.status, 'applied', JSON.stringify(issued));
-    const consumed = consumeHumanOverride({
+    const consumed = await consumeHumanOverride({
       taskRef: TASK_ID,
       ticketId: issued.ticketId,
       failureId: failure,
@@ -315,7 +315,7 @@ test('invalid orchestration state can be recorded without producing a manual cap
   }
 });
 
-test('platform bind guard records real adapter failure evidence without producing a capability', () => {
+test('platform bind guard records real adapter failure evidence without producing a capability', async () => {
   const f = fixture('active');
   fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
     task: { shortIdLength: 2 }, platform: { type: 'github' }
@@ -328,7 +328,7 @@ test('platform bind guard records real adapter failure evidence without producin
   const failure = failureId('platform.issue', 'PLATFORM_BIND_FAILED');
   const platformOptions = { ...options(f.repoRoot), platformClient };
   try {
-    const issued = issueHumanOverride({
+    const issued = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: failure,
       target: 'continue-local',
@@ -339,7 +339,7 @@ test('platform bind guard records real adapter failure evidence without producin
       expiresAt: '2026-08-22 15:00:00+00:00'
     }, platformOptions);
     assert.equal(issued.status, 'applied', JSON.stringify(issued));
-    const consumed = consumeHumanOverride({
+    const consumed = await consumeHumanOverride({
       taskRef: TASK_ID,
       ticketId: issued.ticketId,
       failureId: failure,
@@ -356,7 +356,7 @@ test('platform bind guard records real adapter failure evidence without producin
   }
 });
 
-test('platform pull-request bind guard uses the same record-only path', () => {
+test('platform pull-request bind guard uses the same record-only path', async () => {
   const f = fixture('active');
   fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
     task: { shortIdLength: 2 }, platform: { type: 'github' }
@@ -369,7 +369,7 @@ test('platform pull-request bind guard uses the same record-only path', () => {
   const failure = failureId('platform.pull-request', 'PLATFORM_BIND_FAILED');
   const platformOptions = { ...options(f.repoRoot), platformClient };
   try {
-    const issued = issueHumanOverride({
+    const issued = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: failure,
       target: 'continue-local',
@@ -380,7 +380,7 @@ test('platform pull-request bind guard uses the same record-only path', () => {
       expiresAt: '2026-08-22 15:00:00+00:00'
     }, platformOptions);
     assert.equal(issued.status, 'applied', JSON.stringify(issued));
-    const consumed = consumeHumanOverride({
+    const consumed = await consumeHumanOverride({
       taskRef: TASK_ID,
       ticketId: issued.ticketId,
       failureId: failure,
@@ -398,7 +398,7 @@ test('platform pull-request bind guard uses the same record-only path', () => {
   }
 });
 
-test('platform resource numbers reject non-safe positive integers before probe or write', () => {
+test('platform resource numbers reject non-safe positive integers before probe or write', async () => {
   const cases = [
     { failureId: failureId('platform.issue', 'PLATFORM_BIND_FAILED'), target: 'continue-local', field: 'issueNumber' as const },
     { failureId: failureId('platform.pull-request', 'PLATFORM_BIND_FAILED'), target: 'continue-local', field: 'pullRequestNumber' as const }
@@ -427,7 +427,7 @@ test('platform resource numbers reject non-safe positive integers before probe o
       };
       const before = fs.readFileSync(f.taskMd);
       try {
-        const issued = issueHumanOverride(request, { ...options(f.repoRoot), platformClient });
+        const issued = await issueHumanOverride(request, { ...options(f.repoRoot), platformClient });
         assert.equal(issued.status, 'failed', JSON.stringify(issued));
         assert.equal(issued.error.code, 'OVERRIDE_RESOURCE_INVALID');
         assert.equal(probeCalls, 0);
@@ -439,7 +439,7 @@ test('platform resource numbers reject non-safe positive integers before probe o
   }
 });
 
-test('platform pull-request tickets reject a different resource number without mutation', () => {
+test('platform pull-request tickets reject a different resource number without mutation', async () => {
   const f = fixture('active');
   fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
     task: { shortIdLength: 2 }, platform: { type: 'github' }
@@ -452,7 +452,7 @@ test('platform pull-request tickets reject a different resource number without m
   const failure = failureId('platform.pull-request', 'PLATFORM_BIND_FAILED');
   const platformOptions = { ...options(f.repoRoot), platformClient };
   try {
-    const issued = issueHumanOverride({
+    const issued = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: failure,
       target: 'continue-local',
@@ -464,7 +464,7 @@ test('platform pull-request tickets reject a different resource number without m
     }, platformOptions);
     assert.equal(issued.status, 'applied', JSON.stringify(issued));
     const before = fs.readFileSync(f.taskMd);
-    const consumed = consumeHumanOverride({
+    const consumed = await consumeHumanOverride({
       taskRef: TASK_ID,
       ticketId: issued.ticketId,
       failureId: failure,
@@ -480,7 +480,7 @@ test('platform pull-request tickets reject a different resource number without m
   }
 });
 
-test('legacy pull-request tickets without a durable resource binding fail closed for reissue', () => {
+test('legacy pull-request tickets without a durable resource binding fail closed for reissue', async () => {
   const f = fixture('active');
   fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
     task: { shortIdLength: 2 }, platform: { type: 'github' }
@@ -493,7 +493,7 @@ test('legacy pull-request tickets without a durable resource binding fail closed
   const failure = failureId('platform.pull-request', 'PLATFORM_BIND_FAILED');
   const platformOptions = { ...options(f.repoRoot), platformClient };
   try {
-    const issued = issueHumanOverride({
+    const issued = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: failure,
       target: 'continue-local',
@@ -505,7 +505,7 @@ test('legacy pull-request tickets without a durable resource binding fail closed
     }, platformOptions);
     assert.equal(issued.status, 'applied', JSON.stringify(issued));
     fs.writeFileSync(f.taskMd, removePullRequestColumn(fs.readFileSync(f.taskMd, 'utf8')));
-    const reissued = issueHumanOverride({
+    const reissued = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: failure,
       target: 'continue-local',
@@ -516,7 +516,7 @@ test('legacy pull-request tickets without a durable resource binding fail closed
       expiresAt: '2026-08-22 15:00:00+00:00'
     }, platformOptions);
     assert.equal(reissued.status, 'applied', JSON.stringify(reissued));
-    const reconsumed = consumeHumanOverride({
+    const reconsumed = await consumeHumanOverride({
       taskRef: TASK_ID,
       ticketId: reissued.ticketId,
       failureId: failure,
@@ -525,7 +525,7 @@ test('legacy pull-request tickets without a durable resource binding fail closed
     }, platformOptions);
     assert.equal(reconsumed.status, 'applied', JSON.stringify(reconsumed));
     const before = fs.readFileSync(f.taskMd);
-    const consumed = consumeHumanOverride({
+    const consumed = await consumeHumanOverride({
       taskRef: TASK_ID,
       ticketId: issued.ticketId,
       failureId: failure,
@@ -540,10 +540,10 @@ test('legacy pull-request tickets without a durable resource binding fail closed
   }
 });
 
-test('diagnosis aggregates independent producer probes from one task snapshot', () => {
+test('diagnosis aggregates independent producer probes from one task snapshot', async () => {
   const f = fixture('blocked');
   try {
-    const diagnosis = diagnoseHumanOverrideForTask(TASK_ID, undefined, undefined, options(f.repoRoot));
+    const diagnosis = await diagnoseHumanOverrideForTask(TASK_ID, undefined, undefined, options(f.repoRoot));
     assert.equal(diagnosis.status, 'ready', JSON.stringify(diagnosis));
     assert.equal(diagnosis.taskId, TASK_ID);
     assert.equal(diagnosis.state, 'blocked');
@@ -556,11 +556,11 @@ test('diagnosis aggregates independent producer probes from one task snapshot', 
   }
 });
 
-test('generic local effects remain consuming until the producer effect commits', () => {
+test('generic local effects remain consuming until the producer effect commits', async () => {
   const f = fixture('blocked');
   try {
     const failure = failureId('activity-intent', 'TASK_STATE_MISMATCH');
-    const issued = issueHumanOverride({
+    const issued = await issueHumanOverride({
       taskRef: TASK_ID,
       failureId: failure,
       target: 'continue-local',
@@ -578,7 +578,7 @@ test('generic local effects remain consuming until the producer effect commits',
       target: 'continue-local' as const,
       scope: 'activity-intent'
     };
-    const first = consumeHumanOverride(request, {
+    const first = await consumeHumanOverride(request, {
       ...options(f.repoRoot),
       effectExecutor: () => ({ code: 'EFFECT_FAILED', message: 'injected producer failure' })
     });
@@ -586,7 +586,7 @@ test('generic local effects remain consuming until the producer effect commits',
     assert.equal(first.error.code, 'EFFECT_FAILED');
     assert.match(fs.readFileSync(f.taskMd, 'utf8'), new RegExp(`\\| ${issued.ticketId} \\|.*\\| consuming \\|`));
 
-    const recovered = consumeHumanOverride(request, {
+    const recovered = await consumeHumanOverride(request, {
       ...options(f.repoRoot),
       effectExecutor: () => null
     });
@@ -597,7 +597,7 @@ test('generic local effects remain consuming until the producer effect commits',
   }
 });
 
-test('producer probe reads an existing lifecycle failure journal without resuming it', () => {
+test('producer probe reads an existing lifecycle failure journal without resuming it', async () => {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'human-override-journal-'));
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
@@ -616,7 +616,7 @@ test('producer probe reads an existing lifecycle failure journal without resumin
     assert.equal(fs.existsSync(path.join(taskDir, '.task-lifecycle.json')), true);
 
     const failure = failureId('lifecycle.apply', 'LIFECYCLE_DIRECTORY_RENAME_FAILED');
-    const issued = issueHumanOverride({
+    const issued = await issueHumanOverride({
       taskRef: TASK_ID, failureId: failure, target: 'retry-same-intent', intent: 'complete',
       operator: 'alice', reason: 'retry the recorded directory move', scope: 'task-lifecycle',
       expiresAt: '2026-08-22 15:00:00+00:00'
@@ -625,7 +625,7 @@ test('producer probe reads an existing lifecycle failure journal without resumin
     assert.equal(fs.existsSync(path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID)), true);
     assert.equal(fs.existsSync(path.join(repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), false);
 
-    const consumed = consumeHumanOverride({
+    const consumed = await consumeHumanOverride({
       taskRef: TASK_ID, ticketId: issued.ticketId, failureId: failure,
       target: 'retry-same-intent', intent: 'complete', scope: 'task-lifecycle'
     }, options(repoRoot));

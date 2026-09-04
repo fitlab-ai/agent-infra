@@ -206,15 +206,15 @@ function lifecycleTaskId(request: TaskLifecycleControlRequest, repoRoot: string)
   }
 }
 
-function applyLifecycleWithAuthority(
+async function applyLifecycleWithAuthority(
   context: TaskControlExecutionContext,
   request: TaskLifecycleControlRequest
-): TaskLifecycleResult & { humanOverride?: unknown } {
+): Promise<TaskLifecycleResult & { humanOverride?: unknown }> {
   const conflict = overrideDryRunConflict(request as unknown as Record<string, unknown>);
   if (conflict) {
     return taskLifecycleFailure(request, { code: 'LIFECYCLE_PAYLOAD_INVALID', message: conflict.message });
   }
-  const execute = (): TaskLifecycleResult & { humanOverride?: unknown } => {
+  const execute = async (): Promise<TaskLifecycleResult & { humanOverride?: unknown }> => {
     const lifecycleResult = applyTaskLifecycle(request, { repoRoot: context.repoRoot });
     if (lifecycleResult.status !== 'failed' || !request.overrideTicket) return lifecycleResult;
     if (!request.overrideTarget || !request.overrideScope) {
@@ -223,7 +223,7 @@ function applyLifecycleWithAuthority(
         error: { code: 'OVERRIDE_PAYLOAD_INVALID', message: 'override ticket requires --override-target and --override-scope' }
       };
     }
-    const override = consumeHumanOverride({
+    const override = await consumeHumanOverride({
       taskRef: request.taskRef,
       ticketId: request.overrideTicket,
       failureId: failureId('lifecycle.apply', lifecycleResult.error?.code ?? 'LIFECYCLE_FAILED'),
@@ -238,9 +238,9 @@ function applyLifecycleWithAuthority(
     return { ...lifecycleResult, ...override, humanOverride: override, error: null };
   };
   const taskId = lifecycleTaskId(request, context.repoRoot);
-  if (!taskId) return execute();
+  if (!taskId) return await execute();
   try {
-    return withTaskExecutionLock(
+    return await withTaskExecutionLock(
       context.repoRoot,
       taskId,
       `task-lifecycle.${request.intent}`,
@@ -322,11 +322,11 @@ function orchestrationFailure(error: unknown): OrchestrationResult {
 export function dispatchTaskControlOperation(
   context: TaskControlExecutionContext,
   operation: Extract<TaskControlOperation, { family: 'task-lifecycle' }>
-): TaskLifecycleResult;
+): Promise<TaskLifecycleResult & { humanOverride?: unknown }>;
 export function dispatchTaskControlOperation(
   context: TaskControlExecutionContext,
   operation: Extract<TaskControlOperation, { family: 'task-finalization' }>
-): TaskFinalizationResult;
+): Promise<TaskFinalizationResult>;
 export function dispatchTaskControlOperation(
   context: TaskControlExecutionContext,
   operation: Extract<TaskControlOperation, { family: 'task-orchestration' }>

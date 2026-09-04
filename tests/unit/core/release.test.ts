@@ -100,7 +100,7 @@ test("package metadata supports scoped npm publishing", () => {
   ]);
   assert.match(pkg.scripts.prepublishOnly, /^node scripts\/run-tests\.js/);
   assert.match(pkg.scripts.prepublishOnly, /tests\/\*\*\/\*\.test\.ts/);
-  assert.match(read("lib/platform/verification-sync.ts"), /createGitHubClient/);
+  assert.match(read("lib/platform/verification-sync.ts"), /resolvePlatformProviderContext/);
 });
 
 test("Node runtime baseline stays aligned across metadata and automation", () => {

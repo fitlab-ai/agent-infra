@@ -25,7 +25,7 @@ function fixture(version = '0.8.6'): Fixture {
   execFileSync('git', ['remote', 'add', 'origin', origin], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: '@acme/widgets', version }));
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'widgets', org: 'acme', platform: { type: 'gitea' } }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'widgets', org: 'acme', platform: { type: 'none' } }));
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'initial\n');
   fs.writeFileSync(preload, 'globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}), text: async () => "" });\n');
   execFileSync('git', ['add', '.'], { cwd: root });

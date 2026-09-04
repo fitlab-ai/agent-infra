@@ -23,15 +23,17 @@ type PlatformOperation = {
 type CommentIdentity = {
   kind: 'task' | 'artifact' | 'summary' | 'cancel';
   marker: string;
-  ids: number[];
+  ids: Array<number | string>;
   parts: number;
 };
+
+import type { ResourceIdentity } from './resource-identity.ts';
 
 type PlatformResult = {
   status: PlatformStatus;
   changed: boolean;
   platform: { type: string | null; repository: string | null; currentUser: string | null };
-  resource: { kind: 'repository' | 'issue' | 'pull-request'; number: number | null };
+  resource: { kind: 'repository' | 'issue' | 'pull-request'; number: number | null; identity?: ResourceIdentity };
   capabilities: PlatformCapabilities;
   operations: PlatformOperation[];
   comment: CommentIdentity | null;

@@ -69,24 +69,24 @@ function options(
 
 const request: TaskFinalizationRequest = { taskRef: TASK_ID, intent: 'complete', agent: 'codex' };
 
-test('host finalization uses the canonical root and makes a successful replay a no-op', () => {
+test('host finalization uses the canonical root and makes a successful replay a no-op', async () => {
   const f = fixture();
   let commentCalls = 0;
   let verifyCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = (_taskRef, received) => {
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
     commentCalls += 1;
     assert.equal(received.cwd, f.repoRoot);
     return platformResult(commentCalls === 1 ? 'applied' : 'no-op');
   };
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = (received, receivedOptions) => {
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received, receivedOptions) => {
     verifyCalls += 1;
     assert.deepEqual(received, { taskRef: TASK_ID, event: 'complete-task.completed' });
     assert.equal(receivedOptions?.repoRoot, f.repoRoot);
     return verification('pass');
   };
   try {
-    const first = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const second = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
     assert.equal(commentCalls, 1);
@@ -99,22 +99,22 @@ test('host finalization uses the canonical root and makes a successful replay a 
   }
 });
 
-test('host finalization revalidates canonical steps when the receipt is absent', () => {
+test('host finalization revalidates canonical steps when the receipt is absent', async () => {
   const f = fixture();
   let commentCalls = 0;
   let verifyCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => {
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => {
     commentCalls += 1;
     return platformResult(commentCalls === 1 ? 'applied' : 'no-op');
   };
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => {
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
     return verification('pass');
   };
   try {
-    const first = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     fs.rmSync(path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`));
-    const second = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
     assert.equal(second.lifecycle?.status, 'no-op');
@@ -125,18 +125,18 @@ test('host finalization revalidates canonical steps when the receipt is absent',
   }
 });
 
-test('host finalization rejects a current receipt that omits warningProjection', () => {
+test('host finalization rejects a current receipt that omits warningProjection', async () => {
   const f = fixture();
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => platformResult('no-op');
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => verification('pass');
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
   const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
   try {
-    const first = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as Record<string, unknown>;
     delete receipt.warningProjection;
     fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`);
-    const replay = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const replay = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(replay.status, 'failed');
     assert.equal(replay.error?.code, 'TASK_FINALIZATION_RECEIPT_INVALID');
   } finally {
@@ -144,24 +144,24 @@ test('host finalization rejects a current receipt that omits warningProjection',
   }
 });
 
-test('host finalization returns actionable verification gate failures and retries them', () => {
+test('host finalization returns actionable verification gate failures and retries them', async () => {
   const f = fixture();
   let commentCalls = 0;
   const commentSnapshots: string[] = [];
   let verifyCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => {
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => {
     commentCalls += 1;
     commentSnapshots.push(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8'));
     return platformResult(commentCalls === 1 ? 'applied' : 'no-op');
   };
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => {
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
     return verification(verifyCalls === 1 ? 'fail' : 'pass');
   };
   try {
-    const failed = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const recovered = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const replay = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const failed = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const replay = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(failed.status, 'completed');
     assert.equal(failed.result, 'completed_with_warnings');
     assert.equal(failed.warnings[0]?.code, 'CHECK_FAILED');
@@ -179,23 +179,23 @@ test('host finalization returns actionable verification gate failures and retrie
   }
 });
 
-test('host finalization retries only the pending terminal steps after a comment failure', () => {
+test('host finalization retries only the pending terminal steps after a comment failure', async () => {
   const f = fixture();
   let commentCalls = 0;
   let verifyCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => {
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => {
     commentCalls += 1;
     return commentCalls === 1
       ? platformResult('blocked', { error: { code: 'NETWORK_RETRY', message: 'temporary', retryable: true } })
       : platformResult('no-op');
   };
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => {
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
     return verification('pass');
   };
   try {
-    const first = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const second = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
     assert.equal(first.result, 'completed_with_warnings');
     assert.equal(first.warnings[0]?.code, 'NETWORK_RETRY');
@@ -212,20 +212,20 @@ test('host finalization retries only the pending terminal steps after a comment 
   }
 });
 
-test('host finalization projects every stable warning key for a step before resolving projection', () => {
+test('host finalization projects every stable warning key for a step before resolving projection', async () => {
   const f = fixture();
   let commentCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => {
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => {
     commentCalls += 1;
     if (commentCalls === 1) return platformResult('blocked', { error: { code: 'ERROR_A', message: 'first', retryable: true } });
     if (commentCalls === 2) return platformResult('blocked', { error: { code: 'ERROR_B', message: 'second', retryable: true } });
     return platformResult('no-op');
   };
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => verification('pass');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
   try {
-    applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const recovered = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
     assert.equal(recovered.result, 'completed');
     assert.match(completed, /\| ERROR_A \| resolved \|/);
@@ -235,15 +235,15 @@ test('host finalization projects every stable warning key for a step before reso
   }
 });
 
-test('host finalization receipt mutations are lock-bound and scope-safe', () => {
+test('host finalization receipt mutations are lock-bound and scope-safe', async () => {
   const f = fixture();
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => platformResult('blocked', {
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('blocked', {
     error: { code: 'NETWORK_RETRY', message: 'temporary', retryable: true }
   });
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => verification('pass');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
   const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
   try {
-    applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
     const wrongScope = createFinalizationCapability(receipt, 'task-comment');
     assert.throws(
@@ -276,13 +276,13 @@ test('host finalization receipt mutations are lock-bound and scope-safe', () => 
   }
 });
 
-test('host finalization rejects capability mutations for active tasks', () => {
+test('host finalization rejects capability mutations for active tasks', async () => {
   const f = fixture();
-  const preflight: NonNullable<TaskFinalizationOptions['preflight']> = () => verification('fail');
+  const preflight: NonNullable<TaskFinalizationOptions['preflight']> = async () => verification('fail');
   const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
   try {
-    applyTaskFinalization(request, {
-      ...options(f.repoRoot, () => platformResult('no-op'), () => verification('pass')),
+    await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
       preflight
     });
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
@@ -296,7 +296,7 @@ test('host finalization rejects capability mutations for active tasks', () => {
   }
 });
 
-test('host finalization fails closed when the canonical short-id registry is unavailable', () => {
+test('host finalization fails closed when the canonical short-id registry is unavailable', async () => {
   const mutations: Array<[string, (registryPath: string) => void]> = [
     ['missing', (registryPath) => fs.unlinkSync(registryPath)],
     ['malformed JSON', (registryPath) => fs.writeFileSync(registryPath, '{not-json\n')],
@@ -305,13 +305,13 @@ test('host finalization fails closed when the canonical short-id registry is una
 
   for (const [label, mutate] of mutations) {
     const f = fixture();
-    const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => platformResult('no-op');
-    const verify: NonNullable<TaskFinalizationOptions['verify']> = () => verification('pass');
+    const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+    const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
     const registryPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
     try {
-      const first = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+      const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
       mutate(registryPath);
-      const replay = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+      const replay = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
       assert.equal(first.status, 'completed', label);
       assert.equal(replay.status, 'failed', label);
       assert.equal(replay.error?.code, 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE', label);

@@ -65,9 +65,9 @@ function contextResponse(args: string[]) {
   return null;
 }
 
-test('issue inspection normalizes stable remote identity and metadata', () => {
+test('issue inspection normalizes stable remote identity and metadata', async () => {
   const root = fixture('7');
-  const result = inspectPlatformIssue('TASK-20260101-000001', {
+  const result = await inspectPlatformIssue('TASK-20260101-000001', {
     cwd: root,
     client: clientFor((args) => contextResponse(args) || {
       number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
@@ -81,7 +81,19 @@ test('issue inspection normalizes stable remote identity and metadata', () => {
   assert.equal(result.issue?.nodeId, 'I_7');
 });
 
-test('issue create binds exactly once and replay inspects the existing binding', () => {
+test('issue inspection returns a structured legacy cutoff error for numeric identities', async () => {
+  const root = fixture('42');
+  try {
+    const result = await inspectPlatformIssue('TASK-20260101-000001', { cwd: root, runtimeVersion: 'v1.0.0' });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    assert.match(result.error?.message || '', /current schema/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('issue create binds exactly once and replay inspects the existing binding', async () => {
   const root = fixture();
   let posts = 0;
   const client = clientFor((args, input) => {
@@ -96,15 +108,15 @@ test('issue create binds exactly once and replay inspects the existing binding',
     }
     return { number: 9, id: 90, node_id: 'I_9', html_url: 'https://github.com/acme/widgets/issues/9', state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: null };
   });
-  const first = createPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', client });
+  const first = await createPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', client });
   assert.equal(first.status, 'applied');
   assert.equal(first.task.issueNumber, 9);
-  const second = createPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', client });
+  const second = await createPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', client });
   assert.equal(second.status, 'no-op');
   assert.equal(posts, 1);
 });
 
-test('issue sync plans dry-run without writes and applies incremental label writes', () => {
+test('issue sync plans dry-run without writes and applies incremental label writes', async () => {
   const root = fixture('7');
   let patches = 0;
   let labels = ['status: blocked'];
@@ -127,26 +139,26 @@ test('issue sync plans dry-run without writes and applies incremental label writ
     }
     return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: labels.map((name) => ({ name })), assignees: [], milestone: null };
   });
-  const dry = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', dryRun: true, client });
+  const dry = await syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', dryRun: true, client });
   assert.equal(dry.status, 'planned');
   assert.equal(patches, 0);
-  const applied = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
+  const applied = await syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
   assert.equal(applied.status, 'applied');
   assert.equal(patches, 0);
   assert.deepEqual(labels.sort(), ['status: in-progress']);
-  const replay = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
+  const replay = await syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
   assert.equal(replay.status, 'no-op');
   assert.equal(patches, 0);
 });
 
-test('issue in-label sync requires the task-bound base and uses it for diff evidence', () => {
+test('issue in-label sync requires the task-bound base and uses it for diff evidence', async () => {
   const missingBase = fixture('7');
   try {
     const client = clientFor((args) => contextResponse(args) || (args.some((arg) => arg.endsWith('/labels?per_page=100')) ? [{ name: 'in: core' }] : {
       number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
       state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: null
     }));
-    const result = syncPlatformIssue('TASK-20260101-000001', {
+    const result = await syncPlatformIssue('TASK-20260101-000001', {
       cwd: missingBase, agent: 'codex', client, inLabels: 'from-diff'
     });
     assert.equal(result.status, 'failed');
@@ -197,7 +209,7 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
         state: 'open', title: 'x', body: '', labels: currentLabels.map((name) => ({ name })), assignees: [], milestone: null
       };
     });
-    const result = syncPlatformIssue('TASK-20260101-000001', {
+    const result = await syncPlatformIssue('TASK-20260101-000001', {
       cwd: root, agent: 'codex', client, inLabels: 'from-diff'
     });
     assert.equal(result.status, 'applied');
@@ -208,7 +220,7 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
   }
 });
 
-test('issue sync upgrades a deterministic in-label failure after status success to partial', () => {
+test('issue sync upgrades a deterministic in-label failure after status success to partial', async () => {
   const root = inLabelIssueFixture();
   let labels = ['status: blocked', 'keep'];
   try {
@@ -231,7 +243,7 @@ test('issue sync upgrades a deterministic in-label failure after status success 
       }
       return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: labels.map((name) => ({ name })), assignees: [], milestone: null };
     });
-    const result = syncPlatformIssue('TASK-20260101-000001', {
+    const result = await syncPlatformIssue('TASK-20260101-000001', {
       cwd: root, agent: 'codex', status: 'in-progress', inLabels: 'from-diff', client
     });
     assert.equal(result.status, 'blocked');
@@ -243,7 +255,7 @@ test('issue sync upgrades a deterministic in-label failure after status success 
   }
 });
 
-test('issue sync reports changed when the post-write in-label reread fails', () => {
+test('issue sync reports changed when the post-write in-label reread fails', async () => {
   const root = inLabelIssueFixture();
   let labels = ['keep'];
   let issueReads = 0;
@@ -263,7 +275,7 @@ test('issue sync reports changed when the post-write in-label reread fails', () 
       }
       return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: labels.map((name) => ({ name })), assignees: [], milestone: null };
     });
-    const result = syncPlatformIssue('TASK-20260101-000001', {
+    const result = await syncPlatformIssue('TASK-20260101-000001', {
       cwd: root, agent: 'codex', inLabels: 'from-diff', client
     });
     assert.equal(result.status, 'blocked');
@@ -294,7 +306,7 @@ test('requirement anchors follow the deterministically selected Issue Form', () 
   ]);
 });
 
-test('requirements sync plans, applies once, and converges on replay', () => {
+test('requirements sync plans, applies once, and converges on replay', async () => {
   const root = fixture('7');
   let patches = 0;
   let body = 'Intro\n\n## Requirements\n\nN/A\n';
@@ -311,27 +323,27 @@ test('requirements sync plans, applies once, and converges on replay', () => {
       state: 'open', title: 'x', body, labels: [], assignees: [], milestone: null
     };
   });
-  const dry = syncPlatformIssue('TASK-20260101-000001', {
+  const dry = await syncPlatformIssue('TASK-20260101-000001', {
     cwd: root, agent: 'codex', requirements: true, dryRun: true, client
   });
   assert.equal(dry.status, 'planned');
   assert.equal(patches, 0);
 
-  const applied = syncPlatformIssue('TASK-20260101-000001', {
+  const applied = await syncPlatformIssue('TASK-20260101-000001', {
     cwd: root, agent: 'codex', requirements: true, client
   });
   assert.equal(applied.status, 'applied');
   assert.equal(patches, 1);
   assert.match(body, /- \[x\] first\n- \[ \] second/);
 
-  const replay = syncPlatformIssue('TASK-20260101-000001', {
+  const replay = await syncPlatformIssue('TASK-20260101-000001', {
     cwd: root, agent: 'codex', requirements: true, client
   });
   assert.equal(replay.status, 'no-op');
   assert.equal(patches, 1);
 });
 
-test('requirements sync degrades without an anchor and fails before writes on ambiguity', () => {
+test('requirements sync degrades without an anchor and fails before writes on ambiguity', async () => {
   const root = fixture('7');
   let patches = 0;
   let body = 'Hand-written issue\n';
@@ -344,7 +356,7 @@ test('requirements sync degrades without an anchor and fails before writes on am
       state: 'open', title: 'x', body, labels: [], assignees: [], milestone: null
     };
   });
-  const skipped = syncPlatformIssue('TASK-20260101-000001', {
+  const skipped = await syncPlatformIssue('TASK-20260101-000001', {
     cwd: root, agent: 'codex', requirements: true, client
   });
   assert.equal(skipped.status, 'degraded');
@@ -353,7 +365,7 @@ test('requirements sync degrades without an anchor and fails before writes on am
   }]);
 
   body = '## Requirements\n\n## 需求\n';
-  const failed = syncPlatformIssue('TASK-20260101-000001', {
+  const failed = await syncPlatformIssue('TASK-20260101-000001', {
     cwd: root, agent: 'codex', requirements: true, client
   });
   assert.equal(failed.status, 'failed');
@@ -361,7 +373,7 @@ test('requirements sync degrades without an anchor and fails before writes on am
   assert.equal(patches, 0);
 });
 
-test('issue sync flattens paginated milestones and converges on a specific version', () => {
+test('issue sync flattens paginated milestones and converges on a specific version', async () => {
   const root = fixture('7');
   let patches = 0;
   let currentMilestone = '0.8.x';
@@ -386,16 +398,16 @@ test('issue sync flattens paginated milestones and converges on a specific versi
     };
   });
 
-  const applied = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', milestone: 'specific', client });
+  const applied = await syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', milestone: 'specific', client });
   assert.equal(applied.status, 'applied');
   assert.equal(patches, 1);
 
-  const replay = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', milestone: 'specific', client });
+  const replay = await syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', milestone: 'specific', client });
   assert.equal(replay.status, 'no-op');
   assert.equal(patches, 1);
 });
 
-test('issue sync resolves organization schema and migrates type before pinned fields', () => {
+test('issue sync resolves organization schema and migrates type before pinned fields', async () => {
   const root = fixture('7');
   const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
   fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace('type: feature', 'type: feature\npriority: 高'));
@@ -419,7 +431,7 @@ test('issue sync resolves organization schema and migrates type before pinned fi
     } } } };
     return { number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7', state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: null };
   });
-  const result = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', issueType: true, fields: true, client });
+  const result = await syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', issueType: true, fields: true, client });
   assert.equal(result.status, 'applied');
   assert.deepEqual(writes.map((write) => Object.keys(write.variables)), [
     ['issueId', 'issueTypeId'], ['issueId', 'issueFields']

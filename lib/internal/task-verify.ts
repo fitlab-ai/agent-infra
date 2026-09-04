@@ -11,7 +11,7 @@ function fail(message: string): void {
   process.exitCode = 1;
 }
 
-function taskVerify(args: string[] = []): void {
+async function taskVerify(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (!args[0] || !args[1] || args[0].startsWith('--') || args[1].startsWith('--')) { fail('task ref and verification event are required'); return; }
   const taskRef = args[0];
@@ -41,8 +41,8 @@ function taskVerify(args: string[] = []): void {
   let result;
   let humanOverride: unknown = null;
   try {
-    result = withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-verify.${event}`, () => {
-      let current = verifyTaskEvent({ taskRef, event, ...(artifact ? { artifact } : {}) });
+    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-verify.${event}`, async () => {
+      let current = await verifyTaskEvent({ taskRef, event, ...(artifact ? { artifact } : {}) });
       if (current.status === 'pass' || !overrideTicket) return current;
       if (!overrideTarget || !overrideScope) { fail('override ticket requires target and scope'); return current; }
       const failureProducer = current.status === 'blocked' || current.status === 'fail'
@@ -53,13 +53,13 @@ function taskVerify(args: string[] = []): void {
         : current.status === 'fail'
           ? 'CHECK_FAILED'
           : current.error?.code ?? 'VERIFY_TASK_STATE_MISMATCH';
-      const consumed = consumeHumanOverride({
+      const consumed = await consumeHumanOverride({
         taskRef, ticketId: overrideTicket,
         failureId: failureId(failureProducer, failureCode),
         target: overrideTarget, scope: overrideScope
       }, {
-        effectExecutor: (capability) => {
-          const retried = verifyTaskEvent({ taskRef, event, ...(artifact ? { artifact } : {}) }, { manualOverride: capability });
+        effectExecutor: async (capability) => {
+          const retried = await verifyTaskEvent({ taskRef, event, ...(artifact ? { artifact } : {}) }, { manualOverride: capability });
           current = retried;
           return retried.status !== 'pass'
             ? { code: 'OVERRIDE_EFFECT_FAILED', message: `${retried.error?.code ?? 'VERIFY_FAILED'}: ${retried.error?.message ?? 'manual verification effect failed'}` }

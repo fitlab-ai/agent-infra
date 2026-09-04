@@ -42,8 +42,8 @@ const DEFAULT_DEPENDENCIES: TaskCreateDependencies = {
   addWarning: applyWorkflowWarningIntent
 };
 
-function verifyCreatedTask(repoRoot: string, taskId: string): { operation: TaskCreateOperation; error: TaskCreateResult['error'] } {
-  const verification = verifyTaskEvent(
+async function verifyCreatedTask(repoRoot: string, taskId: string): Promise<{ operation: TaskCreateOperation; error: TaskCreateResult['error'] }> {
+  const verification = await verifyTaskEvent(
     { taskRef: taskId, event: 'create-task.completed' },
     { repoRoot }
   );
@@ -78,7 +78,7 @@ function issueFromTask(repoRoot: string, taskId: string): { number: number; url:
   return match ? { number: Number(match[1]), url: '' } : null;
 }
 
-function createTask(value: unknown, options: CreateTaskOptions): TaskCreateResult {
+async function createTask(value: unknown, options: CreateTaskOptions): Promise<TaskCreateResult> {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...options.dependencies };
   let candidate: TaskCreateCandidateV1;
   let local;
@@ -101,13 +101,13 @@ function createTask(value: unknown, options: CreateTaskOptions): TaskCreateResul
     name: 'task:local', status: local.status, reasonCode: null
   }];
   let issue = issueFromTask(options.repoRoot, local.task.id);
-  const created = dependencies.createIssue(local.task.id, { cwd: options.repoRoot, agent: candidate.agent });
+  const created = await dependencies.createIssue(local.task.id, { cwd: options.repoRoot, agent: candidate.agent });
   operations.push(...platformOperations('platform-create', created.operations));
   if (created.issue) issue = { number: created.issue.number, url: created.issue.url };
 
   let platformFailure: PlatformResult | null = created.status === 'failed' || created.status === 'blocked' ? created : null;
   if (!platformFailure && (created.task.issueNumber || issue)) {
-    const synced = dependencies.syncIssue(local.task.id, {
+    const synced = await dependencies.syncIssue(local.task.id, {
       cwd: options.repoRoot,
       agent: candidate.agent,
       status: 'waiting-for-triage',
@@ -120,7 +120,7 @@ function createTask(value: unknown, options: CreateTaskOptions): TaskCreateResul
     if (synced.issue) issue = { number: synced.issue.number, url: synced.issue.url };
     if (synced.status === 'failed' || synced.status === 'blocked') platformFailure = synced;
     if (!platformFailure) {
-      const commented = dependencies.syncComment(local.task.id, { cwd: options.repoRoot, kind: 'task', agent: candidate.agent });
+      const commented = await dependencies.syncComment(local.task.id, { cwd: options.repoRoot, kind: 'task', agent: candidate.agent });
       operations.push(...platformOperations('platform-comment', commented.operations));
       if (commented.status === 'failed' || commented.status === 'blocked') platformFailure = commented;
     }
@@ -133,7 +133,7 @@ function createTask(value: unknown, options: CreateTaskOptions): TaskCreateResul
       code: 'ISSUE_CREATE_FAILED', target: 'issue', message: `${error.code}: ${error.message}`,
       action: 'Fix platform authentication or connectivity, then retry Issue creation for this task.'
     }, { repoRoot: options.repoRoot });
-    const verified = verifyCreatedTask(options.repoRoot, local.task.id);
+    const verified = await verifyCreatedTask(options.repoRoot, local.task.id);
     operations.push(verified.operation);
     if (verified.error) return {
       status: verified.error.retryable ? 'blocked' : 'failed', changed: local.changed,
@@ -150,7 +150,7 @@ function createTask(value: unknown, options: CreateTaskOptions): TaskCreateResul
     };
   }
 
-  const verified = verifyCreatedTask(options.repoRoot, local.task.id);
+  const verified = await verifyCreatedTask(options.repoRoot, local.task.id);
   operations.push(verified.operation);
   if (verified.error) return {
     status: verified.error.retryable ? 'blocked' : 'failed', changed: local.changed,

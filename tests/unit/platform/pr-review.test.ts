@@ -74,14 +74,15 @@ const IDENTITY = { scope: 'TASK-20260101-000001', round: 1, commitSha: 'a'.repea
 test('reviewMarker and reviewedCommitMarker define the marker contract', () => {
   assert.equal(reviewMarker({ scope: 'TASK-20260101-000001', round: 1, commitSha: 'a' }), '<!-- review-pr:TASK-20260101-000001:r1 -->');
   assert.equal(reviewMarker({ scope: 'pr42', round: 2, commitSha: 'b' }), '<!-- review-pr:pr42:r2 -->');
+  assert.match(reviewMarker({ scope: 'TASK-20260101-000001', round: 3, commitSha: 'c', resource: { kind: 'id', value: 'type:42' } }), /^<!-- review-pr:pr:[A-Za-z0-9_-]+:r3 -->$/);
   assert.equal(reviewedCommitMarker('a'.repeat(40)), `<!-- reviewed-commit: ${'a'.repeat(40)} -->`);
 });
 
-test('publishPrReview generates the marker on first publish and the body starts with it', () => {
+test('publishPrReview generates the marker on first publish and the body starts with it', async () => {
   const root = fixture();
   try {
     const mock = mockClient();
-    const result = publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: '## Findings\n- something' });
+    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: '## Findings\n- something' });
     assert.equal(result.status, 'applied');
     assert.equal(mock.postedBodies.length, 1);
     const posted = mock.postedBodies[0]!;
@@ -93,12 +94,12 @@ test('publishPrReview generates the marker on first publish and the body starts 
   }
 });
 
-test('publishPrReview is idempotent: replay with the same marker and commit is a no-op', () => {
+test('publishPrReview is idempotent: replay with the same marker and commit is a no-op', async () => {
   const root = fixture();
   try {
     const existingBody = `${reviewMarker(IDENTITY)}\n<!-- reviewed-commit: ${IDENTITY.commitSha} -->\n\n## Findings`;
     const mock = mockClient({ initial: [{ id: 1, commit_id: IDENTITY.commitSha, body: existingBody, html_url: 'https://x' }] });
-    const result = publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'APPROVE', body: 'new body' });
+    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'APPROVE', body: 'new body' });
     assert.equal(result.status, 'no-op');
     assert.equal(mock.postedBodies.length, 0);
   } finally {
@@ -106,12 +107,12 @@ test('publishPrReview is idempotent: replay with the same marker and commit is a
   }
 });
 
-test('publishPrReview fails with REVIEW_MARKER_CONFLICT when the marker targets a different commit', () => {
+test('publishPrReview fails with REVIEW_MARKER_CONFLICT when the marker targets a different commit', async () => {
   const root = fixture();
   try {
     const existingBody = `${reviewMarker(IDENTITY)}\n<!-- reviewed-commit: ${'b'.repeat(40)} -->\n\n## Findings`;
     const mock = mockClient({ initial: [{ id: 1, commit_id: 'b'.repeat(40), body: existingBody, html_url: 'https://x' }] });
-    const result = publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'APPROVE', body: 'new body' });
+    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'APPROVE', body: 'new body' });
     assert.equal(result.status, 'failed');
     assert.equal(result.error?.code, 'REVIEW_MARKER_CONFLICT');
     assert.equal(mock.postedBodies.length, 0);
@@ -120,13 +121,13 @@ test('publishPrReview fails with REVIEW_MARKER_CONFLICT when the marker targets 
   }
 });
 
-test('publishPrReview rejects a scope that would break the marker contract', () => {
+test('publishPrReview rejects a scope that would break the marker contract', async () => {
   const root = fixture();
   try {
     const mock = mockClient();
     const badScopes = ['TASK-20260101-000001\r\ninject', 'pr42-->', 'TASK 20260101 000001', ''];
     for (const scope of badScopes) {
-      const result = publishPrReview({
+      const result = await publishPrReview({
         cwd: root, client: mock.client, prNumber: 42,
         identity: { scope, round: 1, commitSha: 'a'.repeat(40) },
         event: 'COMMENT', body: 'body'
@@ -140,11 +141,11 @@ test('publishPrReview rejects a scope that would break the marker contract', () 
   }
 });
 
-test('publishPrReview reconciles a lost POST by re-listing and marking CREATE_RECONCILED', () => {
+test('publishPrReview reconciles a lost POST by re-listing and marking CREATE_RECONCILED', async () => {
   const root = fixture();
   try {
     const mock = mockClient({ failPostTimes: 1 });
-    const result = publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: 'body' });
+    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: 'body' });
     assert.equal(result.status, 'applied');
     assert.equal(result.operations?.[0]?.reasonCode, 'CREATE_RECONCILED');
   } finally {
@@ -152,7 +153,7 @@ test('publishPrReview reconciles a lost POST by re-listing and marking CREATE_RE
   }
 });
 
-test('publishPrReview blocks when a retryable POST cannot be reconciled', () => {
+test('publishPrReview blocks when a retryable POST cannot be reconciled', async () => {
   const root = fixture();
   try {
     const mock = mockClient(); // POST succeeds, so simulate unknown by never writing: use a failing version below
@@ -175,7 +176,7 @@ test('publishPrReview blocks when a retryable POST cannot be reconciled', () => 
       },
       text() { return { ok: true as const, value: '' }; }
     };
-    const result = publishPrReview({ cwd: root, client: client as unknown as GitHubClient, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: 'body' });
+    const result = await publishPrReview({ cwd: root, client: client as unknown as GitHubClient, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: 'body' });
     assert.equal(result.status, 'blocked');
     assert.equal(result.error?.code, 'REVIEW_CREATE_OUTCOME_UNKNOWN');
   } finally {
@@ -183,14 +184,14 @@ test('publishPrReview blocks when a retryable POST cannot be reconciled', () => 
   }
 });
 
-test('listPrReviews returns normalized review entries', () => {
+test('listPrReviews returns normalized review entries', async () => {
   const root = fixture();
   try {
     const mock = mockClient({ initial: [
       { id: 1, commit_id: 'a'.repeat(40), body: `${reviewMarker(IDENTITY)}\nbody`, html_url: 'https://x' },
       { id: 2, commit_id: 'b'.repeat(40), body: 'ordinary comment review', html_url: 'https://y' }
     ] });
-    const result = listPrReviews(42, { cwd: root, client: mock.client });
+    const result = await listPrReviews(42, { cwd: root, client: mock.client });
     assert.equal(result.status, 'no-op');
     assert.equal(result.reviews.length, 2);
     assert.equal(result.reviews[0]!.commitId, 'a'.repeat(40));
