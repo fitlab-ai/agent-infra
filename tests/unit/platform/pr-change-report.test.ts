@@ -50,6 +50,28 @@ function mechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
   };
 }
 
+function categorizedMechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
+  const files = [
+    { status: 'M', oldPath: 'lib/example.ts', newPath: 'lib/example.ts', additions: 4, deletions: 1, oldBytes: 10, newBytes: 13, netBytes: 3 },
+    { status: 'M', oldPath: 'tests/example.test.ts', newPath: 'tests/example.test.ts', additions: 2, deletions: 0, oldBytes: 5, newBytes: 7, netBytes: 2 },
+    { status: 'A', oldPath: null, newPath: 'templates/example.md', additions: 3, deletions: 0, oldBytes: 0, newBytes: 20, netBytes: 20 },
+    { status: 'D', oldPath: '.agents/example.md', newPath: null, additions: 0, deletions: 2, oldBytes: 10, newBytes: 0, netBytes: -10 },
+    { status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 0, newBytes: 4, netBytes: 4 }
+  ];
+  return {
+    version: 1,
+    base,
+    head,
+    mergeBase: sha('a'),
+    patchSha256: 'e'.repeat(64),
+    files,
+    totals: {
+      files: 5, textFiles: 4, binaryFiles: 1, additions: 9, deletions: 3,
+      oldBytes: 25, newBytes: 44, netBytes: 19
+    }
+  };
+}
+
 function identity(): PullRequestIdentity {
   return {
     repository: 'acme/widgets', number: 42,
@@ -140,6 +162,32 @@ test('summary body requires one placeholder and core renders the canonical repor
     const bypass = replaceCanonicalReportPlaceholder(`\n${CANONICAL_REPORT_PLACEHOLDER}\n${CANONICAL_REPORT_HEADING}`, built.value);
     assert.equal(bypass.ok, false);
   }
+});
+
+test('canonical report renders high-level change categories and a Chinese precheck summary', () => {
+  const digest = 'd'.repeat(64);
+  const value = categorizedMechanical();
+  const built = buildPrChangeReport(identity(), digest, value, candidate(digest));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /\| 运行时代码 \| 1 \| 1 \/ 0 \| \+4\/-1 \| \+3 \|/);
+  assert.match(rendered, /\| 模板与生成内容 \| 1 \| 1 \/ 0 \| \+3\/-0 \| \+20 \|/);
+  assert.match(rendered, /\| \*\*合计\*\* \| 5 \| 4 \/ 1 \| \+9\/-3 \| \+19 \|/);
+  assert.equal(rendered.split('#### 适宜性预检\n')[1], '- 结论：**通过**（6/6 项通过）；继续监控 PR；正式审查：否。\n- 高层分析：各项适宜性检查均通过，当前变更可继续进入后续流程。 详细证据保留在结构化报告中。');
+});
+
+test('canonical report summarizes a precheck review route in Chinese', () => {
+  const digest = 'd'.repeat(64);
+  const precheck = candidate(digest);
+  precheck.checks[0] = { ...precheck.checks[0]!, verdict: 'needs-review' };
+  const built = buildPrChangeReport(identity(), digest, mechanical(), precheck);
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.equal(rendered.split('#### 适宜性预检\n')[1], '- 结论：**需复核**（5 项通过，1 项需复核）；转入代码审查；正式审查：否。\n- 高层分析：部分适宜性检查需要复核，当前变更应先进入正式代码审查。 详细证据保留在结构化报告中。');
 });
 
 test('atomic report writes are readable and reject symlink consumption', (t) => {

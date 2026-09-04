@@ -124,22 +124,6 @@ function isSafeRenderedText(value: unknown): value is string {
   return isNonEmptyString(value) && !containsControlMarker(value);
 }
 
-function escapeMarkdownText(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\r\n?/g, '\n')
-    .replace(/\n/g, ' ');
-}
-
-function renderCodeSpan(value: string): string {
-  const safe = escapeMarkdownText(value);
-  const longestRun = Math.max(0, ...(safe.match(/`+/g) || []).map((run) => run.length));
-  const delimiter = '`'.repeat(longestRun + 1);
-  return `${delimiter} ${safe} ${delimiter}`;
-}
-
 function isIntegerOrNull(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
 }
@@ -434,33 +418,85 @@ function runMechanicalChangeReport(repoRoot: string, baseSha: string, headSha: s
   return validated.value;
 }
 
+const CHANGE_CATEGORIES = [
+  { label: '运行时代码', prefixes: ['bin/', 'lib/', 'src/', 'scripts/'] },
+  { label: '测试与校验', prefixes: ['test/', 'tests/'] },
+  { label: '模板与生成内容', prefixes: ['templates/'] },
+  { label: '技能与协作配置', prefixes: ['.agents/'] },
+  { label: '文档与其他', prefixes: [] }
+] as const;
+
+function emptyChangeTotals(): ChangeTotals {
+  return { files: 0, textFiles: 0, binaryFiles: 0, additions: 0, deletions: 0, oldBytes: 0, newBytes: 0, netBytes: 0 };
+}
+
+function categoryForChangeFile(file: ChangeFile): (typeof CHANGE_CATEGORIES)[number] {
+  const filePath = file.newPath || file.oldPath || '';
+  return CHANGE_CATEGORIES.find((category) => category.prefixes.some((prefix) => filePath.startsWith(prefix))) || CHANGE_CATEGORIES[CHANGE_CATEGORIES.length - 1]!;
+}
+
+function summarizeChangeCategories(files: ChangeFile[]): Array<{ label: string; totals: ChangeTotals }> {
+  const summaries = new Map<(typeof CHANGE_CATEGORIES)[number]['label'], ChangeTotals>();
+  for (const file of files) {
+    const category = categoryForChangeFile(file);
+    const totals = summaries.get(category.label) || emptyChangeTotals();
+    totals.files += 1;
+    totals.oldBytes += file.oldBytes;
+    totals.newBytes += file.newBytes;
+    totals.netBytes += file.netBytes;
+    if (file.additions === null) totals.binaryFiles += 1;
+    else {
+      totals.textFiles += 1;
+      totals.additions += file.additions;
+      totals.deletions += file.deletions!;
+    }
+    summaries.set(category.label, totals);
+  }
+  const result: Array<{ label: string; totals: ChangeTotals }> = [];
+  for (const category of CHANGE_CATEGORIES) {
+    const totals = summaries.get(category.label);
+    if (totals) result.push({ label: category.label, totals });
+  }
+  return result;
+}
+
+function signedNumber(value: number): string {
+  return `${value >= 0 ? '+' : ''}${value}`;
+}
+
+function renderLineDelta(totals: ChangeTotals): string {
+  return totals.textFiles === 0 ? '—' : `+${totals.additions}/-${totals.deletions}`;
+}
+
 function renderCanonicalChangeReport(report: PrChangeReport): string {
   const totals = report.diff.totals;
-  const rows = report.diff.files.map((file) => {
-    const filePath = file.newPath || file.oldPath || '(unknown)';
-    const lines = file.additions === null || file.deletions === null ? 'binary' : `+${file.additions}/-${file.deletions}`;
-    return `| ${renderCodeSpan(filePath)} | ${renderCodeSpan(file.status)} | ${lines} | ${file.netBytes >= 0 ? '+' : ''}${file.netBytes} |`;
-  });
-  const checks = report.precheck.checks.map((check) => {
-    const evidence = check.evidence.map((item) => {
-      const location = item.startLine === null ? renderCodeSpan(item.path) : renderCodeSpan(`${item.path}:${item.startLine}${item.endLine && item.endLine !== item.startLine ? `-${item.endLine}` : ''}`);
-      return `${location} — ${renderCodeSpan(item.detail)}`;
-    }).join('; ');
-    return `- **${check.id}**: ${check.verdict} — ${renderCodeSpan(check.rationale)}（${evidence}）`;
-  });
+  const categories = summarizeChangeCategories(report.diff.files);
+  const rows = categories.map(({ label, totals: categoryTotals }) =>
+    `| ${label} | ${categoryTotals.files} | ${categoryTotals.textFiles} / ${categoryTotals.binaryFiles} | ${renderLineDelta(categoryTotals)} | ${signedNumber(categoryTotals.netBytes)} |`);
+  const passedChecks = report.precheck.checks.filter((check) => check.verdict === 'pass').length;
+  const needsReviewChecks = report.precheck.checks.length - passedChecks;
+  const precheckSummary = report.precheck.verdict === 'clear'
+    ? `**通过**（${passedChecks}/${report.precheck.checks.length} 项通过）`
+    : `**需复核**（${passedChecks} 项通过，${needsReviewChecks} 项需复核）`;
+  const route = report.precheck.route === 'watch-pr' ? '继续监控 PR' : '转入代码审查';
+  const analysis = report.precheck.verdict === 'clear'
+    ? '各项适宜性检查均通过，当前变更可继续进入后续流程。'
+    : '部分适宜性检查需要复核，当前变更应先进入正式代码审查。';
   return [
     CANONICAL_REPORT_HEADING,
     '',
-    '| 文件 | 状态 | 行变更 | 净字节 |',
-    '| --- | --- | --- | ---: |',
+    '| 变更类别 | 文件数 | 文本 / 二进制 | 行增减 | 净字节 |',
+    '| --- | ---: | ---: | ---: | ---: |',
     ...rows,
-    `| **合计** | ${totals.files} 个文件（文本 ${totals.textFiles} / 二进制 ${totals.binaryFiles}） | +${totals.additions}/-${totals.deletions} | ${totals.netBytes >= 0 ? '+' : ''}${totals.netBytes} |`,
+    `| **合计** | ${totals.files} | ${totals.textFiles} / ${totals.binaryFiles} | ${renderLineDelta(totals)} | ${signedNumber(totals.netBytes)} |`,
     '',
-    `- 旧字节：${totals.oldBytes}；新字节：${totals.newBytes}；patch：\`${report.diff.patchSha256}\`。`,
-    `- 预检结论：**${report.precheck.verdict}**；路由：\`${report.precheck.route}\`；正式 Review：否。`,
+    `- 总体统计：新增 ${totals.additions} 行、删除 ${totals.deletions} 行；旧字节 ${totals.oldBytes}，新字节 ${totals.newBytes}。`,
+    `- 变更明细按高层类别聚合展示；完整逐文件事实保留在结构化报告中供审计。`,
+    `- 补丁摘要：\`${report.diff.patchSha256}\`。`,
     '',
     '#### 适宜性预检',
-    ...checks
+    `- 结论：${precheckSummary}；${route}；正式审查：否。`,
+    `- 高层分析：${analysis} 详细证据保留在结构化报告中。`
   ].join('\n');
 }
 
