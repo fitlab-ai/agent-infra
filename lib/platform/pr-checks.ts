@@ -34,7 +34,7 @@ type ChecksResult = PlatformResult & {
   logs?: { runId: number; jobId?: number; text: string };
 };
 type GitHubClient = PlatformClient;
-type InspectionOptions = { cwd?: string; client?: PlatformClient };
+type InspectionOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
 type SharedOptions = { cwd?: string; client?: PlatformClient };
 
 function classifyRequiredChecks(required: CheckSnapshot[]): ChecksSnapshot {
@@ -124,8 +124,8 @@ async function resolvedTask(taskRef: string, options: InspectionOptions) {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ok: false as const, output: checksResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }) };
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
-  const fact = readPrDeliveryFact(frontmatter);
-  if (fact.status === 'invalid') return { ok: false as const, output: checksResult('failed', { error: { code: 'PR_DELIVERY_FACT_INVALID', message: fact.error.message, retryable: false } }) };
+  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
+  if (fact.status === 'invalid') return { ok: false as const, output: checksResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }) };
   const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
   const prNumber = resourceIdentityNumber(prIdentity);
   if (!prIdentity) return { ok: false as const, output: checksResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }) };

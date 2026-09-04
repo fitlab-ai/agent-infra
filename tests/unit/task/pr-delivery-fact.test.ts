@@ -77,6 +77,7 @@ test('legacy v1 delivery facts decode to the current v2 shape before the stable 
 test('legacy v1 delivery facts fail with an actionable error at the stable cutoff', () => {
   assert.equal(isLegacyCompatibilityEnabled(`v${LEGACY_COMPATIBILITY_CUTOFF_VERSION}`), false);
   assert.equal(isLegacyCompatibilityEnabled('v1.0.1'), false);
+  const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
   assert.throws(
     () => decodePrDeliveryFact({ version: 1, state: 'unbound', reason: 'initial' }, `v${LEGACY_COMPATIBILITY_CUTOFF_VERSION}`),
     (error: unknown) => error instanceof Error
@@ -84,6 +85,15 @@ test('legacy v1 delivery facts fail with an actionable error at the stable cutof
       && error.code === 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED'
       && error.message.includes('current schema')
   );
+  assert.throws(
+    () => decodePrDeliveryFact(legacy, `v${LEGACY_COMPATIBILITY_CUTOFF_VERSION}`),
+    (error: unknown) => error instanceof Error
+      && 'code' in error
+      && error.code === 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED'
+  );
+  const read = readPrDeliveryFact({ pr_delivery_fact: legacy }, `v${LEGACY_COMPATIBILITY_CUTOFF_VERSION}`);
+  assert.equal(read.status, 'invalid');
+  if (read.status === 'invalid') assert.equal(read.error.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
 });
 
 test('PR delivery fact rejects state-specific omissions and call-level fields', () => {

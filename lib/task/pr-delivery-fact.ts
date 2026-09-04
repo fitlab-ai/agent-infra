@@ -64,13 +64,18 @@ type CreationOutcome =
   | { kind: 'no-op'; createdByCurrentOperation: false }
   | { kind: 'unknown'; errorCode: 'PR_CREATE_OUTCOME_UNKNOWN' };
 
+type PrDeliveryFactError = Error & { code: string };
 type PrDeliveryFactReadResult =
   | { status: 'valid'; fact: PrDeliveryFact }
   | { status: 'missing'; fact: null }
-  | { status: 'invalid'; fact: null; error: Error };
+  | { status: 'invalid'; fact: null; error: PrDeliveryFactError };
 
 function factError(message: string): Error & { code: string } {
   return Object.assign(new Error(`PR_DELIVERY_FACT_INVALID: ${message}`), { code: 'PR_DELIVERY_FACT_INVALID' });
+}
+function asFactError(error: unknown): PrDeliveryFactError {
+  if (error instanceof Error && typeof (error as { code?: unknown }).code === 'string') return error as PrDeliveryFactError;
+  return factError(error instanceof Error ? error.message : String(error));
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 function exactKeys(value: Record<string, unknown>, keys: readonly string[], label: string): void {
@@ -192,8 +197,10 @@ function parseFact(value: unknown, runtimeVersion = VERSION): PrDeliveryFact {
 
 function decodePrDeliveryFact(value: unknown, runtimeVersion = VERSION): PrDeliveryFact {
   if (typeof value === 'string') {
-    try { return parseFact(JSON.parse(value), runtimeVersion); }
-    catch (error) { throw error instanceof Error && error.message.startsWith('PR_DELIVERY_FACT_INVALID:') ? error : factError('value is not valid JSON'); }
+    let decoded: unknown;
+    try { decoded = JSON.parse(value); }
+    catch { throw factError('value is not valid JSON'); }
+    return parseFact(decoded, runtimeVersion);
   }
   return parseFact(value, runtimeVersion);
 }
@@ -201,7 +208,7 @@ function encodePrDeliveryFact(fact: PrDeliveryFact): string { return JSON.string
 function readPrDeliveryFact(metadata: Record<string, unknown>, runtimeVersion = VERSION): PrDeliveryFactReadResult {
   if (!Object.hasOwn(metadata, PR_DELIVERY_FACT_KEY) || metadata[PR_DELIVERY_FACT_KEY] === '') return { status: 'missing', fact: null };
   try { return { status: 'valid', fact: decodePrDeliveryFact(metadata[PR_DELIVERY_FACT_KEY], runtimeVersion) }; }
-  catch (error) { return { status: 'invalid', fact: null, error: error instanceof Error ? error : factError(String(error)) }; }
+  catch (error) { return { status: 'invalid', fact: null, error: asFactError(error) }; }
 }
 function buildUnboundFact(): PrDeliveryFact { return { version: 2, state: 'unbound', reason: 'initial' }; }
 function buildSkippedFact(decidedAt: string): PrDeliveryFact { return parseFact({ version: 2, state: 'skipped', reason: 'explicit', decidedAt }); }
@@ -227,4 +234,4 @@ function identityFromPullRequest(pullRequest: PrDeliveryIdentityInput): PrDelive
 }
 
 export { PR_DELIVERY_FACT_KEY, buildBoundFact, buildSkippedFact, buildUnboundFact, decodePrDeliveryFact, encodePrDeliveryFact, factFrontmatterMutation, identityFromPullRequest, readPrDeliveryFact, serializeResourceIdentity };
-export type { CreationOutcome, PrDeliveryBindingSource, PrDeliveryFact, PrDeliveryFactReadResult, PrDeliveryIdentity, PrDeliveryIdentityInput, PrDeliveryProvenance };
+export type { CreationOutcome, PrDeliveryBindingSource, PrDeliveryFact, PrDeliveryFactError, PrDeliveryFactReadResult, PrDeliveryIdentity, PrDeliveryIdentityInput, PrDeliveryProvenance };

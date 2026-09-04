@@ -24,6 +24,7 @@ type PullRequestSummaryResult = PlatformResult & {
   warnings: readonly OperationWarning[];
 };
 type PullRequestPrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
+type SummaryOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
 
 function warningResultForPrimary(primaryResult: PullRequestPrimaryResult): NonNullable<PullRequestSummaryResult['result']> {
   if (primaryResult === 'pr_created') return 'pr_created_with_warnings';
@@ -65,16 +66,16 @@ function canonicalArtifacts(taskDir: string) {
   return [...byFamily.values()].map(({ family, name, path }) => ({ family, name, path }));
 }
 
-function summaryContext(taskRef: string, options: { cwd?: string; client?: PlatformClient } = {}): SummaryContextResult {
+function summaryContext(taskRef: string, options: SummaryOptions = {}): SummaryContextResult {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ...platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }), task: { id: resolved.taskId, prNumber: null }, artifacts: [] };
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
-  const fact = readPrDeliveryFact(frontmatter);
+  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
   const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? resourceIdentityNumber(fact.fact.identity.resource) : null;
   return { ...platformResult('no-op'), task: { id: resolved.taskId, prNumber }, artifacts: canonicalArtifacts(resolved.taskDir) };
 }
 
-async function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult }): Promise<PullRequestSummaryResult> {
+async function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string }): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
   const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
@@ -107,8 +108,8 @@ async function syncPullRequestSummary(taskRef: string, options: { agent: string;
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return softenFailure(platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }));
   const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
-  const fact = readPrDeliveryFact(frontmatter);
-  if (fact.status === 'invalid') return softenFailure(platformResult('failed', { error: { code: 'PR_DELIVERY_FACT_INVALID', message: fact.error.message, retryable: false } }));
+  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
+  if (fact.status === 'invalid') return softenFailure(platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }));
   const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
   const prNumber = resourceIdentityNumber(prIdentity);
   if (!prIdentity) return softenFailure(platformResult('failed', { error: { code: fact.status === 'missing' ? 'PR_DELIVERY_FACT_MISSING' : 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }));

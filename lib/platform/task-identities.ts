@@ -29,4 +29,12 @@ function taskIssueIdentity(
   return Number.isSafeInteger(number) && number > 0 ? { kind: 'number', value: number } : null;
 }
 
-export { taskIssueIdentity };
+function taskIssueIdentityError(error: unknown): { code: string; message: string } {
+  const value = error && typeof error === 'object' ? error as { code?: unknown } : {};
+  return {
+    code: typeof value.code === 'string' ? value.code : 'PLATFORM_IDENTITY_INVALID',
+    message: error instanceof Error ? error.message : String(error)
+  };
+}
+
+export { taskIssueIdentity, taskIssueIdentityError };

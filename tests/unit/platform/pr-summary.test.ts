@@ -90,6 +90,26 @@ test('PR summary warning result preserves the primary lifecycle outcome', () => 
   assert.equal(warningResultForPrimary('no_op'), 'no_op_with_warnings');
 });
 
+test('PR summary preserves the structured legacy cutoff error from a persisted fact', async () => {
+  const fixture = summaryFixture();
+  try {
+    const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
+    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(legacy)}`));
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: 'Summary',
+      primaryResult: 'pr_created',
+      runtimeVersion: 'v1.0.0'
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('PR summary reconciliation creates, updates, converges and rejects duplicate markers', () => {
   const desired = buildPullRequestSummary('TASK-1', 'Summary', 'abc');
   assert.deepEqual(reconcileSummaryComment([], 'TASK-1', desired), { action: 'create', commentId: null });

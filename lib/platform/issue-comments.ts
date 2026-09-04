@@ -15,7 +15,7 @@ import {
   unsupportedProviderOperation
 } from './provider-bridge.ts';
 import { resourceIdentityNumber } from './resource-identity.ts';
-import { taskIssueIdentity } from './task-identities.ts';
+import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 
 type RemoteComment = { id: number | string; body: string; user?: { login?: string } };
 type RenderedChunk = { marker: string; body: string; content: string; part: number; total: number };
@@ -28,6 +28,7 @@ type SyncOptions = {
   cwd?: string;
   backfill?: boolean;
   client?: PlatformClient;
+  runtimeVersion?: string;
 };
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
@@ -325,7 +326,9 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     });
   }
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent));
+  let issueIdentityFromTask: ReturnType<typeof taskIssueIdentity>;
+  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent), undefined, options.runtimeVersion); }
+  catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
   if (!issueIdentityFromTask) {
     return platformResult('no-op', {
       error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false }
@@ -482,11 +485,13 @@ async function listPlatformComments(issue: string | number, cwd = process.cwd(),
   return { ...platformResult('no-op', { ...contextFields(context), resource: { kind: 'issue', number: resourceIdentityNumber(identity), identity }, error: null }), comments: listed.value };
 }
 
-async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: string; client?: PlatformClient } = {}): Promise<PlatformResult> {
+async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: string; client?: PlatformClient; runtimeVersion?: string } = {}): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } });
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const issueIdentity = taskIssueIdentity(parseTaskFrontmatter(content));
+  let issueIdentity: ReturnType<typeof taskIssueIdentity>;
+  try { issueIdentity = taskIssueIdentity(parseTaskFrontmatter(content), undefined, options.runtimeVersion); }
+  catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
   if (!issueIdentity) return platformResult('no-op', { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false } });
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;

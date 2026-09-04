@@ -81,6 +81,18 @@ test('issue inspection normalizes stable remote identity and metadata', async ()
   assert.equal(result.issue?.nodeId, 'I_7');
 });
 
+test('issue inspection returns a structured legacy cutoff error for numeric identities', async () => {
+  const root = fixture('42');
+  try {
+    const result = await inspectPlatformIssue('TASK-20260101-000001', { cwd: root, runtimeVersion: 'v1.0.0' });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    assert.match(result.error?.message || '', /current schema/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('issue create binds exactly once and replay inspects the existing binding', async () => {
   const root = fixture();
   let posts = 0;

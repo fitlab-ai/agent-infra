@@ -36,7 +36,7 @@ import {
   unsupportedProviderOperation
 } from './provider-bridge.ts';
 import { resourceIdentityEquals, resourceIdentityNumber, resourceIdentityString, serializeResourceIdentity } from './resource-identity.ts';
-import { taskIssueIdentity } from './task-identities.ts';
+import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 
 type GitHubClient = PlatformClient;
@@ -62,7 +62,7 @@ type IssueResult = PlatformResult & {
   task: { id: string | null; issueNumber: number | null };
   issue: IssueSnapshot | null;
 };
-type SharedOptions = { cwd?: string; client?: PlatformClient };
+type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
 type CreateOptions = SharedOptions & { agent: string; dryRun?: boolean };
 type BindOptions = SharedOptions & { issue: string | number; agent: string; dryRun?: boolean };
 type SyncOptions = SharedOptions & {
@@ -128,7 +128,11 @@ async function resolvedContext(taskRef: string, options: SharedOptions) {
   }) };
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const frontmatter = parseTaskFrontmatter(content);
-  const issueIdentity = taskIssueIdentity(frontmatter);
+  let issueIdentity: ResourceIdentity | null;
+  try { issueIdentity = taskIssueIdentity(frontmatter, undefined, options.runtimeVersion); }
+  catch (error) {
+    return { ok: false as const, output: result('failed', resolved.taskId, null, { error: { ...taskIssueIdentityError(error), retryable: false } }) };
+  }
   const issueNumber = resourceIdentityNumber(issueIdentity);
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;

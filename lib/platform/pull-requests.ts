@@ -45,7 +45,7 @@ import {
 } from './provider-bridge.ts';
 import { isResourceIdentity, resourceIdentityEquals, resourceIdentityNumber } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
-import { taskIssueIdentity } from './task-identities.ts';
+import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 import type { ChangeRequestSnapshot as ProviderChangeRequestSnapshot } from './provider-contract.ts';
 
 type PullRequestSnapshot = PlatformChangeRequestSnapshot;
@@ -67,8 +67,8 @@ type PullRequestResult = PlatformResult & {
   }>;
 };
 type GitHubClient = PlatformClient;
-type InspectionOptions = { cwd?: string; client?: PlatformClient };
-type SharedOptions = { cwd?: string; client?: PlatformClient };
+type InspectionOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
+type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
 type CreateOptions = SharedOptions & {
   agent: string;
   base: string;
@@ -83,7 +83,7 @@ type BindOptions = SharedOptions & { agent: string; pr: string | number; dryRun?
 type PullRequestPrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
 type SyncOptions = SharedOptions & { agent: string; metadata?: boolean; closingIssue?: boolean; dryRun?: boolean; primaryResult: PullRequestPrimaryResult };
 type ResolveExternalOptions = SharedOptions & { agent: string; pr?: string | number; dryRun?: boolean };
-type SkipFactOptions = { cwd?: string; agent: string; dryRun?: boolean };
+type SkipFactOptions = { cwd?: string; agent: string; dryRun?: boolean; runtimeVersion?: string };
 type ExternalPullRequestSelection =
   | { status: 'normal'; candidates: PullRequestSnapshot[]; eligible: [] }
   | { status: 'selected'; source: 'unique' | 'explicit'; selected: PullRequestSnapshot; candidates: PullRequestSnapshot[]; eligible: PullRequestSnapshot[] }
@@ -519,12 +519,14 @@ async function resolvedContext(taskRef: string, options: InspectionOptions) {
   }) };
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const frontmatter = parseTypedTaskFrontmatter(content);
-  const factRead = readPrDeliveryFact(frontmatter);
+  const factRead = readPrDeliveryFact(frontmatter, options.runtimeVersion);
   if (factRead.status === 'invalid') return { ok: false as const, output: result('failed', resolved.taskId, null, null, {
-    error: { code: 'PR_DELIVERY_FACT_INVALID', message: factRead.error.message, retryable: false }
+    error: { code: factRead.error.code, message: factRead.error.message, retryable: false }
   }) };
   const fact = factRead.status === 'valid' ? factRead.fact : null;
-  const issueIdentity = taskIssueIdentity(frontmatter);
+  let issueIdentity: ResourceIdentity | null;
+  try { issueIdentity = taskIssueIdentity(frontmatter, undefined, options.runtimeVersion); }
+  catch (error) { return { ok: false as const, output: result('failed', resolved.taskId, null, null, { error: { ...taskIssueIdentityError(error), retryable: false } }) }; }
   const issueNumber = resourceIdentityNumber(issueIdentity);
   const prIdentity = fact?.state === 'bound' ? fact.identity.resource : null;
   const prNumber = resourceIdentityNumber(prIdentity);
@@ -1632,11 +1634,13 @@ function skipPlatformPullRequestFactUnlocked(
       error: { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
     });
   }
-  const issueIdentity = taskIssueIdentity(frontmatter);
+  let issueIdentity: ResourceIdentity | null;
+  try { issueIdentity = taskIssueIdentity(frontmatter, undefined, options.runtimeVersion); }
+  catch (error) { return result('failed', resolved.taskId, null, null, { error: { ...taskIssueIdentityError(error), retryable: false } }); }
   const issueNumber = resourceIdentityNumber(issueIdentity);
-  const existing = readPrDeliveryFact(frontmatter);
+  const existing = readPrDeliveryFact(frontmatter, options.runtimeVersion);
   if (existing.status === 'invalid') return result('failed', resolved.taskId, issueNumber, null, {
-    error: { code: 'PR_DELIVERY_FACT_INVALID', message: existing.error.message, retryable: false }
+    error: { code: existing.error.code, message: existing.error.message, retryable: false }
   });
   if (existing.status === 'missing') return result('failed', resolved.taskId, issueNumber, null, {
     error: { code: 'PR_DELIVERY_FACT_MISSING', message: 'Task has no pr_delivery_fact; repair the task metadata or create a new task', retryable: false }
