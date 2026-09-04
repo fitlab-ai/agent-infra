@@ -6,6 +6,7 @@ import { assertGitWorktreeBinding } from '../../git/worktree-identity.ts';
 import {
   controlError,
   DEFAULT_SANDBOX_CONTROL_TIMING,
+  SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
   type SandboxControlManifest,
   type SandboxControlRequest,
   type SandboxControlResponse,
@@ -14,11 +15,14 @@ import {
 import { prepareSandboxControlExecution, type PreparedSandboxControlExecution, type SandboxControlExecutionResult } from './executor.ts';
 import {
   appendSandboxControlAudit,
-  atomicWriteJson,
+  atomicWriteJsonNoReplace,
   cleanupStaleSandboxControlLease,
   executionPath,
+  readJsonFile,
   readActiveLease,
   readExecution,
+  readSandboxControlResultEvidence,
+  writeSandboxControlResultEvidence,
   terminateSandboxControlExecution,
   writeSandboxControlStatus
 } from './state.ts';
@@ -37,6 +41,7 @@ type ActiveExecution = {
   request: SandboxControlRequest;
   prepared: PreparedSandboxControlExecution;
   result: SandboxControlExecutionResult | null;
+  resultEvidenceWritten: boolean;
   failure: unknown;
   settled: boolean;
 };
@@ -53,8 +58,47 @@ function responsePath(manifest: SandboxControlManifest, id: string): string {
   return path.join(manifest.channelDir, 'responses', `${id}.json`);
 }
 
+function acceptedResponsePath(manifest: SandboxControlManifest, id: string): string {
+  return path.join(manifest.channelDir, 'responses', `${id}.accepted.json`);
+}
+
 function writeResponse(manifest: SandboxControlManifest, response: SandboxControlResponse): void {
-  atomicWriteJson(responsePath(manifest, response.id), response);
+  const filePath = responsePath(manifest, response.id);
+  const terminal = Buffer.byteLength(JSON.stringify(response), 'utf8') <= SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES
+    ? response
+    : {
+      ...response,
+      stdout: '',
+      stderr: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: terminal output exceeded the compact record limit\n',
+      error: {
+        code: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE',
+        message: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: terminal output exceeded the compact record limit',
+        retryable: false
+      }
+    } satisfies SandboxControlResponse;
+  try {
+    atomicWriteJsonNoReplace(filePath, terminal);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'SANDBOX_CONTROL_TERMINAL_ALREADY_EXISTS') throw error;
+    return;
+  }
+  let persisted: unknown;
+  try {
+    persisted = readJsonFile(filePath);
+  } catch {
+    throw new Error('SANDBOX_CONTROL_TERMINAL_READBACK_FAILED');
+  }
+  if (JSON.stringify(persisted) !== JSON.stringify(terminal)) {
+    throw new Error('SANDBOX_CONTROL_TERMINAL_READBACK_FAILED');
+  }
+}
+
+function writeAcceptedResponse(manifest: SandboxControlManifest, response: SandboxControlResponse): void {
+  atomicWriteJsonNoReplace(acceptedResponsePath(manifest, response.id), response);
+}
+
+function removeAcceptedResponse(manifest: SandboxControlManifest, id: string): void {
+  fs.rmSync(acceptedResponsePath(manifest, id), { force: true });
 }
 
 function rejected(id: string, error: unknown): SandboxControlResponse {
@@ -119,6 +163,25 @@ function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => b
     const existingResponse = responsePath(manifest, entry.name);
     if (fs.existsSync(descriptor)) {
       const execution = readExecution(descriptor);
+      let resultEvidence: ReturnType<typeof readSandboxControlResultEvidence> | null = null;
+      let isFinalization = false;
+      try {
+        const request = JSON.parse(fs.readFileSync(path.join(manifest.processingDir, entry.name, 'request.json'), 'utf8')) as { family?: unknown };
+        isFinalization = request.family === 'task-finalization';
+      } catch {
+        // Missing or malformed request evidence remains fail-closed below.
+      }
+      const resultPath = path.join(manifest.processingDir, entry.name, 'result.json');
+      if (fs.existsSync(resultPath)) {
+        try {
+          resultEvidence = readSandboxControlResultEvidence(resultPath);
+          if (resultEvidence.id !== entry.name || resultEvidence.generation !== manifest.generation) {
+            resultEvidence = null;
+          }
+        } catch {
+          resultEvidence = null;
+        }
+      }
       if (!terminateSandboxControlExecution(execution)) {
         throw new Error(`SANDBOX_CONTROL_EXECUTION_STILL_RUNNING: ${entry.name}`);
       }
@@ -130,19 +193,33 @@ function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => b
           const response = JSON.parse(fs.readFileSync(existingResponse, 'utf8')) as SandboxControlResponse;
           terminal = response.version === 2 && response.id === entry.name
             && (response.phase === 'completed' || response.phase === 'rejected');
+          if (!terminal) throw new Error('SANDBOX_CONTROL_RESPONSE_LAYOUT_INVALID');
         } catch {
-          terminal = false;
+          throw new Error('SANDBOX_CONTROL_RESPONSE_LAYOUT_INVALID');
         }
       }
       if (!terminal) {
         if (!brokerOwns()) return false;
-        writeResponse(manifest, unknown(entry.name));
+        if (resultEvidence && !isFinalization) {
+          writeResponse(manifest, {
+            version: 2,
+            id: entry.name,
+            phase: 'completed',
+            exitCode: resultEvidence.exitCode,
+            stdout: '',
+            stderr: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
+            error: null
+          });
+        } else {
+          writeResponse(manifest, unknown(entry.name));
+        }
       }
     } else {
       if (!brokerOwns()) return false;
       writeResponse(manifest, notExecuted(entry.name));
     }
     if (!brokerOwns()) return false;
+    removeAcceptedResponse(manifest, entry.name);
     fs.rmSync(path.join(manifest.processingDir, entry.name), { recursive: true, force: true });
   }
   return true;
@@ -237,6 +314,16 @@ export async function serveSandboxControl(
         break;
       }
       if (current.token !== manifest.token || current.generation !== manifest.generation) break;
+      if (active?.result && !active.resultEvidenceWritten) {
+        try {
+          writeSandboxControlResultEvidence(manifest, active.request.id, active.result);
+          active.resultEvidenceWritten = true;
+          active.failure = null;
+          active.settled = true;
+        } catch (error) {
+          active.failure = error;
+        }
+      }
       const heartbeatNow = Date.now();
       if (heartbeatNow >= nextContainerHeartbeatAt) {
         let observation: ContainerObservation;
@@ -319,7 +406,7 @@ export async function serveSandboxControl(
       }
       if (settledExecution) {
         if (!brokerOwns()) break;
-        if (settledExecution.result) {
+        if (settledExecution.result && settledExecution.resultEvidenceWritten) {
           writeResponse(manifest, {
             version: 2, id: settledExecution.request.id, phase: 'completed', exitCode: settledExecution.result.exitCode,
             stdout: settledExecution.result.stdout, stderr: settledExecution.result.stderr, error: null
@@ -328,6 +415,7 @@ export async function serveSandboxControl(
           writeResponse(manifest, unknown(settledExecution.request.id));
         }
         if (!brokerOwns()) break;
+        removeAcceptedResponse(manifest, settledExecution.request.id);
         fs.rmSync(path.join(manifest.processingDir, settledExecution.request.id), { recursive: true, force: true });
       }
 
@@ -360,10 +448,21 @@ export async function serveSandboxControl(
           const prepared = await prepareSandboxControlExecution({
             manifest, manifestPath, request, requestPath: claimed, internalCliPath: process.argv[1]!
           });
-          const execution: ActiveExecution = { request, prepared, result: null, failure: null, settled: false };
+          const execution: ActiveExecution = {
+            request, prepared, result: null, resultEvidenceWritten: false, failure: null, settled: false
+          };
           active = execution;
           prepared.completion.then(
-            (result) => { execution.result = result; execution.settled = true; },
+            (result) => {
+              execution.result = result;
+              try {
+                writeSandboxControlResultEvidence(manifest, request.id, result);
+                execution.resultEvidenceWritten = true;
+                execution.settled = true;
+              } catch (error) {
+                execution.failure = error;
+              }
+            },
             (error) => { execution.failure = error; execution.settled = true; }
           );
           if (!brokerOwns()) {
@@ -378,7 +477,7 @@ export async function serveSandboxControl(
             retiring = true;
             continue;
           }
-          writeResponse(manifest, {
+          writeAcceptedResponse(manifest, {
             version: 2, id, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
           });
           if (!brokerOwns()) {
@@ -403,6 +502,7 @@ export async function serveSandboxControl(
               retiring = true;
               break;
             }
+            removeAcceptedResponse(manifest, id);
             fs.rmSync(path.join(manifest.processingDir, id), { recursive: true, force: true });
             active = null;
             claimed = null;

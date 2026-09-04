@@ -210,6 +210,155 @@ On first `ai sandbox create`, agent-infra writes a bilingual `README.md` into
 directory to help you discover these channels. The READMEs are idempotent and
 can be safely deleted; the scaffold only writes them when missing.
 
+## Broker–sandbox control protocol
+
+The host broker and the sandbox client communicate through a bind-mounted control
+root containing JSON files. This is a file protocol, not HTTP, TCP, or a Unix
+socket. The broker is the only process allowed to execute host-side task
+operations; the executor child receives a one-shot IPC gate and does not get
+control-root authority from the sandbox.
+
+### Transport topology
+
+The relevant records are laid out as follows (the exact root is recorded in the
+manifest and is not necessarily the same host path as the container path):
+
+```text
+control-root/
+├── manifest.json
+├── broker.json
+├── channel/
+│   ├── requests/<request-id>.json
+│   └── responses/
+│       ├── <request-id>.accepted.json
+│       └── <request-id>.json
+├── processing/<request-id>/
+│   ├── request.json
+│   ├── execution.json
+│   └── result.json
+├── consumed/<request-id>
+├── public/status.json
+└── audit.ndjson
+```
+
+The client first checks the generation and broker heartbeat in `status.json`.
+It then writes a request to a private temporary file and renames it to
+`requests/<request-id>.json`. A request contains the protocol version, request
+identity, sandbox token, generation, absolute admission deadline, control
+family, and family-specific arguments. The broker claims it by renaming it into
+`processing/<request-id>/request.json`, creates the consumed marker, validates
+the manifest binding and deadline, and records the child identity in
+`execution.json`.
+
+Acceptance is an independent durable marker in
+`responses/<request-id>.accepted.json`. It means that the request was admitted;
+it is not the command result. The terminal response is published once at
+`responses/<request-id>.json` and is never replaced. Clients may read that
+terminal response more than once, including after a client or broker restart;
+reusing a request ID is still a replay and must not execute the operation again.
+
+### Result evidence and completion order
+
+After the executor child closes, the broker parent redacts the manifest token
+from stdout and stderr, then calculates their UTF-8 byte counts and SHA-256
+digests. It writes and strictly reads back a
+small `processing/<request-id>/result.json` before marking the in-memory
+execution settled:
+
+```json
+{
+  "version": 1,
+  "id": "<request-id>",
+  "generation": "<generation>",
+  "exitCode": 0,
+  "stdoutBytes": 128,
+  "stderrBytes": 0,
+  "stdoutSha256": "<64 lowercase hex characters>",
+  "stderrSha256": "<64 lowercase hex characters>",
+  "captureState": "metadata-only"
+}
+```
+
+This record is transport evidence, not a task receipt and not a replacement for
+the terminal response. It deliberately contains no token, executor nonce, gate
+owner, PID, environment, host path, or raw output. `metadata-only` means that a
+restart can prove the child exit and its output metadata, but cannot recreate
+the complete output from this record alone.
+
+The commit order is:
+
+```text
+child close
+  → result.json atomic publish + read-back
+  → terminal response publish + read-back
+  → remove processing evidence
+```
+
+If the broker restarts after a valid result record but before terminal cleanup,
+generic process-control families can converge to a terminal response with
+output unavailable. Task finalization is stricter: a successful exit code is
+not proof of task completion; the canonical host finalization receipt remains
+the business authority. If result evidence is absent or malformed, the broker
+keeps the request uncertain/unknown and does not create a new ID or replay a
+mutation.
+
+The authority and lifetime of each record are intentionally different:
+
+| Record | Writer | Lifetime | Authority |
+| --- | --- | --- | --- |
+| `request.json` | client, then broker by claim rename | until claim cleanup | input only |
+| `execution.json` | broker | while the child is prepared/running | process identity/recovery hint |
+| `result.json` | broker parent | until terminal commit | process-outcome evidence |
+| terminal response | broker | generation retention | transport commit point |
+| finalization receipt | host finalization | task lifecycle | business completion authority |
+
+The client never treats `accepted`, `result.json`, or a payload candidate as
+success. It returns only a validated terminal response. This separation is what
+prevents a broker restart from turning an incomplete observation into a second
+host mutation.
+
+Recovery seams are deterministic: a child that has not produced a valid result
+remains unknown; a valid generic result can produce an output-unavailable
+terminal; a finalization result still requires its host receipt; and an already
+published terminal is read-only and preserved.
+
+### Capacity and retention (HD-3/A)
+
+The three profile limits are independent:
+
+- `maxLogicalRecords = 1024`: the maximum number of retained logical control
+  records in one generation.
+- `maxResponseBytes = 64 MiB`: the total persistent response budget, including
+  response/result/payload data and reservations; it is not the size of one
+  ordinary stdout string.
+- `maxTerminalRecordBytes = 1 MiB`: the upper bound for the compact terminal
+  envelope. It is separate from optional output payload storage.
+
+Result evidence is compact and participates in the response budget, but is not
+a fourth public capacity metric. Terminal records are retained for the
+generation. Processing/result evidence is temporary and may be removed only
+after terminal publication and verification. During recovery, temporary files
+are never treated as authoritative records.
+
+In this release, the broker enforces the compact terminal bound and the
+per-execution response bound at the transport edge. Generation-wide reservation
+accounting and payload storage are deliberately not synthesized from these
+constants; adding that layer must preserve the record meanings above.
+
+For maintenance, inspect only the metadata needed to diagnose a request. Do not
+copy request tokens, execution nonces, PIDs, environment values, host paths, or
+raw terminal output into Issues, audit attachments, or general logs. A client
+that times out after acceptance should use the same request ID with the control
+recovery operation; it must not submit a new request for an irreversible
+finalization.
+
+The current protocol uses request version 3 and response version 2. Older
+response layouts are not adapted or dual-written; an invalid or mixed
+generation must fail closed and the sandbox should be recreated from its
+current manifest. The compact result evidence described above is the current
+broker behavior; optional payload records and generation-wide quota accounting
+remain separate concerns and must not be inferred from `result.json`.
+
 ## User-level dotfiles channel
 
 `ai sandbox create` also mounts an optional read-only channel for host user preferences:

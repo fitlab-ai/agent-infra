@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { buildProcessTreeStopCommand } from '../../server/process-control.ts';
 import { getProcessIdentityState } from '../../server/process-state.ts';
 import type { ProcessIdentity, ProcessIdentityProbe } from '../../server/process-state.ts';
@@ -9,7 +9,13 @@ import type {
   SandboxControlExecution,
   SandboxControlLease,
   SandboxControlManifest,
+  SandboxControlResultEvidence,
   SandboxControlStatus
+} from './protocol.ts';
+import {
+  parseSandboxControlResultEvidence,
+  SANDBOX_CONTROL_MAX_RESPONSE_BYTES,
+  SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES
 } from './protocol.ts';
 
 export const SANDBOX_CONTROL_AUDIT_MAX_BYTES = 1024 * 1024;
@@ -31,9 +37,98 @@ export function atomicWriteJson(filePath: string, value: unknown, mode = 0o600, 
   }
 }
 
+export function atomicWriteJsonNoReplace(
+  filePath: string,
+  value: unknown,
+  mode = 0o600,
+  createParent = true
+): void {
+  atomicCreateJson(filePath, value, 'SANDBOX_CONTROL_TERMINAL_ALREADY_EXISTS', mode, createParent);
+}
+
+function atomicCreateJson(
+  filePath: string,
+  value: unknown,
+  duplicateCode: string,
+  mode = 0o600,
+  createParent = true
+): void {
+  if (createParent) fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporary = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(value)}\n`, { mode, flag: 'wx' });
+    try {
+      fs.linkSync(temporary, filePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new Error(duplicateCode);
+      }
+      throw error;
+    }
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
 export function readJsonFile(filePath: string): unknown {
   assertRegularFile(filePath);
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+export function resultEvidencePath(manifest: SandboxControlManifest, requestId: string): string {
+  if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+  return path.join(manifest.processingDir, requestId, 'result.json');
+}
+
+export function readSandboxControlResultEvidence(filePath: string): SandboxControlResultEvidence {
+  assertRegularFile(filePath);
+  const raw = fs.readFileSync(filePath, 'utf8');
+  if (Buffer.byteLength(raw, 'utf8') > SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES) {
+    throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_TOO_LARGE');
+  }
+  try {
+    return parseSandboxControlResultEvidence(JSON.parse(raw));
+  } catch (error) {
+    if (error instanceof Error && error.message === 'SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID') throw error;
+    throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+  }
+}
+
+export function sanitizeSandboxControlOutput(manifest: SandboxControlManifest, output: string): string {
+  return manifest.token.length === 0 ? output : output.split(manifest.token).join('[REDACTED]');
+}
+
+export function writeSandboxControlResultEvidence(
+  manifest: SandboxControlManifest,
+  requestId: string,
+  result: Readonly<{ exitCode: number; stdout: string; stderr: string }>
+): SandboxControlResultEvidence {
+  const stdout = sanitizeSandboxControlOutput(manifest, result.stdout);
+  const stderr = sanitizeSandboxControlOutput(manifest, result.stderr);
+  if (!/^[a-f0-9-]{16,64}$/u.test(requestId)
+    || !Number.isSafeInteger(result.exitCode)
+    || Buffer.byteLength(stdout, 'utf8') + Buffer.byteLength(stderr, 'utf8') > SANDBOX_CONTROL_MAX_RESPONSE_BYTES) {
+    throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+  }
+  const evidence: SandboxControlResultEvidence = {
+    version: 1,
+    id: requestId,
+    generation: manifest.generation,
+    exitCode: result.exitCode,
+    stdoutBytes: Buffer.byteLength(stdout, 'utf8'),
+    stderrBytes: Buffer.byteLength(stderr, 'utf8'),
+    stdoutSha256: createHash('sha256').update(stdout, 'utf8').digest('hex'),
+    stderrSha256: createHash('sha256').update(stderr, 'utf8').digest('hex'),
+    captureState: 'metadata-only'
+  };
+  if (Buffer.byteLength(JSON.stringify(evidence), 'utf8') > SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES) {
+    throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_TOO_LARGE');
+  }
+  atomicCreateJson(
+    resultEvidencePath(manifest, requestId), evidence,
+    'SANDBOX_CONTROL_RESULT_EVIDENCE_ALREADY_EXISTS'
+  );
+  return readSandboxControlResultEvidence(resultEvidencePath(manifest, requestId));
 }
 
 export function statusPath(manifest: SandboxControlManifest): string {

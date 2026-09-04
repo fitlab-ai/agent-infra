@@ -28,11 +28,13 @@ const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
 export class SandboxControlClientError extends Error {
   readonly detail: SandboxControlError;
   readonly accepted: boolean;
-  constructor(detail: SandboxControlError, accepted = false) {
+  readonly requestId: string | null;
+  constructor(detail: SandboxControlError, accepted = false, requestId: string | null = null) {
     super(detail.message);
     this.name = 'SandboxControlClientError';
     this.detail = detail;
     this.accepted = accepted;
+    this.requestId = requestId;
   }
 }
 
@@ -40,8 +42,14 @@ function sleep(milliseconds: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
-function clientError(code: string, message: string, retryable: boolean, accepted = false): never {
-  throw new SandboxControlClientError({ code, message: `${code}: ${message}`, retryable }, accepted);
+function clientError(
+  code: string,
+  message: string,
+  retryable: boolean,
+  accepted = false,
+  requestId: string | null = null
+): never {
+  throw new SandboxControlClientError({ code, message: `${code}: ${message}`, retryable }, accepted, requestId);
 }
 
 function preflight(statusDir: string, generation: string, now = Date.now()): void {
@@ -68,9 +76,9 @@ function preflight(statusDir: string, generation: string, now = Date.now()): voi
 function parseResponse(raw: string, id: string): SandboxControlResponse {
   const response = JSON.parse(raw) as SandboxControlResponse;
   if (response.version !== 2 || response.id !== id
-    || !['accepted', 'completed', 'rejected'].includes(response.phase)
+    || !['completed', 'rejected'].includes(response.phase)
     || (response.phase === 'completed' && !Number.isInteger(response.exitCode))) {
-    clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response is invalid', false);
+    clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response is invalid', false, false, id);
   }
   return response;
 }
@@ -95,13 +103,16 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   preflight(statusDir, request.generation);
   const encoded = `${JSON.stringify(request)}\n`;
   if (Buffer.byteLength(encoded, 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
-    clientError('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit', false);
+    clientError('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit', false, false, request.id);
   }
   const requestsDir = path.join(channelDir, 'requests');
   const responsesDir = path.join(channelDir, 'responses');
   const temporary = path.join(requestsDir, `.${request.id}.tmp`);
   const requestPath = path.join(requestsDir, `${request.id}.json`);
   const responsePath = path.join(responsesDir, `${request.id}.json`);
+  if (fs.existsSync(responsePath)) {
+    clientError('SANDBOX_CONTROL_REQUEST_REPLAYED', 'request id already has a terminal response', false, false, request.id);
+  }
   fs.writeFileSync(temporary, encoded, { mode: 0o600, flag: 'wx' });
   fs.renameSync(temporary, requestPath);
   const deadline = Date.now() + (params.timeoutMs ?? 30_000);
@@ -109,6 +120,8 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   let malformedResponseRaw: string | null = null;
   let malformedResponseObservedAt = 0;
   while (Date.now() < deadline) {
+    const acceptedPath = path.join(responsesDir, `${request.id}.accepted.json`);
+    if (fs.existsSync(acceptedPath)) accepted = true;
     if (fs.existsSync(responsePath)) {
       let raw: string;
       try {
@@ -128,7 +141,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
           malformedResponseRaw = raw;
           malformedResponseObservedAt = now;
         } else if (now - malformedResponseObservedAt >= SANDBOX_CONTROL_RESPONSE_SETTLE_MS) {
-          clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response remained malformed', false, accepted);
+          clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response remained malformed', false, accepted, request.id);
         }
         sleep(25);
         continue;
@@ -136,7 +149,6 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       if (response.phase === 'accepted') {
         accepted = true;
       } else {
-        fs.rmSync(responsePath, { force: true });
         return response;
       }
     }
@@ -149,7 +161,8 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
           'SANDBOX_CONTROL_RESULT_UNKNOWN',
           'request was claimed before broker availability was lost; inspect domain state before retrying',
           false,
-          true
+          true,
+          request.id
         );
       }
     }
@@ -160,7 +173,8 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       'SANDBOX_CONTROL_RESULT_UNKNOWN',
       'accepted request did not produce a final result; inspect domain state before retrying',
       false,
-      true
+      true,
+      request.id
     );
   }
   if (!cancelPendingRequest(requestPath)) {
@@ -168,10 +182,64 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       'SANDBOX_CONTROL_RESULT_UNKNOWN',
       'request was claimed but no acceptance result was observed; inspect domain state before retrying',
       false,
-      true
+      true,
+      request.id
     );
   }
-  clientError('SANDBOX_CONTROL_BROKER_UNAVAILABLE', `broker did not accept the request within ${params.timeoutMs ?? 30_000}ms`, true);
+  clientError('SANDBOX_CONTROL_BROKER_UNAVAILABLE', `broker did not accept the request within ${params.timeoutMs ?? 30_000}ms`, true, false, request.id);
+}
+
+export function recoverSandboxControl(requestId: string, params: Readonly<{
+  channelDir?: string;
+  timeoutMs?: number;
+}> = {}): SandboxControlResponse {
+  if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) {
+    clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'request id is invalid', false, true);
+  }
+  const channelDir = params.channelDir ?? process.env.AGENT_INFRA_CONTROL_DIR ?? '/run/agent-infra/control';
+  const responsePath = path.join(channelDir, 'responses', `${requestId}.json`);
+  const deadline = Date.now() + (params.timeoutMs ?? 30_000);
+  let accepted = false;
+  let malformedResponseRaw: string | null = null;
+  let malformedResponseObservedAt = 0;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(path.join(channelDir, 'responses', `${requestId}.accepted.json`))) accepted = true;
+    if (fs.existsSync(responsePath)) {
+      let raw: string;
+      try {
+        raw = fs.readFileSync(responsePath, 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      let response: SandboxControlResponse;
+      try {
+        response = parseResponse(raw, requestId);
+        malformedResponseRaw = null;
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        const now = Date.now();
+        if (malformedResponseRaw !== raw) {
+          malformedResponseRaw = raw;
+          malformedResponseObservedAt = now;
+        } else if (now - malformedResponseObservedAt >= SANDBOX_CONTROL_RESPONSE_SETTLE_MS) {
+          clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response remained malformed', false, accepted, requestId);
+        }
+        sleep(25);
+        continue;
+      }
+      if (response.phase === 'accepted') accepted = true;
+      else return response;
+    }
+    sleep(25);
+  }
+  clientError(
+    'SANDBOX_CONTROL_RESULT_UNKNOWN',
+    'request did not produce a final result; inspect domain state before retrying',
+    false,
+    accepted,
+    requestId
+  );
 }
 
 function authority(params: { token?: string; generation?: string }): { token: string; generation: string } {

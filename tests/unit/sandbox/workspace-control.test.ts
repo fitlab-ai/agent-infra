@@ -12,6 +12,7 @@ import {
 import {
   bindSandboxControlTask,
   controlError,
+  parseSandboxControlResultEvidence,
   validateSandboxControlRequest,
   type SandboxControlManifest
 } from '../../../lib/sandbox/control/protocol.ts';
@@ -19,7 +20,11 @@ import {
   appendSandboxControlAudit,
   cleanupStaleSandboxControlLease,
   readActiveLease,
+  readSandboxControlResultEvidence,
+  resultEvidencePath,
+  sanitizeSandboxControlOutput,
   terminateSandboxControlExecution,
+  writeSandboxControlResultEvidence,
   SANDBOX_CONTROL_AUDIT_MAX_BYTES
 } from '../../../lib/sandbox/control/state.ts';
 import {
@@ -32,7 +37,11 @@ import {
   quiesceSandboxControlRoot,
   readSandboxControlManifest,
 } from '../../../lib/sandbox/control/lifecycle.ts';
-import { assertSandboxControlExecutorAuthority, executeRequest, nodeEntryArgs } from '../../../lib/sandbox/control/executor.ts';
+import {
+  assertSandboxControlExecutorAuthority,
+  executeRequest,
+  nodeEntryArgs
+} from '../../../lib/sandbox/control/executor.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../lib/sandbox/control/client.ts';
 import {
   closeCodexControllerRegistration,
@@ -66,6 +75,38 @@ const controllerBuild = {
   internalExecutableBuildHash: 'a'.repeat(64),
   lifecycleContractHash: 'b'.repeat(64)
 } as const;
+
+test('sandbox result evidence is strict, durable, and metadata-only', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-result-evidence-'));
+  const boundManifest = {
+    ...manifest,
+    processingDir: path.join(root, 'processing')
+  };
+  const requestId = '0123456789abcdef0123456789abcdef';
+  const result = {
+    exitCode: 7,
+    stdout: `private ${manifest.token} stdout`,
+    stderr: 'private stderr'
+  };
+
+  const evidence = writeSandboxControlResultEvidence(boundManifest, requestId, result);
+
+  assert.deepEqual(readSandboxControlResultEvidence(resultEvidencePath(boundManifest, requestId)), evidence);
+  const persisted = fs.readFileSync(resultEvidencePath(boundManifest, requestId), 'utf8');
+  assert.doesNotMatch(persisted, /private stdout|private stderr|secret/);
+  assert.equal(evidence.captureState, 'metadata-only');
+  assert.equal(sanitizeSandboxControlOutput(manifest, result.stdout), 'private [REDACTED] stdout');
+  assert.equal(evidence.stdoutBytes, Buffer.byteLength(sanitizeSandboxControlOutput(manifest, result.stdout), 'utf8'));
+  assert.match(evidence.stdoutSha256, /^[a-f0-9]{64}$/u);
+  assert.throws(
+    () => parseSandboxControlResultEvidence({ ...evidence, stdout: result.stdout }),
+    /SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID/
+  );
+  assert.throws(
+    () => writeSandboxControlResultEvidence(boundManifest, requestId, result),
+    /SANDBOX_CONTROL_RESULT_EVIDENCE_ALREADY_EXISTS/
+  );
+});
 
 test('sandbox executor authority revalidates the gate-bound broker owner and handoff lease', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-executor-authority-'));

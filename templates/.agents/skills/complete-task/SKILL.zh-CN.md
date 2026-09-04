@@ -197,6 +197,23 @@ agent-infra-internal task-verify {task-id} complete-task.completed --format text
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
+### accepted 后的 sandbox-control 结果恢复
+
+如果本技能在沙箱内执行，且 control client 报告请求已经 accepted 但没有
+terminal result，必须保留原 request identity。此时 client 会在 stderr 输出
+`SANDBOX_CONTROL_REQUEST_ID: <request-id>`。broker 恢复健康后，使用同一个
+request ID 读取 terminal response：
+
+```bash
+agent-infra-internal sandbox-control recover <request-id>
+```
+
+accepted 的 task finalization 不得提交新请求。broker 的
+`processing/<request-id>/result.json` 只是私有 transport evidence，不是 task
+receipt，单凭它不能证明任务完成；finalization receipt 和宿主完成校验仍是
+权威。如果请求在 accepted 之前已被拒绝，则可依据错误的 retryability 使用
+新的 request ID。
+
 ### 8. 告知用户
 
 > 仅在校验通过后执行本步骤。

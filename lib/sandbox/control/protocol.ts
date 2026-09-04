@@ -4,6 +4,9 @@ import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
+export const SANDBOX_CONTROL_MAX_LOGICAL_RECORDS = 1024;
+export const SANDBOX_CONTROL_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+export const SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES = 1024 * 1024;
 export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
@@ -63,6 +66,17 @@ export type SandboxCodexControllerRequest = RequestBase & Readonly<{
 }>;
 export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
+export type SandboxControlResultEvidence = Readonly<{
+  version: 1;
+  id: string;
+  generation: string;
+  exitCode: number;
+  stdoutBytes: number;
+  stderrBytes: number;
+  stdoutSha256: string;
+  stderrSha256: string;
+  captureState: 'metadata-only';
+}>;
 export type SandboxControlResponse = Readonly<{
   version: 2; id: string; phase: 'accepted' | 'completed' | 'rejected'; exitCode: number | null;
   stdout: string; stderr: string; error: SandboxControlError | null;
@@ -95,6 +109,25 @@ export class SandboxControlProtocolError extends Error {
 
 function fail(code: string, message: string, retryable = false): never {
   throw new SandboxControlProtocolError(code, message, retryable);
+}
+
+export function parseSandboxControlResultEvidence(value: unknown): SandboxControlResultEvidence {
+  const evidence = value as Partial<SandboxControlResultEvidence> | null;
+  const keys = evidence && typeof evidence === 'object' ? Object.keys(evidence).sort().join(',') : '';
+  if (keys !== 'captureState,exitCode,generation,id,stderrBytes,stderrSha256,stdoutBytes,stdoutSha256,version'
+    || evidence?.version !== 1
+    || typeof evidence.id !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(evidence.id)
+    || typeof evidence.generation !== 'string' || evidence.generation.length === 0
+    || !Number.isSafeInteger(evidence.exitCode)
+    || !Number.isSafeInteger(evidence.stdoutBytes) || (evidence.stdoutBytes as number) < 0
+    || !Number.isSafeInteger(evidence.stderrBytes) || (evidence.stderrBytes as number) < 0
+    || (evidence.stdoutBytes as number) + (evidence.stderrBytes as number) > SANDBOX_CONTROL_MAX_RESPONSE_BYTES
+    || typeof evidence.stdoutSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(evidence.stdoutSha256)
+    || typeof evidence.stderrSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(evidence.stderrSha256)
+    || evidence.captureState !== 'metadata-only') {
+    throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+  }
+  return evidence as SandboxControlResultEvidence;
 }
 
 export function isSandboxControlFamily(value: string): value is SandboxControlFamily {

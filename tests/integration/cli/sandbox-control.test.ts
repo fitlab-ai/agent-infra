@@ -8,6 +8,7 @@ import {
   requestCodexControllerClose,
   requestCodexControllerOpen,
   requestCodexControllerVerify,
+  recoverSandboxControl,
   requestSandboxControl,
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
@@ -19,7 +20,7 @@ import {
 } from '../../../lib/sandbox/control/lifecycle.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
 import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
-import { atomicWriteJson } from '../../../lib/sandbox/control/state.ts';
+import { atomicWriteJson, writeSandboxControlResultEvidence } from '../../../lib/sandbox/control/state.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
@@ -885,7 +886,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     const transientName = await waitForRequestAsync(requestsDir, 2_000, { client: transientClient });
     const transientId = transientName.slice(0, -5);
     const transientPath = path.join(responsesDir, `${transientId}.json`);
-    fs.writeFileSync(transientPath, `${JSON.stringify({
+    fs.writeFileSync(path.join(responsesDir, `${transientId}.accepted.json`), `${JSON.stringify({
       version: 2, id: transientId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
     })}\n`);
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 75);
@@ -895,6 +896,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     const transient = await transientClient.result;
     assert.equal(transient.exitCode, 0, transient.stderr || transient.stdout);
     assert.equal(JSON.parse(transient.stdout).response.error.code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+    assert.equal(fs.existsSync(transientPath), true);
 
     const status = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as Record<string, unknown>;
     status.updatedAt = Date.now();
@@ -910,6 +912,24 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     assert.equal(JSON.parse(stable.stdout).code, 'SANDBOX_CONTROL_RESPONSE_INVALID');
   } finally {
     await Promise.all([stopCollectedChild(transientClient), stopCollectedChild(stableClient)]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control recovery reads the retained terminal response by request id', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recover-client-'));
+  const responsesDir = path.join(root, 'responses');
+  const requestId = '33333333-3333-3333-3333-333333333333';
+  fs.mkdirSync(responsesDir, { recursive: true });
+  const response = {
+    version: 2, id: requestId, phase: 'completed', exitCode: 0,
+    stdout: 'recovered\n', stderr: '', error: null
+  };
+  fs.writeFileSync(path.join(responsesDir, `${requestId}.json`), `${JSON.stringify(response)}\n`);
+  try {
+    assert.deepEqual(recoverSandboxControl(requestId, { channelDir: root, timeoutMs: 100 }), response);
+    assert.equal(fs.existsSync(path.join(responsesDir, `${requestId}.json`)), true);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1061,7 +1081,7 @@ test('task-bound finalization compensates an accepted response loss through the 
         requestPath,
         internalCliPath: path.resolve('bin/internal-cli.ts')
       });
-      fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
+      fs.writeFileSync(path.join(responsesDir, `${request.id}.accepted.json`), `${JSON.stringify({
         version: 2, id: request.id, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
       })}\n`);
       prepared.start();
@@ -1384,9 +1404,9 @@ test('branch-only broker persists a typed task-create request on the host', asyn
     const replayPath = path.join(channelDir, 'responses', `${requestId}.json`);
     waitForFile(replayPath, 5_000);
     const replay = JSON.parse(fs.readFileSync(replayPath, 'utf8'));
-    assert.equal(replay.phase, 'rejected');
-    assert.equal(replay.error.code, 'SANDBOX_CONTROL_REQUEST_REPLAYED');
-    assert.equal(replay.error.retryable, false);
+    assert.equal(replay.phase, 'completed');
+    assert.equal(JSON.parse(replay.stdout).status, 'applied');
+    assert.equal(fs.existsSync(path.join(channelDir, 'responses', `${requestId}.accepted.json`)), false);
   } finally {
     child.kill();
     await new Promise<void>((resolve) => {
@@ -1407,10 +1427,12 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   const generation = 'recovery-generation';
   const terminalId = '11111111-1111-1111-1111-111111111111';
   const unacceptedId = '22222222-2222-2222-2222-222222222222';
+  const recoverableId = '33333333-3333-3333-3333-333333333333';
   fs.mkdirSync(responsesDir, { recursive: true });
   fs.mkdirSync(statusDir);
   fs.mkdirSync(path.join(processingDir, terminalId), { recursive: true });
   fs.mkdirSync(path.join(processingDir, unacceptedId), { recursive: true });
+  fs.mkdirSync(path.join(processingDir, recoverableId), { recursive: true });
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
@@ -1427,6 +1449,20 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     child: { pid: 999_999_999, startTime: 0, processGroupId: null },
     phase: 'running', updatedAt: Date.now()
   })}\n`);
+  fs.writeFileSync(path.join(processingDir, recoverableId, 'request.json'), `${JSON.stringify({ family: 'task-orchestration' })}\n`);
+  fs.writeFileSync(path.join(processingDir, recoverableId, 'execution.json'), `${JSON.stringify({
+    version: 2, generation, requestId: recoverableId, nonce: 'recoverable-nonce',
+    child: { pid: 999_999_999, startTime: 0, processGroupId: null },
+    phase: 'running', updatedAt: Date.now()
+  })}\n`);
+  writeSandboxControlResultEvidence(
+    { engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+      containerIdentity: { id: 'container-id', labels: {} }, branch, mode: 'task-bound', taskId: 'TASK-20260809-010203',
+      token: 'recovery-secret', generation, channelDir, publicStatusDir: statusDir, processingDir,
+      runtimeDir: path.join(root, 'runtime') },
+    recoverableId,
+    { exitCode: 0, stdout: 'lost output', stderr: '' }
+  );
   const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
@@ -1438,6 +1474,11 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     const unaccepted = JSON.parse(fs.readFileSync(path.join(responsesDir, `${unacceptedId}.json`), 'utf8'));
     assert.equal(unaccepted.error.code, 'SANDBOX_CONTROL_NOT_EXECUTED');
     assert.equal(unaccepted.error.retryable, true);
+    const recovered = JSON.parse(fs.readFileSync(path.join(responsesDir, `${recoverableId}.json`), 'utf8'));
+    assert.equal(recovered.phase, 'completed');
+    assert.equal(recovered.exitCode, 0);
+    assert.match(recovered.stderr, /OUTPUT_UNAVAILABLE/);
+    assert.equal(fs.existsSync(path.join(processingDir, recoverableId)), false);
   } finally {
     child.kill();
     await new Promise<void>((resolve) => {

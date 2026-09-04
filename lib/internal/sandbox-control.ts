@@ -1,4 +1,5 @@
 import {
+  recoverSandboxControl,
   requestSandboxControl,
   requestSandboxTaskFinalization,
   requestSandboxTaskControl,
@@ -39,6 +40,11 @@ function finalizationErrorStatus(error: { retryable: boolean; code: string }): F
   return error.retryable ? 'blocked' : 'failed';
 }
 
+function writeClientError(error: SandboxControlClientError): void {
+  process.stderr.write(`${error.detail.message}\n`);
+  if (error.requestId) process.stderr.write(`SANDBOX_CONTROL_REQUEST_ID: ${error.requestId}\n`);
+}
+
 function sandboxFinalizationClient(args: string[]): void {
   if (args.length !== 4 || !args[0] || args[1] !== 'complete' || args[2] !== '--agent' || !args[3]) {
     const error = { code: 'TASK_FINALIZATION_PAYLOAD_INVALID', message: 'task ref, complete intent, and --agent are required', retryable: false };
@@ -60,7 +66,7 @@ function sandboxFinalizationClient(args: string[]): void {
   } catch (error) {
     if (!(error instanceof SandboxControlClientError)) throw error;
     writeFinalizationEnvelope(finalizationErrorStatus(error.detail), error.accepted, error.detail);
-    process.stderr.write(`${error.detail.message}\n`);
+    writeClientError(error);
     process.exitCode = error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN' ? 1 : error.detail.retryable ? 2 : 1;
     return;
   }
@@ -107,6 +113,24 @@ async function sandboxControl(args: string[]): Promise<void> {
     await runSandboxControlExecutor(request, nonce);
     return;
   }
+  if (operation === 'recover') {
+    if (rest.length !== 1 || !rest[0]) throw new Error('sandbox-control recover requires <request-id>');
+    let response;
+    try {
+      response = recoverSandboxControl(rest[0]);
+    } catch (error) {
+      if (!(error instanceof SandboxControlClientError)) throw error;
+      writeClientError(error);
+      process.exitCode = error.detail.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN' ? 1 : error.detail.retryable ? 75 : 1;
+      return;
+    }
+    process.stdout.write(response.stdout);
+    process.stderr.write(response.stderr);
+    process.exitCode = response.phase === 'rejected'
+      ? response.error?.retryable ? 75 : 1
+      : response.exitCode ?? 1;
+    return;
+  }
   if (operation === 'client') {
     const [family = '', ...commandArgs] = rest;
     if (family === 'task-finalization') {
@@ -126,7 +150,7 @@ async function sandboxControl(args: string[]): Promise<void> {
       }
     } catch (error) {
       if (!(error instanceof SandboxControlClientError)) throw error;
-      process.stderr.write(`${error.detail.message}\n`);
+      writeClientError(error);
       process.exitCode = error.detail.retryable ? 75 : 1;
       return;
     }
@@ -140,7 +164,7 @@ async function sandboxControl(args: string[]): Promise<void> {
     }
     return;
   }
-  throw new Error('Usage: agent-infra-internal sandbox-control serve --manifest <path> | execute --request <path> --nonce <nonce> | client <family> [args...]');
+  throw new Error('Usage: agent-infra-internal sandbox-control serve --manifest <path> | execute --request <path> --nonce <nonce> | client <family> [args...] | recover <request-id>');
 }
 
 export { sandboxControl };

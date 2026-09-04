@@ -198,6 +198,24 @@ Handle the result as follows:
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
+### Accepted sandbox-control result recovery
+
+When this skill is invoked from a sandbox and the control client reports an
+accepted request without a terminal result, preserve the request identity. The
+client prints `SANDBOX_CONTROL_REQUEST_ID: <request-id>` on stderr for this
+case. After the broker is healthy again, recover the same terminal response:
+
+```bash
+agent-infra-internal sandbox-control recover <request-id>
+```
+
+Do not submit a new request for an accepted task finalization. The broker's
+`processing/<request-id>/result.json` is private transport evidence; it is not
+a task receipt and cannot by itself prove completion. The finalization receipt
+and the host completion gate remain authoritative. If the request was rejected
+before acceptance, a new request ID may be used according to the error's
+retryability.
+
 ### 8. Inform User
 
 > Execute this step only after the verification gate passes.
