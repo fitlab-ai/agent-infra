@@ -76,6 +76,34 @@ test('task-artifact finalize-local returns stable digests without mutating a val
   assert.deepEqual(fs.readFileSync(artifact), before);
 });
 
+test('task-artifact rebind-local refreshes passed provenance after an explicit artifact correction', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, localArtifact('plan'));
+
+  const finalized = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(finalized.status, 0, finalized.stderr);
+  const before = JSON.parse(finalized.stdout);
+  fs.appendFileSync(artifact, '\nCorrected report detail.\n');
+
+  const rebound = run(f.root, [
+    f.id, 'rebind-local', '--family', 'plan', '--artifact', 'plan.md',
+    '--reason', 'correct report format after initial finalization'
+  ]);
+  assert.equal(rebound.status, 0, `${rebound.stderr}\n${rebound.stdout}`);
+  const result = JSON.parse(rebound.stdout);
+  assert.equal(result.status, 'passed');
+  assert.equal(result.changed, true);
+  assert.equal(result.rebound, true);
+  assert.equal(result.previousArtifactSha256, before.artifactSha256);
+  assert.notEqual(result.artifactSha256, before.artifactSha256);
+  assert.equal(result.recovery.reason, 'correct report format after initial finalization');
+
+  const refinalized = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(refinalized.status, 0, refinalized.stderr);
+  assert.equal(JSON.parse(refinalized.stdout).artifactSha256, result.artifactSha256);
+});
+
 test('task-artifact finalize-local uses repository config from a nested working directory', () => {
   const f = fixture();
   const sections = ['Problem Understanding', 'Constraints', 'Options Comparison', 'Technical Approach', 'Implementation Steps', 'File List', 'Verification Strategy', 'State Check'];
