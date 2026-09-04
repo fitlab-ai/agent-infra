@@ -469,6 +469,79 @@ function renderLineCounts(totals: ChangeTotals): [string, string, string] {
   return [String(totals.additions), String(totals.deletions), signedNumber(totals.additions - totals.deletions)];
 }
 
+const MAX_REPRESENTATIVE_FILES = 3;
+
+function representativePath(file: ChangeFile): string {
+  return file.newPath || file.oldPath || '';
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+    .replaceAll('\r', '\\r')
+    .replaceAll('\n', '\\n');
+}
+
+function renderRepresentativePath(file: ChangeFile): string {
+  const paths = file.oldPath && file.newPath && file.oldPath !== file.newPath
+    ? [file.oldPath, file.newPath]
+    : [representativePath(file)];
+  return paths.map((filePath) => `<code>${escapeHtml(filePath)}</code>`).join(' → ');
+}
+
+function isPureRename(file: ChangeFile): boolean {
+  if (!file.status.startsWith('R') || !file.oldPath || !file.newPath || file.oldPath === file.newPath) return false;
+  return file.additions === null ? file.netBytes === 0 : file.additions === 0 && file.deletions === 0;
+}
+
+function representativeScore(file: ChangeFile, metric: 'lines' | 'bytes'): number {
+  return metric === 'lines' ? file.additions! + file.deletions! : Math.abs(file.netBytes);
+}
+
+function representativeFiles(files: ChangeFile[], metric: 'lines' | 'bytes'): ChangeFile[] {
+  return files
+    .filter((file) => metric === 'bytes' || (file.additions !== null && file.deletions !== null))
+    .slice()
+    .sort((left, right) => {
+      const scoreDifference = representativeScore(right, metric) - representativeScore(left, metric);
+      if (scoreDifference !== 0) return scoreDifference;
+      const leftPath = representativePath(left);
+      const rightPath = representativePath(right);
+      return leftPath < rightPath ? -1 : leftPath > rightPath ? 1 : 0;
+    })
+    .slice(0, MAX_REPRESENTATIVE_FILES);
+}
+
+function renderRepresentativeFile(file: ChangeFile, metric: 'lines' | 'bytes'): string {
+  const rename = isPureRename(file) ? '（纯 rename）' : '';
+  const category = `${categoryForChangeFile(file).label}${rename}`;
+  const pathValue = renderRepresentativePath(file);
+  if (metric === 'lines') {
+    const additions = file.additions!;
+    const deletions = file.deletions!;
+    return `  - ${pathValue}（${category}）：新增 ${additions} 行、删除 ${deletions} 行，共变更 ${additions + deletions} 行。`;
+  }
+  const kind = file.additions === null ? '二进制' : '文本';
+  return `  - ${pathValue}（${category}）：净字节 ${signedNumber(file.netBytes)}，绝对变化 ${Math.abs(file.netBytes)}（${kind}）。`;
+}
+
+function renderRepresentativeFiles(files: ChangeFile[]): string[] {
+  const lineFiles = representativeFiles(files, 'lines');
+  const byteFiles = representativeFiles(files, 'bytes');
+  return [
+    '#### 代表性变更文件',
+    '',
+    '- 行数变化最大（按新增行+删除行，最多展示 3 个）：',
+    ...(lineFiles.length > 0 ? lineFiles.map((file) => renderRepresentativeFile(file, 'lines')) : ['  - 无可比较的文本文件。']),
+    '- 绝对净字节变化最大（最多展示 3 个）：',
+    ...(byteFiles.length > 0 ? byteFiles.map((file) => renderRepresentativeFile(file, 'bytes')) : ['  - 无文件可比较。'])
+  ];
+}
+
 function renderCanonicalChangeReport(report: PrChangeReport): string {
   const totals = report.diff.totals;
   const categories = summarizeChangeCategories(report.diff.files);
@@ -497,6 +570,8 @@ function renderCanonicalChangeReport(report: PrChangeReport): string {
     `- 总体统计：新增 ${totals.additions} 行、删除 ${totals.deletions} 行；旧字节 ${totals.oldBytes}，新字节 ${totals.newBytes}。`,
     `- 变更明细按高层类别聚合展示；完整逐文件事实保留在结构化报告中供审计。`,
     `- 补丁摘要：\`${report.diff.patchSha256}\`。`,
+    '',
+    ...renderRepresentativeFiles(report.diff.files),
     '',
     '#### 适宜性预检',
     `- 结论：${precheckSummary}；${route}；正式审查：否。`,

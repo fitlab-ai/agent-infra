@@ -72,6 +72,29 @@ function categorizedMechanical(base = sha('b'), head = sha('c')): MechanicalChan
   };
 }
 
+function representativeMechanical(base = sha('b'), head = sha('c')): MechanicalChangeReport {
+  const files = [
+    { status: 'M', oldPath: 'lib/large.ts', newPath: 'lib/large.ts', additions: 8, deletions: 4, oldBytes: 100, newBytes: 110, netBytes: 10 },
+    { status: 'M', oldPath: 'tests/large.test.ts', newPath: 'tests/large.test.ts', additions: 6, deletions: 6, oldBytes: 20, newBytes: 20, netBytes: 0 },
+    { status: 'A', oldPath: null, newPath: 'templates/large.md', additions: 7, deletions: 0, oldBytes: 0, newBytes: 90, netBytes: 90 },
+    { status: 'R100', oldPath: '.agents/old.md', newPath: '.agents/new.md', additions: 0, deletions: 0, oldBytes: 300, newBytes: 300, netBytes: 0 },
+    { status: 'M', oldPath: 'README.md', newPath: 'README.md', additions: null, deletions: null, oldBytes: 600, newBytes: 300, netBytes: -300 },
+    { status: 'D', oldPath: 'tests/removed.test.ts', newPath: null, additions: 0, deletions: 10, oldBytes: 300, newBytes: 0, netBytes: -300 }
+  ];
+  return {
+    version: 1,
+    base,
+    head,
+    mergeBase: sha('a'),
+    patchSha256: 'e'.repeat(64),
+    files,
+    totals: {
+      files: 6, textFiles: 5, binaryFiles: 1, additions: 21, deletions: 20,
+      oldBytes: 1320, newBytes: 820, netBytes: -500
+    }
+  };
+}
+
 function identity(): PullRequestIdentity {
   return {
     repository: 'acme/widgets', number: 42,
@@ -177,6 +200,32 @@ test('canonical report renders high-level change categories and a Chinese preche
   assert.match(rendered, /\| 文档与其他 \| 1 \| — \| — \| — \| 0 \| 4 \| \+4 \| 0 \/ 1 \|/);
   assert.match(rendered, /\| \*\*合计\*\* \| 5 \| 9 \| 3 \| \+6 \| 25 \| 44 \| \+19 \| 4 \/ 1 \|/);
   assert.equal(rendered.split('#### 适宜性预检\n')[1], '- 结论：**通过**（6/6 项通过）；继续监控 PR；正式审查：否。\n- 高层分析：各项适宜性检查均通过，当前变更可继续进入后续流程。 详细证据保留在结构化报告中。');
+});
+
+test('canonical report lists bounded representative files with stable tie ordering and classifications', () => {
+  const digest = 'd'.repeat(64);
+  const built = buildPrChangeReport(identity(), digest, representativeMechanical(), candidate(digest));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /#### 代表性变更文件/);
+  assert.match(rendered, /- 行数变化最大（按新增行\+删除行，最多展示 3 个）：\n  - <code>lib\/large\.ts<\/code>（运行时代码）：新增 8 行、删除 4 行，共变更 12 行。\n  - <code>tests\/large\.test\.ts<\/code>（测试与校验）：新增 6 行、删除 6 行，共变更 12 行。/);
+  assert.match(rendered, /- 绝对净字节变化最大（最多展示 3 个）：\n  - <code>README\.md<\/code>（文档与其他）：净字节 -300，绝对变化 300（二进制）。\n  - <code>tests\/removed\.test\.ts<\/code>（测试与校验）：净字节 -300，绝对变化 300（文本）。/);
+});
+
+test('canonical report identifies a pure rename when it is the representative byte change', () => {
+  const digest = 'd'.repeat(64);
+  const value = representativeMechanical();
+  value.files = [{ status: 'R100', oldPath: 'lib/old.ts', newPath: 'tests/new.test.ts', additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 }];
+  value.totals = { files: 1, textFiles: 1, binaryFiles: 0, additions: 0, deletions: 0, oldBytes: 10, newBytes: 10, netBytes: 0 };
+  const built = buildPrChangeReport(identity(), digest, value, candidate(digest));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+
+  const rendered = renderCanonicalChangeReport(built.value);
+  assert.match(rendered, /- 行数变化最大（按新增行\+删除行，最多展示 3 个）：\n  - <code>lib\/old\.ts<\/code> → <code>tests\/new\.test\.ts<\/code>（测试与校验（纯 rename））：新增 0 行、删除 0 行，共变更 0 行。/);
+  assert.match(rendered, /- 绝对净字节变化最大（最多展示 3 个）：\n  - <code>lib\/old\.ts<\/code> → <code>tests\/new\.test\.ts<\/code>（测试与校验（纯 rename））：净字节 \+0，绝对变化 0（文本）。/);
 });
 
 test('canonical report summarizes a precheck review route in Chinese', () => {
