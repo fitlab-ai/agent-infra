@@ -40,6 +40,19 @@ function waitForFile(filePath: string, timeoutMs: number): void {
   throw new Error(`Timed out waiting for ${filePath}`);
 }
 
+async function waitForReceiptLifecycleDoneAsync(receiptPath: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if ((JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as { lifecycle?: unknown }).lifecycle === 'done') return;
+    } catch {
+      // The receipt may still be between atomic updates.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for completed finalization receipt at ${receiptPath}`);
+}
+
 function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
   const statusPath = path.join(statusDir, 'status.json');
   const deadline = Date.now() + timeoutMs;
@@ -1288,6 +1301,71 @@ test('task-finalization settles and commits the canonical terminal before gracef
   }
 });
 
+test('task-finalization graceful shutdown recovers a receipt before result evidence is visible', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-receipt-before-result-'));
+  const taskId = 'TASK-20260809-010203';
+  const generation = 'finalization-receipt-before-result-generation';
+  const controller = new AbortController();
+  let server: Promise<void> | undefined;
+  let clientResult: Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> | undefined;
+  let releaseResult!: () => void;
+  let resultReleased = false;
+  const resultGate = new Promise<void>((resolve) => { releaseResult = resolve; });
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    writeFinalizationTaskFixture(root, taskId);
+    const manifest = readSandboxControlManifest(manifestPath);
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      internalCliPath: path.resolve('bin/internal-cli.ts'),
+      prepareExecution: async (params) => {
+        const prepared = await prepareSandboxControlExecution(params);
+        return {
+          ...prepared,
+          completion: prepared.completion.then(async (result) => {
+            await resultGate;
+            resultReleased = true;
+            return result;
+          })
+        };
+      }
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    clientResult = runTaskFinalizationClient({
+      channelDir: manifest.channelDir,
+      statusDir: manifest.publicStatusDir,
+      token: manifest.token,
+      generation,
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+    });
+    const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
+    await waitForReceiptLifecycleDoneAsync(receiptPath, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const processingEntries = fs.readdirSync(manifest.processingDir);
+    assert.equal(processingEntries.length, 1);
+    assert.equal(fs.existsSync(path.join(manifest.processingDir, processingEntries[0]!, 'result.json')), false);
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as Record<string, unknown>;
+    assert.equal(receipt.lifecycle, 'done', JSON.stringify(receipt));
+    assert.deepEqual(receipt.controlBinding, { generation, requestId: processingEntries[0] });
+    controller.abort();
+    await server;
+    const client = await clientResult;
+    assert.equal(client.exitCode, 0, `${client.stderr}\n${JSON.stringify(client.payload)}`);
+    assert.equal(client.payload.phase, 'completed');
+    assert.equal((JSON.parse(String(client.payload.stdout)) as { result: { result: string } }).result.result, 'completed');
+    assert.equal(fs.readdirSync(manifest.processingDir).length, 0);
+    assert.equal(resultReleased, false);
+  } finally {
+    releaseResult();
+    controller.abort();
+    await server?.catch(() => undefined);
+    await clientResult?.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('sandbox control client and broker exchange a task-bound response', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
   const channelDir = path.join(root, 'channel');
@@ -1640,9 +1718,10 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
 });
 
 async function runFinalizationRecoveryCase(
-  label: 'success' | 'warnings' | 'missing-receipt' | 'binding-conflict',
-  receiptBinding: { generation: string; requestId: string } | null
-): Promise<{ response: Record<string, unknown> | null; retained: boolean }> {
+  label: 'success' | 'warnings' | 'missing-receipt' | 'binding-conflict' | 'conflicting-terminal',
+  receiptBinding: { generation: string; requestId: string } | null,
+  existingTerminal: Record<string, unknown> | null = null
+): Promise<{ response: Record<string, unknown> | null; retained: boolean; acceptedRetained: boolean; resultEvidenceRetained: boolean }> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-finalization-recovery-${label}-`));
   const taskId = 'TASK-20260809-010203';
   const requestId = label === 'success'
@@ -1651,7 +1730,9 @@ async function runFinalizationRecoveryCase(
       ? '55555555-5555-5555-5555-555555555555'
       : label === 'missing-receipt'
         ? '66666666-6666-6666-6666-666666666666'
-        : '77777777-7777-7777-7777-777777777777';
+        : label === 'binding-conflict'
+          ? '77777777-7777-7777-7777-777777777777'
+          : '88888888-8888-4888-8888-888888888888';
   const generation = 'finalization-recovery-generation';
   try {
     const branch = initializeRepository(root);
@@ -1678,6 +1759,9 @@ async function runFinalizationRecoveryCase(
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`), `${JSON.stringify({
       version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
     })}\n`);
+    if (existingTerminal) {
+      fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.json`), `${JSON.stringify(existingTerminal)}\n`);
+    }
     if (receiptBinding) {
       const receiptDir = path.join(root, '.agents', 'workspace', '.task-finalization');
       fs.mkdirSync(receiptDir, { recursive: true });
@@ -1704,9 +1788,11 @@ async function runFinalizationRecoveryCase(
       ? JSON.parse(fs.readFileSync(responsePath, 'utf8')) as Record<string, unknown>
       : null;
     const retained = fs.existsSync(processingDir);
+    const acceptedRetained = fs.existsSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`));
+    const resultEvidenceRetained = fs.existsSync(path.join(processingDir, 'result.json'));
     controller.abort();
     await server;
-    return { response, retained };
+    return { response, retained, acceptedRetained, resultEvidenceRetained };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1745,4 +1831,20 @@ test('broker recovery retains finalization evidence when the receipt binding con
   });
   assert.equal(result.response, null);
   assert.equal(result.retained, true);
+});
+
+test('broker recovery retains finalization evidence when an existing terminal conflicts', async () => {
+  const requestId = '88888888-8888-4888-8888-888888888888';
+  const forgedTerminal = {
+    version: 2, id: requestId, phase: 'completed', exitCode: 0,
+    stdout: 'forged terminal\n', stderr: '', error: null
+  };
+  const result = await runFinalizationRecoveryCase('conflicting-terminal', {
+    generation: 'finalization-recovery-generation',
+    requestId
+  }, forgedTerminal);
+  assert.deepEqual(result.response, forgedTerminal);
+  assert.equal(result.retained, true);
+  assert.equal(result.acceptedRetained, true);
+  assert.equal(result.resultEvidenceRetained, true);
 });
