@@ -43,6 +43,10 @@ export function atomicWriteJson(filePath: string, value: unknown, mode = 0o600, 
   }
 }
 
+export function sandboxControlEncodedJsonBytes(value: unknown): number {
+  return Buffer.byteLength(`${JSON.stringify(value)}\n`, 'utf8');
+}
+
 export function atomicWriteJsonNoReplace(
   filePath: string,
   value: unknown,
@@ -149,7 +153,7 @@ export function writeSandboxControlResultEvidence(
     stderrSha256: createHash('sha256').update(stderr, 'utf8').digest('hex'),
     captureState: 'metadata-only'
   };
-  if (Buffer.byteLength(JSON.stringify(evidence), 'utf8') > SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES) {
+  if (sandboxControlEncodedJsonBytes(evidence) > SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES) {
     throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_TOO_LARGE');
   }
   atomicCreateJson(
@@ -188,6 +192,9 @@ export function createSandboxControlPayload(
     stderrSha256: createHash('sha256').update(stderr, 'utf8').digest('hex')
   };
   if (payload.stdoutBytes + payload.stderrBytes > SANDBOX_CONTROL_MAX_RESPONSE_BYTES) {
+    throw new Error('SANDBOX_CONTROL_PAYLOAD_TOO_LARGE');
+  }
+  if (sandboxControlEncodedJsonBytes(payload) > SANDBOX_CONTROL_MAX_RESPONSE_BYTES) {
     throw new Error('SANDBOX_CONTROL_PAYLOAD_TOO_LARGE');
   }
   return payload;
@@ -233,36 +240,49 @@ export function readSandboxControlReservation(filePath: string): SandboxControlR
 }
 
 export function sandboxControlGenerationUsage(manifest: SandboxControlManifest): { logicalRecords: number; bytes: number } {
-  const records = new Map<string, { bytes: number; logical: boolean }>();
+  const records = new Map<string, { baseBytes: number; payloadBytes: number; logical: boolean }>();
   const responsesDir = path.join(manifest.channelDir, 'responses');
   if (fs.existsSync(responsesDir)) {
     for (const entry of fs.readdirSync(responsesDir, { withFileTypes: true })) {
       if (!entry.isFile()) continue;
       const terminal = entry.name.match(/^([a-f0-9-]{16,64})\.json$/u);
+      const accepted = entry.name.match(/^([a-f0-9-]{16,64})\.accepted\.json$/u);
       const payload = entry.name.match(/^([a-f0-9-]{16,64})\.payload\.json$/u);
-      if (!terminal && !payload) continue;
-      const id = (terminal ?? payload)![1]!;
-      const previous = records.get(id) ?? { bytes: 0, logical: false };
-      previous.bytes += fs.statSync(path.join(responsesDir, entry.name)).size;
-      previous.logical ||= Boolean(terminal);
+      if (!terminal && !accepted && !payload) continue;
+      const id = (terminal ?? accepted ?? payload)![1]!;
+      const previous = records.get(id) ?? { baseBytes: 0, payloadBytes: 0, logical: false };
+      const fileBytes = fs.statSync(path.join(responsesDir, entry.name)).size;
+      if (payload) previous.payloadBytes += fileBytes;
+      else previous.baseBytes += fileBytes;
+      previous.logical ||= Boolean(terminal || accepted);
       records.set(id, previous);
     }
   }
   if (fs.existsSync(manifest.processingDir)) {
     for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
       if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/u.test(entry.name)) continue;
+      const resultPath = resultEvidencePath(manifest, entry.name);
       const filePath = reservationPath(manifest, entry.name);
-      if (!fs.existsSync(filePath)) continue;
-      const reservation = readSandboxControlReservation(filePath);
-      const previous = records.get(entry.name) ?? { bytes: 0, logical: false };
-      previous.bytes = Math.max(previous.bytes, reservation.bytes);
-      previous.logical = true;
+      const previous = records.get(entry.name) ?? { baseBytes: 0, payloadBytes: 0, logical: false };
+      if (fs.existsSync(resultPath)) {
+        const result = readSandboxControlResultEvidence(resultPath);
+        if (result.id !== entry.name || result.generation !== manifest.generation) {
+          throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+        }
+        previous.baseBytes += fs.statSync(resultPath).size;
+        previous.logical = true;
+      }
+      if (fs.existsSync(filePath)) {
+        const reservation = readSandboxControlReservation(filePath);
+        previous.baseBytes = Math.max(previous.baseBytes, reservation.bytes);
+        previous.logical = true;
+      }
       records.set(entry.name, previous);
     }
   }
   return {
     logicalRecords: [...records.values()].filter((record) => record.logical).length,
-    bytes: [...records.values()].reduce((total, record) => total + record.bytes, 0)
+    bytes: [...records.values()].reduce((total, record) => total + record.baseBytes + record.payloadBytes, 0)
   };
 }
 

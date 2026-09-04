@@ -255,7 +255,9 @@ the manifest binding and deadline, and records the child identity in
 Acceptance is an independent durable marker in
 `responses/<request-id>.accepted.json`. It means that the request was admitted;
 it is not the command result. The terminal response is published once at
-`responses/<request-id>.json` and is never replaced. Clients may read that
+`responses/<request-id>.json` and is never replaced. A duplicate publish first
+reads back the existing terminal and fails closed if it differs from the
+candidate. Clients may read that
 terminal response more than once, including after a client or broker restart;
 reusing a request ID is still a replay and must not execute the operation again.
 
@@ -325,7 +327,12 @@ host mutation.
 Recovery seams are deterministic: a child that has not produced a valid result
 remains unknown; a valid generic result can produce an output-unavailable
 terminal; a finalization result still requires its host receipt; and an already
-published terminal is read-only and preserved.
+published terminal is read-only and preserved. A missing or conflicting
+finalization receipt never falls through to a generic success terminal: the
+processing evidence and reservation remain for a later same-ID recovery. If a
+graceful shutdown observes a settled result, it attempts this same terminal
+publication before terminating the broker; an unsettled child keeps the
+accepted request in the unknown/retained-evidence path.
 
 ### Capacity and retention (HD-3/A)
 
@@ -340,7 +347,8 @@ The three profile limits are independent:
   envelope. It is separate from optional output payload storage.
 
 Result evidence is compact and covered by each request's base reservation; it
-is not a fourth public capacity metric. Terminal records are retained for the
+is not a fourth public capacity metric. Byte accounting uses the exact UTF-8
+bytes persisted on disk, including the final JSON newline. Terminal records are retained for the
 generation. Processing/result evidence is temporary and may be removed only
 after terminal publication and verification. During recovery, temporary files
 are never treated as authoritative records.
@@ -350,7 +358,9 @@ for the request's accepted marker, compact terminal, and result evidence. The
 reservation is one logical record and cannot be bypassed by a later payload.
 The broker rejects admission when the generation would exceed either 1024
 logical records or 64 MiB of retained terminal, payload, and reservation
-storage. A result larger than the 1 MiB compact envelope may be stored as a
+storage. The base reservation remains counted separately from any published
+payload, so a reservation and payload are never collapsed into one byte total.
+A result larger than the 1 MiB compact envelope may be stored as a
 separate redacted payload, provided the remaining generation budget permits it;
 the terminal then contains only its byte counts and SHA-256 references. If the
 payload cannot be retained, the terminal is still committed with

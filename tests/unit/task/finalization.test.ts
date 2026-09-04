@@ -88,6 +88,23 @@ test('host finalization receipt records the sandbox generation and request bindi
   }
 });
 
+test('host finalization fails closed when an existing receipt has a different sandbox binding', () => {
+  const f = fixture();
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => verification('pass');
+  const firstBinding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const conflictingBinding = { generation: 'other-generation', requestId: 'fedcba9876543210fedcba9876543210' };
+  try {
+    assert.equal(applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, verify), controlBinding: firstBinding }).status, 'completed');
+    const replay = applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, verify), controlBinding: conflictingBinding });
+    assert.equal(replay.status, 'failed');
+    assert.equal(replay.error?.code, 'TASK_FINALIZATION_CONTROL_BINDING_CONFLICT');
+    assert.deepEqual(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.controlBinding, firstBinding);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization uses the canonical root and makes a successful replay a no-op', async () => {
   const f = fixture();
   let commentCalls = 0;

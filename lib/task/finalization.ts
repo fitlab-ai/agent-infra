@@ -217,6 +217,14 @@ function readTaskFinalizationReceipt(repoRoot: string, taskId: string): TaskFina
   return readReceipt(path.resolve(repoRoot), taskId);
 }
 
+function controlBindingMatches(
+  receipt: TaskFinalizationReceipt,
+  binding: Readonly<{ generation: string; requestId: string }>
+): boolean {
+  return receipt.controlBinding?.generation === binding.generation
+    && receipt.controlBinding.requestId === binding.requestId;
+}
+
 function writeReceipt(repoRoot: string, receipt: TaskFinalizationReceipt): void {
   const directory = finalizationRoot(repoRoot);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -599,6 +607,17 @@ async function applyUnderLock(
     if (!existed) writeReceipt(repoRoot, receipt);
   } catch (error) {
     return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
+  }
+  if (options.controlBinding && !controlBindingMatches(receipt, options.controlBinding)) {
+    const error: FinalizationError = {
+      code: 'TASK_FINALIZATION_CONTROL_BINDING_CONFLICT',
+      message: 'finalization receipt belongs to a different sandbox request or generation',
+      retryable: false
+    };
+    return failed(taskId, error, {
+      completedSteps: completedSteps(receipt),
+      pendingSteps: pendingSteps(receipt)
+    });
   }
 
   const preflightState = resolveTaskRef(taskId, { repoRoot });

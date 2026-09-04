@@ -86,6 +86,19 @@ async function waitForStatusStateAsync(statusDir: string, state: string, timeout
   throw new Error(`Timed out waiting for ${state} status in ${statusDir}`);
 }
 
+async function waitForResultEvidenceAsync(processingDir: string, timeoutMs: number): Promise<{ requestId: string; resultPath: string }> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const entry of fs.readdirSync(processingDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const resultPath = path.join(processingDir, entry.name, 'result.json');
+      if (fs.existsSync(resultPath)) return { requestId: entry.name, resultPath };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for result evidence in ${processingDir}`);
+}
+
 type CollectedChild = {
   child: ReturnType<typeof spawn>;
   result: Promise<{ exitCode: number; stdout: string; stderr: string }>;
@@ -237,6 +250,26 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);
   return manifestPath;
+}
+
+function writeFinalizationTaskFixture(root: string, taskId: string): void {
+  const activeTaskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
+  fs.mkdirSync(activeTaskDir, { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '08': taskId } })}\n`);
+  fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
+    skill: 'complete-task',
+    checks: { 'required-pr-delivery': null }
+  }));
+  fs.writeFileSync(path.join(activeTaskDir, 'task.md'), [
+    '---', `id: ${taskId}`, 'type: bugfix', 'workflow: bug-fix', 'status: active',
+    'created_at: 2026-08-09 01:02:03+00:00', 'updated_at: 2026-08-09 01:02:03+00:00',
+    'agent_infra_version: v0.9.9', 'current_step: code-review', 'assigned_to: codex',
+    'target_date:', '---', '', '# Task', '', '## Review Disagreement Ledger', '',
+    '| id | stage | round | severity | status | evidence |',
+    '|----|-------|-------|----------|--------|----------|', '', '## Activity Log', ''
+  ].join('\n'));
 }
 
 test('sandbox control lifecycle fails closed when a manifest has no owner evidence', async () => {
@@ -1009,7 +1042,7 @@ test('task-finalization client exposes accepted result loss as a structured unkn
   }
 });
 
-test('task-bound finalization compensates an accepted response loss through the same host executor entry', async () => {
+test('task-bound finalization rejects a new request after accepted response loss', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-compensation-'));
   const taskId = 'TASK-20260809-010203';
   const token = 'lifecycle-secret';
@@ -1111,42 +1144,146 @@ test('task-bound finalization compensates an accepted response loss through the 
     assert.equal(JSON.parse(firstExecution.stdout).status, 'completed');
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
 
-    const registryPath = path.join(root, '.agents', 'workspace', 'active', '.short-ids.json');
-    fs.writeFileSync(registryPath, '{not-json\n');
-    const failedBroker = serveOne(false);
-    const failedClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS });
-    const failedExecution = await failedBroker;
-    assert.equal(failedExecution.exitCode, 1);
-    assert.equal(failedClient.exitCode, 0);
-    assert.equal(failedClient.payload.phase, 'completed');
-    const failedOutput = String(failedClient.payload.stdout);
-    assert.equal(failedOutput.includes(root), false);
-    assert.equal(failedExecution.stdout.includes(root), false);
-    assert.equal(fs.readFileSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`), 'utf8').includes(root), false);
-    assert.equal((JSON.parse(failedOutput) as { error: { code: string } }).error.code, 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE');
-
-    fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: {} })}\n`);
     const secondBroker = serveOne(false);
     const secondClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS });
     const secondExecution = await secondBroker;
     assert.equal(secondClient.exitCode, 0, secondClient.stderr);
+    assert.equal(secondClient.payload.exitCode, 1);
     assert.equal(secondClient.payload.phase, 'completed');
-    const compensated = JSON.parse(String(secondClient.payload.stdout)) as {
-      status: string;
-      changed: boolean;
-      result: { status: string; changed: boolean; lifecycle: { status: string }; taskComment: { status: string }; verification: { status: string } };
-    };
-    assert.equal(compensated.status, 'completed');
-    assert.equal(compensated.changed, false);
-    assert.equal(compensated.result.status, 'completed');
-    assert.equal(compensated.result.changed, false);
-    assert.equal(compensated.result.lifecycle.status, 'no-op');
-    assert.equal(compensated.result.taskComment.status, 'skipped');
-    assert.equal(compensated.result.verification.status, 'no-op');
-    assert.equal(JSON.parse(secondExecution.stdout).status, 'completed');
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
+    assert.equal((JSON.parse(String(secondClient.payload.stdout)) as { error: { code: string } }).error.code, 'TASK_FINALIZATION_CONTROL_BINDING_CONFLICT');
+    assert.equal(JSON.parse(secondExecution.stdout).status, 'failed');
   } finally {
     if (heartbeat) clearInterval(heartbeat);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-finalization normal publication fails closed on a conflicting terminal', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-terminal-conflict-'));
+  const taskId = 'TASK-20260809-010203';
+  const generation = 'finalization-terminal-conflict-generation';
+  const controller = new AbortController();
+  let server: Promise<void> | undefined;
+  let clientResult: Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> | undefined;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    writeFinalizationTaskFixture(root, taskId);
+    const manifest = readSandboxControlManifest(manifestPath);
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1_000 },
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      internalCliPath: path.resolve('bin/internal-cli.ts')
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    clientResult = runTaskFinalizationClient({
+      channelDir: manifest.channelDir,
+      statusDir: manifest.publicStatusDir,
+      token: manifest.token,
+      generation,
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+    });
+    const evidence = await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.json`), `${JSON.stringify({
+      version: 2, id: evidence.requestId, phase: 'completed', exitCode: 0,
+      stdout: 'forged terminal\n', stderr: '', error: null
+    })}\n`);
+    await assert.rejects(server, /SANDBOX_CONTROL_TERMINAL_CONFLICT/);
+    const client = await clientResult;
+    assert.equal(client.exitCode, 0);
+    assert.equal(client.payload.stdout, 'forged terminal\n');
+    assert.equal(fs.existsSync(path.join(manifest.processingDir, evidence.requestId)), true);
+  } finally {
+    controller.abort();
+    await server?.catch(() => undefined);
+    await clientResult?.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-finalization normal publication retains processing when the receipt disappears', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-receipt-missing-'));
+  const taskId = 'TASK-20260809-010203';
+  const generation = 'finalization-receipt-missing-generation';
+  const controller = new AbortController();
+  let server: Promise<void> | undefined;
+  let clientResult: Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> | undefined;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    writeFinalizationTaskFixture(root, taskId);
+    const manifest = readSandboxControlManifest(manifestPath);
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1_000 },
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      internalCliPath: path.resolve('bin/internal-cli.ts')
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    clientResult = runTaskFinalizationClient({
+      channelDir: manifest.channelDir,
+      statusDir: manifest.publicStatusDir,
+      token: manifest.token,
+      generation,
+      timeoutMs: 1_500
+    });
+    const evidence = await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    fs.rmSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`));
+    await server;
+    const client = await clientResult;
+    assert.equal(client.exitCode, 1);
+    assert.equal((client.payload.error as { code: string }).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+    assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.json`)), false);
+    assert.equal(fs.existsSync(path.join(manifest.processingDir, evidence.requestId)), true);
+  } finally {
+    controller.abort();
+    await server?.catch(() => undefined);
+    await clientResult?.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-finalization settles and commits the canonical terminal before graceful shutdown cleanup', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-graceful-shutdown-'));
+  const taskId = 'TASK-20260809-010203';
+  const generation = 'finalization-graceful-shutdown-generation';
+  const controller = new AbortController();
+  let server: Promise<void> | undefined;
+  let clientResult: Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> | undefined;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    writeFinalizationTaskFixture(root, taskId);
+    const manifest = readSandboxControlManifest(manifestPath);
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1_000 },
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      internalCliPath: path.resolve('bin/internal-cli.ts')
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    clientResult = runTaskFinalizationClient({
+      channelDir: manifest.channelDir,
+      statusDir: manifest.publicStatusDir,
+      token: manifest.token,
+      generation,
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+    });
+    const evidence = await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    controller.abort();
+    await server;
+    const client = await clientResult;
+    assert.equal(client.exitCode, 0, client.stderr);
+    assert.equal(client.payload.phase, 'completed');
+    assert.equal((JSON.parse(String(client.payload.stdout)) as { result: { result: string } }).result.result, 'completed');
+    assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.json`)), true);
+    assert.equal(fs.existsSync(path.join(manifest.processingDir, evidence.requestId)), false);
+    assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.accepted.json`)), false);
+  } finally {
+    controller.abort();
+    await server?.catch(() => undefined);
+    await clientResult?.catch(() => undefined);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

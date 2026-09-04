@@ -16,6 +16,7 @@ import {
   parseSandboxControlResultEvidence,
   SANDBOX_CONTROL_MAX_LOGICAL_RECORDS,
   SANDBOX_CONTROL_MAX_RESPONSE_BYTES,
+  SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
   SANDBOX_CONTROL_RESERVATION_BYTES,
   validateSandboxControlRequest,
   type SandboxControlManifest
@@ -27,6 +28,7 @@ import {
   readSandboxControlPayload,
   readSandboxControlResultEvidence,
   resultEvidencePath,
+  sandboxControlEncodedJsonBytes,
   sandboxControlGenerationUsage,
   sanitizeSandboxControlOutput,
   terminateSandboxControlExecution,
@@ -134,9 +136,16 @@ test('sandbox payload and reservation records enforce generation accounting and 
     const payload = writeSandboxControlPayload(boundManifest, requestId, {
       stdout: `printed ${boundManifest.token}\n`, stderr: ''
     });
+    writeSandboxControlResultEvidence(boundManifest, requestId, {
+      exitCode: 0, stdout: `printed ${boundManifest.token}\n`, stderr: ''
+    });
     assert.equal(readSandboxControlPayload(path.join(boundManifest.channelDir, 'responses', `${requestId}.payload.json`)).stdout, 'printed [REDACTED]\n');
     assert.equal(payload.stdoutBytes, Buffer.byteLength(payload.stdout, 'utf8'));
     assert.equal(sandboxControlGenerationUsage(boundManifest).logicalRecords, 1);
+    assert.equal(
+      sandboxControlGenerationUsage(boundManifest).bytes,
+      reservation.bytes + sandboxControlEncodedJsonBytes(payload)
+    );
     assert.throws(
       () => writeSandboxControlReservation(boundManifest, 'fedcba9876543210fedcba9876543210', {
         logicalRecords: 1024, bytes: 0
@@ -166,6 +175,60 @@ test('sandbox terminal publication redacts output before durable write', () => {
     assert.equal(persisted.stdout, 'result [REDACTED]\n');
     assert.equal(persisted.stderr, 'error [REDACTED]\n');
     assert.doesNotMatch(JSON.stringify(persisted), /terminal-secret/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox terminal duplicate is accepted only after strict read-back', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-terminal-duplicate-'));
+  const boundManifest = {
+    ...manifest,
+    channelDir: path.join(root, 'channel')
+  };
+  const requestId = 'abcdefabcdefabcdefabcdefabcdefab';
+  const response = {
+    version: 2 as const, id: requestId, phase: 'completed' as const, exitCode: 0,
+    stdout: 'stable\n', stderr: '', error: null
+  };
+  fs.mkdirSync(path.join(boundManifest.channelDir, 'responses'), { recursive: true });
+  try {
+    writeSandboxControlResponse(boundManifest, response);
+    assert.doesNotThrow(() => writeSandboxControlResponse(boundManifest, response));
+    assert.throws(
+      () => writeSandboxControlResponse(boundManifest, { ...response, stdout: 'forged\n' }),
+      /SANDBOX_CONTROL_TERMINAL_CONFLICT/
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(boundManifest.channelDir, 'responses', `${requestId}.json`), 'utf8')).stdout,
+      'stable\n'
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox terminal size includes the persisted newline at the exact boundary', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-terminal-boundary-'));
+  const boundManifest = {
+    ...manifest,
+    channelDir: path.join(root, 'channel')
+  };
+  const requestId = 'fedcba9876543210fedcba9876543210';
+  const base = {
+    version: 2 as const, id: requestId, phase: 'completed' as const, exitCode: 0,
+    stdout: '', stderr: '', error: null
+  };
+  const emptyBytes = Buffer.byteLength(JSON.stringify(base), 'utf8');
+  const exact = { ...base, stdout: 'x'.repeat(SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES - emptyBytes) };
+  assert.equal(Buffer.byteLength(JSON.stringify(exact), 'utf8'), SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES);
+  assert.equal(sandboxControlEncodedJsonBytes(exact), SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES + 1);
+  fs.mkdirSync(path.join(boundManifest.channelDir, 'responses'), { recursive: true });
+  try {
+    writeSandboxControlResponse(boundManifest, exact);
+    const persisted = JSON.parse(fs.readFileSync(path.join(boundManifest.channelDir, 'responses', `${requestId}.json`), 'utf8')) as Record<string, unknown>;
+    assert.equal(persisted.stdout, '');
+    assert.equal(persisted.error && typeof persisted.error === 'object' && 'code' in persisted.error, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

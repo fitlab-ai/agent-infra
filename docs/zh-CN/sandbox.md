@@ -222,7 +222,8 @@ client 首先检查 `status.json` 中的 generation 和 broker heartbeat，然�
 
 accepted 是独立的持久 marker：`responses/<request-id>.accepted.json`。它只表示请求
 已经被接纳，不是命令结果。terminal response 只发布一次到
-`responses/<request-id>.json`，发布后不可覆盖。client 可以在 client 或 broker 重启
+`responses/<request-id>.json`，发布后不可覆盖。重复发布时会先 read-back 已有 terminal；
+如果它与候选内容不同则 fail closed。client 可以在 client 或 broker 重启
 后重复读取 terminal；但再次使用同一个 request ID 仍然属于 replay，不能再次执行
 操作。
 
@@ -285,7 +286,10 @@ client 永远不会把 `accepted`、`result.json` 或 payload candidate 当作�
 
 因此各个恢复断点是确定的：child 尚未产生有效 result 时保持 unknown；普通
 family 有有效 result 时可以生成 output-unavailable terminal；finalization 仍
-必须检查宿主 receipt；已经发布的 terminal 只能读取、不能覆盖。
+必须检查宿主 receipt；已经发布的 terminal 只能读取、不能覆盖。finalization receipt
+缺失或绑定冲突时，不能落入 generic success terminal，processing evidence 和 reservation
+会保留，等待后续同 ID 恢复。graceful shutdown 如果观察到已 settled 的 result，会先按同一
+authority 尝试发布 terminal 再停止 broker；尚未 settled 的 child 则保留 accepted 和未知结果证据。
 
 ### 容量与保留（HD-3/A）
 
@@ -297,14 +301,15 @@ family 有有效 result 时可以生成 output-unavailable terminal；finalizati
 - `maxTerminalRecordBytes = 1 MiB`：紧凑 terminal envelope 的上限，与可选输出 payload
   的存储空间分开计算。
 
-result evidence 很小，由每个请求的 base reservation 覆盖；它不是第四个公开容量指标。terminal
+result evidence 很小，由每个请求的 base reservation 覆盖；它不是第四个公开容量指标。字节计量使用磁盘上实际持久化的 UTF-8 bytes，包括 JSON 末尾换行。terminal
 在 generation 生命周期内保留。processing/result evidence 是临时数据，只有 terminal
 发布并验证后才能删除。恢复时，临时文件永远不能被当作权威记录。
 
 broker 在写入 accepted marker 之前，会为本次请求的 accepted marker、紧凑 terminal 和
 result evidence 预留固定的 base budget。reservation 自身占用一个 logical record，后续
 payload 不能绕过这项预留。如果 generation 会超过 1024 个 logical record，或持久化的
-terminal、payload 与 reservation 总量会超过 64 MiB，broker 会在 admission 阶段拒绝请求。
+terminal、payload 与 reservation 总量会超过 64 MiB，broker 会在 admission 阶段拒绝请求。base reservation
+与已发布 payload 分开计量，不会把 reservation 和 payload 折叠成一个字节总数。
 如果结果超过 1 MiB 的紧凑 envelope，且 generation 仍有余量，broker 可以把它写成单独的
 已脱敏 payload；terminal 只保存 payload 的字节数和 SHA-256 引用，并设置
 `outputState: "available"`。payload 无法保留时，terminal 仍会提交，但设置
