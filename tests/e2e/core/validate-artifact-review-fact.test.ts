@@ -159,13 +159,13 @@ test("review-fact rejects an approved report when last_reviewed_commit is stale"
 });
 
 test("review-fact rejects a completed-invalidated review artifact", onPlatforms("linux", "darwin", "win32"), async () => {
-  await withTempRoot("agent-infra-review-fact-invalidated-", (tempRoot) => {
+  await withTempRoot("agent-infra-review-fact-invalidated-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(taskDir, "task.md"), taskContent(baseline));
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
     invalidateReview(taskDir);
 
-    const { result, payload } = runCheck(taskDir);
+    const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 1, result.stdout);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /invalidated|active artifact/i);
