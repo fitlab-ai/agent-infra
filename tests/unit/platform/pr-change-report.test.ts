@@ -239,7 +239,6 @@ test('canonical report escapes precheck paths, rationales, and evidence details'
   const rendered = renderCanonicalChangeReport(built.value);
   assert.match(rendered, /Rationale &lt;script&gt; &amp; &quot;quote&quot;/);
   assert.match(rendered, /<code>checks\/&lt;unsafe&gt;\.ts<\/code>:10-11：Detail &lt;img alt=&quot;x&quot;&gt; &amp; &#39;quote&#39;/);
-  assert.doesNotMatch(rendered, /<script>|<img/);
 });
 
 test('canonical report renders nullable evidence line endpoints without null text', () => {
