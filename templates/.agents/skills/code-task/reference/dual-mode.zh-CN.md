@@ -20,7 +20,7 @@ agent-infra-internal task-artifact {task-id} inspect --family code
 |---|---|---:|---|
 | 无 code 产物，且最新 review-plan 精确为 `Approved` 并引用最新 plan | `init` | 0 | 初次实现，产物为 `code.md`；缺少匹配审批或为 `Approved-with-issues` 时返回 error |
 | 最新 review-plan 精确为 `Approved`，且其「审查输入」/「Review Input」字段引用最新 plan，而最新 code 的完成 receipt 未绑定相同 plan 摘要 | `init` | 0 | plan 内容在 code 输入之后获批；进入新一轮实现。`Approved-with-issues` 仅保留历史解析兼容，不构成跨阶段批准；缺失或无效 receipt 失败关闭 |
-| `rev_max < code_max` | `error` | 2 | 最新代码未审查，先运行 `review-code` |
+| 最新 review-code 的完成收据未绑定最新 code identity/SHA | `error` | 2 | 最新代码未审查，先运行 `review-code`；code 与 review-code 的 family 轮次可独立增长 |
 | 最新 review-code 为 Approved 且存在审查完成后产生的 pending 实现输入 | `decision` | 0 | 选择最早 `II-N`，进入裁决驱动实现；false/not-required 与 consumed 输入不触发 |
 | 最新 review-code 为 Approved 且 0/0/0 | `refused` | 1 | 已通过，无需再次运行 `code-task` |
 | 最新 review-code 为 Approved 但有 major/minor | `fix` | 0 | 可选修复模式 |

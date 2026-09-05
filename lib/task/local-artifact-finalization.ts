@@ -12,7 +12,7 @@ import {
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
-import { validateQualificationAudit } from './qualification-audit.ts';
+import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
@@ -307,9 +307,14 @@ function validateLocalArtifact(
   }
 
   if (options.taskContent !== undefined) {
+    const expected = expectedQualificationRelations(options.taskContent, options.family);
+    if (!expected.ok) {
+      diagnostics.push(diagnostic('LOCAL_QUALIFICATION_AUDIT_INVALID', `${expected.code}: ${expected.message}`, content));
+    }
     const qualification = validateQualificationAudit(options.taskContent, content, {
       family: options.family === 'analysis' ? 'analysis' : options.family === 'plan' ? 'plan' : 'code',
-      artifact: options.artifact
+      artifact: options.artifact,
+      expectedUpstreamRelations: expected.ok ? expected.relations : undefined
     });
     if (!qualification.ok) {
       diagnostics.push(diagnostic(

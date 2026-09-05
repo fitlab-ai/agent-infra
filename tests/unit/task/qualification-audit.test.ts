@@ -70,6 +70,34 @@ test('qualification audit round-trips and rejects stale or unknown dependencies'
   if (!invalid.ok) assert.equal(invalid.code, 'QUALIFICATION_CONSTRAINT_DIGEST_MISMATCH');
 });
 
+test('qualification audit rejects candidate snapshots that diverge from task input', () => {
+  const built = buildQualificationAudit(taskContent());
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  const rendered = renderQualificationAudit(built.audit);
+  const changed = rendered.replace('| A | qualified | Small change |', '| A | rejected | Small change |');
+  const result = validateQualificationAudit(taskContent(), `## Qualification Audit\n\n${changed}`, { require: true });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'QUALIFICATION_CANDIDATE_MISMATCH');
+});
+
+test('qualification audit requires the exact started upstream relations', () => {
+  const expected = [{
+    upstreamFamily: 'plan' as const, upstreamArtifact: 'plan.md', upstreamRound: 1,
+    upstreamSha256: 'a'.repeat(64), relation: 'required-input' as const
+  }];
+  const built = buildQualificationAudit(taskContent());
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  const result = validateQualificationAudit(
+    taskContent(),
+    `## Qualification Audit\n\n${renderQualificationAudit(built.audit)}`,
+    { family: 'code', artifact: 'code.md', require: true, expectedUpstreamRelations: expected }
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'QUALIFICATION_UPSTREAM_RELATION_MISMATCH');
+});
+
 test('legacy task input remains explicitly unconfigured until migrated', () => {
   const parsed = parseTaskQualification('# Task\n\n## 约束\n\n- a legacy constraint\n');
   assert.equal(parsed.ok, true);

@@ -286,6 +286,33 @@ test('code replan routing compares plan content with the code input receipt', ()
   assert.equal(result.codeMode?.reviewArtifact, 'review-plan.md');
 });
 
+test('code fix routing trusts the review receipt when code and review family rounds differ', () => {
+  const f = fixture();
+  enableQualification(f);
+  writeQualifiedArtifact(f, 'plan.md');
+  writeQualifiedArtifact(f, 'code.md');
+  writeQualifiedArtifact(f, 'code-r2.md');
+  writeQualifiedArtifact(f, 'review-code.md');
+  fs.appendFileSync(path.join(f.taskDir, 'review-code.md'), [
+    '', '- **审查输入**：', '  - `code-r2.md`', '', '## 审查摘要', '',
+    '- **总体结论**：需要修改',
+    '- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0', ''
+  ].join('\n'));
+  addReceipt(f, {
+    event: 'code.completed', output: 'code-r2.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code-r2.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'code-r2.md')), completedAt: '2026-01-01 00:01:00+00:00'
+  });
+
+  const result = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.codeMode?.mode, 'fix');
+  assert.equal(result.codeMode?.reviewArtifact, 'review-code.md');
+});
+
 test('revision context fails closed when a review points to a future input', () => {
   const f = fixture({ 'analysis.md': '# analysis', 'review-analysis.md': '**Review Input**: `analysis.md`\n' });
   const reviewPath = path.join(f.taskDir, 'review-analysis.md');

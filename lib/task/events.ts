@@ -48,8 +48,8 @@ import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason 
 import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
 import type { InvalidationTargetKind } from './invalidation.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
-import { ARTIFACT_FAMILIES, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
-import type { QualificationAudit } from './qualification-audit.ts';
+import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
+import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -349,6 +349,25 @@ function reviewInputFamily(family: EventFamily): ArtifactFamily {
   return family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
 }
 
+function relationForStartedInput(family: EventFamily, input: ArtifactIdentity): UpstreamRelation['relation'] {
+  if (family.startsWith('review-')) {
+    return input.family === reviewInputFamily(family) ? 'reviewed-input' : 'approval-context';
+  }
+  const consumer = family === 'analyze' ? 'analysis' : family;
+  if ((consumer === 'plan' && input.family === 'analysis') || (consumer === 'code' && input.family === 'plan')) return 'required-input';
+  return 'review-context';
+}
+
+function qualificationRelationsForStarted(family: EventFamily, inputs: readonly ArtifactIdentity[]): UpstreamRelation[] {
+  return inputs.map((input) => ({
+    upstreamFamily: input.family as UpstreamRelation['upstreamFamily'],
+    upstreamArtifact: input.name,
+    upstreamRound: input.round,
+    upstreamSha256: sha256File(input.path),
+    relation: relationForStartedInput(family, input)
+  }));
+}
+
 function lifecycleAction(family: EventFamily): LifecycleAction {
   return family === 'analyze' ? 'analysis' : family;
 }
@@ -430,7 +449,6 @@ function invalidationMutationForCompletion(
     }
   }
   const selected = new Set<string>();
-  const reasonCode = graphUsable ? 'qualification-changed' : 'upstream-replaced';
   if (graphUsable) {
     const changedConstraints = new Set<string>();
     for (const audit of audits.values()) {
@@ -482,6 +500,7 @@ function invalidationMutationForCompletion(
     };
     if ([...nodeMap.keys()].some(hasCycle)) graphUsable = false;
   }
+  const reasonCode = graphUsable ? 'qualification-changed' : 'upstream-replaced';
   const targetNodes = (graphUsable
     ? inventory.filter((node) => selected.has(`${node.family}/${node.name}`))
     : inventory.filter((node) => downstream[sourceFamily].includes(node.family)))
@@ -675,9 +694,14 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       catch (error) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read qualification audit from ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
+      const expected = expectedQualificationRelations(content, eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code');
+      if (!expected.ok) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${expected.code}: ${expected.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
       const qualification = validateQualificationAudit(content, reviewContent, {
         family: eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code',
-        artifact: completedArtifact.name
+        artifact: completedArtifact.name,
+        expectedUpstreamRelations: expected.relations
       });
       if (!qualification.ok) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${qualification.code}: ${qualification.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
@@ -817,6 +841,13 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
   let frontmatterRemove: string[] | undefined;
+  if (eventIdentity.phase === 'started' && artifactContext) {
+    try {
+      frontmatterSet.qualification_input_relations = JSON.stringify(qualificationRelationsForStarted(eventIdentity.family, artifactContext.inputs));
+    } catch (error) {
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot capture qualification input relations: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    }
+  }
   if (eventIdentity.phase === 'started' && eventIdentity.family === 'code') {
     const planInput = artifactContext?.inputs.find((input) => input.family === 'plan');
     if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started plan input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
@@ -841,6 +872,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   } else if (eventIdentity.phase === 'completed' && eventIdentity.family.startsWith('review-')) {
     frontmatterRemove = ['review_input_artifact', 'review_input_sha256'];
   }
+  if (eventIdentity.phase === 'completed') frontmatterRemove = [...(frontmatterRemove ?? []), 'qualification_input_relations'];
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
     { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove }

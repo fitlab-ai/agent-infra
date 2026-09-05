@@ -6,7 +6,13 @@ import path from 'node:path';
 
 import { applyQualificationProposal } from '../../../lib/task/qualification-intents.ts';
 import { applyQualificationConfirmation } from '../../../lib/qualify.ts';
-import { parseQualificationConfirmations, parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
+import {
+  buildQualificationAudit,
+  parseQualificationConfirmations,
+  parseTaskQualification,
+  renderQualificationAudit,
+  validateQualificationAudit
+} from '../../../lib/task/qualification-audit.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const VERSION = 'v0.9.13-alpha.0';
@@ -152,9 +158,55 @@ test('top-level qualification confirms the current digest and creates a core-own
     if (confirmations.ok) {
       assert.equal(confirmations.confirmations[0]?.actor, 'human-declared');
       assert.equal(confirmations.confirmations[0]?.entrypoint, 'ai qualify');
-      assert.equal(confirmations.confirmations[0]?.approvedDigest, initial.qualification.constraintDigest);
+      const current = parseTaskQualification(content);
+      assert.equal(current.ok, true);
+      if (!current.ok) return;
+      assert.equal(confirmations.confirmations[0]?.approvedDigest, current.qualification.constraints[0]?.digest);
+      const audit = buildQualificationAudit(content);
+      assert.equal(audit.ok, true);
+      if (!audit.ok) return;
+      assert.equal(validateQualificationAudit(content, `## Qualification Audit\n\n${renderQualificationAudit(audit.audit)}`, { require: true }).ok, true);
+
+      const changed = content.replace('Keep the public writer', 'Keep the public writer exactly');
+      const changedAudit = buildQualificationAudit(changed);
+      assert.equal(changedAudit.ok, true);
+      if (!changedAudit.ok) return;
+      const stale = validateQualificationAudit(changed, `## Qualification Audit\n\n${renderQualificationAudit(changedAudit.audit)}`, { require: true });
+      assert.equal(stale.ok, false);
+      if (!stale.ok) assert.equal(stale.code, 'QUALIFICATION_CONFIRMATION_DIGEST_MISMATCH');
     }
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('top-level qualification supersedes and revokes confirmed constraints', () => {
+  for (const operation of ['supersede', 'revoke'] as const) {
+    const { repoRoot, taskMd } = fixture();
+    try {
+      const initial = parseTaskQualification(fs.readFileSync(taskMd, 'utf8'));
+      assert.equal(initial.ok, true);
+      if (!initial.ok) continue;
+      assert.equal(applyQualificationConfirmation({
+        taskRef: TASK_ID, constraintId: 'C-1', expectedDigest: initial.qualification.constraintDigest,
+        rationale: 'Confirm before transition.'
+      }, { repoRoot, metadataProvider: metadata }).status, 'applied');
+      const confirmed = parseTaskQualification(fs.readFileSync(taskMd, 'utf8'));
+      assert.equal(confirmed.ok, true);
+      if (!confirmed.ok) continue;
+      const request = {
+        taskRef: TASK_ID, constraintId: 'C-1', expectedDigest: confirmed.qualification.constraintDigest,
+        rationale: `${operation} obsolete confirmation.`, operation
+      };
+      assert.equal(applyQualificationConfirmation(request, { repoRoot, metadataProvider: metadata }).status, 'applied');
+      const changed = parseTaskQualification(fs.readFileSync(taskMd, 'utf8'));
+      assert.equal(changed.ok, true);
+      if (!changed.ok) continue;
+      assert.equal(changed.qualification.constraints[0]?.status, operation === 'supersede' ? 'superseded' : 'open');
+      assert.equal(changed.qualification.constraints[0]?.approvalEvidence, '');
+      assert.equal(applyQualificationConfirmation(request, { repoRoot, metadataProvider: metadata }).status, 'no-op');
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
   }
 });

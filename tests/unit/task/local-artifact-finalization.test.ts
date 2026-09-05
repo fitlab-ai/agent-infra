@@ -5,6 +5,7 @@ import {
   validateLocalArtifact,
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
+import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 
 const PLAN_SECTIONS = [
   ['问题理解', '范围说明'],
@@ -106,4 +107,34 @@ test('code reports support the same one-line heading repair and semantic baselin
   const repaired = validateLocalArtifact(malformed.replace('## 测试结果：', '## 测试结果'), { family: 'code' });
   assert.equal(repaired.ok, true);
   assert.equal(repaired.semanticDigest, failed.semanticDigest);
+});
+
+test('code report validation binds qualification relations to the started input', () => {
+  const task = `---
+id: TASK-20260101-000001
+code_input_artifact: plan.md
+code_input_sha256: ${'a'.repeat(64)}
+---
+
+# Task
+
+## 约束
+
+| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| C-1 | Use the approved plan | derived | task-input | task.md | task.md#约束 |  |  |
+
+## 候选与否决方案
+
+| candidate_id | statement | status | constraint_ids | impact | evidence |
+| --- | --- | --- | --- | --- | --- |
+| A | Use the approved plan | pending | C-1 | bounded | task.md#候选与否决方案 |
+`;
+  const audit = buildQualificationAudit(task);
+  assert.equal(audit.ok, true);
+  if (!audit.ok) return;
+  const content = `${artifact('code')}\n## 资格审计\n\n${renderQualificationAudit(audit.audit)}\n`;
+  const result = validateLocalArtifact(content, { family: 'code', taskContent: task, artifact: 'code.md' });
+  const mismatch = diagnostic(result, 'LOCAL_QUALIFICATION_AUDIT_INVALID');
+  assert.match(mismatch.message, /QUALIFICATION_UPSTREAM_RELATION_MISMATCH/);
 });

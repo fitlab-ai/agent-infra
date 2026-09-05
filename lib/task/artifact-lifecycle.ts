@@ -442,8 +442,8 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
         `Latest ${reviewPlan.latest.name} approves plan content not captured by the latest code input receipt. Entering replan-driven init.`);
     }
   }
-  if (reviewMax < codeMax) {
-    const expected = artifactName('review-code', codeMax);
+  if (!reviewCode.latest || reviewCode.reviewedInput?.name !== latestCode.name) {
+    const expected = reviewCode.next?.name ?? artifactName('review-code', reviewMax + 1);
     return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `${expected} is required before another code round`, expected);
   }
   const review = reviewCode.latest;

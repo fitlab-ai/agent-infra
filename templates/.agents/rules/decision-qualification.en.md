@@ -13,7 +13,7 @@ Any analysis, plan, implementation, or review that decides whether a human decis
 - A `confirmed` constraint requires source evidence, the current semantic digest, and a qualification confirmation record; a confirmation for an old digest cannot be reused.
 - `derived`, `assumption`, `open`, `conflicted`, and `superseded` are pending facts and cannot automatically exclude a candidate.
 - The internal proposal entry point may write only non-confirmed constraints and `pending` candidates. It cannot write actor, QCR, confirmed, or approval fields.
-- `ai qualify` is a declarative process-level human-confirmation entry point. `human-declared` is an audit label, not identity authentication. The core generates the QCR and binds it to the current digest, request id, time, and a single-line rationale.
+- `ai qualify` is the declarative process-level entry point for human confirmation, supersession, and revocation. `human-declared` is an audit label, not identity authentication. On confirmation, the core generates the QCR and binds it to the current post-write per-constraint digest, request id, time, and a single-line rationale. Supersession and revocation move the constraint to `superseded` and `open`, respectively, clear current approval evidence, and retain historical QCRs.
 
 ## Invalidation and review
 
