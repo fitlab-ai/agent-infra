@@ -15,6 +15,10 @@ Review the latest code round and produce `review-code.md` or `review-code-r{N}.m
 
 ## Boundary / Critical Rules
 
+### Persisted Report Evidence
+
+Before generating the review report, read `.agents/rules/evidence-reporting.md`. Normal inspection records the command, scope, structured result, actual conclusion, and uncovered parts; findings, blocking conditions, or disputes retain reproducible locations and decisive excerpts, while identity fields remain exact.
+
 - This skill reviews code and writes a report; it does not modify product code
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - After executing this skill, you **must** immediately update task.md
@@ -34,7 +38,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
 
-Run these commands and paste the raw output into this round's `## State Check` section:
+Run these commands and record the task/artifact scope, key result, and uncovered parts in this round's `## State Check` section; do not paste complete directory listings or task tails on normal success. Retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

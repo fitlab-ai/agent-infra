@@ -15,6 +15,10 @@ Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill 
 
 ## Boundary / Critical Rules
 
+### Persisted Report Evidence
+
+Before generating the implementation report, read `.agents/rules/evidence-reporting.md`. Successful tests record the command, target scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt instead of complete successful stdout.
+
 - Follow the latest plan artifact: `plan.md` or `plan-r{N}.md`
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”
@@ -31,7 +35,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first.
 
-Run these commands and paste the raw output into this round's `## State Check` section:
+Run these commands and record the task/artifact scope, key result, and uncovered parts in this round's `## State Check` section; do not paste complete directory listings or task tails on normal success. Retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

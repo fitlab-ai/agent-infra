@@ -11,7 +11,8 @@ Use the following structure when creating `pr-review.md` or `pr-review-r{N}.md`.
 
 ## State Check
 
-> Paste the state-check command output verbatim; each command starts with `$ `.
+> Record the state-check command, PR/head, review scope, key result, and uncovered parts; each command starts with `$ `.
+> Follow `.agents/rules/evidence-reporting.md`: record PR, head, review scope, key result, and uncovered parts; do not paste complete successful stdout.
 
 ## Identity
 
@@ -76,10 +77,10 @@ Land the following in order before the line-level findings, without impersonatin
 
 ## Evidence
 
-> Every "I verified X" assertion must pair with the corresponding tool output verbatim; the gate only checks this section exists and has at least one `$ ` line.
+> Follow `.agents/rules/evidence-reporting.md`: pair every assertion with a `$ ` command and proportionate result summary; formal Review, failures, blocking conditions, or disputes retain exact identity and decisive excerpts.
 
 - Assertion: {verified claim}
 ```text
 $ {command}
-{raw output}
+{result summary or decisive excerpt}
 ```

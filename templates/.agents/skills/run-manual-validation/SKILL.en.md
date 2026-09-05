@@ -16,6 +16,10 @@ The entry point may omit the task ref; explicit task scope accepts only `--task 
 
 ## Boundary
 
+### Persisted Report Evidence
+
+Before generating a validation report, read `.agents/rules/evidence-reporting.md`. Record only the command name, target scope, exit status, sanitized result, and coverage gap; never record complete argv, environment variables, tokens, absolute paths, or a raw sensitive transcript.
+
 - Select the validation mode, call the sole mechanical entry point, and record evidence; do not mark PR manual validation complete.
 - `complete-manual-validation` remains the maintainer's final registration after coverage is judged sufficient.
 - Never manipulate temporary worktrees, leases, or containers directly; only call `agent-infra-internal task-validate`.
@@ -24,7 +28,7 @@ The entry point may omit the task ref; explicit task scope accepts only `--task 
 
 ## Step 0: State Check (pre-execution hard gate)
 
-Resolve the task reference, then run this command and copy its original output into the artifact:
+Resolve the task reference, then run this command and record the task/artifact scope, key result, and uncovered parts in the artifact; do not paste complete directory listings or task tails on normal success. Retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

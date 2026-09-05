@@ -22,7 +22,8 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 
 ## State Check
 
-> Paste the raw state-check command output; each command starts with `$ `.
+> Record the state-check command, task/artifact scope, key result, and uncovered parts; each command starts with `$ `.
+> Follow `.agents/rules/evidence-reporting.md`: record task/artifact scope, key result, and uncovered parts; do not paste complete successful stdout.
 
 ## Modified Files
 
@@ -60,12 +61,12 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 
 ## Evidence
 
-> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present.
+> Follow `.agents/rules/evidence-reporting.md`: pair each claim with a `$ ` command and proportionate result summary; include a decisive raw excerpt only for failures, blocking conditions, or disputes.
 
 - Claim: {verified claim}
 ```text
 $ {command}
-{raw output}
+{result summary or decisive excerpt}
 ```
 
 ## Differences from Plan

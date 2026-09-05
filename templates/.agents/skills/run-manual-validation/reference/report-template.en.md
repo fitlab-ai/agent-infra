@@ -10,8 +10,9 @@
 
 ```text
 $ agent-infra-internal task-snapshot {task-id} --format text
-{raw-output}
+{command-summary-and-key-result}
 ```
+> Follow `.agents/rules/evidence-reporting.md`: record command name, target scope, exit status, sanitized result, and coverage gap; do not paste complete argv or sensitive transcripts.
 
 ## Validation Target
 
@@ -67,3 +68,4 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 $ agent-infra-internal task-validate {task-ref} --scope {scope} --format json -- {redacted-command}
 {sanitized-result}
 ```
+> Keep only the allowed public command and sanitized structured result; complete successful stdout is not default report content.

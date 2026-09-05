@@ -14,6 +14,10 @@ Lifecycle events require explicit trigger data: use `{trigger-initiator}=orchest
 
 ## Boundary / Critical Rules
 
+### Persisted Report Evidence
+
+Before generating the validation completion report, read `.agents/rules/evidence-reporting.md`. Record commands, scope, structured results, actual conclusions, and uncovered parts for state checks and synchronization; keep the stricter basename-only and sanitized-result boundaries for manual validation.
+
 - This skill closes the manual-validation status in an existing PR summary comment; it does not create a parallel ordinary validation comment.
 - It must write `manual-validation.md` or `manual-validation-r{N}.md` so later PR summary refreshes can reuse the validation result.
 - If the `sync-pr` summary comment is missing, fail instead of creating a partial fallback summary.
@@ -26,7 +30,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
 
-Run these commands and paste the raw output into this round's `## State Check` section:
+Run these commands and record the task/artifact scope, key result, and uncovered parts in this round's `## State Check` section; do not paste complete directory listings or task tails on normal success. Retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

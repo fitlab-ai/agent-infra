@@ -14,7 +14,8 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## State Check
 
-> Paste the raw state-check command output; each command starts with `$ `.
+> Record the state-check command, review scope, key result, and uncovered parts; each command starts with `$ `.
+> Follow `.agents/rules/evidence-reporting.md`: record review scope, key result, and uncovered parts; do not paste complete successful stdout.
 
 ## Review Summary
 
@@ -124,12 +125,12 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## Evidence
 
-> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present. Every Blocker must use reproducible test, call-chain, state-transition, data-flow, specification-conflict, or accurate-location evidence; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
+> Follow `.agents/rules/evidence-reporting.md`: pair each claim with a `$ ` command and proportionate result summary; Blockers, failures, blocking conditions, or disputes require reproducible evidence, exact location, and a decisive excerpt; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
 
 - Claim: {verified claim}
 ```text
 $ {command}
-{raw output}
+{result summary or decisive excerpt}
 ```
 
 ## Self-Doubt

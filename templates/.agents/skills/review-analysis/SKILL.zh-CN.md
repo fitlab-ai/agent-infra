@@ -15,6 +15,10 @@ description: >
 
 ## 行为边界 / 关键规则
 
+### 持久化报告证据
+
+生成审查报告时，先读取 `.agents/rules/evidence-reporting.md`。正常检视记录命令、范围、结构化结果、实际结论和未覆盖部分；finding、阻塞或争议保留可复现位置与决定性摘录，身份字段必须精确保留。
+
 - 本技能只审查分析产物并写报告，不修改业务代码
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 执行本技能后，你**必须**立即更新 task.md
@@ -25,7 +29,7 @@ description: >
 
 在加载 workflow / skill / rules 指令之后、做任何任务状态判断或用户可见结论之前，必须先执行状态核对。指令类文件读取不算对外动作或结论。
 
-运行以下命令，并把原文粘贴到本轮产物的 `## 状态核对` 段：
+运行以下命令，并在本轮产物的 `## 状态核对` 段记录任务/产物范围、关键结果和未覆盖部分；正常成功不粘贴完整目录清单或 `task.md` 尾部。失败、阻塞、身份不一致或争议时，附决定性原文行：
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

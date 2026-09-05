@@ -14,6 +14,10 @@ Host finalization uses receipt v2 with an immutable `receiptId`, monotonic `revi
 
 ## Boundary / Critical Rules
 
+### Persisted Report Evidence
+
+Before generating a completion report or synchronized content, read `.agents/rules/evidence-reporting.md`. Successful checks record the command, scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt.
+
 - This command updates task metadata AND physically moves the task directory
 - Do not move a task that has incomplete workflow steps unless forced
 - The entry point accepts optional `--external-pr <N>` only to select among ambiguous external-delivery candidates; it never bypasses identity or platform gates
@@ -24,7 +28,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
 
-Run these commands and paste the raw output into this round's `## State Check` section:
+Run these commands and record the task/artifact scope, key result, and uncovered parts in this round's `## State Check` section; do not paste complete directory listings or task tails on normal success. Retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text
@@ -123,7 +127,7 @@ If a hard gate is not met, stop immediately and do not execute Steps 3-8.
 ### 3. Complete Business-Only Content
 
 Update only content that the lifecycle core does not own:
-- Add or update the `## State Check` section with the raw Step 0 audit command output, including `$ ` prompt lines, before `## Activity Log`
+- Add or update the `## State Check` section with the Step 0 audit command, task/artifact scope, key result, and uncovered parts; for normal success, do not copy the full directory listing or `task.md` tail, and include decisive raw lines only for failures, blocking, identity mismatches, or disputes, before `## Activity Log`
 - Mark all workflow steps as complete
 - Verify and check off all items in `## Completion Checklist` (change `- [ ]` to `- [x]`)
 

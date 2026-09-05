@@ -15,6 +15,7 @@ $ git status -s
 $ ls -la .agents/workspace/active/{task-id}/
 $ tail .agents/workspace/active/{task-id}/task.md
 ```
+> 按 `.agents/rules/evidence-reporting.md` 记录任务范围、关键结果和未覆盖部分；正常成功不粘贴完整目录清单或 task tail。
 
 ## 验证结论
 
@@ -46,3 +47,4 @@ $ tail .agents/workspace/active/{task-id}/task.md
 - `验证范围` 来自 PR 摘要评论中的 `### ⚠️ 需人工校验` 段。
 - `PR 摘要同步` 必须记录成功、跳过或失败结果。
 - 只有在摘要评论已成功更新或无 diff 跳过时，才写入通过产物。
+- 成功同步记录命令、范围、结构化结果和实际结论；失败、阻塞或争议保留决定性摘录，并继续遵守人工验证脱敏边界。

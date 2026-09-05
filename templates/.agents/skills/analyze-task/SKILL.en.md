@@ -13,6 +13,10 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 ## Boundary / Critical Rules
 
+### Persisted Report Evidence
+
+Before generating the analysis report, read `.agents/rules/evidence-reporting.md`. Record the command, target scope, status or structured result, actual result, and uncovered parts for state checks and successful checks; include decisive raw excerpts only for failures, blocking conditions, or disputes.
+
 - This skill only outputs a requirements analysis document (`analysis.md` or `analysis-r{N}.md`) and does not modify any business code
 - Base the analysis strictly on the existing task input, requirements, context, and source information in `task.md`
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
@@ -25,7 +29,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
 
-Run these commands and paste the raw output into this round's `## State Check` section:
+Run these commands and record the task/artifact scope, key result, and uncovered parts in this round's `## State Check` section; do not paste complete directory listings or task tails on normal success. Retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text
@@ -143,7 +147,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ## State Check
 
-> Paste the raw Step 0 state-check command output; each command starts with `$ `.
+> Record the Step 0 state-check command, task/artifact scope, key result, and uncovered parts; each command starts with `$ `. Do not paste complete directory listings or task tails on normal success; retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes.
 
 ## Requirement Source
 

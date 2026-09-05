@@ -15,6 +15,7 @@ $ git status -s
 $ ls -la .agents/workspace/active/{task-id}/
 $ tail .agents/workspace/active/{task-id}/task.md
 ```
+> Follow `.agents/rules/evidence-reporting.md`: record task scope, key result, and uncovered parts; do not paste the complete directory listing or task tail for normal success.
 
 ## Validation Verdict
 
@@ -46,3 +47,4 @@ $ tail .agents/workspace/active/{task-id}/task.md
 - Derive `Validation Scope` from the PR summary's manual-verification section.
 - `PR Summary Sync` must record success, skip, or failure.
 - Only write a passing artifact after the summary comment is updated or skipped because there is no diff.
+- Successful synchronization records the command, scope, structured result, and actual conclusion; failures, blocking conditions, or disputes retain decisive excerpts and manual-validation redaction boundaries.

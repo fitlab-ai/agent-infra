@@ -14,7 +14,8 @@
 
 ## 状态核对
 
-> 粘贴状态核对命令原文；每条命令以 `$ ` 开头。
+> 记录状态核对命令、审查范围、关键结果和未覆盖部分；每条命令以 `$ ` 开头。
+> 按 `.agents/rules/evidence-reporting.md` 同时记录审查范围、关键结果和未覆盖部分；正常成功不粘贴完整 stdout。
 
 ## 审查摘要
 
@@ -124,12 +125,12 @@
 
 ## 证据原文
 
-> 每条“我验证了 X”断言都要配对对应 tool output 原文；gate 仅校验本段存在和至少一行 `$ `。每条 Blocker 必须配可复现的测试、调用链、状态转换、数据流、规范冲突或准确位置证据；无法复现的判断须降级或移入「自我质疑」。
+> 遵循 `.agents/rules/evidence-reporting.md`：每条断言配对 `$ ` 命令和相称结果摘要；Blocker、失败、阻塞或争议必须保留可复现证据、准确位置和决定性摘录；无法复现的判断须降级或移入「自我质疑」。
 
 - 断言：{verified claim}
 ```text
 $ {command}
-{raw output}
+{result summary or decisive excerpt}
 ```
 
 ## 自我质疑

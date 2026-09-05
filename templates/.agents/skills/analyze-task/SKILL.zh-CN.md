@@ -13,6 +13,10 @@ description: >
 
 ## 行为边界 / 关键规则
 
+### 持久化报告证据
+
+生成分析报告时，先读取 `.agents/rules/evidence-reporting.md`。状态核对和成功检查记录命令、目标范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议才附决定性原文摘录。
+
 - 本技能仅产出需求分析文档（`analysis.md` 或 `analysis-r{N}.md`）—— 不修改任何业务代码
 - 严格基于 `task.md` 中已有的任务输入、需求、上下文和来源信息展开分析
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
@@ -25,7 +29,7 @@ description: >
 
 在加载 workflow / skill / rules 指令之后、做任何任务状态判断或用户可见结论之前，必须先执行状态核对。指令类文件读取不算对外动作或结论。
 
-运行以下命令，并把原文粘贴到本轮产物的 `## 状态核对` 段：
+运行以下命令，并在本轮产物的 `## 状态核对` 段记录任务/产物范围、关键结果和未覆盖部分；正常成功不粘贴完整目录清单或 `task.md` 尾部。失败、阻塞、身份不一致或争议时，附决定性原文行：
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text
@@ -146,7 +150,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {standard-agen
 
 ## 状态核对
 
-> 粘贴第 0 步状态核对命令原文；每条命令以 `$ ` 开头。
+> 记录第 0 步状态核对命令、任务/产物范围、关键结果和未覆盖部分；每条命令以 `$ ` 开头。正常成功不粘贴完整目录清单或 `task.md` 尾部，失败、阻塞、身份不一致或争议时附决定性原文行。
 
 ## 需求来源
 
