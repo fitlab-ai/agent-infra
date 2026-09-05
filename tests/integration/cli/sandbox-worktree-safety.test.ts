@@ -7,6 +7,7 @@ import path from "node:path";
 
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
+import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
 import {
   cliArgs,
   envWithPrependedPath,
@@ -20,6 +21,17 @@ type SafetyModule = typeof import("../../../lib/sandbox/worktree-safety.ts");
 type ManagedFsModule = typeof import("../../../lib/sandbox/managed-fs.ts");
 type RmModule = typeof import("../../../lib/sandbox/commands/rm.ts");
 type PruneModule = typeof import("../../../lib/sandbox/commands/prune.ts");
+
+const FIXTURE_CONTAINER_ID = "f".repeat(64);
+
+function fixtureAuthorityEvidence() {
+  return captureSandboxAuthority("docker-desktop", {
+    lockDomain: "a".repeat(64),
+    probe: () => ({
+      status: 0, signal: null, stdout: JSON.stringify({ ID: "fixture-daemon-id", APIVersion: "1.50" }), stderr: "", pid: 1, output: []
+    })
+  });
+}
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -226,7 +238,7 @@ test("sandbox rm retries control and workspace cleanup after the container is al
     fs.mkdirSync(workspaceViewRoot, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
-      project: "demo", container, containerIdentity: { id: "fixture-container-id", labels: {} }, branch,
+      project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
       mode: "branch-only", taskId: null, token: "partial-secret", generation: "partial-generation",
       channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
       runtimeDir: path.join(controlRoot, "runtime")
@@ -298,7 +310,7 @@ test("sandbox rm removes an empty control container parent after control cleanup
     fs.mkdirSync(processingDir, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
-      project: "demo", container, containerIdentity: { id: "empty-parent-container", labels: {} }, branch,
+      project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
       mode: "branch-only", taskId: null, token: "empty-parent-secret", generation: "empty-parent-generation",
       channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
       runtimeDir: path.join(controlRoot, "runtime")
@@ -820,7 +832,8 @@ test("sandbox rm rejects a control manifest whose container does not match its c
       worktreeRoot: fixture.repoDir,
       project: "demo",
       container: "different-container",
-      containerIdentity: { id: "fixture-container-id", labels: {} },
+      containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} },
+      authorityEvidence: fixtureAuthorityEvidence(),
       branch,
       mode: "task-bound",
       taskId,
@@ -908,7 +921,8 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
       worktreeRoot: fixture.repoDir,
       project: "demo",
       container,
-      containerIdentity: { id: "fixture-container-id", labels: {} },
+      containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} },
+      authorityEvidence: fixtureAuthorityEvidence(),
       branch,
       mode: "task-bound",
       taskId,

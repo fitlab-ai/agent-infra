@@ -27,6 +27,7 @@ import {
   writeSandboxControlResultEvidence
 } from '../../../lib/sandbox/control/state.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
+import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
 import { onPlatforms } from '../../helpers.ts';
@@ -396,6 +397,26 @@ test('sandbox control removal gives container operations a bounded pre-force bud
     await callbackDone;
     assert.equal(callbackTimeout > 0, true);
     assert.equal(callbackTimeout <= 200, true);
+    assert.equal(fs.existsSync(root), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control removal records pending evidence when the exact removal outlives the deadline', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-pending-'));
+  try {
+    writeControlManifest(root, initializeRepository(root), 'remove-pending-generation');
+    await assert.rejects(
+      () => removeSandboxControlRoot(root, {
+        timeoutMs: 30,
+        inspectContainer: async () => ({ state: 'found', id: 'container-id', running: false, labels: {} }),
+        removeContainer: async () => { await new Promise((resolve) => setTimeout(resolve, 100)); }
+      }),
+      /SANDBOX_CONTROL_REMOVE_PENDING/
+    );
+    const pending = JSON.parse(fs.readFileSync(path.join(root, 'removal-pending.json'), 'utf8')) as Record<string, unknown>;
+    assert.equal(pending.phase, 'container-removal');
     assert.equal(fs.existsSync(root), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1631,14 +1652,28 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
     fs.copyFileSync(path.resolve(relative), target);
   }
   const docker = path.join(fakeBin, 'docker');
-  fs.writeFileSync(docker, '#!/bin/sh\n[ "$1" = exec ] && [ "$3" = cat ] && exec cat "$4"\nexit 1\n', { mode: 0o700 });
+  const containerId = 'f'.repeat(64);
+  fs.writeFileSync(docker, `#!/bin/sh
+if [ "$1" = version ]; then printf '%s\\n' '{"ID":"daemon-id","APIVersion":"1.50"}'; exit 0; fi
+if [ "$1" = container ] && [ "$2" = ls ]; then printf '%s\\n' '${containerId}'; exit 0; fi
+if [ "$1" = container ] && [ "$2" = inspect ]; then printf '%s\\n' '{"Id":"${containerId}","State":{"Running":true},"Config":{"Labels":{}}}'; exit 0; fi
+[ "$1" = exec ] && [ "$3" = cat ] && exec cat "$4"
+exit 1
+`, { mode: 0o700 });
+  const authorityEvidence = captureSandboxAuthority('native', {
+    lockDomain: 'a'.repeat(64),
+    probe: () => ({
+      status: 0, signal: null, stdout: JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }), stderr: '', pid: 1, output: []
+    })
+  });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'native',
     repoRoot: root,
     worktreeRoot: root,
     project: 'demo',
     container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} },
+    containerIdentity: { id: containerId, labels: {} },
+    authorityEvidence,
     branch,
     mode: 'task-bound',
     taskId: 'TASK-20260809-010203',

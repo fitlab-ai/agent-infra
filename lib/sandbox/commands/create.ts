@@ -92,6 +92,7 @@ import {
 } from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
+import { captureSandboxAuthority } from '../engines/authority.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { ensureSandboxDiscoveryReadmes } from '../readme-scaffold.ts';
 import { removeDirRecursive } from '../../remove-dir.ts';
@@ -1566,10 +1567,12 @@ export async function create(args: string[]): Promise<void> {
               for (const [key, expected] of Object.entries(expectedLabels)) {
                 if (labels[key] !== expected) throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
               }
+              const authorityEvidence = captureSandboxAuthority(engine);
               finalizeSandboxControlManifest(control, {
                 engine,
                 id: containerId,
-                labels: expectedLabels
+                labels: expectedLabels,
+                authorityEvidence
               });
               replacementLease.clearQuiescing();
               await startSandboxControlBroker(effectiveConfig.repoRoot, control.manifestPath);
