@@ -15,6 +15,10 @@ Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill 
 
 ## Boundary / Critical Rules
 
+## Persisted Report Evidence
+
+Before generating the implementation report, read `.agents/rules/evidence-reporting.md`. Successful tests record the command, target scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt instead of complete successful stdout.
+
 - Follow the latest plan artifact: `plan.md` or `plan-r{N}.md`
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”

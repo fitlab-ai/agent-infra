@@ -14,6 +14,10 @@ Lifecycle events require explicit trigger data: use `{trigger-initiator}=orchest
 
 ## Boundary / Critical Rules
 
+## Persisted Report Evidence
+
+Before generating the validation completion report, read `.agents/rules/evidence-reporting.md`. Record commands, scope, structured results, actual conclusions, and uncovered parts for state checks and synchronization; keep the stricter basename-only and sanitized-result boundaries for manual validation.
+
 - This skill closes the manual-validation status in an existing PR summary comment; it does not create a parallel ordinary validation comment.
 - It must write `manual-validation.md` or `manual-validation-r{N}.md` so later PR summary refreshes can reuse the validation result.
 - If the `sync-pr` summary comment is missing, fail instead of creating a partial fallback summary.

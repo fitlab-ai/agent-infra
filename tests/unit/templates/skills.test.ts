@@ -336,6 +336,63 @@ test("workflow state-check consumers use the typed task snapshot entrypoint", ()
   });
 });
 
+test("lifecycle report producers reference the shared evidence rule", () => {
+  const reportSkills = [
+    "analyze-task",
+    "plan-task",
+    "code-task",
+    "review-analysis",
+    "review-plan",
+    "review-code",
+    "review-pr",
+    "run-manual-validation",
+    "complete-manual-validation",
+    "complete-task"
+  ];
+
+  reportSkills.forEach((skill) => {
+    skillDocPaths(skill).forEach((relativePath) => {
+      assert.match(
+        read(relativePath),
+        /\.agents\/rules\/evidence-reporting\.md/,
+        `${relativePath} should reference the shared evidence rule`
+      );
+    });
+  });
+
+  [
+    ".agents/rules/evidence-reporting.md",
+    "templates/.agents/rules/evidence-reporting.en.md",
+    "templates/.agents/rules/evidence-reporting.zh-CN.md"
+  ].forEach((relativePath) => assert.ok(exists(relativePath), `${relativePath} should exist`));
+
+  [
+    ".agents/skills/code-task/reference/report-template.md",
+    ".agents/skills/review-analysis/reference/report-template.md",
+    ".agents/skills/review-plan/reference/report-template.md",
+    ".agents/skills/review-code/reference/report-template.md",
+    ".agents/skills/review-pr/reference/report-template.md",
+    ".agents/skills/run-manual-validation/reference/report-template.md",
+    ".agents/skills/complete-manual-validation/reference/report-template.md",
+    "templates/.agents/skills/code-task/reference/report-template.en.md",
+    "templates/.agents/skills/review-analysis/reference/report-template.en.md",
+    "templates/.agents/skills/review-plan/reference/report-template.en.md",
+    "templates/.agents/skills/review-code/reference/report-template.en.md",
+    "templates/.agents/skills/review-pr/reference/report-template.en.md",
+    "templates/.agents/skills/run-manual-validation/reference/report-template.en.md",
+    "templates/.agents/skills/complete-manual-validation/reference/report-template.en.md",
+    "templates/.agents/skills/code-task/reference/report-template.zh-CN.md",
+    "templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md",
+    "templates/.agents/skills/review-plan/reference/report-template.zh-CN.md",
+    "templates/.agents/skills/review-code/reference/report-template.zh-CN.md",
+    "templates/.agents/skills/review-pr/reference/report-template.zh-CN.md",
+    "templates/.agents/skills/run-manual-validation/reference/report-template.zh-CN.md",
+    "templates/.agents/skills/complete-manual-validation/reference/report-template.zh-CN.md"
+  ].forEach((relativePath) => {
+    assert.match(read(relativePath), /evidence-reporting\.md/, `${relativePath} should point to the evidence rule`);
+  });
+});
+
 test("review skills declare one initial finalizer before their completion event", () => {
   const stages = [
     { skill: "review-analysis", stage: "analysis" },

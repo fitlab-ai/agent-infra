@@ -15,6 +15,10 @@ description: >
 
 ## 行为边界 / 关键规则
 
+## 持久化报告证据
+
+生成实现报告时，先读取 `.agents/rules/evidence-reporting.md`。成功测试记录命令、目标范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议保留复现入口、准确位置和决定性摘录，不默认粘贴完整成功 stdout。
+
 - 严格遵循最新方案产物：`plan.md` 或 `plan-r{N}.md`
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 实现前读取 `.agents/rules/compatibility-policy.md`；只实现方案明确批准的兼容预算，不以“稳妥”为由保留旧分支、旧结果契约或迁移 shim

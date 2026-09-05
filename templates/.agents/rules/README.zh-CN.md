@@ -12,6 +12,7 @@
 - [`version-stamp.md`](version-stamp.md) — `agent_infra_version` 版本戳的取值命令与写入时机。
 - [`debugging-guide.md`](debugging-guide.md) — 结构化调试流程：收集证据→形成假设→验证假设→修复根因，禁止盲目改代码重试。
 - [`compatibility-policy.md`](compatibility-policy.md) — 兼容性默认关闭：准入证据、实现边界、退出条件与生命周期审查要求。
+- [`evidence-reporting.md`](evidence-reporting.md) — 生命周期报告的状态核对、成功摘要、异常证据、身份字段和敏感信息边界。
 - [`sync-content-generation.md`](sync-content-generation.md) — 同步到 Issue 的任务和生命周期 Markdown 生成约束。
 
 ## Issue / PR

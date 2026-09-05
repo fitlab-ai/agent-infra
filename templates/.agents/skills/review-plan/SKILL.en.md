@@ -15,6 +15,10 @@ Review the latest plan artifact and produce `review-plan.md` or `review-plan-r{N
 
 ## Boundary / Critical Rules
 
+## Persisted Report Evidence
+
+Before generating the review report, read `.agents/rules/evidence-reporting.md`. Normal inspection records the command, scope, structured result, actual conclusion, and uncovered parts; findings, blocking conditions, or disputes retain reproducible locations and decisive excerpts, while identity fields remain exact.
+
 - This skill only reviews plan artifacts and writes a report; it does not modify product code.
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - After executing this skill, you **must** immediately update task.md.

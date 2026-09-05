@@ -14,6 +14,10 @@ description: >
 
 ## 行为边界 / 关键规则
 
+## 持久化报告证据
+
+生成验证完成报告时，先读取 `.agents/rules/evidence-reporting.md`。状态核对和同步结果记录命令、范围、结构化结果、实际结论和未覆盖部分；继续遵守人工验证的 basename-only 与 sanitized result 脱敏边界。
+
 - 本技能用于收尾已有 PR 摘要评论中的人工校验状态，不创建并行的普通验证留言。
 - 必须写入 `manual-validation.md` 或 `manual-validation-r{N}.md`，让后续 PR 摘要刷新可复用人工验证结果。
 - 找不到 `sync-pr` 摘要评论时失败，不创建部分摘要兜底。

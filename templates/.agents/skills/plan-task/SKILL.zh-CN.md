@@ -13,6 +13,10 @@ description: >
 
 ## 行为边界 / 关键规则
 
+## 持久化报告证据
+
+生成方案报告时，先读取 `.agents/rules/evidence-reporting.md`。状态核对和验证记录命令、目标范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议才附决定性原文摘录。
+
 - 本技能仅产出技术方案文档（`plan.md` 或 `plan-r{N}.md`）—— 不修改任何业务代码
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 这是一个**强制性的人工审查检查点** —— 不要自动进入实现阶段

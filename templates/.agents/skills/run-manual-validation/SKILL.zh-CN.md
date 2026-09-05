@@ -16,6 +16,10 @@ description: >
 
 ## 行为边界
 
+## 持久化报告证据
+
+生成验证报告时，先读取 `.agents/rules/evidence-reporting.md`。只记录命令名称、目标范围、退出状态、sanitized result 和覆盖缺口；不得记录完整 argv、环境变量、token、绝对路径或原始敏感 transcript。
+
 - 本技能负责选择校验模式、调用唯一机械入口并记录证据；不把 PR 人工校验标为完成。
 - `complete-manual-validation` 仍是维护者确认覆盖充分后的最终登记入口。
 - 禁止直接操作临时 worktree、lease 或 container；只调用 `agent-infra-internal task-validate`。

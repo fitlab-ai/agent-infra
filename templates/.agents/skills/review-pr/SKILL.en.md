@@ -12,6 +12,10 @@ Based on the target PR's lifecycle-evidence completeness and change risk, select
 
 ## Boundary / Critical Rules
 
+## Persisted Report Evidence
+
+Before generating the PR review report, read `.agents/rules/evidence-reporting.md`. Normal review records the command, scope, structured result, actual conclusion, and uncovered parts; formal Review, findings, blocking conditions, or disputes retain exact identity fields and decisive evidence.
+
 - Strictly follow the fixed evidence-grading decision flow: host resolution → evidence classification → freshness/alignment → risk grading → mode selection
 - `pr-review*` is an independent artifact family: it does not join the analysis/plan/code stage chain and never changes `current_step`
 - Only a formal PR Review (head SHA, conclusion, findings, receipt, Issue artifact link) is published on the PR; no second full process copy goes to a regular PR comment

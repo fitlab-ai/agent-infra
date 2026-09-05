@@ -14,6 +14,10 @@ Host finalization uses receipt v2 with an immutable `receiptId`, monotonic `revi
 
 ## Boundary / Critical Rules
 
+## Persisted Report Evidence
+
+Before generating a completion report or synchronized content, read `.agents/rules/evidence-reporting.md`. Successful checks record the command, scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt.
+
 - This command updates task metadata AND physically moves the task directory
 - Do not move a task that has incomplete workflow steps unless forced
 - The entry point accepts optional `--external-pr <N>` only to select among ambiguous external-delivery candidates; it never bypasses identity or platform gates

@@ -16,6 +16,10 @@ The entry point may omit the task ref; explicit task scope accepts only `--task 
 
 ## Boundary
 
+## Persisted Report Evidence
+
+Before generating a validation report, read `.agents/rules/evidence-reporting.md`. Record only the command name, target scope, exit status, sanitized result, and coverage gap; never record complete argv, environment variables, tokens, absolute paths, or a raw sensitive transcript.
+
 - Select the validation mode, call the sole mechanical entry point, and record evidence; do not mark PR manual validation complete.
 - `complete-manual-validation` remains the maintainer's final registration after coverage is judged sufficient.
 - Never manipulate temporary worktrees, leases, or containers directly; only call `agent-infra-internal task-validate`.

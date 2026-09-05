@@ -13,6 +13,7 @@ so you can quickly find "which ones to read" without opening each file.
 - [`version-stamp.md`](version-stamp.md) — How and when to stamp `agent_infra_version`.
 - [`debugging-guide.md`](debugging-guide.md) — Structured debugging flow: gather evidence → form hypothesis → verify hypothesis → fix the root cause; no blind patch-and-retry.
 - [`compatibility-policy.md`](compatibility-policy.md) — Compatibility by exception: admission evidence, implementation boundaries, exit conditions, and lifecycle review requirements.
+- [`evidence-reporting.md`](evidence-reporting.md) — Minimum evidence semantics for state checks, successful summaries, exceptional results, identity fields, and sensitive data boundaries.
 - [`sync-content-generation.md`](sync-content-generation.md) — Producer-side Markdown constraints for task and lifecycle content synchronized to Issues.
 
 ## Issue / PR
