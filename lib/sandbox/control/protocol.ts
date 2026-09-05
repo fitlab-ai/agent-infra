@@ -38,7 +38,7 @@ export type SandboxControlContainerIdentity = Readonly<{
 export type SandboxControlManifestBase = Readonly<{
   engine: string; repoRoot: string; worktreeRoot: string; project: string; container: string;
   containerIdentity: SandboxControlContainerIdentity;
-  authorityEvidence?: SandboxAuthorityEvidenceV1 | null;
+  authorityEvidence: SandboxAuthorityEvidenceV1;
   branch: string; mode: 'task-bound' | 'branch-only'; taskId: string | null; token: string;
   generation: string; channelDir: string; publicStatusDir: string; processingDir: string;
 }>;

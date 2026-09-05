@@ -61,14 +61,14 @@ test('container inspection maps only an authoritative exact-empty query to absen
     authorityEvidence: evidence
   } as any;
   const absent = await inspectSandboxControlContainer(manifest, {
-    probe: (_cmd, args) => args[0] === 'version'
+    probe: (_cmd, args) => args.includes('version')
       ? ({ status: 0, signal: null, stdout: JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }), stderr: '', pid: 1, output: [] })
       : ({ status: 0, signal: null, stdout: '', stderr: '', pid: 1, output: [] })
   });
   assert.deepEqual(absent, { state: 'absent', id });
 
   const unknown = await inspectSandboxControlContainer(manifest, {
-    probe: (_cmd, args) => args[0] === 'version'
+    probe: (_cmd, args) => args.includes('version')
       ? ({ status: 0, signal: null, stdout: JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }), stderr: '', pid: 1, output: [] })
       : ({ status: 1, signal: null, stdout: '', stderr: 'No such container', pid: 1, output: [] })
   });

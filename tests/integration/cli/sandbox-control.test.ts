@@ -13,6 +13,7 @@ import {
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
 import {
+  clearSandboxRemovalJournal,
   garbageCollectSandboxControlRoot,
   quiesceSandboxControlRoot,
   readSandboxControlManifest,
@@ -270,6 +271,16 @@ function initializeRepository(root: string): string {
   return execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8' }).trim();
 }
 
+function fixtureAuthorityEvidence() {
+  return captureSandboxAuthority('native', {
+    lockDomain: 'a'.repeat(64),
+    probe: () => ({
+      status: 0, signal: null, stdout: JSON.stringify({ ID: 'fixture-daemon-id', APIVersion: '1.50' }),
+      stderr: '', pid: 1, output: []
+    })
+  });
+}
+
 function writeControlManifest(root: string, branch: string, generation = 'lifecycle-generation'): string {
   const manifestPath = path.join(root, 'manifest.json');
   const channelDir = path.join(root, 'channel');
@@ -278,7 +289,7 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
   for (const directory of [channelDir, publicStatusDir, processingDir]) fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, branch,
+    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'lifecycle-secret', generation,
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);
@@ -380,8 +391,9 @@ test('sandbox control removal gives container operations a bounded pre-force bud
   let callbackTimeout = 0;
   let callbackFinished!: () => void;
   const callbackDone = new Promise<void>((resolve) => { callbackFinished = resolve; });
+  let manifestPath: string | undefined;
   try {
-    writeControlManifest(root, initializeRepository(root), 'remove-deadline-generation');
+    manifestPath = writeControlManifest(root, initializeRepository(root), 'remove-deadline-generation');
     await assert.rejects(
       () => removeSandboxControlRoot(root, {
         timeoutMs: 200,
@@ -399,14 +411,16 @@ test('sandbox control removal gives container operations a bounded pre-force bud
     assert.equal(callbackTimeout <= 200, true);
     assert.equal(fs.existsSync(root), true);
   } finally {
+    if (manifestPath && fs.existsSync(root)) clearSandboxRemovalJournal(readSandboxControlManifest(manifestPath));
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('sandbox control removal records pending evidence when the exact removal outlives the deadline', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-pending-'));
+  let manifestPath: string | undefined;
   try {
-    writeControlManifest(root, initializeRepository(root), 'remove-pending-generation');
+    manifestPath = writeControlManifest(root, initializeRepository(root), 'remove-pending-generation');
     await assert.rejects(
       () => removeSandboxControlRoot(root, {
         timeoutMs: 30,
@@ -419,6 +433,7 @@ test('sandbox control removal records pending evidence when the exact removal ou
     assert.equal(pending.phase, 'container-removal');
     assert.equal(fs.existsSync(root), true);
   } finally {
+    if (manifestPath && fs.existsSync(root)) clearSandboxRemovalJournal(readSandboxControlManifest(manifestPath));
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -836,7 +851,7 @@ test('sandbox broker startup resolves only after matching status is published', 
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, branch,
+    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'readiness-secret', generation: 'readiness-generation',
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);
@@ -868,7 +883,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, branch,
+    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'owner-secret', generation: 'owner-generation',
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);
@@ -889,7 +904,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     assert.equal(second.startTime, first.startTime);
     fs.writeFileSync(manifestPath, `${JSON.stringify({
       engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
-      containerIdentity: { id: 'container-id', labels: {} }, branch,
+      containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
       mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'rotated-owner-secret', generation: 'rotated-generation',
       channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
     })}\n`);
@@ -1576,6 +1591,7 @@ test('sandbox control client and broker exchange a task-bound response', async (
     project: 'demo',
     container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} },
+    authorityEvidence: fixtureAuthorityEvidence(),
     branch,
     mode: 'task-bound',
     taskId,
@@ -1654,6 +1670,7 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
   const docker = path.join(fakeBin, 'docker');
   const containerId = 'f'.repeat(64);
   fs.writeFileSync(docker, `#!/bin/sh
+if [ "$1" = --context ] && [ "$2" = default ]; then shift 2; fi
 if [ "$1" = version ]; then printf '%s\\n' '{"ID":"daemon-id","APIVersion":"1.50"}'; exit 0; fi
 if [ "$1" = container ] && [ "$2" = ls ]; then printf '%s\\n' '${containerId}'; exit 0; fi
 if [ "$1" = container ] && [ "$2" = inspect ]; then printf '%s\\n' '{"Id":"${containerId}","State":{"Running":true},"Config":{"Labels":{}}}'; exit 0; fi
@@ -1769,7 +1786,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, branch,
+      containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'branch-only', taskId: null, token, generation, channelDir,
     publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'control', 'runtime')
   })}\n`);
@@ -1854,7 +1871,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
-    containerIdentity: { id: 'container-id', labels: {} }, branch,
+    containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'recovery-secret', generation,
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);

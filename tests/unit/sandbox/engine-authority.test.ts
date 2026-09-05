@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   authorityVersionArgs,
   captureSandboxAuthority,
+  commandForSandboxAuthority,
   verifySandboxAuthority
 } from '../../../lib/sandbox/engines/authority.ts';
 
@@ -44,5 +45,17 @@ test('authority verification rejects route or daemon drift', () => {
   assert.deepEqual(verifySandboxAuthority(null, original), {
     state: 'unknown',
     reason: 'SANDBOX_AUTHORITY_EVIDENCE_MISSING'
+  });
+});
+
+test('persisted endpoint authority builds probes without reading the current route', () => {
+  const evidence = captureSandboxAuthority('native', {
+    env: { DOCKER_HOST: 'tcp://docker.example.test:2376' },
+    probe: () => probeResult(JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }))
+  });
+
+  assert.deepEqual(commandForSandboxAuthority(evidence, 'docker', ['container', 'ls']), {
+    cmd: 'docker',
+    args: ['--host', 'tcp://docker.example.test:2376', 'container', 'ls']
   });
 });

@@ -157,6 +157,12 @@ function sandboxFixture(): SandboxFixture {
     project: 'dual-mode',
     container: 'dual-mode-container',
     containerIdentity: { id: 'container-id', labels: {} },
+    authorityEvidence: {
+      version: 1, provider: 'test', lockDomain: 'a'.repeat(64), routeKind: 'default',
+      routeSelector: { source: 'docker-default' }, normalizedEndpoint: 'docker-default',
+      endpointFingerprint: 'b'.repeat(64), daemonIdentity: { kind: 'docker-server-id', fingerprint: 'c'.repeat(64) },
+      apiVersion: { major: 1, minor: 50 }, authorityFingerprint: 'd'.repeat(64)
+    },
     branch: execFileSync('git', ['branch', '--show-current'], { cwd: fixture.root, encoding: 'utf8' }).trim(),
     mode: 'task-bound',
     taskId: TASK_ID,

@@ -53,7 +53,8 @@ export async function inspectSandboxControlContainer(
     const authority = captureSandboxAuthority(manifest.engine, {
       probe: options.probe,
       timeoutMs: options.timeoutMs,
-      lockDomain: manifest.authorityEvidence.lockDomain
+      lockDomain: manifest.authorityEvidence.lockDomain,
+      route: manifest.authorityEvidence
     });
     const authorityState = verifySandboxAuthority(manifest.authorityEvidence, authority);
     if (authorityState.state !== 'verified') {
@@ -61,7 +62,8 @@ export async function inspectSandboxControlContainer(
     }
     const discovered = discoverExactContainer(manifest.engine, manifest.containerIdentity.id, {
       probe: options.probe,
-      timeoutMs: options.timeoutMs
+      timeoutMs: options.timeoutMs,
+      authority: manifest.authorityEvidence
     });
     if (discovered.state === 'absent') return { state: 'absent', id: discovered.id };
     if (discovered.state === 'conflict') {

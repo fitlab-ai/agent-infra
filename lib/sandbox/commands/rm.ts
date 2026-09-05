@@ -19,7 +19,7 @@ import {
 import { ENGINES, detectEngine, engineDisplayName, isManagedEngine, stopManagedVm } from '../engine.ts';
 import { pruneSandboxDanglingImages } from '../image-prune.ts';
 import { assertManagedPath, removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
-import { runEngine, runOk, runOkEngine, runSafe, runSafeEngine } from '../shell.ts';
+import { run, runEngine, runOk, runOkEngine, runSafe, runSafeEngine } from '../shell.ts';
 import {
   parseSandboxWorkspaceIdentity,
   resolveSandboxCleanupTarget,
@@ -28,8 +28,14 @@ import {
   type SandboxWorkspaceKey
 } from '../workspace-identity.ts';
 import { sandboxControlPaths, sandboxWorkspaceViewPaths } from '../workspace-view.ts';
-import { removeSandboxControlRoot, readSandboxControlManifest } from '../control/lifecycle.ts';
+import {
+  clearSandboxRemovalJournal,
+  removeSandboxControlRoot,
+  readSandboxControlManifest
+} from '../control/lifecycle.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
+import { commandForSandboxAuthority } from '../engines/authority.ts';
+import { acquireSandboxResourceLock, type SandboxResourceLock } from '../control/native-file-lock.ts';
 import { toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
 import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
@@ -425,15 +431,17 @@ async function removeExactSandboxContainer(
   const deadlineAt = Date.now() + timeoutMs;
   const remaining = (): number => Math.max(1, deadlineAt - Date.now());
   const inspect = () => inspectSandboxControlContainer(manifest, { timeoutMs: remaining() });
+  const runAuthorityCommand = (args: string[]): boolean => {
+    const command = manifest.authorityEvidence
+      ? commandForSandboxAuthority(manifest.authorityEvidence, 'docker', args)
+      : null;
+    return command ? runOk(command.cmd, command.args, { timeout: remaining() })
+      : runOkEngine(engine, 'docker', args, { timeout: remaining() });
+  };
   const before = await inspect();
   if (before.state === 'unknown') throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${before.reason}`);
   if (before.state === 'absent') return;
-  if (before.running && !runOkEngine(
-    engine,
-    'docker',
-    ['stop', '--timeout', '1', manifest.containerIdentity.id],
-    { timeout: remaining() }
-  )) {
+  if (before.running && !runAuthorityCommand(['stop', '--timeout', '1', manifest.containerIdentity.id])) {
     const afterStop = await inspect();
     if (afterStop.state !== 'absent' && afterStop.state !== 'found') {
       throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${afterStop.reason}`);
@@ -444,7 +452,7 @@ async function removeExactSandboxContainer(
   }
   const afterStop = await inspect();
   if (afterStop.state === 'unknown') throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${afterStop.reason}`);
-  if (afterStop.state === 'found' && !runOkEngine(engine, 'docker', ['rm', manifest.containerIdentity.id], { timeout: remaining() })) {
+  if (afterStop.state === 'found' && !runAuthorityCommand(['rm', manifest.containerIdentity.id])) {
     const afterRemove = await inspect();
     if (afterRemove.state !== 'absent') {
       throw new Error(`Failed to remove sandbox container: ${manifest.containerIdentity.id}`);
@@ -586,7 +594,21 @@ async function rmOne(
     return;
   }
 
-  preflightRmTarget(config, target);
+  const coordinatedManifests = controlRoots
+    .filter((candidate) => fs.existsSync(candidate))
+    .flatMap((root) => {
+      const manifestPath = path.join(root, 'manifest.json');
+      return fs.existsSync(manifestPath) ? [[root, readSandboxControlManifest(manifestPath)] as const] : [];
+    });
+  const resourceLocks = new Map<string, SandboxResourceLock>();
+  try {
+    for (const [root, manifest] of [...coordinatedManifests].sort(([left], [right]) => left.localeCompare(right))) {
+      resourceLocks.set(root, acquireSandboxResourceLock(
+        `${manifest.engine}:${manifest.containerIdentity.id}`,
+        { lockDomain: manifest.authorityEvidence.lockDomain }
+      ));
+    }
+    preflightRmTarget(config, target);
   const coordinatedContainers = new Set<string>();
   for (const root of controlRoots.filter((candidate) => fs.existsSync(candidate))) {
     assertLegacyCandidateEvidence(root, config.controlBase, config, effectiveBranch, matchedContainers);
@@ -597,7 +619,9 @@ async function rmOne(
     coordinatedContainers.add(manifest.container);
     await removeSandboxControlRoot(root, {
       inspectContainer: (timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }),
-      removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs)
+      removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs),
+      resourceLock: resourceLocks.get(root),
+      retainRemovalJournal: true
     });
     removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
   }
@@ -694,8 +718,13 @@ async function rmOne(
     }
   }
 
+  for (const [, manifest] of coordinatedManifests) clearSandboxRemovalJournal(manifest);
+
   if (!options.quiet) {
     p.outro(pc.green('Sandbox removed'));
+  }
+  } finally {
+    for (const lock of [...resourceLocks.values()].reverse()) lock.release();
   }
 }
 

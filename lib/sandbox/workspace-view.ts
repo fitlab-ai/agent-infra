@@ -57,7 +57,7 @@ export type SandboxControlSetup = Readonly<{
   generation: string;
 }>;
 
-export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 'containerIdentity' | 'engine'> & {
+export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 'containerIdentity' | 'engine' | 'authorityEvidence'> & {
   engine: string;
 }>;
 
@@ -260,7 +260,7 @@ export function finalizeSandboxControlManifest(
     engine: string;
     id: string;
     labels: Readonly<Record<string, string>>;
-    authorityEvidence?: SandboxControlManifest['authorityEvidence'];
+    authorityEvidence: SandboxControlManifest['authorityEvidence'];
   }>
 ): SandboxControlManifest {
   if (!identity.engine || !identity.id) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
@@ -268,7 +268,7 @@ export function finalizeSandboxControlManifest(
     ...setup.manifestDraft,
     engine: identity.engine,
     containerIdentity: { id: identity.id, labels: { ...identity.labels } },
-    authorityEvidence: identity.authorityEvidence ?? setup.manifestDraft.authorityEvidence ?? null
+    authorityEvidence: identity.authorityEvidence
   };
   const temporary = `${setup.manifestPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   try {

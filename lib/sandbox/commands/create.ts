@@ -92,7 +92,12 @@ import {
 } from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
-import { captureSandboxAuthority } from '../engines/authority.ts';
+import {
+  captureSandboxAuthority,
+  commandForSandboxAuthority,
+  verifySandboxAuthority,
+  type SandboxAuthorityEvidenceV1
+} from '../engines/authority.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { ensureSandboxDiscoveryReadmes } from '../readme-scaffold.ts';
 import { removeDirRecursive } from '../../remove-dir.ts';
@@ -924,6 +929,16 @@ function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts:
   return runTaskCommand(command.cmd, command.args, opts);
 }
 
+function runSandboxAuthorityTaskCommand(
+  authority: SandboxAuthorityEvidenceV1,
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string } = {}
+): string {
+  const command = commandForSandboxAuthority(authority, cmd, args);
+  return runTaskCommand(command.cmd, command.args, opts);
+}
+
 // `docker run` args for mounting a tool's containerMount as an in-container
 // tmpfs. containerMount is an in-container path, so it is NOT engine-converted.
 export function buildTmpfsRunArgs(containerMount: string, tmpfs: { size?: string }): string[] {
@@ -1483,7 +1498,8 @@ export async function create(args: string[]): Promise<void> {
 
             let createdContainerRef: string | null = null;
             try {
-              const dockerRunId = runEngineTaskCommand(engine, 'docker', [
+              const authority = captureSandboxAuthority(engine);
+              const dockerRunId = runSandboxAuthorityTaskCommand(authority, 'docker', [
               'run',
               '-d',
               '--init',
@@ -1538,11 +1554,11 @@ export async function create(args: string[]): Promise<void> {
               effectiveConfig.imageName
               ]);
               createdContainerRef = dockerRunId.trim();
-              const containerId = runEngineTaskCommand(engine, 'docker', [
+              const containerId = runSandboxAuthorityTaskCommand(authority, 'docker', [
                 'inspect', '--format', '{{.Id}}', dockerRunId.trim()
               ]).trim();
               if (!containerId) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
-              const rawContainerLabels = runEngineTaskCommand(engine, 'docker', [
+              const rawContainerLabels = runSandboxAuthorityTaskCommand(authority, 'docker', [
                 'inspect', '--format', '{{json .Config.Labels}}', containerId
               ]).trim();
               let inspectedLabels: unknown;
@@ -1567,7 +1583,13 @@ export async function create(args: string[]): Promise<void> {
               for (const [key, expected] of Object.entries(expectedLabels)) {
                 if (labels[key] !== expected) throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
               }
-              const authorityEvidence = captureSandboxAuthority(engine);
+              const authorityEvidence = captureSandboxAuthority(engine, {
+                route: authority,
+                lockDomain: authority.lockDomain
+              });
+              if (verifySandboxAuthority(authority, authorityEvidence).state !== 'verified') {
+                throw new Error('SANDBOX_AUTHORITY_DRIFT_DURING_CREATE');
+              }
               finalizeSandboxControlManifest(control, {
                 engine,
                 id: containerId,

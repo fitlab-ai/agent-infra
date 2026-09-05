@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { buildProcessTreeStopCommand } from '../../server/process-control.ts';
 import {
   getProcessIdentityState,
@@ -16,7 +17,7 @@ import type {
 } from './protocol.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from './protocol.ts';
 import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
-import { acquireSandboxResourceLock } from './native-file-lock.ts';
+import { acquireSandboxResourceLock, type SandboxResourceLock } from './native-file-lock.ts';
 import { isSandboxAuthorityEvidence } from '../engines/authority.ts';
 import {
   parseSandboxControlStatus,
@@ -32,6 +33,43 @@ const QUIESCING_FILE = 'quiescing.json';
 const BROKER_STARTING_FILE = 'broker-starting.json';
 const REPLACEMENT_FILE = 'replacement.json';
 const REPLACEMENT_STATE_SUFFIX = '.replacement-state.json';
+const REMOVAL_JOURNAL_ROOT = path.join('.agent-infra', 'sandbox-removal-journal');
+
+function removalJournalPath(manifest: SandboxControlManifest): string {
+  const carrierDigest = createHash('sha256')
+    .update(`${manifest.engine}\0${manifest.containerIdentity.id}`)
+    .digest('hex');
+  return path.join(os.homedir(), REMOVAL_JOURNAL_ROOT, manifest.authorityEvidence.lockDomain, `${carrierDigest}.json`);
+}
+
+function writeRemovalJournal(manifest: SandboxControlManifest, phase: string): void {
+  const target = removalJournalPath(manifest);
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  const existing = fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, 'utf8')) as { revision?: unknown } : null;
+  const revision = typeof existing?.revision === 'number' && Number.isSafeInteger(existing.revision)
+    ? existing.revision + 1 : 1;
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify({
+      version: 1,
+      revision,
+      phase,
+      containerId: manifest.containerIdentity.id,
+      generation: manifest.generation,
+      authorityFingerprint: manifest.authorityEvidence.authorityFingerprint,
+      lockDomain: manifest.authorityEvidence.lockDomain,
+      recordedAt: Date.now()
+    })}\n`, { mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, target);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
+export function clearSandboxRemovalJournal(manifest: SandboxControlManifest): void {
+  const target = removalJournalPath(manifest);
+  if (fs.existsSync(target)) fs.rmSync(target, { force: true });
+}
 
 async function awaitWithDeadline<T>(
   operation: () => Promise<T>,
@@ -97,13 +135,14 @@ function recordSandboxRemovalPending(
       phase,
       containerId: manifest.containerIdentity.id,
       generation: manifest.generation,
-      authorityFingerprint: manifest.authorityEvidence?.authorityFingerprint ?? null,
+      authorityFingerprint: manifest.authorityEvidence.authorityFingerprint,
       recordedAt: Date.now()
     })}\n`, { mode: 0o600, flag: 'wx' });
     fs.renameSync(temporary, pendingPath);
   } finally {
     fs.rmSync(temporary, { force: true });
   }
+  writeRemovalJournal(manifest, phase);
 }
 
 function readStartupOwner(filePath: string): { raw: string; owner: OwnerIdentity } | null {
@@ -522,11 +561,10 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
   const expectedKeys = [
     'branch', 'channelDir', 'container', 'containerIdentity', 'engine', 'generation',
     'mode', 'processingDir', 'project', 'publicStatusDir', 'repoRoot', 'runtimeDir',
-    'taskId', 'token', 'worktreeRoot'
+    'taskId', 'token', 'worktreeRoot', 'authorityEvidence'
   ];
-  const currentExpectedKeys = [...expectedKeys, 'authorityEvidence'];
   const actualKeys = Object.keys(manifest).sort().join(',');
-  if (actualKeys !== expectedKeys.sort().join(',') && actualKeys !== currentExpectedKeys.sort().join(',')) {
+  if (actualKeys !== expectedKeys.sort().join(',')) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
   if (typeof candidate.containerIdentity !== 'object' || candidate.containerIdentity === null
@@ -549,8 +587,7 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     || typeof candidate.generation !== 'string'
     || (candidate.mode === 'task-bound' && (typeof candidate.taskId !== 'string' || candidate.taskId.length === 0))
     || (candidate.mode === 'branch-only' && candidate.taskId !== null)
-    || (candidate.authorityEvidence !== undefined && candidate.authorityEvidence !== null
-      && !isSandboxAuthorityEvidence(candidate.authorityEvidence))) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+    || !isSandboxAuthorityEvidence(candidate.authorityEvidence)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const root = path.dirname(path.resolve(manifestPath));
   if (path.resolve(candidate.channelDir) !== path.join(root, 'channel')
     || path.resolve(candidate.publicStatusDir) !== path.join(root, 'public')
@@ -570,7 +607,7 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
       id: containerIdentity.id as string,
       labels: { ...(containerIdentity.labels as Record<string, string>) }
     },
-    authorityEvidence: candidate.authorityEvidence ?? null,
+    authorityEvidence: candidate.authorityEvidence,
     branch: candidate.branch,
     mode: candidate.mode,
     taskId: candidate.taskId,
@@ -845,6 +882,8 @@ export type RemoveSandboxControlOptions = Readonly<{
   removeContainer: (timeoutMs: number) => Promise<void>;
   requireAbsent?: boolean;
   selfOwner?: BrokerOwner;
+  resourceLock?: SandboxResourceLock;
+  retainRemovalJournal?: boolean;
 }>;
 
 export async function removeSandboxControlRoot(
@@ -857,9 +896,9 @@ export async function removeSandboxControlRoot(
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
   const manifestPath = path.join(resolvedRoot, 'manifest.json');
   const manifest = readSandboxControlManifest(manifestPath);
-  const resourceLock = acquireSandboxResourceLock(
+  const resourceLock = options.resourceLock ?? acquireSandboxResourceLock(
     `${manifest.engine}:${manifest.containerIdentity.id}`,
-    { lockDomain: manifest.authorityEvidence?.lockDomain }
+    { lockDomain: manifest.authorityEvidence.lockDomain }
   );
   try {
   const inspectContainer = options.inspectContainer
@@ -873,6 +912,7 @@ export async function removeSandboxControlRoot(
     () => inspectContainer(remaining()), deadlineAt, 'SANDBOX_CONTROL_REMOVE_DEADLINE_EXCEEDED'
   );
   if (observation.state === 'unknown') throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${observation.reason}`);
+  writeRemovalJournal(manifest, observation.state === 'absent' ? 'container-absent' : 'container-removal');
   if (options.requireAbsent && observation.state !== 'absent') {
     throw new Error('SANDBOX_CONTROL_CONTAINER_REAPPEARED');
   }
@@ -914,7 +954,10 @@ export async function removeSandboxControlRoot(
   }
 
   if (observation.state === 'found') {
-    if (Date.now() >= deadlineAt) throw new Error('SANDBOX_CONTROL_REMOVE_DEADLINE_EXCEEDED');
+    if (Date.now() >= deadlineAt) {
+      recordSandboxRemovalPending(resolvedRoot, manifest, 'container-removal');
+      throw new Error('SANDBOX_CONTROL_REMOVE_PENDING');
+    }
     let afterRemoval: ContainerObservation;
     try {
       await awaitWithDeadline(
@@ -939,6 +982,7 @@ export async function removeSandboxControlRoot(
         ? `SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${afterRemoval.reason}`
         : 'SANDBOX_CONTROL_CONTAINER_STILL_EXISTS');
     }
+    writeRemovalJournal(manifest, 'container-absent');
   }
 
   const currentManifest = readSandboxControlManifest(manifestPath);
@@ -1013,9 +1057,12 @@ export async function removeSandboxControlRoot(
   if (fs.existsSync(brokerPath) || fs.existsSync(statusPath)) {
     throw new Error('SANDBOX_CONTROL_OWNER_EVIDENCE_REMAINS');
   }
+  writeRemovalJournal(manifest, 'carrier-finalizing');
   fs.rmSync(resolvedRoot, { recursive: true, force: true });
+  writeRemovalJournal(manifest, 'carrier-removed');
+  if (!options.retainRemovalJournal) clearSandboxRemovalJournal(manifest);
   } finally {
-    resourceLock.release();
+    if (!options.resourceLock) resourceLock.release();
   }
 }
 

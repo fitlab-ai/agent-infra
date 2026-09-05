@@ -26,6 +26,7 @@ export type AuthorityCaptureOptions = Readonly<{
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   lockDomain?: string;
+  route?: SandboxAuthorityEvidenceV1;
 }>;
 
 export type AuthorityVerification = Readonly<{
@@ -87,9 +88,51 @@ function routeFor(engine: string, env: NodeJS.ProcessEnv): Readonly<{
     return { kind: 'context', selector: { context }, endpoint: `docker-context://${context}` };
   }
   if (env.DOCKER_HOST) {
-    return { kind: 'endpoint', selector: { source: 'DOCKER_HOST' }, endpoint: safeEndpoint(env.DOCKER_HOST) };
+    const endpoint = safeEndpoint(env.DOCKER_HOST);
+    return { kind: 'endpoint', selector: { source: 'DOCKER_HOST', endpoint }, endpoint };
   }
   return { kind: 'default', selector: { source: 'docker-default' }, endpoint: 'docker-default' };
+}
+
+function routeFromEvidence(evidence: SandboxAuthorityEvidenceV1): Readonly<{
+  kind: SandboxAuthorityEvidenceV1['routeKind'];
+  selector: Readonly<Record<string, string>>;
+  endpoint: string;
+}> {
+  return {
+    kind: evidence.routeKind,
+    selector: evidence.routeSelector,
+    endpoint: evidence.normalizedEndpoint
+  };
+}
+
+/** Build a command using only the route persisted with the sandbox authority. */
+export function commandForSandboxAuthority(
+  evidence: SandboxAuthorityEvidenceV1,
+  cmd: string,
+  args: string[] = []
+): { cmd: string; args: string[] } {
+  if (cmd !== 'docker') {
+    throw new Error('SANDBOX_AUTHORITY_ROUTE_UNSUPPORTED');
+  }
+  if (evidence.routeKind === 'context') {
+    const context = evidence.routeSelector.context;
+    if (!context) throw new Error('SANDBOX_AUTHORITY_ROUTE_INVALID');
+    return { cmd, args: ['--context', context, ...args] };
+  }
+  if (evidence.routeKind === 'endpoint') {
+    const endpoint = evidence.routeSelector.endpoint;
+    if (!endpoint || endpoint.includes('<redacted>')) {
+      throw new Error('SANDBOX_AUTHORITY_ROUTE_UNREPLAYABLE');
+    }
+    return { cmd, args: ['--host', endpoint, ...args] };
+  }
+  if (evidence.routeKind === 'wsl2') {
+    const distro = evidence.routeSelector.distro;
+    if (!distro) throw new Error('SANDBOX_AUTHORITY_ROUTE_INVALID');
+    return { cmd: 'wsl.exe', args: ['--distribution', distro, '--exec', cmd, ...args] };
+  }
+  return { cmd, args: ['--context', 'default', ...args] };
 }
 
 export function authorityVersionArgs(): string[] {
@@ -101,8 +144,10 @@ export function captureSandboxAuthority(
   options: AuthorityCaptureOptions = {}
 ): SandboxAuthorityEvidenceV1 {
   const env = options.env ?? process.env;
-  const route = routeFor(engine, env);
-  const command = commandForEngine(engine, 'docker', authorityVersionArgs());
+  const route = options.route ? routeFromEvidence(options.route) : routeFor(engine, env);
+  const command = options.route
+    ? commandForSandboxAuthority(options.route, 'docker', authorityVersionArgs())
+    : commandForEngine(engine, 'docker', authorityVersionArgs());
   let response: SpawnSyncReturns<string | Buffer>;
   try {
     response = (options.probe ?? runProbe)(
@@ -131,7 +176,7 @@ export function captureSandboxAuthority(
   const evidenceWithoutFingerprint = {
     version: 1 as const,
     provider: engine,
-    lockDomain: options.lockDomain ?? lockDomainFor(engine, normalizedEndpoint),
+    lockDomain: options.lockDomain ?? options.route?.lockDomain ?? lockDomainFor(engine, normalizedEndpoint),
     routeKind: route.kind,
     routeSelector: route.selector,
     normalizedEndpoint,
