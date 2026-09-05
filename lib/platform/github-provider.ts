@@ -443,6 +443,19 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       return { ok: true, value: issueSnapshot(fetched.value, graph || undefined) };
     },
     async create({ context, desired }) {
+      let milestone: number | null = null;
+      if (desired.milestone) {
+        const milestones = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=open&per_page=100`], { cwd: context.workingDirectory });
+        if (!milestones.ok) return milestones;
+        const values = Array.isArray(milestones.value)
+          ? milestones.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
+          : [];
+        const selected = values.find((item: any) => item?.title === desired.milestone);
+        if (!Number.isSafeInteger(selected?.number) || selected.number <= 0) {
+          return invalid('MILESTONE_IDENTITY_INVALID', 'Milestone title does not resolve to a positive number');
+        }
+        milestone = selected.number;
+      }
       const response = client.json<any>(['api', `repos/${repository(context)}/issues`, '-X', 'POST', '--input', '-'], {
         cwd: context.workingDirectory,
         method: 'POST',
@@ -451,7 +464,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
           body: desired.body,
           labels: desired.labels,
           assignees: desired.assignees,
-          ...(desired.milestone ? { milestone: desired.milestone } : {})
+          ...(milestone ? { milestone } : {})
         })
       });
       if (!response.ok) return response;
