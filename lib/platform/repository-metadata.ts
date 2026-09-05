@@ -312,6 +312,26 @@ function initialMilestonesResult(context: PlatformResult, history: boolean): Mil
   });
 }
 
+function labelsFromReconciliation(initial: LabelsResult, value: LabelReconciliation | undefined): LabelsResult['labels'] {
+  if (!value) return initial.labels;
+  return {
+    ...initial.labels,
+    created: value.created,
+    updated: value.updated,
+    removed: value.removed,
+    skipped: value.skipped
+  };
+}
+
+function milestonesFromInitialization(initial: MilestonesResult, value: MilestoneInitialization | undefined): MilestonesResult['milestones'] {
+  if (!value) return initial.milestones;
+  return {
+    ...initial.milestones,
+    created: value.created,
+    skipped: value.skipped
+  };
+}
+
 function usableContext(loaded: { ok: true; value: LoadedContext } | { ok: false; context: PlatformResult }): loaded is { ok: true; value: LoadedContext } {
   return loaded.ok && Boolean(loaded.value.context.platform.repository);
 }
@@ -345,6 +365,9 @@ async function initializeLabels(
   if (!reconciled.ok) return {
     ...initial,
     status: errorStatus(reconciled.error),
+    changed: reconciled.value?.changed || false,
+    operations: [{ name: 'reconcile-labels', status: 'failed', reasonCode: reconciled.error.code }],
+    labels: labelsFromReconciliation(initial, reconciled.value),
     error: providerError(reconciled.error, 'LABEL_INITIALIZATION_FAILED')
   };
   return {
@@ -402,7 +425,12 @@ async function initializeMilestones(
   if (!reconciled.ok) return {
     ...initial,
     status: errorStatus(reconciled.error),
-    milestones: { ...initial.milestones, baseline: plan.baseline, history, desired: plan.desired.map((item) => item.title) },
+    changed: reconciled.value?.changed || false,
+    operations: [{ name: 'reconcile-milestones', status: 'failed', reasonCode: reconciled.error.code }],
+    milestones: milestonesFromInitialization({
+      ...initial,
+      milestones: { ...initial.milestones, baseline: plan.baseline, history, desired: plan.desired.map((item) => item.title) }
+    }, reconciled.value),
     error: providerError(reconciled.error, 'MILESTONE_INITIALIZATION_FAILED')
   };
   return {

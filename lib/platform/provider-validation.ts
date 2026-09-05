@@ -567,11 +567,15 @@ async function invokeProviderOperation<T>(
     }
     if (envelope.ok === false && envelope.error && typeof envelope.error === 'object' && !Array.isArray(envelope.error)) {
       try {
-        exactKeys(envelope, ['ok', 'error'], `${operation} result`);
+        exactKeys(envelope, Object.hasOwn(envelope, 'value') ? ['ok', 'error', 'value'] : ['ok', 'error'], `${operation} result`);
         const error = envelope.error as Record<string, unknown>;
         exactKeys(error, ['code', 'message', 'retryable'], `${operation} error`);
         if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' || !error.message || typeof error.retryable !== 'boolean') throw new Error('invalid provider error');
-        return { ok: false, error: safeProviderError(providerType, operation, error) };
+        return {
+          ok: false,
+          error: safeProviderError(providerType, operation, error),
+          ...(Object.hasOwn(envelope, 'value') ? { value: validate(envelope.value) } : {})
+        };
       } catch {
         return { ok: false, error: validationError(providerType, operation, 'Provider operation returned an invalid error') };
       }

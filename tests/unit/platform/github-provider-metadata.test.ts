@@ -74,3 +74,136 @@ test('GitHub provider reconciles labels safely and creates missing milestones by
   assert.ok(calls.some((call) => call.method === 'DELETE'));
   assert.ok(calls.some((call) => call.method === 'POST' && call.input?.includes('"state":"closed"')));
 });
+
+test('GitHub provider preserves confirmed label mutations when a later mutation fails', async () => {
+  let posts = 0;
+  const client = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args: string[], options: { method?: string; input?: string } = {}) {
+      if (args.some((value) => value.includes('/labels?'))) return { ok: true, value: [[]] };
+      if (options.method === 'POST') {
+        posts += 1;
+        return posts === 1
+          ? { ok: true, value: { id: 1 } }
+          : { ok: false, error: { code: 'PERMISSION_DENIED', message: 'denied', retryable: false } };
+      }
+      return { ok: true, value: null };
+    },
+    text() { return { ok: true, value: '' }; }
+  } as GitHubClient;
+  const provider = createGitHubProvider({
+    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+  }, client);
+
+  const result = await provider.repositoryMetadata!.reconcileLabels({
+    context: { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' },
+    desired: [
+      { name: 'in: first', color: 'BFD4F2', description: 'first' },
+      { name: 'in: second', color: 'BFD4F2', description: 'second' }
+    ],
+    cleanupStaleIn: false,
+    mutation: { idempotencyKey: 'labels-partial' }
+  });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.error.code, 'PERMISSION_DENIED');
+    assert.deepEqual(result.value, {
+      changed: true,
+      created: ['in: first'],
+      updated: [],
+      removed: [],
+      skipped: []
+    });
+  }
+});
+
+test('GitHub provider preserves confirmed cleanup deletions when a later deletion fails', async () => {
+  let deletions = 0;
+  const client = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args: string[]) {
+      if (args.some((value) => value.includes('/labels?'))) {
+        return {
+          ok: true,
+          value: [[
+            { name: 'in: old-one', color: 'fff', description: '' },
+            { name: 'in: old-two', color: 'fff', description: '' }
+          ]]
+        };
+      }
+      return { ok: true, value: null };
+    },
+    text(_args: string[], options: { method?: string } = {}) {
+      if (options.method === 'DELETE') {
+        deletions += 1;
+        return deletions === 1
+          ? { ok: true, value: '' }
+          : { ok: false, error: { code: 'RATE_LIMITED', message: 'retry later', retryable: true } };
+      }
+      return { ok: true, value: '' };
+    }
+  } as GitHubClient;
+  const provider = createGitHubProvider({
+    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+  }, client);
+
+  const result = await provider.repositoryMetadata!.reconcileLabels({
+    context: { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' },
+    desired: [],
+    cleanupStaleIn: true,
+    mutation: { idempotencyKey: 'labels-cleanup-partial' }
+  });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.error.code, 'RATE_LIMITED');
+    assert.deepEqual(result.value, {
+      changed: true,
+      created: [],
+      updated: [],
+      removed: ['in: old-one'],
+      skipped: []
+    });
+  }
+});
+
+test('GitHub provider preserves confirmed milestone creations when a later creation fails', async () => {
+  let posts = 0;
+  const client = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args: string[], options: { method?: string; input?: string } = {}) {
+      if (args.some((value) => value.includes('/milestones?'))) return { ok: true, value: [[]] };
+      if (options.method === 'POST') {
+        posts += 1;
+        return posts === 1
+          ? { ok: true, value: { id: 1 } }
+          : { ok: false, error: { code: 'PERMISSION_DENIED', message: 'denied', retryable: false } };
+      }
+      return { ok: true, value: null };
+    },
+    text() { return { ok: true, value: '' }; }
+  } as GitHubClient;
+  const provider = createGitHubProvider({
+    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+  }, client);
+
+  const result = await provider.repositoryMetadata!.reconcileMilestones({
+    context: { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' },
+    desired: [
+      { title: '1.0.0', description: 'first', state: 'open' },
+      { title: '1.1.0', description: 'second', state: 'open' }
+    ],
+    mutation: { idempotencyKey: 'milestones-partial' }
+  });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.error.code, 'PERMISSION_DENIED');
+    assert.deepEqual(result.value, {
+      changed: true,
+      created: ['1.0.0'],
+      skipped: []
+    });
+  }
+});

@@ -22,7 +22,7 @@ type PlatformError = {
 
 type ProviderResult<T> =
   | { ok: true; value: T }
-  | { ok: false; error: PlatformError };
+  | { ok: false; error: PlatformError; value?: T };
 
 type ProviderOperationContext = {
   repositoryRoot: string;

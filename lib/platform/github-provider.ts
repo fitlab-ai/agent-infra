@@ -20,6 +20,7 @@ import type {
   MutationReceipt,
   MilestoneInitialization,
   PlatformContextSnapshot,
+  PlatformError,
   ProviderOperationContext,
   PlatformProvider,
   PlatformProviderFactoryInput,
@@ -342,6 +343,29 @@ function commentSnapshot(value: any): RemoteCommentSnapshot {
 
 function createReceipt(remoteId: string): ProviderResult<MutationReceipt> {
   return { ok: true, value: { changed: true, remoteId } };
+}
+
+function partialFailure<T>(response: { ok: false; error: PlatformError }, value: T): ProviderResult<T> {
+  return { ok: false, error: response.error, value };
+}
+
+function labelReconciliation(
+  created: string[],
+  updated: string[],
+  removed: string[],
+  skipped: string[]
+): LabelReconciliation {
+  return {
+    changed: created.length > 0 || updated.length > 0 || removed.length > 0,
+    created,
+    updated,
+    removed,
+    skipped
+  };
+}
+
+function milestoneInitialization(created: string[], skipped: string[]): MilestoneInitialization {
+  return { changed: created.length > 0, created, skipped };
 }
 
 function githubResourceToken(identity: ResourceIdentity | null | undefined): string | null {
@@ -905,6 +929,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       const created: string[] = [];
       const updated: string[] = [];
       const skipped: string[] = [];
+      const removed: string[] = [];
       for (const label of desired) {
         const existing = current.get(label.name);
         if (!existing) {
@@ -913,7 +938,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
             method: 'POST',
             input: JSON.stringify({ name: label.name, color: label.color, description: label.description })
           });
-          if (!response.ok) return response;
+          if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
           created.push(label.name);
           continue;
         }
@@ -928,11 +953,10 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
           method: 'PATCH',
           input: JSON.stringify({ new_name: label.name, color: label.color, description: label.description })
         });
-        if (!response.ok) return response;
+        if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
         updated.push(label.name);
       }
       const desiredNames = new Set(desired.map((label) => label.name));
-      const removed: string[] = [];
       if (cleanupStaleIn) {
         for (const name of current.keys()) {
           if (!name.startsWith('in:') || desiredNames.has(name)) continue;
@@ -940,7 +964,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
             cwd: context.workingDirectory,
             method: 'DELETE'
           });
-          if (!response.ok) return response;
+          if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
           removed.push(name);
         }
       }
@@ -978,7 +1002,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
           method: 'POST',
           input: JSON.stringify({ title: milestone.title, description: milestone.description, state: milestone.state })
         });
-        if (!response.ok) return response;
+        if (!response.ok) return partialFailure(response, milestoneInitialization(created, skipped));
         existing.add(milestone.title);
         created.push(milestone.title);
       }
@@ -991,15 +1015,15 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       const issue = input.issue && issues.inspect
         ? await issues.inspect({ context: input.context, target: input.issue })
         : { ok: true as const, value: null };
-      if (!issue.ok) return issue;
+      if (!issue.ok) return { ok: false, error: issue.error };
       const commentFacts = input.includeComments && input.issue && comments.list
         ? await comments.list({ context: input.context, parent: input.issue })
         : { ok: true as const, value: [] as RemoteCommentSnapshot[] };
-      if (!commentFacts.ok) return commentFacts;
+      if (!commentFacts.ok) return { ok: false, error: commentFacts.error };
       const changeRequest = input.changeRequest && changeRequests.inspect
         ? await changeRequests.inspect({ context: input.context, target: input.changeRequest })
         : { ok: true as const, value: null };
-      if (!changeRequest.ok) return changeRequest;
+      if (!changeRequest.ok) return { ok: false, error: changeRequest.error };
       return {
         ok: true,
         value: {

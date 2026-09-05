@@ -1,5 +1,6 @@
 export default async function createPlatformProvider(input) {
   const state = String(input.config.state || 'open');
+  const partialMetadata = input.config.metadataFailure === 'partial';
   return {
     type: input.providerType,
     contractVersion: input.contractVersion,
@@ -27,6 +28,17 @@ export default async function createPlatformProvider(input) {
     },
     repositoryMetadata: {
       async reconcileLabels(request) {
+        if (partialMetadata) return {
+          ok: false,
+          error: { code: 'PERMISSION_DENIED', message: 'denied', retryable: false },
+          value: {
+            changed: true,
+            created: ['in: partial'],
+            updated: [],
+            removed: [],
+            skipped: []
+          }
+        };
         return {
           ok: true,
           value: {
