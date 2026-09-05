@@ -1171,6 +1171,81 @@ test('task-bound finalization rejects a new request after accepted response loss
   }
 });
 
+test('broker recovery cleans up a normally published large-output terminal', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-large-terminal-recovery-'));
+  const requestId = '99999999-9999-4999-8999-999999999999';
+  const output = 'x'.repeat(2 * 1024 * 1024);
+  const childStderr = 'child warning\n';
+  let controller = new AbortController();
+  let server: Promise<void> | undefined;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch);
+    const manifest = readSandboxControlManifest(manifestPath);
+    const executorPath = path.join(root, 'output.cjs');
+    fs.writeFileSync(executorPath, [
+      "process.once('message', () => {",
+      '  process.disconnect();',
+      `  process.stdout.write('x'.repeat(${output.length}));`,
+      `  process.stderr.write(${JSON.stringify(childStderr)});`,
+      '});'
+    ].join('\n'));
+    const options = {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1_000 },
+      inspectContainer: async () => ({ state: 'found' as const, id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      internalCliPath: executorPath
+    };
+    server = serveSandboxControl(manifestPath, controller.signal, options);
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const issuedAt = Date.now();
+    atomicWriteJson(path.join(manifest.channelDir, 'requests', `${requestId}.json`), {
+      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      issuedAt, expiresAt: issuedAt + 2_000, family: 'task-lifecycle', args: ['08', 'complete'],
+      controllerProcess: null, controllerProof: null
+    });
+    await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const processingDir = path.join(manifest.processingDir, requestId);
+    const evidence = fs.readdirSync(processingDir).map((name) => ({
+      name, contents: fs.readFileSync(path.join(processingDir, name))
+    }));
+    const acceptedPath = path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`);
+    const accepted = fs.readFileSync(acceptedPath);
+    const terminalPath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
+    const deadline = Date.now() + SANDBOX_CONTROL_TEST_TIMEOUT_MS;
+    while (!fs.existsSync(terminalPath) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const terminal = fs.readFileSync(terminalPath, 'utf8');
+    controller.abort();
+    await server;
+    assert.equal(JSON.parse(terminal).outputState, 'available');
+    assert.equal(JSON.parse(terminal).stderr, '');
+    const response = recoverSandboxControl(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 });
+    assert.equal(response.stdout, output);
+    assert.equal(response.stderr, childStderr);
+
+    // Restore the durable state from the terminal-published, pre-cleanup boundary.
+    fs.mkdirSync(processingDir, { recursive: true });
+    for (const entry of evidence) fs.writeFileSync(path.join(processingDir, entry.name), entry.contents);
+    fs.writeFileSync(acceptedPath, accepted);
+    controller = new AbortController();
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      ...options,
+      prepareExecution: async () => { throw new Error('Unexpected executor replay'); }
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    assert.equal(fs.existsSync(processingDir), false);
+    assert.equal(fs.existsSync(acceptedPath), false);
+    assert.equal(fs.readFileSync(terminalPath, 'utf8'), terminal);
+    assert.equal(recoverSandboxControl(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, output);
+  } finally {
+    controller.abort();
+    await server?.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('task-finalization normal publication fails closed on a conflicting terminal', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-terminal-conflict-'));
   const taskId = 'TASK-20260809-010203';

@@ -318,7 +318,7 @@ function publishExecutionResult(
         phase: 'completed',
         exitCode: normalized.exitCode,
         stdout: '',
-        stderr: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n',
+        stderr: payload ? '' : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n',
         error: null,
         outputState: payload ? 'available' : 'unavailable',
         payload: payload ? payloadReference(payload) : null
