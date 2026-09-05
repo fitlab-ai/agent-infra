@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { applyQualificationProposal } from '../../../lib/task/qualification-intents.ts';
-import { applyQualificationConfirmation } from '../../../lib/qualify.ts';
+import { applyQualificationConfirmation } from '../../../lib/task/qualification-confirmation.ts';
 import {
   buildQualificationAudit,
   parseQualificationConfirmations,
@@ -139,7 +139,7 @@ test('proposal rejects confirmation authority and stale digest without changing 
   }
 });
 
-test('top-level qualification confirms the current digest and creates a core-owned QCR', () => {
+test('internal qualification confirms the current digest and creates a core-owned QCR', () => {
   const { repoRoot, taskMd } = fixture();
   try {
     const initial = parseTaskQualification(fs.readFileSync(taskMd, 'utf8'));
@@ -157,7 +157,7 @@ test('top-level qualification confirms the current digest and creates a core-own
     assert.equal(confirmations.ok, true);
     if (confirmations.ok) {
       assert.equal(confirmations.confirmations[0]?.actor, 'human-declared');
-      assert.equal(confirmations.confirmations[0]?.entrypoint, 'ai qualify');
+      assert.equal(confirmations.confirmations[0]?.entrypoint, 'task-qualification');
       const current = parseTaskQualification(content);
       assert.equal(current.ok, true);
       if (!current.ok) return;
@@ -180,7 +180,7 @@ test('top-level qualification confirms the current digest and creates a core-own
   }
 });
 
-test('top-level qualification supersedes and revokes confirmed constraints', () => {
+test('internal qualification supersedes and revokes confirmed constraints', () => {
   for (const operation of ['supersede', 'revoke'] as const) {
     const { repoRoot, taskMd } = fixture();
     try {

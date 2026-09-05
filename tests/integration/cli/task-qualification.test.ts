@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { CLI_PATH } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -55,22 +55,24 @@ function digest(taskPath: string): string {
   return parsed.qualification.constraintDigest;
 }
 
-function run(root: string, args: string[]) {
-  return spawnSync(process.execPath, [CLI_PATH, 'qualify', ...args], { cwd: root, encoding: 'utf8' });
+function run(root: string, operation: 'confirm' | 'supersede' | 'revoke', taskPath: string, rationale: string) {
+  const input = path.join(root, `${operation}.json`);
+  fs.writeFileSync(input, JSON.stringify({ constraintId: 'C-1', expectedDigest: digest(taskPath), rationale }));
+  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-qualification', TASK_ID, operation, '--input', input], { cwd: root, encoding: 'utf8' });
 }
 
-test('ai qualify exposes supersede and revoke transitions', () => {
-  for (const transition of ['--supersede', '--revoke'] as const) {
+test('internal task-qualification exposes supersede and revoke transitions', () => {
+  for (const transition of ['supersede', 'revoke'] as const) {
     const f = fixture();
     try {
-      const confirmed = run(f.root, ['--task', TASK_ID, '--constraint', 'C-1', '--digest', digest(f.taskPath), 'Confirm constraint.']);
+      const confirmed = run(f.root, 'confirm', f.taskPath, 'Confirm constraint.');
       assert.equal(confirmed.status, 0, confirmed.stderr || confirmed.stdout);
-      const changed = run(f.root, ['--task', TASK_ID, '--constraint', 'C-1', '--digest', digest(f.taskPath), transition, 'Change confirmation.']);
+      const changed = run(f.root, transition, f.taskPath, 'Change confirmation.');
       assert.equal(changed.status, 0, changed.stderr || changed.stdout);
       const parsed = parseTaskQualification(fs.readFileSync(f.taskPath, 'utf8'));
       assert.equal(parsed.ok, true);
       if (!parsed.ok) continue;
-      assert.equal(parsed.qualification.constraints[0]?.status, transition === '--supersede' ? 'superseded' : 'open');
+      assert.equal(parsed.qualification.constraints[0]?.status, transition === 'supersede' ? 'superseded' : 'open');
       assert.equal(parsed.qualification.constraints[0]?.approvalEvidence, '');
     } finally {
       fs.rmSync(f.root, { recursive: true, force: true });
@@ -78,15 +80,12 @@ test('ai qualify exposes supersede and revoke transitions', () => {
   }
 });
 
-test('ai qualify rejects conflicting transition flags', () => {
+test('internal task-qualification rejects unknown operations', () => {
   const f = fixture();
   try {
-    const result = run(f.root, [
-      '--task', TASK_ID, '--constraint', 'C-1', '--digest', digest(f.taskPath),
-      '--supersede', '--revoke', 'Invalid transition.'
-    ]);
+    const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-qualification', TASK_ID, 'unknown', '--input', f.taskPath], { cwd: f.root, encoding: 'utf8' });
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /cannot be combined/);
+    assert.equal(JSON.parse(result.stdout).error.code, 'QUALIFICATION_PROPOSAL_INVALID');
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

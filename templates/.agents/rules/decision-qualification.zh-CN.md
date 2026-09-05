@@ -13,7 +13,7 @@
 - `confirmed` 约束必须有来源证据、当前语义 digest 和 `资格确认记录`；旧 digest 的确认不能复用。
 - `derived`、`assumption`、`open`、`conflicted`、`superseded` 只能作为待审事实，不能自动排除候选。
 - 内部 proposal 入口只能写入非 confirmed 约束和 `pending` 候选，不能写 actor、QCR、confirmed 或 approval 字段。
-- `ai qualify` 是流程声明式人工确认、替代和撤销入口；`human-declared` 是审计标签，不是身份认证。确认时 QCR 由核心生成并绑定确认写入后的当前单约束 digest、request id、时间和单行理由；替代与撤销分别把约束转为 `superseded` 与 `open`，清空当前 approval evidence，并保留历史 QCR。
+- `agent-infra-internal task-qualification` 是供 Agent/skill 使用的内部确认、替代和撤销入口，不向普通用户暴露 constraint digest 协议；`human-declared` 是审计标签，不是身份认证。确认时 QCR 由核心生成并绑定确认写入后的当前单约束 digest、request id、时间和单行理由；替代与撤销分别把约束转为 `superseded` 与 `open`，清空当前 approval evidence，并保留历史 QCR。
 
 ## 失效与审查
 

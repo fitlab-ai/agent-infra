@@ -124,7 +124,7 @@ function applyQualificationProposal(request: QualificationProposalRequest, optio
   }
   for (const row of values.constraints) {
     const current = currentConstraintMap.get(row.constraintId);
-    if (current?.status === 'confirmed') return failed('QUALIFICATION_CONFIRMATION_REQUIRED', `confirmed constraint '${row.constraintId}' must be superseded or revoked through ai qualify`, resolved.taskId);
+    if (current?.status === 'confirmed') return failed('QUALIFICATION_CONFIRMATION_REQUIRED', `confirmed constraint '${row.constraintId}' must be superseded or revoked through task-qualification`, resolved.taskId);
   }
   const knownConstraintIds = new Set([...parsed.qualification.constraints.map((row) => row.constraintId), ...values.constraints.map((row) => row.constraintId)]);
   for (const row of values.constraints) for (const parent of row.derivedFrom) if (!knownConstraintIds.has(parent)) return failed('QUALIFICATION_CONSTRAINT_UNKNOWN', `constraint proposal '${row.constraintId}' references unknown '${parent}'`, resolved.taskId);

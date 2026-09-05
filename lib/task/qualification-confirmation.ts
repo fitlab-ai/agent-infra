@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 
-import { appendActivityEntry, locateActivityLog } from './task/activity-log.ts';
-import { CONFIRMATION_COLUMNS, CONFIRMATION_HEADINGS, constraintDigest, parseQualificationConfirmations, parseTaskQualification } from './task/qualification-audit.ts';
-import type { QualificationConfirmation } from './task/qualification-audit.ts';
-import { findSectionHeading } from './task/sections.ts';
-import { resolveTaskRef } from './task/resolve-ref.ts';
-import { captureTaskWriteMetadata, writeTask } from './task/write.ts';
-import type { TaskOperationSummary, TaskWriteOptions } from './task/write.ts';
+import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
+import { CONFIRMATION_COLUMNS, CONFIRMATION_HEADINGS, constraintDigest, parseQualificationConfirmations, parseTaskQualification } from './qualification-audit.ts';
+import type { QualificationConfirmation } from './qualification-audit.ts';
+import { findSectionHeading } from './sections.ts';
+import { resolveTaskRef } from './resolve-ref.ts';
+import { captureTaskWriteMetadata, writeTask } from './write.ts';
+import type { TaskOperationSummary, TaskWriteOptions } from './write.ts';
 
 type QualificationConfirmationRequest = {
   taskRef: string;
@@ -94,7 +94,7 @@ function applyQualificationConfirmation(request: QualificationConfirmationReques
     derivedFrom: constraint.derivedFrom, approvalEvidence: qcrId
   } : null;
   const confirmation = confirmedConstraint && qcrId && requestId ? {
-    qcrId, constraintId: request.constraintId, actor: 'human-declared' as const, entrypoint: 'ai qualify' as const,
+    qcrId, constraintId: request.constraintId, actor: 'human-declared' as const, entrypoint: 'task-qualification' as const,
     requestId, approvedDigest: constraintDigest(confirmedConstraint), confirmedAt: metadata.timestamp, rationale: request.rationale.trim()
   } : null;
   const confirmations = confirmation ? [...existing.confirmations, confirmation] : existing.confirmations;
@@ -111,47 +111,6 @@ function applyQualificationConfirmation(request: QualificationConfirmationReques
   const result = writeTask({ taskRef: resolved.taskId, expectedState: 'active', mutations, dryRun: request.dryRun }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state }, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(result.error.code, result.error.message, result.taskId);
   return { status: result.status, changed: result.changed, taskId: result.taskId, qcrId, requestId, operations: result.operations, error: null };
-}
-
-export async function qualify(args: string[], options: TaskWriteOptions = {}): Promise<number> {
-  let taskRef: string | undefined;
-  let constraintId: string | undefined;
-  let expectedDigest: string | undefined;
-  let dryRun = false;
-  let operation: QualificationConfirmationRequest['operation'] = 'confirm';
-  let operationFlag = '';
-  const rationale: string[] = [];
-  try {
-    for (let index = 0; index < args.length; index += 1) {
-      const arg = args[index]!;
-      if (arg === '--task' || arg === '-t') taskRef = args[++index];
-      else if (arg === '--constraint' || arg === '--constraint-id' || arg === '--id') constraintId = args[++index];
-      else if (arg === '--digest' || arg === '--constraint-digest') expectedDigest = args[++index];
-      else if (arg === '--dry-run') dryRun = true;
-      else if (arg === '--supersede' || arg === '--revoke') {
-        if (operationFlag) throw new Error(`options '${operationFlag}' and '${arg}' cannot be combined`);
-        operationFlag = arg;
-        operation = arg === '--supersede' ? 'supersede' : 'revoke';
-      }
-      else if (arg === '--help' || arg === '-h') { process.stdout.write('Usage: ai qualify [--task <ref>] --constraint <C-N> --digest <sha256> [--supersede|--revoke] <rationale>\n'); return 0; }
-      else rationale.push(arg);
-    }
-    if (!taskRef || !constraintId || !expectedDigest || rationale.length === 0) throw new Error('Usage: ai qualify [--task <ref>] --constraint <C-N> --digest <sha256> <rationale>');
-    const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-    if (!resolved.ok) throw new Error(resolved.message);
-    const { withTaskExecutionLock } = await import('./task/task-execution-lock.ts');
-    const result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-qualification.${operation}`, () => applyQualificationConfirmation({ taskRef: resolved.taskId, constraintId: constraintId!, expectedDigest: expectedDigest!, rationale: rationale.join(' '), operation, dryRun }, options));
-    if (result.error) throw new Error(`${result.error.code}: ${result.error.message}`);
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-    return 0;
-  } catch (error) {
-    process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
-  }
-}
-
-export async function cmdQualify(args: string[]): Promise<void> {
-  process.exitCode = await qualify(args);
 }
 
 export { applyQualificationConfirmation };

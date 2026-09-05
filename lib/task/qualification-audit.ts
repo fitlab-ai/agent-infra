@@ -108,7 +108,7 @@ type QualificationConfirmation = {
   qcrId: string;
   constraintId: string;
   actor: 'human-declared';
-  entrypoint: 'ai qualify';
+  entrypoint: 'task-qualification';
   requestId: string;
   approvedDigest: string;
   confirmedAt: string;
@@ -431,10 +431,10 @@ function parseQualificationConfirmations(content: string): { ok: true; confirmat
     const confirmations = table.rows.map(({ values }) => {
       const row: QualificationConfirmation = {
         qcrId: values.qcr_id ?? '', constraintId: values.constraint_id ?? '', actor: values.actor as 'human-declared',
-        entrypoint: values.entrypoint as 'ai qualify', requestId: values.request_id ?? '', approvedDigest: values.approved_digest ?? '',
+        entrypoint: values.entrypoint as 'task-qualification', requestId: values.request_id ?? '', approvedDigest: values.approved_digest ?? '',
         confirmedAt: values.confirmed_at ?? '', rationale: values.rationale ?? ''
       };
-      if (!/^QCR-[1-9]\d*$/.test(row.qcrId) || !/^C-[1-9]\d*$/.test(row.constraintId) || row.actor !== 'human-declared' || row.entrypoint !== 'ai qualify' || !row.requestId || !/^[a-f0-9]{64}$/.test(row.approvedDigest) || !row.confirmedAt || Number.isNaN(Date.parse(row.confirmedAt.replace(' ', 'T'))) || !row.rationale || /[\r\n]/.test(row.rationale)) throw new Error(`qualification confirmation '${row.qcrId}' is invalid`);
+      if (!/^QCR-[1-9]\d*$/.test(row.qcrId) || !/^C-[1-9]\d*$/.test(row.constraintId) || row.actor !== 'human-declared' || row.entrypoint !== 'task-qualification' || !row.requestId || !/^[a-f0-9]{64}$/.test(row.approvedDigest) || !row.confirmedAt || Number.isNaN(Date.parse(row.confirmedAt.replace(' ', 'T'))) || !row.rationale || /[\r\n]/.test(row.rationale)) throw new Error(`qualification confirmation '${row.qcrId}' is invalid`);
       if (seen.has(row.qcrId)) throw new Error(`duplicate qualification confirmation '${row.qcrId}'`);
       seen.add(row.qcrId);
       return row;
