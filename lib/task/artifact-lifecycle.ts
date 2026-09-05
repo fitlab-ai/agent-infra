@@ -10,6 +10,7 @@ import { extractSection, findSectionHeading } from './sections.ts';
 import { receiptForOutput, sha256File } from './artifact-receipts.ts';
 import { isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
 import type { InvalidationDocument } from './invalidation.ts';
+import { validateQualificationAudit } from './qualification-audit.ts';
 
 const artifactFamilyCatalog = [
   { family: 'analysis', sectionAliases: ['分析', 'Analysis'], heading: '分析', labels: ['需求分析报告', 'Requirements Analysis'] },
@@ -340,6 +341,7 @@ const OPTIONAL_CONTEXT: Partial<Record<ArtifactFamily, { family: ArtifactFamily;
   'manual-validation': { family: 'review-code' },
   'validation-run': { family: 'review-code' }
 };
+const QUALIFICATION_RECOVERY_OPTIONAL_CONTEXT_CONSUMERS = new Set<ArtifactFamily>(['analysis', 'plan']);
 
 function resolveArtifactContext(taskRef: string, family: string, options: InspectOptions = {}): ArtifactContextResult {
   const inventory = inspectTaskArtifacts(taskRef, family, options);
@@ -354,6 +356,8 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
     if (input.status === 'failed' || !input.latest) {
       return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_INPUT_MISSING', message: `latest ${required} artifact is required` } };
     }
+    const qualificationError = qualificationErrorForArtifact(input.latest);
+    if (qualificationError) return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: qualificationError } };
     inputs.push(input.latest);
   }
   const optional = OPTIONAL_CONTEXT[inventory.family as ArtifactFamily];
@@ -363,10 +367,25 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
       if (optional.requireReference && !context.reviewedInput) {
         return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: `${context.latest.name} has no valid reviewed input` } };
       }
+      const qualificationError = qualificationErrorForArtifact(context.latest);
+      if (qualificationError && !QUALIFICATION_RECOVERY_OPTIONAL_CONTEXT_CONSUMERS.has(inventory.family as ArtifactFamily)) {
+        return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: qualificationError } };
+      }
       inputs.push(context.latest);
     }
   }
   return { ...inventory, inputs, codeMode: null };
+}
+
+function qualificationErrorForArtifact(artifact: ArtifactIdentity): string | null {
+  try {
+    const taskContent = fs.readFileSync(path.join(path.dirname(artifact.path), 'task.md'), 'utf8');
+    const artifactContent = fs.readFileSync(artifact.path, 'utf8');
+    const result = validateQualificationAudit(taskContent, artifactContent);
+    return result.ok ? null : `${result.code}: ${result.message}`;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 function resolveCodeContext(inventory: ArtifactInventoryResult, options: InspectOptions): ArtifactContextResult {
@@ -379,6 +398,16 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   const codeMax = latestCode?.round ?? 0;
   const reviewMax = reviewCode.latest?.round ?? 0;
   const inputs = [plan.latest];
+  const planQualificationError = qualificationErrorForArtifact(plan.latest);
+  if (planQualificationError) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', planQualificationError);
+  if (latestCode) {
+    const qualificationError = qualificationErrorForArtifact(latestCode);
+    if (qualificationError) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, latestCode.name);
+  }
+  if (reviewCode.latest) {
+    const qualificationError = qualificationErrorForArtifact(reviewCode.latest);
+    if (qualificationError) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, reviewCode.latest.name);
+  }
   if (!latestCode) {
     if (!reviewPlan.latest || reviewPlan.reviewedInput?.name !== plan.latest.name) {
       return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `latest plan '${plan.latest.name}' requires a matching approved review-plan`);
@@ -398,6 +427,10 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   if (reviewPlan.latest && !reviewPlan.reviewedInput) {
     return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', `${reviewPlan.latest.name} has no valid reviewed input`, reviewPlan.latest.name);
   }
+  if (reviewPlan.latest) {
+    const qualificationError = qualificationErrorForArtifact(reviewPlan.latest);
+    if (qualificationError) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, reviewPlan.latest.name);
+  }
   if (reviewPlan.latest && reviewPlan.reviewedInput?.name === plan.latest.name) {
     const verdict = parseVerdict(reviewPlan.latest.path);
     if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, reviewPlan.latest.name);
@@ -409,8 +442,8 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
         `Latest ${reviewPlan.latest.name} approves plan content not captured by the latest code input receipt. Entering replan-driven init.`);
     }
   }
-  if (reviewMax < codeMax) {
-    const expected = artifactName('review-code', codeMax);
+  if (!reviewCode.latest || reviewCode.reviewedInput?.name !== latestCode.name) {
+    const expected = reviewCode.next?.name ?? artifactName('review-code', reviewMax + 1);
     return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `${expected} is required before another code round`, expected);
   }
   const review = reviewCode.latest;

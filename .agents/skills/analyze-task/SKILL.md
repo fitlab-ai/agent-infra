@@ -17,6 +17,7 @@ description: >
 
 生成分析报告时，先读取 `.agents/rules/evidence-reporting.md`。状态核对和成功检查记录命令、目标范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议才附决定性原文摘录。
 
+- 涉及候选资格或 `HD-N` 判断时，先读取 `.agents/rules/decision-qualification.md`，基于 task.md 规范化约束/候选完成资格审计，并在分析产物记录五张资格审计表；不得把来源不明或未确认约束自动升级为排除条件
 - 本技能仅产出需求分析文档（`analysis.md` 或 `analysis-r{N}.md`）—— 不修改任何业务代码
 - 严格基于 `task.md` 中已有的任务输入、需求、上下文和来源信息展开分析
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
@@ -176,6 +177,10 @@ agent-infra-internal task-event {task-id} analyze.started --agent {standard-agen
 
 ## 依赖关系
 - {需要的依赖和与其他模块的协调}
+
+## 资格审计
+
+> 按 `.agents/rules/decision-qualification.md` 填写约束依赖、候选资格、分类结果、上游关系、依赖快照五张表；没有 artifact 上游时保留空表头，不虚构关系。
 
 ## 假设
 

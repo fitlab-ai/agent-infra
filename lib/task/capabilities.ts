@@ -11,6 +11,10 @@ import { parseReworkIntentDocument } from './rework-intent.ts';
 import type { ReworkIntent } from './rework-intent.ts';
 import { sha256File } from './artifact-receipts.ts';
 import { hasOpenLifecycleExecution } from './activity-log.ts';
+import { parseQualificationAudit, parseTaskQualification } from './qualification-audit.ts';
+import type { QualificationAudit, TaskQualification } from './qualification-audit.ts';
+
+const ARTIFACT_AUDIT_FAMILIES = new Set(['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code']);
 
 type LifecycleAction =
   | 'analysis' | 'review-analysis' | 'plan' | 'review-plan'
@@ -42,6 +46,8 @@ type LifecycleFacts = {
   unresolvedLedger: Record<'analysis' | 'plan' | 'code', number>;
   executionBusy: boolean;
   recommendedAction?: LifecycleAction | null;
+  qualificationStale?: boolean;
+  qualificationStaleArtifacts?: readonly string[];
 };
 type CapabilityResult = {
   allowed: boolean;
@@ -86,6 +92,9 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   }
   if (facts.taskState !== 'active') return deny('TASK_NOT_ACTIVE', `state=${facts.taskState}`);
   if (invalidationBlocks(facts.invalidation)) return deny('INVALIDATION_INCOMPLETE');
+  if (facts.qualificationStale && facts.recommendedAction !== action) {
+    return deny('QUALIFICATION_STALE', ...(facts.qualificationStaleArtifacts ?? ['qualification audit is stale']));
+  }
   if (facts.executionBusy) return deny('EXECUTION_BUSY');
 
   const implicit = trigger.explicitRequest === false;
@@ -154,8 +163,42 @@ function reviewMatchesLatest(facts: LifecycleFacts, source: 'analysis' | 'plan' 
   return Boolean(latestSource && facts.reviewedInputs?.[review] === latestSource);
 }
 
+function qualificationCandidateSnapshotMatches(
+  audit: QualificationAudit,
+  qualification: TaskQualification
+): boolean {
+  const current = new Map(qualification.candidates.map((candidate) => [candidate.candidateId, candidate]));
+  return audit.candidateQualifications.length === current.size && audit.candidateQualifications.every((row) => {
+    const candidate = current.get(row.candidateId);
+    return Boolean(candidate && candidate.status === row.status && candidate.impact === row.impact
+      && candidate.evidence === row.evidence && candidate.constraintIds.join(',') === row.constraintIds.join(','));
+  });
+}
+
+const QUALIFICATION_RECOVERY_ORDER: ReadonlyArray<{ action: LifecycleAction; pattern: RegExp }> = [
+  { action: 'analysis', pattern: /^analysis(?:-r\d+)?\.md$/ },
+  { action: 'review-analysis', pattern: /^review-analysis(?:-r\d+)?\.md$/ },
+  { action: 'plan', pattern: /^plan(?:-r\d+)?\.md$/ },
+  { action: 'review-plan', pattern: /^review-plan(?:-r\d+)?\.md$/ },
+  { action: 'code', pattern: /^code(?:-r\d+)?\.md$/ },
+  { action: 'review-code', pattern: /^review-code(?:-r\d+)?\.md$/ }
+];
+
+function qualificationRecoveryAction(facts: LifecycleFacts): LifecycleAction | null {
+  const stale = facts.qualificationStaleArtifacts ?? [];
+  return QUALIFICATION_RECOVERY_ORDER.find(({ pattern }) => stale.some((name) => pattern.test(name)))?.action ?? null;
+}
+
 function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
   if (invalidationBlocks(facts.invalidation)) return { action: null, reasonCode: 'INVALIDATION_INCOMPLETE', evidence: ['reconcile task invalidation before routing'] };
+  if (facts.qualificationStale) {
+    const action = qualificationRecoveryAction(facts);
+    return {
+      action,
+      reasonCode: 'QUALIFICATION_RECOVERY_REQUIRED',
+      evidence: facts.qualificationStaleArtifacts ?? ['qualification audit is stale']
+    };
+  }
   const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
   if (pendingIntent) return { action: pendingIntent.target, reasonCode: 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
   if (!hasArtifact(facts, 'analysis')) return { action: 'analysis', reasonCode: 'ANALYSIS_ARTIFACT_MISSING', evidence: ['analysis artifact is absent'] };
@@ -226,6 +269,28 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
         family, files.filter((name) => artifactFamilies[family].test(name) && isArtifactInvalidated(invalidation.document, family, name))
       ])
     ) as Partial<Record<LifecycleAction, readonly string[]>>;
+    const qualification = parseTaskQualification(content);
+    if (!qualification.ok) return { ok: false, code: 'TASK_CAPABILITY_FACTS_INVALID', message: qualification.message };
+    const qualificationStaleArtifacts: string[] = [];
+    if (qualification.qualification.present) {
+      const constraints = new Map(qualification.qualification.constraints.map((row) => [row.constraintId, row.digest]));
+      for (const family of Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>) {
+        if (!ARTIFACT_AUDIT_FAMILIES.has(family)) continue;
+        const name = latestArtifact(artifacts[family] ?? []);
+        if (!name) continue;
+        let auditContent: string;
+        try { auditContent = fs.readFileSync(path.join(taskDir, name), 'utf8'); }
+        catch { qualificationStaleArtifacts.push(name); continue; }
+        const audit = parseQualificationAudit(auditContent);
+        if (!audit.ok || !audit.audit.present || !audit.audit.snapshot) { qualificationStaleArtifacts.push(name); continue; }
+        const constraintsChanged = audit.audit.constraintDependencies.some((dependency) => constraints.get(dependency.constraintId) !== dependency.constraintDigest);
+        const taskInputChanged = audit.audit.snapshot.taskInputDigest !== qualification.qualification.taskInputDigest;
+        if (audit.audit.snapshot.nonConstraintInputDigest !== qualification.qualification.nonConstraintInputDigest
+          || constraintsChanged
+          || (taskInputChanged && !constraintsChanged)
+          || (taskInputChanged && !qualificationCandidateSnapshotMatches(audit.audit, qualification.qualification))) qualificationStaleArtifacts.push(name);
+      }
+    }
     const reviews: LifecycleFacts['reviews'] = {};
     const reviewedInputs: NonNullable<LifecycleFacts['reviewedInputs']> = {};
     for (const family of ['review-analysis', 'review-plan', 'review-code'] as const) {
@@ -249,7 +314,11 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       taskState, currentStep: String(metadata.current_step ?? ''), artifacts, reviews,
       staleArtifacts, reviewedInputs, artifactHashes,
       invalidation: invalidation.document, reworkIntents: rework.intents,
-      unresolvedLedger, executionBusy: executionBusy || hasOpenLifecycleExecution(content), recommendedAction: null
+      unresolvedLedger,
+      executionBusy: executionBusy || hasOpenLifecycleExecution(content),
+      recommendedAction: null,
+      qualificationStale: qualificationStaleArtifacts.length > 0,
+      qualificationStaleArtifacts
     };
     facts.recommendedAction = recommendNext(facts).action;
     return { ok: true, facts };

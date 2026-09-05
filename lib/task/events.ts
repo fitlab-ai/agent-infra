@@ -48,6 +48,8 @@ import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason 
 import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
 import type { InvalidationTargetKind } from './invalidation.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
+import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
+import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -347,6 +349,25 @@ function reviewInputFamily(family: EventFamily): ArtifactFamily {
   return family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
 }
 
+function relationForStartedInput(family: EventFamily, input: ArtifactIdentity): UpstreamRelation['relation'] {
+  if (family.startsWith('review-')) {
+    return input.family === reviewInputFamily(family) ? 'reviewed-input' : 'approval-context';
+  }
+  const consumer = family === 'analyze' ? 'analysis' : family;
+  if ((consumer === 'plan' && input.family === 'analysis') || (consumer === 'code' && input.family === 'plan')) return 'required-input';
+  return 'review-context';
+}
+
+function qualificationRelationsForStarted(family: EventFamily, inputs: readonly ArtifactIdentity[]): UpstreamRelation[] {
+  return inputs.map((input) => ({
+    upstreamFamily: input.family as UpstreamRelation['upstreamFamily'],
+    upstreamArtifact: input.name,
+    upstreamRound: input.round,
+    upstreamSha256: sha256File(input.path),
+    relation: relationForStartedInput(family, input)
+  }));
+}
+
 function lifecycleAction(family: EventFamily): LifecycleAction {
   return family === 'analyze' ? 'analysis' : family;
 }
@@ -381,49 +402,118 @@ function invalidationMutationForCompletion(
     code: ['review-code']
   };
   const sourceFamily = family as 'analyze' | 'plan' | 'code';
+  const sourceArtifactFamily = sourceFamily === 'analyze' ? 'analysis' : sourceFamily;
   let receipts: readonly ArtifactReceipt[] = [];
   try {
     receipts = parseArtifactReceipts(content).rows;
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
-  const targets = downstream[sourceFamily].flatMap((targetFamily: string) => {
-    const names = fs.readdirSync(taskDir).filter((name) => {
-      const pattern = targetFamily === 'review-analysis' ? /^review-analysis(?:-r\d+)?\.md$/
-        : targetFamily === 'review-plan' ? /^review-plan(?:-r\d+)?\.md$/
-          : targetFamily === 'review-code' ? /^review-code(?:-r\d+)?\.md$/
-            : new RegExp(`^${targetFamily}(?:-r\\d+)?\\.md$`);
-      return pattern.test(name);
-    });
-    return names.flatMap((name) => {
-      try {
-        const stat = fs.lstatSync(path.join(taskDir, name));
-        if (!stat.isFile() || stat.isSymbolicLink()) return [];
-        const targetRound = parseArtifactName(name)?.round ?? 1;
-        const targetSha256 = sha256File(path.join(taskDir, name));
-        const shapes: Array<{ targetKind: InvalidationTargetKind; targetFamily: string; targetArtifact: string; targetRound: number; targetSha256: string }> = [
-          { targetKind: 'artifact', targetFamily, targetArtifact: name, targetRound, targetSha256 }
-        ];
-        const receipt = receipts.find((candidate) => candidate.output === name);
-        if (receipt) shapes.push({
-          targetKind: 'receipt', targetFamily, targetArtifact: name, targetRound,
-          targetSha256: receipt.inputSha256
-        });
-        if (targetFamily.startsWith('review-')) {
-          shapes.push({ targetKind: 'approval', targetFamily, targetArtifact: name, targetRound, targetSha256 });
-        }
-        if (targetFamily === 'review-code') {
-          shapes.push({ targetKind: 'reviewed-snapshot', targetFamily, targetArtifact: name, targetRound, targetSha256 });
-        }
-        return shapes.map((targetShape) => ({
-          ...targetShape,
-          targetId: targetIdFor('pending', targetShape), operationId: 'pending', status: 'pending' as const,
-          reasonCode: 'upstream-replaced', updatedAt: timestamp
-        }));
-      } catch (error) {
-        throw new Error(`cannot inspect invalidation target '${name}': ${error instanceof Error ? error.message : String(error)}`);
+  const inventory = fs.readdirSync(taskDir).flatMap((name) => {
+    const identity = parseArtifactName(name);
+    if (!identity || !(ARTIFACT_FAMILIES as readonly string[]).includes(identity.family)) return [];
+    try {
+      const stat = fs.lstatSync(path.join(taskDir, name));
+      if (!stat.isFile() || stat.isSymbolicLink()) return [];
+      return [{ family: identity.family, name, round: identity.round, sha256: sha256File(path.join(taskDir, name)) }];
+    } catch (error) {
+      throw new Error(`cannot inspect invalidation artifact '${name}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+  const taskQualification = parseTaskQualification(content);
+  if (!taskQualification.ok) return { error: taskQualification.message };
+  const nodeMap = new Map(inventory.map((node) => [`${node.family}/${node.name}`, node]));
+  const audits = new Map<string, QualificationAudit>();
+  let taskInputChanged = false;
+  let graphUsable = taskQualification.qualification.present;
+  if (graphUsable) {
+    for (const node of inventory) {
+      const artifactContent = fs.readFileSync(path.join(taskDir, node.name), 'utf8');
+      const parsedAudit = parseQualificationAudit(artifactContent);
+      if (!parsedAudit.ok || !parsedAudit.audit.present || !parsedAudit.audit.snapshot) { graphUsable = false; break; }
+      audits.set(`${node.family}/${node.name}`, parsedAudit.audit);
+      if (parsedAudit.audit.snapshot.taskInputDigest !== taskQualification.qualification.taskInputDigest) taskInputChanged = true;
+      if (parsedAudit.audit.snapshot.nonConstraintInputDigest !== taskQualification.qualification.nonConstraintInputDigest) {
+        graphUsable = false;
+        break;
       }
-    });
+      if (parsedAudit.audit.snapshot.upstreamArtifactDigest !== upstreamArtifactDigest(parsedAudit.audit.upstreamRelations)) {
+        graphUsable = false;
+        break;
+      }
+      for (const relation of parsedAudit.audit.upstreamRelations) {
+        const upstream = nodeMap.get(`${relation.upstreamFamily}/${relation.upstreamArtifact}`);
+        if (!upstream || upstream.round !== relation.upstreamRound || upstream.sha256 !== relation.upstreamSha256) { graphUsable = false; break; }
+      }
+      if (!graphUsable) break;
+    }
+  }
+  const selected = new Set<string>();
+  if (graphUsable) {
+    const changedConstraints = new Set<string>();
+    for (const audit of audits.values()) {
+      for (const dependency of audit.constraintDependencies) {
+        const current = taskQualification.qualification.constraints.find((row) => row.constraintId === dependency.constraintId);
+        if (!current || current.digest !== dependency.constraintDigest) changedConstraints.add(dependency.constraintId);
+      }
+    }
+    const currentCandidates = new Map(taskQualification.qualification.candidates.map((candidate) => [candidate.candidateId, candidate]));
+    const candidateSnapshotMatches = [...audits.values()].every((audit) => audit.candidateQualifications.length === currentCandidates.size && audit.candidateQualifications.every((row) => {
+      const current = currentCandidates.get(row.candidateId);
+      return Boolean(current && current.status === row.status && current.impact === row.impact
+        && current.evidence === row.evidence && current.constraintIds.join(',') === row.constraintIds.join(','));
+    }));
+    // A task-input digest also covers candidates. A narrowed invalidation graph
+    // is safe only when the old audit rows show that the candidate projection
+    // stayed unchanged and the change is explained by at least one constraint.
+    if (taskInputChanged && (changedConstraints.size === 0 || !candidateSnapshotMatches)) graphUsable = false;
+    for (const node of inventory) {
+      const audit = audits.get(`${node.family}/${node.name}`)!;
+      if (audit.constraintDependencies.some((dependency) => changedConstraints.has(dependency.constraintId))) selected.add(`${node.family}/${node.name}`);
+      if (audit.upstreamRelations.some((relation) => relation.upstreamFamily === sourceArtifactFamily)) selected.add(`${node.family}/${node.name}`);
+    }
+    // Relation rows point from a consumer to its actual upstream artifact. Walk
+    // that reverse edge so review-only seeds and multi-hop consumers receive the
+    // same derived targets as ordinary executor seeds.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const node of inventory) {
+        const key = `${node.family}/${node.name}`;
+        const audit = audits.get(key)!;
+        if (audit.upstreamRelations.some((relation) => selected.has(`${relation.upstreamFamily}/${relation.upstreamArtifact}`)) && !selected.has(key)) {
+          selected.add(key);
+          changed = true;
+        }
+      }
+    }
+    // A relation cycle cannot establish a safe downstream closure.
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const hasCycle = (key: string): boolean => {
+      if (visiting.has(key)) return true;
+      if (visited.has(key)) return false;
+      visiting.add(key);
+      const cycle = audits.get(key)?.upstreamRelations.some((relation) => hasCycle(`${relation.upstreamFamily}/${relation.upstreamArtifact}`)) ?? false;
+      visiting.delete(key); visited.add(key);
+      return cycle;
+    };
+    if ([...nodeMap.keys()].some(hasCycle)) graphUsable = false;
+  }
+  const reasonCode = graphUsable ? 'qualification-changed' : 'upstream-replaced';
+  const targetNodes = (graphUsable
+    ? inventory.filter((node) => selected.has(`${node.family}/${node.name}`))
+    : inventory.filter((node) => downstream[sourceFamily].includes(node.family)))
+    .filter((node) => !(node.family === FAMILY[family].artifact && node.name === artifact.name));
+  const targets = targetNodes.flatMap((node) => {
+    const shapes: Array<{ targetKind: InvalidationTargetKind; targetFamily: string; targetArtifact: string; targetRound: number; targetSha256: string }> = [
+      { targetKind: 'artifact', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 }
+    ];
+    const receipt = receipts.find((candidate) => candidate.output === node.name);
+    if (receipt) shapes.push({ targetKind: 'receipt', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: receipt.inputSha256 });
+    if (node.family.startsWith('review-')) shapes.push({ targetKind: 'approval', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 });
+    if (node.family === 'review-code') shapes.push({ targetKind: 'reviewed-snapshot', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 });
+    return shapes.map((targetShape) => ({ ...targetShape, targetId: targetIdFor('pending', targetShape), operationId: 'pending', status: 'pending' as const, reasonCode, updatedAt: timestamp }));
   });
   if (targets.length === 0) return { mutation: null };
   const source = {
@@ -598,6 +688,25 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     completedArtifact = validated.artifact;
+    if (eventIdentity.family.startsWith('review-')) {
+      let reviewContent: string;
+      try { reviewContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
+      catch (error) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read qualification audit from ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      const expected = expectedQualificationRelations(content, eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code');
+      if (!expected.ok) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${expected.code}: ${expected.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      const qualification = validateQualificationAudit(content, reviewContent, {
+        family: eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code',
+        artifact: completedArtifact.name,
+        expectedUpstreamRelations: expected.relations
+      });
+      if (!qualification.ok) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${qualification.code}: ${qualification.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+    }
     if (eventIdentity.family === 'analyze' || eventIdentity.family === 'plan' || eventIdentity.family === 'code') {
       const localFamily = eventIdentity.family === 'analyze'
         ? 'analysis'
@@ -611,7 +720,9 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       const local = validateLocalArtifact(artifactContent, {
         family: localFamily,
         requiredSections: validationConfig.requiredSections,
-        requiredPatterns: validationConfig.requiredPatterns
+        requiredPatterns: validationConfig.requiredPatterns,
+        taskContent: content,
+        artifact: completedArtifact.name
       });
       if (!local.ok) {
         return failed(normalized, {
@@ -730,6 +841,13 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
   let frontmatterRemove: string[] | undefined;
+  if (eventIdentity.phase === 'started' && artifactContext) {
+    try {
+      frontmatterSet.qualification_input_relations = JSON.stringify(qualificationRelationsForStarted(eventIdentity.family, artifactContext.inputs));
+    } catch (error) {
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot capture qualification input relations: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    }
+  }
   if (eventIdentity.phase === 'started' && eventIdentity.family === 'code') {
     const planInput = artifactContext?.inputs.find((input) => input.family === 'plan');
     if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started plan input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
@@ -754,6 +872,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   } else if (eventIdentity.phase === 'completed' && eventIdentity.family.startsWith('review-')) {
     frontmatterRemove = ['review_input_artifact', 'review_input_sha256'];
   }
+  if (eventIdentity.phase === 'completed') frontmatterRemove = [...(frontmatterRemove ?? []), 'qualification_input_relations'];
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
     { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove }

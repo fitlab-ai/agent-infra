@@ -15,6 +15,7 @@ so you can quickly find "which ones to read" without opening each file.
 - [`compatibility-policy.md`](compatibility-policy.md) — Compatibility by exception: admission evidence, implementation boundaries, exit conditions, and lifecycle review requirements.
 - [`evidence-reporting.md`](evidence-reporting.md) — Minimum evidence semantics for state checks, successful summaries, exceptional results, identity fields, and sensitive data boundaries.
 - [`sync-content-generation.md`](sync-content-generation.md) — Producer-side Markdown constraints for task and lifecycle content synchronized to Issues.
+- [`decision-qualification.md`](decision-qualification.md) — Constraint, candidate, human-confirmation, and six-artifact qualification-audit contract.
 
 ## Issue / PR
 

@@ -35,6 +35,7 @@ import { OrchestrationStateError, readRun } from "./orchestration.ts";
 import { resolveDeliveryTarget } from "./delivery-target.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
+import { validateQualificationAudit } from "./qualification-audit.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -600,6 +601,19 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
   }
 
   const content = fs.readFileSync(artifactPath, "utf8");
+  let taskContent = "";
+  const taskPath = path.join(taskDir, "task.md");
+  if (fs.existsSync(taskPath)) {
+    try {
+      taskContent = fs.readFileSync(taskPath, "utf8");
+    } catch (error) {
+      return failResult("artifact", `Cannot read task qualification contract: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (taskContent && /^review-(?:analysis|plan|code)$/.test(skillName)) {
+    const qualification = validateQualificationAudit(taskContent, content, { artifact: path.basename(artifactPath) });
+    if (!qualification.ok) return failResult("artifact", `${path.basename(artifactPath)} has qualification audit errors: ${qualification.code}: ${qualification.message}`);
+  }
   const requiredSections = config.required_sections || [];
   const localFamily = skillName === "analyze-task"
     ? "analysis"
@@ -608,7 +622,9 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     const local = validateLocalArtifact(content, {
       family: localFamily,
       requiredSections: requiredSections.filter((section: unknown): section is string => typeof section === "string"),
-      requiredPatterns: (config.required_patterns || []).filter((pattern: unknown): pattern is string => typeof pattern === "string")
+      requiredPatterns: (config.required_patterns || []).filter((pattern: unknown): pattern is string => typeof pattern === "string"),
+      ...(taskContent ? { taskContent } : {}),
+      artifact: path.basename(artifactPath)
     });
     if (!local.ok) {
       return failResult(
@@ -786,6 +802,7 @@ function checkActivityLog({ taskDir, config }: any): any {
   let previousTimestamp = "";
   let latestAction = "";
   let latestTimestamp = "";
+  const doneActions: string[] = [];
 
   for (const entry of entries) {
     const match = entry.match(ACTIVITY_LOG_PATTERN);
@@ -805,6 +822,16 @@ function checkActivityLog({ taskDir, config }: any): any {
     if (!ACTIVITY_LOG_STARTED_RE.test(action)) {
       latestTimestamp = timestamp;
       latestAction = action;
+      doneActions.push(action);
+    }
+  }
+
+  if (config.expected_action_pattern && !new RegExp(config.expected_action_pattern).test(latestAction)) {
+    const expected = new RegExp(config.expected_action_pattern);
+    let index = doneActions.length - 1;
+    while (index >= 0 && doneActions[index] === 'Commit' && !expected.test(doneActions[index]!)) index -= 1;
+    if (index >= 0 && expected.test(doneActions[index]!)) {
+      latestAction = doneActions[index]!;
     }
   }
 

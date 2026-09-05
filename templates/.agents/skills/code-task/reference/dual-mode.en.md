@@ -20,7 +20,7 @@ The core scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.
 |---|---|---:|---|
 | no code artifact, and the latest review-plan is exactly `Approved` and references the latest plan | `init` | 0 | initial implementation, output `code.md`; a missing matching approval or `Approved-with-issues` returns an error |
 | latest review-plan is exactly `Approved`, references the latest plan, and the latest code completion receipt does not bind the same plan digest | `init` | 0 | enter a new implementation round. `Approved-with-issues` remains parse-compatible for history but is not cross-stage approval; missing or invalid receipts fail closed |
-| `rev_max < code_max` | `error` | 2 | latest code round is unreviewed; run `review-code` first |
+| the latest review-code completion receipt does not bind the latest code identity/SHA | `error` | 2 | latest code is unreviewed; run `review-code`; code and review-code family rounds may advance independently |
 | latest review-code is Approved and a pending implementation input was decided after that review completed | `decision` | 0 | select the earliest `II-N` and enter decision-driven implementation; false/not-required and consumed inputs do not trigger |
 | latest review-code is Approved with 0/0/0 | `refused` | 1 | already approved; do not run `code-task` again |
 | latest review-code is Approved with major/minor findings | `fix` | 0 | optional fix mode |

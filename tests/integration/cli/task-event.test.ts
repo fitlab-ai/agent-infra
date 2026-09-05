@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
+import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-lifecycle.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
 import { upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
@@ -17,6 +18,27 @@ import {
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
+import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
+
+function enableQualification(taskPath: string) {
+  fs.appendFileSync(taskPath, `\n## \u7ea6\u675f\n\n| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| C-1 | Keep recovery bounded | derived | task-input | task.md | task.md#\u7ea6\u675f |  |  |\n\n## \u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848\n\n| candidate_id | statement | status | constraint_ids | impact | evidence |\n| --- | --- | --- | --- | --- | --- |\n| A | Rebuild the earliest stale stage | qualified | C-1 | bounded recovery | task.md#\u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848 |\n`);
+}
+
+function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
+  const taskContent = fs.readFileSync(taskPath, 'utf8');
+  const identity = parseQualificationArtifactName(path.basename(artifactPath));
+  const expected = identity && (identity.family === 'analysis' || identity.family === 'review-analysis'
+    || identity.family === 'plan' || identity.family === 'review-plan'
+    || identity.family === 'code' || identity.family === 'review-code')
+    ? expectedQualificationRelations(taskContent, identity.family)
+    : { ok: true as const, relations: undefined };
+  assert.equal(expected.ok, true);
+  if (!expected.ok) return;
+  const built = buildQualificationAudit(taskContent, { upstreamRelations: expected.relations });
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  fs.writeFileSync(artifactPath, `# Current artifact\n\n## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
+}
 
 function fixture(step = 'requirement-analysis-review') {
   const explicitStep = arguments.length > 0;
@@ -1061,6 +1083,78 @@ test('source completion records resumable invalidation and downstream writers fa
   assert.equal(retried.status, 0, retried.stdout || retried.stderr);
 });
 
+test('late qualification graph fallback records upstream-replaced reason', () => {
+  const f = fixture('code');
+  enableQualification(f.file);
+  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+  for (const name of ['analysis.md', 'review-analysis.md', 'plan.md', 'review-plan.md', 'code.md', 'review-code.md'] as const) {
+    const built = buildQualificationAudit(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(built.ok, true);
+    if (!built.ok) return;
+    fs.appendFileSync(path.join(f.dir, name), `\n## 资格审计\n\n${renderQualificationAudit(built.audit)}\n`);
+  }
+  for (const [event, output, input] of [
+    ['review-analysis.completed', 'review-analysis.md', 'analysis.md'],
+    ['review-plan.completed', 'review-plan.md', 'plan.md'],
+    ['code.completed', 'code.md', 'plan.md'],
+    ['review-code.completed', 'review-code.md', 'code.md']
+  ] as const) addReceipt(f.file, {
+    event, output, input, inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+
+  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('| A | Rebuild the earliest stale stage | qualified |', '| A | Rebuild the earliest stale stage | rejected |'));
+  const currentTask = fs.readFileSync(f.file, 'utf8');
+  const expected = expectedQualificationRelations(currentTask, 'analysis');
+  assert.equal(expected.ok, true);
+  if (!expected.ok) return;
+  const currentAudit = buildQualificationAudit(currentTask, { upstreamRelations: expected.relations });
+  assert.equal(currentAudit.ok, true);
+  if (!currentAudit.ok) return;
+  fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), `${localArtifact('analysis')}\n## 资格审计\n\n${renderQualificationAudit(currentAudit.audit)}\n`);
+  const completed = run(f.root, [
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
+    ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+  ]);
+  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+  const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+  assert.equal(invalidation.ok, true);
+  if (!invalidation.ok) return;
+  assert.equal(invalidation.document.targets.length > 0, true);
+  assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'upstream-replaced'), true);
+});
+
+test('qualification recovery started events only authorize the earliest stale stage', () => {
+  const f = fixture('code-review');
+  for (const [name, content] of [
+    ['review-analysis.md', reviewArtifact('Analysis Review', 'analysis.md')],
+    ['plan.md', '# Plan\n'],
+    ['review-plan.md', reviewArtifact('Plan Review', 'plan.md')]
+  ] as const) fs.writeFileSync(path.join(f.dir, name), content);
+  addReceipt(f.file, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  enableQualification(f.file);
+  writeQualifiedArtifact(f.file, path.join(f.dir, 'plan.md'));
+
+  const skipped = run(f.root, [f.id, 'review-plan.started', '--agent', 'codex', '--dry-run']);
+  assert.equal(skipped.status, 1);
+  assert.equal(JSON.parse(skipped.stdout).error.code, 'EVENT_TRANSITION_INVALID');
+  assert.match(JSON.parse(skipped.stdout).error.message, /QUALIFICATION_STALE/);
+
+  const planned = run(f.root, [f.id, 'analyze.started', '--agent', 'codex', '--dry-run']);
+  assert.equal(planned.status, 0, planned.stdout || planned.stderr);
+  assert.equal(JSON.parse(planned.stdout).artifact, 'analysis-r2.md');
+
+  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  assert.equal(JSON.parse(started.stdout).artifact, 'analysis-r2.md');
+});
+
 test('analysis restart is authorized by explicit intent without current-step adjacency', () => {
   const f = fixture('technical-design');
   const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
@@ -1154,6 +1248,7 @@ for (const scenario of reviewScenarios) {
     const startedContent = fs.readFileSync(f.file, 'utf8');
     assert.match(startedContent, /^review_input_artifact: /m);
     assert.match(startedContent, /^review_input_sha256: [a-f0-9]{64}$/m);
+    assert.match(startedContent, /^qualification_input_relations: /m);
     const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
     assert.equal(completed.status, 0, completed.stderr);
     const digest = sha256File(path.join(f.dir, scenario.input));

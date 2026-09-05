@@ -36,9 +36,15 @@ delivery_remote_head:          # Most recent successfully delivered task branch 
 
 ### Constraints
 
+| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
 ### Confirmed Decisions
 
 ### Candidate and Rejected Options
+
+| candidate_id | statement | status | constraint_ids | impact | evidence |
+| --- | --- | --- | --- | --- | --- |
 
 ### Acceptance Criteria
 

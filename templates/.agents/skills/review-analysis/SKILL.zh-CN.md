@@ -19,6 +19,7 @@ description: >
 
 生成审查报告时，先读取 `.agents/rules/evidence-reporting.md`。正常检视记录命令、范围、结构化结果、实际结论和未覆盖部分；finding、阻塞或争议保留可复现位置与决定性摘录，身份字段必须精确保留。
 
+- 审查候选资格或 `HD-N` 判断时，先读取 `.agents/rules/decision-qualification.md`，逐项复核产物中的五张资格审计表、digest、QCR 和上游关系；不得把流程标签当作身份认证
 - 本技能只审查分析产物并写报告，不修改业务代码
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 执行本技能后，你**必须**立即更新 task.md

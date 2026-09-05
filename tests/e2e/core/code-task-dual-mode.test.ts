@@ -50,6 +50,16 @@ function seedLifecycleReceipts(taskDir: string) {
       inputSha256: sha256File(path.join(taskDir, "plan.md")), completedAt
     });
   }
+  const reviewCodeOutputs = fs.readdirSync(taskDir).filter((name) => /^review-code(?:-r[2-9]\d*)?\.md$/.test(name));
+  for (const output of reviewCodeOutputs) {
+    const content = fs.readFileSync(path.join(taskDir, output), "utf8");
+    const input = content.match(/`((?:code|code-r[2-9]\d*)\.md)`/)?.[1];
+    if (!input || !fs.existsSync(path.join(taskDir, input))) continue;
+    addReceipt(taskDir, {
+      event: "review-code.completed", output, input,
+      inputSha256: sha256File(path.join(taskDir, input)), completedAt
+    });
+  }
 }
 
 function runDetect(files: Record<string, string>) {
@@ -62,7 +72,9 @@ function runDetect(files: Record<string, string>) {
 }
 
 function zhReview(verdict: string, findings = "0 阻塞项，0 主要，0 次要 / **人工校验**：0") {
-  return `## 审查摘要
+  return `- **审查输入**：\`code.md\`
+
+## 审查摘要
 
 - **总体结论**：${verdict}
 - **发现（AI 可处理）**：${findings}
@@ -70,7 +82,9 @@ function zhReview(verdict: string, findings = "0 阻塞项，0 主要，0 次要
 }
 
 function enReview(verdict: string, findings = "0 blockers, 0 majors, 0 minors / **Manual validation**: 0") {
-  return `## Review Summary
+  return `- **Review Input**: \`code.md\`
+
+## Review Summary
 
 - **Overall Verdict**: ${verdict}
 - **Findings (AI-actionable)**: ${findings}
@@ -203,7 +217,7 @@ test("code-task dual-mode: human-supplemented review with unparsable verdict sti
   const result = runDetect({
     "code.md": "# code",
     "review-code.md": zhReview("通过"),
-    "review-code-r2.md": "## 审查摘要\n\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要\n"
+    "review-code-r2.md": "- **审查输入**：`code.md`\n\n## 审查摘要\n\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要\n"
   });
 
   assert.equal(result.status, 2);
@@ -338,7 +352,7 @@ test("code-task dual-mode: branch 7 - Rejected refuses local fix mode", () => {
 test("code-task dual-mode: parsing failure returns error", () => {
   const result = runDetect({
     "code.md": "# code",
-    "review-code.md": "## 审查摘要\n\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要\n"
+    "review-code.md": "- **审查输入**：`code.md`\n\n## 审查摘要\n\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要\n"
   });
 
   assert.equal(result.status, 2);

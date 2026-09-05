@@ -16,6 +16,7 @@ import {
 } from '../../../lib/task/artifact-lifecycle.ts';
 import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { createInvalidationOperation, invalidationMutation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
+import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -35,6 +36,20 @@ function addReceipt(f: ReturnType<typeof fixture>, receipt: Parameters<typeof up
   const content = fs.readFileSync(taskPath, 'utf8');
   const mutation = upsertArtifactReceipt(content, receipt);
   fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+}
+
+function enableQualification(f: ReturnType<typeof fixture>) {
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const content = fs.readFileSync(taskPath, 'utf8');
+  fs.writeFileSync(taskPath, `${content}\n## \u7ea6\u675f\n\n| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| C-1 | Keep lifecycle recovery possible | derived | task-input | task.md | task.md#\u7ea6\u675f |  |  |\n\n## \u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848\n\n| candidate_id | statement | status | constraint_ids | impact | evidence |\n| --- | --- | --- | --- | --- | --- |\n| A | Rebuild from the earliest stale stage | qualified | C-1 | bounded recovery | task.md#\u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848 |\n`);
+}
+
+function writeQualifiedArtifact(f: ReturnType<typeof fixture>, name: string) {
+  const taskContent = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
+  const built = buildQualificationAudit(taskContent);
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  fs.writeFileSync(path.join(f.taskDir, name), `# ${name}\n\n## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
 }
 
 test('catalog exposes exactly the approved artifact families', () => {
@@ -170,6 +185,65 @@ test('context resolves required latest inputs and actual review references indep
   assert.equal(inspectTaskArtifacts(TASK_ID, 'review-plan', { repoRoot: f.repoRoot }).reviewedInput?.name, 'plan-r2.md');
 });
 
+test('qualification recovery accepts legacy optional context for analysis and plan but rejects a legacy required input', () => {
+  const f = fixture({
+    'analysis.md': '# analysis\n',
+    'review-analysis.md': '**\u5ba1\u67e5\u8f93\u5165**\uff1a`analysis.md`\n',
+    'plan.md': '# plan\n',
+    'review-plan.md': '**\u5ba1\u67e5\u8f93\u5165**\uff1a`plan.md`\n'
+  });
+  enableQualification(f);
+  addReceipt(f, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+
+  const recovery = resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
+  assert.equal(recovery.status, 'ready');
+  assert.deepEqual(recovery.inputs.map((item) => item.name), ['review-analysis.md']);
+
+  const required = resolveArtifactContext(TASK_ID, 'review-plan', { repoRoot: f.repoRoot });
+  assert.equal(required.status, 'failed');
+  assert.equal(required.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+
+  writeQualifiedArtifact(f, 'analysis.md');
+  const planRecovery = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
+  assert.equal(planRecovery.status, 'ready');
+  assert.deepEqual(planRecovery.inputs.map((item) => item.name), ['analysis.md', 'review-plan.md']);
+});
+
+test('qualification recovery rejects legacy optional context outside analysis and plan', () => {
+  const codeFixture = fixture({ 'plan.md': '# plan\n', 'code.md': '# legacy code\n' });
+  enableQualification(codeFixture);
+  writeQualifiedArtifact(codeFixture, 'plan.md');
+  const code = resolveArtifactContext(TASK_ID, 'code', { repoRoot: codeFixture.repoRoot });
+  assert.equal(code.status, 'failed');
+  assert.equal(code.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+
+  const reviewCodeFixture = fixture({
+    'code.md': '# code\n',
+    'plan.md': '# plan\n',
+    'review-plan.md': '**\u5ba1\u67e5\u8f93\u5165**\uff1a`plan.md`\n'
+  });
+  enableQualification(reviewCodeFixture);
+  writeQualifiedArtifact(reviewCodeFixture, 'code.md');
+  const reviewCode = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: reviewCodeFixture.repoRoot });
+  assert.equal(reviewCode.status, 'failed');
+  assert.equal(reviewCode.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+
+  for (const family of ['manual-validation', 'validation-run'] as const) {
+    const f = fixture({ 'review-code.md': '# legacy review code\n' });
+    enableQualification(f);
+    const result = resolveArtifactContext(TASK_ID, family, { repoRoot: f.repoRoot });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+  }
+});
+
 test('review references ignore mtime order and fail closed on content changes', () => {
   const f = fixture({
     'analysis.md': '# analysis\n',
@@ -210,6 +284,33 @@ test('code replan routing compares plan content with the code input receipt', ()
   assert.equal(result.status, 'ready');
   assert.equal(result.codeMode?.mode, 'init');
   assert.equal(result.codeMode?.reviewArtifact, 'review-plan.md');
+});
+
+test('code fix routing trusts the review receipt when code and review family rounds differ', () => {
+  const f = fixture();
+  enableQualification(f);
+  writeQualifiedArtifact(f, 'plan.md');
+  writeQualifiedArtifact(f, 'code.md');
+  writeQualifiedArtifact(f, 'code-r2.md');
+  writeQualifiedArtifact(f, 'review-code.md');
+  fs.appendFileSync(path.join(f.taskDir, 'review-code.md'), [
+    '', '- **审查输入**：', '  - `code-r2.md`', '', '## 审查摘要', '',
+    '- **总体结论**：需要修改',
+    '- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0', ''
+  ].join('\n'));
+  addReceipt(f, {
+    event: 'code.completed', output: 'code-r2.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code-r2.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'code-r2.md')), completedAt: '2026-01-01 00:01:00+00:00'
+  });
+
+  const result = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.codeMode?.mode, 'fix');
+  assert.equal(result.codeMode?.reviewArtifact, 'review-code.md');
 });
 
 test('revision context fails closed when a review points to a future input', () => {

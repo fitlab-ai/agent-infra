@@ -36,9 +36,15 @@ delivery_remote_head:          # 最近一次成功交付到 remote 的任务分
 
 ### 约束
 
+| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
 ### 已确认决策
 
 ### 候选与否决方案
+
+| candidate_id | statement | status | constraint_ids | impact | evidence |
+| --- | --- | --- | --- | --- | --- |
 
 ### 验收标准
 
