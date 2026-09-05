@@ -186,8 +186,18 @@ function stripSection(content: string, aliases: readonly string[]): string {
   return normalizeText(content.replace(new RegExp(`^##\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^##\\s+|$)`, 'm'), ''));
 }
 
+function stripFrontmatter(content: string): string {
+  const opening = /^---(?:\r?\n)/.exec(content);
+  if (!opening) return content;
+  const closing = /^---\r?$/gm;
+  closing.lastIndex = opening[0].length;
+  const match = closing.exec(content);
+  return match ? content.slice(match.index + match[0].length) : content;
+}
+
 function nonConstraintInputDigest(content: string): string {
-  let projection = stripTaskInputSection(content, TASK_CONSTRAINT_HEADINGS);
+  let projection = stripFrontmatter(content);
+  projection = stripTaskInputSection(projection, TASK_CONSTRAINT_HEADINGS);
   projection = stripTaskInputSection(projection, TASK_CANDIDATE_HEADINGS);
   projection = [
     ['活动日志', 'Activity Log'],

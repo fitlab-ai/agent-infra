@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildQualificationAudit,
   constraintDigest,
+  nonConstraintInputDigest,
   parseQualificationAudit,
   parseTaskQualification,
   renderQualificationAudit,
@@ -73,4 +74,22 @@ test('legacy task input remains explicitly unconfigured until migrated', () => {
   const parsed = parseTaskQualification('# Task\n\n## 约束\n\n- a legacy constraint\n');
   assert.equal(parsed.ok, true);
   if (parsed.ok) assert.equal(parsed.qualification.present, false);
+});
+
+test('non-constraint projection ignores mutable task frontmatter', () => {
+  const content = `---
+id: TASK-20260101-000001
+status: active
+updated_at: old
+checkpoint_commit:
+---
+
+${taskContent()}`;
+  const lifecycleUpdated = content
+    .replace('updated_at: old', 'updated_at: new')
+    .replace('checkpoint_commit:', 'checkpoint_commit: abc123');
+  assert.equal(nonConstraintInputDigest(content), nonConstraintInputDigest(lifecycleUpdated));
+
+  const taskContentUpdated = content.replace('# Task\n', '# Task\n\nA changed task description.\n');
+  assert.notEqual(nonConstraintInputDigest(content), nonConstraintInputDigest(taskContentUpdated));
 });
