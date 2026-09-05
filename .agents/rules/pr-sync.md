@@ -2,7 +2,7 @@
 
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
-PR 摘要的语义聚合由模型完成；canonical 产物选择、marker、当前 HEAD、分页评论查找和 create/update/no-op 由 typed core 负责。
+PR 摘要的语义聚合由模型完成；任务意图 digest、完整三点 diff、canonical `pr-change-report.json` sidecar、报告渲染、marker、权威 PR head、分页评论查找和 create/update/no-op 由 typed core 负责。
 
 ## 三层隔离
 
@@ -24,7 +24,8 @@ agent-infra-internal platform-pr summary-context {task-id}
 - 测试结果
 - 审查历程与当前结论
 - 人工校验三态：`### ⚠️ 需人工校验`、`### ✅ 人工验证已通过` 或 `### ✅ 无需人工校验`
-- `### PR 代码增减`：基于 `platform-pr inspect` 的权威 base/head 和完整 `git diff --find-renames --numstat base...head`，按运行时代码、测试、Skill/规则、模板、文档及其他分类核算，并说明 rename、机械镜像与疑似不必要变化
+- 变更摘要、实现范围、测试结果、审查历程和人工校验三态
+- 一个 `<!-- canonical-pr-change-report -->` 占位符；`### PR 代码增减` 由 core renderer 基于权威 diff 生成，调用方不自行写标题或统计
 
 保留人工校验项时，每条写明校验内容、定位和只能人工完成的原因。
 
@@ -41,16 +42,28 @@ core 最终包装出的 canonical 评论结构为：
 ### PR 代码增减
 ```
 
+先用机械脚本和模型预检生成输入，再写入任务目录固定 sidecar：
+
+```bash
+agent-infra-internal platform-pr change-report {task-id} \
+  --agent {standard-agent-token} --mechanical-file {mechanical-report-file} \
+  --precheck-file {precheck-candidate-file}
+```
+
+precheck 必须覆盖六项固定检查并提供文件证据；`formalReview` 固定为 `false`，`needs-review` 路由到 `review-code`。sidecar 是当前 head 的可丢弃派生缓存，不是 lifecycle artifact 或 Issue artifact。
+
 ## 发布
 
 把聚合后的纯正文写入 `{summary-body-file}`，不要自行添加 marker 或 commit SHA：
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {standard-agent-token} --body-file {summary-body-file}
+  --agent {standard-agent-token} --body-file {summary-body-file} \
+  --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
+  --result {primary-result}
 ```
 
-core 会包装唯一 `<!-- sync-pr:{task-id}:summary -->` 和当前 `<!-- last-commit: ... -->`，分页查找 PR 普通评论：不存在则创建、正文变化则原地更新、无差异则 no-op、重复 marker 则稳定失败。正文通过文件输入，调用方不得拼 shell/heredoc。
+正文必须恰好包含一次 `<!-- canonical-pr-change-report -->`，不得自行拼接报告标题/JSON、marker 或 last-commit。core 会重新校验任务意图 digest、绑定 PR identity、完整 patch SHA 和机械统计，由 renderer 生成报告段，再包装唯一 `<!-- sync-pr:{task-id}:summary -->` 和权威 `<!-- last-commit: ... -->`，分页查找 PR 普通评论：不存在则创建、正文变化则原地更新、无差异则 no-op、重复 marker 或报告失配则稳定失败。正文通过文件输入，调用方不得拼 shell/heredoc。
 
 ## 结果回传
 

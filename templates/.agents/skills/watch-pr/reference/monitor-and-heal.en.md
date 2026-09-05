@@ -11,6 +11,12 @@ After the watch command, route by structured `readiness.state`:
 - `conflicting`: the platform explicitly reports a head/base conflict → rebase healing in SKILL step 3.
 - `pending|timed-out|cancelled`: no reliable success fact exists → SKILL step 4.
 
+## Summary Refresh Boundary
+
+Before readiness in every round, and after an external push, self-heal commit, or successful rebase changes the PR head, rerun `summary-context` → mechanical report and six-check precheck → `platform-pr change-report` → `summary-sync --change-report-file ... --result no_op --strict` with exactly one `<!-- canonical-pr-change-report -->` placeholder. `--strict` preserves report or summary refresh failures as `failed/blocked` so warnings cannot reach the ready/complete route. The core revalidates the sidecar against the authoritative PR snapshot, task-intent digest, and complete patch; missing, stale, invalid, bypassed, or raced publication must not continue to a ready/complete route and must enter the help exit with a warning.
+
+When rebuilding the precheck, each of the six `rationale` fields must state the corresponding high-level finding and include at least one path, line range, and concise `detail` as evidence. `change-composition` must describe where responsibilities are concentrated; compatibility, legacy-path, redundancy, and scope checks must state their actual results separately, without reused generic boilerplate. Use the deployed skill's language for rationales and evidence details; Chinese skill deployments must use Chinese.
+
 ## Self-Heal Decision Tree
 
 ```text

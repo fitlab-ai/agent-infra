@@ -4,7 +4,7 @@
 {"source":"platform-pr-inspect","diff":"three-dot-find-renames","metrics":["numstat-lines","git-blob-bytes"],"publish":["pr-summary","user-response"]}
 -->
 
-PR 创建或复用成功后，使用 `platform-pr inspect` 返回的权威 `base.sha` 与 `head.sha` 统计完整 PR 差异，不以最后一个 commit 或工作树状态代替。
+PR 创建或复用成功后，使用 `platform-pr inspect` 返回的权威 `base.sha` 与 `head.sha` 统计完整 PR 差异，不以最后一个 commit 或工作树状态代替。任务意图 digest 只覆盖 `# 任务`/`# Task` 到 `## 上下文`/`## Context` 的语义区间，因此生命周期日志、收据和版本元数据不会使同一 head 的 sidecar 失效。
 
 ## 证据命令
 
@@ -13,6 +13,18 @@ node .agents/skills/create-pr/scripts/change-report.mjs --base {base-sha} --head
 git diff --find-renames --name-status {base-sha}...{head-sha}
 git diff --find-renames --summary {base-sha}...{head-sha}
 ```
+
+将脚本 JSON 和模型生成的六项 precheck candidate 交给 typed core：
+
+```bash
+agent-infra-internal platform-pr change-report {task-id} \
+  --agent {standard-agent-token} --mechanical-file {mechanical-report-file} \
+  --precheck-file {precheck-candidate-file}
+```
+
+core 校验任务意图 digest、PR identity、完整 patch SHA、统计合计和固定顺序的 `target-alignment`、`change-composition`、`compatibility-policy`、`legacy-path-cleanup`、`redundancy`、`scope-discipline`。任一项为 `needs-review` 时路由到 `review-code`，`formalReview` 仍为 `false`。
+
+生成 candidate 时，六项 `rationale` 必须分别写出实际检查结论：`target-alignment` 说明目标对应关系，`change-composition` 概括新增代码集中承担的职责，`compatibility-policy` 说明兼容策略，`legacy-path-cleanup` 说明旧路径处理，`redundancy` 说明冗余检查结果，`scope-discipline` 说明范围判断。不得六项复用“符合范围”等泛化套话；每项至少提供一条直接支持结论的路径、行号和简短 `detail`，并遵循当前已部署技能的语言。中文技能必须使用中文。这些高层理由和证据会直接展示在 canonical 摘要中。
 
 脚本在 merge base 与 head 之间同时计算 `numstat` 行数和 Git blob 的精确字节数。字节比字符具有稳定口径，也能覆盖二进制文件和同行内缩减；子模块不是 blob，按 0 字节贡献核算。新增文件的旧字节数为 0，删除文件的新字节数为 0，纯 rename 的净字节数为 0，copy 只计新增目标内容。
 
@@ -31,7 +43,7 @@ git diff --find-renames --summary {base-sha}...{head-sha}
 
 输出表格必须包含“部分、文件数、新增行、删除行、净增行、旧字节、新字节、净字节”，并有合计行。字节列表示本次变更涉及文件的 blob 内容体积，不表示整个仓库或工作树的磁盘占用。使用精确整数；可附加 KiB/MiB 便于阅读，但不能替代字节数。
 
-各类别的行数和字节数之和必须分别与脚本的 `totals` 一致。随后分别列出行数变化和绝对净字节变化最大的文件，并区分源码、测试、模板镜像和纯 rename。
+各类别的行数和字节数之和必须分别与脚本的 `totals` 一致。随后仅针对文本文件，分别列出行数变化和绝对净字节变化最大的文件，并区分源码、测试和模板镜像；二进制文件只保留在分类合计中，不参与代表性文件排序或内容判断。rename 只按路径变化展示，不推断“纯 rename”。
 
 ## 分析要求
 
@@ -40,7 +52,7 @@ git diff --find-renames --summary {base-sha}...{head-sha}
 - 增长主要集中在哪里，运行时代码与测试/文档/模板各占多少；
 - 行数净变化与净字节变化是否给出不同结论，尤其指出同行内明显缩减或膨胀；
 - 哪些行数只是路径迁移、双语镜像或机械同步；
-- 是否存在与 PR 目标无法直接对应、疑似不必要的变化；若没有，明确说明判断依据；
+- 是否存在与 PR 目标无法直接对应、疑似不必要的变化；若没有，明确说明判断依据；每项结论必须给出文件和行号证据；
 - 若某个测试 fixture 明显大于生产改动，解释它覆盖的风险，而不是仅以行数评价。
 
-将完整报告以 `### PR 代码增减` 段落写入 reviewer 摘要正文，并在 create-pr 的用户可见完成回复中原样保留同一张统计表与结论。不要把报告另建成第二条 PR 评论。
+调用方不要自行写入 `### PR 代码增减`。把恰好包含一次 `<!-- canonical-pr-change-report -->` 的普通摘要正文交给 `summary-sync --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json --result {primary-result}`，由 core renderer 替换并发布。报告不另建第二条 PR 评论。

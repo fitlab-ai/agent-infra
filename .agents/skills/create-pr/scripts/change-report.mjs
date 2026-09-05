@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 function fail(message) {
   process.stderr.write(`${message}\n`);
@@ -128,6 +129,7 @@ function numericLineCount(value) {
 function main() {
   const options = parseArgs(process.argv.slice(2));
   const mergeBase = git(["merge-base", options.base, options.head], options).trim();
+  const patch = git(["diff", "--no-ext-diff", "--binary", "--find-renames", mergeBase, options.head], options, null);
   const diffArgs = ["diff", "--no-ext-diff", "--find-renames", "-z", mergeBase, options.head];
   const files = parseRawDiff(git([...diffArgs.slice(0, 2), "--raw", "--abbrev=64", ...diffArgs.slice(2)], options, null));
   const numstat = parseNumstat(git([...diffArgs.slice(0, 2), "--numstat", ...diffArgs.slice(2)], options, null));
@@ -191,6 +193,7 @@ function main() {
     base: options.base,
     head: options.head,
     mergeBase,
+    patchSha256: createHash("sha256").update(patch).digest("hex"),
     files: reportFiles,
     totals
   }, null, 2)}\n`);

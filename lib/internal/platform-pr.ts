@@ -12,7 +12,7 @@ import {
   syncPlatformPullRequestInLabels
 } from '../platform/pull-requests.ts';
 import type { PullRequestResult } from '../platform/pull-requests.ts';
-import { summaryContext, syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { reportWrite, summaryContext, syncPullRequestSummary } from '../platform/pr-summary.ts';
 import type { PlatformResult } from '../platform/types.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd <path>]
@@ -23,11 +23,12 @@ const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd
        agent-infra-internal platform-pr sync <task-ref> --agent <agent> [--metadata] [--closing-issue] --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync-in-labels --pr <N> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-context <task-ref> [--cwd <path>]
-       agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --result <pr_created|pr_reused|no_op> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr change-report <task-ref> --agent <agent> --mechanical-file <path> --precheck-file <path> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --change-report-file <path> --result <pr_created|pr_reused|no_op> [--strict] [--dry-run] [--cwd <path>]
 `;
 
-const BOOLEAN_FLAGS = new Set(['--draft', '--dry-run', '--metadata', '--closing-issue']);
-const VALUE_FLAGS = new Set(['--cwd', '--agent', '--base', '--head', '--title-file', '--body-file', '--pr', '--result']);
+const BOOLEAN_FLAGS = new Set(['--draft', '--dry-run', '--metadata', '--closing-issue', '--strict']);
+const VALUE_FLAGS = new Set(['--cwd', '--agent', '--base', '--head', '--title-file', '--body-file', '--change-report-file', '--mechanical-file', '--precheck-file', '--pr', '--result']);
 
 function key(flag: string): string {
   return flag.slice(2).replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
@@ -68,7 +69,7 @@ function readFile(value: string, cwd: string): string {
 async function platformPr(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'sync-in-labels', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'sync-in-labels', 'summary-context', 'change-report', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
   if (operation === 'sync-in-labels') {
     const parsed = parse(args, 1);
     if (parsed.error) { fail(parsed.error); return; }
@@ -96,16 +97,24 @@ async function platformPr(args: string[] = []): Promise<void> {
     sync: ['cwd', 'agent', 'metadata', 'closingIssue', 'result', 'dryRun'],
     'sync-in-labels': ['cwd', 'pr', 'dryRun'],
     'summary-context': ['cwd'],
-    'summary-sync': ['cwd', 'agent', 'bodyFile', 'result', 'dryRun']
+    'change-report': ['cwd', 'agent', 'mechanicalFile', 'precheckFile', 'dryRun'],
+    'summary-sync': ['cwd', 'agent', 'bodyFile', 'changeReportFile', 'result', 'dryRun', 'strict']
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
   if (operation === 'inspect') { finish(await inspectPlatformPullRequest(taskRef, { cwd })); return; }
-  if (operation === 'summary-context') { finish(summaryContext(taskRef, { cwd })); return; }
+  if (operation === 'summary-context') { finish(await summaryContext(taskRef, { cwd })); return; }
   if (typeof values.agent !== 'string' || !values.agent) { fail(`${operation} requires --agent`); return; }
   const agent = normalizeAgentToken(values.agent);
   if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
+  if (operation === 'change-report') {
+    if (typeof values.mechanicalFile !== 'string' || typeof values.precheckFile !== 'string') { fail('change-report requires --mechanical-file and --precheck-file'); return; }
+    finish(await reportWrite(taskRef, {
+      cwd, agent: values.agent, mechanicalFile: values.mechanicalFile, precheckFile: values.precheckFile, dryRun: values.dryRun === true
+    }));
+    return;
+  }
   if (operation === 'skip') {
     finish(await skipPlatformPullRequestFact(taskRef, { cwd, agent, dryRun: values.dryRun === true }));
     return;
@@ -135,9 +144,10 @@ async function platformPr(args: string[] = []): Promise<void> {
   }
   if (operation === 'summary-sync') {
     if (typeof values.bodyFile !== 'string') { fail('summary-sync requires --body-file'); return; }
+    if (typeof values.changeReportFile !== 'string') { fail('summary-sync requires --change-report-file'); return; }
     if (!primaryResult) { fail('summary-sync requires --result pr_created, pr_reused, or no_op'); return; }
     try {
-      finish(await syncPullRequestSummary(taskRef, { cwd, agent: values.agent, body: readFile(values.bodyFile, cwd), primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', dryRun: values.dryRun === true }));
+      finish(await syncPullRequestSummary(taskRef, { cwd, agent: values.agent, body: readFile(values.bodyFile, cwd), changeReportFile: values.changeReportFile, primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', dryRun: values.dryRun === true, strict: values.strict === true }));
     } catch (error) {
       fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
     }

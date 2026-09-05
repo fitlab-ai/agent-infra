@@ -36,7 +36,7 @@ function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } 
 test('platform-pr CLI advertises all PR and summary intents', () => {
   const output = run(['--help']);
   assert.equal(output.status, 0);
-  for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'sync-in-labels', 'summary-context', 'summary-sync']) {
+  for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'sync-in-labels', 'summary-context', 'change-report', 'summary-sync']) {
     assert.match(output.stdout, new RegExp(`platform-pr ${operation}`));
   }
 });
@@ -47,7 +47,7 @@ test('platform-pr sync-in-labels validates the PR number before platform access'
   assert.equal(JSON.parse(output.stdout).error.code, 'PR_PAYLOAD_INVALID');
 });
 
-test('platform-pr summary-sync accepts the commit path no-op result before task resolution', () => {
+test('platform-pr summary-sync validates required report input before invoking the operation', () => {
   const bodyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-summary-'));
   const bodyFile = path.join(bodyRoot, 'body.md');
   fs.writeFileSync(bodyFile, '');
@@ -56,9 +56,33 @@ test('platform-pr summary-sync accepts the commit path no-op result before task 
       'summary-sync', 'TASK-1', '--agent', 'codex', '--body-file', bodyFile, '--result', 'no_op'
     ]);
     assert.equal(output.status, 1);
-    assert.equal(JSON.parse(output.stdout).error.code, 'INVALID_TASK_REF');
+    assert.equal(JSON.parse(output.stdout).error.code, 'PR_PAYLOAD_INVALID');
   } finally {
     fs.rmSync(bodyRoot, { recursive: true, force: true });
+  }
+});
+
+test('platform-pr summary-sync strict mode keeps report failures non-zero without changing default warnings', () => {
+  const fixture = createFixture(boundFixture(1));
+  try {
+    const args = [
+      'summary-sync', fixture.taskId, '--agent', 'codex', '--body-file', 'body.md',
+      '--change-report-file', `.agents/workspace/active/${fixture.taskId}/pr-change-report.json`, '--result', 'no_op'
+    ];
+    const relaxed = run(args, { cwd: fixture.root, env: fixture.env });
+    assert.equal(relaxed.status, 0, relaxed.stderr || relaxed.stdout);
+    const relaxedPayload = JSON.parse(relaxed.stdout);
+    assert.equal(relaxedPayload.status, 'applied');
+    assert.equal(relaxedPayload.warnings[0].code, 'PR_CHANGE_REPORT_MISSING');
+
+    const strict = run([...args, '--strict'], { cwd: fixture.root, env: fixture.env });
+    assert.equal(strict.status, 1, strict.stderr || strict.stdout);
+    const strictPayload = JSON.parse(strict.stdout);
+    assert.equal(strictPayload.status, 'failed');
+    assert.equal(strictPayload.error.code, 'PR_CHANGE_REPORT_MISSING');
+    assert.equal(strictPayload.warnings.length, 0);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
@@ -669,6 +693,7 @@ test('platform-pr CLI rejects incomplete and conflicting payloads before I/O', (
     ['bind', 'TASK-1', '--agent', 'codex'],
     ['resolve-external', 'TASK-1'],
     ['sync', 'TASK-1', '--agent', 'codex'],
+    ['change-report', 'TASK-1', '--agent', 'codex'],
     ['summary-sync', 'TASK-1', '--agent', 'codex']
   ]) {
     const output = run(args);

@@ -48,13 +48,13 @@ Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deter
 
 Before running this step, read `reference/monitor-and-heal.md` and `.agents/rules/pr-checks-commands.md`.
 
-Initialize `repairCommits=[]` and `rebaseAttempts=0`. Run `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`, then route only by `readiness.state`: `ready` to step 7, `conflicting|checks-failed` to step 3, and `pending|timed-out|cancelled` to step 4.
+Initialize `repairCommits=[]` and `rebaseAttempts=0`. Before readiness in every round, run `platform-pr summary-context`, rebuild the task-bound `pr-change-report.json` for the authoritative PR head using the shared PR change-report contract, and refresh the single summary with a body containing one `<!-- canonical-pr-change-report -->` placeholder via `summary-sync --change-report-file ... --result no_op --strict`. `--strict` preserves report or summary refresh failures as `failed/blocked` instead of treating warnings as success. A report or summary refresh failure must not enter the ready/complete exit; use step 4. After the refresh, run `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`, then route only by `readiness.state`: `ready` to step 7, `conflicting|checks-failed` to step 3, and `pending|timed-out|cancelled` to step 4.
 
 ### 3. Self-Heal Loop
 
 Before running this step, read the "Self-Heal Decision Tree" of `reference/monitor-and-heal.md` and "Resolve a Failing Run id and Pull Logs" of `.agents/rules/pr-checks-commands.md`.
 
-For `checks-failed`, minimally fix a locatable code-layer failure, test, and publish through the existing commit/push intents. For `conflicting`, follow the reference's same-repository, clean-tree, head/base identity, rebase, full-test, and `git-workflow push-rebased` exact-lease flow, capped at two attempts. Append only remotely verified SHAs, then watch the new head again; any failed safety check goes to step 4.
+For `checks-failed`, minimally fix a locatable code-layer failure, test, and publish through the existing commit/push intents. For `conflicting`, follow the reference's same-repository, clean-tree, head/base identity, rebase, full-test, and `git-workflow push-rebased` exact-lease flow, capped at two attempts. Append only remotely verified SHAs; after any external push, self-heal commit, or rebase changes the head, refresh the report and summary before watching the new head again; any failed safety check goes to step 4.
 
 ### 4. Help Exit (Produce-Then-Stop)
 

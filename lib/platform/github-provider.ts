@@ -22,6 +22,7 @@ import type {
   PlatformProvider,
   PlatformProviderFactoryInput,
   ProviderResult,
+  ResourceIdentity,
   ReleaseNotesFacts,
   RepositoryMetadataSnapshot,
   ReleaseSnapshot,
@@ -339,6 +340,10 @@ function createReceipt(remoteId: string): ProviderResult<MutationReceipt> {
   return { ok: true, value: { changed: true, remoteId } };
 }
 
+function githubResourceToken(identity: ResourceIdentity | null | undefined): string | null {
+  return resourceIdentityString(identity) || (identity?.kind === 'number' ? String(identity.value) : null);
+}
+
 function syncLabels(
   client: GitHubClient,
   repositoryName: string,
@@ -563,7 +568,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async write({ context, parent, body, existingComment }) {
       const number = resourceIdentityNumber(parent);
       if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
-      const commentId = resourceIdentityString(existingComment);
+      const commentId = githubResourceToken(existingComment);
       const endpoint = commentId ? `repos/${repository(context)}/issues/comments/${commentId}` : `repos/${repository(context)}/issues/${number}/comments`;
       const response = client.json<any>(['api', endpoint, '-X', commentId ? 'PATCH' : 'POST', '--input', '-'], {
         cwd: context.workingDirectory,
@@ -574,7 +579,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       return createReceipt(String(response.value?.id || commentId || ''));
     },
     async delete({ context, comment }) {
-      const commentId = resourceIdentityString(comment);
+      const commentId = githubResourceToken(comment);
       if (!commentId) return invalid('COMMENT_ID_INVALID', 'Comment id is required');
       const response = client.text(['api', `repos/${repository(context)}/issues/comments/${commentId}`, '-X', 'DELETE'], { cwd: context.workingDirectory, method: 'DELETE' });
       if (!response.ok) return response;

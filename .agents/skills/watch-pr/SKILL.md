@@ -48,13 +48,13 @@ description: >
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 与 `.agents/rules/pr-checks-commands.md`。
 
-进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，只按结构化 `readiness.state` 分流：`ready` 进入步骤 7，`conflicting` 或 `checks-failed` 进入步骤 3，`pending|timed-out|cancelled` 进入步骤 4。
+进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。每轮 readiness 前先调用 `platform-pr summary-context`，按共享 PR change-report contract 以当前权威 PR head 重建任务绑定的 `pr-change-report.json`，再用含唯一 `<!-- canonical-pr-change-report -->` 占位符的正文调用 `summary-sync --change-report-file ... --result no_op --strict` 刷新同一条摘要。`--strict` 将报告或摘要刷新失败保留为 `failed/blocked`，不得把 warning 当作成功；刷新失败时不得进入 ready/complete 出口，按步骤 4 记录阻塞。刷新完成后调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，只按结构化 `readiness.state` 分流：`ready` 进入步骤 7，`conflicting` 或 `checks-failed` 进入步骤 3，`pending|timed-out|cancelled` 进入步骤 4。
 
 ### 3. 自愈循环
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 的「自愈决策树」与 `.agents/rules/pr-checks-commands.md` 的「解析失败 run id 并拉日志」。
 
-`checks-failed` 只对可定位代码层失败做最小修复和测试，再用既有 commit/push intent 发布。`conflicting` 严格执行 reference 的同仓库、干净工作树、head/base 身份、rebase、完整测试与 `git-workflow push-rebased` 精确 lease 流程；上限 2 次。仅记录远端复核成功的 SHA，随后重新监控新 head；任一安全检查失败转步骤 4。
+`checks-failed` 只对可定位代码层失败做最小修复和测试，再用既有 commit/push intent 发布。`conflicting` 严格执行 reference 的同仓库、干净工作树、head/base 身份、rebase、完整测试与 `git-workflow push-rebased` 精确 lease 流程；上限 2 次。仅记录远端复核成功的 SHA；任何外部 push、自愈 commit 或 rebase 改变 head 后，先按本轮报告→摘要顺序刷新，再重新监控新 head；任一安全检查失败转步骤 4。
 
 ### 4. 求助出口（产出后停止）
 
