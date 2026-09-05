@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import {
   requestCodexControllerClose,
   requestCodexControllerOpen,
@@ -110,6 +110,25 @@ async function waitForResultEvidenceAsync(processingDir: string, timeoutMs: numb
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`Timed out waiting for result evidence in ${processingDir}`);
+}
+
+function observeResultEvidence(t: TestContext, processingDir: string): Promise<{ requestId: string; resultPath: string }> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timed out waiting for result read-back')), SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    t.after(() => clearTimeout(timer));
+    const readFile = fs.readFileSync;
+    const observer = t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => {
+      const contents = readFile(...args);
+      const resultPath = String(args[0]);
+      if (path.basename(resultPath) === 'result.json' && path.dirname(path.dirname(resultPath)) === processingDir) {
+        observer.mock.restore();
+        clearTimeout(timer);
+        // Resume after the broker records the read-back, before its next publication tick.
+        resolve({ requestId: path.basename(path.dirname(resultPath)), resultPath });
+      }
+      return contents;
+    });
+  });
 }
 
 type CollectedChild = {
@@ -1290,7 +1309,7 @@ test('task-finalization normal publication fails closed on a conflicting termina
   }
 });
 
-test('task-finalization normal publication retains processing when the receipt disappears', async () => {
+test('task-finalization normal publication retains processing when the receipt disappears', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-receipt-missing-'));
   const taskId = 'TASK-20260809-010203';
   const generation = 'finalization-receipt-missing-generation';
@@ -1302,8 +1321,9 @@ test('task-finalization normal publication retains processing when the receipt d
     const manifestPath = writeControlManifest(root, branch, generation);
     writeFinalizationTaskFixture(root, taskId);
     const manifest = readSandboxControlManifest(manifestPath);
+    const resultEvidence = observeResultEvidence(t, manifest.processingDir);
     server = serveSandboxControl(manifestPath, controller.signal, {
-      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1_000 },
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
       internalCliPath: path.resolve('bin/internal-cli.ts')
@@ -1316,7 +1336,7 @@ test('task-finalization normal publication retains processing when the receipt d
       generation,
       timeoutMs: 1_500
     });
-    const evidence = await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const evidence = await resultEvidence;
     fs.rmSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`));
     await server;
     const client = await clientResult;
@@ -1332,7 +1352,7 @@ test('task-finalization normal publication retains processing when the receipt d
   }
 });
 
-test('task-finalization settles and commits the canonical terminal before graceful shutdown cleanup', async () => {
+test('task-finalization settles and commits the canonical terminal before graceful shutdown cleanup', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-graceful-shutdown-'));
   const taskId = 'TASK-20260809-010203';
   const generation = 'finalization-graceful-shutdown-generation';
@@ -1344,8 +1364,9 @@ test('task-finalization settles and commits the canonical terminal before gracef
     const manifestPath = writeControlManifest(root, branch, generation);
     writeFinalizationTaskFixture(root, taskId);
     const manifest = readSandboxControlManifest(manifestPath);
+    const resultEvidence = observeResultEvidence(t, manifest.processingDir);
     server = serveSandboxControl(manifestPath, controller.signal, {
-      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1_000 },
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
       internalCliPath: path.resolve('bin/internal-cli.ts')
@@ -1358,7 +1379,7 @@ test('task-finalization settles and commits the canonical terminal before gracef
       generation,
       timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
     });
-    const evidence = await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    const evidence = await resultEvidence;
     controller.abort();
     await server;
     const client = await clientResult;
