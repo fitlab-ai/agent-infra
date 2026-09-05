@@ -16,6 +16,7 @@ import { fetchSandboxRows, selectSandboxContainer } from './list-running.ts';
 import { resolveTools, toolConfigDirCandidates } from '../tools.ts';
 import { detectEngine } from '../engine.ts';
 import { resolveSandboxTarget } from '../workspace-identity.ts';
+import { readSandboxControlStatusForRow } from './control-status.ts';
 
 const USAGE = `Usage: ai sandbox show <branch | TASK-id | N>
 
@@ -92,6 +93,21 @@ export function show(args: string[] = []): void {
   p.log.step('Workspace identity');
   process.stdout.write(`  Mode: ${container?.workspaceMode ?? 'legacy-invalid'}\n`);
   process.stdout.write(`  Task: ${container?.taskId ?? '-'}\n`);
+
+  p.log.step('Control status');
+  const controlStatus = container
+    ? readSandboxControlStatusForRow(config, container)
+    : null;
+  if (!controlStatus) {
+    p.log.warn('  Control status unavailable');
+  } else {
+    process.stdout.write(`  Health: ${controlStatus.state}\n`);
+    process.stdout.write(`  Task view: ${controlStatus.taskView.state}\n`);
+    process.stdout.write(`  Task source: ${controlStatus.taskView.observedSource ?? '-'}\n`);
+    if (controlStatus.taskView.reasonCode) {
+      process.stdout.write(`  Task view reason: ${controlStatus.taskView.reasonCode}\n`);
+    }
+  }
 
   for (const tool of detail.toolStates) {
     p.log.step(`${tool.name} state`);

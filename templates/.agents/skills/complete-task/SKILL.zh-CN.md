@@ -170,36 +170,19 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 `--force` 不能解除身份、并发、本地原子性或 required-PR hard gate；这些能力失败时必须停止。其余审查、人工校验和平台证据由 terminal verification 记录为 warning/pending，并通过后续重试恢复。
 
-### 6. 执行宿主 finalization 入口并验证终态
+### 6. 执行宿主 finalization 入口
 
 ```bash
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-finalization 按 lifecycle → task 评论 → `complete-task.completed` 校验的固定顺序执行，并将每一步的状态写入宿主 receipt。`result=completed` 即表示 lifecycle 已安全完成；若还有外围 warning，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。
-
-```bash
-ls .agents/workspace/completed/{task-id}/task.md
-```
-
-仅在 finalization 返回 `status=completed` 后确认任务目录已成功移动。
+finalization 按 lifecycle → task 评论 → `complete-task.completed` 校验的固定顺序执行，并将每一步的状态写入宿主 receipt。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
 
 ### 7. 处理 finalization 重试与结果
 
 场景 A 与场景 B `finalization-retry` 都从宿主执行同一个 `task-finalization` 入口。receipt 只是重入提示，不是 canonical truth：每次重入都要重新验证终态 task 评论和完成校验；只有任务已处于 `completed` 且短号 registry 已释放时，才可跳过不可逆的 lifecycle。不得拆开调用旧的 lifecycle、评论同步或完成校验命令。若 task 评论或校验因网络问题返回 `blocked`，保留 receipt 和已完成状态，修复网络后重跑 complete-task；若生命周期仍未完成，任务保持 active 并从 receipt 的待处理步骤继续。
 
-完成结果必须包含本次 finalization 的结构化输出，确认任务产物和同步状态符合规范：
-
-```bash
-agent-infra-internal task-verify {task-id} complete-task.completed --format text
-```
-
-处理结果：
-- `status=completed` / 退出码 0（全部通过）-> 继续到「告知用户」步骤
-- `status=failed` / 退出码 1 -> 根据输出修复问题后重新运行 finalization
-- `status=blocked` / 退出码 2 -> 保留 receipt 与已完成的步骤并停止；稍后重跑 complete-task 进入 `finalization-retry`
-
-将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+完成结果必须直接消费本次宿主 finalization 的结构化输出、receipt 和 warning projection。`completed` 或 `completed_with_warnings` 才允许继续；`failed` / `blocked` / `unknown` 必须保留 receipt 并停止，之后通过同一 finalization 入口重试。不要在沙箱旧挂载中另行运行 `ls completed` 或 `task-verify complete-task.completed`，也不要用其结果推翻宿主结果。
 
 ### accepted 后的 sandbox-control 结果恢复
 

@@ -23,6 +23,7 @@ import {
   SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
   SANDBOX_CONTROL_RESERVATION_BYTES
 } from './protocol.ts';
+import { parseSandboxTaskView, taskViewForManifest, type SandboxTaskView } from './task-view.ts';
 
 export const SANDBOX_CONTROL_AUDIT_MAX_BYTES = 1024 * 1024;
 export const SANDBOX_CONTROL_EXECUTION_STOP_MS = 2_000;
@@ -296,10 +297,11 @@ export function writeSandboxControlStatus(
   state: SandboxControlStatus['state'],
   reasonCode: string | null,
   activeRequestId: string | null,
-  now = Date.now()
+  now = Date.now(),
+  taskView: SandboxTaskView = taskViewForManifest(manifest)
 ): SandboxControlStatus {
   const status: SandboxControlStatus = {
-    version: 2, generation: manifest.generation, broker, state, reasonCode, activeRequestId, updatedAt: now
+    version: 3, generation: manifest.generation, broker, state, reasonCode, activeRequestId, updatedAt: now, taskView
   };
   atomicWriteJson(statusPath(manifest), status, 0o600, false);
   return status;
@@ -307,7 +309,7 @@ export function writeSandboxControlStatus(
 
 export function parseSandboxControlStatus(value: unknown): SandboxControlStatus {
   const status = value as Partial<SandboxControlStatus> | null;
-  if (!status || status.version !== 2 || typeof status.generation !== 'string'
+  if (!status || status.version !== 3 || typeof status.generation !== 'string'
     || !status.broker || !Number.isSafeInteger(status.broker.pid) || typeof status.broker.startTime !== 'number'
     || !Number.isSafeInteger(status.broker.startTime) || typeof status.broker.brokerId !== 'string'
     || status.broker.brokerId.length === 0
@@ -315,6 +317,7 @@ export function parseSandboxControlStatus(value: unknown): SandboxControlStatus 
     || (status.reasonCode !== null && typeof status.reasonCode !== 'string')
     || (status.activeRequestId !== null && typeof status.activeRequestId !== 'string')
     || !Number.isSafeInteger(status.updatedAt)) throw new Error('SANDBOX_CONTROL_STATUS_INVALID');
+  parseSandboxTaskView(status.taskView);
   return status as SandboxControlStatus;
 }
 

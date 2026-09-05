@@ -180,8 +180,9 @@ function inplaceFixture({ includeContainer = true }: { includeContainer?: boolea
   const statusPath = path.join(control.statusDir, 'status.json');
   const writeStatus = (overrides: Record<string, unknown>) => {
     fs.writeFileSync(statusPath, `${JSON.stringify({
-      version: 2, generation, broker: { pid: 999999, startTime: 123456789, brokerId: 'fixture-broker' },
+      version: 3, generation, broker: { pid: 999999, startTime: 123456789, brokerId: 'fixture-broker' },
       state: 'healthy', reasonCode: null, activeRequestId: null, updatedAt: Date.now(),
+      taskView: { state: 'current', taskId, observedSource: 'active', receipt: null, reasonCode: null },
       ...overrides
     })}\n`);
   };

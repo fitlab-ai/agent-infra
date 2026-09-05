@@ -171,36 +171,19 @@ If a summary must mirror a human-decided `post-review-commit` exemption, make a 
 
 `--force` cannot lift identity, concurrency, local atomicity, or required-PR hard gates; failures there must stop. Other review, manual-validation, and platform evidence is recorded by terminal verification as warning/pending and can be repaired by retrying.
 
-### 6. Run the Host Finalization Entry Point and Verify the Terminal State
+### 6. Run the Host Finalization Entry Point
 
 ```bash
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-Finalization runs lifecycle -> the terminal task comment -> the `complete-task.completed` gate in a fixed order and records each step in the host receipt. `result=completed` means lifecycle completed safely; if peripheral warnings remain, return `result=completed_with_warnings`, warnings, and pending steps. Use `result=failed` or `result=blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state.
-
-```bash
-ls .agents/workspace/completed/{task-id}/task.md
-```
-
-Check the task directory only after finalization returns `status=completed`.
+Finalization runs lifecycle -> the terminal task comment -> the `complete-task.completed` gate in a fixed order and records each step in the host receipt. `result=completed` means the host safely completed the task from structured results and the receipt; if peripheral warnings remain, return `result=completed_with_warnings`, warnings, and pending steps. Use `result=failed` or `result=blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state. A sandbox must not run `ls completed` or a local terminal verification against its historical mount to re-decide this result.
 
 ### 7. Handle Finalization Retries and Results
 
 Both Scenario A and Scenario B `finalization-retry` run the same `task-finalization` entry point from the host. The receipt is only a re-entry hint, not canonical truth: every re-entry revalidates the terminal task comment and completion gate; only an already `completed` task with its short-id registry entry released may skip the irreversible lifecycle. Do not split the operation into the former lifecycle, comment-sync, or completion-gate commands. If the task comment or gate is blocked by the network, preserve the receipt and completed steps, fix the network, and rerun complete-task. If lifecycle has not completed, keep the task active and resume the pending steps from the receipt.
 
-The result must include the structured output from this finalization run, confirming that the task artifact and sync state are valid:
-
-```bash
-agent-infra-internal task-verify {task-id} complete-task.completed --format text
-```
-
-Handle the result as follows:
-- `status=completed` / exit code 0 (all checks passed) -> continue to the "Inform User" step
-- `status=failed` / exit code 1 -> fix the reported issues and run finalization again
-- `status=blocked` / exit code 2 -> preserve the receipt and completed steps and stop; rerun complete-task later to enter `finalization-retry`
-
-Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
+Consume the structured finalization result, receipt, and warning projection directly. Continue only for `completed` or `completed_with_warnings`; preserve the receipt and stop for `failed`, `blocked`, or `unknown`, then retry through the same finalization entry point. Do not run `ls completed` or `task-verify complete-task.completed` from a stale sandbox mount, and do not let that local result overrule the host result.
 
 ### Accepted sandbox-control result recovery
 

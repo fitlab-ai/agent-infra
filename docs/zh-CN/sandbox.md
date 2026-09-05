@@ -150,7 +150,7 @@ v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑�
 
 tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/.codex` 下的 Codex 数据库、日志、session 与其他未列入 seed 的文件无法恢复；`config.toml`、`model-catalogs` 等声明式 seed 可以从只读 staging mount 重建；bind mount 的 worktree、凭据、shell 配置与 share 目录继续由宿主持久化。
 
-`ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、workspace identity、完整 task ID 和分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印基于标签的 workspace identity、该分支的 worktree 路径和各工具（Claude Code、Codex、Antigravity CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
+`ai sandbox ls` 保持精简：列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、workspace identity、完整 task ID 和分支），并在表后为每个容器显示 health/task-view 摘要。要查看某个沙箱的完整详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印基于标签的 workspace identity、该分支的 worktree 路径、各工具（Claude Code、Codex、Antigravity CLI、OpenCode）的 state 路径、broker health 和 task-view。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
 
 下一个大版本的破坏性迁移：任务短号仅使用裸数字。请把 `#NN` 改为 `NN`；引用后的 `#NN` 输入也会被拒绝。
 
@@ -292,6 +292,21 @@ family 有有效 result 时可以生成 output-unavailable terminal；finalizati
 缺失或绑定冲突时，不能落入 generic success terminal，processing evidence 和 reservation
 会保留，等待后续同 ID 恢复。graceful shutdown 如果观察到已 settled 的 result，会先按同一
 authority 尝试发布 terminal 再停止 broker；尚未 settled 的 child 则保留 accepted 和未知结果证据。
+
+### health 与 task-view 状态
+
+`public/status.json` 使用 version 3，并携带两个相互独立的维度：`state` 表示 broker health
+（`starting`、`healthy`、`busy` 或 `parked`），`taskView.state` 表示任务证据
+（`not-applicable`、`current`、`finalized-stale` 或 `unknown`）。因此 healthy broker
+可以同时拥有 `finalized-stale` task view。task view 是对 canonical task source 和
+finalization receipt 的经过验证的投影，不是第二个完成事实源。completed view 只读；stale
+或 unknown 允许诊断、显式清理以及仅匹配原 request 的 recovery，但会在解析任务或加锁前
+拒绝新的任务推进、artifact 写入、终态裁决和远端写入。
+
+普通 broker 重启或 `ai sandbox enter` 不会清除 stale。completed re-entry 只有在 canonical
+completed source、receipt identity、task ID 和 container identity 全部匹配后才会变成
+`current`。`ai sandbox ls` 与 `ai sandbox show` 会同时显示 health 和 task-view，避免把
+broker 可用性误认为任务写入授权。
 
 ### 容量与保留（HD-3/A）
 

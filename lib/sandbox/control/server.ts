@@ -34,7 +34,8 @@ import {
   writeSandboxControlReservation,
   writeSandboxControlResultEvidence,
   terminateSandboxControlExecution,
-  writeSandboxControlStatus
+  writeSandboxControlStatus,
+  readSandboxControlStatus
 } from './state.ts';
 import { validateSandboxControlRequest } from './protocol.ts';
 import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
@@ -48,6 +49,12 @@ import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
 import { resolveTaskRef } from '../../task/resolve-ref.ts';
+import {
+  mergeSandboxTaskView,
+  taskViewAfterFinalization,
+  taskViewForManifest,
+  type SandboxTaskView
+} from './task-view.ts';
 
 type ActiveExecution = {
   request: SandboxControlRequest;
@@ -232,6 +239,36 @@ function finalizationRecoveryResponse(
   };
 }
 
+function publishFinalizationTaskView(
+  manifest: SandboxControlManifest,
+  broker: BrokerOwner,
+  requestId: string,
+  state: 'starting' | 'healthy' | 'busy' | 'parked',
+  reasonCode: string | null,
+  activeRequestId: string | null
+): SandboxTaskView {
+  let view: SandboxTaskView;
+  try {
+    const resolved = resolveTaskRef(manifest.taskId ?? '', { repoRoot: manifest.repoRoot });
+    const receipt = readTaskFinalizationReceipt(manifest.repoRoot, manifest.taskId ?? '');
+    view = resolved.ok && resolved.state === 'completed'
+      ? taskViewAfterFinalization({
+          taskId: manifest.taskId ?? '', generation: manifest.generation, requestId, receipt
+        })
+      : {
+          state: 'unknown', taskId: manifest.taskId, observedSource: 'unknown', receipt: null,
+          reasonCode: 'SANDBOX_TASK_VIEW_SOURCE_UNCONFIRMED'
+        };
+  } catch {
+    view = {
+      state: 'unknown', taskId: manifest.taskId, observedSource: 'unknown', receipt: null,
+      reasonCode: 'SANDBOX_TASK_VIEW_RECEIPT_INVALID'
+    };
+  }
+  writeSandboxControlStatus(manifest, broker, state, reasonCode, activeRequestId, Date.now(), view);
+  return view;
+}
+
 function payloadReference(payload: ReturnType<typeof createSandboxControlPayload>) {
   return {
     version: payload.version,
@@ -343,6 +380,7 @@ function publishExecutionResult(
   manifest: SandboxControlManifest,
   request: SandboxControlRequest,
   result: SandboxControlExecutionResult,
+  broker: BrokerOwner,
   brokerOwns: () => boolean
 ): boolean {
   const normalized = sanitizeSandboxControlResult(manifest, result);
@@ -387,6 +425,10 @@ function publishExecutionResult(
     }
   }
   if (!brokerOwns()) return false;
+  if (request.family === 'task-finalization' && normalized.exitCode === 0) {
+    const view = publishFinalizationTaskView(manifest, broker, request.id, 'healthy', null, null);
+    if (view.state === 'unknown') return false;
+  }
   return writeSandboxControlResponse(manifest, terminal);
 }
 
@@ -452,7 +494,7 @@ function bindingReason(manifest: SandboxControlManifest): string | null {
   }
 }
 
-function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => boolean): boolean {
+function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner, brokerOwns: () => boolean): boolean {
   for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/.test(entry.name)) continue;
     if (!brokerOwns()) return false;
@@ -534,12 +576,20 @@ function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => b
         const reconciliation = terminalMatchesEvidence(manifest, request, existingTerminalResponse!, resultEvidence, payload, payloadInvalid);
         if (!reconciliation.valid) continue;
         payloadReferenced = reconciliation.payloadReferenced;
+        if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
+          const view = publishFinalizationTaskView(manifest, broker, request.id, 'starting', null, null);
+          if (view.state === 'unknown') continue;
+        }
       }
       if (!terminal) {
         if (!brokerOwns()) return false;
         if (!resultEvidence || !request || payloadInvalid) continue;
         const recovered = recoveryResponse(manifest, request, resultEvidence, payload);
         if (!recovered) continue;
+        if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
+          const view = publishFinalizationTaskView(manifest, broker, request.id, 'starting', null, null);
+          if (view.state === 'unknown') continue;
+        }
         writeSandboxControlResponse(manifest, recovered);
         payloadReferenced = Boolean(payload) && request.family !== 'task-finalization';
       }
@@ -623,6 +673,25 @@ export async function serveSandboxControl(
     releaseStartup();
   }
   let active: ActiveExecution | null = null;
+  let startupReceipt: unknown = null;
+  if (manifest.taskId) {
+    try {
+      startupReceipt = readTaskFinalizationReceipt(manifest.repoRoot, manifest.taskId);
+    } catch {
+      // Preserve malformed receipt evidence as unknown rather than treating it as no receipt.
+      startupReceipt = {};
+    }
+  }
+  let taskView = taskViewForManifest({
+    ...manifest,
+    receipt: startupReceipt
+  });
+  try {
+    const previous = readSandboxControlStatus(manifest.publicStatusDir);
+    if (previous.generation === manifest.generation) taskView = mergeSandboxTaskView(taskView, previous.taskView);
+  } catch {
+    // A fresh control root has no previous task-view projection.
+  }
   let lastState = '';
   let lastStatusAt = 0;
   let nextBindingCheckAt = 0;
@@ -633,7 +702,7 @@ export async function serveSandboxControl(
   let bindingBackoffMs: number = timing.parkedBindingInitialMs;
   try {
     if (!brokerOwns()) return;
-    writeSandboxControlStatus(manifest, broker, 'starting', null, null);
+    writeSandboxControlStatus(manifest, broker, 'starting', null, null, Date.now(), taskView);
     if (!brokerOwns()) return;
     appendBrokerAudit(manifest, 'broker-start', {
       pid: broker.pid,
@@ -653,6 +722,12 @@ export async function serveSandboxControl(
       internalCliPath: options.internalCliPath ?? process.argv[1] ?? null
     });
     if (!recoverProcessing(manifest, brokerOwns)) return;
+    try {
+      const published = readSandboxControlStatus(manifest.publicStatusDir);
+      if (published.generation === manifest.generation) taskView = published.taskView;
+    } catch {
+      // The regular heartbeat will publish an invalid or missing projection as unknown.
+    }
     while (!signal.aborted) {
       let settledExecution: ActiveExecution | null = null;
       if (!brokerOwns()) break;
@@ -747,7 +822,7 @@ export async function serveSandboxControl(
       const state = reasonCode ? 'parked' : active ? 'busy' : 'healthy';
       const stateKey = `${state}:${reasonCode ?? ''}:${active?.request.id ?? ''}`;
       if (brokerOwns() && (stateKey !== lastState || now - lastStatusAt >= timing.controlTickMs)) {
-        writeSandboxControlStatus(manifest, broker, state, reasonCode, active?.request.id ?? null, now);
+        writeSandboxControlStatus(manifest, broker, state, reasonCode, active?.request.id ?? null, now, taskView);
         lastStatusAt = now;
       }
       if (brokerOwns() && stateKey !== lastState) {
@@ -758,7 +833,15 @@ export async function serveSandboxControl(
         if (!brokerOwns()) break;
         let terminalCommitted = false;
         if (settledExecution.result && settledExecution.resultEvidenceWritten) {
-          terminalCommitted = publishExecutionResult(manifest, settledExecution.request, settledExecution.result, brokerOwns);
+          terminalCommitted = publishExecutionResult(manifest, settledExecution.request, settledExecution.result, broker, brokerOwns);
+          if (terminalCommitted && settledExecution.request.family === 'task-finalization') {
+            try {
+              const published = readSandboxControlStatus(manifest.publicStatusDir);
+              if (published.generation === manifest.generation) taskView = published.taskView;
+            } catch {
+              taskView = { state: 'unknown', taskId: manifest.taskId, observedSource: 'unknown', receipt: null, reasonCode: 'SANDBOX_TASK_VIEW_STATUS_INVALID' };
+            }
+          }
         } else {
           terminalCommitted = writeSandboxControlResponse(manifest, unknown(settledExecution.request.id));
         }
@@ -988,7 +1071,7 @@ export async function serveSandboxControl(
         }
       }
       if (owned && active.result && active.resultEvidenceWritten) {
-        if (publishExecutionResult(manifest, active.request, active.result, brokerOwns)) {
+        if (publishExecutionResult(manifest, active.request, active.result, broker, brokerOwns)) {
           if (brokerOwns()) {
             removeAcceptedResponse(manifest, active.request.id);
             fs.rmSync(path.join(manifest.processingDir, active.request.id), { recursive: true, force: true });
@@ -1000,7 +1083,11 @@ export async function serveSandboxControl(
         const terminationConfirmed = active.prepared.terminate(owned);
         if (owned && brokerOwns() && active.request.family === 'task-finalization') {
           const recovered = finalizationRecoveryResponse(manifest, active.request.id, 0);
-          if (recovered.status === 'matched' && recovered.response && writeSandboxControlResponse(manifest, recovered.response)) {
+          const view = recovered.status === 'matched'
+            ? publishFinalizationTaskView(manifest, broker, active.request.id, 'healthy', null, null)
+            : null;
+          if (view?.state !== 'unknown' && recovered.status === 'matched' && recovered.response
+            && writeSandboxControlResponse(manifest, recovered.response)) {
             if (terminationConfirmed && brokerOwns()) {
               removeAcceptedResponse(manifest, active.request.id);
               fs.rmSync(path.join(manifest.processingDir, active.request.id), { recursive: true, force: true });

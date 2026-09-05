@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 import { VERSION } from '../lib/version.ts';
+import {
+  formatTaskViewDiagnostic,
+  guardTaskOperation,
+  TaskViewOperationError
+} from '../lib/internal/task-operation-registry.ts';
 
 // Node.js version check
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
@@ -53,6 +58,22 @@ const command = Object.hasOwn(COMMAND_ALIASES, rawCommand)
   ? COMMAND_ALIASES[rawCommand]
   : rawCommand;
 
+let taskViewGuardFailed = false;
+try {
+  const guard = guardTaskOperation('public', command ?? '', process.argv.slice(3));
+  if (guard.taskView && guard.descriptor.effect === 'diagnostic') {
+    process.stderr.write(formatTaskViewDiagnostic(guard.taskView));
+  }
+} catch (error) {
+  taskViewGuardFailed = true;
+  if (error instanceof TaskViewOperationError) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = error.exitCode;
+  } else {
+    throw error;
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -73,7 +94,7 @@ async function importCommand(importPath: string) {
   }
 }
 
-switch (command) {
+if (!taskViewGuardFailed) switch (command) {
   case 'agent-client': {
     const imported = await importCommand('../lib/agent-client.ts');
     if (!imported) break;

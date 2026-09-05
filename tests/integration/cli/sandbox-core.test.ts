@@ -162,6 +162,13 @@ async function quiesceSandboxControlRootForCleanup(root: string): Promise<void> 
 
 function withInternalCliOnPath<T>(binDir: string, action: () => T): T {
   writeNodeCommandShim(path.join(binDir, "agent-infra-internal"), INTERNAL_CLI_PATH);
+  const previousEnv = process.env;
+  const hostDirectEnv = { ...process.env };
+  delete hostDirectEnv.AGENT_INFRA_TASK_ID;
+  for (const key of Object.keys(hostDirectEnv)) {
+    if (key.startsWith("AGENT_INFRA_CONTROL_") || key === "AGENT_INFRA_RUNTIME_DIR") delete hostDirectEnv[key];
+  }
+  process.env = hostDirectEnv;
   const originalPath = process.env.PATH;
   process.env.PATH = envWithPrependedPath(process.env, binDir).PATH;
   try {
@@ -169,6 +176,7 @@ function withInternalCliOnPath<T>(binDir: string, action: () => T): T {
   } finally {
     if (originalPath === undefined) delete process.env.PATH;
     else process.env.PATH = originalPath;
+    process.env = previousEnv;
   }
 }
 
@@ -369,13 +377,20 @@ function writeTaskBoundControlEvidence(
     runtimeDir: path.join(controlRoot, "runtime")
   })}\n`, "utf8");
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
-    version: 2,
+    version: 3,
     generation: `${taskId}-generation`,
     broker: { pid: 999_999_999, startTime: 0, brokerId: `${taskId}-broker` },
     state: "healthy",
     reasonCode: null,
     activeRequestId: null,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    taskView: {
+      state: "unknown",
+      taskId,
+      observedSource: "unknown",
+      receipt: null,
+      reasonCode: "SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE"
+    }
   })}\n`, "utf8");
   return controlRoot;
 }

@@ -22,6 +22,7 @@ import type { ProcessIdentity } from '../../server/process-state.ts';
 import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
+import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
 
@@ -52,7 +53,19 @@ function clientError(
   throw new SandboxControlClientError({ code, message: `${code}: ${message}`, retryable }, accepted, requestId);
 }
 
-function preflight(statusDir: string, generation: string, now = Date.now()): void {
+function hasTaskBoundMarker(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.AGENT_INFRA_TASK_ID)
+    && Boolean(env.AGENT_INFRA_CONTROL_TOKEN || env.AGENT_INFRA_CONTROL_GENERATION
+      || env.AGENT_INFRA_CONTROL_STATUS_DIR || env.AGENT_INFRA_RUNTIME_DIR || env.AGENT_INFRA_CONTROL_DIR);
+}
+
+function preflight(
+  statusDir: string,
+  generation: string,
+  taskViewEffect: TaskViewAccessEffect | null = null,
+  now = Date.now(),
+  env: NodeJS.ProcessEnv = process.env
+): void {
   let status;
   try {
     status = readSandboxControlStatus(statusDir);
@@ -71,6 +84,26 @@ function preflight(statusDir: string, generation: string, now = Date.now()): voi
     clientError(code, 'broker is parked until the host restores a valid binding', true);
   }
   if (status.state !== 'healthy') clientError('SANDBOX_CONTROL_BROKER_UNAVAILABLE', 'broker is not ready', true);
+  if (taskViewEffect && hasTaskBoundMarker(env)) {
+    const view = taskViewFromStatus(status);
+    if (view.taskId !== env.AGENT_INFRA_TASK_ID) {
+      clientError('SANDBOX_TASK_VIEW_TASK_ID_MISMATCH', 'task view task id does not match the sandbox task marker', false);
+    }
+    const access = accessSandboxTaskView(view, taskViewEffect);
+    if (!access.allowed) {
+      clientError(
+        access.reasonCode ?? 'SANDBOX_TASK_VIEW_DENIED',
+        access.message ?? 'task view denied',
+        false
+      );
+    }
+  }
+}
+
+function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAccessEffect | null {
+  if (request.family === 'task-lifecycle' || request.family === 'task-finalization') return 'progress';
+  if (request.family === 'task-orchestration') return request.args[1] === 'status' ? 'diagnostic' : 'progress';
+  return null;
 }
 
 function parseResponse(raw: string, id: string): SandboxControlResponse {
@@ -122,7 +155,8 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
 }>): SandboxControlResponse {
   const channelDir = params.channelDir ?? process.env.AGENT_INFRA_CONTROL_DIR ?? '/run/agent-infra/control';
   const statusDir = params.statusDir ?? process.env.AGENT_INFRA_CONTROL_STATUS_DIR ?? '/run/agent-infra/control-status';
-  preflight(statusDir, request.generation);
+  const taskViewEffect = taskViewEffectForRequest(request);
+  preflight(statusDir, request.generation, taskViewEffect);
   const encoded = `${JSON.stringify(request)}\n`;
   if (Buffer.byteLength(encoded, 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
     clientError('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit', false, false, request.id);
@@ -176,7 +210,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
     }
     if (!accepted) {
       try {
-        preflight(statusDir, request.generation);
+        preflight(statusDir, request.generation, taskViewEffect);
       } catch (error) {
         if (cancelPendingRequest(requestPath)) throw error;
         clientError(
