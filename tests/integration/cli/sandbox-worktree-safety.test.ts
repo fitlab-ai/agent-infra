@@ -8,6 +8,7 @@ import path from "node:path";
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
+import { listSandboxRemovalJournals } from "../../../lib/sandbox/control/lifecycle.ts";
 import {
   cliArgs,
   envWithPrependedPath,
@@ -977,6 +978,99 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
     assert.equal(fs.existsSync(shellConfig), false);
     assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
   } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm resumes a share cleanup phase without replaying completed host cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-phase-retry-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/share-phase-retry";
+  const config = rmOneConfig(fixture, tmpDir);
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+  const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
+  const target = {
+    branch,
+    effectiveBranch: branch,
+    engine: "docker-desktop",
+    matchedContainers: [],
+    existingWorktrees: [],
+    toolCandidates: [],
+    workspace: { mode: "branch-only" as const },
+    controlRoots: [controlRoot],
+    workspaceViewRoots: []
+  };
+  const originalRmdirSync = fs.rmdirSync;
+  let injectFailure = true;
+  try {
+    const channelDir = path.join(controlRoot, "channel");
+    const publicStatusDir = path.join(controlRoot, "public");
+    const processingDir = path.join(controlRoot, "processing");
+    fs.mkdirSync(channelDir, { recursive: true });
+    fs.mkdirSync(publicStatusDir, { recursive: true });
+    fs.mkdirSync(processingDir, { recursive: true });
+    fs.mkdirSync(share, { recursive: true });
+    fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+      engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+      project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+      mode: "branch-only", taskId: null, token: "share-phase-token", generation: "share-phase-generation",
+      channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
+    })}\n`);
+    fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+      version: 2, generation: "share-phase-generation",
+      broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+      state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+    })}\n`);
+
+    fs.rmdirSync = ((targetPath, options) => {
+      if (injectFailure && path.resolve(String(targetPath)) === path.resolve(share)) {
+        injectFailure = false;
+        throw new Error("INJECTED_CRASH_BEFORE_SHARE_PHASE_COMMIT");
+      }
+      return originalRmdirSync(targetPath, options);
+    }) as typeof fs.rmdirSync;
+    const previousPath = process.env.PATH;
+    const previousDockerLog = process.env.DOCKER_LOG_PATH;
+    const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+    process.env.PATH = envWithPrependedPath(process.env, fixture.binDir).PATH;
+    process.env.DOCKER_LOG_PATH = fixture.logPath;
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    try {
+      await assert.rejects(
+        () => rm.rmOne(config, [], branch, { assumeYes: true, target }),
+        /INJECTED_CRASH_BEFORE_SHARE_PHASE_COMMIT/
+      );
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousDockerLog === undefined) delete process.env.DOCKER_LOG_PATH;
+      else process.env.DOCKER_LOG_PATH = previousDockerLog;
+      if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+      else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    }
+    fs.rmdirSync = originalRmdirSync;
+
+    const journal = listSandboxRemovalJournals({ branch, project: "demo" })
+      .find((candidate) => candidate.target.controlRoot === path.resolve(controlRoot));
+    assert.ok(journal);
+    assert.equal(journal.phase, "share-finalizing");
+    const journalPath = path.join(
+      os.homedir(), ".agent-infra", "sandbox-removal-journal", journal.lockDomain,
+      `${journal.carrierIdentityDigest}.json`
+    );
+    const persisted = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+    persisted.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
+    fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
+
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target }));
+    assert.equal(fs.existsSync(controlRoot), false);
+    assert.equal(fs.existsSync(share), false);
+    assert.equal(listSandboxRemovalJournals({ branch, project: "demo" })
+      .some((candidate) => candidate.target.controlRoot === path.resolve(controlRoot)), false);
+  } finally {
+    fs.rmdirSync = originalRmdirSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

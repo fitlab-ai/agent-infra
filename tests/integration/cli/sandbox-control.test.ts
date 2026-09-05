@@ -443,6 +443,55 @@ test('sandbox control removal records pending evidence when the exact removal ou
   }
 });
 
+test('sandbox control removal resumes from carrier-finalizing without replaying container actions', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-carrier-retry-'));
+  let manifestPath: string | undefined;
+  let manifest: ReturnType<typeof readSandboxControlManifest> | undefined;
+  const originalRmSync = fs.rmSync;
+  let injectFailure = true;
+  try {
+    const branch = initializeRepository(root);
+    manifestPath = writeControlManifest(root, branch, `carrier-retry-generation-${process.pid}-${Date.now()}`);
+    manifest = readSandboxControlManifest(manifestPath);
+    fs.rmSync = ((target, options) => {
+      if (injectFailure && path.resolve(String(target)) === path.resolve(root)) {
+        injectFailure = false;
+        throw new Error('INJECTED_CRASH_BEFORE_CARRIER_DELETE');
+      }
+      return originalRmSync(target, options);
+    }) as typeof fs.rmSync;
+
+    await assert.rejects(
+      () => removeSandboxControlRoot(root, {
+        timeoutMs: 200,
+        inspectContainer: async () => ({ state: 'absent', id: 'container-id' }),
+        retainRemovalJournal: true,
+        removeContainer: async () => { throw new Error('unexpected container removal'); }
+      }),
+      /INJECTED_CRASH_BEFORE_CARRIER_DELETE/
+    );
+    assert.equal(readSandboxRemovalJournal(manifest)?.phase, 'carrier-finalizing');
+  } finally {
+    fs.rmSync = originalRmSync;
+  }
+
+  try {
+    await removeSandboxControlRoot(root, {
+      timeoutMs: 200,
+      identityProbe: () => 'dead',
+      inspectContainer: async () => { throw new Error('container observation must not replay'); },
+      retainRemovalJournal: true,
+      removeContainer: async () => { throw new Error('container removal must not replay'); }
+    });
+    assert.equal(fs.existsSync(root), false);
+    const recovered = manifest ? readSandboxRemovalJournal(manifest) : null;
+    assert.equal(recovered?.phase, 'carrier-removed');
+    if (recovered) clearSandboxRemovalJournalRecord(recovered);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, and revision CAS', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-removal-journal-'));
   try {

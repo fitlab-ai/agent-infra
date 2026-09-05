@@ -378,6 +378,10 @@ function phaseIndex(phase: SandboxRemovalJournalPhase): number {
   return SANDBOX_REMOVAL_JOURNAL_PHASES.indexOf(phase);
 }
 
+export function sandboxRemovalPhaseIndex(phase: SandboxRemovalJournalPhase): number {
+  return phaseIndex(phase);
+}
+
 function assertNextRemovalPhase(current: SandboxRemovalJournalPhase, next: SandboxRemovalJournalPhase): boolean {
   const currentIndex = phaseIndex(current);
   const nextIndex = phaseIndex(next);
@@ -1403,6 +1407,20 @@ export async function removeSandboxControlRoot(
     target: options.removalTarget,
     identityProbe
   });
+  if (journal.record.phase === 'carrier-finalizing') {
+    if (fs.readFileSync(manifestPath, 'utf8') !== manifestRawBeforeLock
+      || !isSandboxControlRootQuiescing(resolvedRoot)) {
+      throw new Error('SANDBOX_CONTROL_MANIFEST_CHANGED');
+    }
+    fs.rmSync(resolvedRoot, { recursive: true, force: true });
+    if (fs.existsSync(resolvedRoot)) throw new Error('SANDBOX_CONTROL_TARGET_MISMATCH');
+    journal.write('carrier-removed');
+    if (!options.retainRemovalJournal) clearSandboxRemovalJournal(manifest);
+    return;
+  }
+  if (sandboxRemovalPhaseIndex(journal.record.phase) >= sandboxRemovalPhaseIndex('carrier-removed')) {
+    throw new Error('SANDBOX_CONTROL_TARGET_MISMATCH');
+  }
   if (journal.record.phase === 'prepared') journal.write('target-committed');
   const observation = await awaitWithDeadline(
     () => inspectContainer(remaining()), deadlineAt, 'SANDBOX_CONTROL_REMOVE_DEADLINE_EXCEEDED'
