@@ -250,8 +250,107 @@ type RemovalTombstoneOwnership = Readonly<{
   source: string;
 }>;
 
+type RemovalSourceIdentity = Readonly<{
+  dev: string;
+  ino: string;
+}>;
+
+type RemovalTombstoneRecord = RemovalTombstoneOwnership & Readonly<{
+  sourceIdentity: RemovalSourceIdentity;
+}>;
+
 const REMOVAL_TOMBSTONE_MARKER = '.agent-infra-removal-ownership.json';
 const REMOVAL_TOMBSTONE_PAYLOAD = 'payload';
+
+function removalSourceClaimPath(source: string, ownership: RemovalTombstoneOwnership): string {
+  const claimDigest = createHash('sha256')
+    .update(JSON.stringify(ownership))
+    .digest('hex')
+    .slice(0, 24);
+  return path.join(source, `.agent-infra-removal-source-${claimDigest}.json`);
+}
+
+function removalSourceIdentity(source: string): RemovalSourceIdentity {
+  const stat = fs.lstatSync(source, { bigint: true });
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev === 0n || stat.ino === 0n) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
+  }
+  return { dev: String(stat.dev), ino: String(stat.ino) };
+}
+
+function sameRemovalSourceIdentity(left: RemovalSourceIdentity, right: RemovalSourceIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function removalSourceClaimMatches(
+  source: string,
+  ownership: RemovalTombstoneOwnership,
+  identity: RemovalSourceIdentity
+): boolean {
+  try {
+    const claimPath = removalSourceClaimPath(source, ownership);
+    const claimStat = fs.lstatSync(claimPath);
+    if (!claimStat.isFile() || claimStat.isSymbolicLink()) return false;
+    const record = JSON.parse(fs.readFileSync(claimPath, 'utf8')) as Partial<RemovalTombstoneRecord>;
+    return record.version === ownership.version
+      && record.targetDigest === ownership.targetDigest
+      && record.permitDigest === ownership.permitDigest
+      && record.kind === ownership.kind
+      && typeof record.source === 'string'
+      && path.resolve(record.source) === path.resolve(ownership.source)
+      && record.sourceIdentity?.dev === identity.dev
+      && record.sourceIdentity?.ino === identity.ino;
+  } catch {
+    return false;
+  }
+}
+
+function isOwnedRemovalSourceClaim(source: string, ownership: RemovalTombstoneOwnership): boolean {
+  try {
+    const claimPath = removalSourceClaimPath(source, ownership);
+    const claimStat = fs.lstatSync(claimPath);
+    if (!claimStat.isFile() || claimStat.isSymbolicLink()) return false;
+    const record = JSON.parse(fs.readFileSync(claimPath, 'utf8')) as Partial<RemovalTombstoneRecord>;
+    return record.version === ownership.version
+      && record.targetDigest === ownership.targetDigest
+      && record.permitDigest === ownership.permitDigest
+      && record.kind === ownership.kind
+      && typeof record.source === 'string'
+      && path.resolve(record.source) === path.resolve(ownership.source);
+  } catch {
+    return false;
+  }
+}
+
+function removeOwnedSourceClaim(source: string, ownership: RemovalTombstoneOwnership): void {
+  try {
+    const claimPath = removalSourceClaimPath(source, ownership);
+    if (isOwnedRemovalSourceClaim(source, ownership)) fs.unlinkSync(claimPath);
+  } catch {
+    // Preserve the source when the claim cannot be revalidated.
+  }
+}
+
+function readRemovalTombstoneRecord(root: string, tombstone: string): RemovalTombstoneRecord | null {
+  assertManagedPath(root, tombstone);
+  try {
+    const tombstoneStat = fs.lstatSync(tombstone);
+    const markerStat = fs.lstatSync(removalTombstoneMarker(tombstone));
+    if (!tombstoneStat.isDirectory() || tombstoneStat.isSymbolicLink()
+      || !markerStat.isFile() || markerStat.isSymbolicLink()) return null;
+    const record = JSON.parse(fs.readFileSync(removalTombstoneMarker(tombstone), 'utf8')) as Partial<RemovalTombstoneRecord>;
+    if (record.version !== 1
+      || typeof record.targetDigest !== 'string'
+      || typeof record.permitDigest !== 'string'
+      || typeof record.kind !== 'string'
+      || typeof record.source !== 'string'
+      || record.sourceIdentity?.dev === undefined
+      || record.sourceIdentity.ino === undefined) return null;
+    return record as RemovalTombstoneRecord;
+  } catch {
+    return null;
+  }
+}
 
 function removalTombstonePayload(tombstone: string): string {
   return path.join(tombstone, REMOVAL_TOMBSTONE_PAYLOAD);
@@ -266,19 +365,31 @@ function isOwnedRemovalTombstone(
   tombstone: string,
   ownership: RemovalTombstoneOwnership
 ): boolean {
-  assertManagedPath(root, tombstone);
-  try {
-    const tombstoneStat = fs.lstatSync(tombstone);
-    const markerStat = fs.lstatSync(removalTombstoneMarker(tombstone));
-    if (!tombstoneStat.isDirectory() || tombstoneStat.isSymbolicLink()
-      || !markerStat.isFile() || markerStat.isSymbolicLink()) return false;
-    const record = JSON.parse(fs.readFileSync(removalTombstoneMarker(tombstone), 'utf8')) as Partial<RemovalTombstoneOwnership>;
-    return record.version === 1
+  const record = readRemovalTombstoneRecord(root, tombstone);
+  return record !== null
+    && record.version === 1
       && record.targetDigest === ownership.targetDigest
       && record.permitDigest === ownership.permitDigest
       && record.kind === ownership.kind
       && typeof record.source === 'string'
       && path.resolve(record.source) === path.resolve(ownership.source);
+}
+
+function isOwnedRemovalPayload(
+  root: string,
+  tombstone: string,
+  ownership: RemovalTombstoneOwnership
+): boolean {
+  const record = readRemovalTombstoneRecord(root, tombstone);
+  if (!record || record.targetDigest !== ownership.targetDigest
+    || record.permitDigest !== ownership.permitDigest
+    || record.kind !== ownership.kind
+    || path.resolve(record.source) !== path.resolve(ownership.source)) return false;
+  try {
+    const payload = removalTombstonePayload(tombstone);
+    const payloadIdentity = removalSourceIdentity(payload);
+    return sameRemovalSourceIdentity(payloadIdentity, record.sourceIdentity)
+      && removalSourceClaimMatches(payload, ownership, record.sourceIdentity);
   } catch {
     return false;
   }
@@ -310,20 +421,54 @@ function stageManagedRemoval(
     if (sourceExists) {
       throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
     }
-    if (recovering) return;
+    if (recovering) {
+      if (!isOwnedRemovalPayload(root, tombstone, ownership)) {
+        throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
+      }
+      return;
+    }
     throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
   }
   if (recovering) {
     throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${source}`);
   }
   if (!sourceExists) return;
-  fs.mkdirSync(tombstone, { mode: 0o700 });
-  fs.writeFileSync(removalTombstoneMarker(tombstone), `${JSON.stringify(ownership)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-    flag: 'wx'
-  });
-  fs.renameSync(source, removalTombstonePayload(tombstone));
+  const expectedIdentity = removalSourceIdentity(source);
+  const claimPath = removalSourceClaimPath(source, ownership);
+  try {
+    fs.writeFileSync(claimPath, `${JSON.stringify({ ...ownership, sourceIdentity: expectedIdentity })}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx'
+    });
+  } catch {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
+  }
+  if (!sameRemovalSourceIdentity(expectedIdentity, removalSourceIdentity(source))) {
+    removeOwnedSourceClaim(source, ownership);
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
+  }
+  let moved = false;
+  try {
+    fs.mkdirSync(tombstone, { mode: 0o700 });
+    fs.writeFileSync(removalTombstoneMarker(tombstone), `${JSON.stringify({ ...ownership, sourceIdentity: expectedIdentity })}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx'
+    });
+    fs.renameSync(source, removalTombstonePayload(tombstone));
+    moved = true;
+    if (!isOwnedRemovalPayload(root, tombstone, ownership)) {
+      const payloadIdentity = removalSourceIdentity(removalTombstonePayload(tombstone));
+      if (!sameRemovalSourceIdentity(payloadIdentity, expectedIdentity) && !fs.existsSync(source)) {
+        fs.renameSync(removalTombstonePayload(tombstone), source);
+      }
+      throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
+    }
+  } catch (error) {
+    if (!moved) removeOwnedSourceClaim(source, ownership);
+    throw error;
+  }
 }
 
 function cleanupManagedTombstones(
@@ -335,13 +480,13 @@ function cleanupManagedTombstones(
 ): void {
   for (const source of sources) {
     const tombstone = removalTombstonePath(targetDigest, kind, source);
-    if (fs.existsSync(tombstone) && isOwnedRemovalTombstone(root, tombstone, {
-      version: 1,
-      targetDigest,
-      permitDigest,
-      kind,
-      source
-    })) removeManagedDir(root, tombstone);
+    if (!fs.existsSync(tombstone)) continue;
+    const ownership = { version: 1, targetDigest, permitDigest, kind, source } as const;
+    if (!isOwnedRemovalTombstone(root, tombstone, ownership)) continue;
+    if (!isOwnedRemovalPayload(root, tombstone, ownership)) {
+      throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
+    }
+    removeManagedDir(root, tombstone);
   }
 }
 
