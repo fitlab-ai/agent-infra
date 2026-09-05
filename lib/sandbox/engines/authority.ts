@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { SpawnSyncReturns } from 'node:child_process';
-import { commandForEngine, runProbe } from '../shell.ts';
+import { runProbe } from '../shell.ts';
 import { getAdapter } from './index.ts';
 
 export type SandboxAuthorityEvidenceV1 = Readonly<{
@@ -55,11 +55,15 @@ function safeEndpoint(value: string): string {
   if (!value) return 'docker-default';
   try {
     const parsed = new URL(value);
+    const hasCredentials = Boolean(parsed.username || parsed.password);
     parsed.username = '';
     parsed.password = '';
     parsed.search = '';
     parsed.hash = '';
-    return parsed.toString().replace(/\/$/u, '');
+    const normalized = parsed.toString().replace(/\/$/u, '');
+    return hasCredentials
+      ? normalized.replace(`${parsed.protocol}//`, `${parsed.protocol}//<redacted>@`)
+      : normalized;
   } catch {
     return value
       .replace(/\/\/[^/@]+@/u, '//<redacted>@')
@@ -71,39 +75,88 @@ function lockDomainFor(engine: string, endpoint: string): string {
   return digest(`${process.platform}\0${process.arch}\0${engine}\0${endpoint}`);
 }
 
-function routeFor(engine: string, env: NodeJS.ProcessEnv): Readonly<{
+type SandboxAuthorityRoute = Readonly<{
   kind: SandboxAuthorityEvidenceV1['routeKind'];
   selector: Readonly<Record<string, string>>;
   endpoint: string;
-}> {
+  command: (args: string[]) => { cmd: string; args: string[] };
+}>;
+
+function contextRoute(context: string): SandboxAuthorityRoute {
+  return {
+    kind: 'context',
+    selector: { context },
+    endpoint: `docker-context://${context}`,
+    command: (args) => ({ cmd: 'docker', args: ['--context', context, ...args] })
+  };
+}
+
+function endpointRoute(endpoint: string, rawEndpoint: string): SandboxAuthorityRoute {
+  return {
+    kind: 'endpoint',
+    selector: { source: 'DOCKER_HOST', endpoint },
+    endpoint,
+    command: (args) => ({ cmd: 'docker', args: ['--host', rawEndpoint, ...args] })
+  };
+}
+
+function routeFor(engine: string, env: NodeJS.ProcessEnv): SandboxAuthorityRoute {
   if (engine === 'wsl2') {
     return {
       kind: 'wsl2',
-      selector: { distro: env.WSL_DISTRO_NAME ?? 'default' },
-      endpoint: safeEndpoint(env.DOCKER_HOST ?? '')
+      selector: {
+        ...(env.WSL_DISTRO_NAME ? { distro: env.WSL_DISTRO_NAME } : { source: 'wsl-default' }),
+        ...(env.DOCKER_CONTEXT ? { context: env.DOCKER_CONTEXT } : {})
+      },
+      endpoint: safeEndpoint(env.DOCKER_HOST ?? ''),
+      command: (args) => ({
+        cmd: 'wsl.exe',
+        args: [
+          ...(env.WSL_DISTRO_NAME ? ['--distribution', env.WSL_DISTRO_NAME] : []),
+          '--exec', 'docker',
+          ...(env.DOCKER_CONTEXT ? ['--context', env.DOCKER_CONTEXT] : []),
+          ...args
+        ]
+      })
     };
   }
   const context = getAdapter(engine).dockerContext;
   if (context) {
-    return { kind: 'context', selector: { context }, endpoint: `docker-context://${context}` };
+    return contextRoute(context);
+  }
+  if (env.DOCKER_CONTEXT) {
+    return contextRoute(env.DOCKER_CONTEXT);
   }
   if (env.DOCKER_HOST) {
-    const endpoint = safeEndpoint(env.DOCKER_HOST);
-    return { kind: 'endpoint', selector: { source: 'DOCKER_HOST', endpoint }, endpoint };
+    return endpointRoute(safeEndpoint(env.DOCKER_HOST), env.DOCKER_HOST);
   }
-  return { kind: 'default', selector: { source: 'docker-default' }, endpoint: 'docker-default' };
+  return contextRoute('default');
 }
 
-function routeFromEvidence(evidence: SandboxAuthorityEvidenceV1): Readonly<{
-  kind: SandboxAuthorityEvidenceV1['routeKind'];
-  selector: Readonly<Record<string, string>>;
-  endpoint: string;
-}> {
+function routeFromEvidence(evidence: SandboxAuthorityEvidenceV1): SandboxAuthorityRoute {
   return {
     kind: evidence.routeKind,
     selector: evidence.routeSelector,
-    endpoint: evidence.normalizedEndpoint
+    endpoint: evidence.normalizedEndpoint,
+    command: (args) => commandForSandboxAuthority(evidence, 'docker', args)
   };
+}
+
+function currentContextRoute(
+  engine: string,
+  env: NodeJS.ProcessEnv,
+  probe: AuthorityProbe,
+  timeoutMs?: number
+): SandboxAuthorityRoute {
+  const configured = routeFor(engine, env);
+  if (configured.kind !== 'context' || configured.selector.context !== 'default') return configured;
+  if (env.DOCKER_CONTEXT || env.DOCKER_HOST || getAdapter(engine).dockerContext) return configured;
+  const result = probe('docker', ['context', 'show'], timeoutMs === undefined ? {} : { timeout: timeoutMs });
+  const context = text(result.stdout).trim();
+  if (result.status !== 0 || !/^[A-Za-z0-9][A-Za-z0-9_.@/-]*$/u.test(context)) {
+    throw new Error('SANDBOX_AUTHORITY_ROUTE_CAPTURE_FAILED');
+  }
+  return contextRoute(context);
 }
 
 /** Build a command using only the route persisted with the sandbox authority. */
@@ -129,8 +182,16 @@ export function commandForSandboxAuthority(
   }
   if (evidence.routeKind === 'wsl2') {
     const distro = evidence.routeSelector.distro;
-    if (!distro) throw new Error('SANDBOX_AUTHORITY_ROUTE_INVALID');
-    return { cmd: 'wsl.exe', args: ['--distribution', distro, '--exec', cmd, ...args] };
+    const context = evidence.routeSelector.context;
+    return {
+      cmd: 'wsl.exe',
+      args: [
+        ...(distro ? ['--distribution', distro] : []),
+        '--exec', cmd,
+        ...(context ? ['--context', context] : []),
+        ...args
+      ]
+    };
   }
   return { cmd, args: ['--context', 'default', ...args] };
 }
@@ -144,13 +205,16 @@ export function captureSandboxAuthority(
   options: AuthorityCaptureOptions = {}
 ): SandboxAuthorityEvidenceV1 {
   const env = options.env ?? process.env;
-  const route = options.route ? routeFromEvidence(options.route) : routeFor(engine, env);
+  const probe = options.probe ?? runProbe;
+  const route = options.route
+    ? routeFromEvidence(options.route)
+    : currentContextRoute(engine, env, probe, options.timeoutMs);
   const command = options.route
     ? commandForSandboxAuthority(options.route, 'docker', authorityVersionArgs())
-    : commandForEngine(engine, 'docker', authorityVersionArgs());
+    : route.command(authorityVersionArgs());
   let response: SpawnSyncReturns<string | Buffer>;
   try {
-    response = (options.probe ?? runProbe)(
+    response = probe(
       command.cmd,
       command.args,
       options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }

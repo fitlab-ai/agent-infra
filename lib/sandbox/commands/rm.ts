@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
@@ -29,9 +30,15 @@ import {
 } from '../workspace-identity.ts';
 import { sandboxControlPaths, sandboxWorkspaceViewPaths } from '../workspace-view.ts';
 import {
+  advanceSandboxRemovalJournalPhase,
+  claimSandboxRemovalJournal,
   clearSandboxRemovalJournal,
+  clearSandboxRemovalJournalRecord,
+  listSandboxRemovalJournals,
   removeSandboxControlRoot,
-  readSandboxControlManifest
+  readSandboxControlManifest,
+  type SandboxRemovalJournal,
+  type SandboxRemovalTargetCommit
 } from '../control/lifecycle.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { commandForSandboxAuthority } from '../engines/authority.ts';
@@ -67,6 +74,61 @@ function projectToolDirs(config: SandboxConfig, tools: SandboxTool[]): string[] 
 function isMissingPathError(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error
     && (error as { code?: unknown }).code === 'ENOENT');
+}
+
+function digestCleanupValue(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function removalTargetDigest(config: SandboxConfig, target: RmTarget): string {
+  return digestCleanupValue({
+    project: config.project,
+    branch: target.effectiveBranch,
+    workspace: target.workspace,
+    controlRoots: target.controlRoots.map((candidate) => path.resolve(candidate)),
+    workspaceViewRoots: target.workspaceViewRoots.map((candidate) => path.resolve(candidate)),
+    managedPathCandidates: (target.managedPathCandidates ?? []).map((candidate) => path.resolve(candidate)).sort()
+  });
+}
+
+function removalPermitDigest(permits: ReadonlyMap<string, WorktreeRemovalPermit>): string {
+  return digestCleanupValue([...permits.entries()]
+    .map(([worktree, permit]) => [path.resolve(worktree), permit.mode, permit.snapshot.identity])
+    .sort(([left], [right]) => String(left).localeCompare(String(right))));
+}
+
+function removalPermitCommits(permits: ReadonlyMap<string, WorktreeRemovalPermit>): SandboxRemovalTargetCommit['permits'] {
+  return [...permits.entries()]
+    .map(([worktree, permit]) => ({
+      path: path.resolve(worktree),
+      mode: permit.mode,
+      snapshot: permit.snapshot
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function permitsFromJournal(
+  journals: readonly SandboxRemovalJournal[],
+  target: RmTarget,
+  expectedTargetDigest: string
+): Map<string, WorktreeRemovalPermit> {
+  const permits = new Map<string, WorktreeRemovalPermit>();
+  for (const journal of journals) {
+    if (journal.target.targetDigest !== expectedTargetDigest) continue;
+    if (journal.target.branch !== target.effectiveBranch) {
+      throw new Error('SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH');
+    }
+    for (const entry of journal.target.permits) {
+      if (path.resolve(entry.path) !== path.resolve(entry.snapshot.worktree)) {
+        throw new Error('SANDBOX_CONTROL_REMOVAL_PERMIT_MISMATCH');
+      }
+      permits.set(path.resolve(entry.path), {
+        mode: entry.mode,
+        snapshot: entry.snapshot
+      });
+    }
+  }
+  return permits;
 }
 
 export function sandboxManagedPathKey(
@@ -562,33 +624,46 @@ async function rmOne(
     p.intro(pc.cyan(`Removing sandbox for ${branch}`));
   }
 
+  const targetDigest = removalTargetDigest(config, target);
+  const existingJournals = listSandboxRemovalJournals({
+    branch: effectiveBranch,
+    project: config.project,
+    targetDigest
+  });
   const recovery = options.permits
     ? new Map<string, WorktreeRecoveryContext>()
     : recoveryContexts(config, target, existingWorktrees);
+  const journalPermits = options.permits ? new Map<string, WorktreeRemovalPermit>()
+    : permitsFromJournal(existingJournals, target, targetDigest);
   const permits = options.permits
     ? new Map(options.permits)
-    : await authorizeWorktrees(existingWorktrees, {
-        allowDirtyDiscard: options.allowDirtyDiscard ?? true,
-        assumeYes: Boolean(options.assumeYes)
-      }, {
-        ...options.prompt,
-        interactive: options.interactive ?? Boolean(process.stdin.isTTY),
-        recovery
-      });
+    : journalPermits.size > 0
+      ? journalPermits
+      : await authorizeWorktrees(existingWorktrees, {
+          allowDirtyDiscard: options.allowDirtyDiscard ?? true,
+          assumeYes: Boolean(options.assumeYes)
+        }, {
+          ...options.prompt,
+          interactive: options.interactive ?? Boolean(process.stdin.isTTY),
+          recovery
+        });
   for (const worktree of existingWorktrees) {
     const permit = permits.get(path.resolve(worktree));
     if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
     verifyWorktreePermit(permit);
   }
 
-  const shouldRemoveWorktree = existingWorktrees.length === 0
-    ? false
-    : options.assumeYes
-      ? true
-      : await confirm({
-          message: `Remove worktree(s): ${existingWorktrees.join(', ')}?`,
-          initialValue: true
-        });
+  const recoveredRemovalChoice = existingJournals.find((journal) => journal.target.targetDigest === targetDigest);
+  const shouldRemoveWorktree = recoveredRemovalChoice
+    ? recoveredRemovalChoice.target.removeWorktree
+    : existingWorktrees.length === 0
+      ? false
+      : options.assumeYes
+        ? true
+        : await confirm({
+            message: `Remove worktree(s): ${existingWorktrees.join(', ')}?`,
+            initialValue: true
+          });
   if (isCancel(shouldRemoveWorktree)) {
     p.outro('Cancelled');
     return;
@@ -598,9 +673,13 @@ async function rmOne(
     .filter((candidate) => fs.existsSync(candidate))
     .flatMap((root) => {
       const manifestPath = path.join(root, 'manifest.json');
-      return fs.existsSync(manifestPath) ? [[root, readSandboxControlManifest(manifestPath)] as const] : [];
+      return fs.existsSync(manifestPath)
+        ? [[root, readSandboxControlManifest(manifestPath), fs.readFileSync(manifestPath, 'utf8')] as const]
+        : [];
     });
   const resourceLocks = new Map<string, SandboxResourceLock>();
+  const recoveredJournals: SandboxRemovalJournal[] = [];
+  const recoveredContainerNames = new Set<string>();
   try {
     for (const [root, manifest] of [...coordinatedManifests].sort(([left], [right]) => left.localeCompare(right))) {
       resourceLocks.set(root, acquireSandboxResourceLock(
@@ -608,22 +687,67 @@ async function rmOne(
         { lockDomain: manifest.authorityEvidence.lockDomain }
       ));
     }
+    for (const journal of existingJournals.filter((candidate) => !fs.existsSync(candidate.target.controlRoot))) {
+      if (!target.controlRoots.some((root) => path.resolve(root) === path.resolve(journal.target.controlRoot))) {
+        throw new Error('SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH');
+      }
+      if (journal.target.permitDigest !== removalPermitDigest(permits)) {
+        throw new Error('SANDBOX_CONTROL_REMOVAL_PERMIT_MISMATCH');
+      }
+      const lock = acquireSandboxResourceLock(`${journal.engine}:${journal.containerId}`, {
+        lockDomain: journal.lockDomain
+      });
+      resourceLocks.set(journal.target.controlRoot, lock);
+      const current = listSandboxRemovalJournals({
+        branch: journal.target.branch,
+        project: journal.target.project,
+        targetDigest: journal.target.targetDigest
+      }).find((candidate) => candidate.carrierIdentityDigest === journal.carrierIdentityDigest);
+      if (!current || current.revision !== journal.revision || current.handoffId !== journal.handoffId) {
+        throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH');
+      }
+      const claimed = claimSandboxRemovalJournal(current, { resourceLock: lock });
+      const recovered = claimed.phase === 'carrier-finalizing'
+        ? advanceSandboxRemovalJournalPhase(claimed, 'carrier-removed', { resourceLock: lock })
+        : claimed;
+      if (recovered.phase !== 'carrier-removed') {
+        throw new Error('SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING');
+      }
+      recoveredJournals.push(recovered);
+      recoveredContainerNames.add(controlRootContainer(config, journal.target.controlRoot));
+    }
     preflightRmTarget(config, target);
-  const coordinatedContainers = new Set<string>();
+  const coordinatedContainers = new Set(recoveredContainerNames);
   for (const root of controlRoots.filter((candidate) => fs.existsSync(candidate))) {
     assertLegacyCandidateEvidence(root, config.controlBase, config, effectiveBranch, matchedContainers);
     assertControlRootMatchesTarget(root, effectiveBranch, workspace);
     const manifestPath = path.join(root, 'manifest.json');
     if (!fs.existsSync(manifestPath)) continue;
+    const currentRaw = fs.readFileSync(manifestPath, 'utf8');
     const manifest = readSandboxControlManifest(manifestPath);
+    const initial = coordinatedManifests.find(([candidate]) => candidate === root);
+    if (!initial || currentRaw !== initial[2]) throw new Error('SANDBOX_CONTROL_MANIFEST_CHANGED');
     coordinatedContainers.add(manifest.container);
     await removeSandboxControlRoot(root, {
       inspectContainer: (timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }),
       removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs),
       resourceLock: resourceLocks.get(root),
-      retainRemovalJournal: true
+      retainRemovalJournal: true,
+      removalTarget: {
+        branch: effectiveBranch,
+        project: config.project,
+        controlRoot: path.resolve(root),
+        targetDigest,
+        permitDigest: removalPermitDigest(permits),
+        removeWorktree: shouldRemoveWorktree,
+        permits: removalPermitCommits(permits)
+      }
     });
     removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
+  }
+
+  if ([...recoveredContainerNames].some((name) => matchedContainers.includes(name))) {
+    throw new Error('SANDBOX_CONTROL_CONTAINER_REAPPEARED');
   }
 
   const uncoordinatedContainers = matchedContainers.filter((name) => !coordinatedContainers.has(name));
@@ -719,6 +843,7 @@ async function rmOne(
   }
 
   for (const [, manifest] of coordinatedManifests) clearSandboxRemovalJournal(manifest);
+  for (const journal of recoveredJournals) clearSandboxRemovalJournalRecord(journal);
 
   if (!options.quiet) {
     p.outro(pc.green('Sandbox removed'));

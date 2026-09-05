@@ -13,8 +13,12 @@ import {
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
 import {
+  advanceSandboxRemovalJournalPhase,
+  claimSandboxRemovalJournal,
   clearSandboxRemovalJournal,
+  clearSandboxRemovalJournalRecord,
   garbageCollectSandboxControlRoot,
+  readSandboxRemovalJournal,
   quiesceSandboxControlRoot,
   readSandboxControlManifest,
   removeSandboxControlRoot
@@ -273,6 +277,7 @@ function initializeRepository(root: string): string {
 
 function fixtureAuthorityEvidence() {
   return captureSandboxAuthority('native', {
+    env: { DOCKER_CONTEXT: 'default' },
     lockDomain: 'a'.repeat(64),
     probe: () => ({
       status: 0, signal: null, stdout: JSON.stringify({ ID: 'fixture-daemon-id', APIVersion: '1.50' }),
@@ -434,6 +439,47 @@ test('sandbox control removal records pending evidence when the exact removal ou
     assert.equal(fs.existsSync(root), true);
   } finally {
     if (manifestPath && fs.existsSync(root)) clearSandboxRemovalJournal(readSandboxControlManifest(manifestPath));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, and revision CAS', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-removal-journal-'));
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, 'removal-journal-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    await removeSandboxControlRoot(root, {
+      timeoutMs: 200,
+      inspectContainer: async () => ({ state: 'absent', id: 'container-id' }),
+      retainRemovalJournal: true,
+      removeContainer: async () => { throw new Error('unexpected container removal'); }
+    });
+
+    const prepared = readSandboxRemovalJournal(manifest);
+    assert.ok(prepared);
+    assert.equal(prepared.version, 2);
+    assert.equal(prepared.phase, 'carrier-removed');
+    assert.equal(prepared.revision, 4);
+    assert.equal(prepared.expectedOldJournalRevision, 3);
+    assert.equal(prepared.target.controlRoot, root);
+    assert.throws(
+      () => claimSandboxRemovalJournal(prepared),
+      /SANDBOX_CONTROL_REMOVE_RETRY_IN_PROGRESS/
+    );
+
+    const claimed = claimSandboxRemovalJournal(prepared, { identityProbe: () => 'dead' });
+    assert.equal(claimed.revision, prepared.revision + 1);
+    assert.equal(claimed.expectedOldJournalRevision, prepared.revision);
+    const advanced = advanceSandboxRemovalJournalPhase(claimed, 'carrier-removed');
+    assert.equal(advanced.revision, claimed.revision + 1);
+    assert.throws(
+      () => advanceSandboxRemovalJournalPhase(prepared, 'carrier-removed'),
+      /SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH/
+    );
+    clearSandboxRemovalJournalRecord(advanced);
+    assert.equal(readSandboxRemovalJournal(manifest), null);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1678,6 +1724,7 @@ if [ "$1" = container ] && [ "$2" = inspect ]; then printf '%s\\n' '{"Id":"${con
 exit 1
 `, { mode: 0o700 });
   const authorityEvidence = captureSandboxAuthority('native', {
+    env: { DOCKER_CONTEXT: 'default' },
     lockDomain: 'a'.repeat(64),
     probe: () => ({
       status: 0, signal: null, stdout: JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }), stderr: '', pid: 1, output: []

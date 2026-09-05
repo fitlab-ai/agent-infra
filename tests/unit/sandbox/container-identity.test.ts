@@ -52,6 +52,7 @@ test('container identity fails closed for same-name replacement and label drift'
 test('container inspection maps only an authoritative exact-empty query to absent', async () => {
   const id = 'f'.repeat(64);
   const evidence = captureSandboxAuthority('native', {
+    env: { DOCKER_CONTEXT: 'default' },
     lockDomain: 'e'.repeat(64),
     probe: () => ({ status: 0, signal: null, stdout: JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }), stderr: '', pid: 1, output: [] })
   });

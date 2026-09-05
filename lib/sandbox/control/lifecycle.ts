@@ -17,7 +17,11 @@ import type {
 } from './protocol.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from './protocol.ts';
 import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
-import { acquireSandboxResourceLock, type SandboxResourceLock } from './native-file-lock.ts';
+import {
+  acquireSandboxResourceLock,
+  resolveSandboxLockNamespace,
+  type SandboxResourceLock
+} from './native-file-lock.ts';
 import { isSandboxAuthorityEvidence } from '../engines/authority.ts';
 import {
   parseSandboxControlStatus,
@@ -35,40 +39,463 @@ const REPLACEMENT_FILE = 'replacement.json';
 const REPLACEMENT_STATE_SUFFIX = '.replacement-state.json';
 const REMOVAL_JOURNAL_ROOT = path.join('.agent-infra', 'sandbox-removal-journal');
 
-function removalJournalPath(manifest: SandboxControlManifest): string {
-  const carrierDigest = createHash('sha256')
-    .update(`${manifest.engine}\0${manifest.containerIdentity.id}`)
-    .digest('hex');
-  return path.join(os.homedir(), REMOVAL_JOURNAL_ROOT, manifest.authorityEvidence.lockDomain, `${carrierDigest}.json`);
+export const SANDBOX_REMOVAL_JOURNAL_PHASES = [
+  'prepared', 'container-removal', 'container-absent', 'carrier-finalizing', 'carrier-removed'
+] as const;
+export type SandboxRemovalJournalPhase = typeof SANDBOX_REMOVAL_JOURNAL_PHASES[number];
+export type SandboxRemovalTargetCommit = Readonly<{
+  branch: string;
+  project: string;
+  controlRoot: string;
+  targetDigest: string;
+  permitDigest: string;
+  removeWorktree: boolean;
+  permits: readonly Readonly<{
+    path: string;
+    mode: 'clean' | 'discard';
+    snapshot: Readonly<{
+      worktree: string;
+      branch: string;
+      head: string;
+      changes: readonly Readonly<{
+        indexStatus: string;
+        worktreeStatus: string;
+        path: string;
+        originalPath?: string;
+      }>[];
+      identity: string;
+      source?: 'registered' | 'recovered';
+      recovery?: Readonly<{
+        repoRoot: string;
+        worktreeBase: string;
+        branch: string;
+        identitySource: 'branch-only' | 'task-bound';
+        taskId: string | null;
+      }>;
+    }>;
+  }>[];
+}>;
+export type SandboxRemovalJournal = Readonly<{
+  version: 2;
+  operation: 'sandbox-rm';
+  oldOperation: 'sandbox-rm';
+  newOperation: 'sandbox-rm';
+  handoffId: string;
+  transitionId: string;
+  engine: string;
+  containerId: string;
+  generation: string;
+  authorityFingerprint: string;
+  carrierIdentityDigest: string;
+  lockDomain: string;
+  owner: ProcessIdentity & Readonly<{ leaseNonce: string }>;
+  phase: SandboxRemovalJournalPhase;
+  expectedOldJournalRevision: number | null;
+  revision: number;
+  target: SandboxRemovalTargetCommit;
+  recordedAt: number;
+}>;
+
+function removalCarrierDigest(engine: string, containerId: string, generation: string): string {
+  return createHash('sha256').update(`${engine}\0${containerId}\0${generation}`).digest('hex');
 }
 
-function writeRemovalJournal(manifest: SandboxControlManifest, phase: string): void {
-  const target = removalJournalPath(manifest);
-  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  const existing = fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, 'utf8')) as { revision?: unknown } : null;
-  const revision = typeof existing?.revision === 'number' && Number.isSafeInteger(existing.revision)
-    ? existing.revision + 1 : 1;
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+function assertPrivateDirectory(directory: string): void {
+  const home = path.resolve(os.homedir());
+  const resolved = path.resolve(directory);
+  const relative = path.relative(home, resolved);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+  }
+  let current = home;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+    }
+    if (process.platform !== 'win32' && typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+      throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+    }
+  }
+}
+
+function removalJournalDomain(lockDomain: string, create = true): string {
+  const namespace = resolveSandboxLockNamespace('sandbox-removal-journal', { lockDomain });
+  const root = path.join(path.dirname(namespace.lockRoot), REMOVAL_JOURNAL_ROOT.split(path.sep).at(-1)!);
+  if (create) fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  assertPrivateDirectory(root);
+  const domain = path.join(root, lockDomain);
+  if (create) fs.mkdirSync(domain, { recursive: true, mode: 0o700 });
+  assertPrivateDirectory(domain);
+  return domain;
+}
+
+function removalJournalPath(manifest: SandboxControlManifest): string {
+  return path.join(
+    removalJournalDomain(manifest.authorityEvidence.lockDomain),
+    `${removalCarrierDigest(manifest.engine, manifest.containerIdentity.id, manifest.generation)}.json`
+  );
+}
+
+function removalJournalPathForRecord(record: SandboxRemovalJournal): string {
+  return path.join(
+    removalJournalDomain(record.lockDomain, false),
+    `${record.carrierIdentityDigest}.json`
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  return actual.length === keys.length && actual.every((key, index) => key === keys[index]);
+}
+
+function isRemovalPermitCommit(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.path !== 'string' || !path.isAbsolute(value.path)
+    || (value.mode !== 'clean' && value.mode !== 'discard') || !isRecord(value.snapshot)
+    || typeof value.snapshot.worktree !== 'string' || !path.isAbsolute(value.snapshot.worktree)
+    || typeof value.snapshot.branch !== 'string' || typeof value.snapshot.head !== 'string'
+    || typeof value.snapshot.identity !== 'string' || !Array.isArray(value.snapshot.changes)
+    || value.snapshot.changes.some((change) => !isRecord(change)
+      || typeof change.indexStatus !== 'string' || typeof change.worktreeStatus !== 'string'
+      || typeof change.path !== 'string'
+      || (change.originalPath !== undefined && typeof change.originalPath !== 'string'))
+    || (value.snapshot.source !== undefined
+      && value.snapshot.source !== 'registered' && value.snapshot.source !== 'recovered')) return false;
+  if (value.snapshot.recovery === undefined) return true;
+  const recovery = value.snapshot.recovery;
+  return isRecord(recovery)
+    && typeof recovery.repoRoot === 'string' && path.isAbsolute(recovery.repoRoot)
+    && typeof recovery.worktreeBase === 'string' && path.isAbsolute(recovery.worktreeBase)
+    && typeof recovery.branch === 'string'
+    && (recovery.identitySource === 'branch-only' || recovery.identitySource === 'task-bound')
+    && (recovery.taskId === null || typeof recovery.taskId === 'string');
+}
+
+function parseRemovalJournal(raw: string): SandboxRemovalJournal {
+  let value: unknown;
   try {
-    fs.writeFileSync(temporary, `${JSON.stringify({
-      version: 1,
-      revision,
-      phase,
-      containerId: manifest.containerIdentity.id,
-      generation: manifest.generation,
-      authorityFingerprint: manifest.authorityEvidence.authorityFingerprint,
-      lockDomain: manifest.authorityEvidence.lockDomain,
-      recordedAt: Date.now()
-    })}\n`, { mode: 0o600, flag: 'wx' });
-    fs.renameSync(temporary, target);
-  } finally {
-    fs.rmSync(temporary, { force: true });
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+  }
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'authorityFingerprint', 'carrierIdentityDigest', 'containerId', 'engine', 'expectedOldJournalRevision',
+    'generation', 'handoffId', 'lockDomain', 'newOperation', 'oldOperation', 'operation', 'owner', 'phase',
+    'recordedAt', 'revision', 'target', 'transitionId', 'version'
+  ]) || !isRecord(value.owner) || !hasExactKeys(value.owner, ['leaseNonce', 'pid', 'startTime'])
+    || !isRecord(value.target) || !hasExactKeys(value.target, [
+      'branch', 'controlRoot', 'permitDigest', 'permits', 'project', 'removeWorktree', 'targetDigest'
+    ]) || value.version !== 2 || value.operation !== 'sandbox-rm'
+    || value.oldOperation !== 'sandbox-rm' || value.newOperation !== 'sandbox-rm'
+    || typeof value.handoffId !== 'string' || value.handoffId.length === 0
+    || typeof value.transitionId !== 'string' || value.transitionId.length === 0
+    || typeof value.engine !== 'string' || value.engine.length === 0
+    || typeof value.containerId !== 'string' || value.containerId.length === 0
+    || typeof value.generation !== 'string' || value.generation.length === 0
+    || typeof value.authorityFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(value.authorityFingerprint)
+    || typeof value.carrierIdentityDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.carrierIdentityDigest)
+    || typeof value.lockDomain !== 'string' || !/^[a-f0-9]{64}$/u.test(value.lockDomain)
+    || !Number.isSafeInteger(value.owner.pid) || (value.owner.pid as number) <= 0
+    || !Number.isSafeInteger(value.owner.startTime) || typeof value.owner.leaseNonce !== 'string'
+    || value.owner.leaseNonce.length === 0
+    || !SANDBOX_REMOVAL_JOURNAL_PHASES.includes(value.phase as SandboxRemovalJournalPhase)
+    || !(value.expectedOldJournalRevision === null
+      || (Number.isSafeInteger(value.expectedOldJournalRevision) && (value.expectedOldJournalRevision as number) >= 0))
+    || !Number.isSafeInteger(value.revision) || (value.revision as number) <= 0
+    || typeof value.target.branch !== 'string' || value.target.branch.length === 0
+    || typeof value.target.project !== 'string' || value.target.project.length === 0
+    || typeof value.target.controlRoot !== 'string' || path.isAbsolute(value.target.controlRoot) === false
+    || typeof value.target.targetDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.target.targetDigest)
+    || typeof value.target.permitDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.target.permitDigest)
+    || typeof value.target.removeWorktree !== 'boolean'
+    || !Array.isArray(value.target.permits)
+    || value.target.permits.some((permit) => !isRemovalPermitCommit(permit))
+    || !Number.isSafeInteger(value.recordedAt)) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+  }
+  const expected = value.expectedOldJournalRevision as number | null;
+  const revision = value.revision as number;
+  if ((expected === null && revision !== 1) || (expected !== null && revision !== expected + 1)) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+  }
+  return {
+    version: 2,
+    operation: 'sandbox-rm',
+    oldOperation: 'sandbox-rm',
+    newOperation: 'sandbox-rm',
+    handoffId: value.handoffId as string,
+    transitionId: value.transitionId as string,
+    engine: value.engine as string,
+    containerId: value.containerId as string,
+    generation: value.generation as string,
+    authorityFingerprint: value.authorityFingerprint as string,
+    carrierIdentityDigest: value.carrierIdentityDigest as string,
+    lockDomain: value.lockDomain as string,
+    owner: {
+      pid: value.owner.pid as number,
+      startTime: value.owner.startTime as number,
+      leaseNonce: value.owner.leaseNonce as string
+    },
+    phase: value.phase as SandboxRemovalJournalPhase,
+    expectedOldJournalRevision: expected,
+    revision,
+    target: {
+      branch: value.target.branch as string,
+      project: value.target.project as string,
+      controlRoot: value.target.controlRoot as string,
+      targetDigest: value.target.targetDigest as string,
+      permitDigest: value.target.permitDigest as string,
+      removeWorktree: value.target.removeWorktree as boolean,
+      permits: value.target.permits as SandboxRemovalTargetCommit['permits']
+    },
+    recordedAt: value.recordedAt as number
+  };
+}
+
+function readRemovalJournalAt(target: string): SandboxRemovalJournal | null {
+  if (!fs.existsSync(target)) return null;
+  const stat = fs.lstatSync(target);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+  return parseRemovalJournal(fs.readFileSync(target, 'utf8'));
+}
+
+export function readSandboxRemovalJournal(manifest: SandboxControlManifest): SandboxRemovalJournal | null {
+  return readRemovalJournalAt(removalJournalPath(manifest));
+}
+
+export function listSandboxRemovalJournals(
+  filter: Readonly<{ branch?: string; project?: string; targetDigest?: string }> = {}
+): SandboxRemovalJournal[] {
+  const namespace = resolveSandboxLockNamespace('sandbox-removal-journal');
+  const root = path.join(path.dirname(namespace.lockRoot), REMOVAL_JOURNAL_ROOT.split(path.sep).at(-1)!);
+  if (!fs.existsSync(root)) return [];
+  assertPrivateDirectory(root);
+  const journals: SandboxRemovalJournal[] = [];
+  for (const domainEntry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!domainEntry.isDirectory() || domainEntry.isSymbolicLink()) {
+      throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+    }
+    const domain = path.join(root, domainEntry.name);
+    assertPrivateDirectory(domain);
+    for (const entry of fs.readdirSync(domain, { withFileTypes: true })) {
+      if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith('.json')) {
+        throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+      }
+      const record = readRemovalJournalAt(path.join(domain, entry.name));
+      if (!record || record.lockDomain !== domainEntry.name
+        || `${record.carrierIdentityDigest}.json` !== entry.name) {
+        throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_INVALID');
+      }
+      if ((!filter.branch || record.target.branch === filter.branch)
+        && (!filter.project || record.target.project === filter.project)
+        && (!filter.targetDigest || record.target.targetDigest === filter.targetDigest)) {
+        journals.push(record);
+      }
+    }
+  }
+  return journals;
+}
+
+export function clearSandboxRemovalJournalRecord(record: SandboxRemovalJournal): void {
+  const target = removalJournalPathForRecord(record);
+  if (fs.existsSync(target)) {
+    const current = readRemovalJournalAt(target);
+    if (!current || current.revision !== record.revision || current.handoffId !== record.handoffId) {
+      throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH');
+    }
+    fs.rmSync(target, { force: true });
   }
 }
 
 export function clearSandboxRemovalJournal(manifest: SandboxControlManifest): void {
   const target = removalJournalPath(manifest);
   if (fs.existsSync(target)) fs.rmSync(target, { force: true });
+}
+
+type RemovalJournalCursor = Readonly<{
+  record: SandboxRemovalJournal;
+  write(phase: SandboxRemovalJournalPhase): SandboxRemovalJournal;
+}>;
+
+function defaultRemovalTarget(manifest: SandboxControlManifest): SandboxRemovalTargetCommit {
+  const targetDigest = createHash('sha256')
+    .update(`${manifest.project}\0${manifest.branch}\0${manifest.container}\0${manifest.channelDir}`)
+    .digest('hex');
+  return {
+    branch: manifest.branch,
+    project: manifest.project,
+    controlRoot: path.dirname(manifest.channelDir),
+    targetDigest,
+    permitDigest: createHash('sha256').update('none').digest('hex'),
+    removeWorktree: false,
+    permits: []
+  };
+}
+
+function assertRemovalJournalLock(
+  record: SandboxRemovalJournal,
+  resourceLock: SandboxResourceLock
+): void {
+  const namespace = resolveSandboxLockNamespace(`${record.engine}:${record.containerId}`, {
+    lockDomain: record.lockDomain
+  });
+  if (resourceLock.lockDomain !== record.lockDomain || resourceLock.path !== namespace.lockPath) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_LOCK_MISMATCH');
+  }
+}
+
+function writeRemovalJournalAt(
+  target: string,
+  base: Omit<SandboxRemovalJournal, 'phase' | 'expectedOldJournalRevision' | 'revision' | 'recordedAt'>,
+  phase: SandboxRemovalJournalPhase,
+  expectedOldJournalRevision: number | null
+): SandboxRemovalJournal {
+  const existing = readRemovalJournalAt(target);
+  if (expectedOldJournalRevision === null
+    ? existing !== null
+    : existing?.revision !== expectedOldJournalRevision) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH');
+  }
+  const record: SandboxRemovalJournal = {
+    ...base,
+    phase,
+    expectedOldJournalRevision,
+    revision: expectedOldJournalRevision === null ? 1 : expectedOldJournalRevision + 1,
+    recordedAt: Date.now()
+  };
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(record)}\n`, { mode: 0o600, flag: 'wx' });
+    if (expectedOldJournalRevision === null && fs.existsSync(target)) {
+      throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH');
+    }
+    fs.renameSync(temporary, target);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+  return record;
+}
+
+function writeRemovalJournal(
+  manifest: SandboxControlManifest,
+  base: Omit<SandboxRemovalJournal, 'phase' | 'expectedOldJournalRevision' | 'revision' | 'recordedAt'>,
+  phase: SandboxRemovalJournalPhase,
+  expectedOldJournalRevision: number | null
+): SandboxRemovalJournal {
+  return writeRemovalJournalAt(removalJournalPath(manifest), base, phase, expectedOldJournalRevision);
+}
+
+function startRemovalJournal(
+  manifest: SandboxControlManifest,
+  options: Readonly<{
+    target?: SandboxRemovalTargetCommit;
+    identityProbe: ProcessIdentityProbe;
+  }>
+): RemovalJournalCursor {
+  const target = removalJournalPath(manifest);
+  const existing = readRemovalJournalAt(target);
+  if (existing && (existing.engine !== manifest.engine || existing.containerId !== manifest.containerIdentity.id
+    || existing.generation !== manifest.generation
+    || existing.authorityFingerprint !== manifest.authorityEvidence.authorityFingerprint
+    || existing.lockDomain !== manifest.authorityEvidence.lockDomain)) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_IDENTITY_MISMATCH');
+  }
+  if (existing) {
+    const state = options.identityProbe(existing.owner);
+    if (state === 'alive') throw new Error('SANDBOX_CONTROL_REMOVE_RETRY_IN_PROGRESS');
+    if (state === 'unknown') throw new Error('SANDBOX_CONTROL_REMOVE_OWNER_UNKNOWN');
+  }
+  const startTime = getProcessStartTime(process.pid);
+  if (startTime === null) throw new Error('SANDBOX_CONTROL_REMOVE_OWNER_UNAVAILABLE');
+  const base = {
+    version: 2 as const,
+    operation: 'sandbox-rm' as const,
+    oldOperation: 'sandbox-rm' as const,
+    newOperation: 'sandbox-rm' as const,
+    handoffId: randomUUID(),
+    transitionId: randomUUID(),
+    engine: manifest.engine,
+    containerId: manifest.containerIdentity.id,
+    generation: manifest.generation,
+    authorityFingerprint: manifest.authorityEvidence.authorityFingerprint,
+    carrierIdentityDigest: removalCarrierDigest(manifest.engine, manifest.containerIdentity.id, manifest.generation),
+    lockDomain: manifest.authorityEvidence.lockDomain,
+    owner: { pid: process.pid, startTime, leaseNonce: randomUUID() },
+    target: options.target ?? defaultRemovalTarget(manifest)
+  };
+  const initialPhase = existing?.phase ?? 'prepared';
+  let record = writeRemovalJournal(manifest, base, initialPhase, existing?.revision ?? null);
+  return {
+    get record() { return record; },
+    write(phase) {
+      record = writeRemovalJournal(manifest, base, phase, record.revision);
+      return record;
+    }
+  };
+}
+
+export function claimSandboxRemovalJournal(
+  journal: SandboxRemovalJournal,
+  options: Readonly<{ identityProbe?: ProcessIdentityProbe; resourceLock?: SandboxResourceLock }> = {}
+): SandboxRemovalJournal {
+  const target = removalJournalPathForRecord(journal);
+  const resourceLock = options.resourceLock
+    ?? acquireSandboxResourceLock(`${journal.engine}:${journal.containerId}`, { lockDomain: journal.lockDomain });
+  const ownedLock = options.resourceLock ? null : resourceLock;
+  try {
+    assertRemovalJournalLock(journal, resourceLock);
+    const current = readRemovalJournalAt(target);
+    if (!current || current.revision !== journal.revision || current.handoffId !== journal.handoffId) {
+      throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH');
+    }
+    const state = (options.identityProbe ?? getProcessIdentityState)(current.owner);
+    if (state === 'alive') throw new Error('SANDBOX_CONTROL_REMOVE_RETRY_IN_PROGRESS');
+    if (state === 'unknown') throw new Error('SANDBOX_CONTROL_REMOVE_OWNER_UNKNOWN');
+    const startTime = getProcessStartTime(process.pid);
+    if (startTime === null) throw new Error('SANDBOX_CONTROL_REMOVE_OWNER_UNAVAILABLE');
+    const base = {
+      ...current,
+      handoffId: randomUUID(),
+      transitionId: randomUUID(),
+      owner: { pid: process.pid, startTime, leaseNonce: randomUUID() }
+    };
+    return writeRemovalJournalAt(target, base, current.phase, current.revision);
+  } finally {
+    ownedLock?.release();
+  }
+}
+
+export function advanceSandboxRemovalJournalPhase(
+  journal: SandboxRemovalJournal,
+  phase: SandboxRemovalJournalPhase,
+  options: Readonly<{ resourceLock?: SandboxResourceLock }> = {}
+): SandboxRemovalJournal {
+  const target = removalJournalPathForRecord(journal);
+  const resourceLock = options.resourceLock
+    ?? acquireSandboxResourceLock(`${journal.engine}:${journal.containerId}`, { lockDomain: journal.lockDomain });
+  const ownedLock = options.resourceLock ? null : resourceLock;
+  try {
+    assertRemovalJournalLock(journal, resourceLock);
+    const current = readRemovalJournalAt(target);
+    if (!current || current.revision !== journal.revision || current.handoffId !== journal.handoffId) {
+      throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH');
+    }
+    const {
+      phase: _phase,
+      expectedOldJournalRevision: _expected,
+      revision: _revision,
+      recordedAt: _recordedAt,
+      ...base
+    } = current;
+    return writeRemovalJournalAt(target, base, phase, current.revision);
+  } finally {
+    ownedLock?.release();
+  }
 }
 
 async function awaitWithDeadline<T>(
@@ -125,7 +552,8 @@ function markSandboxControlRootQuiescing(root: string): void {
 function recordSandboxRemovalPending(
   root: string,
   manifest: SandboxControlManifest,
-  phase: 'container-removal' | 'container-verification'
+  phase: 'container-removal' | 'container-verification',
+  journal: RemovalJournalCursor
 ): void {
   const pendingPath = path.join(root, 'removal-pending.json');
   const temporary = `${pendingPath}.${process.pid}.${randomUUID()}.tmp`;
@@ -142,7 +570,7 @@ function recordSandboxRemovalPending(
   } finally {
     fs.rmSync(temporary, { force: true });
   }
-  writeRemovalJournal(manifest, phase);
+  journal.write(phase === 'container-verification' ? 'container-absent' : 'container-removal');
 }
 
 function readStartupOwner(filePath: string): { raw: string; owner: OwnerIdentity } | null {
@@ -884,6 +1312,7 @@ export type RemoveSandboxControlOptions = Readonly<{
   selfOwner?: BrokerOwner;
   resourceLock?: SandboxResourceLock;
   retainRemovalJournal?: boolean;
+  removalTarget?: SandboxRemovalTargetCommit;
 }>;
 
 export async function removeSandboxControlRoot(
@@ -895,12 +1324,16 @@ export async function removeSandboxControlRoot(
   const stat = fs.lstatSync(resolvedRoot);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
   const manifestPath = path.join(resolvedRoot, 'manifest.json');
+  const manifestRawBeforeLock = fs.readFileSync(manifestPath, 'utf8');
   const manifest = readSandboxControlManifest(manifestPath);
   const resourceLock = options.resourceLock ?? acquireSandboxResourceLock(
     `${manifest.engine}:${manifest.containerIdentity.id}`,
     { lockDomain: manifest.authorityEvidence.lockDomain }
   );
   try {
+  if (fs.readFileSync(manifestPath, 'utf8') !== manifestRawBeforeLock) {
+    throw new Error('SANDBOX_CONTROL_MANIFEST_CHANGED');
+  }
   const inspectContainer = options.inspectContainer
     ?? ((timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }));
   const timeoutMs = options.timeoutMs ?? options.timing?.quiesceDeadlineMs ?? DEFAULT_QUIESCE_TIMEOUT_MS;
@@ -908,11 +1341,15 @@ export async function removeSandboxControlRoot(
   const deadlineAt = Date.now() + timeoutMs;
   const forceAt = forceDeadline(deadlineAt, timeoutMs);
   const remaining = (): number => Math.max(0, deadlineAt - Date.now());
+  const journal = startRemovalJournal(manifest, {
+    target: options.removalTarget,
+    identityProbe
+  });
   const observation = await awaitWithDeadline(
     () => inspectContainer(remaining()), deadlineAt, 'SANDBOX_CONTROL_REMOVE_DEADLINE_EXCEEDED'
   );
   if (observation.state === 'unknown') throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${observation.reason}`);
-  writeRemovalJournal(manifest, observation.state === 'absent' ? 'container-absent' : 'container-removal');
+  journal.write(observation.state === 'absent' ? 'container-absent' : 'container-removal');
   if (options.requireAbsent && observation.state !== 'absent') {
     throw new Error('SANDBOX_CONTROL_CONTAINER_REAPPEARED');
   }
@@ -955,7 +1392,7 @@ export async function removeSandboxControlRoot(
 
   if (observation.state === 'found') {
     if (Date.now() >= deadlineAt) {
-      recordSandboxRemovalPending(resolvedRoot, manifest, 'container-removal');
+      recordSandboxRemovalPending(resolvedRoot, manifest, 'container-removal', journal);
       throw new Error('SANDBOX_CONTROL_REMOVE_PENDING');
     }
     let afterRemoval: ContainerObservation;
@@ -972,7 +1409,7 @@ export async function removeSandboxControlRoot(
       );
     } catch (error) {
       if (error instanceof Error && error.message === 'SANDBOX_CONTROL_REMOVE_DEADLINE_EXCEEDED') {
-        recordSandboxRemovalPending(resolvedRoot, manifest, 'container-removal');
+        recordSandboxRemovalPending(resolvedRoot, manifest, 'container-removal', journal);
         throw new Error('SANDBOX_CONTROL_REMOVE_PENDING');
       }
       throw error;
@@ -982,13 +1419,18 @@ export async function removeSandboxControlRoot(
         ? `SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${afterRemoval.reason}`
         : 'SANDBOX_CONTROL_CONTAINER_STILL_EXISTS');
     }
-    writeRemovalJournal(manifest, 'container-absent');
+    journal.write('container-absent');
   }
 
+  const currentManifestRaw = fs.readFileSync(manifestPath, 'utf8');
   const currentManifest = readSandboxControlManifest(manifestPath);
-  if (currentManifest.token !== manifest.token || currentManifest.generation !== manifest.generation
+  if (currentManifestRaw !== manifestRawBeforeLock
+    || currentManifest.engine !== manifest.engine
+    || currentManifest.containerIdentity.id !== manifest.containerIdentity.id
+    || currentManifest.authorityEvidence.lockDomain !== manifest.authorityEvidence.lockDomain
+    || currentManifest.token !== manifest.token || currentManifest.generation !== manifest.generation
     || !isSandboxControlRootQuiescing(resolvedRoot)) {
-    throw new Error('SANDBOX_CONTROL_OWNER_TRANSITION');
+    throw new Error('SANDBOX_CONTROL_MANIFEST_CHANGED');
   }
   const currentBroker = readBrokerOwner(brokerPath);
   if (selfOwned && (!currentBroker || !selfOwner || !sameOwner(selfOwner, currentBroker)
@@ -1057,9 +1499,9 @@ export async function removeSandboxControlRoot(
   if (fs.existsSync(brokerPath) || fs.existsSync(statusPath)) {
     throw new Error('SANDBOX_CONTROL_OWNER_EVIDENCE_REMAINS');
   }
-  writeRemovalJournal(manifest, 'carrier-finalizing');
+  journal.write('carrier-finalizing');
   fs.rmSync(resolvedRoot, { recursive: true, force: true });
-  writeRemovalJournal(manifest, 'carrier-removed');
+  journal.write('carrier-removed');
   if (!options.retainRemovalJournal) clearSandboxRemovalJournal(manifest);
   } finally {
     if (!options.resourceLock) resourceLock.release();

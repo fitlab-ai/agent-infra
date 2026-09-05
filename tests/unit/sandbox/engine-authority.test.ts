@@ -21,7 +21,7 @@ test('authority capture stores only redacted route and hashed daemon identity', 
     }
   });
 
-  assert.deepEqual(calls[0], authorityVersionArgs());
+  assert.deepEqual(calls[0], ['--host', 'tcp://user:secret@example.test:2376?token=hidden', ...authorityVersionArgs()]);
   assert.equal(evidence.normalizedEndpoint.includes('secret'), false);
   assert.equal(evidence.normalizedEndpoint.includes('hidden'), false);
   assert.equal(evidence.daemonIdentity.fingerprint.includes('daemon-secret-id'), false);
@@ -57,5 +57,68 @@ test('persisted endpoint authority builds probes without reading the current rou
   assert.deepEqual(commandForSandboxAuthority(evidence, 'docker', ['container', 'ls']), {
     cmd: 'docker',
     args: ['--host', 'tcp://docker.example.test:2376', 'container', 'ls']
+  });
+});
+
+test('authority capture persists the effective native Docker context and replays it', () => {
+  const calls: string[][] = [];
+  const evidence = captureSandboxAuthority('native', {
+    env: { DOCKER_CONTEXT: 'remote-prod' },
+    probe: (_cmd, args) => {
+      calls.push(args);
+      return probeResult(JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }));
+    }
+  });
+
+  assert.deepEqual(calls[0], ['--context', 'remote-prod', ...authorityVersionArgs()]);
+  assert.equal(evidence.routeKind, 'context');
+  assert.deepEqual(evidence.routeSelector, { context: 'remote-prod' });
+  assert.deepEqual(commandForSandboxAuthority(evidence, 'docker', ['ps']), {
+    cmd: 'docker', args: ['--context', 'remote-prod', 'ps']
+  });
+});
+
+test('authority capture resolves the current native context before persisting it', () => {
+  const calls: string[][] = [];
+  const evidence = captureSandboxAuthority('native', {
+    env: {},
+    probe: (_cmd, args) => {
+      calls.push(args);
+      return args[0] === 'context'
+        ? probeResult('remote-current\n')
+        : probeResult(JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }));
+    }
+  });
+
+  assert.deepEqual(calls, [
+    ['context', 'show'],
+    ['--context', 'remote-current', ...authorityVersionArgs()]
+  ]);
+  assert.deepEqual(commandForSandboxAuthority(evidence, 'docker', ['ps']), {
+    cmd: 'docker', args: ['--context', 'remote-current', 'ps']
+  });
+});
+
+test('credentialed Docker hosts are redacted and cannot be replayed', () => {
+  const evidence = captureSandboxAuthority('native', {
+    env: { DOCKER_HOST: 'tcp://user:secret@example.test:2376?token=hidden' },
+    probe: () => probeResult(JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }))
+  });
+
+  assert.match(evidence.routeSelector.endpoint ?? '', /<redacted>/u);
+  assert.throws(
+    () => commandForSandboxAuthority(evidence, 'docker', ['ps']),
+    /SANDBOX_AUTHORITY_ROUTE_UNREPLAYABLE/
+  );
+});
+
+test('WSL default route replay does not invent a distribution named default', () => {
+  const evidence = captureSandboxAuthority('wsl2', {
+    env: {},
+    probe: () => probeResult(JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }))
+  });
+
+  assert.deepEqual(commandForSandboxAuthority(evidence, 'docker', ['ps']), {
+    cmd: 'wsl.exe', args: ['--exec', 'docker', 'ps']
   });
 });
