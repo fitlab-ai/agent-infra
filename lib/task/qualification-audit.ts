@@ -200,15 +200,23 @@ function nonConstraintInputDigest(content: string): string {
   projection = stripTaskInputSection(projection, TASK_CONSTRAINT_HEADINGS);
   projection = stripTaskInputSection(projection, TASK_CANDIDATE_HEADINGS);
   projection = [
+    ['上下文', 'Context'],
+    ['需求', 'Requirements'],
+    ['分析', 'Analysis'],
+    ['设计', 'Design'],
+    ['实现备注', 'Implementation Notes'],
+    ['审查反馈', 'Review Feedback'],
+    ['审查分歧账本', 'Review Disagreement Ledger'],
+    ['人工裁决', 'Human Rulings', 'Decision Records'],
     ['活动日志', 'Activity Log'],
     ['产物生命周期收据', 'Artifact Lifecycle Receipts'],
     ['产物失效记录', 'Artifact Invalidation'],
     ['账本', 'Ledger'],
-    ['决策记录', 'Decision Records'],
     ['实现输入', 'Implementation Inputs'],
-    ['警告', 'Warnings'],
+    ['工作流告警', 'Warnings', 'Workflow Warnings'],
     ['返工意图', 'Rework Intents'],
-    CONFIRMATION_HEADINGS
+    CONFIRMATION_HEADINGS,
+    ['完成检查清单', 'Completion Checklist']
   ].reduce((value, aliases) => stripSection(value, aliases), projection);
   return digest(projection);
 }
