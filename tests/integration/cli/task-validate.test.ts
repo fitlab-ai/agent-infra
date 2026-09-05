@@ -121,6 +121,15 @@ function startStatusHeartbeat(tmpDir: string, statusPath: string, patch: Record<
   return child;
 }
 
+async function removeFixtureAfterChildExit(tmpDir: string, child: ReturnType<typeof spawn> | undefined): Promise<void> {
+  if (child && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    child.kill();
+    await exited;
+  }
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
 function inplaceFixture({ includeContainer = true }: { includeContainer?: boolean } = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-validate-inplace-'));
   const project = 'demo';
@@ -228,10 +237,10 @@ test('snapshot validation runs at the task commit and removes its temporary work
 
 test('inplace validation refuses to run when the broker is not idle', (t) => {
   const f = inplaceFixture();
-  t.after(() => fs.rmSync(f.tmpDir, { recursive: true, force: true }));
+  let heartbeat: ReturnType<typeof spawn> | undefined;
+  t.after(() => removeFixtureAfterChildExit(f.tmpDir, heartbeat));
   f.writeStatus({ state: 'busy', activeRequestId: 'other-request' });
-  const heartbeat = startStatusHeartbeat(f.tmpDir, f.statusPath, { state: 'busy', activeRequestId: 'other-request' });
-  t.after(() => { try { heartbeat.kill(); } catch { /* already exited */ } });
+  heartbeat = startStatusHeartbeat(f.tmpDir, f.statusPath, { state: 'busy', activeRequestId: 'other-request' });
   const result = spawnTaskValidate(f.repoDir, f.env, [
     f.taskId, '--scope', 'inplace', '--format', 'json', '--', process.execPath, '-e', 'process.exit(0)'
   ]);
@@ -267,9 +276,9 @@ test('inplace validation refuses to run when the manifest generation does not ma
 
 test('inplace validation refuses to run when no matching container exists', (t) => {
   const f = inplaceFixture({ includeContainer: false });
-  t.after(() => fs.rmSync(f.tmpDir, { recursive: true, force: true }));
-  const heartbeat = startStatusHeartbeat(f.tmpDir, f.statusPath, { state: 'healthy', activeRequestId: null });
-  t.after(() => { try { heartbeat.kill(); } catch { /* already exited */ } });
+  let heartbeat: ReturnType<typeof spawn> | undefined;
+  t.after(() => removeFixtureAfterChildExit(f.tmpDir, heartbeat));
+  heartbeat = startStatusHeartbeat(f.tmpDir, f.statusPath, { state: 'healthy', activeRequestId: null });
   const result = spawnTaskValidate(f.repoDir, f.env, [
     f.taskId, '--scope', 'inplace', '--format', 'json', '--', process.execPath, '-e', 'process.exit(0)'
   ]);
@@ -280,10 +289,10 @@ test('inplace validation refuses to run when no matching container exists', (t) 
 
 test('inplace validation stops, runs, restarts the container, and restores broker health', (t) => {
   const f = inplaceFixture();
-  t.after(() => fs.rmSync(f.tmpDir, { recursive: true, force: true }));
+  let driver: ReturnType<typeof startStateDriver> | undefined;
+  t.after(() => removeFixtureAfterChildExit(f.tmpDir, driver?.child));
   const leasePath = path.join(f.control.root, 'lease.json');
-  const driver = startStateDriver(f.tmpDir, f.statusPath, leasePath, f.dockerFixture.logPath);
-  t.after(() => { try { driver.child.kill(); } catch { /* already exited */ } });
+  driver = startStateDriver(f.tmpDir, f.statusPath, leasePath, f.dockerFixture.logPath);
 
   const result = spawnTaskValidate(f.repoDir, f.env, [
     f.taskId, '--scope', 'inplace', '--format', 'json', '--',
