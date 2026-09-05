@@ -92,7 +92,9 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   }
   if (facts.taskState !== 'active') return deny('TASK_NOT_ACTIVE', `state=${facts.taskState}`);
   if (invalidationBlocks(facts.invalidation)) return deny('INVALIDATION_INCOMPLETE');
-  if (facts.qualificationStale) return deny('QUALIFICATION_STALE', ...(facts.qualificationStaleArtifacts ?? ['qualification audit is stale']));
+  if (facts.qualificationStale && facts.recommendedAction !== action) {
+    return deny('QUALIFICATION_STALE', ...(facts.qualificationStaleArtifacts ?? ['qualification audit is stale']));
+  }
   if (facts.executionBusy) return deny('EXECUTION_BUSY');
 
   const implicit = trigger.explicitRequest === false;
@@ -173,8 +175,30 @@ function qualificationCandidateSnapshotMatches(
   });
 }
 
+const QUALIFICATION_RECOVERY_ORDER: ReadonlyArray<{ action: LifecycleAction; pattern: RegExp }> = [
+  { action: 'analysis', pattern: /^analysis(?:-r\d+)?\.md$/ },
+  { action: 'review-analysis', pattern: /^review-analysis(?:-r\d+)?\.md$/ },
+  { action: 'plan', pattern: /^plan(?:-r\d+)?\.md$/ },
+  { action: 'review-plan', pattern: /^review-plan(?:-r\d+)?\.md$/ },
+  { action: 'code', pattern: /^code(?:-r\d+)?\.md$/ },
+  { action: 'review-code', pattern: /^review-code(?:-r\d+)?\.md$/ }
+];
+
+function qualificationRecoveryAction(facts: LifecycleFacts): LifecycleAction | null {
+  const stale = facts.qualificationStaleArtifacts ?? [];
+  return QUALIFICATION_RECOVERY_ORDER.find(({ pattern }) => stale.some((name) => pattern.test(name)))?.action ?? null;
+}
+
 function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
   if (invalidationBlocks(facts.invalidation)) return { action: null, reasonCode: 'INVALIDATION_INCOMPLETE', evidence: ['reconcile task invalidation before routing'] };
+  if (facts.qualificationStale) {
+    const action = qualificationRecoveryAction(facts);
+    return {
+      action,
+      reasonCode: 'QUALIFICATION_RECOVERY_REQUIRED',
+      evidence: facts.qualificationStaleArtifacts ?? ['qualification audit is stale']
+    };
+  }
   const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
   if (pendingIntent) return { action: pendingIntent.target, reasonCode: 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
   if (!hasArtifact(facts, 'analysis')) return { action: 'analysis', reasonCode: 'ANALYSIS_ARTIFACT_MISSING', evidence: ['analysis artifact is absent'] };
@@ -250,9 +274,10 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
     const qualificationStaleArtifacts: string[] = [];
     if (qualification.qualification.present) {
       const constraints = new Map(qualification.qualification.constraints.map((row) => [row.constraintId, row.digest]));
-      for (const name of activeFiles) {
-        const family = familyFor(name);
-        if (!family || !ARTIFACT_AUDIT_FAMILIES.has(family)) continue;
+      for (const family of Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>) {
+        if (!ARTIFACT_AUDIT_FAMILIES.has(family)) continue;
+        const name = latestArtifact(artifacts[family] ?? []);
+        if (!name) continue;
         let auditContent: string;
         try { auditContent = fs.readFileSync(path.join(taskDir, name), 'utf8'); }
         catch { qualificationStaleArtifacts.push(name); continue; }

@@ -17,6 +17,18 @@ import {
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
+import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
+
+function enableQualification(taskPath: string) {
+  fs.appendFileSync(taskPath, `\n## \u7ea6\u675f\n\n| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| C-1 | Keep recovery bounded | derived | task-input | task.md | task.md#\u7ea6\u675f |  |  |\n\n## \u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848\n\n| candidate_id | statement | status | constraint_ids | impact | evidence |\n| --- | --- | --- | --- | --- | --- |\n| A | Rebuild the earliest stale stage | qualified | C-1 | bounded recovery | task.md#\u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848 |\n`);
+}
+
+function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
+  const built = buildQualificationAudit(fs.readFileSync(taskPath, 'utf8'));
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  fs.writeFileSync(artifactPath, `# Current artifact\n\n## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
+}
 
 function fixture(step = 'requirement-analysis-review') {
   const explicitStep = arguments.length > 0;
@@ -1059,6 +1071,34 @@ test('source completion records resumable invalidation and downstream writers fa
   assert.equal(reconciled.status, 0, reconciled.stdout || reconciled.stderr);
   const retried = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
   assert.equal(retried.status, 0, retried.stdout || retried.stderr);
+});
+
+test('qualification recovery started events only authorize the earliest stale stage', () => {
+  const f = fixture('code-review');
+  for (const [name, content] of [
+    ['review-analysis.md', reviewArtifact('Analysis Review', 'analysis.md')],
+    ['plan.md', '# Plan\n'],
+    ['review-plan.md', reviewArtifact('Plan Review', 'plan.md')]
+  ] as const) fs.writeFileSync(path.join(f.dir, name), content);
+  addReceipt(f.file, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  enableQualification(f.file);
+  writeQualifiedArtifact(f.file, path.join(f.dir, 'plan.md'));
+
+  const skipped = run(f.root, [f.id, 'review-plan.started', '--agent', 'codex', '--dry-run']);
+  assert.equal(skipped.status, 1);
+  assert.equal(JSON.parse(skipped.stdout).error.code, 'EVENT_TRANSITION_INVALID');
+  assert.match(JSON.parse(skipped.stdout).error.message, /QUALIFICATION_STALE/);
+
+  const planned = run(f.root, [f.id, 'analyze.started', '--agent', 'codex', '--dry-run']);
+  assert.equal(planned.status, 0, planned.stdout || planned.stderr);
+  assert.equal(JSON.parse(planned.stdout).artifact, 'analysis-r2.md');
+
+  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  assert.equal(JSON.parse(started.stdout).artifact, 'analysis-r2.md');
 });
 
 test('analysis restart is authorized by explicit intent without current-step adjacency', () => {

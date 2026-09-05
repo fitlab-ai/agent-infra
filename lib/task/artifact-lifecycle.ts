@@ -341,6 +341,7 @@ const OPTIONAL_CONTEXT: Partial<Record<ArtifactFamily, { family: ArtifactFamily;
   'manual-validation': { family: 'review-code' },
   'validation-run': { family: 'review-code' }
 };
+const QUALIFICATION_RECOVERY_OPTIONAL_CONTEXT_CONSUMERS = new Set<ArtifactFamily>(['analysis', 'plan']);
 
 function resolveArtifactContext(taskRef: string, family: string, options: InspectOptions = {}): ArtifactContextResult {
   const inventory = inspectTaskArtifacts(taskRef, family, options);
@@ -367,7 +368,9 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
         return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: `${context.latest.name} has no valid reviewed input` } };
       }
       const qualificationError = qualificationErrorForArtifact(context.latest);
-      if (qualificationError) return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: qualificationError } };
+      if (qualificationError && !QUALIFICATION_RECOVERY_OPTIONAL_CONTEXT_CONSUMERS.has(inventory.family as ArtifactFamily)) {
+        return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: qualificationError } };
+      }
       inputs.push(context.latest);
     }
   }

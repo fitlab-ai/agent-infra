@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleAction, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
 import { invalidationMutation, createInvalidationOperation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
+import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 
 const trigger: ExplicitTrigger = {
@@ -21,6 +22,10 @@ function facts(currentStep: string): LifecycleFacts {
     reworkIntents: [],
     unresolvedLedger: { analysis: 0, plan: 0, code: 0 }, executionBusy: false
   };
+}
+
+function qualificationTask() {
+  return `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: requirement-analysis\n---\n\n# Task\n\n## \u7ea6\u675f\n\n| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| C-1 | Keep recovery bounded | derived | task-input | task.md | task.md#\u7ea6\u675f |  |  |\n\n## \u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848\n\n| candidate_id | statement | status | constraint_ids | impact | evidence |\n| --- | --- | --- | --- | --- | --- |\n| A | Rebuild the earliest stale stage | qualified | C-1 | bounded recovery | task.md#\u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848 |\n`;
 }
 
 test('explicit trigger authorization does not depend on current_step', () => {
@@ -106,6 +111,56 @@ test('recommendation is derived from lifecycle facts rather than current_step', 
     artifacts: { ...facts('code-review').artifacts, analysis: ['analysis.md'] }
   };
   assert.equal(recommendNext(withAnalysis).action, 'review-analysis');
+});
+
+test('qualification recovery routes to the earliest stale stage and only authorizes that stage', () => {
+  const stale = {
+    ...facts('code'),
+    artifacts: {
+      analysis: ['analysis.md'], 'review-analysis': ['review-analysis.md'],
+      plan: ['plan.md'], 'review-plan': ['review-plan.md'],
+      code: ['code.md'], 'review-code': []
+    },
+    qualificationStale: true,
+    qualificationStaleArtifacts: ['review-plan.md', 'analysis.md']
+  } satisfies LifecycleFacts;
+
+  const recommendation = recommendNext(stale);
+  assert.equal(recommendation.action, 'analysis');
+  assert.equal(recommendation.reasonCode, 'QUALIFICATION_RECOVERY_REQUIRED');
+
+  const recoveryFacts = { ...stale, recommendedAction: recommendation.action };
+  assert.equal(canStart('analysis', recoveryFacts, trigger).allowed, true);
+  const busy = canStart('analysis', { ...recoveryFacts, executionBusy: true }, trigger);
+  assert.equal(busy.allowed, false);
+  assert.equal(busy.reasonCode, 'EXECUTION_BUSY');
+  const skipped = canStart('review-code', recoveryFacts, { ...trigger, requestedAction: 'review-code' });
+  assert.equal(skipped.allowed, false);
+  assert.equal(skipped.reasonCode, 'QUALIFICATION_STALE');
+});
+
+test('qualification recovery only evaluates the latest active artifact in each family', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-qualification-latest-'));
+  try {
+    const taskDir = path.join(root, 'task');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const content = qualificationTask();
+    fs.writeFileSync(path.join(taskDir, 'task.md'), content);
+    fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# legacy analysis\n');
+    const built = buildQualificationAudit(content);
+    assert.equal(built.ok, true);
+    if (!built.ok) return;
+    fs.writeFileSync(path.join(taskDir, 'analysis-r2.md'), `# Current analysis\n\n## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
+
+    const result = buildLifecycleFacts(taskDir, content, 'active');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.facts.qualificationStale, false);
+    assert.deepEqual(result.facts.qualificationStaleArtifacts, []);
+    assert.equal(recommendNext(result.facts).action, 'review-analysis');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('explicit source provenance requires a matching artifact hash', () => {
