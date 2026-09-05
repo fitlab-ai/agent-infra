@@ -1520,6 +1520,97 @@ test("sandbox rm preserves a share replacement between source claim and rename",
   }
 });
 
+test("sandbox rm restores a share replacement after a crash following rename", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-crash-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/share-replacement-crash";
+  const config = rmOneConfig(fixture, tmpDir);
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+  const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
+  const target = {
+    branch,
+    effectiveBranch: branch,
+    engine: "docker-desktop",
+    matchedContainers: [],
+    existingWorktrees: [],
+    toolCandidates: [],
+    workspace: { mode: "branch-only" as const },
+    controlRoots: [controlRoot],
+    workspaceViewRoots: []
+  };
+  const originalRenameSync = fs.renameSync;
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  let injected = false;
+  try {
+    fs.mkdirSync(share, { recursive: true });
+    fs.mkdirSync(path.join(controlRoot, "channel"), { recursive: true });
+    fs.mkdirSync(path.join(controlRoot, "public"), { recursive: true });
+    fs.mkdirSync(path.join(controlRoot, "processing"), { recursive: true });
+    fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+      engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+      project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+      mode: "branch-only", taskId: null, token: "share-replacement-crash-token", generation: "share-replacement-crash-generation",
+      channelDir: path.join(controlRoot, "channel"), publicStatusDir: path.join(controlRoot, "public"),
+      processingDir: path.join(controlRoot, "processing"), runtimeDir: path.join(controlRoot, "runtime")
+    })}\n`);
+    fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
+      version: 2, generation: "share-replacement-crash-generation",
+      broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+      state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+    })}\n`);
+
+    fs.renameSync = ((source, destination) => {
+      if (!injected && path.resolve(String(source)) === path.resolve(share)) {
+        fs.rmSync(share, { recursive: true, force: true });
+        fs.mkdirSync(share, { recursive: true });
+        fs.writeFileSync(path.join(share, "replacement.txt"), "replacement\n");
+      }
+      const result = originalRenameSync(source, destination);
+      if (!injected && path.resolve(String(source)) === path.resolve(share)) {
+        injected = true;
+        throw new Error("injected crash after rename");
+      }
+      return result;
+    }) as typeof fs.renameSync;
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
+      /injected crash after rename/
+    );
+    fs.renameSync = originalRenameSync;
+    assert.equal(fs.readFileSync(path.join(share, "replacement.txt"), "utf8"), "replacement\n");
+    const journal = listSandboxRemovalJournals({ branch, project: "demo" })[0];
+    assert.ok(journal);
+    const journalPath = path.join(
+      os.homedir(), ".agent-infra", "sandbox-removal-journal", journal.lockDomain,
+      `${journal.carrierIdentityDigest}.json`
+    );
+    const persisted = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+    persisted.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
+    fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
+      /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
+    );
+    assert.equal(fs.readFileSync(path.join(share, "replacement.txt"), "utf8"), "replacement\n");
+    const tombstone = fs.readdirSync(path.dirname(share))
+      .map((entry) => path.join(path.dirname(share), entry))
+      .find((entry) => path.basename(entry).startsWith(".agent-infra-removal-"));
+    assert.ok(tombstone);
+    assert.equal(fs.existsSync(path.join(tombstone, "payload")), false);
+  } finally {
+    fs.renameSync = originalRenameSync;
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    for (const journal of listSandboxRemovalJournals({ branch, project: "demo" })) {
+      if (journal.target.controlRoot === path.resolve(controlRoot)) clearSandboxRemovalJournalRecord(journal);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm preserves untouched targets after a partial workspace phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-multi-target-phase-retry-"));

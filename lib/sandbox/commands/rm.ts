@@ -405,6 +405,24 @@ function assertOwnedRemovalTombstone(
   }
 }
 
+function restoreUnexpectedRemovalPayload(
+  root: string,
+  tombstone: string,
+  source: string,
+  expectedIdentity: RemovalSourceIdentity
+): void {
+  assertManagedPath(root, tombstone);
+  assertManagedPath(root, source);
+  const payload = removalTombstonePayload(tombstone);
+  const payloadIdentity = removalSourceIdentity(payload);
+  if (sameRemovalSourceIdentity(payloadIdentity, expectedIdentity) || fs.existsSync(source)) return;
+  fs.renameSync(payload, source);
+}
+
+function shouldStageManagedRemoval(source: string, tombstone: string, recovering: boolean): boolean {
+  return fs.existsSync(source) || (recovering && fs.existsSync(tombstone));
+}
+
 function stageManagedRemoval(
   root: string,
   source: string,
@@ -423,6 +441,14 @@ function stageManagedRemoval(
     }
     if (recovering) {
       if (!isOwnedRemovalPayload(root, tombstone, ownership)) {
+        const record = readRemovalTombstoneRecord(root, tombstone);
+        if (record) {
+          try {
+            restoreUnexpectedRemovalPayload(root, tombstone, source, record.sourceIdentity);
+          } catch {
+            // Preserve the tombstone when the unexpected payload cannot be restored safely.
+          }
+        }
         throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
       }
       return;
@@ -459,13 +485,20 @@ function stageManagedRemoval(
     fs.renameSync(source, removalTombstonePayload(tombstone));
     moved = true;
     if (!isOwnedRemovalPayload(root, tombstone, ownership)) {
-      const payloadIdentity = removalSourceIdentity(removalTombstonePayload(tombstone));
-      if (!sameRemovalSourceIdentity(payloadIdentity, expectedIdentity) && !fs.existsSync(source)) {
-        fs.renameSync(removalTombstonePayload(tombstone), source);
-      }
+      restoreUnexpectedRemovalPayload(root, tombstone, source, expectedIdentity);
       throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
     }
   } catch (error) {
+    if (!moved && fs.existsSync(tombstone) && !fs.existsSync(source)) {
+      const record = readRemovalTombstoneRecord(root, tombstone);
+      if (record) {
+        try {
+          restoreUnexpectedRemovalPayload(root, tombstone, source, record.sourceIdentity);
+        } catch {
+          // Preserve the tombstone when the unexpected payload cannot be restored safely.
+        }
+      }
+    }
     if (!moved) removeOwnedSourceClaim(source, ownership);
     throw error;
   }
@@ -1432,7 +1465,11 @@ async function rmOne(
       [workspaceViewRoots, path.join(config.workspaceViewBase, config.project), 'Workspace view'],
       [controlRoots, path.join(config.controlBase, config.project), 'Control channel']
     ] as const) {
-      for (const directory of roots.filter((candidate) => fs.existsSync(candidate))) {
+      for (const directory of roots.filter((candidate) => shouldStageManagedRemoval(
+        candidate,
+        removalTombstonePath(targetDigest, 'workspace', candidate),
+        runWorkspaceCleanup.recovering
+      ))) {
         assertLegacyCandidateEvidence(directory, base === path.join(config.controlBase, config.project)
           ? config.controlBase : config.workspaceViewBase, config, effectiveBranch, matchedContainers);
         stageManagedRemoval(
@@ -1508,7 +1545,11 @@ async function rmOne(
   );
   if (runToolCleanup.run) {
     for (const { tool, candidates } of toolCandidates) {
-      for (const dir of candidates.filter((candidate) => fs.existsSync(candidate))) {
+      for (const dir of candidates.filter((candidate) => shouldStageManagedRemoval(
+        candidate,
+        removalTombstonePath(targetDigest, 'tool', candidate),
+        runToolCleanup.recovering
+      ))) {
         stageManagedRemoval(
           tool.sandboxBase,
           dir,
@@ -1535,7 +1576,11 @@ async function rmOne(
     config.project, target, targetDigest, 'shell-finalizing', 'shell-removed', resourceLocks
   );
   if (runShellCleanup.run) {
-    for (const dir of shellConfigDirCandidates(config, effectiveBranch).filter((candidate) => fs.existsSync(candidate))) {
+    for (const dir of shellConfigDirCandidates(config, effectiveBranch).filter((candidate) => shouldStageManagedRemoval(
+      candidate,
+      removalTombstonePath(targetDigest, 'shell', candidate),
+      runShellCleanup.recovering
+    ))) {
       stageManagedRemoval(
         config.shellConfigBase,
         dir,
@@ -1561,7 +1606,11 @@ async function rmOne(
     config.project, target, targetDigest, 'share-finalizing', 'share-removed', resourceLocks
   );
   if (runShareCleanup.run) {
-    if (shouldRemoveShare && fs.existsSync(sharePath)) {
+    if (shouldRemoveShare && shouldStageManagedRemoval(
+      sharePath,
+      removalTombstonePath(targetDigest, 'share', sharePath),
+      runShareCleanup.recovering
+    )) {
       stageManagedRemoval(
         config.shareBase,
         sharePath,
