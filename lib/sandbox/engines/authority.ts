@@ -55,19 +55,20 @@ function safeEndpoint(value: string): string {
   if (!value) return 'docker-default';
   try {
     const parsed = new URL(value);
-    const hasCredentials = Boolean(parsed.username || parsed.password);
+    const hasUnreplayableParts = Boolean(parsed.username || parsed.password || parsed.search || parsed.hash);
     parsed.username = '';
     parsed.password = '';
     parsed.search = '';
     parsed.hash = '';
     const normalized = parsed.toString().replace(/\/$/u, '');
-    return hasCredentials
-      ? normalized.replace(`${parsed.protocol}//`, `${parsed.protocol}//<redacted>@`)
+    return hasUnreplayableParts
+      ? `${normalized}#<redacted>`
       : normalized;
   } catch {
-    return value
+    const normalized = value
       .replace(/\/\/[^/@]+@/u, '//<redacted>@')
       .replace(/[?&](?:token|password|secret|key)=[^&]*/giu, '');
+    return /[@?#]/u.test(value) ? `${normalized.replace(/[?#].*$/u, '')}#<redacted>` : normalized;
   }
 }
 
@@ -91,35 +92,26 @@ function contextRoute(context: string): SandboxAuthorityRoute {
   };
 }
 
-function endpointRoute(endpoint: string, rawEndpoint: string): SandboxAuthorityRoute {
+function endpointRoute(endpoint: string, rawEndpoint: string, unreplayable?: string): SandboxAuthorityRoute {
   return {
     kind: 'endpoint',
-    selector: { source: 'DOCKER_HOST', endpoint },
+    selector: {
+      source: 'DOCKER_HOST',
+      endpoint,
+      ...(unreplayable ? { unreplayable } : {})
+    },
     endpoint,
     command: (args) => ({ cmd: 'docker', args: ['--host', rawEndpoint, ...args] })
   };
 }
 
+function tlsEnvironmentReason(env: NodeJS.ProcessEnv): string | undefined {
+  return env.DOCKER_TLS_VERIFY || env.DOCKER_CERT_PATH || env.DOCKER_TLS
+    ? 'tls-environment'
+    : undefined;
+}
+
 function routeFor(engine: string, env: NodeJS.ProcessEnv): SandboxAuthorityRoute {
-  if (engine === 'wsl2') {
-    return {
-      kind: 'wsl2',
-      selector: {
-        ...(env.WSL_DISTRO_NAME ? { distro: env.WSL_DISTRO_NAME } : { source: 'wsl-default' }),
-        ...(env.DOCKER_CONTEXT ? { context: env.DOCKER_CONTEXT } : {})
-      },
-      endpoint: safeEndpoint(env.DOCKER_HOST ?? ''),
-      command: (args) => ({
-        cmd: 'wsl.exe',
-        args: [
-          ...(env.WSL_DISTRO_NAME ? ['--distribution', env.WSL_DISTRO_NAME] : []),
-          '--exec', 'docker',
-          ...(env.DOCKER_CONTEXT ? ['--context', env.DOCKER_CONTEXT] : []),
-          ...args
-        ]
-      })
-    };
-  }
   const context = getAdapter(engine).dockerContext;
   if (context) {
     return contextRoute(context);
@@ -128,9 +120,84 @@ function routeFor(engine: string, env: NodeJS.ProcessEnv): SandboxAuthorityRoute
     return contextRoute(env.DOCKER_CONTEXT);
   }
   if (env.DOCKER_HOST) {
-    return endpointRoute(safeEndpoint(env.DOCKER_HOST), env.DOCKER_HOST);
+    return endpointRoute(safeEndpoint(env.DOCKER_HOST), env.DOCKER_HOST, tlsEnvironmentReason(env));
   }
   return contextRoute('default');
+}
+
+function validRouteName(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_.@/-]*$/u.test(value);
+}
+
+function resolveWslDistro(probe: AuthorityProbe, timeoutMs?: number, explicit?: string): string {
+  if (explicit) {
+    if (!validRouteName(explicit)) throw new Error('SANDBOX_AUTHORITY_ROUTE_CAPTURE_FAILED');
+    return explicit;
+  }
+  const result = probe(
+    'wsl.exe',
+    ['--list', '--verbose'],
+    timeoutMs === undefined ? {} : { timeout: timeoutMs }
+  );
+  if (result.status !== 0) throw new Error('SANDBOX_AUTHORITY_ROUTE_CAPTURE_FAILED');
+  const output = text(result.stdout).replace(/\0/gu, '').replace(/\r/gu, '');
+  const defaultLine = output.split('\n').find((line) => /^\s*\*\s+/u.test(line));
+  const distro = defaultLine?.replace(/^\s*\*\s+/u, '').replace(/\s+(?:Running|Stopped)\s+\d+\s*$/iu, '').trim();
+  if (!distro || !validRouteName(distro)) throw new Error('SANDBOX_AUTHORITY_ROUTE_CAPTURE_FAILED');
+  return distro;
+}
+
+function wslRoute(
+  distro: string,
+  context: string | undefined,
+  env: NodeJS.ProcessEnv
+): SandboxAuthorityRoute {
+  const endpoint = env.DOCKER_HOST
+    ? safeEndpoint(env.DOCKER_HOST)
+    : `wsl://${distro}/${context ?? 'default'}`;
+  const unreplayable = tlsEnvironmentReason(env)
+    ?? (endpoint.includes('<redacted>') ? 'ambient-endpoint-secret' : undefined);
+  return {
+    kind: 'wsl2',
+    selector: {
+      distro,
+      ...(context ? { context } : {}),
+      ...(unreplayable ? { unreplayable } : {}),
+      ...(env.DOCKER_HOST ? { endpoint } : {})
+    },
+    endpoint,
+    command: (args) => ({
+      cmd: 'wsl.exe',
+      args: [
+        '--distribution', distro,
+        '--exec', 'docker',
+        ...(context ? ['--context', context] : []),
+        ...(env.DOCKER_HOST ? ['--host', env.DOCKER_HOST] : []),
+        ...args
+      ]
+    })
+  };
+}
+
+function currentWslRoute(
+  env: NodeJS.ProcessEnv,
+  probe: AuthorityProbe,
+  timeoutMs?: number
+): SandboxAuthorityRoute {
+  const distro = resolveWslDistro(probe, timeoutMs, env.WSL_DISTRO_NAME);
+  let context = env.DOCKER_CONTEXT;
+  if (!context && !env.DOCKER_HOST) {
+    const result = probe(
+      'wsl.exe',
+      ['--distribution', distro, '--exec', 'docker', 'context', 'show'],
+      timeoutMs === undefined ? {} : { timeout: timeoutMs }
+    );
+    context = text(result.stdout).trim();
+    if (result.status !== 0 || !validRouteName(context)) {
+      throw new Error('SANDBOX_AUTHORITY_ROUTE_CAPTURE_FAILED');
+    }
+  }
+  return wslRoute(distro, context, env);
 }
 
 function routeFromEvidence(evidence: SandboxAuthorityEvidenceV1): SandboxAuthorityRoute {
@@ -175,7 +242,7 @@ export function commandForSandboxAuthority(
   }
   if (evidence.routeKind === 'endpoint') {
     const endpoint = evidence.routeSelector.endpoint;
-    if (!endpoint || endpoint.includes('<redacted>')) {
+    if (!endpoint || endpoint.includes('<redacted>') || evidence.routeSelector.unreplayable) {
       throw new Error('SANDBOX_AUTHORITY_ROUTE_UNREPLAYABLE');
     }
     return { cmd, args: ['--host', endpoint, ...args] };
@@ -183,12 +250,17 @@ export function commandForSandboxAuthority(
   if (evidence.routeKind === 'wsl2') {
     const distro = evidence.routeSelector.distro;
     const context = evidence.routeSelector.context;
+    const endpoint = evidence.routeSelector.endpoint;
+    if (!distro || evidence.routeSelector.unreplayable || endpoint?.includes('<redacted>')) {
+      throw new Error('SANDBOX_AUTHORITY_ROUTE_UNREPLAYABLE');
+    }
     return {
       cmd: 'wsl.exe',
       args: [
-        ...(distro ? ['--distribution', distro] : []),
+        '--distribution', distro,
         '--exec', cmd,
         ...(context ? ['--context', context] : []),
+        ...(endpoint && !endpoint.startsWith('wsl://') ? ['--host', endpoint] : []),
         ...args
       ]
     };
@@ -208,7 +280,9 @@ export function captureSandboxAuthority(
   const probe = options.probe ?? runProbe;
   const route = options.route
     ? routeFromEvidence(options.route)
-    : currentContextRoute(engine, env, probe, options.timeoutMs);
+    : engine === 'wsl2'
+      ? currentWslRoute(env, probe, options.timeoutMs)
+      : currentContextRoute(engine, env, probe, options.timeoutMs);
   const command = options.route
     ? commandForSandboxAuthority(options.route, 'docker', authorityVersionArgs())
     : route.command(authorityVersionArgs());

@@ -40,7 +40,10 @@ const REPLACEMENT_STATE_SUFFIX = '.replacement-state.json';
 const REMOVAL_JOURNAL_ROOT = path.join('.agent-infra', 'sandbox-removal-journal');
 
 export const SANDBOX_REMOVAL_JOURNAL_PHASES = [
-  'prepared', 'container-removal', 'container-absent', 'carrier-finalizing', 'carrier-removed'
+  'prepared', 'target-committed', 'container-removal', 'container-absent',
+  'carrier-finalizing', 'carrier-removed', 'workspace-finalizing', 'workspace-removed',
+  'branch-finalizing', 'branch-removed', 'tool-finalizing', 'tool-removed',
+  'shell-finalizing', 'shell-removed', 'share-finalizing', 'share-removed', 'completed'
 ] as const;
 export type SandboxRemovalJournalPhase = typeof SANDBOX_REMOVAL_JOURNAL_PHASES[number];
 export type SandboxRemovalTargetCommit = Readonly<{
@@ -50,6 +53,13 @@ export type SandboxRemovalTargetCommit = Readonly<{
   targetDigest: string;
   permitDigest: string;
   removeWorktree: boolean;
+  removeBranch: boolean;
+  removeShare: boolean;
+  worktreePaths: readonly string[];
+  workspaceViewPaths: readonly string[];
+  toolPaths: readonly string[];
+  shellPaths: readonly string[];
+  sharePath: string;
   permits: readonly Readonly<{
     path: string;
     mode: 'clean' | 'discard';
@@ -189,7 +199,9 @@ function parseRemovalJournal(raw: string): SandboxRemovalJournal {
     'recordedAt', 'revision', 'target', 'transitionId', 'version'
   ]) || !isRecord(value.owner) || !hasExactKeys(value.owner, ['leaseNonce', 'pid', 'startTime'])
     || !isRecord(value.target) || !hasExactKeys(value.target, [
-      'branch', 'controlRoot', 'permitDigest', 'permits', 'project', 'removeWorktree', 'targetDigest'
+      'branch', 'controlRoot', 'permitDigest', 'permits', 'project', 'removeBranch', 'removeShare',
+      'removeWorktree', 'sharePath', 'shellPaths', 'targetDigest', 'toolPaths', 'workspaceViewPaths',
+      'worktreePaths'
     ]) || value.version !== 2 || value.operation !== 'sandbox-rm'
     || value.oldOperation !== 'sandbox-rm' || value.newOperation !== 'sandbox-rm'
     || typeof value.handoffId !== 'string' || value.handoffId.length === 0
@@ -213,6 +225,13 @@ function parseRemovalJournal(raw: string): SandboxRemovalJournal {
     || typeof value.target.targetDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.target.targetDigest)
     || typeof value.target.permitDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.target.permitDigest)
     || typeof value.target.removeWorktree !== 'boolean'
+    || typeof value.target.removeBranch !== 'boolean'
+    || typeof value.target.removeShare !== 'boolean'
+    || typeof value.target.sharePath !== 'string' || !path.isAbsolute(value.target.sharePath)
+    || !Array.isArray(value.target.worktreePaths) || value.target.worktreePaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
+    || !Array.isArray(value.target.workspaceViewPaths) || value.target.workspaceViewPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
+    || !Array.isArray(value.target.toolPaths) || value.target.toolPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
+    || !Array.isArray(value.target.shellPaths) || value.target.shellPaths.some((entry) => typeof entry !== 'string' || !path.isAbsolute(entry))
     || !Array.isArray(value.target.permits)
     || value.target.permits.some((permit) => !isRemovalPermitCommit(permit))
     || !Number.isSafeInteger(value.recordedAt)) {
@@ -251,6 +270,13 @@ function parseRemovalJournal(raw: string): SandboxRemovalJournal {
       targetDigest: value.target.targetDigest as string,
       permitDigest: value.target.permitDigest as string,
       removeWorktree: value.target.removeWorktree as boolean,
+      removeBranch: value.target.removeBranch as boolean,
+      removeShare: value.target.removeShare as boolean,
+      worktreePaths: value.target.worktreePaths as string[],
+      workspaceViewPaths: value.target.workspaceViewPaths as string[],
+      toolPaths: value.target.toolPaths as string[],
+      shellPaths: value.target.shellPaths as string[],
+      sharePath: value.target.sharePath as string,
       permits: value.target.permits as SandboxRemovalTargetCommit['permits']
     },
     recordedAt: value.recordedAt as number
@@ -333,8 +359,34 @@ function defaultRemovalTarget(manifest: SandboxControlManifest): SandboxRemovalT
     targetDigest,
     permitDigest: createHash('sha256').update('none').digest('hex'),
     removeWorktree: false,
+    removeBranch: false,
+    removeShare: false,
+    worktreePaths: [],
+    workspaceViewPaths: [],
+    toolPaths: [],
+    shellPaths: [],
+    sharePath: path.join(path.dirname(manifest.channelDir), 'share'),
     permits: []
   };
+}
+
+function sameRemovalTarget(left: SandboxRemovalTargetCommit, right: SandboxRemovalTargetCommit): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function phaseIndex(phase: SandboxRemovalJournalPhase): number {
+  return SANDBOX_REMOVAL_JOURNAL_PHASES.indexOf(phase);
+}
+
+function assertNextRemovalPhase(current: SandboxRemovalJournalPhase, next: SandboxRemovalJournalPhase): boolean {
+  const currentIndex = phaseIndex(current);
+  const nextIndex = phaseIndex(next);
+  if (nextIndex === currentIndex) return false;
+  if (current === 'target-committed' && next === 'container-absent') return true;
+  if (nextIndex !== currentIndex + 1) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID');
+  }
+  return true;
 }
 
 function assertRemovalJournalLock(
@@ -405,6 +457,10 @@ function startRemovalJournal(
     || existing.lockDomain !== manifest.authorityEvidence.lockDomain)) {
     throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_IDENTITY_MISMATCH');
   }
+  const targetCommit = options.target ?? existing?.target ?? defaultRemovalTarget(manifest);
+  if (existing && options.target && !sameRemovalTarget(existing.target, options.target)) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH');
+  }
   if (existing) {
     const state = options.identityProbe(existing.owner);
     if (state === 'alive') throw new Error('SANDBOX_CONTROL_REMOVE_RETRY_IN_PROGRESS');
@@ -426,13 +482,14 @@ function startRemovalJournal(
     carrierIdentityDigest: removalCarrierDigest(manifest.engine, manifest.containerIdentity.id, manifest.generation),
     lockDomain: manifest.authorityEvidence.lockDomain,
     owner: { pid: process.pid, startTime, leaseNonce: randomUUID() },
-    target: options.target ?? defaultRemovalTarget(manifest)
+    target: targetCommit
   };
   const initialPhase = existing?.phase ?? 'prepared';
   let record = writeRemovalJournal(manifest, base, initialPhase, existing?.revision ?? null);
   return {
     get record() { return record; },
     write(phase) {
+      if (!assertNextRemovalPhase(record.phase, phase)) return record;
       record = writeRemovalJournal(manifest, base, phase, record.revision);
       return record;
     }
@@ -485,6 +542,7 @@ export function advanceSandboxRemovalJournalPhase(
     if (!current || current.revision !== journal.revision || current.handoffId !== journal.handoffId) {
       throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH');
     }
+    if (!assertNextRemovalPhase(current.phase, phase)) return current;
     const {
       phase: _phase,
       expectedOldJournalRevision: _expected,
@@ -1345,6 +1403,7 @@ export async function removeSandboxControlRoot(
     target: options.removalTarget,
     identityProbe
   });
+  if (journal.record.phase === 'prepared') journal.write('target-committed');
   const observation = await awaitWithDeadline(
     () => inspectContainer(remaining()), deadlineAt, 'SANDBOX_CONTROL_REMOVE_DEADLINE_EXCEEDED'
   );

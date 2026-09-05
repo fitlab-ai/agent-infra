@@ -460,9 +460,11 @@ test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, 
     assert.ok(prepared);
     assert.equal(prepared.version, 2);
     assert.equal(prepared.phase, 'carrier-removed');
-    assert.equal(prepared.revision, 4);
-    assert.equal(prepared.expectedOldJournalRevision, 3);
+    assert.equal(prepared.revision, 5);
+    assert.equal(prepared.expectedOldJournalRevision, 4);
     assert.equal(prepared.target.controlRoot, root);
+    assert.equal(prepared.target.removeBranch, false);
+    assert.equal(prepared.target.removeShare, false);
     assert.throws(
       () => claimSandboxRemovalJournal(prepared),
       /SANDBOX_CONTROL_REMOVE_RETRY_IN_PROGRESS/
@@ -472,7 +474,11 @@ test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, 
     assert.equal(claimed.revision, prepared.revision + 1);
     assert.equal(claimed.expectedOldJournalRevision, prepared.revision);
     const advanced = advanceSandboxRemovalJournalPhase(claimed, 'carrier-removed');
-    assert.equal(advanced.revision, claimed.revision + 1);
+    assert.equal(advanced.revision, claimed.revision);
+    assert.throws(
+      () => advanceSandboxRemovalJournalPhase(claimed, 'prepared'),
+      /SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID/
+    );
     assert.throws(
       () => advanceSandboxRemovalJournalPhase(prepared, 'carrier-removed'),
       /SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH/

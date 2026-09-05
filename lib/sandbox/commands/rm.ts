@@ -32,7 +32,6 @@ import { sandboxControlPaths, sandboxWorkspaceViewPaths } from '../workspace-vie
 import {
   advanceSandboxRemovalJournalPhase,
   claimSandboxRemovalJournal,
-  clearSandboxRemovalJournal,
   clearSandboxRemovalJournalRecord,
   listSandboxRemovalJournals,
   removeSandboxControlRoot,
@@ -105,6 +104,74 @@ function removalPermitCommits(permits: ReadonlyMap<string, WorktreeRemovalPermit
       snapshot: permit.snapshot
     }))
     .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function removalTargetCommit(
+  config: SandboxConfig,
+  target: RmTarget,
+  permits: ReadonlyMap<string, WorktreeRemovalPermit>,
+  removeWorktree: boolean,
+  removeBranch: boolean,
+  removeShare: boolean
+): SandboxRemovalTargetCommit {
+  return {
+    branch: target.effectiveBranch,
+    project: config.project,
+    controlRoot: path.resolve(target.controlRoots[0] ?? path.join(config.controlBase, config.project)),
+    targetDigest: removalTargetDigest(config, target),
+    permitDigest: removalPermitDigest(permits),
+    removeWorktree,
+    removeBranch,
+    removeShare,
+    worktreePaths: target.existingWorktrees.map((candidate) => path.resolve(candidate)).sort(),
+    workspaceViewPaths: target.workspaceViewRoots.map((candidate) => path.resolve(candidate)).sort(),
+    toolPaths: target.toolCandidates.flatMap(({ candidates }) => candidates.map((candidate) => path.resolve(candidate))).sort(),
+    shellPaths: shellConfigDirCandidates(config, target.effectiveBranch).map((candidate) => path.resolve(candidate)).sort(),
+    sharePath: path.resolve(shareBranchDir(config, target.effectiveBranch)),
+    permits: removalPermitCommits(permits)
+  };
+}
+
+function assertRemovalSelectionMatches(
+  expected: SandboxRemovalTargetCommit,
+  actual: SandboxRemovalTargetCommit
+): void {
+  const normalize = (value: SandboxRemovalTargetCommit): unknown => ({
+    ...value,
+    controlRoot: '',
+    permits: value.permits
+  });
+  if (JSON.stringify(normalize(expected)) !== JSON.stringify(normalize(actual))) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH');
+  }
+}
+
+const REMOVAL_PHASE_ORDER = [
+  'prepared', 'target-committed', 'container-removal', 'container-absent',
+  'carrier-finalizing', 'carrier-removed', 'workspace-finalizing', 'workspace-removed',
+  'branch-finalizing', 'branch-removed', 'tool-finalizing', 'tool-removed',
+  'shell-finalizing', 'shell-removed', 'share-finalizing', 'share-removed', 'completed'
+] as const;
+
+function advanceRemovalJournals(
+  project: string,
+  target: RmTarget,
+  targetDigest: string,
+  phase: SandboxRemovalJournal['phase'],
+  resourceLocks: ReadonlyMap<string, SandboxResourceLock>
+): SandboxRemovalJournal[] {
+  const targetIndex = REMOVAL_PHASE_ORDER.indexOf(phase as typeof REMOVAL_PHASE_ORDER[number]);
+  return listSandboxRemovalJournals({
+    branch: target.effectiveBranch,
+    project,
+    targetDigest
+  }).map((journal) => {
+    const currentIndex = REMOVAL_PHASE_ORDER.indexOf(journal.phase as typeof REMOVAL_PHASE_ORDER[number]);
+    if (currentIndex >= targetIndex) return journal;
+    const lock = resourceLocks.get(journal.target.controlRoot);
+    if (!lock) throw new Error('SANDBOX_CONTROL_REMOVAL_LOCK_MISMATCH');
+    return advanceSandboxRemovalJournalPhase(journal, phase, { resourceLock: lock });
+  });
 }
 
 function permitsFromJournal(
@@ -630,6 +697,11 @@ async function rmOne(
     project: config.project,
     targetDigest
   });
+  const persistedTarget = existingJournals[0]?.target;
+  for (const journal of existingJournals) {
+    if (!persistedTarget) break;
+    assertRemovalSelectionMatches(persistedTarget, journal.target);
+  }
   const recovery = options.permits
     ? new Map<string, WorktreeRecoveryContext>()
     : recoveryContexts(config, target, existingWorktrees);
@@ -653,9 +725,9 @@ async function rmOne(
     verifyWorktreePermit(permit);
   }
 
-  const recoveredRemovalChoice = existingJournals.find((journal) => journal.target.targetDigest === targetDigest);
+  const recoveredRemovalChoice = persistedTarget;
   const shouldRemoveWorktree = recoveredRemovalChoice
-    ? recoveredRemovalChoice.target.removeWorktree
+    ? recoveredRemovalChoice.removeWorktree
     : existingWorktrees.length === 0
       ? false
       : options.assumeYes
@@ -669,6 +741,53 @@ async function rmOne(
     return;
   }
 
+  const shouldDeleteBranch = recoveredRemovalChoice
+    ? recoveredRemovalChoice.removeBranch
+    : shouldRemoveWorktree && existingWorktrees.length > 0
+      ? options.assumeYes
+        ? true
+        : await confirm({
+            message: `Also delete local branch '${effectiveBranch}'?`,
+            initialValue: true
+          })
+      : false;
+  if (isCancel(shouldDeleteBranch)) {
+    p.outro('Cancelled');
+    return;
+  }
+
+  const sharePath = path.resolve(shareBranchDir(config, effectiveBranch));
+  const shouldRemoveShare = recoveredRemovalChoice
+    ? recoveredRemovalChoice.removeShare
+    : fs.existsSync(sharePath)
+      ? options.assumeYes
+        ? true
+        : await confirm({
+            message: `Remove share dir for branch '${effectiveBranch}' (${sharePath})?`,
+            initialValue: true
+          })
+      : false;
+  if (isCancel(shouldRemoveShare)) {
+    p.outro('Cancelled');
+    return;
+  }
+
+  const committedTarget = persistedTarget
+    ? {
+        ...persistedTarget,
+        permitDigest: removalPermitDigest(permits),
+        permits: removalPermitCommits(permits)
+      }
+    : removalTargetCommit(
+        config,
+        target,
+        permits,
+        Boolean(shouldRemoveWorktree),
+        Boolean(shouldDeleteBranch),
+        Boolean(shouldRemoveShare)
+      );
+  if (persistedTarget) assertRemovalSelectionMatches(persistedTarget, committedTarget);
+
   const coordinatedManifests = controlRoots
     .filter((candidate) => fs.existsSync(candidate))
     .flatMap((root) => {
@@ -678,7 +797,6 @@ async function rmOne(
         : [];
     });
   const resourceLocks = new Map<string, SandboxResourceLock>();
-  const recoveredJournals: SandboxRemovalJournal[] = [];
   const recoveredContainerNames = new Set<string>();
   try {
     for (const [root, manifest] of [...coordinatedManifests].sort(([left], [right]) => left.localeCompare(right))) {
@@ -691,6 +809,7 @@ async function rmOne(
       if (!target.controlRoots.some((root) => path.resolve(root) === path.resolve(journal.target.controlRoot))) {
         throw new Error('SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH');
       }
+      assertRemovalSelectionMatches(committedTarget, journal.target);
       if (journal.target.permitDigest !== removalPermitDigest(permits)) {
         throw new Error('SANDBOX_CONTROL_REMOVAL_PERMIT_MISMATCH');
       }
@@ -707,13 +826,15 @@ async function rmOne(
         throw new Error('SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH');
       }
       const claimed = claimSandboxRemovalJournal(current, { resourceLock: lock });
+      if (!['carrier-finalizing', 'carrier-removed', 'workspace-finalizing', 'workspace-removed',
+        'branch-finalizing', 'branch-removed', 'tool-finalizing', 'tool-removed',
+        'shell-finalizing', 'shell-removed', 'share-finalizing', 'share-removed', 'completed']
+        .includes(claimed.phase)) {
+        throw new Error('SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING');
+      }
       const recovered = claimed.phase === 'carrier-finalizing'
         ? advanceSandboxRemovalJournalPhase(claimed, 'carrier-removed', { resourceLock: lock })
         : claimed;
-      if (recovered.phase !== 'carrier-removed') {
-        throw new Error('SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING');
-      }
-      recoveredJournals.push(recovered);
       recoveredContainerNames.add(controlRootContainer(config, journal.target.controlRoot));
     }
     preflightRmTarget(config, target);
@@ -733,15 +854,7 @@ async function rmOne(
       removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs),
       resourceLock: resourceLocks.get(root),
       retainRemovalJournal: true,
-      removalTarget: {
-        branch: effectiveBranch,
-        project: config.project,
-        controlRoot: path.resolve(root),
-        targetDigest,
-        permitDigest: removalPermitDigest(permits),
-        removeWorktree: shouldRemoveWorktree,
-        permits: removalPermitCommits(permits)
-      }
+      removalTarget: { ...committedTarget, controlRoot: path.resolve(root) }
     });
     removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
   }
@@ -769,6 +882,7 @@ async function rmOne(
     p.log.warn(`No sandbox container found for '${branch}'`);
   }
 
+  advanceRemovalJournals(config.project, target, targetDigest, 'workspace-finalizing', resourceLocks);
   for (const [roots, base, label] of [
     [workspaceViewRoots, path.join(config.workspaceViewBase, config.project), 'Workspace view'],
     [controlRoots, path.join(config.controlBase, config.project), 'Control channel']
@@ -796,23 +910,21 @@ async function rmOne(
       if (registered.includes(path.resolve(worktree))) throw new Error(`Worktree is still registered after removal: ${worktree}`);
     }
 
-    const shouldDeleteBranch = options.assumeYes
-      ? true
-      : await confirm({
-          message: `Also delete local branch '${effectiveBranch}'?`,
-          initialValue: true
-        });
+  }
+  advanceRemovalJournals(config.project, target, targetDigest, 'workspace-removed', resourceLocks);
 
-    if (!isCancel(shouldDeleteBranch) && shouldDeleteBranch) {
+  advanceRemovalJournals(config.project, target, targetDigest, 'branch-finalizing', resourceLocks);
+  if (shouldRemoveWorktree && shouldDeleteBranch) {
       if (!runOk('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch])) {
         throw new Error(`Local branch '${effectiveBranch}' was not deleted`);
       }
       if (runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${effectiveBranch}`])) {
         throw new Error(`Local branch '${effectiveBranch}' still exists after removal`);
       }
-    }
   }
+  advanceRemovalJournals(config.project, target, targetDigest, 'branch-removed', resourceLocks);
 
+  advanceRemovalJournals(config.project, target, targetDigest, 'tool-finalizing', resourceLocks);
   for (const { tool, candidates } of toolCandidates) {
     for (const dir of candidates.filter((candidate) => fs.existsSync(candidate))) {
       removeManagedDir(tool.sandboxBase, dir);
@@ -820,30 +932,26 @@ async function rmOne(
       p.log.success(`${tool.name} state removed: ${dir}`);
     }
   }
+  advanceRemovalJournals(config.project, target, targetDigest, 'tool-removed', resourceLocks);
 
+  advanceRemovalJournals(config.project, target, targetDigest, 'shell-finalizing', resourceLocks);
   for (const dir of shellConfigDirCandidates(config, effectiveBranch).filter((candidate) => fs.existsSync(candidate))) {
     removeManagedDir(config.shellConfigBase, dir);
     assertRemoved(dir, 'Shell config');
     p.log.success(`Shell config removed: ${dir}`);
   }
+  advanceRemovalJournals(config.project, target, targetDigest, 'shell-removed', resourceLocks);
 
-  const shareBranch = shareBranchDir(config, effectiveBranch);
-  if (fs.existsSync(shareBranch)) {
-    const shouldRemoveShare = options.assumeYes
-      ? true
-      : await confirm({
-          message: `Remove share dir for branch '${effectiveBranch}' (${shareBranch})?`,
-          initialValue: true
-        });
-    if (!isCancel(shouldRemoveShare) && shouldRemoveShare) {
-      removeManagedDir(config.shareBase, shareBranch);
-      assertRemoved(shareBranch, 'Share dir');
-      p.log.success(`Share dir removed: ${shareBranch}`);
-    }
+  advanceRemovalJournals(config.project, target, targetDigest, 'share-finalizing', resourceLocks);
+  if (shouldRemoveShare && fs.existsSync(sharePath)) {
+    removeManagedDir(config.shareBase, sharePath);
+    assertRemoved(sharePath, 'Share dir');
+    p.log.success(`Share dir removed: ${sharePath}`);
   }
+  advanceRemovalJournals(config.project, target, targetDigest, 'share-removed', resourceLocks);
 
-  for (const [, manifest] of coordinatedManifests) clearSandboxRemovalJournal(manifest);
-  for (const journal of recoveredJournals) clearSandboxRemovalJournalRecord(journal);
+  const completedJournals = advanceRemovalJournals(config.project, target, targetDigest, 'completed', resourceLocks);
+  for (const journal of completedJournals) clearSandboxRemovalJournalRecord(journal);
 
   if (!options.quiet) {
     p.outro(pc.green('Sandbox removed'));
