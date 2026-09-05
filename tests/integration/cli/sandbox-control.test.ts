@@ -1766,6 +1766,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     const unaccepted = JSON.parse(fs.readFileSync(path.join(responsesDir, `${unacceptedId}.json`), 'utf8'));
     assert.equal(unaccepted.error.code, 'SANDBOX_CONTROL_NOT_EXECUTED');
     assert.equal(unaccepted.error.retryable, true);
+    waitForFile(path.join(responsesDir, `${recoverableId}.json`), 5_000);
     const recovered = JSON.parse(fs.readFileSync(path.join(responsesDir, `${recoverableId}.json`), 'utf8'));
     assert.equal(recovered.phase, 'completed');
     assert.equal(recovered.exitCode, 0);
