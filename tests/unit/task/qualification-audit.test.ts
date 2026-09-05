@@ -84,10 +84,15 @@ updated_at: old
 checkpoint_commit:
 ---
 
-${taskContent()}`;
+${taskContent()}
+
+## 活动日志
+
+- old runtime entry`;
   const lifecycleUpdated = content
     .replace('updated_at: old', 'updated_at: new')
-    .replace('checkpoint_commit:', 'checkpoint_commit: abc123');
+    .replace('checkpoint_commit:', 'checkpoint_commit: abc123')
+    .replace('old runtime entry', 'new runtime entry');
   assert.equal(nonConstraintInputDigest(content), nonConstraintInputDigest(lifecycleUpdated));
 
   const taskContentUpdated = content.replace('# Task\n', '# Task\n\nA changed task description.\n');

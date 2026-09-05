@@ -183,7 +183,7 @@ function stripSection(content: string, aliases: readonly string[]): string {
   const body = sectionBody(content, aliases);
   if (body === null) return normalizeText(content);
   const heading = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  return normalizeText(content.replace(new RegExp(`^##\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^##\\s+|$)`, 'm'), ''));
+  return normalizeText(content.replace(new RegExp(`^##\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^##\\s+|(?![\\s\\S]))`, 'm'), ''));
 }
 
 function stripFrontmatter(content: string): string {
@@ -227,7 +227,7 @@ function stripSectionAtLevel(content: string, aliases: readonly string[], level:
   if (body === null) return normalizeText(content);
   const heading = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const marker = '#'.repeat(level);
-  return normalizeText(content.replace(new RegExp(`^${marker}\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^#{2,${level}}\\s+|$)`, 'm'), ''));
+  return normalizeText(content.replace(new RegExp(`^${marker}\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^#{2,${level}}\\s+|(?![\\s\\S]))`, 'm'), ''));
 }
 
 function parseTaskQualification(content: string): { ok: true; qualification: TaskQualification } | { ok: false; code: string; message: string } {
