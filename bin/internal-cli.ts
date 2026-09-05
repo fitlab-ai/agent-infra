@@ -153,6 +153,11 @@ if (taskControlCommand) {
     await taskLedger(process.argv.slice(3));
     break;
   }
+  case 'task-qualification': {
+    const { taskQualification } = await import('../lib/internal/task-qualification.ts');
+    await taskQualification(process.argv.slice(3));
+    break;
+  }
   case 'task-warning': {
     const { taskWarning } = await import('../lib/internal/task-warning.ts');
     await taskWarning(process.argv.slice(3));

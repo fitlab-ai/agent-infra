@@ -19,6 +19,30 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 
 ## Review Summary
 
+## Qualification Audit Review
+
+> Use `.agents/rules/decision-qualification.md` to review the five tables: constraint dependencies, candidate qualification, classification results, upstream relations, and dependency snapshot.
+
+### Constraint Dependencies
+| constraint_id | constraint_digest | role | evidence |
+| --- | --- | --- | --- |
+
+### Candidate Qualification
+| candidate_id | status | impact | constraint_ids | evidence |
+| --- | --- | --- | --- | --- |
+
+### Classification Results
+| decision_id | classification | evidence |
+| --- | --- | --- |
+
+### Upstream Relations
+| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
+| --- | --- | --- | --- | --- |
+
+### Dependency Snapshot
+| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
+| --- | --- | --- |
+
 - **Reviewer**: {reviewer-name}
 - **Review Time**: {timestamp}
 - **Scope**: {file-count and major modules}

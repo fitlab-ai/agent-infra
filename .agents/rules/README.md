@@ -14,6 +14,7 @@
 - [`compatibility-policy.md`](compatibility-policy.md) — 兼容性默认关闭：准入证据、实现边界、退出条件与生命周期审查要求。
 - [`evidence-reporting.md`](evidence-reporting.md) — 生命周期报告的状态核对、成功摘要、异常证据、身份字段和敏感信息边界。
 - [`sync-content-generation.md`](sync-content-generation.md) — 同步到 Issue 的任务和生命周期 Markdown 生成约束。
+- [`decision-qualification.md`](decision-qualification.md) — 约束、候选、人工确认和六类 artifact 资格审计契约。
 
 ## Issue / PR
 

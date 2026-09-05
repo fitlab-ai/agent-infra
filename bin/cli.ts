@@ -19,6 +19,7 @@ Commands:
   cp <ssh-alias>  Copy local clipboard image to a remote macOS clipboard or Linux sandbox over SSH
   data            Capture, verify, audit, repair, and export process data
   decide          Record a ruling; code-stage decisions require explicit implementation intent
+  qualify         Confirm an audited constraint through the human-declared qualification flow
   help            Show this help message
   init            Initialize a new project with update-agent-infra seed command
   merge           Merge tasks from another current workspace directory (active/blocked/completed/archive)
@@ -112,6 +113,13 @@ switch (command) {
     if (!imported) break;
     const { cmdDecide } = imported;
     await cmdDecide(process.argv.slice(3));
+    break;
+  }
+  case 'qualify': {
+    const imported = await importCommand('../lib/qualify.ts');
+    if (!imported) break;
+    const { cmdQualify } = imported;
+    await cmdQualify(process.argv.slice(3));
     break;
   }
   case 'init': {

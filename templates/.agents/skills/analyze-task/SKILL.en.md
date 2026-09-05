@@ -17,6 +17,7 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 Before generating the analysis report, read `.agents/rules/evidence-reporting.md`. Record the command, target scope, status or structured result, actual result, and uncovered parts for state checks and successful checks; include decisive raw excerpts only for failures, blocking conditions, or disputes.
 
+- When evaluating candidate qualification or `HD-N`, read `.agents/rules/decision-qualification.md`, audit normalized task constraints/candidates, and record the five qualification-audit tables in the analysis artifact; unknown or unconfirmed constraints must not automatically exclude a candidate
 - This skill only outputs a requirements analysis document (`analysis.md` or `analysis-r{N}.md`) and does not modify any business code
 - Base the analysis strictly on the existing task input, requirements, context, and source information in `task.md`
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body

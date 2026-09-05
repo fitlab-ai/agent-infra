@@ -12,6 +12,7 @@ import {
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
+import { validateQualificationAudit } from './qualification-audit.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
@@ -41,7 +42,8 @@ type LocalArtifactDiagnosticCode =
   | 'LOCAL_REQUIRED_PATTERN_MISSING'
   | 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION'
   | 'LOCAL_REPAIR_PROVENANCE_CONFLICT'
-  | 'LOCAL_REPAIR_BASELINE_MISMATCH';
+  | 'LOCAL_REPAIR_BASELINE_MISMATCH'
+  | 'LOCAL_QUALIFICATION_AUDIT_INVALID';
 
 type LocalArtifactDiagnostic = {
   code: LocalArtifactDiagnosticCode;
@@ -57,6 +59,8 @@ type LocalArtifactValidationOptions = {
   family: LocalArtifactFamily;
   requiredSections?: readonly string[];
   requiredPatterns?: readonly string[];
+  taskContent?: string;
+  artifact?: string;
 };
 
 type LocalArtifactValidationResult = {
@@ -302,6 +306,20 @@ function validateLocalArtifact(
     ));
   }
 
+  if (options.taskContent !== undefined) {
+    const qualification = validateQualificationAudit(options.taskContent, content, {
+      family: options.family === 'analysis' ? 'analysis' : options.family === 'plan' ? 'plan' : 'code',
+      artifact: options.artifact
+    });
+    if (!qualification.ok) {
+      diagnostics.push(diagnostic(
+        'LOCAL_QUALIFICATION_AUDIT_INVALID',
+        `${qualification.code}: ${qualification.message}`,
+        content
+      ));
+    }
+  }
+
   if (candidates.length === 1 && diagnostics.length === 0) {
     const candidate = candidates[0]!;
     const section = candidate.text.slice(0, -1);
@@ -399,10 +417,19 @@ function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): Local
       taskId: resolved.taskId, taskDir: resolved.taskDir
     });
   }
+  let taskContent: string;
+  try { taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
+  catch (error) {
+    return failedFinalization(request, { code: 'TASK_READ_FAILED', message: error instanceof Error ? error.message : String(error) }, {
+      taskId: resolved.taskId, taskDir: resolved.taskDir
+    });
+  }
   const result = validateLocalArtifact(content, {
     family: request.family,
     requiredSections: request.requiredSections,
-    requiredPatterns: request.requiredPatterns
+    requiredPatterns: request.requiredPatterns,
+    taskContent,
+    artifact: request.artifact
   });
   const artifactSha256 = sha256Content(content);
   let intent: LocalArtifactFinalizationIntent | null;

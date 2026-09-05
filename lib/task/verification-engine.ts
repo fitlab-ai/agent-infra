@@ -35,6 +35,7 @@ import { OrchestrationStateError, readRun } from "./orchestration.ts";
 import { resolveDeliveryTarget } from "./delivery-target.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
+import { validateQualificationAudit } from "./qualification-audit.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -600,6 +601,19 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
   }
 
   const content = fs.readFileSync(artifactPath, "utf8");
+  let taskContent = "";
+  const taskPath = path.join(taskDir, "task.md");
+  if (fs.existsSync(taskPath)) {
+    try {
+      taskContent = fs.readFileSync(taskPath, "utf8");
+    } catch (error) {
+      return failResult("artifact", `Cannot read task qualification contract: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (taskContent && /^review-(?:analysis|plan|code)$/.test(skillName)) {
+    const qualification = validateQualificationAudit(taskContent, content, { artifact: path.basename(artifactPath) });
+    if (!qualification.ok) return failResult("artifact", `${path.basename(artifactPath)} has qualification audit errors: ${qualification.code}: ${qualification.message}`);
+  }
   const requiredSections = config.required_sections || [];
   const localFamily = skillName === "analyze-task"
     ? "analysis"
@@ -608,7 +622,9 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     const local = validateLocalArtifact(content, {
       family: localFamily,
       requiredSections: requiredSections.filter((section: unknown): section is string => typeof section === "string"),
-      requiredPatterns: (config.required_patterns || []).filter((pattern: unknown): pattern is string => typeof pattern === "string")
+      requiredPatterns: (config.required_patterns || []).filter((pattern: unknown): pattern is string => typeof pattern === "string"),
+      ...(taskContent ? { taskContent } : {}),
+      artifact: path.basename(artifactPath)
     });
     if (!local.ok) {
       return failResult(

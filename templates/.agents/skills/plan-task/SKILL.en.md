@@ -17,6 +17,7 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 Before generating the plan report, read `.agents/rules/evidence-reporting.md`. Record the command, target scope, status or structured result, actual result, and uncovered parts for state checks and verification; include decisive raw excerpts only for failures, blocking conditions, or disputes.
 
+- When evaluating candidate qualification or `HD-N`, read `.agents/rules/decision-qualification.md`, audit normalized task constraints/candidates, and record the five qualification-audit tables in the plan artifact; unknown or unconfirmed constraints must not automatically exclude a candidate
 - This skill only outputs a technical plan document (`plan.md` or `plan-r{N}.md`) and does not modify any business code
 - This is a **mandatory human review checkpoint**; do not automatically proceed to implementation
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body

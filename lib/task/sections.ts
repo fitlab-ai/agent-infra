@@ -175,16 +175,18 @@ function matchingSections(content: string, aliases: readonly string[]) {
   const allowed = new Set(aliases);
   return linesOf(content)
     .map((line, index, lines) => {
-      const match = /^##\s+(.+?)\s*$/.exec(line.text);
-      if (!match?.[1] || !allowed.has(match[1])) return null;
+      const match = /^(#{2,3})\s+(.+?)\s*$/.exec(line.text);
+      if (!match?.[2] || !allowed.has(match[2])) return null;
+      const level = match[1]!.length;
       let end = content.length;
       for (let i = index + 1; i < lines.length; i += 1) {
-        if (/^##\s+/.test(lines[i]!.text)) {
+        const nextHeading = /^(#{2,3})\s+/.exec(lines[i]!.text);
+        if (nextHeading && nextHeading[1]!.length <= level) {
           end = lines[i]!.start;
           break;
         }
       }
-      return { heading: match[1], line, bodyStart: line.end, end };
+      return { heading: match[2]!, line, bodyStart: line.end, end };
     })
     .filter((match): match is NonNullable<typeof match> => match !== null);
 }

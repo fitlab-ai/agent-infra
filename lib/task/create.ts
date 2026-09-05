@@ -7,6 +7,7 @@ import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
+import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS } from './qualification-audit.ts';
 
 const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const;
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
@@ -178,6 +179,25 @@ function renderList(items: readonly string[]): string {
   return items.map((item) => `- ${item}`).join('\n');
 }
 
+function tableCell(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');
+}
+
+function renderTable(columns: readonly string[], rows: readonly (readonly string[])[]): string {
+  return [
+    `| ${columns.join(' | ')} |`,
+    `| ${columns.map(() => '---').join(' | ')} |`,
+    ...rows.map((row) => `| ${row.map(tableCell).join(' | ')} |`)
+  ].join('\n');
+}
+
+function appendCanonicalRows(content: string, columns: readonly string[], rows: readonly (readonly string[])[]): string {
+  if (rows.length === 0) return content;
+  const table = renderTable(columns, rows);
+  const separator = `| ${columns.map(() => '---').join(' | ')} |`;
+  return content.replace(separator, `${separator}\n${table.split('\n').slice(2).join('\n')}`);
+}
+
 function replaceEmptySubsection(content: string, heading: string, items: readonly string[]): string {
   if (items.length === 0) return content;
   return content.replace(`${heading}\n`, `${heading}\n\n${renderList(items)}\n`);
@@ -231,6 +251,13 @@ function renderTask(params: Readonly<{
     ['### 验收标准', 'acceptanceCriteria'], ['### 未决事项', 'openQuestions']
   ];
   for (const [heading, key] of sections) content = replaceEmptySubsection(content, heading, candidate.taskInput[key]);
+  const constraintIds = candidate.taskInput.constraints.map((_, index) => `C-${index + 1}`);
+  content = appendCanonicalRows(content, CONSTRAINT_COLUMNS, candidate.taskInput.constraints.map((statement, index) => [
+    constraintIds[index]!, statement, 'assumption', 'create-task', 'taskInput', 'create-task input', '', ''
+  ]));
+  content = appendCanonicalRows(content, CANDIDATE_COLUMNS, candidate.taskInput.alternatives.map((statement, index) => [
+    String.fromCharCode(65 + index), statement, 'pending', constraintIds.join(','), 'requires qualification', 'create-task input'
+  ]));
   content = content.replace('- **关联 Issue**：#XXX', '- **关联 Issue**：N/A');
   content = content.replace('- **关联 PR**：#XXX', '- **关联 PR**：N/A');
   content = content.replace('- **分支**：`feature/xxx`', `- **分支**：\`${branch}\``);

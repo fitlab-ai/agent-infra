@@ -20,6 +20,30 @@
 - **裁决证据**：`{decision-evidence 或 N/A}`
 - **需求摘要**：{本轮实现输入的范围摘要}
 
+## 资格审计
+
+> 按 `.agents/rules/decision-qualification.md` 填写以下五张表。
+
+### 约束依赖
+| constraint_id | constraint_digest | role | evidence |
+| --- | --- | --- | --- |
+
+### 候选资格
+| candidate_id | status | impact | constraint_ids | evidence |
+| --- | --- | --- | --- | --- |
+
+### 分类结果
+| decision_id | classification | evidence |
+| --- | --- | --- |
+
+### 上游关系
+| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
+| --- | --- | --- | --- | --- |
+
+### 依赖快照
+| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
+| --- | --- | --- |
+
 ## 状态核对
 
 > 记录状态核对命令、任务/产物范围、关键结果和未覆盖部分；每条命令以 `$ ` 开头。

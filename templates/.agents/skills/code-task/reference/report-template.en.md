@@ -20,6 +20,30 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 - **Decision Evidence**: `{decision-evidence or N/A}`
 - **Scope Summary**: {scope of this round's implementation input}
 
+## Qualification Audit
+
+> Use `.agents/rules/decision-qualification.md` and fill these five tables.
+
+### Constraint Dependencies
+| constraint_id | constraint_digest | role | evidence |
+| --- | --- | --- | --- |
+
+### Candidate Qualification
+| candidate_id | status | impact | constraint_ids | evidence |
+| --- | --- | --- | --- | --- |
+
+### Classification Results
+| decision_id | classification | evidence |
+| --- | --- | --- |
+
+### Upstream Relations
+| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
+| --- | --- | --- | --- | --- |
+
+### Dependency Snapshot
+| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
+| --- | --- | --- |
+
 ## State Check
 
 > Record the state-check command, task/artifact scope, key result, and uncovered parts; each command starts with `$ `.
