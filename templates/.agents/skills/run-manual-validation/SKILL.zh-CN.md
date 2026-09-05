@@ -16,7 +16,7 @@ description: >
 
 ## 行为边界
 
-## 持久化报告证据
+### 持久化报告证据
 
 生成验证报告时，先读取 `.agents/rules/evidence-reporting.md`。只记录命令名称、目标范围、退出状态、sanitized result 和覆盖缺口；不得记录完整 argv、环境变量、token、绝对路径或原始敏感 transcript。
 
@@ -28,7 +28,7 @@ description: >
 
 ## 第 0 步：状态核对（执行前硬约束）
 
-解析任务引用后运行，并把原文写入产物：
+解析任务引用后运行，并在产物中记录任务/产物范围、关键结果和未覆盖部分；正常成功不粘贴完整目录清单或 `task.md` 尾部，失败、阻塞、身份不一致或争议时附决定性原文行：
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

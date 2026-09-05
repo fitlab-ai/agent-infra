@@ -16,7 +16,7 @@ The entry point may omit the task ref; explicit task scope accepts only `--task 
 
 ## Boundary
 
-## Persisted Report Evidence
+### Persisted Report Evidence
 
 Before generating a validation report, read `.agents/rules/evidence-reporting.md`. Record only the command name, target scope, exit status, sanitized result, and coverage gap; never record complete argv, environment variables, tokens, absolute paths, or a raw sensitive transcript.
 
@@ -28,7 +28,7 @@ Before generating a validation report, read `.agents/rules/evidence-reporting.md
 
 ## Step 0: State Check (pre-execution hard gate)
 
-Resolve the task reference, then run this command and copy its original output into the artifact:
+Resolve the task reference, then run this command and record the task/artifact scope, key result, and uncovered parts in the artifact; do not paste complete directory listings or task tails on normal success. Retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

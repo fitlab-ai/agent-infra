@@ -14,7 +14,7 @@ description: >
 
 ## 行为边界 / 关键规则
 
-## 持久化报告证据
+### 持久化报告证据
 
 生成验证完成报告时，先读取 `.agents/rules/evidence-reporting.md`。状态核对和同步结果记录命令、范围、结构化结果、实际结论和未覆盖部分；继续遵守人工验证的 basename-only 与 sanitized result 脱敏边界。
 
@@ -30,7 +30,7 @@ description: >
 
 在加载 workflow / skill / rules 指令之后、做任何任务状态判断或用户可见结论之前，必须先执行状态核对。指令类文件读取不算对外动作或结论。
 
-运行以下命令，并把原文粘贴到本轮产物的 `## 状态核对` 段：
+运行以下命令，并在本轮产物的 `## 状态核对` 段记录任务/产物范围、关键结果和未覆盖部分；正常成功不粘贴完整目录清单或 `task.md` 尾部。失败、阻塞、身份不一致或争议时，附决定性原文行：
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

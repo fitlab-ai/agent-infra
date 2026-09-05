@@ -12,7 +12,7 @@ description: >
 
 ## 行为边界 / 关键规则
 
-## 持久化报告证据
+### 持久化报告证据
 
 生成 PR 审查报告时，先读取 `.agents/rules/evidence-reporting.md`。正常审查记录命令、范围、结构化结果、实际结论和未覆盖部分；正式 Review、finding、阻塞或争议的身份字段和决定性证据必须精确保留。
 
@@ -45,7 +45,7 @@ description: >
 agent-infra-internal task-snapshot {task-id} --format text
 ```
 
-任务锚定路径在开始前记录当前任务目录与既有 `pr-review*` 轮次；一次性路径（无任务）记录 PR 编号与目标目录。状态核对输出粘贴到本轮产物 `pr-review-rN.md` 的 `## 状态核对` 段。
+任务锚定路径在开始前记录当前任务目录与既有 `pr-review*` 轮次；一次性路径（无任务）记录 PR 编号与目标目录。将命令、PR/head、审查范围、关键结果和未覆盖部分写入本轮产物 `pr-review-rN.md` 的 `## 状态核对` 段；正常成功不粘贴完整目录清单或 `task.md` 尾部，身份不一致、失败、阻塞或争议时保留决定性原文行。
 
 ## 执行步骤
 

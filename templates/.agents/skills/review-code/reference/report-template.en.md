@@ -14,7 +14,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## State Check
 
-> Paste the raw state-check command output; each command starts with `$ `.
+> Record the state-check command, review scope, key result, and uncovered parts; each command starts with `$ `.
 > Follow `.agents/rules/evidence-reporting.md`: record review scope, key result, and uncovered parts; do not paste complete successful stdout.
 
 ## Review Summary
@@ -130,7 +130,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - Claim: {verified claim}
 ```text
 $ {command}
-{raw output}
+{result summary or decisive excerpt}
 ```
 
 ## Self-Doubt

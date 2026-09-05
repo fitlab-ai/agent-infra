@@ -14,7 +14,7 @@ Host finalization uses receipt v2 with an immutable `receiptId`, monotonic `revi
 
 ## Boundary / Critical Rules
 
-## Persisted Report Evidence
+### Persisted Report Evidence
 
 Before generating a completion report or synchronized content, read `.agents/rules/evidence-reporting.md`. Successful checks record the command, scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt.
 
@@ -28,7 +28,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
 
-Run these commands and paste the raw output into this round's `## State Check` section:
+Run these commands and record the task/artifact scope, key result, and uncovered parts in this round's `## State Check` section; do not paste complete directory listings or task tails on normal success. Retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes:
 
 ```bash
 agent-infra-internal task-snapshot {task-id} --format text

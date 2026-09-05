@@ -12,7 +12,7 @@ Based on the target PR's lifecycle-evidence completeness and change risk, select
 
 ## Boundary / Critical Rules
 
-## Persisted Report Evidence
+### Persisted Report Evidence
 
 Before generating the PR review report, read `.agents/rules/evidence-reporting.md`. Normal review records the command, scope, structured result, actual conclusion, and uncovered parts; formal Review, findings, blocking conditions, or disputes retain exact identity fields and decisive evidence.
 
@@ -45,7 +45,7 @@ Before making any task-state judgment or user-visible conclusion, run the state 
 agent-infra-internal task-snapshot {task-id} --format text
 ```
 
-The task-anchored path records the current task directory and existing `pr-review*` rounds before starting; the one-shot path (no task) records the PR number and target directory. Paste the state-check output into the `## State Check` section of this round's `pr-review-rN.md`.
+The task-anchored path records the current task directory and existing `pr-review*` rounds before starting; the one-shot path (no task) records the PR number and target directory. Record the command, PR/head, review scope, key result, and uncovered parts in this round's `## State Check` section; do not paste complete directory listings or task tails on normal success, and retain decisive raw lines for identity mismatches, failures, blocking conditions, or disputes.
 
 ## Steps
 

@@ -14,7 +14,7 @@
 
 ## 状态核对
 
-> 粘贴状态核对命令原文；每条命令以 `$ ` 开头。
+> 记录状态核对命令、审查范围、关键结果和未覆盖部分；每条命令以 `$ ` 开头。
 > 按 `.agents/rules/evidence-reporting.md` 同时记录审查范围、关键结果和未覆盖部分；正常成功不粘贴完整 stdout。
 
 ## 审查摘要
@@ -124,7 +124,7 @@
 - 断言：{verified claim}
 ```text
 $ {command}
-{raw output}
+{result summary or decisive excerpt}
 ```
 
 ## 自我质疑
