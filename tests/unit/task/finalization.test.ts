@@ -70,13 +70,13 @@ function options(
 
 const request: TaskFinalizationRequest = { taskRef: TASK_ID, intent: 'complete', agent: 'codex' };
 
-test('host finalization receipt records the sandbox generation and request binding', () => {
+test('host finalization receipt records the sandbox generation and request binding', async () => {
   const f = fixture();
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
   const requestId = '0123456789abcdef0123456789abcdef';
   try {
-    applyTaskFinalization(request, {
+    await applyTaskFinalization(request, {
       ...options(f.repoRoot, commentSync, verify),
       controlBinding: { generation: 'sandbox-generation', requestId }
     });
