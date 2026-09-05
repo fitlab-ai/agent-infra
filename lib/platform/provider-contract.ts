@@ -162,6 +162,41 @@ type MutationReceipt = {
   operationId?: string;
 };
 
+type SecurityAlertKind = 'dependabot' | 'code-scanning';
+
+type SecurityAlertSnapshot = {
+  kind: SecurityAlertKind;
+  number: number;
+  state: string;
+  data: JsonValue;
+};
+
+type LabelDefinition = {
+  name: string;
+  color: string;
+  description: string;
+};
+
+type LabelReconciliation = {
+  changed: boolean;
+  created: string[];
+  updated: string[];
+  removed: string[];
+  skipped: string[];
+};
+
+type MilestoneDefinition = {
+  title: string;
+  description: string;
+  state: 'open' | 'closed';
+};
+
+type MilestoneInitialization = {
+  changed: boolean;
+  created: string[];
+  skipped: string[];
+};
+
 type RepositoryMetadataSnapshot = {
   repository: { identity: ResourceIdentity; name: string; url: string | null };
   labels: Array<{ identity: ResourceIdentity; name: string }>;
@@ -383,6 +418,34 @@ type PlatformProvider = {
       historyLimit: number;
     }): Promise<ProviderResult<ReleaseNotesFacts>>;
   };
+  securityAlerts?: {
+    inspect(input: {
+      context: ProviderOperationContext;
+      kind: SecurityAlertKind;
+      number: number;
+    }): Promise<ProviderResult<SecurityAlertSnapshot>>;
+    dismiss(input: {
+      context: ProviderOperationContext;
+      kind: SecurityAlertKind;
+      number: number;
+      reason: string;
+      comment: string;
+      mutation: MutationIdentity;
+    }): Promise<ProviderResult<MutationReceipt>>;
+  };
+  repositoryMetadata?: {
+    reconcileLabels(input: {
+      context: ProviderOperationContext;
+      desired: LabelDefinition[];
+      cleanupStaleIn: boolean;
+      mutation: MutationIdentity;
+    }): Promise<ProviderResult<LabelReconciliation>>;
+    reconcileMilestones(input: {
+      context: ProviderOperationContext;
+      desired: MilestoneDefinition[];
+      mutation: MutationIdentity;
+    }): Promise<ProviderResult<MilestoneInitialization>>;
+  };
   verification?: {
     fetchRemoteFacts(input: {
       context: ProviderOperationContext;
@@ -420,6 +483,8 @@ function validatePlatformProvider(
     checks: { required: ['inspectRequired', 'resolveRun', 'fetchLogs'], optional: [] },
     reviews: { required: ['list', 'publish'], optional: [] },
     releases: { required: ['inspect', 'create', 'update', 'reconcileMilestones', 'publishNotes', 'collectNotes'], optional: [] },
+    securityAlerts: { required: ['inspect', 'dismiss'], optional: [] },
+    repositoryMetadata: { required: ['reconcileLabels', 'reconcileMilestones'], optional: [] },
     verification: { required: ['fetchRemoteFacts'], optional: [] }
   };
   const resourceKindsByGroup: Record<string, PlatformResourceKind[]> = {
@@ -429,6 +494,8 @@ function validatePlatformProvider(
     checks: ['pull-request'],
     reviews: ['pull-request'],
     releases: ['release', 'issue', 'pull-request'],
+    securityAlerts: [],
+    repositoryMetadata: [],
     verification: ['issue', 'pull-request']
   };
   if (!isRecord(value)
@@ -515,6 +582,10 @@ export type {
   IssueSnapshot,
   JsonValue,
   MilestoneReconciliation,
+  MilestoneDefinition,
+  MilestoneInitialization,
+  LabelDefinition,
+  LabelReconciliation,
   MutationIdentity,
   MutationReceipt,
   PlatformCapabilities,
@@ -531,6 +602,8 @@ export type {
   RepositoryMetadataSnapshot,
   ReleaseNotesFacts,
   ResourceIdentity,
+  SecurityAlertKind,
+  SecurityAlertSnapshot,
   ReviewSnapshot,
   VerificationRemoteFacts
 };

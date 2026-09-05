@@ -34,7 +34,7 @@ description: >
 
 ### 1. 获取告警信息
 
-执行前先读取 `.agents/rules/security-alerts.md`，然后运行 `bash .agents/scripts/security-alerts.sh read-codescan --number {alert-number}`，解析其 JSON 结果获取告警详情。
+执行前先读取 `.agents/rules/security-alerts.md`，然后运行 `agent-infra-internal platform-security read --kind code-scanning --number {alert-number}`，解析其 JSON 结果获取告警详情。
 
 提取关键信息：
 - `number`：告警编号

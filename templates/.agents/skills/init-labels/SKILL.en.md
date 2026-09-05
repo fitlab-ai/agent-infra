@@ -19,17 +19,17 @@ Confirm that:
 
 If any prerequisite fails, stop and report the matching error.
 
-### 2. Run the bootstrap script
+### 2. Run the labels runtime intent
 
 Execute the complete label initialization flow with:
 
 ```bash
-bash .agents/skills/init-labels/scripts/init-labels.sh
+agent-infra-internal platform-metadata init-labels
 ```
 
-The script and `.agents/rules/label-milestone-setup.md` are responsible for:
+The runtime intent and `.agents/rules/label-milestone-setup.md` are responsible for:
 - Reading the configured `labels.in` mapping and preserving unrelated labels
-- Selecting the provider leaf or returning a clear no-op/degraded result
+- Selecting the platform capability or returning a clear no-op/degraded result
 - Creating or updating the standard label set and reporting the final summary
 - Printing the final execution summary
 
@@ -69,8 +69,8 @@ Show the current mapping and ask whether it should be updated.
 #### 4.3 Write the mapping and create labels
 
 1. Write the final mapping to `.agents/.airc.json` under `labels.in`.
-2. Run `bash .agents/skills/init-labels/scripts/init-labels.sh` to create or update one `in: {key}` label for each mapping key.
-3. After user confirmation, rerun the script with `--cleanup-stale-in` to delete stale `in:` labels that are no longer present in the final mapping.
+2. Run `agent-infra-internal platform-metadata init-labels` to create or update one `in: {key}` label for each mapping key.
+3. After user confirmation, rerun the intent with `--cleanup-stale-in` to delete stale `in:` labels that are no longer present in the final mapping.
 
 ### 5. Output and behavior guarantees
 
@@ -100,7 +100,7 @@ Next step - initialize milestones (optional):
 
 ## Error Handling
 
-- Provider capability unavailable: report the script's `degraded` or `no-op` result without claiming remote changes.
-- Provider authentication or repository access failure: report the script's non-zero exit status and diagnostic output; do not claim remote changes.
+- Platform capability unavailable: report the runtime's `degraded` or `no-op` result without claiming remote changes.
+- Platform authentication or repository access failure: report the runtime's non-zero exit status and diagnostic output; do not claim remote changes.
 - Permission error: prompt "No permission to manage labels in this repository"
 - API rate limit: prompt "platform API rate limit reached, please retry later"

@@ -215,3 +215,34 @@ test('provider operation validation rejects coercion, context mismatch, and raw 
     assert.doesNotMatch(failure.error.message, /fake-supersecret/);
   }
 });
+
+test('optional security and repository metadata groups are validated without becoming required', async () => {
+  const provider = wrapProviderOperations({
+    type: 'trae',
+    contractVersion: 1,
+    context: { async resolve() { return { ok: true, value: { type: 'trae', scope: { id: 'scope' }, currentUser: null, capabilities: { authenticated: false, comment: false, triage: false, push: false, admin: false }, authenticated: false } }; } },
+    securityAlerts: {
+      async inspect() { return { ok: true, value: { kind: 'dependabot', number: 7, state: 'open', data: { number: 7 } } }; },
+      async dismiss() { return { ok: true, value: { remoteId: '7', changed: true } }; }
+    },
+    repositoryMetadata: {
+      async reconcileLabels() { return { ok: true, value: { changed: false, created: [], updated: [], removed: [], skipped: ['type: task'] } }; },
+      async reconcileMilestones() { return { ok: true, value: { changed: false, created: [], skipped: ['General Backlog'] } }; }
+    }
+  } as never);
+  const security = await provider.securityAlerts!.inspect({} as never);
+  assert.equal(security.ok, true);
+  const labels = await provider.repositoryMetadata!.reconcileLabels({} as never);
+  assert.equal(labels.ok, true);
+  const invalid = wrapProviderOperations({
+    type: 'trae', contractVersion: 1,
+    context: { async resolve() { return { ok: true, value: { type: 'trae', scope: { id: 'scope' }, currentUser: null, capabilities: { authenticated: false, comment: false, triage: false, push: false, admin: false }, authenticated: false } }; } },
+    securityAlerts: {
+      async inspect() { return { ok: true, value: { kind: 'dependabot', number: 0, state: 'open', data: null } }; },
+      async dismiss() { return { ok: true, value: { remoteId: '7', changed: true } }; }
+    }
+  } as never);
+  const invalidAlert = await invalid.securityAlerts!.inspect({} as never);
+  assert.equal(invalidAlert.ok, false);
+  if (!invalidAlert.ok) assert.equal(invalidAlert.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
+});

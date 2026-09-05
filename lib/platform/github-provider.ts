@@ -16,7 +16,9 @@ import type {
   CheckRunSnapshot,
   GitEvidenceSnapshot,
   IssueSnapshot,
+  LabelReconciliation,
   MutationReceipt,
+  MilestoneInitialization,
   PlatformContextSnapshot,
   ProviderOperationContext,
   PlatformProvider,
@@ -29,6 +31,8 @@ import type {
   RemoteCommentSnapshot,
   RequiredCheckSnapshot,
   ReviewSnapshot,
+  SecurityAlertKind,
+  SecurityAlertSnapshot,
   VerificationRemoteFacts
 } from './provider-contract.ts';
 import { resourceIdentityNumber, resourceIdentityString } from './resource-identity.ts';
@@ -371,7 +375,7 @@ function syncLabels(
   return { status: changed ? 'applied' as const : 'no-op' as const, changed, error: null };
 }
 
-function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'verification'> {
+function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'securityAlerts' | 'repositoryMetadata' | 'verification'> {
   const issues: NonNullable<PlatformProvider['issues']> = {
     async listLabels({ context }) {
       const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/labels?per_page=100`], { cwd: context.workingDirectory });
@@ -854,6 +858,134 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     }
   };
 
+  const securityAlerts: NonNullable<PlatformProvider['securityAlerts']> = {
+    async inspect({ context, kind, number }): Promise<ProviderResult<SecurityAlertSnapshot>> {
+      if (!Number.isSafeInteger(number) || number <= 0) return invalid('SECURITY_NUMBER_INVALID', 'Alert number must be a positive integer');
+      const suffix = kind === 'dependabot' ? 'dependabot' : kind === 'code-scanning' ? 'code-scanning' : null;
+      if (!suffix) return invalid('SECURITY_KIND_INVALID', 'Alert kind is invalid');
+      const response = client.json<any>(['api', `repos/${repository(context)}/${suffix}/alerts/${number}`], { cwd: context.workingDirectory });
+      if (!response.ok) return response;
+      const data = response.value;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return invalid('SECURITY_RESPONSE_INVALID', 'The platform returned an invalid security alert');
+      const value: SecurityAlertSnapshot = {
+        kind,
+        number,
+        state: typeof data.state === 'string' ? data.state : 'invalid',
+        data
+      };
+      return { ok: true, value };
+    },
+    async dismiss({ context, kind, number, reason, comment }): Promise<ProviderResult<MutationReceipt>> {
+      const suffix = kind === 'dependabot' ? 'dependabot' : kind === 'code-scanning' ? 'code-scanning' : null;
+      if (!suffix) return invalid('SECURITY_KIND_INVALID', 'Alert kind is invalid');
+      if (!Number.isSafeInteger(number) || number <= 0) return invalid('SECURITY_NUMBER_INVALID', 'Alert number must be a positive integer');
+      const response = client.json<any>(['api', `repos/${repository(context)}/${suffix}/alerts/${number}`, '-X', 'PATCH', '--input', '-'], {
+        cwd: context.workingDirectory,
+        method: 'PATCH',
+        input: JSON.stringify({ state: 'dismissed', dismissed_reason: reason, dismissed_comment: comment })
+      });
+      if (!response.ok) return response;
+      return createReceipt(String(response.value?.id || `${kind}:${number}`));
+    }
+  };
+
+  const repositoryMetadata: NonNullable<PlatformProvider['repositoryMetadata']> = {
+    async reconcileLabels({ context, desired, cleanupStaleIn }): Promise<ProviderResult<LabelReconciliation>> {
+      const endpoint = `repos/${repository(context)}/labels?per_page=100`;
+      const listed = client.json<any>(['api', '--paginate', '--slurp', endpoint], { cwd: context.workingDirectory });
+      if (!listed.ok) return listed;
+      if (!Array.isArray(listed.value)) return invalid('LABEL_RESPONSE_INVALID', 'The platform returned an invalid label list');
+      const values = Array.isArray(listed.value)
+        ? listed.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
+        : [];
+      if (values.some((entry: any) => !entry || typeof entry.name !== 'string' || !entry.name)) {
+        return invalid('LABEL_RESPONSE_INVALID', 'The platform returned a label without a valid name');
+      }
+      const current = new Map<string, any>(values.map((entry: any) => [String(entry.name), entry]));
+      const created: string[] = [];
+      const updated: string[] = [];
+      const skipped: string[] = [];
+      for (const label of desired) {
+        const existing = current.get(label.name);
+        if (!existing) {
+          const response = client.json(['api', `repos/${repository(context)}/labels`, '-X', 'POST', '--input', '-'], {
+            cwd: context.workingDirectory,
+            method: 'POST',
+            input: JSON.stringify({ name: label.name, color: label.color, description: label.description })
+          });
+          if (!response.ok) return response;
+          created.push(label.name);
+          continue;
+        }
+        const sameColor = typeof existing.color === 'string' && existing.color.toUpperCase() === label.color.toUpperCase();
+        const sameDescription = String(existing.description || '') === label.description;
+        if (sameColor && sameDescription) {
+          skipped.push(label.name);
+          continue;
+        }
+        const response = client.json(['api', `repos/${repository(context)}/labels/${encodeURIComponent(label.name)}`, '-X', 'PATCH', '--input', '-'], {
+          cwd: context.workingDirectory,
+          method: 'PATCH',
+          input: JSON.stringify({ new_name: label.name, color: label.color, description: label.description })
+        });
+        if (!response.ok) return response;
+        updated.push(label.name);
+      }
+      const desiredNames = new Set(desired.map((label) => label.name));
+      const removed: string[] = [];
+      if (cleanupStaleIn) {
+        for (const name of current.keys()) {
+          if (!name.startsWith('in:') || desiredNames.has(name)) continue;
+          const response = client.text(['api', `repos/${repository(context)}/labels/${encodeURIComponent(name)}`, '-X', 'DELETE'], {
+            cwd: context.workingDirectory,
+            method: 'DELETE'
+          });
+          if (!response.ok) return response;
+          removed.push(name);
+        }
+      }
+      return {
+        ok: true,
+        value: {
+          changed: created.length > 0 || updated.length > 0 || removed.length > 0,
+          created,
+          updated,
+          removed,
+          skipped
+        }
+      };
+    },
+    async reconcileMilestones({ context, desired }): Promise<ProviderResult<MilestoneInitialization>> {
+      const listed = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=all&per_page=100`], { cwd: context.workingDirectory });
+      if (!listed.ok) return listed;
+      if (!Array.isArray(listed.value)) return invalid('MILESTONE_RESPONSE_INVALID', 'The platform returned an invalid milestone list');
+      const values = Array.isArray(listed.value)
+        ? listed.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
+        : [];
+      if (values.some((entry: any) => !entry || typeof entry.title !== 'string' || !entry.title)) {
+        return invalid('MILESTONE_RESPONSE_INVALID', 'The platform returned a milestone without a valid title');
+      }
+      const existing = new Set(values.map((entry: any) => String(entry.title)));
+      const created: string[] = [];
+      const skipped: string[] = [];
+      for (const milestone of desired) {
+        if (existing.has(milestone.title)) {
+          skipped.push(milestone.title);
+          continue;
+        }
+        const response = client.json(['api', `repos/${repository(context)}/milestones`, '-X', 'POST', '--input', '-'], {
+          cwd: context.workingDirectory,
+          method: 'POST',
+          input: JSON.stringify({ title: milestone.title, description: milestone.description, state: milestone.state })
+        });
+        if (!response.ok) return response;
+        existing.add(milestone.title);
+        created.push(milestone.title);
+      }
+      return { ok: true, value: { changed: created.length > 0, created, skipped } };
+    }
+  };
+
   const verification: NonNullable<PlatformProvider['verification']> = {
     async fetchRemoteFacts(input) {
       const issue = input.issue && issues.inspect
@@ -881,7 +1013,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     }
   };
 
-  return { issues, comments, changeRequests, checks, reviews, releases, verification };
+  return { issues, comments, changeRequests, checks, reviews, releases, securityAlerts, repositoryMetadata, verification };
 }
 
 function createGitHubProvider(

@@ -5,7 +5,11 @@ import type {
   CheckLogSnapshot,
   CheckRunSnapshot,
   GitEvidenceSnapshot,
+  LabelDefinition,
+  LabelReconciliation,
   IssueSnapshot,
+  MilestoneDefinition,
+  MilestoneInitialization,
   MilestoneReconciliation,
   MutationReceipt,
   PlatformContextSnapshot,
@@ -18,6 +22,8 @@ import type {
   RepositoryMetadataSnapshot,
   RequiredCheckSnapshot,
   ReviewSnapshot,
+  SecurityAlertKind,
+  SecurityAlertSnapshot,
   VerificationRemoteFacts
 } from './provider-contract.ts';
 import type { JsonValue } from './provider-contract.ts';
@@ -273,6 +279,67 @@ function validateReceipt(value: unknown): MutationReceipt {
   };
 }
 
+function positiveInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new Error(`${label} must be a positive integer`);
+  return value as number;
+}
+
+function validateSecurityAlert(value: unknown): SecurityAlertSnapshot {
+  const item = record(value, 'security alert');
+  exactKeys(item, ['kind', 'number', 'state', 'data'], 'security alert');
+  if (item.kind !== 'dependabot' && item.kind !== 'code-scanning') throw new Error('security alert.kind is invalid');
+  return {
+    kind: item.kind as SecurityAlertKind,
+    number: positiveInteger(item.number, 'security alert.number'),
+    state: stringValue(item.state, 'security alert.state'),
+    data: jsonValue(item.data, 'security alert.data')
+  };
+}
+
+function validateLabelDefinition(value: unknown, label: string): LabelDefinition {
+  const item = record(value, label);
+  exactKeys(item, ['name', 'color', 'description'], label);
+  return {
+    name: stringValue(item.name, `${label}.name`),
+    color: stringValue(item.color, `${label}.color`),
+    description: stringValue(item.description, `${label}.description`, true)
+  };
+}
+
+function validateLabelReconciliation(value: unknown): LabelReconciliation {
+  const item = record(value, 'label reconciliation');
+  exactKeys(item, ['changed', 'created', 'updated', 'removed', 'skipped'], 'label reconciliation');
+  const names = (field: string) => arrayValue(item[field], `label reconciliation.${field}`).map((entry) => stringValue(entry, `${field}[]`));
+  return {
+    changed: booleanValue(item.changed, 'label reconciliation.changed'),
+    created: names('created'),
+    updated: names('updated'),
+    removed: names('removed'),
+    skipped: names('skipped')
+  };
+}
+
+function validateMilestoneDefinition(value: unknown, label: string): MilestoneDefinition {
+  const item = record(value, label);
+  exactKeys(item, ['title', 'description', 'state'], label);
+  if (item.state !== 'open' && item.state !== 'closed') throw new Error(`${label}.state is invalid`);
+  return {
+    title: stringValue(item.title, `${label}.title`),
+    description: stringValue(item.description, `${label}.description`, true),
+    state: item.state
+  };
+}
+
+function validateMilestoneInitialization(value: unknown): MilestoneInitialization {
+  const item = record(value, 'milestone initialization');
+  exactKeys(item, ['changed', 'created', 'skipped'], 'milestone initialization');
+  return {
+    changed: booleanValue(item.changed, 'milestone initialization.changed'),
+    created: arrayValue(item.created, 'milestone initialization.created').map((entry) => stringValue(entry, 'created[]')),
+    skipped: arrayValue(item.skipped, 'milestone initialization.skipped').map((entry) => stringValue(entry, 'skipped[]'))
+  };
+}
+
 function validateMetadata(value: unknown): RepositoryMetadataSnapshot {
   const item = record(value, 'repository metadata');
   exactKeys(item, ['repository', 'labels', 'milestones', 'issueTypes', 'fields'], 'repository metadata');
@@ -375,6 +442,11 @@ const PROVIDER_ERROR_CATALOG: Readonly<Record<string, { message: string; retryab
   ISSUE_NUMBER_INVALID: { message: 'The issue number is invalid', retryable: false },
   ISSUE_CREATE_RESPONSE_INVALID: { message: 'Issue creation returned an invalid response', retryable: false },
   COMMENT_ID_INVALID: { message: 'The comment identity is invalid', retryable: false },
+  SECURITY_KIND_INVALID: { message: 'The security alert kind is invalid', retryable: false },
+  SECURITY_NUMBER_INVALID: { message: 'The security alert number is invalid', retryable: false },
+  SECURITY_RESPONSE_INVALID: { message: 'The platform returned an invalid security alert', retryable: false },
+  LABEL_RESPONSE_INVALID: { message: 'The platform returned an invalid label response', retryable: false },
+  MILESTONE_RESPONSE_INVALID: { message: 'The platform returned an invalid milestone response', retryable: false },
   MILESTONE_IDENTITY_INVALID: { message: 'The milestone identity is invalid', retryable: false },
   CHECK_RUN_NOT_FOUND: { message: 'The check run was not found', retryable: false },
   RELEASE_NOTES_AUTHORS_TRUNCATED: { message: 'Release note commit authors exceeded the supported limit', retryable: false },
@@ -458,6 +530,10 @@ function validators(providerType: string, declaration?: ProviderIdentityDeclarat
     },
     'releases.publishNotes': validateReceipt,
     'releases.collectNotes': (value) => validateReleaseNotes(value, declaration),
+    'securityAlerts.inspect': validateSecurityAlert,
+    'securityAlerts.dismiss': validateReceipt,
+    'repositoryMetadata.reconcileLabels': validateLabelReconciliation,
+    'repositoryMetadata.reconcileMilestones': validateMilestoneInitialization,
     'verification.fetchRemoteFacts': (value) => {
       const item = record(value, 'verification facts');
       exactKeys(item, ['issue', 'comments', 'changeRequest', 'commit', 'fields'], 'verification facts');
@@ -510,7 +586,7 @@ function wrapProviderOperations(provider: PlatformProvider): PlatformProvider {
   const map = validators(provider.type, provider.identity);
   const wrapped: PlatformProvider = { ...provider, context: { ...provider.context } };
   wrapped.context.resolve = (input) => invokeProviderOperation(provider.type, 'context.resolve', () => provider.context.resolve(input), map['context.resolve']! as ResultValidator<PlatformContextSnapshot>);
-  for (const groupName of ['issues', 'comments', 'changeRequests', 'checks', 'reviews', 'releases', 'verification'] as const) {
+  for (const groupName of ['issues', 'comments', 'changeRequests', 'checks', 'reviews', 'releases', 'securityAlerts', 'repositoryMetadata', 'verification'] as const) {
     const group = provider[groupName];
     if (!group) continue;
     const target: Record<string, unknown> = { ...group };

@@ -34,7 +34,7 @@ This skill **creates** task.md, so there is no file to write at the start. Captu
 
 ### 1. Retrieve Alert Information
 
-Read `.agents/rules/security-alerts.md` before this step, then run `bash .agents/scripts/security-alerts.sh read-dependabot --number {alert-number}` and parse its JSON result to fetch the alert details.
+Read `.agents/rules/security-alerts.md` before this step, then run `agent-infra-internal platform-security read --kind dependabot --number {alert-number}` and parse its JSON result to fetch the alert details.
 
 Extract key information:
 - `number`: alert number

@@ -19,17 +19,17 @@ description: >
 
 如果任一条件失败，停止并输出对应错误。
 
-### 2. 运行初始化脚本
+### 2. 运行 labels runtime intent
 
 执行以下命令，完成整套 label 初始化流程：
 
 ```bash
-bash .agents/skills/init-labels/scripts/init-labels.sh
+agent-infra-internal platform-metadata init-labels
 ```
 
-脚本与 `.agents/rules/label-milestone-setup.md` 共同负责：
+runtime intent 与 `.agents/rules/label-milestone-setup.md` 共同负责：
 - 读取配置的 `labels.in` 映射并保留无关 label
-- 选择 provider 叶子，或返回明确的 no-op/degraded 结果
+- 选择平台能力，或返回明确的 no-op/degraded 结果
 - 创建或更新标准 label 集合并输出最终摘要
 - 输出最终执行摘要
 
@@ -69,8 +69,8 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 #### 4.3 写入配置并创建 label
 
 1. 将最终映射写入 `.agents/.airc.json` 的 `labels.in` 字段。
-2. 执行 `bash .agents/skills/init-labels/scripts/init-labels.sh`，为每个映射 key 创建或更新 `in: {key}` label。
-3. 询问用户确认后，再使用 `--cleanup-stale-in` 重新执行脚本，清理不在最终映射中的旧 `in:` label。
+2. 执行 `agent-infra-internal platform-metadata init-labels`，为每个映射 key 创建或更新 `in: {key}` label。
+3. 询问用户确认后，再使用 `--cleanup-stale-in` 重新执行 intent，清理不在最终映射中的旧 `in:` label。
 
 ### 5. 输出与行为保证
 
@@ -100,7 +100,7 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 
 ## 错误处理
 
-- provider 能力不可用：如实报告脚本的 `degraded` 或 `no-op` 结果，不得声称远端已变更。
-- provider 认证或仓库访问失败：如实报告脚本的非零退出状态和诊断输出；不得声称远端已变更。
+- 平台能力不可用：如实报告 runtime 的 `degraded` 或 `no-op` 结果，不得声称远端已变更。
+- 平台认证或仓库访问失败：如实报告 runtime 的非零退出状态和诊断输出；不得声称远端已变更。
 - 权限不足：提示 "No permission to manage labels in this repository"
 - API 限流：提示 "platform API rate limit reached, please retry later"

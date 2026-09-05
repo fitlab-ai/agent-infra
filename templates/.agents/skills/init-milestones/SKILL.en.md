@@ -19,20 +19,18 @@ Confirm that:
 
 If any prerequisite fails, stop and report the matching error.
 
-### 2. Run the bootstrap script
+### 2. Run the milestones runtime intent
 
 Execute the complete milestone initialization flow with:
 
 ```bash
-bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
+agent-infra-internal platform-metadata init-milestones $ARGUMENTS
 ```
 
-The script and `.agents/rules/label-milestone-setup.md` are responsible for:
-- Creating and cleaning up a temporary workspace
-- Detecting whether `--history` was requested
-- Scanning all `v*` Git tags, selecting the highest valid version by SemVer precedence, and using compatibility default `0.1.0` when none is valid, without reading ecosystem manifests
-- Letting the provider leaf list and write current milestones
-- Building the desired milestone set and creating only the missing titles
+The runtime intent and `.agents/rules/label-milestone-setup.md` are responsible for:
+- Receiving the `--history` request and planning the desired milestones
+- Applying the established baseline, history, state, and title-idempotency contract
+- Letting runtime/provider code list and write current milestones
 - Printing the final execution summary
 
 ### 3. Standard milestone definitions
@@ -78,8 +76,8 @@ Next step - initialize labels (optional):
 
 ## Error Handling
 
-- Provider capability, authentication, or repository access failure: report the script's non-zero exit status and diagnostic output; do not claim remote changes.
-- Version detection failed: prompt "Unable to determine current version baseline"
-- No valid SemVer `v*` tags found in `--history` mode: prompt "No valid SemVer history tags found matching v*; only standard milestones will be created"
+- Platform capability, authentication, or repository access failure: report the runtime's non-zero exit status and diagnostic output; do not claim remote changes.
+- Version detection failed: report the runtime's version-baseline error
+- No valid SemVer `v*` tags found in `--history` mode: report the runtime's history diagnostic
 - Permission error: prompt "No permission to manage milestones in this repository"
 - API rate limit: prompt "platform API rate limit reached, please retry later"
