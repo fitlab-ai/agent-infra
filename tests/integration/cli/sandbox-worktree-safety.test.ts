@@ -1494,7 +1494,12 @@ test("sandbox rm preserves a share replacement between source claim and rename",
       /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
     );
     fs.writeFileSync = originalWriteFileSync;
-    assert.equal(fs.readFileSync(path.join(share, "replacement.txt"), "utf8"), "replacement\n");
+    assert.equal(fs.existsSync(share), false);
+    const tombstone = fs.readdirSync(path.dirname(share))
+      .map((entry) => path.join(path.dirname(share), entry))
+      .find((entry) => path.basename(entry).startsWith(".agent-infra-removal-"));
+    assert.ok(tombstone);
+    assert.equal(fs.readFileSync(path.join(tombstone, "payload", "replacement.txt"), "utf8"), "replacement\n");
     const journal = listSandboxRemovalJournals({ branch, project: "demo" })[0];
     assert.ok(journal);
     const journalPath = path.join(
@@ -1508,7 +1513,8 @@ test("sandbox rm preserves a share replacement between source claim and rename",
       () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
       /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
     );
-    assert.equal(fs.readFileSync(path.join(share, "replacement.txt"), "utf8"), "replacement\n");
+    assert.equal(fs.existsSync(share), false);
+    assert.equal(fs.readFileSync(path.join(tombstone, "payload", "replacement.txt"), "utf8"), "replacement\n");
   } finally {
     fs.writeFileSync = originalWriteFileSync;
     if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
@@ -1520,7 +1526,7 @@ test("sandbox rm preserves a share replacement between source claim and rename",
   }
 });
 
-test("sandbox rm restores a share replacement after a crash following rename", onPlatforms("linux", "darwin", "win32"), async () => {
+test("sandbox rm preserves a share replacement after a crash following rename", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-crash-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1580,7 +1586,15 @@ test("sandbox rm restores a share replacement after a crash following rename", o
       /injected crash after rename/
     );
     fs.renameSync = originalRenameSync;
-    assert.equal(fs.readFileSync(path.join(share, "replacement.txt"), "utf8"), "replacement\n");
+    assert.equal(fs.existsSync(share), false);
+    const tombstone = fs.readdirSync(path.dirname(share))
+      .map((entry) => path.join(path.dirname(share), entry))
+      .find((entry) => path.basename(entry).startsWith(".agent-infra-removal-"));
+    assert.ok(tombstone);
+    assert.equal(fs.readFileSync(path.join(tombstone, "payload", "replacement.txt"), "utf8"), "replacement\n");
+    fs.rmSync(path.join(tombstone, "payload"), { recursive: true, force: true });
+    fs.mkdirSync(path.join(tombstone, "payload"), { recursive: true });
+    fs.writeFileSync(path.join(tombstone, "payload", "foreign.txt"), "foreign\n");
     const journal = listSandboxRemovalJournals({ branch, project: "demo" })[0];
     assert.ok(journal);
     const journalPath = path.join(
@@ -1594,12 +1608,8 @@ test("sandbox rm restores a share replacement after a crash following rename", o
       () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
       /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
     );
-    assert.equal(fs.readFileSync(path.join(share, "replacement.txt"), "utf8"), "replacement\n");
-    const tombstone = fs.readdirSync(path.dirname(share))
-      .map((entry) => path.join(path.dirname(share), entry))
-      .find((entry) => path.basename(entry).startsWith(".agent-infra-removal-"));
-    assert.ok(tombstone);
-    assert.equal(fs.existsSync(path.join(tombstone, "payload")), false);
+    assert.equal(fs.existsSync(share), false);
+    assert.equal(fs.readFileSync(path.join(tombstone, "payload", "foreign.txt"), "utf8"), "foreign\n");
   } finally {
     fs.renameSync = originalRenameSync;
     if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;

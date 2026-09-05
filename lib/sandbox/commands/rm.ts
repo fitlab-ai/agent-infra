@@ -405,20 +405,6 @@ function assertOwnedRemovalTombstone(
   }
 }
 
-function restoreUnexpectedRemovalPayload(
-  root: string,
-  tombstone: string,
-  source: string,
-  expectedIdentity: RemovalSourceIdentity
-): void {
-  assertManagedPath(root, tombstone);
-  assertManagedPath(root, source);
-  const payload = removalTombstonePayload(tombstone);
-  const payloadIdentity = removalSourceIdentity(payload);
-  if (sameRemovalSourceIdentity(payloadIdentity, expectedIdentity) || fs.existsSync(source)) return;
-  fs.renameSync(payload, source);
-}
-
 function shouldStageManagedRemoval(source: string, tombstone: string, recovering: boolean): boolean {
   return fs.existsSync(source) || (recovering && fs.existsSync(tombstone));
 }
@@ -441,14 +427,6 @@ function stageManagedRemoval(
     }
     if (recovering) {
       if (!isOwnedRemovalPayload(root, tombstone, ownership)) {
-        const record = readRemovalTombstoneRecord(root, tombstone);
-        if (record) {
-          try {
-            restoreUnexpectedRemovalPayload(root, tombstone, source, record.sourceIdentity);
-          } catch {
-            // Preserve the tombstone when the unexpected payload cannot be restored safely.
-          }
-        }
         throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
       }
       return;
@@ -485,20 +463,9 @@ function stageManagedRemoval(
     fs.renameSync(source, removalTombstonePayload(tombstone));
     moved = true;
     if (!isOwnedRemovalPayload(root, tombstone, ownership)) {
-      restoreUnexpectedRemovalPayload(root, tombstone, source, expectedIdentity);
       throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
     }
   } catch (error) {
-    if (!moved && fs.existsSync(tombstone) && !fs.existsSync(source)) {
-      const record = readRemovalTombstoneRecord(root, tombstone);
-      if (record) {
-        try {
-          restoreUnexpectedRemovalPayload(root, tombstone, source, record.sourceIdentity);
-        } catch {
-          // Preserve the tombstone when the unexpected payload cannot be restored safely.
-        }
-      }
-    }
     if (!moved) removeOwnedSourceClaim(source, ownership);
     throw error;
   }
