@@ -242,40 +242,106 @@ function removalTombstonePath(targetDigest: string, kind: RemovalActionKind, sou
   );
 }
 
-function removalTombstones(
-  targetDigest: string,
-  kind: RemovalActionKind,
-  sources: readonly string[]
-): string[] {
-  return sources.map((source) => removalTombstonePath(targetDigest, kind, source));
+type RemovalTombstoneOwnership = Readonly<{
+  version: 1;
+  targetDigest: string;
+  permitDigest: string;
+  kind: RemovalActionKind;
+  source: string;
+}>;
+
+const REMOVAL_TOMBSTONE_MARKER = '.agent-infra-removal-ownership.json';
+const REMOVAL_TOMBSTONE_PAYLOAD = 'payload';
+
+function removalTombstonePayload(tombstone: string): string {
+  return path.join(tombstone, REMOVAL_TOMBSTONE_PAYLOAD);
+}
+
+function removalTombstoneMarker(tombstone: string): string {
+  return path.join(tombstone, REMOVAL_TOMBSTONE_MARKER);
+}
+
+function isOwnedRemovalTombstone(
+  root: string,
+  tombstone: string,
+  ownership: RemovalTombstoneOwnership
+): boolean {
+  assertManagedPath(root, tombstone);
+  try {
+    const tombstoneStat = fs.lstatSync(tombstone);
+    const markerStat = fs.lstatSync(removalTombstoneMarker(tombstone));
+    if (!tombstoneStat.isDirectory() || tombstoneStat.isSymbolicLink()
+      || !markerStat.isFile() || markerStat.isSymbolicLink()) return false;
+    const record = JSON.parse(fs.readFileSync(removalTombstoneMarker(tombstone), 'utf8')) as Partial<RemovalTombstoneOwnership>;
+    return record.version === 1
+      && record.targetDigest === ownership.targetDigest
+      && record.permitDigest === ownership.permitDigest
+      && record.kind === ownership.kind
+      && typeof record.source === 'string'
+      && path.resolve(record.source) === path.resolve(ownership.source);
+  } catch {
+    return false;
+  }
+}
+
+function assertOwnedRemovalTombstone(
+  root: string,
+  tombstone: string,
+  ownership: RemovalTombstoneOwnership
+): void {
+  if (!isOwnedRemovalTombstone(root, tombstone, ownership)) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${ownership.source}`);
+  }
 }
 
 function stageManagedRemoval(
   root: string,
   source: string,
   tombstone: string,
-  recovering: boolean
+  recovering: boolean,
+  ownership: RemovalTombstoneOwnership
 ): void {
   assertManagedPath(root, source);
   assertManagedPath(root, tombstone);
   const sourceExists = fs.existsSync(source);
   const tombstoneExists = fs.existsSync(tombstone);
-  if (sourceExists && tombstoneExists) {
+  if (tombstoneExists) {
+    assertOwnedRemovalTombstone(root, tombstone, ownership);
+    if (sourceExists) {
+      throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
+    }
+    if (recovering) return;
     throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
   }
   if (recovering) {
-    if (sourceExists && !tombstoneExists) {
-      throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${source}`);
-    }
-    return;
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${source}`);
   }
   if (!sourceExists) return;
-  fs.renameSync(source, tombstone);
+  fs.mkdirSync(tombstone, { mode: 0o700 });
+  fs.writeFileSync(removalTombstoneMarker(tombstone), `${JSON.stringify(ownership)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+    flag: 'wx'
+  });
+  fs.renameSync(source, removalTombstonePayload(tombstone));
 }
 
-function cleanupManagedTombstones(root: string, tombstones: readonly string[]): void {
-  for (const tombstone of tombstones) {
-    if (fs.existsSync(tombstone)) removeManagedDir(root, tombstone);
+function cleanupManagedTombstones(
+  root: string,
+  targetDigest: string,
+  permitDigest: string,
+  kind: RemovalActionKind,
+  sources: readonly string[]
+): void {
+  for (const source of sources) {
+    const tombstone = removalTombstonePath(targetDigest, kind, source);
+    if (fs.existsSync(tombstone) && isOwnedRemovalTombstone(root, tombstone, {
+      version: 1,
+      targetDigest,
+      permitDigest,
+      kind,
+      source
+    })) removeManagedDir(root, tombstone);
   }
 }
 
@@ -348,30 +414,78 @@ function cleanupBranchTombstone(
   }
 }
 
+function worktreeRegistration(
+  config: SandboxConfig,
+  worktree: string
+): { head: string; branch: string | null } | null {
+  const lines = runSafe('git', ['-C', config.repoRoot, 'worktree', 'list', '--porcelain']).split('\n');
+  let current: { path: string; head: string; branch: string | null } | null = null;
+  const flush = (): { head: string; branch: string | null } | null => {
+    if (!current || path.resolve(current.path) !== path.resolve(worktree)) return null;
+    return { head: current.head, branch: current.branch };
+  };
+  for (const line of lines) {
+    if (line.startsWith('worktree ')) {
+      const previous = flush();
+      if (previous) return previous;
+      current = { path: line.slice('worktree '.length), head: '', branch: null };
+    } else if (current && line.startsWith('HEAD ')) {
+      current.head = line.slice('HEAD '.length);
+    } else if (current && line.startsWith('branch ')) {
+      current.branch = line.slice('branch '.length);
+    }
+  }
+  return flush();
+}
+
+function assertWorktreeRegistrationIdentity(
+  config: SandboxConfig,
+  worktree: string,
+  permit: WorktreeRemovalPermit
+): void {
+  const registration = worktreeRegistration(config, worktree);
+  if (!registration) return;
+  if (registration.head !== permit.snapshot.head
+    || registration.branch !== `refs/heads/${permit.snapshot.branch}`) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${worktree}`);
+  }
+}
+
+function pruneWorktreeRegistration(config: SandboxConfig, worktree: string): void {
+  runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
+  if (worktreeRegistration(config, worktree)) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${worktree}`);
+  }
+}
+
 function stageWorktreeRemoval(
   config: SandboxConfig,
   worktree: string,
   permit: WorktreeRemovalPermit,
   tombstone: string,
-  recovering: boolean
+  recovering: boolean,
+  ownership: RemovalTombstoneOwnership
 ): void {
   assertManagedPath(config.worktreeBase, worktree);
   assertManagedPath(config.worktreeBase, tombstone);
   const worktreeExists = fs.existsSync(worktree);
   const tombstoneExists = fs.existsSync(tombstone);
   if (worktreeExists || !recovering) verifyWorktreePermit(permit);
-  if (worktreeExists && tombstoneExists) {
-    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${worktree}`);
-  }
   if (recovering) {
-    if (worktreeExists && !tombstoneExists) {
+    if (worktreeExists || !tombstoneExists) {
+      if (worktreeExists && tombstoneExists) {
+        throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${worktree}`);
+      }
       throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${worktree}`);
     }
+    assertOwnedRemovalTombstone(config.worktreeBase, tombstone, ownership);
+    assertWorktreeRegistrationIdentity(config, worktree, permit);
+    pruneWorktreeRegistration(config, worktree);
     return;
   }
   if (!worktreeExists) return;
-  fs.renameSync(worktree, tombstone);
-  runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
+  stageManagedRemoval(config.worktreeBase, worktree, tombstone, false, ownership);
+  pruneWorktreeRegistration(config, worktree);
 }
 
 function cleanupCompletedRemovalArtifacts(
@@ -390,15 +504,15 @@ function cleanupCompletedRemovalArtifacts(
     sandboxRemovalPhaseIndex(journal.phase) >= sandboxRemovalPhaseIndex(phase)
   ));
   if (completed('workspace-removed')) {
-    cleanupManagedTombstones(config.workspaceViewBase, removalTombstones(
-      targetDigest, 'workspace', target.workspaceViewRoots
-    ));
-    cleanupManagedTombstones(path.join(config.controlBase, config.project), removalTombstones(
-      targetDigest, 'workspace', target.controlRoots
-    ));
-    cleanupManagedTombstones(config.worktreeBase, removalTombstones(
-      targetDigest, 'worktree', committedTarget.worktreePaths
-    ));
+    cleanupManagedTombstones(
+      config.workspaceViewBase, targetDigest, committedTarget.permitDigest, 'workspace', target.workspaceViewRoots
+    );
+    cleanupManagedTombstones(
+      path.join(config.controlBase, config.project), targetDigest, committedTarget.permitDigest, 'workspace', target.controlRoots
+    );
+    cleanupManagedTombstones(
+      config.worktreeBase, targetDigest, committedTarget.permitDigest, 'worktree', committedTarget.worktreePaths
+    );
   }
   if (completed('branch-removed')) {
     cleanupBranchTombstone(config, target.effectiveBranch, targetDigest, new Map(
@@ -409,13 +523,13 @@ function cleanupCompletedRemovalArtifacts(
     ));
   }
   if (completed('tool-removed')) {
-    cleanupManagedTombstones(config.home, removalTombstones(targetDigest, 'tool', committedTarget.toolPaths));
+    cleanupManagedTombstones(config.home, targetDigest, committedTarget.permitDigest, 'tool', committedTarget.toolPaths);
   }
   if (completed('shell-removed')) {
-    cleanupManagedTombstones(config.shellConfigBase, removalTombstones(targetDigest, 'shell', committedTarget.shellPaths));
+    cleanupManagedTombstones(config.shellConfigBase, targetDigest, committedTarget.permitDigest, 'shell', committedTarget.shellPaths);
   }
   if (completed('share-removed')) {
-    cleanupManagedTombstones(config.shareBase, removalTombstones(targetDigest, 'share', [committedTarget.sharePath]));
+    cleanupManagedTombstones(config.shareBase, targetDigest, committedTarget.permitDigest, 'share', [committedTarget.sharePath]);
   }
 }
 
@@ -990,9 +1104,19 @@ async function rmOne(
   for (const worktree of existingWorktrees) {
     const permit = permits.get(path.resolve(worktree));
     if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
+    const worktreeTombstone = removalTombstonePath(targetDigest, 'worktree', worktree);
+    const workspacePhasePending = existingJournals.some((journal) => (
+      sandboxRemovalPhaseIndex(journal.phase) < sandboxRemovalPhaseIndex('workspace-removed')
+    ));
     if (fs.existsSync(worktree)
-      || existingJournals.every((journal) => sandboxRemovalPhaseIndex(journal.phase)
-        < sandboxRemovalPhaseIndex('workspace-removed'))) {
+      || (workspacePhasePending
+      && !isOwnedRemovalTombstone(config.worktreeBase, worktreeTombstone, {
+        version: 1,
+        targetDigest,
+        permitDigest: removalPermitDigest(permits),
+        kind: 'worktree',
+        source: worktree
+      }))) {
       verifyWorktreePermit(permit);
     }
   }
@@ -1170,7 +1294,14 @@ async function rmOne(
           base,
           directory,
           removalTombstonePath(targetDigest, 'workspace', directory),
-          runWorkspaceCleanup.recovering
+          runWorkspaceCleanup.recovering,
+          {
+            version: 1,
+            targetDigest,
+            permitDigest: committedTarget.permitDigest,
+            kind: 'workspace',
+            source: directory
+          }
         );
         if (!options.quiet) p.log.success(`${label} removed: ${directory}`);
       }
@@ -1185,7 +1316,14 @@ async function rmOne(
           worktree,
           permit,
           removalTombstonePath(targetDigest, 'worktree', worktree),
-          runWorkspaceCleanup.recovering
+          runWorkspaceCleanup.recovering,
+          {
+            version: 1,
+            targetDigest,
+            permitDigest: committedTarget.permitDigest,
+            kind: 'worktree',
+            source: worktree
+          }
         );
       }
     }
@@ -1230,7 +1368,14 @@ async function rmOne(
           tool.sandboxBase,
           dir,
           removalTombstonePath(targetDigest, 'tool', dir),
-          runToolCleanup.recovering
+          runToolCleanup.recovering,
+          {
+            version: 1,
+            targetDigest,
+            permitDigest: committedTarget.permitDigest,
+            kind: 'tool',
+            source: dir
+          }
         );
         p.log.success(`${tool.name} state removed: ${dir}`);
       }
@@ -1250,7 +1395,14 @@ async function rmOne(
         config.shellConfigBase,
         dir,
         removalTombstonePath(targetDigest, 'shell', dir),
-        runShellCleanup.recovering
+        runShellCleanup.recovering,
+        {
+          version: 1,
+          targetDigest,
+          permitDigest: committedTarget.permitDigest,
+          kind: 'shell',
+          source: dir
+        }
       );
       p.log.success(`Shell config removed: ${dir}`);
     }
@@ -1269,7 +1421,14 @@ async function rmOne(
         config.shareBase,
         sharePath,
         removalTombstonePath(targetDigest, 'share', sharePath),
-        runShareCleanup.recovering
+        runShareCleanup.recovering,
+        {
+          version: 1,
+          targetDigest,
+          permitDigest: committedTarget.permitDigest,
+          kind: 'share',
+          source: sharePath
+        }
       );
       p.log.success(`Share dir removed: ${sharePath}`);
     }

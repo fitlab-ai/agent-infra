@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1267,6 +1268,166 @@ test("sandbox rm preserves a replacement worktree after a workspace phase crash"
     assert.match(git(fixture.repoDir, "worktree", "list", "--porcelain"), new RegExp(`worktree ${worktree.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   } finally {
     fs.writeFileSync = originalWriteFileSync;
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    for (const journal of listSandboxRemovalJournals({ branch, project: "demo" })) {
+      if (journal.target.controlRoot === path.resolve(controlRoot)) clearSandboxRemovalJournalRecord(journal);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm recovers a worktree after a prune-phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-worktree-prune-retry-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/worktree-prune-retry";
+  const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+  const config = rmOneConfig(fixture, tmpDir);
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+  const channelDir = path.join(controlRoot, "channel");
+  const publicStatusDir = path.join(controlRoot, "public");
+  const processingDir = path.join(controlRoot, "processing");
+  fs.mkdirSync(channelDir, { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+    engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+    project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    mode: "branch-only", taskId: null, token: "worktree-prune-token", generation: "worktree-prune-generation",
+    channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
+  })}\n`);
+  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+    version: 2, generation: "worktree-prune-generation",
+    broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+  })}\n`);
+  const target = {
+    branch,
+    effectiveBranch: branch,
+    engine: "docker-desktop",
+    matchedContainers: [],
+    existingWorktrees: [worktree],
+    toolCandidates: [],
+    workspace: { mode: "branch-only" as const },
+    controlRoots: [controlRoot],
+    workspaceViewRoots: []
+  };
+  const inspected = safety.inspectWorktree(worktree);
+  assert.equal(inspected.status, "clean");
+  const permit = safety.createCleanPermit(inspected.snapshot);
+  const originalRenameSync = fs.renameSync;
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  let injectFailure = true;
+  try {
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    fs.renameSync = ((source, destination) => {
+      const result = originalRenameSync(source, destination);
+      if (injectFailure && path.resolve(String(source)) === path.resolve(worktree)) {
+        injectFailure = false;
+        throw new Error("INJECTED_CRASH_AFTER_WORKTREE_RENAME_BEFORE_PRUNE");
+      }
+      return result;
+    }) as typeof fs.renameSync;
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        target,
+        permits: new Map([[path.resolve(worktree), permit]])
+      })),
+      /INJECTED_CRASH_AFTER_WORKTREE_RENAME_BEFORE_PRUNE/
+    );
+    fs.renameSync = originalRenameSync;
+    const journal = listSandboxRemovalJournals({ branch, project: "demo" })[0];
+    assert.ok(journal);
+    assert.equal(journal.phase, "workspace-finalizing");
+    const journalPath = path.join(
+      os.homedir(), ".agent-infra", "sandbox-removal-journal", journal.lockDomain,
+      `${journal.carrierIdentityDigest}.json`
+    );
+    const persisted = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+    persisted.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
+    fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
+
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target }));
+
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
+    assert.equal(listSandboxRemovalJournals({ branch, project: "demo" }).length, 0);
+    assert.doesNotMatch(git(fixture.repoDir, "worktree", "list", "--porcelain"), new RegExp(
+      `worktree ${worktree.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}`
+    ));
+  } finally {
+    fs.renameSync = originalRenameSync;
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    for (const journal of listSandboxRemovalJournals({ branch, project: "demo" })) {
+      if (journal.target.controlRoot === path.resolve(controlRoot)) clearSandboxRemovalJournalRecord(journal);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm preserves an unowned tombstone when the source is absent", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unowned-tombstone-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/unowned-tombstone";
+  const config = rmOneConfig(fixture, tmpDir);
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+  const channelDir = path.join(controlRoot, "channel");
+  const publicStatusDir = path.join(controlRoot, "public");
+  const processingDir = path.join(controlRoot, "processing");
+  fs.mkdirSync(channelDir, { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+    engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+    project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    mode: "branch-only", taskId: null, token: "unowned-tombstone-token", generation: "unowned-tombstone-generation",
+    channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
+  })}\n`);
+  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+    version: 2, generation: "unowned-tombstone-generation",
+    broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+  })}\n`);
+  const target = {
+    branch,
+    effectiveBranch: branch,
+    engine: "docker-desktop",
+    matchedContainers: [],
+    existingWorktrees: [],
+    toolCandidates: [],
+    workspace: { mode: "branch-only" as const },
+    controlRoots: [controlRoot],
+    workspaceViewRoots: []
+  };
+  const targetDigest = createHash("sha256").update(JSON.stringify({
+    project: config.project,
+    branch,
+    workspace: target.workspace,
+    controlRoots: target.controlRoots.map((candidate) => path.resolve(candidate)),
+    workspaceViewRoots: [],
+    managedPathCandidates: []
+  })).digest("hex");
+  const share = path.resolve(path.join(config.shareBase, "branches", branch.replaceAll("/", "..")));
+  const sourceDigest = createHash("sha256").update(`share\0${share}`).digest("hex");
+  const tombstone = path.join(
+    path.dirname(share),
+    `.agent-infra-removal-${targetDigest.slice(0, 16)}-share-${sourceDigest.slice(0, 24)}`
+  );
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  try {
+    fs.mkdirSync(tombstone, { recursive: true });
+    fs.writeFileSync(path.join(tombstone, "unowned.txt"), "must-survive\n", "utf8");
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target }));
+    assert.equal(fs.existsSync(path.join(tombstone, "unowned.txt")), true);
+  } finally {
     if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
     else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
     for (const journal of listSandboxRemovalJournals({ branch, project: "demo" })) {
