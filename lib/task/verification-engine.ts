@@ -802,6 +802,7 @@ function checkActivityLog({ taskDir, config }: any): any {
   let previousTimestamp = "";
   let latestAction = "";
   let latestTimestamp = "";
+  const doneActions: string[] = [];
 
   for (const entry of entries) {
     const match = entry.match(ACTIVITY_LOG_PATTERN);
@@ -821,6 +822,16 @@ function checkActivityLog({ taskDir, config }: any): any {
     if (!ACTIVITY_LOG_STARTED_RE.test(action)) {
       latestTimestamp = timestamp;
       latestAction = action;
+      doneActions.push(action);
+    }
+  }
+
+  if (config.expected_action_pattern && !new RegExp(config.expected_action_pattern).test(latestAction)) {
+    const expected = new RegExp(config.expected_action_pattern);
+    let index = doneActions.length - 1;
+    while (index >= 0 && doneActions[index] === 'Commit' && !expected.test(doneActions[index]!)) index -= 1;
+    if (index >= 0 && expected.test(doneActions[index]!)) {
+      latestAction = doneActions[index]!;
     }
   }
 
