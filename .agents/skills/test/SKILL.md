@@ -21,6 +21,14 @@ npm run typecheck
 
 三层测试是反馈速度优化；本项目按测试的可观察范围与运行成本选择对应层级。新增测试文件默认归入 **full**，确认足够快且足够核心后，再上调到 core 或 smoke。
 
+### fast smoke（目标 <5s）
+
+```bash
+npm run test:smoke:fast
+```
+
+与 smoke 运行相同的 unit 测试范围，但跳过构建。仅用于代码修改后的内循环；完成一个实施步骤后仍须运行 smoke，以验证最新构建产物。
+
 ### smoke（目标 <5s）
 
 ```bash
@@ -28,8 +36,7 @@ npm run test:smoke
 ```
 
 适用场景：
-- code-task 内循环
-- 保存即跑 / 频繁反馈
+- code-task 的实施步骤完成后
 - 仅断言项目结构、配置、模板契约
 
 ### core（目标 <15s）

@@ -25,6 +25,17 @@ description: >
 
 三层测试是可选的反馈速度优化；如果测试套件较小，所有层级都可以映射到同一个完整测试命令。
 
+### fast smoke（目标 <5s）
+
+```bash
+# TODO：替换为项目的 fast smoke 子集命令
+# npm run test:smoke:fast       (Node.js)
+# pytest -m "not slow"          (Python)
+# go test -short ./...          (Go)
+```
+
+当项目提供不重复构建的快速路径时，用于 code-task 内循环。它应覆盖与 smoke 相同的测试，同时跳过重复的编译或生成步骤。
+
 ### smoke（目标 <5s）
 
 ```bash
@@ -35,8 +46,8 @@ description: >
 ```
 
 适用场景：
-- code-task 内循环
-- 保存即跑 / 频繁反馈
+- 完成一个实施步骤后
+- 项目没有 fast 路径时的保存即跑 / 频繁反馈
 - 仅断言项目结构、配置、模板契约
 
 ### core（目标 <15s）

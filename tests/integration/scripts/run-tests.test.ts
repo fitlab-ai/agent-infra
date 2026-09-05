@@ -32,6 +32,7 @@ test('project test scripts use the sandbox-control-safe runner', () => {
   };
   for (const name of [
     'test:smoke',
+    'test:smoke:fast',
     'test:core',
     'test:integration',
     'test',
@@ -41,6 +42,17 @@ test('project test scripts use the sandbox-control-safe runner', () => {
     const script = pkg.scripts[name] ?? '';
     assert.equal(script.startsWith('node scripts/run-tests.js'), true);
   }
+});
+
+test('fast smoke skips the build without changing the unit-test selection', () => {
+  const pkg = JSON.parse(fs.readFileSync(filePath('package.json'), 'utf8')) as {
+    scripts: Record<string, string>;
+  };
+  const smoke = pkg.scripts['test:smoke'] ?? '';
+  const fastSmoke = pkg.scripts['test:smoke:fast'] ?? '';
+  assert.match(fastSmoke, /--skip-build/);
+  assert.match(fastSmoke, /tests\/unit\/\*\*\/\*\.test\.ts/);
+  assert.match(smoke, /tests\/unit\/\*\*\/\*\.test\.ts/);
 });
 
 test('test runner lock serializes independent runs and permits inherited reentry', async () => {

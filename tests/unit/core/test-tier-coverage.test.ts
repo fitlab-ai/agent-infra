@@ -38,6 +38,15 @@ test("test:smoke script targets unit tier only", () => {
     "test:smoke must not include integration/e2e globs");
 });
 
+test("test:smoke:fast script targets the same unit tier without a build", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const fastSmoke = pkg.scripts["test:smoke:fast"];
+  assert.match(fastSmoke, /--skip-build/);
+  assert.match(fastSmoke, /tests\/unit\/\*\*\/\*\.test\.ts/);
+  assert.ok(!/tests\/integration|tests\/e2e/.test(fastSmoke),
+    "test:smoke:fast must not include integration/e2e globs");
+});
+
 test("test:core script targets unit and integration tiers", () => {
   const pkg = JSON.parse(read("package.json"));
   const core = pkg.scripts["test:core"];

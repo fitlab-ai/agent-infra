@@ -41,7 +41,9 @@ For each fix:
 1. read the affected files
 2. apply the smallest necessary change
 3. verify the change addresses the review feedback
-4. run the project's **smoke subset** for immediate feedback (see the `test` skill)
+4. run the project's **fast smoke subset** for immediate feedback (see the `test` skill)
+
+After completing the repair round, run the **smoke subset** to verify the complete build and unit tests.
 
 ## Run Test Verification
 

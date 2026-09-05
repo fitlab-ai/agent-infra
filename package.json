@@ -65,6 +65,7 @@
     "prepare": "git config core.hooksPath .git-hooks || true",
     "typecheck": "tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.jschecks.json --noEmit",
     "test:smoke": "node scripts/run-tests.js \"tests/unit/**/*.test.ts\"",
+    "test:smoke:fast": "node scripts/run-tests.js --skip-build \"tests/unit/**/*.test.ts\"",
     "test:core": "node scripts/run-tests.js \"tests/unit/**/*.test.ts\" \"tests/integration/**/*.test.ts\"",
     "test:integration": "node scripts/run-tests.js \"tests/integration/**/*.test.ts\" \"tests/e2e/**/*.test.ts\"",
     "check": "npm run typecheck && npm test",

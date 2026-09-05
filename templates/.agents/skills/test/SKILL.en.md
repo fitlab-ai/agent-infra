@@ -27,6 +27,17 @@ Confirm no compilation errors.
 
 This project uses three test layers as an optional optimization; if the test suite is small, all layers may map to the same full test command.
 
+### fast smoke (target <5s)
+
+```bash
+# TODO: Replace with this project's fast smoke subset command
+# npm run test:smoke:fast       (Node.js)
+# pytest -m "not slow"          (Python)
+# go test -short ./...          (Go)
+```
+
+Use for code-task inner loops when the project provides a build-free fast path. It should cover the same tests as smoke while skipping redundant compilation or generation.
+
 ### smoke (target <5s)
 
 ```bash
@@ -37,8 +48,8 @@ This project uses three test layers as an optional optimization; if the test sui
 ```
 
 Use for:
-- code-task inner loops
-- save-and-run / frequent feedback
+- after completing an implementation step
+- save-and-run / frequent feedback when no fast path exists
 - project structure, configuration, and template contract checks
 
 ### core (target <15s)
