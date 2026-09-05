@@ -1269,6 +1269,9 @@ function syncTemplates(projectRoot, templateRootOverride) {
     }
   }
   const version = resolveVersionFromTemplateRoot(templateRoot);
+  const projectTemplateRoot = path.join(projectRoot, 'templates');
+  const sourceRepositoryTemplate = fs.existsSync(projectTemplateRoot)
+    && fs.realpathSync(templateRoot) === fs.realpathSync(projectTemplateRoot);
 
   const { project, org, language: lang = 'en' } = cfg;
   const platformType = cfg.platform?.type || DEFAULTS.platform.type;
@@ -1770,6 +1773,17 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
     for (const [tgt, src] of selected) {
       if (expectedTargets) expectedTargets.add(tgt);
+
+      if (sourceRepositoryTemplate && tgt === '.github/workflows/pr-label.yml') {
+        report.managed.protected.push({
+          target: tgt,
+          reason: 'source-repository',
+          baseline: trustedBaseline(managedBaselines[tgt]),
+          local: fs.existsSync(path.join(projectRoot, tgt)) ? sha256(fs.readFileSync(path.join(projectRoot, tgt))) : null,
+          template: sha256(renderContent(fs.readFileSync(path.join(templateRoot, src), 'utf8'), vars))
+        });
+        continue;
+      }
 
       if (matchesAny(tgt, merged) || matchesAny(tgt, ejected)) {
         report.managed.skippedMerged.push(tgt);
