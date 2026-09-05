@@ -127,7 +127,7 @@ If a hard gate is not met, stop immediately and do not execute Steps 3-8.
 ### 3. Complete Business-Only Content
 
 Update only content that the lifecycle core does not own:
-- Add or update the `## State Check` section with the raw Step 0 audit command output, including `$ ` prompt lines, before `## Activity Log`
+- Add or update the `## State Check` section with the Step 0 audit command, task/artifact scope, key result, and uncovered parts; for normal success, do not copy the full directory listing or `task.md` tail, and include decisive raw lines only for failures, blocking, identity mismatches, or disputes, before `## Activity Log`
 - Mark all workflow steps as complete
 - Verify and check off all items in `## Completion Checklist` (change `- [ ]` to `- [x]`)
 
