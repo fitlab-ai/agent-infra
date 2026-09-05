@@ -181,6 +181,155 @@ tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/
 目录下写入一份中英双语 `README.md`，帮助你发现这些通道。README 是幂等的，
 可以安全删除；scaffold 仅在文件缺失时写入。
 
+## Broker–sandbox 控制协议
+
+宿主 broker 与沙箱 client 通过 bind-mounted control root 中的 JSON 文件通信。
+它不是 HTTP、TCP 或 Unix socket。broker 是唯一可以执行宿主 task 操作的进程；
+executor 子进程只通过一次性的 IPC gate 获得调用机会，不会从沙箱获得 control
+root 的写权限或宿主控制 authority。
+
+### 传输目录结构
+
+以下是维护时需要关注的记录（实际宿主路径由 manifest 记录，未必与容器内路径
+相同）：
+
+```text
+control-root/
+├── manifest.json
+├── broker.json
+├── channel/
+│   ├── requests/<request-id>.json
+│   └── responses/
+│       ├── <request-id>.accepted.json
+│       ├── <request-id>.payload.json   （可选输出 payload）
+│       └── <request-id>.json
+├── processing/<request-id>/
+│   ├── request.json
+│   ├── execution.json
+│   ├── reservation.json
+│   └── result.json
+├── consumed/<request-id>
+├── public/status.json
+└── audit.ndjson
+```
+
+client 首先检查 `status.json` 中的 generation 和 broker heartbeat，然后把请求写入
+私有临时文件，再 rename 为 `requests/<request-id>.json`。请求包含协议版本、请求
+身份、沙箱 token、generation、绝对 admission deadline、control family 和该 family
+的参数。broker 将请求 rename 到 `processing/<request-id>/request.json` 完成 claim，
+创建 consumed marker，校验 manifest 绑定和 deadline，并在 `execution.json` 中记录
+子进程身份。
+
+accepted 是独立的持久 marker：`responses/<request-id>.accepted.json`。它只表示请求
+已经被接纳，不是命令结果。terminal response 只发布一次到
+`responses/<request-id>.json`，发布后不可覆盖。重复发布时会先 read-back 已有 terminal；
+如果它与候选内容不同则 fail closed。client 可以在 client 或 broker 重启
+后重复读取 terminal；但再次使用同一个 request ID 仍然属于 replay，不能再次执行
+操作。
+
+### result evidence 与完成顺序
+
+executor 子进程退出后，由 broker 父进程先从 stdout/stderr 中去除 manifest token，
+再计算 UTF-8 字节数和 SHA-256 摘要，先写入并严格 read-back 一个小型的
+`processing/<request-id>/result.json`，然后才把内存中的 execution 标记为 settled：
+
+```json
+{
+  "version": 1,
+  "id": "<request-id>",
+  "generation": "<generation>",
+  "exitCode": 0,
+  "stdoutBytes": 128,
+  "stderrBytes": 0,
+  "stdoutSha256": "<64 位小写十六进制字符>",
+  "stderrSha256": "<64 位小写十六进制字符>",
+  "captureState": "metadata-only"
+}
+```
+
+这个记录只是 transport evidence，不是 task receipt，也不能替代 terminal response。
+它刻意不包含 token、executor nonce、gate owner、PID、环境变量、宿主路径或原始输出。
+`metadata-only` 表示重启后可以证明子进程已经退出并取得输出的元数据，但不能只凭
+这个记录恢复完整输出正文。
+
+提交顺序固定为：
+
+```text
+child close
+  → result.json 原子发布并 read-back
+  → 可选的已脱敏 payload 原子发布并 read-back
+  → terminal response 发布并 read-back
+  → 删除 processing evidence
+```
+
+如果 broker 在 result record 有效、terminal 清理前重启，普通 process-control family
+可以收敛为带有“output unavailable”语义的 terminal response。task-finalization 更严格：
+成功的 exit code 不能证明 task 已完成，canonical 宿主 finalization receipt 仍是业务
+authority。如果 result evidence 缺失或格式错误，broker 会保持 uncertain/unknown，不能
+创建新的 request ID，也不能重放 mutation。
+
+每类记录的 authority 和生命周期刻意不同：
+
+| 记录 | 写入者 | 生命周期 | authority |
+| --- | --- | --- | --- |
+| `request.json` | client，随后由 broker 通过 claim rename 接管 | claim 后清理 | 仅作为输入 |
+| `execution.json` | broker | child prepared/running 期间 | 进程身份/恢复提示 |
+| `reservation.json` | broker | admission 到 terminal cleanup | generation quota reservation |
+| `result.json` | broker 父进程 | terminal commit 前 | 进程结果证据 |
+| payload record | broker | generation 生命周期，仅在 terminal 引用时保留 | 已脱敏输出正文 |
+| terminal response | broker | generation 生命周期 | transport 提交点 |
+| finalization receipt | 宿主 finalization | task 生命周期 | 业务完成 authority |
+
+client 永远不会把 `accepted`、`result.json` 或 payload candidate 当作成功，
+只返回经过校验的 terminal response。这个分层可以避免 broker 重启时把不完整
+的观测变成第二次宿主 mutation。
+
+因此各个恢复断点是确定的：child 尚未产生有效 result 时保持 unknown；普通
+family 有有效 result 时可以生成 output-unavailable terminal；finalization 仍
+必须检查宿主 receipt；已经发布的 terminal 只能读取、不能覆盖。finalization receipt
+缺失或绑定冲突时，不能落入 generic success terminal，processing evidence 和 reservation
+会保留，等待后续同 ID 恢复。graceful shutdown 如果观察到已 settled 的 result，会先按同一
+authority 尝试发布 terminal 再停止 broker；尚未 settled 的 child 则保留 accepted 和未知结果证据。
+
+### 容量与保留（HD-3/A）
+
+三个 profile 上限相互独立：
+
+- `maxLogicalRecords = 1024`：一个 generation 中最多保留的 logical control record 数量。
+- `maxResponseBytes = 64 MiB`：持久化 response/result/payload 数据和 reservation 的总预算，
+  不是一条普通 stdout 字符串的大小。
+- `maxTerminalRecordBytes = 1 MiB`：紧凑 terminal envelope 的上限，与可选输出 payload
+  的存储空间分开计算。
+
+result evidence 很小，由每个请求的 base reservation 覆盖；它不是第四个公开容量指标。字节计量使用磁盘上实际持久化的 UTF-8 bytes，包括 JSON 末尾换行。terminal
+在 generation 生命周期内保留。processing/result evidence 是临时数据，只有 terminal
+发布并验证后才能删除。恢复时，临时文件永远不能被当作权威记录。
+
+broker 在写入 accepted marker 之前，会为本次请求的 accepted marker、紧凑 terminal 和
+result evidence 预留固定的 base budget。reservation 自身占用一个 logical record，后续
+payload 不能绕过这项预留。如果 generation 会超过 1024 个 logical record，或持久化的
+terminal、payload 与 reservation 总量会超过 64 MiB，broker 会在 admission 阶段拒绝请求。base reservation
+与已发布 payload 分开计量，不会把 reservation 和 payload 折叠成一个字节总数。
+如果结果超过 1 MiB 的紧凑 envelope，且 generation 仍有余量，broker 可以把它写成单独的
+已脱敏 payload；terminal 只保存 payload 的字节数和 SHA-256 引用，并设置
+`outputState: "available"`。payload 无法保留时，terminal 仍会提交，但设置
+`outputState: "unavailable"`。
+
+logical record 只计数一次：同一请求的 terminal 或尚未完成的 reservation 占用一个 slot。
+terminal 成功提交后，临时的 request、execution、result 和 reservation 会被删除；只有
+terminal 及其引用的 payload 保留在 generation 内。没有被 terminal 引用的 payload 也会
+在同一清理阶段删除。这样 quota 在 broker 重启后仍然可计算，并且 payload 不会独立成为
+任务 mutation 的 authority。
+
+维护排障时只读取所需的元数据。不要把 request token、execution nonce、PID、环境值、宿主
+路径或原始 terminal 输出复制到 Issue、审计附件或普通日志中。client 在 accepted 后超时，
+应使用同一个 request ID 执行 control recovery；不可为不可逆的 finalization 提交新请求。
+
+当前协议使用 request version 3 和 response version 2。旧 response layout 不做 adapter、
+双写或长期迁移；invalid 或 generation 混用必须 fail closed，并根据当前 manifest 重建
+沙箱。payload 只能通过同一 request ID 和 generation 的 terminal 引用定位；它不能从
+`result.json` 推断出来，也不能授权任何 task mutation。
+
 ## 用户级 dotfiles 通道
 
 `ai sandbox create` 还会自动挂载一条可选的只读通道，用于把宿主机用户级偏好带进沙箱：

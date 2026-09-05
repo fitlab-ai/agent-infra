@@ -345,6 +345,9 @@ export function dispatchTaskControlOperation(
     operationTaskId(context, operation.request.taskRef);
     return applyTaskFinalization(operation.request, {
       repoRoot: context.repoRoot,
+      ...(context.source === 'sandbox-executor' ? {
+        controlBinding: { generation: context.generation, requestId: context.requestId }
+      } : {}),
       preflight: (request, options) => verifyTaskEvent(
         { ...request, event: 'complete-task.hard-preflight' }, options
       )

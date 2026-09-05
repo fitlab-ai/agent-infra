@@ -53,14 +53,14 @@ function taskArtifact(args: string[] = []): void {
     else if (result.status === 'failed') process.exitCode = 2;
     return;
   }
+  const resolved = resolveTaskRef(args[0]!);
+  const repositoryRoot = resolved.ok ? resolved.repoRoot : process.cwd();
   if (!artifact) { failUsage("option '--artifact' is required"); return; }
   if (family !== 'analysis' && family !== 'plan' && family !== 'code') {
     failUsage("finalize-local only supports 'analysis', 'plan', and 'code'");
     return;
   }
   const skillName = family === 'analysis' ? 'analyze-task' : family === 'plan' ? 'plan-task' : 'code-task';
-  const resolved = resolveTaskRef(args[0]!);
-  const repositoryRoot = resolved.ok ? resolved.repoRoot : process.cwd();
   let config: { requiredSections?: readonly string[]; requiredPatterns?: readonly string[] } = {};
   try {
     const loaded = loadVerificationConfig(repositoryRoot, skillName);

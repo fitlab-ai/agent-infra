@@ -1,9 +1,14 @@
+import { createHash } from 'node:crypto';
 import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
 import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
+export const SANDBOX_CONTROL_MAX_LOGICAL_RECORDS = 1024;
+export const SANDBOX_CONTROL_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+export const SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES = 1024 * 1024;
+export const SANDBOX_CONTROL_RESERVATION_BYTES = SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES + 4 * 1024;
 export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
@@ -63,9 +68,43 @@ export type SandboxCodexControllerRequest = RequestBase & Readonly<{
 }>;
 export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
+export type SandboxControlResultEvidence = Readonly<{
+  version: 1;
+  id: string;
+  generation: string;
+  exitCode: number;
+  stdoutBytes: number;
+  stderrBytes: number;
+  stdoutSha256: string;
+  stderrSha256: string;
+  captureState: 'metadata-only';
+}>;
+export type SandboxControlPayloadReference = Readonly<{
+  version: 1;
+  id: string;
+  generation: string;
+  stdoutBytes: number;
+  stderrBytes: number;
+  stdoutSha256: string;
+  stderrSha256: string;
+}>;
+export type SandboxControlPayload = SandboxControlPayloadReference & Readonly<{
+  stdout: string;
+  stderr: string;
+}>;
+export type SandboxControlReservation = Readonly<{
+  version: 1;
+  id: string;
+  generation: string;
+  logicalRecords: 1;
+  bytes: number;
+  createdAt: number;
+}>;
 export type SandboxControlResponse = Readonly<{
   version: 2; id: string; phase: 'accepted' | 'completed' | 'rejected'; exitCode: number | null;
   stdout: string; stderr: string; error: SandboxControlError | null;
+  outputState?: 'available' | 'unavailable';
+  payload?: SandboxControlPayloadReference | null;
 }>;
 export type SandboxControlStatus = Readonly<{
   version: 2; generation: string; broker: ProcessIdentity & { brokerId: string };
@@ -95,6 +134,80 @@ export class SandboxControlProtocolError extends Error {
 
 function fail(code: string, message: string, retryable = false): never {
   throw new SandboxControlProtocolError(code, message, retryable);
+}
+
+export function parseSandboxControlResultEvidence(value: unknown): SandboxControlResultEvidence {
+  const evidence = value as Partial<SandboxControlResultEvidence> | null;
+  const keys = evidence && typeof evidence === 'object' ? Object.keys(evidence).sort().join(',') : '';
+  if (keys !== 'captureState,exitCode,generation,id,stderrBytes,stderrSha256,stdoutBytes,stdoutSha256,version'
+    || evidence?.version !== 1
+    || typeof evidence.id !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(evidence.id)
+    || typeof evidence.generation !== 'string' || evidence.generation.length === 0
+    || !Number.isSafeInteger(evidence.exitCode)
+    || !Number.isSafeInteger(evidence.stdoutBytes) || (evidence.stdoutBytes as number) < 0
+    || !Number.isSafeInteger(evidence.stderrBytes) || (evidence.stderrBytes as number) < 0
+    || (evidence.stdoutBytes as number) + (evidence.stderrBytes as number) > SANDBOX_CONTROL_MAX_RESPONSE_BYTES
+    || typeof evidence.stdoutSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(evidence.stdoutSha256)
+    || typeof evidence.stderrSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(evidence.stderrSha256)
+    || evidence.captureState !== 'metadata-only') {
+    throw new Error('SANDBOX_CONTROL_RESULT_EVIDENCE_INVALID');
+  }
+  return evidence as SandboxControlResultEvidence;
+}
+
+function validPayloadReference(value: unknown, id: string, generation: string): value is SandboxControlPayloadReference {
+  const payload = value as Partial<SandboxControlPayloadReference> | null;
+  const keys = payload && typeof payload === 'object' ? Object.keys(payload).sort().join(',') : '';
+  return keys === 'generation,id,stderrBytes,stderrSha256,stdoutBytes,stdoutSha256,version'
+    && payload?.version === 1
+    && payload.id === id
+    && payload.generation === generation
+    && Number.isSafeInteger(payload.stdoutBytes) && (payload.stdoutBytes as number) >= 0
+    && Number.isSafeInteger(payload.stderrBytes) && (payload.stderrBytes as number) >= 0
+    && (payload.stdoutBytes as number) + (payload.stderrBytes as number) <= SANDBOX_CONTROL_MAX_RESPONSE_BYTES
+    && typeof payload.stdoutSha256 === 'string' && /^[a-f0-9]{64}$/u.test(payload.stdoutSha256)
+    && typeof payload.stderrSha256 === 'string' && /^[a-f0-9]{64}$/u.test(payload.stderrSha256);
+}
+
+export function parseSandboxControlPayload(value: unknown): SandboxControlPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('SANDBOX_CONTROL_PAYLOAD_INVALID');
+  const payload = value as Partial<SandboxControlPayload>;
+  const reference: Partial<SandboxControlPayloadReference> = {
+    version: payload.version,
+    id: payload.id,
+    generation: payload.generation,
+    stdoutBytes: payload.stdoutBytes,
+    stderrBytes: payload.stderrBytes,
+    stdoutSha256: payload.stdoutSha256,
+    stderrSha256: payload.stderrSha256
+  };
+  const keys = Object.keys(payload).sort().join(',');
+  if (keys !== 'generation,id,stderr,stderrBytes,stderrSha256,stdout,stdoutBytes,stdoutSha256,version'
+    || !validPayloadReference(reference, reference.id as string, reference.generation as string)
+    || typeof payload.stdout !== 'string' || typeof payload.stderr !== 'string'
+    || Buffer.byteLength(payload.stdout, 'utf8') !== payload.stdoutBytes
+    || Buffer.byteLength(payload.stderr, 'utf8') !== payload.stderrBytes
+    || createHash('sha256').update(payload.stdout, 'utf8').digest('hex') !== payload.stdoutSha256
+    || createHash('sha256').update(payload.stderr, 'utf8').digest('hex') !== payload.stderrSha256) {
+    throw new Error('SANDBOX_CONTROL_PAYLOAD_INVALID');
+  }
+  return payload as SandboxControlPayload;
+}
+
+export function parseSandboxControlReservation(value: unknown): SandboxControlReservation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('SANDBOX_CONTROL_RESERVATION_INVALID');
+  const reservation = value as Partial<SandboxControlReservation>;
+  const keys = Object.keys(reservation).sort().join(',');
+  if (keys !== 'bytes,createdAt,generation,id,logicalRecords,version'
+    || reservation.version !== 1
+    || typeof reservation.id !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(reservation.id)
+    || typeof reservation.generation !== 'string' || reservation.generation.length === 0
+    || reservation.logicalRecords !== 1
+    || !Number.isSafeInteger(reservation.bytes) || (reservation.bytes as number) < SANDBOX_CONTROL_RESERVATION_BYTES
+    || !Number.isSafeInteger(reservation.createdAt)) {
+    throw new Error('SANDBOX_CONTROL_RESERVATION_INVALID');
+  }
+  return reservation as SandboxControlReservation;
 }
 
 export function isSandboxControlFamily(value: string): value is SandboxControlFamily {
