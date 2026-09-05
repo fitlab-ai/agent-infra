@@ -8,7 +8,10 @@ import path from "node:path";
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
-import { listSandboxRemovalJournals } from "../../../lib/sandbox/control/lifecycle.ts";
+import {
+  clearSandboxRemovalJournalRecord,
+  listSandboxRemovalJournals
+} from "../../../lib/sandbox/control/lifecycle.ts";
 import {
   cliArgs,
   envWithPrependedPath,
@@ -982,7 +985,7 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
   }
 });
 
-test("sandbox rm resumes a share cleanup phase without replaying completed host cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+test("sandbox rm preserves a replacement after a share cleanup phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1002,7 +1005,7 @@ test("sandbox rm resumes a share cleanup phase without replaying completed host 
     controlRoots: [controlRoot],
     workspaceViewRoots: []
   };
-  const originalRmdirSync = fs.rmdirSync;
+  const originalWriteFileSync = fs.writeFileSync;
   let injectFailure = true;
   try {
     const channelDir = path.join(controlRoot, "channel");
@@ -1024,13 +1027,16 @@ test("sandbox rm resumes a share cleanup phase without replaying completed host 
       state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
     })}\n`);
 
-    fs.rmdirSync = ((targetPath, options) => {
-      if (injectFailure && path.resolve(String(targetPath)) === path.resolve(share)) {
+    fs.writeFileSync = ((targetPath, data, options) => {
+      if (injectFailure && String(targetPath).includes(".tmp") && String(data).includes('"phase":"share-removed"')) {
         injectFailure = false;
-        throw new Error("INJECTED_CRASH_BEFORE_SHARE_PHASE_COMMIT");
+        fs.mkdirSync(share, { recursive: true });
+        fs.writeFileSync(path.join(share, "replacement.txt"), "replacement\n");
+        originalWriteFileSync(targetPath, data, options);
+        throw new Error("INJECTED_CRASH_AFTER_SHARE_ACTION");
       }
-      return originalRmdirSync(targetPath, options);
-    }) as typeof fs.rmdirSync;
+      return originalWriteFileSync(targetPath, data, options);
+    }) as typeof fs.writeFileSync;
     const previousPath = process.env.PATH;
     const previousDockerLog = process.env.DOCKER_LOG_PATH;
     const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
@@ -1040,7 +1046,7 @@ test("sandbox rm resumes a share cleanup phase without replaying completed host 
     try {
       await assert.rejects(
         () => rm.rmOne(config, [], branch, { assumeYes: true, target }),
-        /INJECTED_CRASH_BEFORE_SHARE_PHASE_COMMIT/
+        /INJECTED_CRASH_AFTER_SHARE_ACTION/
       );
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
@@ -1050,7 +1056,7 @@ test("sandbox rm resumes a share cleanup phase without replaying completed host 
       if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
       else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
     }
-    fs.rmdirSync = originalRmdirSync;
+    fs.writeFileSync = originalWriteFileSync;
 
     const journal = listSandboxRemovalJournals({ branch, project: "demo" })
       .find((candidate) => candidate.target.controlRoot === path.resolve(controlRoot));
@@ -1064,13 +1070,296 @@ test("sandbox rm resumes a share cleanup phase without replaying completed host 
     persisted.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
     fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
 
-    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target }));
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
+      /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
+    );
     assert.equal(fs.existsSync(controlRoot), false);
-    assert.equal(fs.existsSync(share), false);
-    assert.equal(listSandboxRemovalJournals({ branch, project: "demo" })
-      .some((candidate) => candidate.target.controlRoot === path.resolve(controlRoot)), false);
+    assert.equal(fs.existsSync(path.join(share, "replacement.txt")), true);
+    const remaining = listSandboxRemovalJournals({ branch, project: "demo" })
+      .find((candidate) => candidate.target.controlRoot === path.resolve(controlRoot));
+    assert.equal(remaining?.phase, "share-finalizing");
+    if (remaining) clearSandboxRemovalJournalRecord(remaining);
   } finally {
-    fs.rmdirSync = originalRmdirSync;
+    fs.writeFileSync = originalWriteFileSync;
+    for (const journal of listSandboxRemovalJournals({ branch, project: "demo" })) {
+      if (journal.target.controlRoot === path.resolve(controlRoot)) clearSandboxRemovalJournalRecord(journal);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm preserves a same-head branch replacement after a branch phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-branch-phase-retry-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/branch-phase-retry";
+  const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+  const config = rmOneConfig(fixture, tmpDir);
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+  const channelDir = path.join(controlRoot, "channel");
+  const publicStatusDir = path.join(controlRoot, "public");
+  const processingDir = path.join(controlRoot, "processing");
+  fs.mkdirSync(channelDir, { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+    engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+    project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    mode: "branch-only", taskId: null, token: "branch-phase-token", generation: "branch-phase-generation",
+    channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
+  })}\n`);
+  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+    version: 2, generation: "branch-phase-generation",
+    broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+  })}\n`);
+  const target = {
+    branch,
+    effectiveBranch: branch,
+    engine: "docker-desktop",
+    matchedContainers: [],
+    existingWorktrees: [worktree],
+    toolCandidates: [],
+    workspace: { mode: "branch-only" as const },
+    controlRoots: [controlRoot],
+    workspaceViewRoots: []
+  };
+  const inspected = safety.inspectWorktree(worktree);
+  assert.equal(inspected.status, "clean");
+  const permit = safety.createCleanPermit(inspected.snapshot);
+  const head = git(fixture.repoDir, "rev-parse", `refs/heads/${branch}`);
+  const originalWriteFileSync = fs.writeFileSync;
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  let injectFailure = true;
+  try {
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    fs.writeFileSync = ((targetPath, data, options) => {
+      if (injectFailure && String(targetPath).includes(".tmp") && String(data).includes('"phase":"branch-removed"')) {
+        injectFailure = false;
+        originalWriteFileSync(targetPath, data, options);
+        throw new Error("INJECTED_CRASH_AFTER_BRANCH_DELETE");
+      }
+      return originalWriteFileSync(targetPath, data, options);
+    }) as typeof fs.writeFileSync;
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        target,
+        permits: new Map([[path.resolve(worktree), permit]])
+      })),
+      /INJECTED_CRASH_AFTER_BRANCH_DELETE/
+    );
+    fs.writeFileSync = originalWriteFileSync;
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
+    git(fixture.repoDir, "branch", branch, head);
+    const journal = listSandboxRemovalJournals({ branch, project: "demo" })[0];
+    assert.ok(journal);
+    assert.equal(journal.phase, "branch-finalizing");
+    const journalPath = path.join(
+      os.homedir(), ".agent-infra", "sandbox-removal-journal", journal.lockDomain,
+      `${journal.carrierIdentityDigest}.json`
+    );
+    const persisted = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+    persisted.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
+    fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
+      /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
+    );
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), branch);
+    assert.equal(fs.existsSync(worktree), false);
+  } finally {
+    fs.writeFileSync = originalWriteFileSync;
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    for (const remaining of listSandboxRemovalJournals({ branch, project: "demo" })) {
+      if (remaining.target.controlRoot === path.resolve(controlRoot)) {
+        clearSandboxRemovalJournalRecord(remaining);
+      }
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm preserves a replacement worktree after a workspace phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-worktree-phase-retry-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/worktree-phase-retry";
+  const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+  const config = rmOneConfig(fixture, tmpDir);
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+  const channelDir = path.join(controlRoot, "channel");
+  const publicStatusDir = path.join(controlRoot, "public");
+  const processingDir = path.join(controlRoot, "processing");
+  fs.mkdirSync(channelDir, { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+    engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+    project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    mode: "branch-only", taskId: null, token: "worktree-phase-token", generation: "worktree-phase-generation",
+    channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
+  })}\n`);
+  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+    version: 2, generation: "worktree-phase-generation",
+    broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+  })}\n`);
+  const target = {
+    branch,
+    effectiveBranch: branch,
+    engine: "docker-desktop",
+    matchedContainers: [],
+    existingWorktrees: [worktree],
+    toolCandidates: [],
+    workspace: { mode: "branch-only" as const },
+    controlRoots: [controlRoot],
+    workspaceViewRoots: []
+  };
+  const inspected = safety.inspectWorktree(worktree);
+  assert.equal(inspected.status, "clean");
+  const permit = safety.createCleanPermit(inspected.snapshot);
+  const originalWriteFileSync = fs.writeFileSync;
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  let injectFailure = true;
+  try {
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    fs.writeFileSync = ((targetPath, data, options) => {
+      if (injectFailure && String(targetPath).includes(".tmp") && String(data).includes('"phase":"workspace-removed"')) {
+        injectFailure = false;
+        originalWriteFileSync(targetPath, data, options);
+        git(fixture.repoDir, "worktree", "add", "-q", worktree, branch);
+        throw new Error("INJECTED_CRASH_AFTER_WORKTREE_MOVE");
+      }
+      return originalWriteFileSync(targetPath, data, options);
+    }) as typeof fs.writeFileSync;
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        target,
+        permits: new Map([[path.resolve(worktree), permit]])
+      })),
+      /INJECTED_CRASH_AFTER_WORKTREE_MOVE/
+    );
+    fs.writeFileSync = originalWriteFileSync;
+    const journal = listSandboxRemovalJournals({ branch, project: "demo" })[0];
+    assert.ok(journal);
+    assert.equal(journal.phase, "workspace-finalizing");
+    const journalPath = path.join(
+      os.homedir(), ".agent-infra", "sandbox-removal-journal", journal.lockDomain,
+      `${journal.carrierIdentityDigest}.json`
+    );
+    const persisted = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+    persisted.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
+    fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
+      /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
+    );
+    assert.equal(fs.existsSync(worktree), true);
+    assert.match(git(fixture.repoDir, "worktree", "list", "--porcelain"), new RegExp(`worktree ${worktree.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  } finally {
+    fs.writeFileSync = originalWriteFileSync;
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    for (const journal of listSandboxRemovalJournals({ branch, project: "demo" })) {
+      if (journal.target.controlRoot === path.resolve(controlRoot)) clearSandboxRemovalJournalRecord(journal);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm preserves untouched targets after a partial workspace phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-multi-target-phase-retry-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/multi-target-phase-retry";
+  const config = rmOneConfig(fixture, tmpDir);
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+  const firstView = path.join(config.workspaceViewBase, config.project, container, "branch-only");
+  const secondView = path.join(config.workspaceViewBase, config.project, container, "second");
+  const channelDir = path.join(controlRoot, "channel");
+  const publicStatusDir = path.join(controlRoot, "public");
+  const processingDir = path.join(controlRoot, "processing");
+  fs.mkdirSync(channelDir, { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
+  fs.mkdirSync(firstView, { recursive: true });
+  fs.writeFileSync(path.join(firstView, "old.txt"), "old\n");
+  fs.mkdirSync(secondView, { recursive: true });
+  fs.writeFileSync(path.join(secondView, "keep.txt"), "keep\n");
+  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+    engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+    project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
+    mode: "branch-only", taskId: null, token: "multi-target-phase-token", generation: "multi-target-phase-generation",
+    channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
+  })}\n`);
+  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+    version: 2, generation: "multi-target-phase-generation",
+    broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+  })}\n`);
+  const target = {
+    branch,
+    effectiveBranch: branch,
+    engine: "docker-desktop",
+    matchedContainers: [],
+    existingWorktrees: [],
+    toolCandidates: [],
+    workspace: { mode: "branch-only" as const },
+    controlRoots: [controlRoot],
+    workspaceViewRoots: [firstView, secondView]
+  };
+  const originalRenameSync = fs.renameSync;
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  let injectFailure = true;
+  try {
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    fs.renameSync = ((source, destination) => {
+      const result = originalRenameSync(source, destination);
+      if (injectFailure && path.resolve(String(source)) === path.resolve(firstView)) {
+        injectFailure = false;
+        fs.mkdirSync(firstView, { recursive: true });
+        fs.writeFileSync(path.join(firstView, "replacement.txt"), "replacement\n");
+        throw new Error("INJECTED_CRASH_AFTER_FIRST_TARGET_MOVE");
+      }
+      return result;
+    }) as typeof fs.renameSync;
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
+      /INJECTED_CRASH_AFTER_FIRST_TARGET_MOVE/
+    );
+    fs.renameSync = originalRenameSync;
+    const journal = listSandboxRemovalJournals({ branch, project: "demo" })[0];
+    assert.ok(journal);
+    const journalPath = path.join(
+      os.homedir(), ".agent-infra", "sandbox-removal-journal", journal.lockDomain,
+      `${journal.carrierIdentityDigest}.json`
+    );
+    const persisted = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+    persisted.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
+    fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
+      /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
+    );
+    assert.equal(fs.existsSync(path.join(firstView, "replacement.txt")), true);
+    assert.equal(fs.existsSync(path.join(secondView, "keep.txt")), true);
+  } finally {
+    fs.renameSync = originalRenameSync;
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    for (const journal of listSandboxRemovalJournals({ branch, project: "demo" })) {
+      if (journal.target.controlRoot === path.resolve(controlRoot)) clearSandboxRemovalJournalRecord(journal);
+    }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

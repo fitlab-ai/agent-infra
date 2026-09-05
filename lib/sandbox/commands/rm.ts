@@ -186,16 +186,22 @@ function prepareRemovalAction(
   startPhase: SandboxRemovalJournal['phase'],
   completedPhase: SandboxRemovalJournal['phase'],
   resourceLocks: ReadonlyMap<string, SandboxResourceLock>
-): boolean {
+): RemovalActionPreparation {
   const journals = listSandboxRemovalJournals({
     branch: target.effectiveBranch,
     project,
     targetDigest
   });
+  const startIndex = sandboxRemovalPhaseIndex(startPhase);
+  const completedIndex = sandboxRemovalPhaseIndex(completedPhase);
   const shouldRun = journals.length === 0
-    || journals.some((journal) => sandboxRemovalPhaseIndex(journal.phase) < sandboxRemovalPhaseIndex(completedPhase));
+    || journals.some((journal) => sandboxRemovalPhaseIndex(journal.phase) < completedIndex);
+  const recovering = journals.some((journal) => {
+    const index = sandboxRemovalPhaseIndex(journal.phase);
+    return index >= startIndex && index < completedIndex;
+  });
   advanceRemovalJournals(project, target, targetDigest, startPhase, resourceLocks);
-  return shouldRun;
+  return { run: shouldRun, recovering };
 }
 
 function assertRemovalPathsAbsent(paths: readonly string[]): void {
@@ -222,6 +228,194 @@ function assertBranchRemovalIdentity(
   const actualHead = runSafe('git', ['-C', config.repoRoot, 'rev-parse', `refs/heads/${branch}`]);
   if (!expectedHeads.has(actualHead)) {
     throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
+  }
+}
+
+function removalTombstonePath(targetDigest: string, kind: RemovalActionKind, source: string): string {
+  const sourceDigest = createHash('sha256')
+    .update(`${kind}\0${path.resolve(source)}`)
+    .digest('hex')
+    .slice(0, 24);
+  return path.join(
+    path.dirname(path.resolve(source)),
+    `.agent-infra-removal-${targetDigest.slice(0, 16)}-${kind}-${sourceDigest}`
+  );
+}
+
+function removalTombstones(
+  targetDigest: string,
+  kind: RemovalActionKind,
+  sources: readonly string[]
+): string[] {
+  return sources.map((source) => removalTombstonePath(targetDigest, kind, source));
+}
+
+function stageManagedRemoval(
+  root: string,
+  source: string,
+  tombstone: string,
+  recovering: boolean
+): void {
+  assertManagedPath(root, source);
+  assertManagedPath(root, tombstone);
+  const sourceExists = fs.existsSync(source);
+  const tombstoneExists = fs.existsSync(tombstone);
+  if (sourceExists && tombstoneExists) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${source}`);
+  }
+  if (recovering) {
+    if (sourceExists && !tombstoneExists) {
+      throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${source}`);
+    }
+    return;
+  }
+  if (!sourceExists) return;
+  fs.renameSync(source, tombstone);
+}
+
+function cleanupManagedTombstones(root: string, tombstones: readonly string[]): void {
+  for (const tombstone of tombstones) {
+    if (fs.existsSync(tombstone)) removeManagedDir(root, tombstone);
+  }
+}
+
+function branchRemovalTombstoneRef(targetDigest: string): string {
+  return `refs/agent-infra/sandbox-removal/${targetDigest}/branch`;
+}
+
+function branchPermitHead(
+  branch: string,
+  permits: ReadonlyMap<string, WorktreeRemovalPermit>
+): string | null {
+  const heads = new Set(
+    [...permits.values()]
+      .filter((permit) => permit.snapshot.branch === branch)
+      .map((permit) => permit.snapshot.head)
+  );
+  return heads.size === 1 ? [...heads][0]! : null;
+}
+
+function stageBranchRemoval(
+  config: SandboxConfig,
+  branch: string,
+  targetDigest: string,
+  permits: ReadonlyMap<string, WorktreeRemovalPermit>,
+  recovering: boolean
+): void {
+  const expectedHead = branchPermitHead(branch, permits);
+  if (!expectedHead) throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
+  const branchName = `refs/heads/${branch}`;
+  const tombstone = branchRemovalTombstoneRef(targetDigest);
+  const branchExists = runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', branchName]);
+  const tombstoneExists = runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', tombstone]);
+  if (branchExists && tombstoneExists) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
+  }
+  if (recovering) {
+    if (branchExists && !tombstoneExists) {
+      throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${branch}`);
+    }
+    if (tombstoneExists && runSafe('git', ['-C', config.repoRoot, 'rev-parse', tombstone]) !== expectedHead) {
+      throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
+    }
+    return;
+  }
+  if (!branchExists) return;
+  assertBranchRemovalIdentity(config, branch, permits);
+  const actualHead = runSafe('git', ['-C', config.repoRoot, 'rev-parse', branchName]);
+  if (!runOk('git', ['-C', config.repoRoot, 'update-ref', tombstone, actualHead, '0'.repeat(40)])) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
+  }
+  if (!runOk('git', ['-C', config.repoRoot, 'update-ref', '-d', branchName, actualHead])) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
+  }
+}
+
+function cleanupBranchTombstone(
+  config: SandboxConfig,
+  branch: string,
+  targetDigest: string,
+  permits: ReadonlyMap<string, WorktreeRemovalPermit>
+): void {
+  const tombstone = branchRemovalTombstoneRef(targetDigest);
+  if (!runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', tombstone])) return;
+  const expectedHead = branchPermitHead(branch, permits);
+  if (!expectedHead || runSafe('git', ['-C', config.repoRoot, 'rev-parse', tombstone]) !== expectedHead) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
+  }
+  if (!runOk('git', ['-C', config.repoRoot, 'update-ref', '-d', tombstone, expectedHead])) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${branch}`);
+  }
+}
+
+function stageWorktreeRemoval(
+  config: SandboxConfig,
+  worktree: string,
+  permit: WorktreeRemovalPermit,
+  tombstone: string,
+  recovering: boolean
+): void {
+  assertManagedPath(config.worktreeBase, worktree);
+  assertManagedPath(config.worktreeBase, tombstone);
+  const worktreeExists = fs.existsSync(worktree);
+  const tombstoneExists = fs.existsSync(tombstone);
+  if (worktreeExists || !recovering) verifyWorktreePermit(permit);
+  if (worktreeExists && tombstoneExists) {
+    throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${worktree}`);
+  }
+  if (recovering) {
+    if (worktreeExists && !tombstoneExists) {
+      throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${worktree}`);
+    }
+    return;
+  }
+  if (!worktreeExists) return;
+  fs.renameSync(worktree, tombstone);
+  runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
+}
+
+function cleanupCompletedRemovalArtifacts(
+  config: SandboxConfig,
+  target: RmTarget,
+  committedTarget: SandboxRemovalTargetCommit,
+  targetDigest: string
+): void {
+  const journals = listSandboxRemovalJournals({
+    branch: target.effectiveBranch,
+    project: config.project,
+    targetDigest
+  });
+  if (journals.length === 0) return;
+  const completed = (phase: SandboxRemovalJournal['phase']): boolean => journals.every((journal) => (
+    sandboxRemovalPhaseIndex(journal.phase) >= sandboxRemovalPhaseIndex(phase)
+  ));
+  if (completed('workspace-removed')) {
+    cleanupManagedTombstones(config.workspaceViewBase, removalTombstones(
+      targetDigest, 'workspace', target.workspaceViewRoots
+    ));
+    cleanupManagedTombstones(path.join(config.controlBase, config.project), removalTombstones(
+      targetDigest, 'workspace', target.controlRoots
+    ));
+    cleanupManagedTombstones(config.worktreeBase, removalTombstones(
+      targetDigest, 'worktree', committedTarget.worktreePaths
+    ));
+  }
+  if (completed('branch-removed')) {
+    cleanupBranchTombstone(config, target.effectiveBranch, targetDigest, new Map(
+      committedTarget.permits.map((permit) => [path.resolve(permit.path), {
+        mode: permit.mode,
+        snapshot: permit.snapshot
+      }])
+    ));
+  }
+  if (completed('tool-removed')) {
+    cleanupManagedTombstones(config.home, removalTombstones(targetDigest, 'tool', committedTarget.toolPaths));
+  }
+  if (completed('shell-removed')) {
+    cleanupManagedTombstones(config.shellConfigBase, removalTombstones(targetDigest, 'shell', committedTarget.shellPaths));
+  }
+  if (completed('share-removed')) {
+    cleanupManagedTombstones(config.shareBase, removalTombstones(targetDigest, 'share', [committedTarget.sharePath]));
   }
 }
 
@@ -296,6 +490,13 @@ type RmTarget = {
   controlRoots: string[];
   workspaceViewRoots: string[];
 };
+
+type RemovalActionKind = 'workspace' | 'worktree' | 'tool' | 'shell' | 'share';
+
+type RemovalActionPreparation = Readonly<{
+  run: boolean;
+  recovering: boolean;
+}>;
 
 type CleanupCandidate = Readonly<{
   row: SandboxRow;
@@ -789,7 +990,11 @@ async function rmOne(
   for (const worktree of existingWorktrees) {
     const permit = permits.get(path.resolve(worktree));
     if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
-    verifyWorktreePermit(permit);
+    if (fs.existsSync(worktree)
+      || existingJournals.every((journal) => sandboxRemovalPhaseIndex(journal.phase)
+        < sandboxRemovalPhaseIndex('workspace-removed'))) {
+      verifyWorktreePermit(permit);
+    }
   }
 
   const recoveredRemovalChoice = persistedTarget;
@@ -904,6 +1109,7 @@ async function rmOne(
         : claimed;
       recoveredContainerNames.add(controlRootContainer(config, journal.target.controlRoot));
     }
+    cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
     preflightRmTarget(config, target);
   const coordinatedContainers = new Set(recoveredContainerNames);
   for (const root of controlRoots.filter((candidate) => fs.existsSync(candidate))) {
@@ -952,7 +1158,7 @@ async function rmOne(
   const runWorkspaceCleanup = prepareRemovalAction(
     config.project, target, targetDigest, 'workspace-finalizing', 'workspace-removed', resourceLocks
   );
-  if (runWorkspaceCleanup) {
+  if (runWorkspaceCleanup.run) {
     for (const [roots, base, label] of [
       [workspaceViewRoots, path.join(config.workspaceViewBase, config.project), 'Workspace view'],
       [controlRoots, path.join(config.controlBase, config.project), 'Control channel']
@@ -960,9 +1166,12 @@ async function rmOne(
       for (const directory of roots.filter((candidate) => fs.existsSync(candidate))) {
         assertLegacyCandidateEvidence(directory, base === path.join(config.controlBase, config.project)
           ? config.controlBase : config.workspaceViewBase, config, effectiveBranch, matchedContainers);
-        removeManagedDir(base, directory);
-        assertRemoved(directory, label);
-        removeEmptyManagedParent(base, directory);
+        stageManagedRemoval(
+          base,
+          directory,
+          removalTombstonePath(targetDigest, 'workspace', directory),
+          runWorkspaceCleanup.recovering
+        );
         if (!options.quiet) p.log.success(`${label} removed: ${directory}`);
       }
     }
@@ -971,13 +1180,13 @@ async function rmOne(
       for (const worktree of existingWorktrees) {
         const permit = permits.get(path.resolve(worktree));
         if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
-        removeWorktreeDir(config.repoRoot, config.worktreeBase, worktree, permit, {
-          allowRegisteredPathFallback: engine === ENGINES.WSL2
-        });
-        assertRemoved(worktree, 'Worktree');
-        const registered = runSafe('git', ['-C', config.repoRoot, 'worktree', 'list', '--porcelain'])
-          .split('\n').filter((line) => line.startsWith('worktree ')).map((line) => path.resolve(line.slice(9)));
-        if (registered.includes(path.resolve(worktree))) throw new Error(`Worktree is still registered after removal: ${worktree}`);
+        stageWorktreeRemoval(
+          config,
+          worktree,
+          permit,
+          removalTombstonePath(targetDigest, 'worktree', worktree),
+          runWorkspaceCleanup.recovering
+        );
       }
     }
   } else {
@@ -987,35 +1196,42 @@ async function rmOne(
     ]);
   }
   advanceRemovalJournals(config.project, target, targetDigest, 'workspace-removed', resourceLocks);
+  cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
+  for (const [roots, base] of [
+    [workspaceViewRoots, path.join(config.workspaceViewBase, config.project)],
+    [controlRoots, path.join(config.controlBase, config.project)]
+  ] as const) {
+    for (const directory of roots) {
+      if (!fs.existsSync(directory)) removeEmptyManagedParent(base, directory);
+    }
+  }
 
   const runBranchCleanup = prepareRemovalAction(
     config.project, target, targetDigest, 'branch-finalizing', 'branch-removed', resourceLocks
   );
-  if (runBranchCleanup) {
+  if (runBranchCleanup.run) {
     if (shouldRemoveWorktree && shouldDeleteBranch) {
-      assertBranchRemovalIdentity(config, effectiveBranch, permits);
-      if (runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${effectiveBranch}`])
-        && !runOk('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch])) {
-        throw new Error(`Local branch '${effectiveBranch}' was not deleted`);
-      }
-      if (runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${effectiveBranch}`])) {
-        throw new Error(`Local branch '${effectiveBranch}' still exists after removal`);
-      }
+      stageBranchRemoval(config, effectiveBranch, targetDigest, permits, runBranchCleanup.recovering);
     }
   } else if (shouldRemoveWorktree && shouldDeleteBranch
     && runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${effectiveBranch}`])) {
     throw new Error(`SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH: ${effectiveBranch}`);
   }
   advanceRemovalJournals(config.project, target, targetDigest, 'branch-removed', resourceLocks);
+  cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
 
   const runToolCleanup = prepareRemovalAction(
     config.project, target, targetDigest, 'tool-finalizing', 'tool-removed', resourceLocks
   );
-  if (runToolCleanup) {
+  if (runToolCleanup.run) {
     for (const { tool, candidates } of toolCandidates) {
       for (const dir of candidates.filter((candidate) => fs.existsSync(candidate))) {
-        removeManagedDir(tool.sandboxBase, dir);
-        assertRemoved(dir, `${tool.name} state`);
+        stageManagedRemoval(
+          tool.sandboxBase,
+          dir,
+          removalTombstonePath(targetDigest, 'tool', dir),
+          runToolCleanup.recovering
+        );
         p.log.success(`${tool.name} state removed: ${dir}`);
       }
     }
@@ -1023,34 +1239,45 @@ async function rmOne(
     assertRemovalPathsAbsent(removalActionPaths(target, config, 'tool-removed'));
   }
   advanceRemovalJournals(config.project, target, targetDigest, 'tool-removed', resourceLocks);
+  cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
 
   const runShellCleanup = prepareRemovalAction(
     config.project, target, targetDigest, 'shell-finalizing', 'shell-removed', resourceLocks
   );
-  if (runShellCleanup) {
+  if (runShellCleanup.run) {
     for (const dir of shellConfigDirCandidates(config, effectiveBranch).filter((candidate) => fs.existsSync(candidate))) {
-      removeManagedDir(config.shellConfigBase, dir);
-      assertRemoved(dir, 'Shell config');
+      stageManagedRemoval(
+        config.shellConfigBase,
+        dir,
+        removalTombstonePath(targetDigest, 'shell', dir),
+        runShellCleanup.recovering
+      );
       p.log.success(`Shell config removed: ${dir}`);
     }
   } else {
     assertRemovalPathsAbsent(removalActionPaths(target, config, 'shell-removed'));
   }
   advanceRemovalJournals(config.project, target, targetDigest, 'shell-removed', resourceLocks);
+  cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
 
   const runShareCleanup = prepareRemovalAction(
     config.project, target, targetDigest, 'share-finalizing', 'share-removed', resourceLocks
   );
-  if (runShareCleanup) {
+  if (runShareCleanup.run) {
     if (shouldRemoveShare && fs.existsSync(sharePath)) {
-      removeManagedDir(config.shareBase, sharePath);
-      assertRemoved(sharePath, 'Share dir');
+      stageManagedRemoval(
+        config.shareBase,
+        sharePath,
+        removalTombstonePath(targetDigest, 'share', sharePath),
+        runShareCleanup.recovering
+      );
       p.log.success(`Share dir removed: ${sharePath}`);
     }
   } else if (shouldRemoveShare) {
     assertRemovalPathsAbsent(removalActionPaths(target, config, 'share-removed'));
   }
   advanceRemovalJournals(config.project, target, targetDigest, 'share-removed', resourceLocks);
+  cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
 
   const completedJournals = advanceRemovalJournals(config.project, target, targetDigest, 'completed', resourceLocks);
   for (const journal of completedJournals) clearSandboxRemovalJournalRecord(journal);
