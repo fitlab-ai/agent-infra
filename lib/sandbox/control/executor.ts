@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { getProcessStartTime } from '../../server/process-state.ts';
-import { createTask } from '../../task/create-service.ts';
+import {
+  createTask,
+  projectTaskCreateResult,
+  taskCreateExitCode,
+  taskCreateFailure,
+  type TaskCreateResult
+} from '../../task/create-service.ts';
 import { applyTaskFinalization } from '../../task/finalization.ts';
 import { bindSandboxControlTask, validateSandboxControlRequest, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
 import {
@@ -286,6 +292,22 @@ function lifecycleFailure(code: string, message: string): SandboxControlExecutio
   };
 }
 
+function taskCreateExecutionResult(result: TaskCreateResult): SandboxControlExecutionResult {
+  return {
+    exitCode: taskCreateExitCode(result),
+    stdout: `${JSON.stringify(result)}\n`,
+    stderr: ''
+  };
+}
+
+function taskCreateExecutionFailure(requestId: string, code: string, message: string): SandboxControlExecutionResult {
+  return taskCreateExecutionResult(taskCreateFailure({ code, message, retryable: false }, {
+    requestId,
+    accepted: true,
+    recovery: 'inspect-domain-state'
+  }));
+}
+
 function finalizationResult(result: Awaited<ReturnType<typeof applyTaskFinalization>>): SandboxControlExecutionResult {
   const payload = {
     version: 1,
@@ -314,12 +336,18 @@ async function executeRequestInner(
   options: ExecuteRequestOptions = {}
 ): Promise<SandboxControlExecutionResult> {
   if (request.family === 'task-create') {
-    const result = await createTask(request.candidate, { repoRoot: manifest.repoRoot });
-    return {
-      exitCode: result.status === 'blocked' ? 2 : result.status === 'failed' ? 1 : 0,
-      stdout: `${JSON.stringify(result)}\n`,
-      stderr: ''
-    };
+    try {
+      const result = await createTask(request.candidate, { repoRoot: manifest.repoRoot });
+      return taskCreateExecutionResult(projectTaskCreateResult(result, {
+        requestId: request.id,
+        accepted: true,
+        recovery: 'none'
+      }));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const code = /^([A-Z][A-Z0-9_]+)/u.exec(detail)?.[1] ?? 'TASK_CREATE_EXECUTION_FAILED';
+      return taskCreateExecutionFailure(request.id, code, detail);
+    }
   }
   if (request.family === 'codex-controller') {
     try {
@@ -557,7 +585,9 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
         })}\n`,
         stderr: ''
       }
-      : request.family === 'task-lifecycle'
+      : request.family === 'task-create'
+        ? taskCreateExecutionFailure(request.id, code, detail)
+        : request.family === 'task-lifecycle'
         ? lifecycleFailure(code, detail)
         : orchestrationFailure(code, detail);
   }

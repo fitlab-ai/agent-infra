@@ -1,22 +1,71 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { requestSandboxTaskCreate, SandboxControlClientError } from '../sandbox/control/client.ts';
+import {
+  classifySandboxControlEnvironment,
+  requestSandboxTaskCreate,
+  SandboxControlClientError
+} from '../sandbox/control/client.ts';
 import { SANDBOX_CONTROL_MAX_BYTES } from '../sandbox/control/protocol.ts';
 import { validateTaskCreateCandidate } from '../task/create.ts';
-import { createTask, type TaskCreateResult } from '../task/create-service.ts';
+import {
+  createTask,
+  parseTaskCreateResult,
+  projectTaskCreateResult,
+  taskCreateExitCode,
+  taskCreateFailure,
+  type TaskCreateControl,
+  type TaskCreateResult
+} from '../task/create-service.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-function failed(code: string, message: string, retryable = false): TaskCreateResult {
-  return {
-    status: retryable ? 'blocked' : 'failed', changed: false, task: { id: null, shortId: null }, issue: null,
-    operations: [], warnings: [], error: { code, message, retryable }
-  };
+function failed(code: string, message: string, retryable = false, control?: TaskCreateControl): TaskCreateResult {
+  return taskCreateFailure({ code, message, retryable }, control);
 }
 
 function output(result: TaskCreateResult): void {
   process.stdout.write(`${JSON.stringify(result)}\n`);
-  process.exitCode = result.status === 'blocked' ? 2 : result.status === 'failed' ? 1 : 0;
+  process.exitCode = taskCreateExitCode(result);
+}
+
+function clientErrorControl(error: SandboxControlClientError): TaskCreateControl {
+  return {
+    requestId: error.requestId,
+    accepted: error.accepted,
+    recovery: error.accepted ? 'same-request-id' : error.detail.retryable ? 'new-request-id' : 'none'
+  };
+}
+
+function parseControlledResult(response: ReturnType<typeof requestSandboxTaskCreate>): TaskCreateResult {
+  if (response.phase !== 'completed' || response.error !== null) {
+    return failed(
+      'SANDBOX_CONTROL_RESPONSE_INVALID',
+      'SANDBOX_CONTROL_RESPONSE_INVALID: completed task-create response is invalid',
+      false,
+      { requestId: response.id, accepted: true, recovery: 'same-request-id' }
+    );
+  }
+  let result: TaskCreateResult;
+  try {
+    result = parseTaskCreateResult(JSON.parse(response.stdout));
+  } catch {
+    return failed(
+      'TASK_CREATE_RESULT_INVALID',
+      'TASK_CREATE_RESULT_INVALID: task-create result payload is invalid',
+      false,
+      { requestId: response.id, accepted: true, recovery: 'same-request-id' }
+    );
+  }
+  if (!result.control || result.control.requestId !== response.id || result.control.accepted !== true) {
+    return failed(
+      'TASK_CREATE_RESULT_INVALID',
+      'TASK_CREATE_RESULT_INVALID: controlled task-create result is missing request evidence',
+      false,
+      { requestId: response.id, accepted: true, recovery: 'same-request-id' }
+    );
+  }
+  process.stderr.write(response.stderr);
+  return result;
 }
 
 async function taskCreate(args: string[]): Promise<void> {
@@ -34,25 +83,33 @@ async function taskCreate(args: string[]): Promise<void> {
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('TASK_CREATE_INPUT_INVALID: input must be a regular file');
     if (stat.size > SANDBOX_CONTROL_MAX_BYTES) throw new Error('TASK_CREATE_INPUT_TOO_LARGE: input exceeds the control limit');
     const candidate = validateTaskCreateCandidate(JSON.parse(fs.readFileSync(inputPath, 'utf8')));
-    if (process.env.AGENT_INFRA_CONTROL_TOKEN) {
+    const environment = classifySandboxControlEnvironment();
+    if (environment.kind === 'invalid') {
+      output(failed(environment.code ?? 'TASK_CONTROL_TRANSPORT_INVALID', environment.message ?? 'sandbox client control configuration is invalid'));
+      return;
+    }
+    if (environment.kind === 'controlled') {
       const response = requestSandboxTaskCreate({ candidate });
       if (response.phase === 'rejected') {
         output(failed(
           response.error?.code ?? 'SANDBOX_CONTROL_REJECTED',
           response.error?.message ?? response.stderr,
-          response.error?.retryable ?? false
+          response.error?.retryable ?? false,
+          {
+            requestId: response.id,
+            accepted: false,
+            recovery: response.error?.retryable ? 'new-request-id' : 'none'
+          }
         ));
         return;
       }
-      process.stdout.write(response.stdout);
-      process.stderr.write(response.stderr);
-      process.exitCode = response.exitCode;
+      output(parseControlledResult(response));
       return;
     }
     output(await createTask(candidate, { repoRoot: process.cwd() }));
   } catch (error) {
     if (error instanceof SandboxControlClientError) {
-      output(failed(error.detail.code, error.detail.message, error.detail.retryable));
+      output(failed(error.detail.code, error.detail.message, error.detail.retryable, clientErrorControl(error)));
       return;
     }
     const message = error instanceof Error ? error.message : String(error);

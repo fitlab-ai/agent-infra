@@ -50,12 +50,7 @@ import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
 import { resolveTaskRef } from '../../task/resolve-ref.ts';
-import {
-  mergeSandboxTaskView,
-  taskViewAfterFinalization,
-  taskViewForManifest,
-  type SandboxTaskView
-} from './task-view.ts';
+import { taskCreateOutputUnavailableResult } from '../../task/create-service.ts';
 
 type ActiveExecution = {
   request: SandboxControlRequest;
@@ -300,16 +295,17 @@ function outputMatchesEvidence(output: string, bytes: number, sha256: string): b
 }
 
 function genericRecoveryResponse(
-  requestId: string,
-  evidence: ReturnType<typeof readSandboxControlResultEvidence>,
+  request: SandboxControlRequest,
+  exitCode: number,
   payload: ReturnType<typeof readSandboxControlPayload> | null
 ): SandboxControlResponse {
+  const outputUnavailable = request.family === 'task-create' && !payload;
   return {
     version: 2,
-    id: requestId,
+    id: request.id,
     phase: 'completed',
-    exitCode: evidence.exitCode,
-    stdout: '',
+    exitCode,
+    stdout: outputUnavailable ? `${JSON.stringify(taskCreateOutputUnavailableResult(request.id))}\n` : '',
     stderr: payload ? '' : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
     error: null,
     outputState: payload ? 'available' : 'unavailable',
@@ -327,7 +323,7 @@ function recoveryResponse(
     const finalization = finalizationRecoveryResponse(manifest, request.id, evidence.exitCode);
     return finalization.status === 'matched' ? finalization.response ?? null : null;
   }
-  return genericRecoveryResponse(request.id, evidence, payload);
+  return genericRecoveryResponse(request, evidence.exitCode, payload);
 }
 
 function terminalMatchesEvidence(
@@ -366,7 +362,7 @@ function terminalMatchesEvidence(
     };
   }
   if (response.outputState === 'unavailable') {
-    const expected = genericRecoveryResponse(request.id, evidence, null);
+    const expected = genericRecoveryResponse(request, evidence.exitCode, null);
     return { valid: JSON.stringify(response) === JSON.stringify(expected), payloadReferenced: false };
   }
   return {
@@ -399,7 +395,7 @@ function publishExecutionResult(
     if (sandboxControlEncodedJsonBytes(inline) <= SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES) {
       terminal = inline;
     }
-    let payload = null;
+    let payload: ReturnType<typeof createSandboxControlPayload> | null = null;
     if (!terminal) {
       try {
         payload = createSandboxControlPayload(manifest, request.id, normalized);
@@ -412,17 +408,7 @@ function publishExecutionResult(
       } catch {
         payload = null;
       }
-      terminal = {
-        version: 2,
-        id: request.id,
-        phase: 'completed',
-        exitCode: normalized.exitCode,
-        stdout: '',
-        stderr: payload ? '' : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n',
-        error: null,
-        outputState: payload ? 'available' : 'unavailable',
-        payload: payload ? payloadReference(payload) : null
-      };
+      terminal = genericRecoveryResponse(request, normalized.exitCode, payload);
     }
   }
   if (!brokerOwns()) return false;
@@ -611,7 +597,13 @@ function delay(ms: number): Promise<void> {
 }
 
 export function sandboxControlSafeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith('AGENT_INFRA_CONTROL_')));
+  return Object.fromEntries(Object.entries(env).filter(([key]) => {
+    const normalized = key.toUpperCase();
+    return !normalized.startsWith('AGENT_INFRA_CONTROL_')
+      && normalized !== 'AGENT_INFRA_TASK_ID'
+      && normalized !== 'AGENT_INFRA_RUNTIME_DIR'
+      && normalized !== 'AGENT_INFRA_EXECUTOR_MANIFEST';
+  }));
 }
 
 export async function serveSandboxControl(

@@ -10,7 +10,10 @@ import { canonicalTaskCreateCandidate, validateTaskCreateCandidate } from '../..
 
 const internalCli = path.resolve('bin/internal-cli.ts');
 const hostEnvironment = Object.fromEntries(
-  Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_INFRA_CONTROL_'))
+  Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_INFRA_CONTROL_')
+    && key !== 'AGENT_INFRA_TASK_ID'
+    && key !== 'AGENT_INFRA_RUNTIME_DIR'
+    && key !== 'AGENT_INFRA_EXECUTOR_MANIFEST')
 );
 
 function fixture(): string {
@@ -120,6 +123,37 @@ test('task-create internal CLI rejects symbolic-link input without writing', () 
     });
     assert.equal(result.status, 1);
     assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CREATE_INPUT_INVALID');
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create internal CLI returns controlled recovery evidence when the broker is unavailable', () => {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  fs.writeFileSync(input, JSON.stringify(candidate()));
+  try {
+    const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...hostEnvironment,
+        AGENT_INFRA_CONTROL_TOKEN: 'controlled-token',
+        AGENT_INFRA_CONTROL_GENERATION: 'controlled-generation',
+        AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
+        AGENT_INFRA_CONTROL_STATUS_DIR: path.join(root, 'status')
+      }
+    });
+    assert.equal(result.status, 2);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 'blocked');
+    assert.equal(payload.error.code, 'SANDBOX_CONTROL_BROKER_UNAVAILABLE');
+    assert.deepEqual(payload.control, {
+      requestId: null,
+      accepted: false,
+      recovery: 'new-request-id'
+    });
     assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

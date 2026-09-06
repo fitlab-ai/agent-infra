@@ -26,6 +26,62 @@ import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } 
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
 
+type SandboxControlEnvironmentClassification = Readonly<{
+  kind: 'direct' | 'controlled' | 'invalid';
+  mode?: 'task-bound' | 'branch-only';
+  code?: 'TASK_CONTROL_TRANSPORT_INVALID';
+  message?: string;
+}>;
+
+export function classifySandboxControlEnvironment(
+  env: NodeJS.ProcessEnv = process.env
+): SandboxControlEnvironmentClassification {
+  const controlKeys = [
+    'AGENT_INFRA_CONTROL_TOKEN',
+    'AGENT_INFRA_CONTROL_GENERATION',
+    'AGENT_INFRA_CONTROL_DIR',
+    'AGENT_INFRA_CONTROL_STATUS_DIR'
+  ] as const;
+  const hasControlMarker = controlKeys.some((key) => Boolean(env[key]));
+  const hasTaskIdentity = Boolean(env.AGENT_INFRA_TASK_ID);
+  const hasRuntime = Boolean(env.AGENT_INFRA_RUNTIME_DIR);
+  const hasExecutorMarker = Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
+  const hasControllerBinding = Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING);
+  const hasAnyMarker = hasControlMarker || hasTaskIdentity || hasRuntime || hasExecutorMarker || hasControllerBinding;
+  const hasCompleteControl = controlKeys.every((key) => Boolean(env[key]));
+
+  if (!hasAnyMarker) return { kind: 'direct' };
+  if (hasExecutorMarker) {
+    return {
+      kind: 'invalid',
+      code: 'TASK_CONTROL_TRANSPORT_INVALID',
+      message: 'executor context is only valid for sandbox-control execute'
+    };
+  }
+  if (hasControllerBinding) {
+    return {
+      kind: 'invalid',
+      code: 'TASK_CONTROL_TRANSPORT_INVALID',
+      message: 'sandbox client control configuration is incomplete or conflicting'
+    };
+  }
+  if (!hasCompleteControl) {
+    return {
+      kind: 'invalid',
+      code: 'TASK_CONTROL_TRANSPORT_INVALID',
+      message: 'sandbox client control configuration is incomplete or conflicting'
+    };
+  }
+  if (hasTaskIdentity !== hasRuntime) {
+    return {
+      kind: 'invalid',
+      code: 'TASK_CONTROL_TRANSPORT_INVALID',
+      message: 'sandbox task identity and runtime binding must be provided together'
+    };
+  }
+  return { kind: 'controlled', mode: hasTaskIdentity ? 'task-bound' : 'branch-only' };
+}
+
 export class SandboxControlClientError extends Error {
   readonly detail: SandboxControlError;
   readonly accepted: boolean;

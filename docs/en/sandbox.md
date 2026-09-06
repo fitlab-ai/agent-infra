@@ -142,6 +142,15 @@ Both identities may create a new task through the dedicated typed `task-create` 
 
 Creation retries have two identities. Reusing an outer request id is rejected even after a broker restart. After a timeout, the caller uses a new outer id but reuses the original immutable candidate file and business idempotency key; semantically identical JSON returns the original task as `no-op`, while changed field values fail closed. Platform failures retain the local task and short id and return a structured warning.
 
+Controlled `task-create` results also carry request evidence: `accepted: true` with
+`recovery: none` means the result is complete, `accepted: false` with
+`recovery: new-request-id` permits retrying the same candidate after a transient
+pre-acceptance failure, and `recovery: same-request-id` requires recovery using
+the accepted request. If broker recovery cannot retain the output payload, it
+returns a failed `SANDBOX_CONTROL_OUTPUT_UNAVAILABLE` task result with
+`recovery: inspect-domain-state`; inspect the host task state before deciding
+whether a later retry is safe.
+
 Task lifecycle, finalization, and orchestration use one typed Task Control Authority with separate transport entries. Direct-host commands call the local authority adapter and do not create a broker, control channel, manifest, or sandbox authority root. A sandbox client only creates a control request; the broker-spawned executor becomes the authority caller only after the gate, current manifest, request, owner, lease, and controller checks pass. Branch-only containers, mismatched IDs, unknown command families, and stale shared-workspace containers fail closed. `ai sandbox ls` exposes `WORKSPACE` and `TASK` columns, while `ai sandbox show` reports the same label-derived identity.
 
 The parent-plus-child bind topology from v0.9.7 is legacy and intentionally incompatible with the current per-state topology. On upgrade, or when old code encounters a newer per-state container during rollback, the check fails closed; run `ai sandbox start --recreate <task-ref-or-branch>` once. Container-local processes, tmux sessions, the writable layer, ordinary `/tmp`, and RAM state may be lost, while the worktree, local branch, and host-managed task/tool data are preserved.

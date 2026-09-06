@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1980,6 +1980,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
 
     const [requestId] = fs.readdirSync(path.join(root, 'control', 'consumed'));
     assert.ok(requestId);
+    assert.deepEqual(result.control, { requestId, accepted: true, recovery: 'none' });
     fs.writeFileSync(path.join(channelDir, 'requests', `${requestId}.json`), `${JSON.stringify({
       version: 2, id: requestId, token, generation, issuedAt: Date.now(), expiresAt: Date.now() + 2_000,
       family: 'task-create', candidate
@@ -2078,6 +2079,76 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
       if (child.exitCode !== null || child.signalCode !== null) resolve();
       else child.once('exit', () => resolve());
     });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('broker recovery returns inspectable task-create output when the payload is unavailable', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-recovery-'));
+  const requestId = '99999999-9999-4999-8999-999999999999';
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, 'task-create-recovery-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    const processingDirectory = path.join(manifest.processingDir, requestId);
+    fs.mkdirSync(processingDirectory, { recursive: true });
+    const issuedAt = Date.now() - 1_000;
+    const candidate = {
+      version: 1 as const,
+      idempotencyKey: '12345678-1234-4123-8123-123456789abc',
+      agent: 'codex' as const,
+      title: 'Recover task-create output',
+      type: 'feature' as const,
+      branchSlug: 'recover-task-create-output',
+      priority: 'Medium' as const,
+      effort: 'Low' as const,
+      description: 'Recover a task-create result after the broker loses its payload.',
+      taskInput: {
+        sources: [], facts: [], constraints: [], decisions: [], alternatives: [],
+        acceptanceCriteria: [], openQuestions: []
+      }
+    };
+    fs.writeFileSync(path.join(processingDirectory, 'request.json'), `${JSON.stringify({
+      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      issuedAt, expiresAt: issuedAt + 2_000, family: 'task-create', candidate,
+      controllerProcess: null, controllerProof: null
+    })}\n`);
+    fs.writeFileSync(path.join(processingDirectory, 'execution.json'), `${JSON.stringify({
+      version: 2, generation: manifest.generation, requestId, nonce: 'task-create-recovery-nonce',
+      child: { pid: 999_999_999, startTime: 0, processGroupId: null }, phase: 'running', updatedAt: Date.now()
+    })}\n`);
+    writeSandboxControlReservation(manifest, requestId, { logicalRecords: 0, bytes: 0 });
+    writeSandboxControlResultEvidence(manifest, requestId, { exitCode: 0, stdout: 'lost task-create output\n', stderr: '' });
+
+    const controller = new AbortController();
+    const server = serveSandboxControl(manifestPath, controller.signal, {
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', 5_000);
+    const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
+    waitForFile(responsePath, 5_000);
+    const response = JSON.parse(fs.readFileSync(responsePath, 'utf8')) as Record<string, unknown>;
+    assert.equal(response.phase, 'completed');
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.outputState, 'unavailable');
+    const result = JSON.parse(String(response.stdout));
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error.code, 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE');
+    assert.deepEqual(result.control, { requestId, accepted: true, recovery: 'inspect-domain-state' });
+    assert.equal(result.task.id, null);
+    assert.equal(result.task.shortId, null);
+    assert.equal(recoverSandboxControl(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, response.stdout);
+    assert.equal(fs.existsSync(processingDirectory), false);
+    controller.abort();
+    await server;
+
+    const recovered = spawnSync(process.execPath, [
+      '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'recover', requestId
+    ], { cwd: path.resolve('.'), encoding: 'utf8', env: { ...process.env, AGENT_INFRA_CONTROL_DIR: manifest.channelDir } });
+    assert.equal(recovered.status, 1, recovered.stderr || recovered.stdout);
+    assert.equal(recovered.stdout, response.stdout);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

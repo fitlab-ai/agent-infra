@@ -13,6 +13,7 @@ import {
   verifyCodexSandboxControllerContextWithWarnings
 } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
+import { parseTaskCreateResult, taskCreateExitCode } from '../task/create-service.ts';
 
 function isCanonicalCodexPrepare(args: readonly string[]): boolean {
   if (args[1] !== 'prepare') return false;
@@ -44,6 +45,17 @@ function finalizationErrorStatus(error: { retryable: boolean; code: string }): F
 function writeClientError(error: SandboxControlClientError): void {
   process.stderr.write(`${error.detail.message}\n`);
   if (error.requestId) process.stderr.write(`SANDBOX_CONTROL_REQUEST_ID: ${error.requestId}\n`);
+}
+
+function recoveredExitCode(response: Awaited<ReturnType<typeof recoverSandboxControl>>): number {
+  if (response.phase !== 'completed') return response.exitCode ?? 1;
+  try {
+    const result = parseTaskCreateResult(JSON.parse(response.stdout));
+    if (result.control?.requestId === response.id) return taskCreateExitCode(result);
+  } catch {
+    // Other control families use their own result envelopes.
+  }
+  return response.exitCode ?? 1;
 }
 
 function sandboxFinalizationClient(args: string[]): void {
@@ -130,7 +142,7 @@ async function sandboxControl(args: string[]): Promise<void> {
     process.stderr.write(response.stderr);
     process.exitCode = response.phase === 'rejected'
       ? response.error?.retryable ? 75 : 1
-      : response.exitCode ?? 1;
+      : recoveredExitCode(response);
     return;
   }
   if (internalHandlerRoute('sandbox-control', 'client', operation ?? '')) {
