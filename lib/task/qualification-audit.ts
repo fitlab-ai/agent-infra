@@ -240,9 +240,13 @@ function stripSectionAtLevel(content: string, aliases: readonly string[], level:
 }
 
 function parseTaskQualification(content: string): { ok: true; qualification: TaskQualification } | { ok: false; code: string; message: string } {
-  const hasConstraintHeading = taskInputSection(content, TASK_CONSTRAINT_HEADINGS) !== null;
-  const hasCandidateHeading = taskInputSection(content, TASK_CANDIDATE_HEADINGS) !== null;
-  if (!hasConstraintHeading && !hasCandidateHeading) {
+  const constraintBody = taskInputSection(content, TASK_CONSTRAINT_HEADINGS);
+  const candidateBody = taskInputSection(content, TASK_CANDIDATE_HEADINGS);
+  const hasConstraintHeading = constraintBody !== null;
+  const hasCandidateHeading = candidateBody !== null;
+  if ((!hasConstraintHeading && !hasCandidateHeading)
+    || (hasConstraintHeading && hasCandidateHeading
+      && !/^\s*\|/m.test(constraintBody!) && !/^\s*\|/m.test(candidateBody!))) {
     return { ok: true, qualification: { present: false, constraints: [], candidates: [], constraintDigest: digest([]), taskInputDigest: digest({ constraints: [], candidates: [] }), nonConstraintInputDigest: nonConstraintInputDigest(content) } };
   }
   if (!hasConstraintHeading || !hasCandidateHeading) {
@@ -252,8 +256,6 @@ function parseTaskQualification(content: string): { ok: true; qualification: Tas
     return { ok: true, qualification: { present: false, constraints: [], candidates: [], constraintDigest: digest([]), taskInputDigest: digest({ constraints: [], candidates: [] }), nonConstraintInputDigest: nonConstraintInputDigest(content) } };
   }
   try {
-    const constraintBody = taskInputSection(content, TASK_CONSTRAINT_HEADINGS);
-    const candidateBody = taskInputSection(content, TASK_CANDIDATE_HEADINGS);
     const constraintTable = constraintBody === null ? null : parseTable(`## 约束\n${constraintBody}`, { sectionAliases: ['约束'], columns: CONSTRAINT_COLUMNS });
     const candidateTable = candidateBody === null ? null : parseTable(`## 候选与否决方案\n${candidateBody}`, { sectionAliases: ['候选与否决方案'], columns: CANDIDATE_COLUMNS });
     if (!constraintTable || !candidateTable) return { ok: false, code: 'QUALIFICATION_TASK_CONTRACT_INVALID', message: 'task qualification requires canonical constraints and candidates tables' };

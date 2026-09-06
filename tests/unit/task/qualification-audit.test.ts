@@ -104,6 +104,21 @@ test('legacy task input remains explicitly unconfigured until migrated', () => {
   if (parsed.ok) assert.equal(parsed.qualification.present, false);
 });
 
+test('prose in both task input sections remains unconfigured', () => {
+  const content = '# Task\n\n## 任务输入\n\n### 约束\n\n- Keep host ownership.\n\n### 候选与否决方案\n\n- Use finalization receipts.\n';
+  const parsed = parseTaskQualification(content);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.qualification.present, false);
+  assert.equal(validateQualificationAudit(content, '# Review\n').ok, true);
+});
+
+test('partially configured qualification tables fail closed', () => {
+  const content = taskContent().replace(/\| candidate_id[\s\S]*$/, '- Use the existing writer.\n');
+  const parsed = parseTaskQualification(content);
+  assert.equal(parsed.ok, false);
+  if (!parsed.ok) assert.equal(parsed.code, 'QUALIFICATION_TASK_CONTRACT_INVALID');
+});
+
 test('non-constraint projection ignores mutable task frontmatter', () => {
   const content = `---
 id: TASK-20260101-000001
