@@ -8,10 +8,19 @@ function receipt(id, changed = true) {
   return { ok: true, value: { remoteId: id, changed } };
 }
 
-function issue(labels) {
+function wrongTarget(message) {
+  return { ok: false, error: { code: 'WRONG_TARGET', message, retryable: false } };
+}
+
+function configuredIdentity(config, resource, number) {
+  const kind = config.identityKind || 'number';
+  return kind === 'number' ? { kind, value: number } : { kind, value: resource === 'change' ? String(number) : `${resource}-${number}` };
+}
+
+function issue(config, labels) {
   return {
     id: 'issue-7',
-    identity: { kind: 'number', value: 7 },
+    identity: configuredIdentity(config, 'issue', 7),
     number: 7,
     title: 'External Issue',
     body: '',
@@ -24,10 +33,10 @@ function issue(labels) {
   };
 }
 
-function changeRequest(labels) {
+function changeRequest(config, labels) {
   return {
     id: 'change-1',
-    identity: { kind: 'number', value: 1 },
+    identity: configuredIdentity(config, 'change', 1),
     number: 1,
     state: 'open',
     title: 'External Change',
@@ -57,10 +66,12 @@ export default async function createPlatformProvider(input) {
     capabilities: { authenticated: true, comment: true, triage: true, push: true, admin: false },
     authenticated: true
   };
+  const issueIdentity = configuredIdentity(config, 'issue', 7);
+  const pullRequestIdentity = configuredIdentity(config, 'change', 1);
   return {
     type: input.providerType,
     contractVersion: input.contractVersion,
-    identity: { issue: 'number', 'pull-request': 'number' },
+    identity: { issue: config.identityKind || 'number', 'pull-request': config.identityKind || 'number' },
     context: {
       async resolve() {
         recordCall(config, 'context.resolve');
@@ -82,9 +93,10 @@ export default async function createPlatformProvider(input) {
           }
         };
       },
-      async inspect() {
+      async inspect(request) {
         recordCall(config, 'issues.inspect');
-        return { ok: true, value: issue(issueLabels) };
+        if (JSON.stringify(request.target) !== JSON.stringify(issueIdentity)) return wrongTarget('Issue inspect target identity was not preserved');
+        return { ok: true, value: issue(config, issueLabels) };
       },
       async create() {
         recordCall(config, 'issues.create');
@@ -92,22 +104,31 @@ export default async function createPlatformProvider(input) {
       },
       async update(request) {
         recordCall(config, 'issues.update');
+        if (JSON.stringify(request.target) !== JSON.stringify(issueIdentity)) {
+          return wrongTarget('Issue update target identity was not preserved');
+        }
+        if (request.mutation.idempotencyKey !== `issue:update:${JSON.stringify(issueIdentity)}:in-labels`) {
+          return wrongTarget('Issue mutation identity was not preserved');
+        }
         issueLabels = request.patch.labels || issueLabels;
         return receipt('issue-updated');
       }
     },
     changeRequests: {
-      async inspect() {
+      async inspect(request) {
         recordCall(config, 'changeRequests.inspect');
-        return { ok: true, value: changeRequest(pullRequestLabels) };
+        if (JSON.stringify(request.target) !== JSON.stringify(pullRequestIdentity)) return wrongTarget('Change request inspect target identity was not preserved');
+        return { ok: true, value: changeRequest(config, pullRequestLabels) };
       },
-      async listFiles() {
+      async listFiles(request) {
         recordCall(config, 'changeRequests.listFiles');
+        if (JSON.stringify(request.target) !== JSON.stringify(pullRequestIdentity)) return wrongTarget('Change request files target identity was not preserved');
         return { ok: true, value: ['lib/core.ts'] };
       },
-      async listClosingIssues() {
+      async listClosingIssues(request) {
         recordCall(config, 'changeRequests.listClosingIssues');
-        return { ok: true, value: [{ kind: 'number', value: 7 }] };
+        if (JSON.stringify(request.target) !== JSON.stringify(pullRequestIdentity)) return wrongTarget('Closing issues target identity was not preserved');
+        return { ok: true, value: [issueIdentity] };
       },
       async listClosing() {
         recordCall(config, 'changeRequests.listClosing');
@@ -119,6 +140,12 @@ export default async function createPlatformProvider(input) {
       },
       async update(request) {
         recordCall(config, 'changeRequests.update');
+        if (JSON.stringify(request.target) !== JSON.stringify(pullRequestIdentity)) {
+          return wrongTarget('Change request update target identity was not preserved');
+        }
+        if (request.mutation.idempotencyKey !== `pull-request:update:${JSON.stringify(pullRequestIdentity)}:in-labels`) {
+          return wrongTarget('Change request mutation identity was not preserved');
+        }
         pullRequestLabels = request.patch.labels || pullRequestLabels;
         return receipt('change-updated');
       },
@@ -130,7 +157,7 @@ export default async function createPlatformProvider(input) {
     verification: {
       async fetchRemoteFacts() {
         recordCall(config, 'verification.fetchRemoteFacts');
-        return { ok: true, value: { issue: issue(issueLabels), comments: [], changeRequest: changeRequest(pullRequestLabels), commit: null, fields: {} } };
+        return { ok: true, value: { issue: issue(config, issueLabels), comments: [], changeRequest: changeRequest(config, pullRequestLabels), commit: null, fields: {} } };
       }
     }
   };

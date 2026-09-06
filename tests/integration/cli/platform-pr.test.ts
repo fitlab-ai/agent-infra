@@ -82,6 +82,54 @@ test('platform-pr sync-in-labels routes all remote reads and writes through an e
   }
 });
 
+for (const identityKind of ['id', 'key']) {
+  test(`platform-pr sync-in-labels preserves external ${identityKind} closing Issue identity`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `platform-pr-${identityKind}-`));
+    const calls = path.join(root, 'provider-calls.txt');
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+        platform: {
+          type: 'trae',
+          providers: {
+            trae: {
+              source: filePath('tests/fixtures/platform-providers/in-label-provider.mjs'),
+              config: { callsPath: calls, identityKind }
+            }
+          }
+        },
+        labels: { in: { core: ['lib/'] } }
+      }));
+      const output = run(['sync-in-labels', '--pr', '1'], {
+        cwd: root,
+        env: { AGENT_INFRA_GH_BIN: path.join(root, 'github-must-not-run') }
+      });
+      assert.equal(output.status, 0, output.stderr || output.stdout);
+      const payload = JSON.parse(output.stdout);
+      assert.equal(payload.status, 'applied');
+      assert.equal(payload.task.issueNumber, null);
+      assert.deepEqual(payload.evidence.closingIssues, [{ kind: identityKind, value: `issue-7` }]);
+      assert.deepEqual(payload.resources.map((resource: { identity: unknown; number: number | null }) => ({ identity: resource.identity, number: resource.number })), [
+        { identity: { kind: identityKind, value: 'issue-7' }, number: null },
+        { identity: { kind: identityKind, value: '1' }, number: null }
+      ]);
+      assert.deepEqual(fs.readFileSync(calls, 'utf8').trim().split('\n'), [
+        'context.resolve',
+        'changeRequests.inspect',
+        'changeRequests.listFiles',
+        'issues.listLabels',
+        'changeRequests.listClosingIssues',
+        'issues.inspect',
+        'changeRequests.update',
+        'changeRequests.inspect'
+      ]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test('platform-pr sync-in-labels reports unsupported provider capabilities without GitHub fallback', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-unsupported-'));
   try {
