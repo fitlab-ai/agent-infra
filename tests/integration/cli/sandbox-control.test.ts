@@ -879,10 +879,11 @@ test('sandbox broker uses configured idle heartbeat and parked binding backoff i
 test('sandbox broker self-GCs its control root after an authoritative absent heartbeat', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-heartbeat-absent-'));
   const controller = new AbortController();
+  let serving: Promise<void> | undefined;
   let heartbeatQueries = 0;
   try {
     const manifestPath = writeControlManifest(root, initializeRepository(root), 'heartbeat-absent-generation');
-    const serving = serveSandboxControl(manifestPath, controller.signal, {
+    serving = serveSandboxControl(manifestPath, controller.signal, {
       timing: {
         controlTickMs: 5,
         parkedBindingInitialMs: 10,
@@ -899,11 +900,12 @@ test('sandbox broker self-GCs its control root after an authoritative absent hea
     while (fs.existsSync(root) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    await serving;
     assert.equal(fs.existsSync(root), false);
+    await serving;
     assert.equal(heartbeatQueries >= 2, true);
   } finally {
     controller.abort();
+    await serving;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1734,6 +1736,8 @@ test('sandbox control client and broker exchange a task-bound response', async (
     assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
     assert.equal(readSandboxControlManifest(manifestPath).taskId, taskId);
 
+    // The response becomes visible before the broker appends its publication audit.
+    waitForAuditEvent(path.join(root, 'audit.ndjson'), 'executor-result-published', generation, 2_000);
     const audit = fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8')
       .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
     const events = new Set(audit.map((entry) => entry.event));

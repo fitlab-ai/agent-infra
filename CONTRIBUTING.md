@@ -47,6 +47,18 @@ npm test
 
 Refer to the project's `README.md` for more guidance on how to set up the development environment.
 
+### Native sandbox lock dependency
+
+Sandbox tests require a working `fs-ext-extra-prebuilt` native module. The project approves its pinned install script for npm versions that block dependency scripts by default. After changing Node.js versions, verify the module with `node -e "require('fs-ext-extra-prebuilt')"`.
+
+On Node.js 26, version 2.2.13 can report a successful install without compiling when npm hoists `nan`. If loading the module fails, build it directly with npm's bundled node-gyp (requires Python and a C++ toolchain), then rerun the tests:
+
+```bash
+node "$(npm config get node-gyp)" rebuild --directory=node_modules/fs-ext-extra-prebuilt
+node -e "require('fs-ext-extra-prebuilt')"
+npm test
+```
+
 ## Branch Management
 
 - Create a new branch for every feature or bug fix; avoid developing directly on the main branch (e.g. `main`).

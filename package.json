@@ -85,5 +85,8 @@
   },
   "overrides": {
     "axios": "1.18.1"
+  },
+  "allowScripts": {
+    "fs-ext-extra-prebuilt@2.2.13": true
   }
 }

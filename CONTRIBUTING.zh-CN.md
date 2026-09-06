@@ -47,6 +47,18 @@ npm test
 
 请参考项目的 `README.md` 文件以获取更多关于如何配置开发环境的指导。
 
+### 沙箱原生锁依赖
+
+沙箱测试需要能正常加载的 `fs-ext-extra-prebuilt` 原生模块。项目已为默认阻止依赖脚本的 npm 版本批准该依赖固定版本的安装脚本。切换 Node.js 版本后，使用 `node -e "require('fs-ext-extra-prebuilt')"` 验证模块是否可用。
+
+在 Node.js 26 上，若 npm 将 `nan` 提升到顶层，2.2.13 版本可能在未编译的情况下报告安装成功。模块加载失败时，使用 npm 自带的 node-gyp 直接编译（需要 Python 和 C++ 工具链），然后重跑测试：
+
+```bash
+node "$(npm config get node-gyp)" rebuild --directory=node_modules/fs-ext-extra-prebuilt
+node -e "require('fs-ext-extra-prebuilt')"
+npm test
+```
+
 ## 分支管理
 
 - 为每个功能或问题修复创建一个新的分支，避免在主分支（如 `main`）上直接开发。
