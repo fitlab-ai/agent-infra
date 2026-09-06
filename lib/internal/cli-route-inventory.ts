@@ -34,6 +34,7 @@ export const PUBLIC_CLI_ROUTE_SELECTORS = Object.freeze({
  */
 export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-create': ['input'],
+  'task-qualification': ['proposal', 'confirm', 'supersede', 'revoke'],
   'sandbox-control': ['serve', 'execute', 'recover', 'client'],
   'agent-client': ['next-steps', 'model-selection'],
   'codex-lifecycle': ['preflight', 'capability-arm', 'hook-event', 'resolve-start', 'resolve-stop', 'consume'],
@@ -42,6 +43,8 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-delivery': ['deliver'],
   'release-workflow': ['inspect', 'prepare', 'publish', 'post-prepare', 'post-publish'],
   'platform-release-notes': ['context', 'stage', 'publish'],
+  'platform-security': ['read', 'dismiss'],
+  'platform-metadata': ['init-labels', 'init-milestones'],
   'platform-context': ['resolve'],
   'platform-comment': ['list', 'owner', 'backfill', 'sync'],
   'platform-issue': ['inspect', 'create', 'bind', 'sync'],
@@ -83,6 +86,7 @@ function optionValue(args: readonly string[], name: string): string | undefined 
 export function internalRouteSelector(command: string, args: readonly string[]): string {
   if (command === 'sandbox-control') return first(args);
   if (command === 'task-create') return 'input';
+  if (command === 'task-qualification') return args[1] ?? '';
   if (command === 'task-lifecycle') return args[1] ? 'intent' : '';
   if (command === 'task-finalization') return args[1] === 'complete' ? 'complete' : '';
   if (command === 'task-event') return args[1] ? 'event' : '';

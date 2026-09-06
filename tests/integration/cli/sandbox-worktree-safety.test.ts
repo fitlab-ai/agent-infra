@@ -1032,9 +1032,9 @@ test("sandbox rm preserves a replacement after a share cleanup phase crash", onP
       channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
     fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
-      version: 2, generation: "share-phase-generation",
+      version: 3, generation: "share-phase-generation",
       broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
-      state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+      state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView(null)
     })}\n`);
 
     fs.writeFileSync = ((targetPath, data, options) => {
@@ -1122,9 +1122,9 @@ test("sandbox rm preserves a same-head branch replacement after a branch phase c
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
-    version: 2, generation: "branch-phase-generation",
+    version: 3, generation: "branch-phase-generation",
     broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
-    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView(null)
   })}\n`);
   const target = {
     branch,
@@ -1218,9 +1218,9 @@ test("sandbox rm preserves a replacement worktree after a workspace phase crash"
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
-    version: 2, generation: "worktree-phase-generation",
+    version: 3, generation: "worktree-phase-generation",
     broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
-    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView(null)
   })}\n`);
   const target = {
     branch,
@@ -1312,9 +1312,9 @@ test("sandbox rm recovers a worktree after a prune-phase crash", onPlatforms("li
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
-    version: 2, generation: "worktree-prune-generation",
+    version: 3, generation: "worktree-prune-generation",
     broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
-    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView(null)
   })}\n`);
   const target = {
     branch,
@@ -1403,9 +1403,9 @@ test("sandbox rm preserves an unowned tombstone when the source is absent", onPl
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
-    version: 2, generation: "unowned-tombstone-generation",
+    version: 3, generation: "unowned-tombstone-generation",
     broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
-    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView(null)
   })}\n`);
   const target = {
     branch,
@@ -1485,9 +1485,9 @@ test("sandbox rm retains an unexpected moved share payload for diagnosis", onPla
       processingDir: path.join(controlRoot, "processing"), runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
     fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
-      version: 2, generation: "share-replacement-generation",
+      version: 3, generation: "share-replacement-generation",
       broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
-      state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+      state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView(null)
     })}\n`);
 
     fs.writeFileSync = ((targetPath, data, options) => {
@@ -1574,9 +1574,9 @@ test("sandbox rm preserves foreign tombstone payload on interrupted retry", onPl
       processingDir: path.join(controlRoot, "processing"), runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
     fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
-      version: 2, generation: "share-replacement-crash-generation",
+      version: 3, generation: "share-replacement-crash-generation",
       broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
-      state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+      state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView(null)
     })}\n`);
 
     fs.renameSync = ((source, destination) => {
@@ -1660,9 +1660,9 @@ test("sandbox rm preserves untouched targets after a partial workspace phase cra
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
-    version: 2, generation: "multi-target-phase-generation",
+    version: 3, generation: "multi-target-phase-generation",
     broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
-    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+    state: "healthy", reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView(null)
   })}\n`);
   const target = {
     branch,

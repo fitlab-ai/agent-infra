@@ -721,7 +721,7 @@ export async function serveSandboxControl(
       processingDir: manifest.processingDir,
       internalCliPath: options.internalCliPath ?? process.argv[1] ?? null
     });
-    if (!recoverProcessing(manifest, brokerOwns)) return;
+    if (!recoverProcessing(manifest, broker, brokerOwns)) return;
     try {
       const published = readSandboxControlStatus(manifest.publicStatusDir);
       if (published.generation === manifest.generation) taskView = published.taskView;

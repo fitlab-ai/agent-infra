@@ -41,6 +41,10 @@ const descriptor = (
 function internalTaskRoutes(): TaskOperationDescriptor[] {
   return [
     descriptor('internal', 'task-create', 'input', 'conditional', 'progress'),
+    descriptor('internal', 'task-qualification', 'proposal', 'task-bound', 'progress'),
+    descriptor('internal', 'task-qualification', 'confirm', 'task-bound', 'progress'),
+    descriptor('internal', 'task-qualification', 'supersede', 'task-bound', 'progress'),
+    descriptor('internal', 'task-qualification', 'revoke', 'task-bound', 'progress'),
     descriptor('internal', 'sandbox-control', 'serve', 'non-task', 'progress', 'none'),
     descriptor('internal', 'sandbox-control', 'execute', 'non-task', 'progress', 'none'),
     descriptor('internal', 'sandbox-control', 'recover', 'conditional', 'recovery', 'delegated'),
@@ -70,6 +74,10 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'platform-release-notes', 'context', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'platform-release-notes', 'stage', 'non-task', 'artifact-write', 'none'),
     descriptor('internal', 'platform-release-notes', 'publish', 'non-task', 'remote-write', 'none'),
+    descriptor('internal', 'platform-security', 'read', 'non-task', 'diagnostic', 'none'),
+    descriptor('internal', 'platform-security', 'dismiss', 'non-task', 'remote-write', 'none'),
+    descriptor('internal', 'platform-metadata', 'init-labels', 'non-task', 'remote-write', 'none'),
+    descriptor('internal', 'platform-metadata', 'init-milestones', 'non-task', 'remote-write', 'none'),
     descriptor('internal', 'platform-context', 'resolve', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'platform-comment', 'list', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'platform-comment', 'owner', 'task-bound', 'diagnostic'),
@@ -197,8 +205,8 @@ export const TASK_OPERATION_DESCRIPTORS = Object.freeze([
 ]);
 
 export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
-  'task-create', 'sandbox-control', 'agent-client', 'codex-lifecycle', 'codex-sandbox-controller',
-  'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-context',
+  'task-create', 'task-qualification', 'sandbox-control', 'agent-client', 'codex-lifecycle', 'codex-sandbox-controller',
+  'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-security', 'platform-metadata', 'platform-context',
   'platform-comment', 'platform-issue', 'platform-pr', 'platform-pr-review', 'pr-review-grade',
   'platform-checks', 'task-context', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',
   'task-orchestration', 'task-review', 'task-event', 'task-invalidation', 'task-lifecycle',
