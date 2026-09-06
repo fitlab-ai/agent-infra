@@ -297,7 +297,8 @@ function outputMatchesEvidence(output: string, bytes: number, sha256: string): b
 function genericRecoveryResponse(
   request: SandboxControlRequest,
   exitCode: number,
-  payload: ReturnType<typeof readSandboxControlPayload> | null
+  payload: ReturnType<typeof readSandboxControlPayload> | null,
+  cause: 'publish' | 'recovery' = 'recovery'
 ): SandboxControlResponse {
   const outputUnavailable = request.family === 'task-create' && !payload;
   return {
@@ -306,7 +307,9 @@ function genericRecoveryResponse(
     phase: 'completed',
     exitCode,
     stdout: outputUnavailable ? `${JSON.stringify(taskCreateOutputUnavailableResult(request.id))}\n` : '',
-    stderr: payload ? '' : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
+    stderr: payload ? '' : cause === 'publish'
+      ? 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n'
+      : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
     error: null,
     outputState: payload ? 'available' : 'unavailable',
     payload: payload ? payloadReference(payload) : null
@@ -408,7 +411,7 @@ function publishExecutionResult(
       } catch {
         payload = null;
       }
-      terminal = genericRecoveryResponse(request, normalized.exitCode, payload);
+      terminal = genericRecoveryResponse(request, normalized.exitCode, payload, 'publish');
     }
   }
   if (!brokerOwns()) return false;
@@ -549,7 +552,7 @@ function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner
               || response.payload.stdoutSha256 !== payload.stdoutSha256
               || response.payload.stderrSha256 !== payload.stderrSha256) throw new Error('payload missing or mismatched');
             payloadReferenced = true;
-          } else if (terminal && (response.outputState !== undefined
+          } else if (terminal && ((response.outputState !== undefined && response.outputState !== 'unavailable')
             || response.payload !== undefined && response.payload !== null)) {
             throw new Error('payload state invalid');
           }

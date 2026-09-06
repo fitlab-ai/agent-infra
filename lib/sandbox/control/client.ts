@@ -162,7 +162,7 @@ function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAcces
   return null;
 }
 
-function parseResponse(raw: string, id: string): SandboxControlResponse {
+function parseResponse(raw: string, id: string, accepted = false): SandboxControlResponse {
   const response = JSON.parse(raw) as SandboxControlResponse;
   if (response.version !== 2 || response.id !== id
     || !['completed', 'rejected'].includes(response.phase)
@@ -170,13 +170,13 @@ function parseResponse(raw: string, id: string): SandboxControlResponse {
     || (response.outputState !== undefined && response.outputState !== 'available' && response.outputState !== 'unavailable')
     || (response.outputState === 'available' && !response.payload)
     || (response.outputState === 'unavailable' && response.payload !== null && response.payload !== undefined)) {
-    clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response is invalid', false, false, id);
+    clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response is invalid', false, accepted, id);
   }
   return response;
 }
 
-function readPublishedResponse(raw: string, id: string, channelDir: string): SandboxControlResponse {
-  const response = parseResponse(raw, id);
+function readPublishedResponse(raw: string, id: string, channelDir: string, accepted = false): SandboxControlResponse {
+  const response = parseResponse(raw, id, accepted);
   if (response.outputState !== 'available') return response;
   const filePath = path.join(channelDir, 'responses', `${id}.payload.json`);
   let payload;
@@ -244,7 +244,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       }
       let response: SandboxControlResponse;
       try {
-        response = readPublishedResponse(raw, request.id, channelDir);
+        response = readPublishedResponse(raw, request.id, channelDir, accepted);
         malformedResponseRaw = null;
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
@@ -326,7 +326,7 @@ export function recoverSandboxControl(requestId: string, params: Readonly<{
       }
       let response: SandboxControlResponse;
       try {
-        response = readPublishedResponse(raw, requestId, channelDir);
+        response = readPublishedResponse(raw, requestId, channelDir, accepted);
         malformedResponseRaw = null;
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;

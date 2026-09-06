@@ -91,14 +91,15 @@ async function taskCreate(args: string[]): Promise<void> {
     if (environment.kind === 'controlled') {
       const response = requestSandboxTaskCreate({ candidate });
       if (response.phase === 'rejected') {
+        const accepted = response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN';
         output(failed(
           response.error?.code ?? 'SANDBOX_CONTROL_REJECTED',
           response.error?.message ?? response.stderr,
           response.error?.retryable ?? false,
           {
             requestId: response.id,
-            accepted: false,
-            recovery: response.error?.retryable ? 'new-request-id' : 'none'
+            accepted,
+            recovery: accepted ? 'same-request-id' : response.error?.retryable ? 'new-request-id' : 'none'
           }
         ));
         return;
