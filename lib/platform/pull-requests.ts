@@ -7,19 +7,13 @@ import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { extractSection } from '../task/sections.ts';
 import { captureTaskWriteMetadata, writeTask } from '../task/write.ts';
 import type { PlatformChangeRequestSnapshot } from './adapters.ts';
-import { parseGitHubRemote, resolvePlatformContext, resolvePlatformProviderContext } from './context.ts';
+import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
-import { createGitHubClient } from './github-client.ts';
 import { inspectPlatformIssue } from './issues.ts';
-import { inspectGitHubIssue } from './issues.ts';
-import type { IssueSnapshot } from './issues.ts';
 import { planPullRequestMetadata } from './pull-request-metadata.ts';
 import {
-  extractPullRequestFileNames,
   planInLabelUpdate,
-  syncLabelDelta,
-  validateInLabelMapping,
-  validateRepositoryLabelPayload
+  validateInLabelMapping
 } from './in-label-sync.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
@@ -46,7 +40,7 @@ import {
 import { isResourceIdentity, resourceIdentityEquals, resourceIdentityNumber } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
-import type { ChangeRequestSnapshot as ProviderChangeRequestSnapshot } from './provider-contract.ts';
+import type { ChangeRequestSnapshot as ProviderChangeRequestSnapshot, IssueSnapshot as ProviderIssueSnapshot } from './provider-contract.ts';
 
 type PullRequestSnapshot = PlatformChangeRequestSnapshot;
 
@@ -672,8 +666,6 @@ async function inspectPlatformPullRequestByNumber(prNumber: string | number, opt
   });
 }
 
-const CLOSING_ISSUES_QUERY = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number} pageInfo{hasNextPage endCursor}}}}}';
-
 function readInLabelMapping(repoRoot: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: { code: string; message: string; retryable: boolean } } {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as {
@@ -718,96 +710,6 @@ function taskInLabelTarget(
   return { ok: true as const, value: planned.target };
 }
 
-function inspectClosingIssueNumbers(client: GitHubClient, repository: string, pullRequest: number, cwd: string) {
-  const [owner, name] = repository.split('/');
-  if (!owner || !name) return {
-    ok: false as const,
-    error: { code: 'IN_LABEL_SYNC_REPOSITORY_INVALID', message: 'Repository identity is invalid', retryable: false }
-  };
-  let cursor: string | null = null;
-  const numbers: number[] = [];
-  for (;;) {
-    const args = ['api', 'graphql', '-f', `query=${CLOSING_ISSUES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${pullRequest}`];
-    if (cursor) args.push('-F', `cursor=${cursor}`);
-    const response = client.json<unknown>(args, { cwd });
-    if (!response.ok) return response;
-    const connection = (response.value as {
-      data?: { repository?: { pullRequest?: { closingIssuesReferences?: {
-        nodes?: unknown[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-      } } } };
-    })?.data?.repository?.pullRequest?.closingIssuesReferences;
-    if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) return {
-      ok: false as const,
-      error: { code: 'IN_LABEL_SYNC_ASSOCIATION_INVALID', message: 'Closing Issue response is incomplete', retryable: false }
-    };
-    for (const node of connection.nodes) {
-      const issue = Number((node as { number?: unknown })?.number);
-      if (!Number.isSafeInteger(issue) || issue <= 0) return {
-        ok: false as const,
-        error: { code: 'IN_LABEL_SYNC_ASSOCIATION_INVALID', message: 'Closing Issue identity is invalid', retryable: false }
-      };
-      numbers.push(issue);
-    }
-    if (!connection.pageInfo.hasNextPage) return { ok: true as const, value: [...new Set(numbers)] };
-    if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === cursor) return {
-      ok: false as const,
-      error: { code: 'IN_LABEL_SYNC_ASSOCIATION_INVALID', message: 'Closing Issue pagination cursor is invalid', retryable: false }
-    };
-    cursor = connection.pageInfo.endCursor;
-  }
-}
-
-function inspectRepositoryLabels(client: GitHubClient, repository: string, cwd: string) {
-  const response = client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository}/labels?per_page=100`], { cwd });
-  if (!response.ok) return response;
-  const labels = validateRepositoryLabelPayload(response.value);
-  return labels.ok ? { ok: true as const, value: new Set(labels.value) } : labels;
-}
-
-function inspectPullRequestFiles(client: GitHubClient, repository: string, pullRequest: number, cwd: string) {
-  const response = client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository}/pulls/${pullRequest}/files?per_page=100`], { cwd });
-  if (!response.ok) return response;
-  const files = extractPullRequestFileNames(response.value);
-  return files ? { ok: true as const, value: files } : {
-    ok: false as const,
-    error: { code: 'IN_LABEL_SYNC_FILES_INVALID', message: 'Pull request files response is incomplete', retryable: false }
-  };
-}
-
-function inspectTaskInLabelTarget(
-  repoRoot: string,
-  frontmatter: Record<string, unknown>,
-  pullRequest: PullRequestSnapshot,
-  repository: string,
-  client: GitHubClient
-) {
-  const baseRef = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
-  if (!baseRef) return {
-    ok: false as const,
-    error: { code: 'IN_LABEL_SYNC_BASE_MISSING', message: 'Task has no delivery_base_ref for in-label evidence', retryable: false }
-  };
-  let changedFiles: string[];
-  try {
-    changedFiles = execFileSync('git', ['diff', `${baseRef}...HEAD`, '--name-only'], {
-      cwd: repoRoot, encoding: 'utf8'
-    }).trim().split(/\r?\n/).filter(Boolean);
-  } catch (error) {
-    return {
-      ok: false as const,
-      error: { code: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE', message: error instanceof Error ? error.message : String(error), retryable: false }
-    };
-  }
-  const mapping = readInLabelMapping(repoRoot);
-  if (!mapping.ok) return mapping;
-  const labels = inspectRepositoryLabels(client, repository, repoRoot);
-  if (!labels.ok) return labels;
-  const planned = planInLabelUpdate({
-    changedFiles, currentLabels: pullRequest.labels, mapping: mapping.value, repositoryLabels: labels.value
-  });
-  if (planned.error) return { ok: false as const, error: planned.error };
-  return { ok: true as const, value: { changedFiles, target: planned.target } };
-}
-
 function inLabelResource(
   kind: 'issue' | 'pull-request',
   number: number,
@@ -821,73 +723,103 @@ function inLabelResource(
 
 async function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
   const cwd = path.resolve(options.cwd || process.cwd());
-  const client = options.client || createGitHubClient();
-  const context = await resolvePlatformContext({ cwd, client });
+  const loaded = await resolvePlatformProviderContext({ cwd, client: options.client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
-  if (!usable) return result(context.status, null, null, prNumber, {
+  if (!loaded.ok || !usable) return result(context.status, null, null, prNumber, {
     platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
   });
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) return result('failed', null, null, prNumber, {
     platform: context.platform, capabilities: context.capabilities,
     error: { code: 'PR_NUMBER_INVALID', message: 'PR number must be positive', retryable: false }
   });
+  const provider = loaded.value.provider;
+  const operationContext = providerOperationContext(loaded.value);
+  const providerFailure = (error: { code: string; message: string; retryable: boolean }): PullRequestResult => result(
+    error.code === 'PLATFORM_CAPABILITY_UNSUPPORTED' ? 'degraded' : providerStatus(error),
+    null,
+    null,
+    prNumber,
+    {
+      platform: context.platform,
+      capabilities: context.capabilities,
+      resource: { kind: 'pull-request', number: prNumber },
+      error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
+    }
+  );
   const repository = context.platform.repository!;
-  const fetched = inspectGitHubPullRequest(client, repository, prNumber, cwd);
-  if (!fetched.ok) return result(fetched.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
-    platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: fetched.error
-  });
-  const files = inspectPullRequestFiles(client, repository, prNumber, cwd);
-  if (!files.ok) return result(files.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
-    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
-    resource: { kind: 'pull-request', number: prNumber }, error: files.error
-  });
+  const pullRequestIdentity = providerResourceToken(provider, 'pull-request', String(prNumber));
+  const inspected = provider.changeRequests?.inspect
+    ? await provider.changeRequests.inspect({ context: operationContext, target: pullRequestIdentity })
+    : unsupportedProviderOperation(provider, 'changeRequests.inspect');
+  if (!inspected.ok) return providerFailure(inspected.error);
+  const fetched = normalizeProviderPullRequest(inspected.value, repository, prNumber);
+  const files = provider.changeRequests?.listFiles
+    ? await provider.changeRequests.listFiles({ context: operationContext, target: pullRequestIdentity })
+    : unsupportedProviderOperation(provider, 'changeRequests.listFiles');
+  if (!files.ok) return providerFailure(files.error);
   const mapping = readInLabelMapping(cwd);
   if (!mapping.ok) return result('failed', null, null, prNumber, {
-    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched,
     resource: { kind: 'pull-request', number: prNumber }, error: mapping.error
   });
-  const repositoryLabels = inspectRepositoryLabels(client, repository, cwd);
-  if (!repositoryLabels.ok) return result(repositoryLabels.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
-    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
-    resource: { kind: 'pull-request', number: prNumber }, error: repositoryLabels.error
-  });
+  let repositoryLabels = new Set<string>();
+  if (Object.keys(mapping.value).length > 0) {
+    const labels = provider.issues?.listLabels
+      ? await provider.issues.listLabels({ context: operationContext })
+      : unsupportedProviderOperation(provider, 'issues.listLabels');
+    if (!labels.ok) return providerFailure(labels.error);
+    repositoryLabels = new Set(labels.value);
+  }
   const plannedTarget = planInLabelUpdate({
-    changedFiles: files.value, currentLabels: fetched.value.labels,
-    mapping: mapping.value, repositoryLabels: repositoryLabels.value
+    changedFiles: files.value, currentLabels: fetched.labels,
+    mapping: mapping.value, repositoryLabels
   });
   if (plannedTarget.error) return result('failed', null, null, prNumber, {
-    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched,
     resource: { kind: 'pull-request', number: prNumber }, error: plannedTarget.error
   });
-  const target = plannedTarget.target;
-  const association = inspectClosingIssueNumbers(client, repository, prNumber, cwd);
-  if (!association.ok) return result(association.error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
-    platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
-    resource: { kind: 'pull-request', number: prNumber }, evidence: { kind: 'pull-request-files', pullRequestFiles: files.value }, error: association.error
-  });
+  const association = provider.changeRequests?.listClosingIssues
+    ? await provider.changeRequests.listClosingIssues({ context: operationContext, target: pullRequestIdentity })
+    : unsupportedProviderOperation(provider, 'changeRequests.listClosingIssues');
+  if (!association.ok) return providerFailure(association.error);
 
-  const issueNumber = association.value.length === 1 ? association.value[0]! : null;
-  let issue: IssueSnapshot | null = null;
-  if (issueNumber) {
-    const fetchedIssue = inspectGitHubIssue(client, repository, issueNumber, cwd);
-    if (!fetchedIssue.ok) return result(fetchedIssue.error.retryable ? 'blocked' : 'failed', null, issueNumber, prNumber, {
-      platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
-      resource: { kind: 'issue', number: issueNumber }, evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error: fetchedIssue.error
+  const issueIdentity = association.value.length === 1 ? association.value[0]! : null;
+  const issueNumber = issueIdentity ? resourceIdentityNumber(issueIdentity) : null;
+  if (issueIdentity && issueNumber === null) {
+    return result('degraded', null, null, prNumber, {
+      platform: context.platform,
+      capabilities: context.capabilities,
+      pullRequest: fetched,
+      resource: { kind: 'pull-request', number: prNumber },
+      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value },
+      error: { code: 'IN_LABEL_SYNC_ASSOCIATION_UNSUPPORTED', message: 'The associated Issue identity cannot be represented by this operation', retryable: false }
     });
+  }
+  const closingIssueNumbers = association.value.flatMap((identity) => {
+    const number = resourceIdentityNumber(identity);
+    return number === null ? [] : [number];
+  });
+  let issue: ProviderIssueSnapshot | null = null;
+  if (issueIdentity) {
+    const fetchedIssue = provider.issues?.inspect
+      ? await provider.issues.inspect({ context: operationContext, target: issueIdentity })
+      : unsupportedProviderOperation(provider, 'issues.inspect');
+    if (!fetchedIssue.ok) return providerFailure(fetchedIssue.error);
     issue = fetchedIssue.value;
   }
 
   const resources = issue
     ? [
-      { kind: 'issue' as const, number: issue.number, snapshot: issue },
-      { kind: 'pull-request' as const, number: prNumber, snapshot: fetched.value }
+      { kind: 'issue' as const, number: issueNumber!, snapshot: issue },
+      { kind: 'pull-request' as const, number: prNumber, snapshot: fetched }
     ]
-    : [{ kind: 'pull-request' as const, number: prNumber, snapshot: fetched.value }];
+    : [{ kind: 'pull-request' as const, number: prNumber, snapshot: fetched }];
   const plans = resources.map((resource) => ({
     ...resource,
     plan: planInLabelUpdate({
       changedFiles: files.value, currentLabels: resource.snapshot.labels,
-      mapping: mapping.value, repositoryLabels: repositoryLabels.value
+      mapping: mapping.value, repositoryLabels
     })
   }));
   const operations: PlatformOperation[] = [
@@ -903,65 +835,88 @@ async function syncPlatformPullRequestInLabels(prNumber: number, options: Shared
     item.kind,
     item.number,
     item.snapshot.labels,
-    target,
+    item.plan.target,
     item.plan.changed && willWrite ? null : item.snapshot.labels,
     item.plan.changed && willWrite ? 'unknown' : 'no-op'
   ));
   if (options.dryRun || !context.capabilities.triage) return result(
     !context.capabilities.triage || association.value.length !== 1 ? 'degraded' : plans.some((item) => item.plan.changed) ? 'planned' : 'no-op',
     null, issueNumber, prNumber, {
-      platform: context.platform, capabilities: context.capabilities, pullRequest: fetched.value,
+      platform: context.platform, capabilities: context.capabilities, pullRequest: fetched,
       resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
-      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error: null
+      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueNumbers }, error: null
     }
   );
 
-  let currentPullRequest = fetched.value;
+  let currentPullRequest = fetched;
   let successfulWrites = 0;
   for (const item of plans) {
     if (!item.plan.changed) continue;
-    const synced = syncLabelDelta(client, repository, item.number, cwd, item.snapshot.labels, item.plan.target);
-    if (synced.status === 'failed' || synced.status === 'blocked') {
+    const targetIdentity = item.kind === 'issue' ? issueIdentity! : pullRequestIdentity;
+    const synced = item.kind === 'issue'
+      ? provider.issues?.update
+        ? await provider.issues.update({
+          context: operationContext,
+          target: targetIdentity,
+          currentLabels: item.snapshot.labels,
+          patch: { labels: item.plan.labels },
+          mutation: { idempotencyKey: `issue:update:${item.number}:in-labels`, target: targetIdentity }
+        })
+        : unsupportedProviderOperation(provider, 'issues.update')
+      : provider.changeRequests?.update
+        ? await provider.changeRequests.update({
+          context: operationContext,
+          target: targetIdentity,
+          currentLabels: item.snapshot.labels,
+          patch: { labels: item.plan.labels },
+          mutation: { idempotencyKey: `pull-request:update:${item.number}:in-labels`, target: targetIdentity }
+        })
+        : unsupportedProviderOperation(provider, 'changeRequests.update');
+    if (!synced.ok) {
       const state = resourcesState.find((resource) => resource.kind === item.kind && resource.number === item.number)!;
-      state.effect = synced.status === 'blocked' ? 'unknown' : 'no-op';
-      state.after = synced.status === 'blocked' ? null : item.snapshot.labels;
-      const partial = successfulWrites > 0 || synced.status === 'blocked';
-      const error = partial && synced.error
+      state.effect = synced.error.retryable ? 'unknown' : 'no-op';
+      state.after = state.effect === 'unknown' ? null : item.snapshot.labels;
+      const partial = successfulWrites > 0 || synced.error.retryable;
+      const error = partial
         ? { ...synced.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${synced.error.message}` }
         : synced.error;
-      return result(partial ? 'blocked' : synced.status, null, issueNumber, prNumber, {
-        changed: successfulWrites > 0 || synced.changed, platform: context.platform, capabilities: context.capabilities,
+      return result(partial ? 'blocked' : providerStatus(synced.error), null, issueNumber, prNumber, {
+        changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,
         pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
-        evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error
+        evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueNumbers }, error: providerError(error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
       });
     }
-    successfulWrites += synced.changed ? 1 : 0;
+    successfulWrites += synced.value.changed ? 1 : 0;
     const reread = item.kind === 'issue'
-      ? inspectGitHubIssue(client, repository, item.number, cwd)
-      : inspectGitHubPullRequest(client, repository, item.number, cwd);
+      ? provider.issues?.inspect
+        ? await provider.issues.inspect({ context: operationContext, target: targetIdentity })
+        : unsupportedProviderOperation(provider, 'issues.inspect')
+      : provider.changeRequests?.inspect
+        ? await provider.changeRequests.inspect({ context: operationContext, target: targetIdentity })
+        : unsupportedProviderOperation(provider, 'changeRequests.inspect');
     if (!reread.ok) return result('blocked', null, issueNumber, prNumber, {
       changed: true, platform: context.platform, capabilities: context.capabilities,
       pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
-      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value },
-      error: { ...reread.error, code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
+      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueNumbers },
+      error: { ...providerError(reread.error, 'PLATFORM_PROVIDER_OPERATION_FAILED'), code: 'IN_LABEL_SYNC_PARTIAL', message: `In-label synchronization is partial or unknown: ${reread.error.message}` }
     });
-    const after = reread.value.labels;
+    const after = reread.value.labels || [];
     const state = resourcesState.find((resource) => resource.kind === item.kind && resource.number === item.number)!;
     state.after = after;
-    state.effect = after.filter((label: string) => label.startsWith('in:')).sort().join('\0') === target.join('\0') ? 'applied' : 'unknown';
+    state.effect = after.filter((label: string) => label.startsWith('in:')).sort().join('\0') === item.plan.target.join('\0') ? 'applied' : 'unknown';
     if (state.effect === 'unknown') return result('blocked', null, issueNumber, prNumber, {
       changed: true, platform: context.platform, capabilities: context.capabilities,
       pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber }, operations, resources: resourcesState,
-      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value },
+      evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueNumbers },
       error: { code: 'IN_LABEL_SYNC_PARTIAL', message: `${item.kind} #${item.number} did not converge to the expected in: labels`, retryable: true }
     });
-    if (item.kind === 'pull-request') currentPullRequest = reread.value as PullRequestSnapshot;
+    if (item.kind === 'pull-request') currentPullRequest = normalizeProviderPullRequest(reread.value as ProviderChangeRequestSnapshot, repository, prNumber, currentPullRequest);
   }
   return result(association.value.length !== 1 ? 'degraded' : successfulWrites > 0 ? 'applied' : 'no-op', null, issueNumber, prNumber, {
     changed: successfulWrites > 0, platform: context.platform, capabilities: context.capabilities,
     pullRequest: currentPullRequest, resource: { kind: 'pull-request', number: prNumber },
     operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' as const } : operation),
-    resources: resourcesState, evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: association.value }, error: null
+    resources: resourcesState, evidence: { kind: 'pull-request-files', pullRequestFiles: files.value, closingIssues: closingIssueNumbers }, error: null
   });
 }
 

@@ -37,11 +37,12 @@ import type {
   VerificationRemoteFacts
 } from './provider-contract.ts';
 import { resourceIdentityNumber, resourceIdentityString } from './resource-identity.ts';
-import { syncLabelDelta } from './in-label-sync.ts';
+import { extractPullRequestFileNames, syncLabelDelta } from './in-label-sync.ts';
 
 const CURRENT_USER_QUERY = 'query { viewer { login } }';
 const ISSUE_TYPES_QUERY = `query($owner:String!){organization(login:$owner){issueTypes(first:20){nodes{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}}}}}`;
 const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id issueType{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{id name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{id name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{id name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{id name}}}}}}}}`;
+const CLOSING_ISSUES_QUERY = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number} pageInfo{hasNextPage endCursor}}}}}';
 
 function parseGitHubRemote(remote: string): string | null {
   const trimmed = remote.trim().replace(/\.git$/, '');
@@ -638,6 +639,58 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       const fetched = module.inspectGitHubPullRequest(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
       return { ok: true, value: changeRequestSnapshot(fetched.value) };
+    },
+    async listFiles({ context, target }) {
+      const number = resourceIdentityNumber(target);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const response = client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository(context)}/pulls/${number}/files?per_page=100`], { cwd: context.workingDirectory });
+      if (!response.ok) return response;
+      const files = extractPullRequestFileNames(response.value);
+      return files
+        ? { ok: true, value: files }
+        : invalid('IN_LABEL_SYNC_FILES_INVALID', 'Pull request files response is incomplete');
+    },
+    async listClosingIssues({ context, target }) {
+      const number = resourceIdentityNumber(target);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const [owner, name] = repository(context).split('/');
+      if (!owner || !name) return invalid('IN_LABEL_SYNC_REPOSITORY_INVALID', 'Repository identity is invalid');
+      const identities: ResourceIdentity[] = [];
+      let cursor: string | null = null;
+      for (;;) {
+        const args = ['api', 'graphql', '-f', `query=${CLOSING_ISSUES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`];
+        if (cursor) args.push('-F', `cursor=${cursor}`);
+        const response = client.json<unknown>(args, { cwd: context.workingDirectory });
+        if (!response.ok) return response;
+        const connection = (response.value as {
+          data?: { repository?: { pullRequest?: { closingIssuesReferences?: {
+            nodes?: unknown[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+          } } } };
+        })?.data?.repository?.pullRequest?.closingIssuesReferences;
+        if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) {
+          return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue response is incomplete');
+        }
+        for (const node of connection.nodes) {
+          const issue = Number((node as { number?: unknown })?.number);
+          if (!Number.isSafeInteger(issue) || issue <= 0) {
+            return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue identity is invalid');
+          }
+          identities.push({ kind: 'number', value: issue });
+        }
+        if (!connection.pageInfo.hasNextPage) {
+          const seen = new Set<string>();
+          return { ok: true, value: identities.filter((identity) => {
+            const key = `${identity.kind}:${identity.value}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }) };
+        }
+        if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === cursor) {
+          return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue pagination cursor is invalid');
+        }
+        cursor = connection.pageInfo.endCursor;
+      }
     },
     async listClosing({ context, issue }) {
       const number = resourceIdentityNumber(issue);

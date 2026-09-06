@@ -321,6 +321,8 @@ type PlatformProvider = {
       head: string;
     }): Promise<ProviderResult<{ sha: string }>>;
     inspect(input: { context: ProviderOperationContext; target: ResourceIdentity }): Promise<ProviderResult<ChangeRequestSnapshot>>;
+    listFiles?(input: { context: ProviderOperationContext; target: ResourceIdentity }): Promise<ProviderResult<string[]>>;
+    listClosingIssues?(input: { context: ProviderOperationContext; target: ResourceIdentity }): Promise<ProviderResult<ResourceIdentity[]>>;
     listClosing(input: { context: ProviderOperationContext; issue: ResourceIdentity }): Promise<ProviderResult<ChangeRequestSnapshot[]>>;
     create(input: {
       context: ProviderOperationContext;
@@ -477,9 +479,9 @@ function validatePlatformProvider(
   providerType: string
 ): ProviderResult<PlatformProvider> {
   const operationGroups: Record<string, { required: string[]; optional: string[] }> = {
-    issues: { required: ['inspect', 'create', 'update', 'describeRepository'], optional: [] },
+    issues: { required: ['inspect', 'create', 'update', 'describeRepository'], optional: ['listLabels', 'listMilestones'] },
     comments: { required: ['list', 'write', 'delete'], optional: [] },
-    changeRequests: { required: ['inspect', 'listClosing', 'create', 'update', 'resolveGitEvidence'], optional: ['verifyHead'] },
+    changeRequests: { required: ['inspect', 'listClosing', 'create', 'update', 'resolveGitEvidence'], optional: ['verifyHead', 'listFiles', 'listClosingIssues'] },
     checks: { required: ['inspectRequired', 'resolveRun', 'fetchLogs'], optional: [] },
     reviews: { required: ['list', 'publish'], optional: [] },
     releases: { required: ['inspect', 'create', 'update', 'reconcileMilestones', 'publishNotes', 'collectNotes'], optional: [] },

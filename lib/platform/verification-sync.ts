@@ -7,9 +7,7 @@ import { resolvePlatformProviderContext } from "./context.ts";
 import { hasCheckedRequirement, resolveRequirementSection } from "./issue-metadata.ts";
 import { requirementSectionAnchors } from "./issues.ts";
 import { taskTypeLabel } from "./metadata-labels.ts";
-import { planInLabelUpdate, validateInLabelMapping, validateRepositoryLabelPayload } from "./in-label-sync.ts";
-import { inspectGitHubPullRequest } from "./pull-requests.ts";
-import { createGitHubClient } from "./github-client.ts";
+import { planInLabelUpdate, validateInLabelMapping } from "./in-label-sync.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
@@ -200,7 +198,6 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any): Promise
     prIdentity,
     issueNumber,
     prNumber,
-    upstreamRepo: platformContext.platform.repository,
     repoOwnerType: String(loaded.ok ? loaded.value.snapshot.metadata?.ownerType || "unknown" : "unknown"),
     hasTriage: platformContext.capabilities.triage,
     hasPush: platformContext.capabilities.push,
@@ -314,6 +311,27 @@ async function fetchRemoteData(context: any): Promise<any> {
     prComments = listed.value.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body }));
   }
   const changeRequest = facts.value.changeRequest;
+  let inLabelMapping: Record<string, string[]> = {};
+  let repositoryLabels: string[] = [];
+  if (context.config.verify_in_labels_computed && context.hasTriage) {
+    const mapping = loadInLabelMapping();
+    if (!mapping.ok) return { earlyReturn: failResult(CHECK_TYPE, mapping.message, "check_failed") };
+    inLabelMapping = mapping.value;
+    if (Object.keys(inLabelMapping).length > 0) {
+      const labels = provider?.issues?.listLabels
+        ? await provider.issues.listLabels({ context: operationContext })
+        : unsupportedProviderOperation(provider, "issues.listLabels");
+      if (!labels.ok) {
+        const error = providerError(labels.error, "PLATFORM_PROVIDER_OPERATION_FAILED");
+        return {
+          earlyReturn: error.retryable
+            ? blockedResult(CHECK_TYPE, `${error.code}: ${error.message}`, "network_error")
+            : failResult(CHECK_TYPE, `${error.code}: ${error.message}`, "check_failed")
+        };
+      }
+      repositoryLabels = labels.value;
+    }
+  }
   return {
     issue,
     comments: facts.value.comments.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body })),
@@ -327,7 +345,9 @@ async function fetchRemoteData(context: any): Promise<any> {
       ? (changeRequest.milestone ? { title: changeRequest.milestone } : null)
       : undefined,
     prAssignees: changeRequest?.assignees,
-    prHeadSha: changeRequest?.headSha
+    prHeadSha: changeRequest?.headSha,
+    inLabelMapping,
+    repositoryLabels
   };
 }
 
@@ -605,7 +625,7 @@ function checkInLabelsComputed(context: any, remoteData: any): any {
     return null;
   }
 
-  const expectedInLabels = computeExpectedInLabels(context.taskDir, context.upstreamRepo);
+  const expectedInLabels = computeExpectedInLabels(context.taskDir, remoteData.repositoryLabels, remoteData.inLabelMapping);
   if (!expectedInLabels.ok) {
     return expectedInLabels.type === "check_failed"
       ? failResult(CHECK_TYPE, expectedInLabels.message, expectedInLabels.type)
@@ -1015,7 +1035,7 @@ function formatLabelList(labels: any): any {
   return labels.length > 0 ? labels.join(", ") : "none";
 }
 
-function computeExpectedInLabels(taskDir: any, repository: any): any {
+function computeExpectedInLabels(taskDir: any, repositoryLabels: string[] = [], mappingOverride?: Record<string, string[]>): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return task;
@@ -1034,32 +1054,16 @@ function computeExpectedInLabels(taskDir: any, repository: any): any {
     .map((value) => value.trim())
     .filter(Boolean);
 
-  const mapping = loadInLabelMapping();
-  if (!mapping.ok) {
-    return mapping;
-  }
-
-  if (Object.keys(mapping.value ?? {}).length === 0) {
+  const mapping = mappingOverride ?? {};
+  if (Object.keys(mapping).length === 0) {
     return { ok: true, labels: [], mode: "mapped" };
   }
 
-  const client = createGitHubClient();
-  const repoLabelsResult = withRetry(() => client.json([
-    "api", "--paginate", "--slurp", `repos/${repository}/labels?per_page=100`
-  ], { cwd: taskDir }));
-  if (!repoLabelsResult.ok) {
-    return repoLabelsResult;
-  }
-
-  const repositoryLabels = validateRepositoryLabelPayload(repoLabelsResult.value);
-  if (!repositoryLabels.ok) {
-    return { ok: false, type: "check_failed", message: repositoryLabels.error.message };
-  }
   const planned = planInLabelUpdate({
     changedFiles,
     currentLabels: [],
-    mapping: mapping.value ?? {},
-    repositoryLabels: new Set(repositoryLabels.value)
+    mapping,
+    repositoryLabels: new Set(repositoryLabels)
   });
   if (planned.error) {
     return { ok: false, type: "check_failed", message: planned.error.message };
@@ -1084,7 +1088,7 @@ function loadInLabelMapping(): any {
   }
 }
 
-// === GitHub API ===
+// === Git working tree ===
 
 function gitText(args: any, cwd: any): any {
   try {

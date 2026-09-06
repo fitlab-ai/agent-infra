@@ -487,6 +487,8 @@ function validators(providerType: string, declaration?: ProviderIdentityDeclarat
       return { sha: stringValue(item.sha, 'change request head.sha') };
     },
     'changeRequests.inspect': (value) => validateChangeRequest(value, declaredIdentityKind(declaration, 'pull-request'), true),
+    'changeRequests.listFiles': (value) => arrayValue(value, 'pull request files').map((entry) => stringValue(entry, 'pull request files[]')),
+    'changeRequests.listClosingIssues': (value) => arrayValue(value, 'closing issues').map((entry) => identity(entry, 'closing issues[]', declaredIdentityKind(declaration, 'issue'))),
     'changeRequests.listClosing': (value) => arrayValue(value, 'changeRequests').map((entry) => validateChangeRequest(entry, declaredIdentityKind(declaration, 'pull-request'), true)),
     'changeRequests.create': validateReceipt,
     'changeRequests.update': validateReceipt,
