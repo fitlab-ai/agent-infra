@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import { detectRepoRoot } from '../task/resolve-ref.ts';
 import { configuredShortIdLength, executeShortIdCommand } from '../task/short-id.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-short-id <alloc|release|resolve|list> [argument] [--active-dir <path>] [--short-id-length <N>] [--verify]\n`;
 
@@ -16,7 +16,14 @@ function taskShortId(args: string[] = []): void {
   if (!ensureInternalHandlerRoute('task-short-id', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['alloc', 'release', 'resolve', 'list'].includes(operation)) { failure('a valid short-id operation is required'); return; }
+  const route = operation === 'list' && args.includes('--verify') ? 'list-verify' : operation ?? '';
+  if (!operation || ![
+    internalHandlerRoute('task-short-id', 'alloc', route),
+    internalHandlerRoute('task-short-id', 'release', route),
+    internalHandlerRoute('task-short-id', 'resolve', route),
+    internalHandlerRoute('task-short-id', 'list', route),
+    internalHandlerRoute('task-short-id', 'list-verify', route)
+  ].some(Boolean)) { failure('a valid short-id operation is required'); return; }
   const positional: string[] = [];
   let activeDir: string | null = null;
   let shortIdLength: number | null = null;

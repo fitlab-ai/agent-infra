@@ -2,7 +2,7 @@ import { finalizeReviewSummary } from '../task/review-finalization.ts';
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-review <task-ref> finalize-summary --stage <analysis|plan|code> --artifact <review-*.md> [--orchestrated] [--dry-run] [--override-ticket <ticket> --override-target <target> --override-scope <scope>]\n';
 
@@ -27,7 +27,7 @@ async function taskReview(args: string[] = []): Promise<void> {
     failUsage('task ref and intent are required');
     return;
   }
-  if (args[1] !== 'finalize-summary') {
+  if (!internalHandlerRoute('task-review', 'finalize-summary', args[1] ?? '')) {
     failUsage(`unknown intent '${args[1]}'`);
     return;
   }

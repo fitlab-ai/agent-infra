@@ -1,7 +1,7 @@
 import { reconcileTaskInvalidation } from '../task/invalidation-command.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-invalidation <task-ref> reconcile [--max-targets <n>] [--dry-run]\n';
 
@@ -9,7 +9,7 @@ function taskInvalidation(args: string[] = []): void {
   if (!ensureInternalHandlerRoute('task-invalidation', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const taskRef = args[0];
-  if (!taskRef || args[1] !== 'reconcile') {
+  if (!taskRef || !internalHandlerRoute('task-invalidation', 'reconcile', args[1] ?? '')) {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'INVALIDATION_PAYLOAD_INVALID', message: 'task ref and reconcile are required' } })}\n`);
     process.stderr.write(USAGE);
     process.exitCode = 1;

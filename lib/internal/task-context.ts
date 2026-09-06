@@ -1,6 +1,6 @@
 import { parseTaskScope } from '../task/command-options.ts';
 import { resolveTaskContext } from '../task/resolve-ref.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-context resolve [<task-ref> | --task <task-ref> | -t <task-ref>]\n`;
 
@@ -13,7 +13,7 @@ function fail(code: string, message: string, usage = false): void {
 function taskContext(args: string[] = []): void {
   if (!ensureInternalHandlerRoute('task-context', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
-  if (args[0] !== 'resolve') { fail('TASK_CONTEXT_PAYLOAD_INVALID', "operation 'resolve' is required", true); return; }
+  if (!internalHandlerRoute('task-context', 'resolve', args[0] ?? '')) { fail('TASK_CONTEXT_PAYLOAD_INVALID', "operation 'resolve' is required", true); return; }
   let scope;
   try {
     scope = parseTaskScope(args.slice(1));

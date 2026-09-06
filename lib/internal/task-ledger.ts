@@ -6,7 +6,7 @@ import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, isReviewStage, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from '../task/ledger.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-ledger <task-ref> <intent> [intent flags] [--dry-run]\n\nIntents: finding-upsert, finding-respond, finding-review, decision-next-id, decision-upsert, rework-intent-upsert, stage-status\n`;
 const FLAGS: Record<string, string> = {
@@ -31,7 +31,15 @@ async function taskLedger(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
   if (!taskRef || !kind) { usageFailure('task ref and intent are required'); return; }
-  if (!['finding-upsert', 'finding-respond', 'finding-review', 'decision-next-id', 'decision-upsert', 'rework-intent-upsert', 'stage-status'].includes(kind)) {
+  if (![
+    internalHandlerRoute('task-ledger', 'finding-upsert', kind),
+    internalHandlerRoute('task-ledger', 'finding-respond', kind),
+    internalHandlerRoute('task-ledger', 'finding-review', kind),
+    internalHandlerRoute('task-ledger', 'decision-next-id', kind),
+    internalHandlerRoute('task-ledger', 'decision-upsert', kind),
+    internalHandlerRoute('task-ledger', 'rework-intent-upsert', kind),
+    internalHandlerRoute('task-ledger', 'stage-status', kind)
+  ].some(Boolean)) {
     usageFailure(`unknown ledger intent '${kind}'`); return;
   }
   const values: Record<string, unknown> = { kind, taskRef };

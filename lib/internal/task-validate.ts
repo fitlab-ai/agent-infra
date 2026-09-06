@@ -24,7 +24,7 @@ import {
 } from '../sandbox/control/protocol.ts';
 import { getProcessStartTime } from '../server/process-state.ts';
 import { assertGitWorktreeBinding } from '../git/worktree-identity.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-validate <branch | TASK-id | N> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command> [args...]`;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
@@ -289,9 +289,11 @@ function taskValidate(args: string[]): void {
     const target = resolveSandboxTarget(options.target, config.repoRoot);
     const commit = git(config.repoRoot, ['rev-parse', target.branch]);
     const startedAt = new Date().toISOString();
-    const result = options.scope === 'snapshot'
+    const result = internalHandlerRoute('task-validate', 'snapshot', options.scope)
       ? snapshotValidation(config.repoRoot, commit, options)
-      : inplaceValidation(config, target, options);
+      : internalHandlerRoute('task-validate', 'inplace', options.scope)
+        ? inplaceValidation(config, target, options)
+        : (() => { throw new Error('TASK_VALIDATE_SCOPE_UNREGISTERED'); })();
     const evidence = {
       version: 1,
       taskId: target.workspace.mode === 'task-bound' ? target.workspace.taskId : null,

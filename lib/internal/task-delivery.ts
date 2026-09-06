@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import { deliverTaskBranch } from '../task/delivery.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-delivery <task-ref> deliver --agent <agent> [--remote <name>] [--base <branch>] [--dry-run] [--cwd <path>]\n`;
 
@@ -10,7 +10,7 @@ function taskDelivery(args: string[] = []): void {
   if (!ensureInternalHandlerRoute('task-delivery', args)) return;
   const taskRef = args[0];
   const operation = args[1];
-  if (!taskRef || operation !== 'deliver') {
+  if (!taskRef || !internalHandlerRoute('task-delivery', 'deliver', operation ?? '')) {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'DELIVERY_PAYLOAD_INVALID', message: 'task ref and deliver operation are required' } })}\n`);
     process.stderr.write(USAGE);
     process.exitCode = 1;

@@ -7,7 +7,7 @@ import {
   watchPullRequestReadiness
 } from '../platform/pr-checks.ts';
 import type { ChecksResult } from '../platform/pr-checks.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-checks inspect <task-ref> [--cwd <path>]
        agent-infra-internal platform-checks watch <task-ref> --interval-seconds <N> --deadline-seconds <N> [--cwd <path>]
@@ -57,7 +57,12 @@ async function platformChecks(args: string[] = []): Promise<void> {
   if (!ensureInternalHandlerRoute('platform-checks', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['inspect', 'watch', 'resolve-run', 'logs'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || ![
+    internalHandlerRoute('platform-checks', 'inspect', operation),
+    internalHandlerRoute('platform-checks', 'watch', operation),
+    internalHandlerRoute('platform-checks', 'resolve-run', operation),
+    internalHandlerRoute('platform-checks', 'logs', operation)
+  ].some(Boolean)) { fail('a valid operation is required'); return; }
   const taskRef = args[1];
   if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
   const parsed = parse(args, 2);
@@ -72,19 +77,20 @@ async function platformChecks(args: string[] = []): Promise<void> {
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
-  if (operation === 'inspect') { finish(await inspectPullRequestReadiness(taskRef, { cwd })); return; }
-  if (operation === 'resolve-run') {
+  if (internalHandlerRoute('platform-checks', 'inspect', operation)) { finish(await inspectPullRequestReadiness(taskRef, { cwd })); return; }
+  if (internalHandlerRoute('platform-checks', 'resolve-run', operation)) {
     if (!values.checkName) { fail('resolve-run requires --check-name'); return; }
     finish(await resolvePlatformCheckRun(taskRef, { cwd, checkName: values.checkName, detailsUrl: values.detailsUrl }));
     return;
   }
-  if (operation === 'logs') {
+  if (internalHandlerRoute('platform-checks', 'logs', operation)) {
     const run = positive(values.run);
     const job = values.job === undefined ? undefined : positive(values.job);
     if (!run || values.job !== undefined && !job) { fail('logs requires a positive --run and optional positive --job'); return; }
     finish(await fetchPlatformCheckLogs(taskRef, { cwd, run, job: job || undefined }));
     return;
   }
+  if (!internalHandlerRoute('platform-checks', 'watch', operation)) { fail('operation is not registered'); return; }
   const intervalSeconds = positive(values.intervalSeconds);
   const deadlineSeconds = positive(values.deadlineSeconds);
   if (!intervalSeconds || !deadlineSeconds) { fail('watch requires positive --interval-seconds and --deadline-seconds'); return; }

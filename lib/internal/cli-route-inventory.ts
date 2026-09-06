@@ -112,6 +112,17 @@ export function isInternalHandlerRoute(command: string, args: readonly string[])
   return Boolean(selector && selectors?.some((candidate) => candidate === selector));
 }
 
+/**
+ * Marks a selector at the handler's actual dispatch branch.
+ *
+ * The call is intentionally side-effect free so the top-level task-view guard
+ * can still run before a handler module is imported. Route coverage tests read
+ * these branch markers independently from the pre-import inventory.
+ */
+export function internalHandlerRoute(command: string, selector: string, actualSelector: string): boolean {
+  return command.length > 0 && selector === actualSelector;
+}
+
 export function ensureInternalHandlerRoute(command: string, args: readonly string[]): boolean {
   if (isInternalHandlerRoute(command, args)) return true;
   const selector = internalRouteSelector(command, args);

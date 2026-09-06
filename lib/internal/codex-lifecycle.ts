@@ -22,7 +22,7 @@ import {
   sealCodexOrchestrationDelegation,
   sealCodexParentDelegation
 } from '../task/codex-orchestration.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal codex-lifecycle <capability-arm|hook-event|resolve-start|resolve-stop|preflight|consume> [options]\n';
 const MANAGED_AGENT = /^agent-infra-lifecycle-(executor|reviewer)$/;
@@ -167,7 +167,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
   const parsed = parse(args);
   if (!parsed || process.exitCode) return;
   try {
-    if (parsed.operation === 'preflight') {
+    if (internalHandlerRoute('codex-lifecycle', 'preflight', parsed.operation)) {
       const format = parsed.values['--format'] ?? 'json';
       if (!['text', 'json'].includes(format)) throw new Error("format must be 'text' or 'json'");
       const runtimeFields = [
@@ -190,7 +190,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       return;
     }
 
-    if (parsed.operation === 'capability-arm') {
+    if (internalHandlerRoute('codex-lifecycle', 'capability-arm', parsed.operation)) {
       const taskId = parsed.values['--task-id'];
       if (!taskId) throw new Error('capability-arm requires --task-id');
       const resolved = resolveTaskRef(taskId, { repoRoot: process.cwd() });
@@ -213,7 +213,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
     }
 
     const store = createCodexLifecycleStore({ cliVersion: cliVersion() });
-    if (parsed.operation === 'hook-event') {
+    if (internalHandlerRoute('codex-lifecycle', 'hook-event', parsed.operation)) {
       const phase = parsed.values['--event'];
       if (!phase || !['pre-tool', 'subagent-start', 'post-tool', 'subagent-stop'].includes(phase)) {
         throw new Error('hook-event requires a known --event');
@@ -350,7 +350,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
 
     const childThreadId = parsed.values['--child-id'];
     if (!childThreadId) throw new Error(`operation '${parsed.operation}' requires --child-id`);
-    if (parsed.operation === 'resolve-start') {
+    if (internalHandlerRoute('codex-lifecycle', 'resolve-start', parsed.operation)) {
       if (store.read(childThreadId).state.spawn?.hookDefinitionHash !== hookDefinitionHash()) {
         throw new Error('Codex lifecycle hook definition hash is stale');
       }
@@ -362,7 +362,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       if (latest.state.status !== 'start-ready') process.exitCode = 1;
       return;
     }
-    if (parsed.operation === 'resolve-stop') {
+    if (internalHandlerRoute('codex-lifecycle', 'resolve-stop', parsed.operation)) {
       const stopTurnId = store.read(childThreadId).state.stop?.turnId;
       if (!stopTurnId) throw new Error('Codex lifecycle stop hook is not available');
       const terminal = await resolveCodexTerminal(childThreadId, stopTurnId);
@@ -373,7 +373,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       output({ status: latest.state.status, changed: true, evidence: latest.state.stopEvidence, diagnostics: [], error: latest.state.error });
       return;
     }
-    if (parsed.operation === 'consume') {
+    if (internalHandlerRoute('codex-lifecycle', 'consume', parsed.operation)) {
       const consumer = parsed.values['--consumer'];
       if (!consumer) throw new Error('consume requires --consumer');
       const consumed = store.consume(childThreadId, consumer, hookDefinitionHash());

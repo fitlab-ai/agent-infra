@@ -11,7 +11,7 @@ import {
 import type { DecisionRecord, HostResolution } from '../pr-review/evidence-grading.ts';
 import { inspectPlatformPullRequestByNumber } from '../platform/pull-requests.ts';
 import { verifyInProcess } from '../task/verification-engine.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal pr-review-grade decide --input-file <path|-> [--cwd <path>]
        agent-infra-internal pr-review-grade resolve-host --pr <token> [--cwd <path>]
@@ -54,7 +54,11 @@ async function prReviewGrade(args: string[] = []): Promise<void> {
   if (!ensureInternalHandlerRoute('pr-review-grade', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['decide', 'resolve-host', 'verify-artifact'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || ![
+    internalHandlerRoute('pr-review-grade', 'decide', operation),
+    internalHandlerRoute('pr-review-grade', 'resolve-host', operation),
+    internalHandlerRoute('pr-review-grade', 'verify-artifact', operation)
+  ].some(Boolean)) { fail('a valid operation is required'); return; }
   const parsed = parseFlags(args, 1);
   if (parsed.error) { fail(parsed.error); return; }
   const values = parsed.values;
@@ -67,7 +71,7 @@ async function prReviewGrade(args: string[] = []): Promise<void> {
   const unexpected = Object.keys(values).find((key) => !allowed[operation]!.includes(key));
   if (unexpected) { fail(`${operation} does not accept '--${unexpected}'`); return; }
 
-  if (operation === 'decide') {
+  if (internalHandlerRoute('pr-review-grade', 'decide', operation)) {
     if (typeof values.inputFile !== 'string') { fail('decide requires --input-file'); return; }
     let input: unknown;
     try {
@@ -86,7 +90,7 @@ async function prReviewGrade(args: string[] = []): Promise<void> {
     return;
   }
 
-  if (operation === 'resolve-host') {
+  if (internalHandlerRoute('pr-review-grade', 'resolve-host', operation)) {
     const pr = typeof values.pr === 'string' ? values.pr : '';
     if (!pr) { fail('resolve-host requires --pr <token>'); return; }
     const inspected = await inspectPlatformPullRequestByNumber(pr, { cwd });
@@ -111,6 +115,7 @@ async function prReviewGrade(args: string[] = []): Promise<void> {
     return;
   }
 
+  if (!internalHandlerRoute('pr-review-grade', 'verify-artifact', operation)) { fail('operation is not registered'); return; }
   if (typeof values.artifactFile !== 'string') { fail('verify-artifact requires --artifact-file'); return; }
   const artifactPath = path.resolve(cwd, values.artifactFile);
   let result: Record<string, unknown>;

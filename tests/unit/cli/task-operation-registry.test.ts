@@ -17,7 +17,6 @@ import {
 import {
   INTERNAL_HANDLER_ROUTE_SELECTORS,
   INTERNAL_CLI_ROUTE_SELECTORS,
-  ensureInternalHandlerRoute,
   isInternalHandlerRoute,
   PUBLIC_CLI_ROUTE_SELECTORS
 } from '../../../lib/internal/cli-route-inventory.ts';
@@ -36,6 +35,31 @@ const staleView: SandboxTaskView = {
 
 function commands(descriptors: readonly TaskOperationDescriptor[], command: string): TaskOperationDescriptor[] {
   return descriptors.filter((item) => item.command === command);
+}
+
+function routeKey(command: string, selector: string): string {
+  return `${command}:${selector}`;
+}
+
+function routeKeysFromHandlerBranches(): Set<string> {
+  const internalDir = path.resolve(process.cwd(), 'lib/internal');
+  const marker = /internalHandlerRoute\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/gu;
+  const keys = new Set<string>();
+  for (const name of fs.readdirSync(internalDir).filter((entry) => entry.endsWith('.ts'))) {
+    if (name === 'cli-route-inventory.ts') continue;
+    const source = fs.readFileSync(path.join(internalDir, name), 'utf8');
+    for (const match of source.matchAll(marker)) keys.add(routeKey(match[1]!, match[2]!));
+  }
+  return keys;
+}
+
+function routeKeysFromInventory(): Set<string> {
+  return new Set(Object.entries(INTERNAL_HANDLER_ROUTE_SELECTORS)
+    .flatMap(([command, selectors]) => selectors.map((selector) => routeKey(command, selector))));
+}
+
+function routeKeysFromDescriptors(): Set<string> {
+  return new Set(INTERNAL_OPERATION_DESCRIPTORS.map((item) => routeKey(item.command, item.selector)));
 }
 
 test('dispatcher route inventories have explicit descriptors in both directions', () => {
@@ -84,34 +108,22 @@ test('internal descriptor selectors match the shared dispatcher inventory', () =
   );
 });
 
-test('internal handler route definitions are the registry input and reject selector drift', () => {
+test('actual handler branches and registry descriptors have bidirectional coverage', () => {
+  const actual = routeKeysFromHandlerBranches();
+  const inventory = routeKeysFromInventory();
+  const descriptors = routeKeysFromDescriptors();
+  assert.deepEqual([...actual].sort(), [...inventory].sort());
+  assert.deepEqual([...actual].sort(), [...descriptors].sort());
   assert.strictEqual(INTERNAL_CLI_ROUTE_SELECTORS, INTERNAL_HANDLER_ROUTE_SELECTORS);
-  for (const [command, selectors] of Object.entries(INTERNAL_HANDLER_ROUTE_SELECTORS)) {
-    for (const selector of selectors) {
-      const args = command === 'task-create'
-        ? ['--input', 'candidate.json']
-        : command === 'task-short-id' && selector === 'list-verify'
-          ? ['list', '--verify']
-          : command === 'task-snapshot'
-            ? ['TASK-20260904-002344']
-          : command === 'task-delivery' || command === 'task-ledger' || command === 'task-warning' || command === 'task-activity'
-            || command === 'task-artifact' || command === 'task-review' || command === 'task-invalidation' || command === 'task-override'
-          ? ['TASK-20260904-002344', selector]
-          : command === 'task-context'
-            ? [selector]
-            : command === 'task-validate'
-              ? ['TASK-20260904-002344', '--scope', selector]
-              : command === 'platform-pr-review'
-                ? [selector === 'publish-pr' || selector === 'publish-task' ? 'publish' : selector, '--scope', selector === 'publish-task' ? 'TASK-20260904-002344' : 'pr123']
-                : command === 'task-lifecycle' || command === 'task-finalization' || command === 'task-orchestration'
-                  ? ['TASK-20260904-002344', selector]
-                  : command === 'task-event' || command === 'task-verify'
-                    ? ['TASK-20260904-002344', selector]
-                    : [selector];
-      assert.equal(ensureInternalHandlerRoute(command, args), true, `${command} ${selector}`);
-    }
-  }
   assert.equal(isInternalHandlerRoute('git-workflow', ['unregistered']), false);
+
+  const removed = [...actual][0]!;
+  const simulatedDeletion = new Set([...actual].filter((key) => key !== removed));
+  assert.deepEqual([...descriptors].filter((key) => !simulatedDeletion.has(key)), [removed]);
+
+  const [command, selector] = removed.split(':');
+  const simulatedRename = new Set([...actual].map((key) => key === removed ? routeKey(command!, `${selector}-renamed`) : key));
+  assert.deepEqual([...descriptors].filter((key) => !simulatedRename.has(key)), [removed]);
 });
 
 test('non-prefix task mutation routes resolve to task-bound descriptors', () => {

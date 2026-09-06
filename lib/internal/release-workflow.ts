@@ -9,7 +9,7 @@ import { inspectPlatformRelease, reconcileReleaseMilestones } from '../platform/
 import { inspectHomebrewChannel, inspectNpmChannel } from '../release/channels.ts';
 import { releaseSnapshot } from '../release/workflow.ts';
 import type { PostReleaseFacts, ReleaseFacts } from '../release/workflow.ts';
-import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 function command(cwd: string, executable: string, args: string[]) {
   return spawnSync(executable, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -313,18 +313,24 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   const version = String(rawVersion || '').replace(/^v/, '');
   const cwdIndex = rest.indexOf('--cwd');
   const cwd = path.resolve(cwdIndex >= 0 && rest[cwdIndex + 1] ? rest[cwdIndex + 1]! : process.cwd());
-  if (!['inspect', 'prepare', 'publish', 'post-prepare', 'post-publish'].includes(action || '') || !semver.valid(version)) {
+  if (![
+    internalHandlerRoute('release-workflow', 'inspect', action || ''),
+    internalHandlerRoute('release-workflow', 'prepare', action || ''),
+    internalHandlerRoute('release-workflow', 'publish', action || ''),
+    internalHandlerRoute('release-workflow', 'post-prepare', action || ''),
+    internalHandlerRoute('release-workflow', 'post-publish', action || '')
+  ].some(Boolean) || !semver.valid(version)) {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'RELEASE_INPUT_INVALID', message: 'Usage: release-workflow inspect|prepare|publish|post-prepare|post-publish <version>' } })}\n`);
     process.exitCode = 1; return;
   }
   if (!ensureInternalHandlerRoute('release-workflow', args)) return;
   const before = releaseSnapshot(version, await inspectFacts(cwd, version));
-  if (action === 'inspect') { process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`); return; }
+  if (internalHandlerRoute('release-workflow', 'inspect', action || '')) { process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`); return; }
   if (before.facts.localTagConflict) {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'GIT_TAG_CONFLICT', message: `Tag v${version} is not reachable from HEAD` } })}\n`);
     process.exitCode = 1; return;
   }
-  if (action === 'prepare') {
+  if (internalHandlerRoute('release-workflow', 'prepare', action || '')) {
     if (before.phase !== 'unprepared') {
       const milestones = await reconcileReleaseMilestones(version, { cwd });
       process.stdout.write(`${JSON.stringify({ ...milestones, snapshot: before })}\n`);
@@ -354,14 +360,14 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
     process.stdout.write(`${JSON.stringify({ status, changed: true, snapshot, operations: milestones?.operations ?? [], error: tagged.status !== 0 ? { code: 'GIT_TAG_FAILED', message: String(tagged.stderr) } : milestones?.error ?? null })}\n`);
     process.exitCode = failed ? 1 : blocked ? 2 : 0; return;
   }
-  if (action === 'publish') {
+  if (internalHandlerRoute('release-workflow', 'publish', action || '')) {
     if (!before.facts.localTag || !['prepared', 'partially-published'].includes(before.phase)) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_PHASE_INVALID', message: `Cannot publish from ${before.phase}` } })}\n`); process.exitCode = 1; return; }
     const branch = git(cwd, ['branch', '--show-current']) || '';
     const refs = [...(!before.facts.remoteBranch ? [branch] : []), ...(!before.facts.remoteTag ? [`refs/tags/v${version}`] : [])];
     const result = pushGitRefs({ cwd, remote: 'origin', refs });
     process.stdout.write(`${JSON.stringify({ ...result, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = result.status === 'failed' ? 1 : result.status === 'degraded' ? 2 : 0; return;
   }
-  if (action === 'post-publish') {
+  if (internalHandlerRoute('release-workflow', 'post-publish', action || '')) {
     const expectedValues = optionValues(rest, '--expected-sha256');
     if (expectedValues.length !== 1 || !/^sha256:[0-9a-f]{64}$/.test(expectedValues[0]!)) {
       process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_INPUT_INVALID', message: 'post-publish requires one --expected-sha256 sha256:<64 hex>' } })}\n`);
@@ -396,6 +402,10 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
     process.exitCode = blocked ? 2 : 1; return;
   }
 
+  if (!internalHandlerRoute('release-workflow', 'post-prepare', action || '')) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_INPUT_INVALID', message: 'release-workflow action is not registered' } })}\n`);
+    process.exitCode = 1; return;
+  }
   if (before.phase === 'complete') {
     process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`);
     return;
