@@ -283,33 +283,32 @@ export function captureSandboxAuthority(
     : engine === 'wsl2'
       ? currentWslRoute(env, probe, options.timeoutMs)
       : currentContextRoute(engine, env, probe, options.timeoutMs);
-  const command = options.route
-    ? commandForSandboxAuthority(options.route, 'docker', authorityVersionArgs())
-    : route.command(authorityVersionArgs());
-  let response: SpawnSyncReturns<string | Buffer>;
-  try {
-    response = probe(
-      command.cmd,
-      command.args,
-      options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }
-    );
-  } catch {
-    throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
+  function probeJson(args: string[]): unknown {
+    const command = options.route
+      ? commandForSandboxAuthority(options.route, 'docker', args)
+      : route.command(args);
+    try {
+      const response = probe(
+        command.cmd,
+        command.args,
+        options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }
+      );
+      if (response.status !== 0) throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
+      return JSON.parse(text(response.stdout).trim());
+    } catch {
+      throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
+    }
   }
-  if (response.status !== 0) throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
-  let server: unknown;
-  try {
-    server = JSON.parse(text(response.stdout).trim());
-  } catch {
-    throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
-  }
+  const server = probeJson(authorityVersionArgs());
   if (!server || typeof server !== 'object' || Array.isArray(server)) {
     throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
   }
   const record = server as Record<string, unknown>;
-  const serverId = typeof record.ID === 'string' ? record.ID : '';
-  const api = typeof record.APIVersion === 'string' ? /^(\d+)\.(\d+)$/u.exec(record.APIVersion) : null;
-  if (!serverId || !api) throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
+  const api = typeof record.ApiVersion === 'string' ? /^(\d+)\.(\d+)$/u.exec(record.ApiVersion) : null;
+  if (!api) throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
+  // Docker version exposes API metadata; the daemon ID belongs to Docker info.
+  const serverId = probeJson(['info', '--format', '{{json .ID}}']);
+  if (typeof serverId !== 'string' || !serverId.trim()) throw new Error('SANDBOX_AUTHORITY_CAPTURE_FAILED');
   const normalizedEndpoint = route.endpoint;
   const evidenceWithoutFingerprint = {
     version: 1 as const,

@@ -32,8 +32,8 @@ const FIXTURE_CONTAINER_ID = "f".repeat(64);
 function fixtureAuthorityEvidence() {
   return captureSandboxAuthority("docker-desktop", {
     lockDomain: "a".repeat(64),
-    probe: () => ({
-      status: 0, signal: null, stdout: JSON.stringify({ ID: "fixture-daemon-id", APIVersion: "1.50" }), stderr: "", pid: 1, output: []
+    probe: (_cmd, args) => ({
+      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? "fixture-daemon-id" : { ApiVersion: "1.50" }), stderr: "", pid: 1, output: []
     })
   });
 }

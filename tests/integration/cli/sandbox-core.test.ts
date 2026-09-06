@@ -346,8 +346,8 @@ function writeTaskBoundControlEvidence(
   const containerId = "f".repeat(64);
   const authorityEvidence = captureSandboxAuthority("docker-desktop", {
     lockDomain: "a".repeat(64),
-    probe: () => ({
-      status: 0, signal: null, stdout: JSON.stringify({ ID: "fixture-daemon-id", APIVersion: "1.50" }), stderr: "", pid: 1, output: []
+    probe: (_cmd, args) => ({
+      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? "fixture-daemon-id" : { ApiVersion: "1.50" }), stderr: "", pid: 1, output: []
     })
   });
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({

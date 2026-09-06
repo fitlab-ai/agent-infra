@@ -279,8 +279,8 @@ function fixtureAuthorityEvidence() {
   return captureSandboxAuthority('native', {
     env: { DOCKER_CONTEXT: 'default' },
     lockDomain: 'a'.repeat(64),
-    probe: () => ({
-      status: 0, signal: null, stdout: JSON.stringify({ ID: 'fixture-daemon-id', APIVersion: '1.50' }),
+    probe: (_cmd, args) => ({
+      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'fixture-daemon-id' : { ApiVersion: '1.50' }),
       stderr: '', pid: 1, output: []
     })
   });
@@ -1772,7 +1772,8 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
   const containerId = 'f'.repeat(64);
   fs.writeFileSync(docker, `#!/bin/sh
 if [ "$1" = --context ] && [ "$2" = default ]; then shift 2; fi
-if [ "$1" = version ]; then printf '%s\\n' '{"ID":"daemon-id","APIVersion":"1.50"}'; exit 0; fi
+if [ "$1" = version ]; then printf '%s\\n' '{"ApiVersion":"1.50"}'; exit 0; fi
+if [ "$1" = info ]; then printf '%s\\n' '"daemon-id"'; exit 0; fi
 if [ "$1" = container ] && [ "$2" = ls ]; then printf '%s\\n' '${containerId}'; exit 0; fi
 if [ "$1" = container ] && [ "$2" = inspect ]; then printf '%s\\n' '{"Id":"${containerId}","State":{"Running":true},"Config":{"Labels":{}}}'; exit 0; fi
 [ "$1" = exec ] && [ "$3" = cat ] && exec cat "$4"
@@ -1781,8 +1782,8 @@ exit 1
   const authorityEvidence = captureSandboxAuthority('native', {
     env: { DOCKER_CONTEXT: 'default' },
     lockDomain: 'a'.repeat(64),
-    probe: () => ({
-      status: 0, signal: null, stdout: JSON.stringify({ ID: 'daemon-id', APIVersion: '1.50' }), stderr: '', pid: 1, output: []
+    probe: (_cmd, args) => ({
+      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'daemon-id' : { ApiVersion: '1.50' }), stderr: '', pid: 1, output: []
     })
   });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
