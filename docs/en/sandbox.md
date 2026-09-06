@@ -197,8 +197,19 @@ All removal paths inspect every target worktree before destructive cleanup.
 Staged, unstaged, conflicted, or non-ignored untracked changes make batch,
 purge, prune, `--yes`, and other non-interactive removal fail closed. A single
 interactive `ai sandbox rm <branch>` may discard changes only after displaying
-the exact dirty snapshot and receiving a separate confirmation that defaults
-to no. If the snapshot changes before deletion, authorization expires.
+the dirty snapshot and receiving a separate confirmation that defaults
+to no. Discard authorizes loss of later changes in that same worktree and branch;
+clean-only authorization still expires if the snapshot changes.
+
+Normal task-bound cleanup follows successful `complete-task`, short-ID release,
+and movement to the completed task directory. Use the full `TASK-id` for cleanup;
+a released short ID may refer to another task. Exceptional cleanup is an explicit
+operator decision to discard the selected sandbox and rebuild it, and may stop
+running executions. Both paths retain exact container authority/identity, managed
+path and ownership checks, and stop execution before host cleanup. They do not
+promise atomic source-instance moves against unrelated host programs replacing
+the selected directories concurrently. No privileged host service is required.
+An unreachable engine or an unknown removal result remains retryable, not success.
 Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
 behind by older versions or interrupted cleanup, then `ai sandbox prune` to
 remove only dirs without an active sandbox container.

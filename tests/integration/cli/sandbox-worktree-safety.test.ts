@@ -557,7 +557,7 @@ test("recovered worktree safety rejects damaged content with inconsistent admin 
   }
 });
 
-test("worktree removal permit fails closed when content changes after authorization", onPlatforms("linux", "darwin", "win32"), async () => {
+test("explicit discard permits later content changes but rejects another branch", onPlatforms("linux", "darwin", "win32"), async () => {
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const fixture = createLinkedWorktree();
   try {
@@ -568,10 +568,9 @@ test("worktree removal permit fails closed when content changes after authorizat
 
     fs.writeFileSync(path.join(fixture.worktree, "tracked.txt"), "changed after authorization\n", "utf8");
 
-    assert.throws(
-      () => safety.verifyWorktreePermit(permit),
-      /changed after authorization/
-    );
+    assert.equal(safety.verifyWorktreePermit(permit).branch, inspected.snapshot.branch);
+    execFileSync("git", ["-C", fixture.worktree, "switch", "-c", "feature/other-target"]);
+    assert.throws(() => safety.verifyWorktreePermit(permit), /changed after authorization/);
     assert.equal(fs.existsSync(fixture.worktree), true);
   } finally {
     fixture.cleanup();
@@ -592,7 +591,7 @@ test("interactive single-worktree authorization uses a separate default-no disca
         confirm: async (options) => {
           confirmationCount += 1;
           assert.equal(options.initialValue, false);
-          assert.match(options.message, /Discard these exact uncommitted changes/);
+          assert.match(options.message, /Discard this worktree/);
           return true;
         }
       }
@@ -1265,7 +1264,10 @@ test("sandbox rm preserves a replacement worktree after a workspace phase crash"
       /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
     );
     assert.equal(fs.existsSync(worktree), true);
-    assert.match(git(fixture.repoDir, "worktree", "list", "--porcelain"), new RegExp(`worktree ${worktree.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    const registeredPaths = git(fixture.repoDir, "worktree", "list", "--porcelain")
+      .split("\n").filter((line) => line.startsWith("worktree "))
+      .map((line) => fs.realpathSync.native(line.slice(9)));
+    assert.ok(registeredPaths.includes(fs.realpathSync.native(worktree)));
   } finally {
     fs.writeFileSync = originalWriteFileSync;
     if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
@@ -1437,7 +1439,7 @@ test("sandbox rm preserves an unowned tombstone when the source is absent", onPl
   }
 });
 
-test("sandbox rm preserves a share replacement between source claim and rename", onPlatforms("linux", "darwin", "win32"), async () => {
+test("sandbox rm retains an unexpected moved share payload for diagnosis", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-replacement-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1526,7 +1528,7 @@ test("sandbox rm preserves a share replacement between source claim and rename",
   }
 });
 
-test("sandbox rm preserves a share replacement after a crash following rename", onPlatforms("linux", "darwin", "win32"), async () => {
+test("sandbox rm preserves foreign tombstone payload on interrupted retry", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-crash-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1733,7 +1735,7 @@ test("sandbox rm allows explicit discard of a stable recovered dirty snapshot", 
     assert.equal(fs.existsSync(worktree), false);
     assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
     assert.equal(prompts.some(({ message, initialValue }) => (
-      message === "Discard these exact uncommitted changes?" && initialValue === false
+      message === "Discard this worktree and all its uncommitted changes, including later changes?" && initialValue === false
     )), true);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

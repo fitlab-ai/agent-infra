@@ -437,6 +437,8 @@ function stageManagedRemoval(
     throw new Error(`SANDBOX_CONTROL_REMOVAL_ACTION_OUTCOME_UNKNOWN: ${source}`);
   }
   if (!sourceExists) return;
+  // The operator authorizes cleanup of this managed target after execution stops.
+  // Path checks detect conflicts; they do not provide an atomic source-instance move.
   const expectedIdentity = removalSourceIdentity(source);
   const claimPath = removalSourceClaimPath(source, ownership);
   try {
@@ -1188,7 +1190,7 @@ async function authorizeWorktrees(
     }
     p.log.warn(formatWorktreeSnapshot(inspection.snapshot));
     const confirmed = await confirm({
-      message: 'Discard these exact uncommitted changes?',
+      message: 'Discard this worktree and all its uncommitted changes, including later changes?',
       initialValue: false
     });
     if (isCancel(confirmed) || !confirmed) throw new Error('Dirty worktree removal cancelled; nothing was deleted');

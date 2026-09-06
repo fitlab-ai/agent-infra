@@ -83,7 +83,7 @@ function assertPrivateDirectory(directory: string, home: string): void {
     if (process.platform !== 'win32') fs.chmodSync(current, 0o700);
   }
   const real = fs.realpathSync.native(path.resolve(directory));
-  const realRelative = path.relative(resolvedHome, real);
+  const realRelative = path.relative(fs.realpathSync.native(resolvedHome), real);
   if (!realRelative || realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
     throw new Error('SANDBOX_LOCK_UNSUPPORTED: lock namespace realpath escapes the user home');
   }
