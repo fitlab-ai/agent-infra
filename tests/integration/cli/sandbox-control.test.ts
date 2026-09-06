@@ -560,73 +560,82 @@ test('sandbox control removal checks an absent startup transition after the pre-
   }
 });
 
-test('sandbox control removal completes all stages for stubborn broker and execution', onPlatforms('linux', 'darwin'), async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-stages-'));
-  const brokerReadyPath = path.join(root, 'broker-ready');
-  const executionReadyPath = path.join(root, 'execution-ready');
-  const stubbornScript = "const fs = require('node:fs'); process.on('SIGTERM', () => {}); fs.writeFileSync(process.argv[1], 'ready'); setInterval(() => {}, 1000);";
-  const brokerProcess = spawn(process.execPath, ['--eval', stubbornScript, brokerReadyPath], { stdio: 'ignore' });
-  const executionProcess = spawn(process.execPath, ['--eval', stubbornScript, executionReadyPath], {
-    detached: true,
-    stdio: 'ignore'
-  });
-  const stages: string[] = [];
-  let inspectCalls = 0;
-  try {
-    waitForFile(brokerReadyPath, 5_000);
-    waitForFile(executionReadyPath, 5_000);
-    const branch = initializeRepository(root);
-    const manifestPath = writeControlManifest(root, branch, 'remove-stages-generation');
-    const brokerStartTime = getProcessStartTime(brokerProcess.pid!);
-    const executionStartTime = getProcessStartTime(executionProcess.pid!);
-    assert.ok(brokerStartTime);
-    assert.ok(executionStartTime);
-    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
-      version: 3, pid: brokerProcess.pid, startTime: brokerStartTime, brokerId: 'stubborn-broker',
-      token: 'lifecycle-secret', generation: 'remove-stages-generation'
-    })}\n`);
-    fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
-      version: 2, generation: 'remove-stages-generation',
-      broker: { pid: brokerProcess.pid, startTime: brokerStartTime, brokerId: 'stubborn-broker' },
-      state: 'busy', reasonCode: null, activeRequestId: 'stubborn-request', updatedAt: Date.now()
-    })}\n`);
-    const executionDir = path.join(root, 'processing', 'stubborn-request');
-    fs.mkdirSync(executionDir);
-    fs.writeFileSync(path.join(executionDir, 'execution.json'), `${JSON.stringify({
-      version: 2, generation: 'remove-stages-generation', requestId: 'stubborn-request', nonce: 'stubborn-nonce',
-      child: { pid: executionProcess.pid, startTime: executionStartTime, processGroupId: executionProcess.pid },
-      phase: 'running', updatedAt: Date.now()
-    })}\n`);
-
-    await removeSandboxControlRoot(root, {
-      timeoutMs: 1_000,
-      inspectContainer: async () => {
-        inspectCalls += 1;
-        return inspectCalls === 1
-          ? { state: 'found', id: 'container-id', running: true, labels: {} }
-          : { state: 'absent', id: 'container-id' };
-      },
-      removeContainer: async () => {
-        stages.push('container-remove');
-        assert.equal(isProcessAlive(brokerProcess.pid!), true);
-        assert.equal(isProcessAlive(executionProcess.pid!), true);
-      }
+for (const removalFails of [false, true]) {
+  test(`sandbox control removal ${removalFails ? 'cleans up stubborn children after failure' : 'completes all stages for stubborn broker and execution'}`, onPlatforms('linux', 'darwin'), async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-stages-'));
+    const brokerReadyPath = path.join(root, 'broker-ready');
+    const executionReadyPath = path.join(root, 'execution-ready');
+    const stubbornScript = "const fs = require('node:fs'); process.on('SIGTERM', () => {}); fs.writeFileSync(process.argv[1], 'ready'); setInterval(() => {}, 1000);";
+    const brokerProcess = spawn(process.execPath, ['--eval', stubbornScript, brokerReadyPath], { stdio: 'ignore' });
+    const executionProcess = spawn(process.execPath, ['--eval', stubbornScript, executionReadyPath], {
+      detached: true,
+      stdio: 'ignore'
     });
+    const stages: string[] = [];
+    let inspectCalls = 0;
+    try {
+      waitForFile(brokerReadyPath, 5_000);
+      waitForFile(executionReadyPath, 5_000);
+      const branch = initializeRepository(root);
+      const manifestPath = writeControlManifest(root, branch, 'remove-stages-generation');
+      const brokerStartTime = getProcessStartTime(brokerProcess.pid!);
+      const executionStartTime = getProcessStartTime(executionProcess.pid!);
+      assert.ok(brokerStartTime);
+      assert.ok(executionStartTime);
+      fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+        version: 3, pid: brokerProcess.pid, startTime: brokerStartTime, brokerId: 'stubborn-broker',
+        token: 'lifecycle-secret', generation: 'remove-stages-generation'
+      })}\n`);
+      fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
+        version: 2, generation: 'remove-stages-generation',
+        broker: { pid: brokerProcess.pid, startTime: brokerStartTime, brokerId: 'stubborn-broker' },
+        state: 'busy', reasonCode: null, activeRequestId: 'stubborn-request', updatedAt: Date.now()
+      })}\n`);
+      const executionDir = path.join(root, 'processing', 'stubborn-request');
+      fs.mkdirSync(executionDir);
+      fs.writeFileSync(path.join(executionDir, 'execution.json'), `${JSON.stringify({
+        version: 2, generation: 'remove-stages-generation', requestId: 'stubborn-request', nonce: 'stubborn-nonce',
+        child: { pid: executionProcess.pid, startTime: executionStartTime, processGroupId: executionProcess.pid },
+        phase: 'running', updatedAt: Date.now()
+      })}\n`);
 
-    assert.deepEqual(stages, ['container-remove']);
-    assert.equal(inspectCalls, 2);
-    assert.equal(isProcessAlive(brokerProcess.pid!), false);
-    assert.equal(isProcessAlive(executionProcess.pid!), false);
-    assert.equal(fs.existsSync(root), false);
-  } finally {
-    for (const child of [executionProcess, brokerProcess]) {
-      if (child.pid && isProcessAlive(child.pid)) {
-        try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already exited */ }
+      const removal = removeSandboxControlRoot(root, {
+        timeoutMs: 1_000,
+        inspectContainer: async () => {
+          inspectCalls += 1;
+          return inspectCalls === 1
+            ? { state: 'found', id: 'container-id', running: true, labels: {} }
+            : { state: 'absent', id: 'container-id' };
+        },
+        removeContainer: async () => {
+          if (removalFails) throw new Error('injected removal failure');
+          stages.push('container-remove');
+          assert.equal(isProcessAlive(brokerProcess.pid!), true);
+          assert.equal(isProcessAlive(executionProcess.pid!), true);
+        }
+      });
+
+      if (removalFails) {
+        await assert.rejects(removal, /injected removal failure/);
+        return;
       }
+      await removal;
+
+      assert.deepEqual(stages, ['container-remove']);
+      assert.equal(inspectCalls, 2);
+      assert.equal(isProcessAlive(brokerProcess.pid!), false);
+      assert.equal(isProcessAlive(executionProcess.pid!), false);
+      assert.equal(fs.existsSync(root), false);
+    } finally {
+      if (executionProcess.pid && isProcessAlive(executionProcess.pid)) {
+        try { process.kill(-executionProcess.pid, 'SIGKILL'); } catch { /* already exited */ }
+      }
+      if (brokerProcess.pid) await stopBroker(brokerProcess.pid);
+      fs.rmSync(root, { recursive: true, force: true });
+      assert.equal(isProcessAlive(brokerProcess.pid!), false);
     }
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
+  });
+}
 
 test('sandbox control lifecycle terminates a live execution before accepting a stale broker', onPlatforms('linux', 'darwin'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-stale-execution-'));
