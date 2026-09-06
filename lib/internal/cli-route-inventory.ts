@@ -27,7 +27,12 @@ export const PUBLIC_CLI_ROUTE_SELECTORS = Object.freeze({
   version: ['version']
 } as const);
 
-export const INTERNAL_CLI_ROUTE_SELECTORS = Object.freeze({
+/**
+ * The selector definitions consumed by every internal handler. Keep this
+ * module free of handler imports so the pre-import task-view guard remains
+ * effective.
+ */
+export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-create': ['input'],
   'sandbox-control': ['serve', 'execute', 'recover', 'client'],
   'agent-client': ['next-steps', 'model-selection'],
@@ -61,3 +66,60 @@ export const INTERNAL_CLI_ROUTE_SELECTORS = Object.freeze({
   'task-verify': ['event'],
   'task-validate': ['snapshot', 'inplace']
 } as const);
+
+export const INTERNAL_CLI_ROUTE_SELECTORS = INTERNAL_HANDLER_ROUTE_SELECTORS;
+
+function first(args: readonly string[]): string {
+  return args[0] ?? '';
+}
+
+function optionValue(args: readonly string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  if (index >= 0) return args[index + 1];
+  const prefix = `${name}=`;
+  return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
+}
+
+export function internalRouteSelector(command: string, args: readonly string[]): string {
+  if (command === 'sandbox-control') return first(args);
+  if (command === 'task-create') return 'input';
+  if (command === 'task-lifecycle') return args[1] ? 'intent' : '';
+  if (command === 'task-finalization') return args[1] === 'complete' ? 'complete' : '';
+  if (command === 'task-event') return args[1] ? 'event' : '';
+  if (command === 'task-verify') return args[0] && args[1] ? 'event' : '';
+  if (command === 'task-snapshot') return 'snapshot';
+  if (command === 'task-validate') return optionValue(args, '--scope') ?? 'snapshot';
+  if (command === 'task-short-id') return first(args) === 'list' && args.includes('--verify') ? 'list-verify' : first(args);
+  if (command === 'task-orchestration') return args[1] === 'status' ? 'status' : args[1] ? 'progress' : '';
+  if (command === 'task-review') return args[1] ?? '';
+  if (command === 'task-invalidation') return args[1] ?? '';
+  if (command === 'task-override') return args[1] ?? '';
+  if (command === 'task-artifact') return args[1] ?? '';
+  if (command === 'platform-pr-review' && first(args) === 'publish') {
+    const scope = optionValue(args, '--scope') ?? '';
+    return /^TASK-\d{8}-\d{6}$/u.test(scope) ? 'publish-task' : /^pr\d+$/u.test(scope) ? 'publish-pr' : '';
+  }
+  if (['task-ledger', 'task-warning', 'task-activity'].includes(command)) return args[1] ?? '';
+  if (command === 'task-delivery') return args[1] ?? '';
+  if (command === 'task-context') return first(args);
+  return first(args);
+}
+
+export function isInternalHandlerRoute(command: string, args: readonly string[]): boolean {
+  if (args[0] === '--help' || args[0] === '-h') return true;
+  const selector = internalRouteSelector(command, args);
+  const selectors = INTERNAL_HANDLER_ROUTE_SELECTORS[command as keyof typeof INTERNAL_HANDLER_ROUTE_SELECTORS];
+  return Boolean(selector && selectors?.some((candidate) => candidate === selector));
+}
+
+export function ensureInternalHandlerRoute(command: string, args: readonly string[]): boolean {
+  if (isInternalHandlerRoute(command, args)) return true;
+  const selector = internalRouteSelector(command, args);
+  process.stdout.write(`${JSON.stringify({
+    status: 'failed',
+    changed: false,
+    error: { code: 'INTERNAL_ROUTE_UNREGISTERED', message: `operation '${command} ${selector || first(args)}' is not registered` }
+  })}\n`);
+  process.exitCode = 1;
+  return false;
+}

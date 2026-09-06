@@ -1,6 +1,7 @@
 import { createDirectHostExecutionContext, dispatchTaskControlOperation, parseTaskControlOperation } from '../task/control-authority.ts';
 import { OrchestrationStateError } from '../task/orchestration.ts';
 import { detectRepoRoot } from '../task/resolve-ref.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|dispatch|await-activation|recover-prepared|hook-start|hook-stop|advance|pause|status> [options]\n';
 
@@ -19,6 +20,7 @@ function parseFailure(error: unknown): string {
 }
 
 async function taskOrchestration(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-orchestration', args)) return;
   if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
     return;

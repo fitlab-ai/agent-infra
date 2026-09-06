@@ -15,7 +15,10 @@ import {
   type TaskOperationDescriptor
 } from '../../../lib/internal/task-operation-registry.ts';
 import {
+  INTERNAL_HANDLER_ROUTE_SELECTORS,
   INTERNAL_CLI_ROUTE_SELECTORS,
+  ensureInternalHandlerRoute,
+  isInternalHandlerRoute,
   PUBLIC_CLI_ROUTE_SELECTORS
 } from '../../../lib/internal/cli-route-inventory.ts';
 import type { SandboxTaskView } from '../../../lib/sandbox/control/task-view.ts';
@@ -79,6 +82,36 @@ test('internal descriptor selectors match the shared dispatcher inventory', () =
     ])),
     Object.fromEntries(Object.entries(INTERNAL_CLI_ROUTE_SELECTORS).map(([route, selectors]) => [route, [...selectors].sort()]))
   );
+});
+
+test('internal handler route definitions are the registry input and reject selector drift', () => {
+  assert.strictEqual(INTERNAL_CLI_ROUTE_SELECTORS, INTERNAL_HANDLER_ROUTE_SELECTORS);
+  for (const [command, selectors] of Object.entries(INTERNAL_HANDLER_ROUTE_SELECTORS)) {
+    for (const selector of selectors) {
+      const args = command === 'task-create'
+        ? ['--input', 'candidate.json']
+        : command === 'task-short-id' && selector === 'list-verify'
+          ? ['list', '--verify']
+          : command === 'task-snapshot'
+            ? ['TASK-20260904-002344']
+          : command === 'task-delivery' || command === 'task-ledger' || command === 'task-warning' || command === 'task-activity'
+            || command === 'task-artifact' || command === 'task-review' || command === 'task-invalidation' || command === 'task-override'
+          ? ['TASK-20260904-002344', selector]
+          : command === 'task-context'
+            ? [selector]
+            : command === 'task-validate'
+              ? ['TASK-20260904-002344', '--scope', selector]
+              : command === 'platform-pr-review'
+                ? [selector === 'publish-pr' || selector === 'publish-task' ? 'publish' : selector, '--scope', selector === 'publish-task' ? 'TASK-20260904-002344' : 'pr123']
+                : command === 'task-lifecycle' || command === 'task-finalization' || command === 'task-orchestration'
+                  ? ['TASK-20260904-002344', selector]
+                  : command === 'task-event' || command === 'task-verify'
+                    ? ['TASK-20260904-002344', selector]
+                    : [selector];
+      assert.equal(ensureInternalHandlerRoute(command, args), true, `${command} ${selector}`);
+    }
+  }
+  assert.equal(isInternalHandlerRoute('git-workflow', ['unregistered']), false);
 });
 
 test('non-prefix task mutation routes resolve to task-bound descriptors', () => {

@@ -10,7 +10,8 @@ import {
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import {
   PUBLIC_CLI_COMMAND_ALIASES,
-  PUBLIC_CLI_SELECTOR_ALIASES
+  PUBLIC_CLI_SELECTOR_ALIASES,
+  internalRouteSelector
 } from './cli-route-inventory.ts';
 
 export type TaskOperationDispatcher = 'public' | 'internal';
@@ -218,31 +219,6 @@ function optionValue(args: readonly string[], name: string): string | undefined 
   return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
 
-function internalSelector(command: string, args: readonly string[]): string {
-  if (command === 'sandbox-control') return first(args);
-  if (command === 'task-create') return 'input';
-  if (command === 'task-lifecycle') return args[1] ? 'intent' : '';
-  if (command === 'task-finalization') return args[1] === 'complete' ? 'complete' : '';
-  if (command === 'task-event') return args[1] ? 'event' : '';
-  if (command === 'task-verify') return args[0] && args[1] ? 'event' : '';
-  if (command === 'task-snapshot') return 'snapshot';
-  if (command === 'task-validate') return optionValue(args, '--scope') ?? 'snapshot';
-  if (command === 'task-short-id') return first(args) === 'list' && args.includes('--verify') ? 'list-verify' : first(args);
-  if (command === 'task-orchestration') return args[1] === 'status' ? 'status' : args[1] ? 'progress' : '';
-  if (command === 'task-review') return args[1] ?? '';
-  if (command === 'task-invalidation') return args[1] ?? '';
-  if (command === 'task-override') return args[1] ?? '';
-  if (command === 'task-artifact') return args[1] ?? '';
-  if (command === 'platform-pr-review' && first(args) === 'publish') {
-    const scope = optionValue(args, '--scope') ?? '';
-    return /^TASK-\d{8}-\d{6}$/u.test(scope) ? 'publish-task' : /^pr\d+$/u.test(scope) ? 'publish-pr' : '';
-  }
-  if (['task-ledger', 'task-warning', 'task-activity'].includes(command)) return args[1] ?? '';
-  if (command === 'task-delivery') return args[1] ?? '';
-  if (command === 'task-context') return first(args);
-  return first(args);
-}
-
 function publicSelector(command: string, args: readonly string[]): string {
   if (command === 'agent-client' || command === 'data' || command === 'server' || command === 'sandbox' || command === 'task') {
     const selector = first(args);
@@ -272,7 +248,7 @@ export function resolveTaskOperation(
   const normalizedCommand = dispatcher === 'public'
     ? PUBLIC_CLI_COMMAND_ALIASES[command as keyof typeof PUBLIC_CLI_COMMAND_ALIASES] ?? command
     : command;
-  const selector = dispatcher === 'internal' ? internalSelector(normalizedCommand, args) : publicSelector(normalizedCommand, args);
+  const selector = dispatcher === 'internal' ? internalRouteSelector(normalizedCommand, args) : publicSelector(normalizedCommand, args);
   if (!selector) return null;
   return descriptorsFor(dispatcher).find((item) => item.command === normalizedCommand && item.selector === selector) ?? null;
 }

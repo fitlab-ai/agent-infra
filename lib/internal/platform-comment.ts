@@ -10,6 +10,7 @@ import {
 import type { CommentKind } from '../platform/issue-comments.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { backfillCompletionComments } from '../platform/completion-backfill.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment owner <task-ref> [--cwd <path>]
@@ -53,6 +54,7 @@ function readBodyFile(value: string, cwd: string): string {
 }
 
 async function platformComment(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-comment', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['list', 'owner', 'backfill', 'sync'].includes(operation)) { fail('a valid operation is required'); return; }

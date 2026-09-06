@@ -6,6 +6,7 @@ import {
 import type { ConsumeHumanOverrideRequest, HumanOverrideRequest } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-override <task-ref> <diagnose|issue|consume> [options]
 
@@ -38,6 +39,7 @@ function usageFailure(message: string): void {
 }
 
 async function taskOverride(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-override', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, operation] = args;
   if (!taskRef || !operation || !['diagnose', 'issue', 'consume'].includes(operation)) {

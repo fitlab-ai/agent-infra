@@ -14,6 +14,7 @@ import {
 import type { PullRequestResult } from '../platform/pull-requests.ts';
 import { reportWrite, summaryContext, syncPullRequestSummary } from '../platform/pr-summary.ts';
 import type { PlatformResult } from '../platform/types.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd <path>]
        agent-infra-internal platform-pr resolve-external <task-ref> --agent <agent> [--pr <token>] [--dry-run] [--cwd <path>]
@@ -67,6 +68,7 @@ function readFile(value: string, cwd: string): string {
 }
 
 async function platformPr(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-pr', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'sync-in-labels', 'summary-context', 'change-report', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }

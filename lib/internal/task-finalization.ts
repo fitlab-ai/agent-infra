@@ -5,6 +5,7 @@ import {
 } from '../task/control-authority.ts';
 import { applyTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-finalization <N | TASK-id> complete --agent <agent>\n';
 
@@ -37,6 +38,7 @@ function parseFailure(error: unknown): string {
 }
 
 async function taskFinalization(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-finalization', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
 
   let operation;

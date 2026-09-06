@@ -9,6 +9,7 @@ import type {
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-activity <task-ref> pr-review-inspect
        agent-infra-internal task-activity <task-ref> pr-review-start --agent <agent> --artifact <canonical.md> --head <40hex> [--dry-run]
@@ -44,6 +45,7 @@ function usageFailure(message: string): void {
 }
 
 async function taskActivity(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-activity', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
   if (!taskRef || taskRef.startsWith('--') || !kind || !OPERATIONS.has(kind)) {

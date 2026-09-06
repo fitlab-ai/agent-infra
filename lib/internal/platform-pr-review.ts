@@ -5,6 +5,7 @@ import { inspectPlatformPullRequestByNumber } from '../platform/pull-requests.ts
 import { listPrReviews, publishPrReview } from '../platform/pr-review.ts';
 import type { PrReviewEvent } from '../platform/pr-review.ts';
 import type { PlatformResult } from '../platform/types.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-pr-review inspect --pr <token> [--cwd <path>]
        agent-infra-internal platform-pr-review list --pr <token> [--cwd <path>]
@@ -51,6 +52,7 @@ function readBodyFile(value: string, cwd: string): string {
 }
 
 async function platformPrReview(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-pr-review', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['inspect', 'list', 'publish'].includes(operation)) { fail('a valid operation is required'); return; }

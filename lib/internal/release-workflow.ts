@@ -9,6 +9,7 @@ import { inspectPlatformRelease, reconcileReleaseMilestones } from '../platform/
 import { inspectHomebrewChannel, inspectNpmChannel } from '../release/channels.ts';
 import { releaseSnapshot } from '../release/workflow.ts';
 import type { PostReleaseFacts, ReleaseFacts } from '../release/workflow.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 function command(cwd: string, executable: string, args: string[]) {
   return spawnSync(executable, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -316,6 +317,7 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'RELEASE_INPUT_INVALID', message: 'Usage: release-workflow inspect|prepare|publish|post-prepare|post-publish <version>' } })}\n`);
     process.exitCode = 1; return;
   }
+  if (!ensureInternalHandlerRoute('release-workflow', args)) return;
   const before = releaseSnapshot(version, await inspectFacts(cwd, version));
   if (action === 'inspect') { process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`); return; }
   if (before.facts.localTagConflict) {

@@ -5,7 +5,7 @@ import {
   guardTaskOperation,
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
-import { INTERNAL_CLI_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
+import { INTERNAL_HANDLER_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
 
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
 if (major < 22 || (major === 22 && minor < 9)) {
@@ -16,7 +16,7 @@ if (major < 22 || (major === 22 && minor < 9)) {
 }
 
 const command = process.argv[2] || '';
-const internalRouteRegistered = Object.hasOwn(INTERNAL_CLI_ROUTE_SELECTORS, command);
+const internalRouteRegistered = Object.hasOwn(INTERNAL_HANDLER_ROUTE_SELECTORS, command);
 const taskControlCommand = command === 'task-lifecycle' || command === 'task-orchestration' || command === 'task-finalization';
 
 let taskViewGuardFailed = false;

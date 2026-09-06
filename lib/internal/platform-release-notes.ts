@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { publishReleaseNotes, releaseNoteContext, stageReleaseNotes } from '../platform/release-notes.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 type ParsedOptions = Readonly<{ values: ReadonlyMap<string, string>; switches: ReadonlySet<string> }>;
 
@@ -37,6 +38,7 @@ function finish(result: { status: string; [key: string]: unknown }): void {
 }
 
 async function platformReleaseNotes(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-release-notes', args)) return;
   const [action, ...rest] = args;
   if (action === 'context') {
     const parsed = parseOptions(rest, ['--cwd', '--history-limit', '--from-tag', '--to-tag', '--branch']);

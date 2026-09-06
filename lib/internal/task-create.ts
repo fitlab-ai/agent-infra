@@ -5,6 +5,7 @@ import { requestSandboxTaskCreate, SandboxControlClientError } from '../sandbox/
 import { SANDBOX_CONTROL_MAX_BYTES } from '../sandbox/control/protocol.ts';
 import { validateTaskCreateCandidate } from '../task/create.ts';
 import { createTask, type TaskCreateResult } from '../task/create-service.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 function failed(code: string, message: string, retryable = false): TaskCreateResult {
   return {
@@ -19,6 +20,7 @@ function output(result: TaskCreateResult): void {
 }
 
 async function taskCreate(args: string[]): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-create', args)) return;
   const inputIndex = args.indexOf('--input');
   const input = inputIndex >= 0 ? args[inputIndex + 1] : undefined;
   if (!input || args.length !== 2 || inputIndex !== 0) {

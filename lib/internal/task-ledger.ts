@@ -6,6 +6,7 @@ import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, isReviewStage, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from '../task/ledger.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-ledger <task-ref> <intent> [intent flags] [--dry-run]\n\nIntents: finding-upsert, finding-respond, finding-review, decision-next-id, decision-upsert, rework-intent-upsert, stage-status\n`;
 const FLAGS: Record<string, string> = {
@@ -26,6 +27,7 @@ function usageFailure(message: string): void {
 }
 
 async function taskLedger(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-ledger', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
   if (!taskRef || !kind) { usageFailure('task ref and intent are required'); return; }

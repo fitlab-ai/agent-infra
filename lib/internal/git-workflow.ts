@@ -3,10 +3,12 @@ import { inspectGitWorkflow, previewCommitTree, pushRebasedBranch } from '../git
 import { compareReviewTrees, snapshotReview } from '../git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../task/review-fingerprint.ts';
 import { executeCommitOperation } from '../task/commit-operation.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 function output(value: unknown): void { process.stdout.write(`${JSON.stringify(value)}\n`); }
 
 function gitWorkflow(args: string[] = []): void {
+  if (!ensureInternalHandlerRoute('git-workflow', args)) return;
   const [action, ...rest] = args;
   const cwdIndex = rest.indexOf('--cwd');
   const cwd = cwdIndex >= 0 ? rest[cwdIndex + 1] : process.cwd();

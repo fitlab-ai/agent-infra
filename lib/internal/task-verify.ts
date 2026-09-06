@@ -2,6 +2,7 @@ import { renderTaskVerification, verifyTaskEvent } from '../task/verification.ts
 import { consumeHumanOverride, failureId } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-verify <N | TASK-id> <verification-event> [--artifact <canonical.md>] [--format json|text] [--override-ticket <ticket> --override-target <target> --override-scope <scope>]\n';
 
@@ -12,6 +13,7 @@ function fail(message: string): void {
 }
 
 async function taskVerify(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-verify', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (!args[0] || !args[1] || args[0].startsWith('--') || args[1].startsWith('--')) { fail('task ref and verification event are required'); return; }
   const taskRef = args[0];

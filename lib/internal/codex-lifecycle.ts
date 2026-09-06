@@ -22,6 +22,7 @@ import {
   sealCodexOrchestrationDelegation,
   sealCodexParentDelegation
 } from '../task/codex-orchestration.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal codex-lifecycle <capability-arm|hook-event|resolve-start|resolve-stop|preflight|consume> [options]\n';
 const MANAGED_AGENT = /^agent-infra-lifecycle-(executor|reviewer)$/;
@@ -162,6 +163,7 @@ function payloadText(payload: unknown, key: string): string {
 }
 
 async function codexLifecycle(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('codex-lifecycle', args)) return;
   const parsed = parse(args);
   if (!parsed || process.exitCode) return;
   try {

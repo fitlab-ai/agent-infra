@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { detectRepoRoot } from '../task/resolve-ref.ts';
 import { configuredShortIdLength, executeShortIdCommand } from '../task/short-id.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-short-id <alloc|release|resolve|list> [argument] [--active-dir <path>] [--short-id-length <N>] [--verify]\n`;
 
@@ -12,6 +13,7 @@ function failure(message: string): void {
 }
 
 function taskShortId(args: string[] = []): void {
+  if (!ensureInternalHandlerRoute('task-short-id', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['alloc', 'release', 'resolve', 'list'].includes(operation)) { failure('a valid short-id operation is required'); return; }

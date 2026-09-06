@@ -2,6 +2,7 @@ import {
   runCodexSandboxController,
   verifyCodexSandboxControllerContextWithWarnings
 } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal codex-sandbox-controller <run|verify-context> [options]\n';
 
@@ -51,6 +52,7 @@ function parse(args: string[]): Readonly<{ operation: string; values: Readonly<R
 }
 
 async function codexSandboxController(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('codex-sandbox-controller', args)) return;
   const parsed = parse(args);
   if (!parsed || process.exitCode) return;
   try {

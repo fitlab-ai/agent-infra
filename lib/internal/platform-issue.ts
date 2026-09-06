@@ -8,6 +8,7 @@ import {
   syncPlatformIssue
 } from '../platform/issues.ts';
 import type { IssueResult } from '../platform/issues.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-issue inspect <task-ref> [--cwd <path>]
        agent-infra-internal platform-issue create <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
@@ -60,6 +61,7 @@ function oneOf(values: Record<string, string | boolean>, name: string, allowed: 
 }
 
 async function platformIssue(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-issue', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['inspect', 'create', 'bind', 'sync'].includes(operation)) { fail('a valid operation is required'); return; }

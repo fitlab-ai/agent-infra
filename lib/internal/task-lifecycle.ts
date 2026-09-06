@@ -7,6 +7,7 @@ import {
 import { lifecycleIntentCatalog } from '../task/lifecycle.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import type { TaskLifecycleResult } from '../task/lifecycle.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\nOverride: --override-ticket <ticket> --override-target <target> --override-scope <scope>\n`;
 
@@ -22,6 +23,7 @@ function parseFailure(error: unknown): string {
 }
 
 async function taskLifecycle(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-lifecycle', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
 
   let operation;

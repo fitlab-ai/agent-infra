@@ -12,6 +12,7 @@ import {
   controllerProofFromContext,
   verifyCodexSandboxControllerContextWithWarnings
 } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 function isCanonicalCodexPrepare(args: readonly string[]): boolean {
   if (args[1] !== 'prepare') return false;
@@ -87,6 +88,7 @@ function sandboxFinalizationClient(args: string[]): void {
 }
 
 async function sandboxControl(args: string[]): Promise<void> {
+  if (!ensureInternalHandlerRoute('sandbox-control', args)) return;
   const [operation, ...rest] = args;
   if (operation === 'serve') {
     const manifestIndex = rest.indexOf('--manifest');

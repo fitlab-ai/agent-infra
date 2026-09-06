@@ -24,6 +24,7 @@ import {
 } from '../sandbox/control/protocol.ts';
 import { getProcessStartTime } from '../server/process-state.ts';
 import { assertGitWorktreeBinding } from '../git/worktree-identity.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-validate <branch | TASK-id | N> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command> [args...]`;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
@@ -271,6 +272,7 @@ function sniffFormat(args: string[]): 'text' | 'json' {
 }
 
 function taskValidate(args: string[]): void {
+  if (!ensureInternalHandlerRoute('task-validate', args)) return;
   let options: ValidateOptions;
   try {
     options = parseValidateArgs(args);

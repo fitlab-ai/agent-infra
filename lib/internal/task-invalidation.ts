@@ -1,10 +1,12 @@
 import { reconcileTaskInvalidation } from '../task/invalidation-command.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-invalidation <task-ref> reconcile [--max-targets <n>] [--dry-run]\n';
 
 function taskInvalidation(args: string[] = []): void {
+  if (!ensureInternalHandlerRoute('task-invalidation', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const taskRef = args[0];
   if (!taskRef || args[1] !== 'reconcile') {

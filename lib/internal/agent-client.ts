@@ -9,6 +9,7 @@ import { normalizeCustomTUIs } from '../agent-clients/custom-tuis.ts';
 import { renderNextStepCommands } from '../agent-clients/next-steps.ts';
 import { getAgentClientModelSelection } from '../agent-clients/registry.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal agent-client <next-steps|model-selection> [options]\n';
 
@@ -84,6 +85,7 @@ function parseArgs(args: string[]): ParsedArgs | null {
 }
 
 function agentClient(args: string[] = []): void {
+  if (!ensureInternalHandlerRoute('agent-client', args)) return;
   if (args[0] === 'model-selection') {
     const values: Record<string, string> = {};
     const seen = new Set<string>();

@@ -11,6 +11,7 @@ import {
 import type { DecisionRecord, HostResolution } from '../pr-review/evidence-grading.ts';
 import { inspectPlatformPullRequestByNumber } from '../platform/pull-requests.ts';
 import { verifyInProcess } from '../task/verification-engine.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal pr-review-grade decide --input-file <path|-> [--cwd <path>]
        agent-infra-internal pr-review-grade resolve-host --pr <token> [--cwd <path>]
@@ -50,6 +51,7 @@ function readInput(value: string, cwd: string): string {
 }
 
 async function prReviewGrade(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('pr-review-grade', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['decide', 'resolve-host', 'verify-artifact'].includes(operation)) { fail('a valid operation is required'); return; }

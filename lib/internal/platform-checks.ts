@@ -7,6 +7,7 @@ import {
   watchPullRequestReadiness
 } from '../platform/pr-checks.ts';
 import type { ChecksResult } from '../platform/pr-checks.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-checks inspect <task-ref> [--cwd <path>]
        agent-infra-internal platform-checks watch <task-ref> --interval-seconds <N> --deadline-seconds <N> [--cwd <path>]
@@ -53,6 +54,7 @@ function positive(value: string | undefined): number | null {
 }
 
 async function platformChecks(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-checks', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
   if (!operation || !['inspect', 'watch', 'resolve-run', 'logs'].includes(operation)) { fail('a valid operation is required'); return; }

@@ -1,4 +1,5 @@
 import { collectTaskSnapshot } from '../task/snapshot.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-snapshot <N | TASK-id> [--format json|text]\n';
 
@@ -9,6 +10,7 @@ function fail(message: string): void {
 }
 
 function taskSnapshot(args: string[] = []): void {
+  if (!ensureInternalHandlerRoute('task-snapshot', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (!args[0] || args[0].startsWith('--')) { fail('task ref is required'); return; }
   let format: 'json' | 'text' = 'json';
