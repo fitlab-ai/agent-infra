@@ -1,3 +1,4 @@
+import { completedReentryView } from './completed-reentry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -819,6 +820,16 @@ export async function serveSandboxControl(
       }
       reasonCode ??= containerReasonCode;
       reasonCode ??= bindingReasonCode;
+      if (!reasonCode && !active && taskView.state !== 'current') {
+        try {
+          const reentered = await completedReentryView(manifest, inspectContainer);
+          if (reentered && brokerOwns() && !readActiveLease(manifest) && !bindingCheck(manifest)) {
+            taskView = reentered;
+          }
+        } catch {
+          // Invalid or changed re-entry evidence never clears the existing task view.
+        }
+      }
       const state = reasonCode ? 'parked' : active ? 'busy' : 'healthy';
       const stateKey = `${state}:${reasonCode ?? ''}:${active?.request.id ?? ''}`;
       if (brokerOwns() && (stateKey !== lastState || now - lastStatusAt >= timing.controlTickMs)) {

@@ -1,3 +1,4 @@
+import { prepareCompletedReentry, publishCompletedReentry, waitForCompletedReentry } from './control/completed-reentry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -653,7 +654,7 @@ function recoveryTaskSources(repoRoot: string, taskId: string): {
   return { mountPaths, accessiblePaths: [completedSource] };
 }
 
-function startCompletedSandboxContainer(params: {
+export function startCompletedSandboxContainer(params: {
   config: SandboxConfig;
   engine: string;
   container: string;
@@ -1250,7 +1251,17 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       throw new Error('Explicit container recreation requested.');
     }
     if (!params.row.running) {
+      let completedReentry: { manifest: SandboxControlManifest; evidence: Awaited<ReturnType<typeof prepareCompletedReentry>> } | null = null;
       if (params.reentry === 'completed' && params.workspace?.mode === 'task-bound') {
+        const control = sandboxControlPaths({
+          base: params.config.controlBase, project: params.config.project,
+          container: params.row.name, identity: params.workspace
+        });
+        const manifest = readSandboxControlManifest(control.manifestPath);
+        if (manifest.taskId !== params.workspace.taskId || manifest.branch !== params.branch) {
+          throw new Error('SANDBOX_COMPLETED_REENTRY_EVIDENCE_INVALID');
+        }
+        completedReentry = { manifest, evidence: await prepareCompletedReentry(manifest) };
         startCompletedSandboxContainer({
           config: params.config,
           engine: params.engine,
@@ -1314,6 +1325,15 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       }
       if (final.findings.length > 0) {
         throw new Error(describeFindings(final.findings));
+      }
+      if (completedReentry) {
+        const { manifest, evidence } = completedReentry;
+        const current = await prepareCompletedReentry(manifest);
+        if (JSON.stringify(current) !== JSON.stringify(evidence)) {
+          throw new Error('SANDBOX_COMPLETED_REENTRY_EVIDENCE_INVALID');
+        }
+        publishCompletedReentry(manifest, evidence);
+        await waitForCompletedReentry(manifest, evidence);
       }
       return { container: params.row.name, path: 'recovered', warnings };
     }
