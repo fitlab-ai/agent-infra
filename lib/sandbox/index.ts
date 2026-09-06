@@ -1,3 +1,5 @@
+import { PUBLIC_CLI_ROUTE_SELECTORS } from '../internal/cli-route-inventory.ts';
+
 const USAGE = `Usage: ai sandbox <command> [options]
 
 Commands:
@@ -26,6 +28,7 @@ Commands:
   vm status|start|stop         Manage the sandbox VM (macOS) or check the backend (Windows)
 
 Run 'ai sandbox <command> --help' for details.`;
+const SANDBOX_OPERATIONS = PUBLIC_CLI_ROUTE_SELECTORS.sandbox;
 
 export async function runSandbox(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
@@ -39,6 +42,10 @@ export async function runSandbox(args: string[]): Promise<void> {
   if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
     process.stdout.write(`${USAGE}\n`);
     return;
+  }
+
+  if (!SANDBOX_OPERATIONS.includes(subcommand as typeof SANDBOX_OPERATIONS[number])) {
+    throw new Error(`Unknown sandbox command: ${subcommand}`);
   }
 
   switch (subcommand) {

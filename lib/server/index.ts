@@ -1,5 +1,8 @@
 import { runDaemon } from './daemon.ts';
 import { start, stop, status, logs } from './process-control.ts';
+import { PUBLIC_CLI_ROUTE_SELECTORS } from '../internal/cli-route-inventory.ts';
+
+const SERVER_OPERATIONS = PUBLIC_CLI_ROUTE_SELECTORS.server;
 
 const USAGE = `Usage: ai server <command> [options]
 
@@ -22,6 +25,13 @@ export async function runServer(args: string[]): Promise<void> {
   }
   if (subcommand === 'help' || subcommand === '--help' || subcommand === '-h') {
     process.stdout.write(`${USAGE}\n`);
+    return;
+  }
+
+  if (!SERVER_OPERATIONS.includes(subcommand as typeof SERVER_OPERATIONS[number])) {
+    process.stderr.write(`Unknown server command: ${subcommand}\n`);
+    process.stdout.write(`${USAGE}\n`);
+    process.exitCode = 1;
     return;
   }
 

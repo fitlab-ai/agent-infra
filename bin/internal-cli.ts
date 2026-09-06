@@ -5,6 +5,7 @@ import {
   guardTaskOperation,
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
+import { INTERNAL_CLI_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
 
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
 if (major < 22 || (major === 22 && minor < 9)) {
@@ -15,6 +16,7 @@ if (major < 22 || (major === 22 && minor < 9)) {
 }
 
 const command = process.argv[2] || '';
+const internalRouteRegistered = Object.hasOwn(INTERNAL_CLI_ROUTE_SELECTORS, command);
 const taskControlCommand = command === 'task-lifecycle' || command === 'task-orchestration' || command === 'task-finalization';
 
 let taskViewGuardFailed = false;
@@ -82,7 +84,7 @@ if (!taskViewGuardFailed && taskControlCommand) {
       }
     }
   }
-} else if (!taskViewGuardFailed) switch (command) {
+} else if (!taskViewGuardFailed && internalRouteRegistered) switch (command) {
 
   case 'task-create': {
     const { taskCreate } = await import('../lib/internal/task-create.ts');

@@ -6,7 +6,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { CLI_PATH, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 import {
   createDirectHostExecutionContext,
   createSandboxExecutorExecutionContext,
@@ -28,6 +28,19 @@ function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, command, ...args], {
+    cwd: os.tmpdir(),
+    env,
+    encoding: 'utf8'
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout?.toString() ?? '',
+    stderr: result.stderr?.toString() ?? ''
+  };
+}
+
+function runPublic(args: string[], env: NodeJS.ProcessEnv): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(process.execPath, [CLI_PATH, ...args], {
     cwd: os.tmpdir(),
     env,
     encoding: 'utf8'
@@ -68,6 +81,34 @@ test('task control without sandbox markers uses the direct-host entry', () => {
   const result = run('task-lifecycle', ['--help'], cleanEnv());
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Usage: agent-infra-internal task-lifecycle/);
+});
+
+test('branch-only control markers keep non-task public commands on the host entry', () => {
+  const result = runPublic(['version'], cleanEnv({
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation',
+    AGENT_INFRA_CONTROL_DIR: '/missing/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status'
+  }));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /agent-infra v/);
+  assert.equal(result.stderr, '');
+});
+
+test('top-level usage and version aliases remain available in task-bound environments', () => {
+  const env = cleanEnv({
+    AGENT_INFRA_TASK_ID: TASK_ID,
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation',
+    AGENT_INFRA_CONTROL_DIR: '/missing/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status',
+    AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
+  });
+  for (const args of [[], ['help'], ['--version'], ['-v']]) {
+    const result = runPublic(args, env);
+    assert.equal(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
+    assert.notEqual(result.stdout, '');
+  }
 });
 
 test('complete sandbox markers use the client entry without executing local authority', () => {

@@ -8,11 +8,15 @@ import {
   type TaskViewAccessEffect
 } from '../sandbox/control/task-view.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
+import {
+  PUBLIC_CLI_COMMAND_ALIASES,
+  PUBLIC_CLI_SELECTOR_ALIASES
+} from './cli-route-inventory.ts';
 
 export type TaskOperationDispatcher = 'public' | 'internal';
 export type TaskOperationScope = 'task-bound' | 'non-task' | 'conditional';
 export type TaskOperationEffect = TaskViewAccessEffect;
-export type TaskRefSource = 'argv' | 'environment' | 'none' | 'delegated';
+export type TaskRefSource = 'argv' | 'environment' | 'none' | 'delegated' | 'input';
 
 export type TaskOperationDescriptor = Readonly<{
   dispatcher: TaskOperationDispatcher;
@@ -54,7 +58,7 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'git-workflow', 'preview-tree', 'conditional', 'diagnostic'),
     descriptor('internal', 'git-workflow', 'snapshot', 'conditional', 'diagnostic'),
     descriptor('internal', 'git-workflow', 'compare-trees', 'conditional', 'diagnostic'),
-    descriptor('internal', 'git-workflow', 'commit', 'task-bound', 'progress'),
+    descriptor('internal', 'git-workflow', 'commit', 'task-bound', 'progress', 'input'),
     descriptor('internal', 'git-workflow', 'push-rebased', 'task-bound', 'remote-write'),
     descriptor('internal', 'task-delivery', 'deliver', 'task-bound', 'remote-write'),
     descriptor('internal', 'release-workflow', 'inspect', 'non-task', 'diagnostic', 'none'),
@@ -241,8 +245,11 @@ function internalSelector(command: string, args: readonly string[]): string {
 
 function publicSelector(command: string, args: readonly string[]): string {
   if (command === 'agent-client' || command === 'data' || command === 'server' || command === 'sandbox' || command === 'task') {
-    if (command === 'task' && first(args) === 'd') return 'decisions';
-    return first(args);
+    const selector = first(args);
+    if (command === 'task') {
+      return PUBLIC_CLI_SELECTOR_ALIASES.task[selector as keyof typeof PUBLIC_CLI_SELECTOR_ALIASES.task] ?? selector;
+    }
+    return selector;
   }
   if (command === 'run') {
     const skill = optionValue(args, '--skill');
@@ -262,8 +269,8 @@ export function resolveTaskOperation(
   command: string,
   args: readonly string[] = []
 ): TaskOperationDescriptor | null {
-  const normalizedCommand = dispatcher === 'public' && (command === '--version' || command === '-v')
-    ? 'version'
+  const normalizedCommand = dispatcher === 'public'
+    ? PUBLIC_CLI_COMMAND_ALIASES[command as keyof typeof PUBLIC_CLI_COMMAND_ALIASES] ?? command
     : command;
   const selector = dispatcher === 'internal' ? internalSelector(normalizedCommand, args) : publicSelector(normalizedCommand, args);
   if (!selector) return null;
@@ -284,18 +291,24 @@ const TASK_MARKER_KEYS = [
   'AGENT_INFRA_CONTROL_STATUS_DIR',
   'AGENT_INFRA_RUNTIME_DIR'
 ] as const;
-const TASK_CONTROL_MARKER_KEYS = TASK_MARKER_KEYS.slice(1, -1);
+const TASK_CONTROL_MARKER_KEYS = [
+  'AGENT_INFRA_CONTROL_TOKEN',
+  'AGENT_INFRA_CONTROL_GENERATION',
+  'AGENT_INFRA_CONTROL_DIR',
+  'AGENT_INFRA_CONTROL_STATUS_DIR'
+] as const;
 
 type TaskMarkerState = 'none' | 'branch-only' | 'task-bound' | 'incomplete';
 
 function taskMarkerState(env: NodeJS.ProcessEnv): TaskMarkerState {
   const present = (key: typeof TASK_MARKER_KEYS[number]) => Boolean(env[key]);
   const taskId = present('AGENT_INFRA_TASK_ID');
-  const controls = TASK_MARKER_KEYS.slice(1).every(present);
+  const controls = TASK_CONTROL_MARKER_KEYS.every(present);
+  const runtime = present('AGENT_INFRA_RUNTIME_DIR');
   const any = TASK_MARKER_KEYS.some(present);
   if (!any) return 'none';
-  if (taskId && controls) return 'task-bound';
-  if (!taskId && controls) return 'branch-only';
+  if (taskId && controls && runtime) return 'task-bound';
+  if (!taskId && controls && !runtime) return 'branch-only';
   return 'incomplete';
 }
 
@@ -310,6 +323,7 @@ function explicitTaskRefForOperation(
   selected: TaskOperationDescriptor
 ): string | null {
   if (selected.taskRefSource === 'none' || selected.taskRefSource === 'environment') return null;
+  if (selected.taskRefSource === 'input') return inputTaskRefForOperation(args);
   if (command === 'sandbox-control' && args[0] === 'client') {
     return explicitTaskRefForOperation('internal', args[1] ?? '', args.slice(2), selected);
   }
@@ -342,6 +356,21 @@ function explicitTaskRefForOperation(
   if (command === 'task-create' || command === 'task-short-id' && first(args) === 'list') return null;
   if (command === 'task-short-id') return args[1] ?? null;
   return first(args) || null;
+}
+
+function inputTaskRefForOperation(args: readonly string[]): string | null {
+  const inputPath = optionValue(args, '--input');
+  if (!inputPath) return null;
+  try {
+    const input = JSON.parse(fs.readFileSync(inputPath, 'utf8')) as { taskRef?: unknown };
+    return typeof input.taskRef === 'string' && input.taskRef.trim() ? input.taskRef.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTaskInputRef(taskRef: string): boolean {
+  return /^TASK-\d{8}-\d{6}$/u.test(taskRef) || /^\d+$/u.test(taskRef);
 }
 
 function taskRefMatchesEnvironment(taskRef: string, taskId: string): boolean {
@@ -440,19 +469,25 @@ export function guardTaskOperation(
   }
   if (selected.scope === 'non-task' || markerState !== 'task-bound') return { descriptor: selected, taskView: null };
   const taskId = env.AGENT_INFRA_TASK_ID!;
-  const taskRef = explicitTaskRefForOperation(dispatcher, command, args, selected);
-  if (taskRef && !taskRefMatchesEnvironment(taskRef, taskId)) {
-    throw new TaskViewOperationError(
-      'SANDBOX_TASK_REF_MISMATCH',
-      `task-bound operation targets '${taskRef}', but the sandbox is bound to '${taskId}'`
-    );
-  }
   const taskView = options.taskView ?? viewFromEnvironment(env);
   if (taskView.state === 'not-applicable' && selected.effect !== 'cleanup') {
     throw new TaskViewOperationError('SANDBOX_TASK_VIEW_INVALID', 'task-bound operation has no applicable task view');
   }
   const access = accessSandboxTaskView(taskView, selected.effect);
   if (!access.allowed) throw new TaskViewOperationError(access.reasonCode ?? 'SANDBOX_TASK_VIEW_DENIED', access.message ?? 'task view denied');
+  const taskRef = explicitTaskRefForOperation(dispatcher, command, args, selected);
+  if (selected.taskRefSource === 'input' && (!taskRef || !isTaskInputRef(taskRef))) {
+    throw new TaskViewOperationError(
+      'SANDBOX_TASK_REF_INVALID',
+      'task-bound input must contain a valid taskRef'
+    );
+  }
+  if (taskRef && !taskRefMatchesEnvironment(taskRef, taskId)) {
+    throw new TaskViewOperationError(
+      'SANDBOX_TASK_REF_MISMATCH',
+      `task-bound operation targets '${taskRef}', but the sandbox is bound to '${taskId}'`
+    );
+  }
   return { descriptor: selected, taskView };
 }
 

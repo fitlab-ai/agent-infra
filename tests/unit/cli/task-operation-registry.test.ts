@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -11,6 +14,10 @@ import {
   resolveTaskOperation,
   type TaskOperationDescriptor
 } from '../../../lib/internal/task-operation-registry.ts';
+import {
+  INTERNAL_CLI_ROUTE_SELECTORS,
+  PUBLIC_CLI_ROUTE_SELECTORS
+} from '../../../lib/internal/cli-route-inventory.ts';
 import type { SandboxTaskView } from '../../../lib/sandbox/control/task-view.ts';
 
 const staleView: SandboxTaskView = {
@@ -27,23 +34,6 @@ const staleView: SandboxTaskView = {
 function commands(descriptors: readonly TaskOperationDescriptor[], command: string): TaskOperationDescriptor[] {
   return descriptors.filter((item) => item.command === command);
 }
-
-const actualPublicSelectors: Readonly<Record<string, readonly string[]>> = {
-  'agent-client': ['list', 'status', 'enable', 'disable', 'configure'],
-  cp: ['cp'],
-  data: ['capture', 'verify', 'audit', 'repair', 'export'],
-  decide: ['decide'],
-  help: ['help'],
-  init: ['init'],
-  merge: ['merge'],
-  run: ['create-task', 'task-skill', 'recreate'],
-  sandbox: ['create', 'exec', 'ls', 'show', 'prune', 'rebuild', 'refresh', 'rm', 'start', 'vm'],
-  server: ['start', 'stop', 'status', 'logs', '__daemon'],
-  task: ['cat', 'decisions', 'files', 'grep', 'issue-body', 'log', 'ls', 'show', 'status'],
-  sync: ['sync'],
-  update: ['update'],
-  version: ['version']
-};
 
 test('dispatcher route inventories have explicit descriptors in both directions', () => {
   for (const [routes, descriptors] of [
@@ -66,16 +56,29 @@ test('dispatcher route inventories have explicit descriptors in both directions'
 
 test('public descriptor selectors match the actual command dispatchers', () => {
   assert.deepEqual(
-    Object.fromEntries(PUBLIC_DISPATCHER_ROUTES.map((route) => [
+    Object.fromEntries(Object.keys(PUBLIC_CLI_ROUTE_SELECTORS).map((route) => [
       route,
       commands(PUBLIC_OPERATION_DESCRIPTORS, route).map((item) => item.selector).sort()
     ])),
-    Object.fromEntries(Object.entries(actualPublicSelectors).map(([route, selectors]) => [route, [...selectors].sort()]))
+    Object.fromEntries(Object.entries(PUBLIC_CLI_ROUTE_SELECTORS).map(([route, selectors]) => [route, [...selectors].sort()]))
   );
   assert.equal(resolveTaskOperation('public', 'agent-client', ['status'])?.selector, 'status');
   assert.equal(resolveTaskOperation('public', 'agent-client', ['inspect']), null);
   assert.equal(resolveTaskOperation('public', 'sandbox', ['enter']), null);
   assert.equal(resolveTaskOperation('public', 'server', ['__daemon'])?.selector, '__daemon');
+  assert.equal(resolveTaskOperation('public', '', [])?.selector, 'help');
+  assert.equal(resolveTaskOperation('public', '--version', [])?.selector, 'version');
+  assert.equal(resolveTaskOperation('public', '-v', [])?.selector, 'version');
+});
+
+test('internal descriptor selectors match the shared dispatcher inventory', () => {
+  assert.deepEqual(
+    Object.fromEntries(Object.keys(INTERNAL_CLI_ROUTE_SELECTORS).map((route) => [
+      route,
+      commands(INTERNAL_OPERATION_DESCRIPTORS, route).map((item) => item.selector).sort()
+    ])),
+    Object.fromEntries(Object.entries(INTERNAL_CLI_ROUTE_SELECTORS).map(([route, selectors]) => [route, [...selectors].sort()]))
+  );
 });
 
 test('non-prefix task mutation routes resolve to task-bound descriptors', () => {
@@ -144,7 +147,7 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
       AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
       AGENT_INFRA_CONTROL_DIR: '/control',
       AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
-      AGENT_INFRA_RUNTIME_DIR: '/runtime'
+      AGENT_INFRA_RUNTIME_DIR: undefined
     },
     taskView: staleView
   }));
@@ -164,6 +167,43 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
     }),
     (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_REF_MISMATCH:')
   );
+});
+
+test('task-bound git input identity is checked before the commit module can load', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-input-'));
+  const inputPath = path.join(root, 'commit.json');
+  const taskEnv = {
+    AGENT_INFRA_TASK_ID: staleView.taskId!,
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_DIR: '/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
+    AGENT_INFRA_RUNTIME_DIR: '/runtime'
+  };
+  try {
+    fs.writeFileSync(inputPath, JSON.stringify({ taskRef: 'TASK-20990101-010101' }));
+    assert.throws(
+      () => guardTaskOperation('internal', 'git-workflow', ['commit', '--input', inputPath], { env: taskEnv, taskView: { ...staleView, state: 'current', observedSource: 'active', reasonCode: null } }),
+      (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_REF_MISMATCH:')
+    );
+    fs.writeFileSync(inputPath, JSON.stringify({ taskRef: staleView.taskId }));
+    assert.throws(
+      () => guardTaskOperation('internal', 'git-workflow', ['commit', '--input', inputPath], { env: taskEnv, taskView: staleView }),
+      (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_VIEW_FINALIZED:')
+    );
+    fs.writeFileSync(inputPath, JSON.stringify({ taskRef: 'feature/other-task' }));
+    assert.throws(
+      () => guardTaskOperation('internal', 'git-workflow', ['commit', '--input', inputPath], { env: taskEnv, taskView: { ...staleView, state: 'current', observedSource: 'active', reasonCode: null } }),
+      (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_REF_INVALID:')
+    );
+    fs.writeFileSync(inputPath, JSON.stringify({}));
+    assert.throws(
+      () => guardTaskOperation('internal', 'git-workflow', ['commit', '--input', inputPath], { env: taskEnv, taskView: { ...staleView, state: 'current', observedSource: 'active', reasonCode: null } }),
+      (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_REF_INVALID:')
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('host-direct routes remain unchanged without task-bound markers', () => {

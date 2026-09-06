@@ -1188,8 +1188,7 @@ test('task-finalization client exposes accepted result loss as a structured unkn
       AGENT_INFRA_CONTROL_GENERATION: generation,
       AGENT_INFRA_CONTROL_DIR: channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
-      AGENT_INFRA_TASK_ID: undefined,
-      AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
+      AGENT_INFRA_TASK_ID: undefined
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }));

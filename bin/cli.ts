@@ -5,6 +5,7 @@ import {
   guardTaskOperation,
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
+import { PUBLIC_CLI_COMMAND_ALIASES } from '../lib/internal/cli-route-inventory.ts';
 
 // Node.js version check
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
@@ -48,14 +49,9 @@ Examples:
   npx @fitlab-ai/agent-infra init
 `;
 
-const COMMAND_ALIASES: Record<string, string> = {
-  s: 'sandbox',
-  t: 'task'
-};
-
 const rawCommand = process.argv[2] || '';
-const command = Object.hasOwn(COMMAND_ALIASES, rawCommand)
-  ? COMMAND_ALIASES[rawCommand]
+const command = Object.hasOwn(PUBLIC_CLI_COMMAND_ALIASES, rawCommand)
+  ? PUBLIC_CLI_COMMAND_ALIASES[rawCommand as keyof typeof PUBLIC_CLI_COMMAND_ALIASES]
   : rawCommand;
 
 let taskViewGuardFailed = false;

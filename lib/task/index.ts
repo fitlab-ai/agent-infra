@@ -1,3 +1,8 @@
+import {
+  PUBLIC_CLI_ROUTE_SELECTORS,
+  PUBLIC_CLI_SELECTOR_ALIASES
+} from '../internal/cli-route-inventory.ts';
+
 const USAGE = `Usage: ai task <command> [options]
 
 Commands:
@@ -30,6 +35,7 @@ Examples:
   ai task status --task 11
 
 Run 'ai task <command> --help' for details.`;
+const TASK_OPERATIONS = PUBLIC_CLI_ROUTE_SELECTORS.task;
 
 export async function runTask(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
@@ -45,14 +51,21 @@ export async function runTask(args: string[]): Promise<void> {
     return;
   }
 
-  switch (subcommand) {
+  const routeSelector: string = PUBLIC_CLI_SELECTOR_ALIASES.task[subcommand as keyof typeof PUBLIC_CLI_SELECTOR_ALIASES.task] ?? subcommand;
+  if (!TASK_OPERATIONS.includes(routeSelector as typeof TASK_OPERATIONS[number])) {
+    process.stderr.write(`Unknown task command: ${subcommand}\n\n`);
+    process.stdout.write(`${USAGE}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  switch (routeSelector) {
     case 'cat': {
       const { cat } = await import('./commands/cat.ts');
       cat(rest);
       break;
     }
-    case 'decisions':
-    case 'd': {
+    case 'decisions': {
       const { decisions } = await import('./commands/decisions.ts');
       decisions(rest);
       break;
