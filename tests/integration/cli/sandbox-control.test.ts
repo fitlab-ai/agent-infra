@@ -1734,6 +1734,27 @@ test('sandbox control client and broker exchange a task-bound response', async (
     assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
     assert.equal(readSandboxControlManifest(manifestPath).taskId, taskId);
 
+    const audit = fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8')
+      .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    const events = new Set(audit.map((entry) => entry.event));
+    for (const event of [
+      'broker-start', 'request-claimed', 'request-validated', 'request-gates-passed',
+      'executor-prepared', 'request-accepted', 'executor-start', 'executor-completed',
+      'executor-result-evidence-written', 'executor-result-published', 'executor-request-start',
+      'executor-request-validated', 'orchestration-state-read-failed',
+      'executor-request-finished'
+    ]) assert.equal(events.has(event), true, `missing audit event: ${event}`);
+    const brokerStart = audit.find((entry) => entry.event === 'broker-start');
+    assert.equal(brokerStart?.manifestPath, manifestPath);
+    assert.equal(brokerStart?.repoRoot, root);
+    const requestValidated = audit.find((entry) => entry.event === 'request-validated');
+    assert.equal(requestValidated?.requestId, orchestrationResponse.id);
+    assert.equal(requestValidated?.requestPath, path.join(root, 'processing', String(orchestrationResponse.id), 'request.json'));
+    const stateFailure = audit.find((entry) => entry.event === 'orchestration-state-read-failed');
+    assert.equal(stateFailure?.taskDir, taskDir);
+    assert.equal(stateFailure?.file, runPath);
+    assert.equal(stateFailure?.reasonCodes, 'top-level-keys');
+
     const response = requestSandboxControl({
       family: 'task-lifecycle',
       args: ['08', 'complete'],

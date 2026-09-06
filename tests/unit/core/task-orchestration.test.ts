@@ -11,6 +11,7 @@ import {
   beginOrResumeOrchestration as beginOrResumeOrchestrationRaw,
   completeOrchestrationStage,
   dispatchOrchestrationDelegation,
+  OrchestrationStateError,
   pauseOrchestration,
   prepareOrchestrationDelegation as prepareOrchestrationDelegationRaw,
   readRun,
@@ -187,6 +188,75 @@ test('readRun rejects persisted state outside the current complete structure', (
     fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
     assert.throws(() => readRun(f.taskDir), { name: 'OrchestrationStateError' });
   }
+});
+
+test('orchestration state diagnostics identify the file, digest, and validation reason', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  persisted.schemaVersion = 3;
+  fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
+  const events: Array<{ event: string; fields: Readonly<Record<string, unknown>> }> = [];
+
+  assert.throws(
+    () => readRun(f.taskDir, { diagnosticLog: (event, fields) => events.push({ event, fields }) }),
+    (error: unknown) => error instanceof OrchestrationStateError && error.reasonCodes.includes('top-level-keys')
+  );
+  const failed = events.find(({ event }) => event === 'orchestration-state-read-failed');
+  assert.ok(failed);
+  assert.equal(failed.fields.taskId, 'TASK-20260101-000001');
+  assert.equal(failed.fields.fileType, 'file');
+  assert.equal(failed.fields.rawBytes, fs.statSync(runPath).size);
+  assert.match(String(failed.fields.rawSha256), /^[a-f0-9]{64}$/u);
+  assert.equal(failed.fields.reasonCodes, 'top-level-keys');
+});
+
+test('orchestration diagnostics protect malformed content and tolerate logger failures', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const expected = readRun(f.taskDir);
+  const brokenLogger = (): never => { throw new Error('audit unavailable'); };
+  assert.deepEqual(readRun(f.taskDir, { diagnosticLog: brokenLogger }), expected);
+
+  const secret = 'secret-test-marker';
+  fs.writeFileSync(runPath, secret);
+  const events: Array<{ event: string; fields: Readonly<Record<string, unknown>> }> = [];
+  assert.throws(() => readRun(f.taskDir, {
+    diagnosticLog: (event, fields) => events.push({ event, fields })
+  }), OrchestrationStateError);
+  const failed = events.find(({ event }) => event === 'orchestration-state-read-failed');
+  assert.equal(failed?.fields.reasonCodes, 'json-parse');
+  assert.equal(JSON.stringify(events).includes(secret.slice(0, 10)), false);
+  assert.throws(() => readRun(f.taskDir, { diagnosticLog: brokenLogger }), OrchestrationStateError);
+});
+
+test('orchestration diagnostics identify an invalid unrelated active candidate', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const otherTaskId = 'TASK-20260101-000002';
+  const otherTaskDir = path.join(f.root, '.agents', 'workspace', 'active', otherTaskId);
+  fs.mkdirSync(otherTaskDir, { recursive: true });
+  fs.writeFileSync(path.join(otherTaskDir, 'orchestration.json'), '{"schemaVersion":3}\n');
+  const events: Array<{ event: string; fields: Readonly<Record<string, unknown>> }> = [];
+
+  assert.throws(
+    () => prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
+      client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+    }, {
+      repoRoot: f.root,
+      supportsLifecycleDelegation: () => true,
+      diagnosticLog: (event, fields) => events.push({ event, fields })
+    }),
+    (error: unknown) => error instanceof OrchestrationStateError && error.reasonCodes.includes('top-level-keys')
+  );
+  const failed = events.find(({ event, fields }) => event === 'orchestration-active-scan-candidate-failed'
+    && fields.candidateTaskId === otherTaskId);
+  assert.ok(failed);
+  assert.equal(failed.fields.reasonCodes, 'top-level-keys');
+  assert.equal(failed.fields.candidateTaskDir, otherTaskDir);
+  assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
 });
 
 test('persisted run identity is bound to its task directory', () => {

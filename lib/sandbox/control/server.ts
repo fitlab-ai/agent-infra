@@ -58,6 +58,67 @@ type ActiveExecution = {
   settled: boolean;
 };
 
+function safeRealpath(value: string): string | null {
+  try {
+    return fs.realpathSync.native(value);
+  } catch {
+    return null;
+  }
+}
+
+function appendBrokerAudit(
+  manifest: SandboxControlManifest,
+  event: string,
+  fields: Record<string, string | number | boolean | null> = {}
+): void {
+  try {
+    appendSandboxControlAudit(manifest, event, { source: 'broker', ...fields });
+  } catch {
+    // Diagnostics must never change the control protocol.
+  }
+}
+
+function requestAuditFields(
+  manifest: SandboxControlManifest,
+  manifestPath: string,
+  request: SandboxControlRequest
+): Record<string, string | number | boolean | null> {
+  const args = 'args' in request ? request.args : [];
+  const encodedArgs = JSON.stringify(args);
+  return {
+    requestId: request.id,
+    requestFamily: request.family,
+    sandboxTaskId: manifest.taskId,
+    requestGeneration: request.generation,
+    requestIssuedAt: request.issuedAt,
+    requestExpiresAt: request.expiresAt,
+    requestArgCount: args.length,
+    requestArgsSha256: createHash('sha256').update(encodedArgs, 'utf8').digest('hex'),
+    requestTaskRef: args[0] ?? null,
+    requestCommand: args[1] ?? null,
+    controllerProofPresent: request.controllerProof !== null,
+    hostCwd: process.cwd(),
+    manifestPath,
+    manifestPathRealpath: safeRealpath(manifestPath),
+    repoRoot: manifest.repoRoot,
+    repoRootRealpath: safeRealpath(manifest.repoRoot),
+    worktreeRoot: manifest.worktreeRoot,
+    worktreeRootRealpath: safeRealpath(manifest.worktreeRoot),
+    runtimeDir: manifest.runtimeDir,
+    runtimeDirRealpath: safeRealpath(manifest.runtimeDir)
+  };
+}
+
+function resultAuditFields(result: SandboxControlExecutionResult): Record<string, string | number | boolean | null> {
+  return {
+    exitCode: result.exitCode,
+    stdoutBytes: Buffer.byteLength(result.stdout, 'utf8'),
+    stderrBytes: Buffer.byteLength(result.stderr, 'utf8'),
+    stdoutSha256: createHash('sha256').update(result.stdout, 'utf8').digest('hex'),
+    stderrSha256: createHash('sha256').update(result.stderr, 'utf8').digest('hex')
+  };
+}
+
 function assertRealDirectory(directory: string, parent?: string): void {
   const stat = fs.lstatSync(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
@@ -574,7 +635,23 @@ export async function serveSandboxControl(
     if (!brokerOwns()) return;
     writeSandboxControlStatus(manifest, broker, 'starting', null, null);
     if (!brokerOwns()) return;
-    appendSandboxControlAudit(manifest, 'broker-start', { pid: broker.pid });
+    appendBrokerAudit(manifest, 'broker-start', {
+      pid: broker.pid,
+      brokerId: broker.brokerId,
+      hostCwd: process.cwd(),
+      manifestPath,
+      manifestPathRealpath: safeRealpath(manifestPath),
+      repoRoot: manifest.repoRoot,
+      repoRootRealpath: safeRealpath(manifest.repoRoot),
+      worktreeRoot: manifest.worktreeRoot,
+      worktreeRootRealpath: safeRealpath(manifest.worktreeRoot),
+      runtimeDir: manifest.runtimeDir,
+      runtimeDirRealpath: safeRealpath(manifest.runtimeDir),
+      channelDir: manifest.channelDir,
+      publicStatusDir: manifest.publicStatusDir,
+      processingDir: manifest.processingDir,
+      internalCliPath: options.internalCliPath ?? process.argv[1] ?? null
+    });
     if (!recoverProcessing(manifest, brokerOwns)) return;
     while (!signal.aborted) {
       let settledExecution: ActiveExecution | null = null;
@@ -647,7 +724,7 @@ export async function serveSandboxControl(
         if (!brokerOwns()) break;
         if (cleanupStaleSandboxControlLease(manifest)) {
           if (!brokerOwns()) break;
-          appendSandboxControlAudit(manifest, 'lease-stale-cleanup');
+          appendBrokerAudit(manifest, 'lease-stale-cleanup');
         }
         if (readActiveLease(manifest)) reasonCode = 'SANDBOX_CONTROL_HANDOFF_ACTIVE';
       } catch {
@@ -674,7 +751,7 @@ export async function serveSandboxControl(
         lastStatusAt = now;
       }
       if (brokerOwns() && stateKey !== lastState) {
-        appendSandboxControlAudit(manifest, 'broker-state', { state, reasonCode, requestId: active?.request.id ?? null });
+        appendBrokerAudit(manifest, 'broker-state', { state, reasonCode, requestId: active?.request.id ?? null });
         lastState = stateKey;
       }
       if (settledExecution) {
@@ -686,6 +763,12 @@ export async function serveSandboxControl(
           terminalCommitted = writeSandboxControlResponse(manifest, unknown(settledExecution.request.id));
         }
         if (!terminalCommitted) return;
+        appendBrokerAudit(manifest, 'executor-result-published', {
+          ...requestAuditFields(manifest, manifestPath, settledExecution.request),
+          resultAvailable: settledExecution.result !== null,
+          resultEvidenceWritten: settledExecution.resultEvidenceWritten,
+          ...(settledExecution.result ? resultAuditFields(settledExecution.result) : {})
+        });
         if (!brokerOwns()) break;
         removeAcceptedResponse(manifest, settledExecution.request.id);
         fs.rmSync(path.join(manifest.processingDir, settledExecution.request.id), { recursive: true, force: true });
@@ -697,12 +780,19 @@ export async function serveSandboxControl(
         const id = name.slice(0, -5);
         const source = path.join(requestsDir, name);
         let claimed: string | null = null;
+        let validatedRequest: SandboxControlRequest | null = null;
         try {
           if (!brokerOwns()) {
             retiring = true;
             break;
           }
           claimed = claimRequest(manifest, source, id);
+          appendBrokerAudit(manifest, 'request-claimed', {
+            requestId: id,
+            requestSourcePath: source,
+            requestClaimedPath: claimed,
+            requestProcessingDir: path.dirname(claimed)
+          });
           if (!brokerOwns()) {
             retiring = true;
             break;
@@ -715,12 +805,43 @@ export async function serveSandboxControl(
           if (reasonCode) throw new Error(reasonCode);
           if (active) throw new Error('SANDBOX_CONTROL_BUSY');
           const request = validateSandboxControlRequest(JSON.parse(fs.readFileSync(claimed, 'utf8')), manifest);
+          validatedRequest = request;
+          appendBrokerAudit(manifest, 'request-validated', {
+            ...requestAuditFields(manifest, manifestPath, request),
+            requestPath: claimed
+          });
           if (bindingCheck(manifest)) throw new Error('SANDBOX_WORKTREE_BINDING_LOST');
           if (readActiveLease(manifest)) throw new Error('SANDBOX_CONTROL_HANDOFF_ACTIVE');
+          appendBrokerAudit(manifest, 'request-gates-passed', {
+            ...requestAuditFields(manifest, manifestPath, request),
+            requestPath: claimed,
+            bindingChecked: true,
+            handoffLeaseChecked: true
+          });
           writeSandboxControlReservation(manifest, request.id, sandboxControlGenerationUsage(manifest));
+          appendBrokerAudit(manifest, 'executor-reservation-written', {
+            ...requestAuditFields(manifest, manifestPath, request),
+            requestPath: claimed,
+            executionPath: executionPath(manifest, request.id)
+          });
+          appendBrokerAudit(manifest, 'executor-prepare-start', {
+            ...requestAuditFields(manifest, manifestPath, request),
+            requestPath: claimed,
+            executorCwd: manifest.repoRoot,
+            executorEntry: options.internalCliPath ?? process.argv[1] ?? null
+          });
           const prepared = await prepareExecution({
             manifest, manifestPath, request, requestPath: claimed,
             internalCliPath: options.internalCliPath ?? process.argv[1]!
+          });
+          appendBrokerAudit(manifest, 'executor-prepared', {
+            ...requestAuditFields(manifest, manifestPath, request),
+            requestPath: claimed,
+            executorCwd: manifest.repoRoot,
+            childPid: prepared.execution.child.pid,
+            childStartTime: prepared.execution.child.startTime,
+            childProcessGroupId: prepared.execution.child.processGroupId,
+            executionPath: executionPath(manifest, request.id)
           });
           const execution: ActiveExecution = {
             request, prepared, result: null, resultEvidenceWritten: false, failure: null, settled: false
@@ -729,15 +850,39 @@ export async function serveSandboxControl(
           prepared.completion.then(
             (result) => {
               execution.result = sanitizeSandboxControlResult(manifest, result);
+              appendBrokerAudit(manifest, 'executor-completed', {
+                ...requestAuditFields(manifest, manifestPath, request),
+                ...resultAuditFields(execution.result),
+                childPid: prepared.execution.child.pid,
+                childStartTime: prepared.execution.child.startTime
+              });
               try {
                 writeSandboxControlResultEvidence(manifest, request.id, execution.result);
                 execution.resultEvidenceWritten = true;
                 execution.settled = true;
+                appendBrokerAudit(manifest, 'executor-result-evidence-written', {
+                  ...requestAuditFields(manifest, manifestPath, request),
+                  resultPath: path.join(manifest.processingDir, request.id, 'result.json'),
+                  ...resultAuditFields(execution.result)
+                });
               } catch (error) {
                 execution.failure = error;
+                appendBrokerAudit(manifest, 'executor-result-evidence-failed', {
+                  ...requestAuditFields(manifest, manifestPath, request),
+                  errorType: error instanceof Error ? error.name : typeof error,
+                });
               }
             },
-            (error) => { execution.failure = error; execution.settled = true; }
+            (error) => {
+              execution.failure = error;
+              execution.settled = true;
+              appendBrokerAudit(manifest, 'executor-failed', {
+                ...requestAuditFields(manifest, manifestPath, request),
+                childPid: prepared.execution.child.pid,
+                childStartTime: prepared.execution.child.startTime,
+                errorType: error instanceof Error ? error.name : typeof error,
+              });
+            }
           );
           if (!brokerOwns()) {
             prepared.terminate(false);
@@ -754,6 +899,11 @@ export async function serveSandboxControl(
           writeAcceptedResponse(manifest, {
             version: 2, id, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
           });
+          appendBrokerAudit(manifest, 'request-accepted', {
+            ...requestAuditFields(manifest, manifestPath, request),
+            acceptedPath: acceptedResponsePath(manifest, id),
+            executionPhase: 'prepared'
+          });
           if (!brokerOwns()) {
             prepared.terminate(false);
             active = null;
@@ -761,8 +911,18 @@ export async function serveSandboxControl(
             break;
           }
           try {
+            appendBrokerAudit(manifest, 'executor-start', {
+              ...requestAuditFields(manifest, manifestPath, request),
+              childPid: prepared.execution.child.pid,
+              childStartTime: prepared.execution.child.startTime,
+              executionPath: executionPath(manifest, request.id)
+            });
             prepared.start(brokerOwns);
           } catch (error) {
+            appendBrokerAudit(manifest, 'executor-start-failed', {
+              ...requestAuditFields(manifest, manifestPath, request),
+              errorType: error instanceof Error ? error.name : typeof error,
+            });
             const owned = brokerOwns();
             prepared.terminate(owned);
             if (!owned || !brokerOwns()) {
@@ -784,7 +944,7 @@ export async function serveSandboxControl(
               retiring = true;
               break;
             }
-            appendSandboxControlAudit(manifest, 'executor-gate-failed', { requestId: id });
+            appendBrokerAudit(manifest, 'executor-gate-failed', { requestId: id });
             continue;
           }
         } catch (error) {
@@ -792,6 +952,16 @@ export async function serveSandboxControl(
             retiring = true;
             break;
           }
+          const detail = controlError(error);
+          appendBrokerAudit(manifest, 'request-rejected', {
+            requestId: id,
+            requestFamily: validatedRequest?.family ?? null,
+            sandboxTaskId: manifest.taskId,
+            requestPath: claimed,
+            errorCode: detail.code,
+            errorRetryable: detail.retryable,
+            errorType: error instanceof Error ? error.name : typeof error,
+          });
           writeSandboxControlResponse(manifest, rejected(id, error));
           if (!brokerOwns()) {
             retiring = true;

@@ -1,12 +1,18 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { getProcessStartTime } from '../../server/process-state.ts';
 import { createTask } from '../../task/create-service.ts';
 import { applyTaskFinalization } from '../../task/finalization.ts';
 import { bindSandboxControlTask, validateSandboxControlRequest, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
-import { atomicWriteJson, executionPath, readActiveLease, terminateSandboxControlExecution } from './state.ts';
+import {
+  appendSandboxControlAudit,
+  atomicWriteJson,
+  executionPath,
+  readActiveLease,
+  terminateSandboxControlExecution
+} from './state.ts';
 import {
   createSandboxExecutorExecutionContext,
   dispatchTaskControlOperation,
@@ -21,6 +27,7 @@ import {
   openCodexControllerRegistration,
   resolveCodexControllerBinding
 } from './controller-registration.ts';
+import type { OrchestrationDiagnosticLogger } from '../../task/orchestration.ts';
 
 export type SandboxControlExecutionResult = {
   exitCode: number;
@@ -57,6 +64,67 @@ export function assertSandboxControlExecutorAuthority(
 
 function safeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith('AGENT_INFRA_CONTROL_')));
+}
+
+function safeRealpath(value: string): string | null {
+  try {
+    return fs.realpathSync.native(value);
+  } catch {
+    return null;
+  }
+}
+
+function appendExecutorAudit(
+  manifest: SandboxControlManifest,
+  event: string,
+  fields: Record<string, string | number | boolean | null> = {}
+): void {
+  try {
+    appendSandboxControlAudit(manifest, event, { source: 'executor', ...fields });
+  } catch {
+    // Diagnostics must never change the control protocol.
+  }
+}
+
+function requestAuditFields(
+  manifest: SandboxControlManifest,
+  manifestPath: string,
+  request: SandboxControlRequest
+): Record<string, string | number | boolean | null> {
+  const args = 'args' in request ? request.args : [];
+  const encodedArgs = JSON.stringify(args);
+  return {
+    requestId: request.id,
+    requestFamily: request.family,
+    sandboxTaskId: manifest.taskId,
+    requestGeneration: request.generation,
+    requestIssuedAt: request.issuedAt,
+    requestExpiresAt: request.expiresAt,
+    requestArgCount: args.length,
+    requestArgsSha256: createHash('sha256').update(encodedArgs, 'utf8').digest('hex'),
+    requestTaskRef: args[0] ?? null,
+    requestCommand: args[1] ?? null,
+    controllerProofPresent: request.controllerProof !== null,
+    hostCwd: process.cwd(),
+    manifestPath,
+    manifestPathRealpath: safeRealpath(manifestPath),
+    repoRoot: manifest.repoRoot,
+    repoRootRealpath: safeRealpath(manifest.repoRoot),
+    worktreeRoot: manifest.worktreeRoot,
+    worktreeRootRealpath: safeRealpath(manifest.worktreeRoot),
+    runtimeDir: manifest.runtimeDir,
+    runtimeDirRealpath: safeRealpath(manifest.runtimeDir)
+  };
+}
+
+function resultAuditFields(result: SandboxControlExecutionResult): Record<string, string | number | boolean | null> {
+  return {
+    exitCode: result.exitCode,
+    stdoutBytes: Buffer.byteLength(result.stdout, 'utf8'),
+    stderrBytes: Buffer.byteLength(result.stderr, 'utf8'),
+    stdoutSha256: createHash('sha256').update(result.stdout, 'utf8').digest('hex'),
+    stderrSha256: createHash('sha256').update(result.stderr, 'utf8').digest('hex')
+  };
 }
 
 export function nodeEntryArgs(entry: string, args: string[]): string[] {
@@ -239,7 +307,7 @@ type ExecuteRequestOptions = Readonly<{
   resolveControllerBinding?: typeof resolveCodexControllerBinding;
 }>;
 
-export async function executeRequest(
+async function executeRequestInner(
   manifest: SandboxControlManifest,
   manifestPath: string,
   request: SandboxControlRequest,
@@ -293,6 +361,16 @@ export async function executeRequest(
           });
       return { exitCode: 0, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
     } catch (error) {
+      const errorCode = error instanceof CodexControllerRegistrationError
+        ? error.code
+        : /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]
+          ?? 'CODEX_SANDBOX_CONTROLLER_FAILED';
+      appendExecutorAudit(manifest, 'controller-operation-failed', {
+        ...requestAuditFields(manifest, manifestPath, request),
+        controllerCommand: request.command,
+        errorCode,
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
       return controllerFailure(error);
     }
   }
@@ -364,6 +442,14 @@ export async function executeRequest(
       );
     }
   }
+  const diagnosticLog: OrchestrationDiagnosticLogger = (event, fields): void => {
+    appendExecutorAudit(manifest, event.startsWith('orchestration-') ? event : `orchestration-${event}`, {
+      requestId: request.id,
+      requestFamily: request.family,
+      sandboxTaskId: manifest.taskId,
+      ...fields
+    });
+  };
   const context = createSandboxExecutorExecutionContext({
     repoRoot: manifest.repoRoot,
     worktreeRoot: manifest.worktreeRoot,
@@ -372,6 +458,7 @@ export async function executeRequest(
     generation: manifest.generation,
     manifestPath,
     requestId: request.id,
+    diagnosticLog,
     ...(controllerBinding ? { controllerBinding } : {})
   });
   const format = (value: unknown): SandboxControlExecutionResult => {
@@ -390,6 +477,34 @@ export async function executeRequest(
     return format(await dispatchTaskControlOperation(context, operation));
 }
 
+export async function executeRequest(
+  manifest: SandboxControlManifest,
+  manifestPath: string,
+  request: SandboxControlRequest,
+  options: ExecuteRequestOptions = {}
+): Promise<SandboxControlExecutionResult> {
+  const fields = requestAuditFields(manifest, manifestPath, request);
+  appendExecutorAudit(manifest, 'executor-request-start', fields);
+  try {
+    const result = await executeRequestInner(manifest, manifestPath, request, options);
+    appendExecutorAudit(manifest, 'executor-request-finished', {
+      requestId: request.id,
+      requestFamily: request.family,
+      sandboxTaskId: manifest.taskId,
+      ...resultAuditFields(result)
+    });
+    return result;
+  } catch (error) {
+    appendExecutorAudit(manifest, 'executor-request-failed', {
+      requestId: request.id,
+      requestFamily: request.family,
+      sandboxTaskId: manifest.taskId,
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+    throw error;
+  }
+}
+
 export async function runSandboxControlExecutor(requestPath: string, nonce: string): Promise<void> {
   const gateOwner = await waitForGate(nonce);
   process.disconnect?.();
@@ -397,13 +512,29 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   if (!manifestPath) throw new Error('SANDBOX_CONTROL_EXECUTOR_MANIFEST_MISSING');
   const manifest = readSandboxControlManifest(manifestPath);
   const root = fs.realpathSync.native(process.cwd());
-  if (fs.realpathSync.native(manifest.repoRoot) !== root) throw new Error('SANDBOX_CONTROL_EXECUTOR_ROOT_INVALID');
+  const expectedRoot = safeRealpath(manifest.repoRoot);
+  if (expectedRoot !== root) {
+    appendExecutorAudit(manifest, 'executor-root-validation-failed', {
+      hostCwd: process.cwd(),
+      observedRoot: root,
+      expectedRoot
+    });
+    throw new Error('SANDBOX_CONTROL_EXECUTOR_ROOT_INVALID');
+  }
   const raw = JSON.parse(fs.readFileSync(requestPath, 'utf8')) as unknown;
   const request = validateSandboxControlRequest(raw, manifest);
+  appendExecutorAudit(manifest, 'executor-request-validated', requestAuditFields(manifest, manifestPath, request));
   const requestDirectory = path.resolve(path.dirname(requestPath));
   const processingDirectory = path.resolve(path.join(manifest.processingDir, request.id));
   const channelRequestDirectory = path.resolve(path.join(manifest.channelDir, 'requests'));
   if (requestDirectory !== processingDirectory && requestDirectory !== channelRequestDirectory) {
+    appendExecutorAudit(manifest, 'executor-request-path-validation-failed', {
+      ...requestAuditFields(manifest, manifestPath, request),
+      requestPath,
+      requestDirectory,
+      processingDirectory,
+      channelRequestDirectory
+    });
     throw new Error('SANDBOX_CONTROL_EXECUTOR_REQUEST_INVALID');
   }
   let result: SandboxControlExecutionResult;
@@ -411,6 +542,10 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
     assertSandboxControlExecutorAuthority(manifest, gateOwner);
     result = await executeRequest(manifest, manifestPath, request);
   } catch (error) {
+    appendExecutorAudit(manifest, 'executor-authority-or-dispatch-failed', {
+      ...requestAuditFields(manifest, manifestPath, request),
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
     const detail = error instanceof Error ? error.message : String(error);
     const code = /^([A-Z][A-Z0-9_]+)/u.exec(detail)?.[1] ?? 'SANDBOX_CONTROL_EXECUTOR_FAILED';
     result = request.family === 'task-finalization'

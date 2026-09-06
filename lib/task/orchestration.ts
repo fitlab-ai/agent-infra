@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
@@ -154,6 +154,7 @@ type OrchestrationCompletionPlanResult = Readonly<{
 type OrchestrationOptions = {
   repoRoot?: string;
   gitWorktreeRoot?: string;
+  diagnosticLog?: OrchestrationDiagnosticLogger;
   id?: () => string;
   now?: () => string;
   maxSteps?: number;
@@ -178,6 +179,10 @@ type OrchestrationOptions = {
   hasActiveLifecycleEvidence?: (receipt: DelegationReceipt) => boolean;
 };
 
+export type OrchestrationDiagnosticValue = string | number | boolean | null;
+export type OrchestrationDiagnosticFields = Readonly<Record<string, OrchestrationDiagnosticValue>>;
+export type OrchestrationDiagnosticLogger = (event: string, fields: OrchestrationDiagnosticFields) => void;
+
 function supportsLifecycleDelegation(client: AgentClientId): boolean {
   return getAgentClientCapability(client, 'subagents').level !== 'unsupported'
     && getAgentClientCapability(client, 'orchestration').level !== 'unsupported'
@@ -194,11 +199,13 @@ const ORCHESTRATION_STATE_INVALID_MESSAGE = 'orchestration.json does not match t
 class OrchestrationStateError extends Error {
   readonly code = 'ORCHESTRATION_STATE_INVALID';
   readonly taskId: string | null;
+  readonly reasonCodes: readonly string[];
 
-  constructor(taskId: string | null = null) {
+  constructor(taskId: string | null = null, reasonCodes: readonly string[] = []) {
     super(ORCHESTRATION_STATE_INVALID_MESSAGE);
     this.name = 'OrchestrationStateError';
     this.taskId = taskId;
+    this.reasonCodes = Object.freeze([...reasonCodes]);
   }
 }
 
@@ -288,46 +295,128 @@ const ORCHESTRATION_RUN_KEYS = [
   'pause', 'commitAuthorization', 'completionEvidence', 'createdAt', 'updatedAt'
 ] as const;
 
+function orchestrationStateReasonCodes(value: unknown, expectedTaskId?: string): string[] {
+  if (!hasExactKeys(value, ORCHESTRATION_RUN_KEYS)) return ['top-level-keys'];
+  const record = value;
+  const reasons: string[] = [];
+  if (!exactText(record.taskId)) reasons.push('taskId');
+  else if (expectedTaskId !== undefined && record.taskId !== expectedTaskId) reasons.push('taskId-mismatch');
+  if (!exactText(record.runId)) reasons.push('runId');
+  if (!['running', 'paused', 'completed'].includes(record.status as string)) reasons.push('status');
+  if (!(record.nextStage === null || ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'commit'].includes(record.nextStage as string))) {
+    reasons.push('nextStage');
+  }
+  if (!Number.isSafeInteger(record.stepCount) || (record.stepCount as number) < 0) reasons.push('stepCount');
+  if (!Number.isSafeInteger(record.maxSteps) || (record.maxSteps as number) < 1) reasons.push('maxSteps');
+  if (!isModelPolicy(record.modelPolicy)) reasons.push('modelPolicy');
+  if (!isModelPolicySource(record.modelPolicySource)) reasons.push('modelPolicySource');
+  if (!Array.isArray(record.recoveryHistory) || !record.recoveryHistory.every(isRecovery)) reasons.push('recoveryHistory');
+  if (typeof record.baseline !== 'string') reasons.push('baseline');
+  if (!(record.pendingDelegation === null || isDelegationReceipt(record.pendingDelegation))) reasons.push('pendingDelegation');
+  if (!Array.isArray(record.receipts) || !record.receipts.every(isDelegationReceipt)) reasons.push('receipts');
+  if (!(record.pause === null || isPause(record.pause))) reasons.push('pause');
+  if (!hasExactKeys(record.commitAuthorization, ['issuedAt', 'consumedAt'])) {
+    reasons.push('commitAuthorization');
+  } else {
+    if (!nullableText(record.commitAuthorization.issuedAt)) reasons.push('commitAuthorization.issuedAt');
+    if (!nullableText(record.commitAuthorization.consumedAt)) reasons.push('commitAuthorization.consumedAt');
+  }
+  if (!(record.completionEvidence === null || isCompletionEvidence(record.completionEvidence))) reasons.push('completionEvidence');
+  if (!exactText(record.createdAt)) reasons.push('createdAt');
+  if (!exactText(record.updatedAt)) reasons.push('updatedAt');
+  if (Array.isArray(record.receipts) && record.receipts.every(isDelegationReceipt)
+    && (record.pendingDelegation === null || isDelegationReceipt(record.pendingDelegation))) {
+    const receipts = [...record.receipts, ...(record.pendingDelegation ? [record.pendingDelegation] : [])];
+    if (receipts.some((receipt) => receipt.taskId !== record.taskId || receipt.runId !== record.runId)) {
+      reasons.push('receipt-identity');
+    }
+  }
+  return reasons;
+}
+
+function emitDiagnostic(options: Pick<OrchestrationOptions, 'diagnosticLog'> | undefined, event: string, fields: OrchestrationDiagnosticFields): void {
+  try {
+    options?.diagnosticLog?.(event, fields);
+  } catch {
+    // Diagnostics must never change lifecycle behavior.
+  }
+}
+
+function fileObservation(file: string): OrchestrationDiagnosticFields {
+  try {
+    const stat = fs.lstatSync(file);
+    let realpath: string | null = null;
+    try { realpath = fs.realpathSync.native(file); } catch { /* retain the lstat observation */ }
+    return {
+      file,
+      exists: true,
+      fileType: stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : 'other',
+      symbolicLink: stat.isSymbolicLink(),
+      bytes: stat.isFile() ? stat.size : null,
+      mtimeMs: stat.mtimeMs,
+      device: stat.dev,
+      inode: stat.ino,
+      realpath
+    };
+  } catch (error) {
+    return {
+      file,
+      exists: false,
+      fileType: null,
+      symbolicLink: null,
+      bytes: null,
+      mtimeMs: null,
+      device: null,
+      inode: null,
+      realpath: null,
+      fsError: error instanceof Error && 'code' in error ? String(error.code) : null
+    };
+  }
+}
+
 function parseOrchestrationRun(value: unknown, expectedTaskId?: string): OrchestrationRun {
-  if (!hasExactKeys(value, ORCHESTRATION_RUN_KEYS)
-    || !exactText(value.taskId)
-    || (expectedTaskId !== undefined && value.taskId !== expectedTaskId)
-    || !exactText(value.runId)
-    || !['running', 'paused', 'completed'].includes(value.status as string)
-    || !(value.nextStage === null || ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'commit'].includes(value.nextStage as string))
-    || !Number.isSafeInteger(value.stepCount) || (value.stepCount as number) < 0
-    || !Number.isSafeInteger(value.maxSteps) || (value.maxSteps as number) < 1
-    || !isModelPolicy(value.modelPolicy)
-    || !isModelPolicySource(value.modelPolicySource)
-    || !Array.isArray(value.recoveryHistory) || !value.recoveryHistory.every(isRecovery)
-    || typeof value.baseline !== 'string'
-    || !(value.pendingDelegation === null || isDelegationReceipt(value.pendingDelegation))
-    || !Array.isArray(value.receipts) || !value.receipts.every(isDelegationReceipt)
-    || !(value.pause === null || isPause(value.pause))
-    || !hasExactKeys(value.commitAuthorization, ['issuedAt', 'consumedAt'])
-    || !nullableText(value.commitAuthorization.issuedAt)
-    || !nullableText(value.commitAuthorization.consumedAt)
-    || !(value.completionEvidence === null || isCompletionEvidence(value.completionEvidence))
-    || !exactText(value.createdAt)
-    || !exactText(value.updatedAt)) {
-    throw new OrchestrationStateError();
-  }
-  const receipts = [...value.receipts, ...(value.pendingDelegation ? [value.pendingDelegation] : [])];
-  if (receipts.some((receipt) => receipt.taskId !== value.taskId || receipt.runId !== value.runId)) {
-    throw new OrchestrationStateError();
-  }
+  const reasonCodes = orchestrationStateReasonCodes(value, expectedTaskId);
+  if (reasonCodes.length > 0) throw new OrchestrationStateError(expectedTaskId ?? null, reasonCodes);
   return value as OrchestrationRun;
 }
 
-function readRun(taskDir: string): OrchestrationRun | null {
+function readRun(taskDir: string, options: Pick<OrchestrationOptions, 'diagnosticLog'> = {}): OrchestrationRun | null {
   const file = orchestrationPath(taskDir);
-  if (!fs.existsSync(file)) return null;
   const taskId = path.basename(taskDir);
+  const observed = options.diagnosticLog ? fileObservation(file) : {};
+  if (!fs.existsSync(file)) {
+    emitDiagnostic(options, 'orchestration-state-missing', { taskId, taskDir, ...observed });
+    return null;
+  }
+  emitDiagnostic(options, 'orchestration-state-read-start', { taskId, taskDir, ...observed });
+  let rawBytes: number | null = null;
+  let rawSha256: string | null = null;
   try {
-    return parseOrchestrationRun(JSON.parse(fs.readFileSync(file, 'utf8')), taskId);
+    const raw = fs.readFileSync(file, 'utf8');
+    if (options.diagnosticLog) {
+      rawBytes = Buffer.byteLength(raw, 'utf8');
+      rawSha256 = createHash('sha256').update(raw, 'utf8').digest('hex');
+    }
+    const run = parseOrchestrationRun(JSON.parse(raw), taskId);
+    emitDiagnostic(options, 'orchestration-state-read-ok', {
+      taskId, taskDir, file, rawBytes, rawSha256, status: run.status, runId: run.runId,
+      stepCount: run.stepCount, pendingDelegation: run.pendingDelegation !== null
+    });
+    return run;
   } catch (error) {
-    if (error instanceof OrchestrationStateError) throw new OrchestrationStateError(taskId);
-    throw new OrchestrationStateError(taskId);
+    const reasonCodes = error instanceof OrchestrationStateError && error.reasonCodes.length > 0
+      ? error.reasonCodes
+      : [error instanceof SyntaxError ? 'json-parse' : 'file-read'];
+    emitDiagnostic(options, 'orchestration-state-read-failed', {
+      taskId,
+      taskDir,
+      ...observed,
+      rawBytes,
+      rawSha256,
+      reasonCodes: reasonCodes.join(','),
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+    throw new OrchestrationStateError(taskId, reasonCodes);
   }
 }
 
@@ -417,7 +506,7 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
   }
   let existing: OrchestrationRun | null;
   try {
-    existing = readRun(resolved.taskDir);
+    existing = readRun(resolved.taskDir, options);
   } catch (error) {
     return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
@@ -616,7 +705,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   }
   let run: OrchestrationRun | null;
   try {
-    run = readRun(resolved.taskDir);
+    run = readRun(resolved.taskDir, options);
   } catch (error) {
     return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
@@ -729,7 +818,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
 function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
+  const run = readRun(resolved.taskDir, options);
   if (!run) return failed('ORCHESTRATION_RUN_MISSING', 'no orchestration run exists', resolved.taskId);
   return { status: run.status, changed: false, taskId: resolved.taskId, run, next: null, error: null };
 }
@@ -749,7 +838,15 @@ function prepareOrchestrationDelegationUnlocked(
   if (!(options.supportsLifecycleDelegation ?? supportsLifecycleDelegation)(input.client)) {
     return failed('ORCHESTRATION_CLIENT_UNSUPPORTED', `client '${input.client}' does not support lifecycle orchestration`, resolved.taskId);
   }
-  const run = readRun(resolved.taskDir);
+  emitDiagnostic(options, 'orchestration-prepare-start', {
+    taskId: resolved.taskId,
+    taskDir: resolved.taskDir,
+    repoRoot: resolved.repoRoot,
+    client: input.client,
+    requestedModel: input.requestedModel ?? null,
+    requestedReasoningEffort: input.requestedReasoningEffort ?? null
+  });
+  const run = readRun(resolved.taskDir, options);
   if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
   if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
   const repositoryPending = matchingDelegations(() => true, options);
@@ -862,7 +959,7 @@ function dispatchOrchestrationDelegationUnlocked(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
+  const run = readRun(resolved.taskDir, options);
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
   if (run.status !== 'running') {
     return failed('ORCHESTRATION_STATE_INVALID', 'spawn dispatch requires a running orchestration', resolved.taskId);
@@ -908,16 +1005,42 @@ function matchingDelegations(
   const repoRoot = options.repoRoot ?? process.cwd();
   const activeRoot = path.join(repoRoot, '.agents', 'workspace', 'active');
   if (!fs.existsSync(activeRoot)) return [];
-  return fs.readdirSync(activeRoot, { withFileTypes: true })
+  emitDiagnostic(options, 'orchestration-active-scan-start', {
+    activeRoot
+  });
+  const matches = fs.readdirSync(activeRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
-      const run = readRun(path.join(activeRoot, entry.name));
+      const candidateTaskId = entry.name;
+      const candidateTaskDir = path.join(activeRoot, candidateTaskId);
+      emitDiagnostic(options, 'orchestration-active-scan-candidate', {
+        candidateTaskId,
+        candidateTaskDir,
+        orchestrationPath: orchestrationPath(candidateTaskDir)
+      });
+      let run: OrchestrationRun | null;
+      try {
+        run = readRun(candidateTaskDir, options);
+      } catch (error) {
+        emitDiagnostic(options, 'orchestration-active-scan-candidate-failed', {
+          candidateTaskId,
+          candidateTaskDir,
+          errorType: error instanceof Error ? error.name : typeof error,
+          reasonCodes: error instanceof OrchestrationStateError ? error.reasonCodes.join(',') : null
+        });
+        throw error;
+      }
       if (!run || run.status !== 'running' || !run.pendingDelegation) return [];
       const receipt = run.pendingDelegation;
       return predicate(receipt)
-        ? [{ taskId: entry.name, run }]
+        ? [{ taskId: candidateTaskId, run }]
         : [];
     });
+  emitDiagnostic(options, 'orchestration-active-scan-finished', {
+    activeRoot,
+    matchingDelegations: matches.length
+  });
+  return matches;
 }
 
 function uniqueMatchingDelegation(
@@ -1163,7 +1286,7 @@ function activateOrchestrationDelegation(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
+  const run = readRun(resolved.taskDir, options);
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
   if (run.status !== 'running') {
     return { status: run.status, changed: false, taskId: resolved.taskId, run, next: null, error: null };
@@ -1191,7 +1314,7 @@ async function awaitOrchestrationDelegationActivation(
   while (true) {
     const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
     if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-    const run = readRun(resolved.taskDir);
+    const run = readRun(resolved.taskDir, options);
     if (!run?.pendingDelegation) {
       return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
     }
@@ -1257,7 +1380,7 @@ function recoverPreparedOrchestrationDelegation(
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   try {
     return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-orchestration.recover-prepared', () => {
-      const run = readRun(resolved.taskDir);
+      const run = readRun(resolved.taskDir, options);
       const receipt = run?.pendingDelegation;
       if (!run || !receipt) {
         return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
@@ -1329,7 +1452,7 @@ function completeOrchestrationStage(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
+  const run = readRun(resolved.taskDir, options);
   if (!run) return { status: 'running', changed: false, taskId: resolved.taskId, run: null, next: null, error: null };
   if (!run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'active run has no pending delegation', resolved.taskId);
   const result = completeDelegationStage(run.pendingDelegation, event);
@@ -1348,7 +1471,7 @@ function inspectOrchestrationStage(
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   let run: OrchestrationRun | null;
   try {
-    run = readRun(resolved.taskDir);
+    run = readRun(resolved.taskDir, options);
   } catch (error) {
     return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
@@ -1409,7 +1532,7 @@ function sealOrchestrationDelegation(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
+  const run = readRun(resolved.taskDir, options);
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
   const result = sealDelegation(run.pendingDelegation, event, { now: options.now });
   if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
@@ -1421,7 +1544,7 @@ function sealOrchestrationDelegation(
 function advanceOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
+  const run = readRun(resolved.taskDir, options);
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
   const result = consumeDelegation(run.pendingDelegation, { now: options.now });
   if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
@@ -1448,7 +1571,7 @@ function pauseOrchestration(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
+  const run = readRun(resolved.taskDir, options);
   if (!run) return failed('ORCHESTRATION_RUN_MISSING', 'no orchestration run exists', resolved.taskId);
   const updated = withUpdatedRun(run, { status: 'paused', pause: { code, message, recoverable } });
   saveRun(resolved.taskDir, updated);

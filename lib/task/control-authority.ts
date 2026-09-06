@@ -20,7 +20,11 @@ import {
   sealOrchestrationDelegation,
   statusOrchestration
 } from './orchestration.ts';
-import type { OrchestrationOptions, OrchestrationResult } from './orchestration.ts';
+import type {
+  OrchestrationDiagnosticLogger,
+  OrchestrationOptions,
+  OrchestrationResult
+} from './orchestration.ts';
 import { prepareCodexOrchestrationDelegation } from './codex-orchestration.ts';
 import {
   applyTaskFinalization,
@@ -60,6 +64,7 @@ export type TaskControlExecutionContext =
       generation: string;
       manifestPath: string;
       requestId: string;
+      diagnosticLog?: OrchestrationDiagnosticLogger;
       controllerBinding?: TaskControlControllerBinding | null;
     }>;
 
@@ -134,6 +139,7 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
   generation: string;
   manifestPath: string;
   requestId: string;
+  diagnosticLog?: OrchestrationDiagnosticLogger;
   controllerBinding?: TaskControlControllerBinding | null;
 }>): TaskControlExecutionContext {
   if (!/^TASK-\d{8}-\d{6}$/u.test(params.taskId) || !params.generation || !params.requestId) {
@@ -153,6 +159,7 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
     generation: params.generation,
     manifestPath: absolute('manifestPath', params.manifestPath),
     requestId: params.requestId,
+    ...(params.diagnosticLog === undefined ? {} : { diagnosticLog: params.diagnosticLog }),
     ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) })
   };
 }
@@ -192,6 +199,9 @@ function domainOptions(
   return {
     ...options,
     repoRoot: context.repoRoot,
+    ...(context.source === 'sandbox-executor' && context.diagnosticLog !== undefined
+      ? { diagnosticLog: context.diagnosticLog }
+      : {}),
     ...(context.source === 'sandbox-executor' ? { gitWorktreeRoot: context.worktreeRoot } : {})
   };
 }
