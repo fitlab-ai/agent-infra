@@ -72,10 +72,12 @@ test('task control without sandbox markers uses the direct-host entry', () => {
 
 test('complete sandbox markers use the client entry without executing local authority', () => {
   const result = run('task-orchestration', ['TASK-20260809-010203', 'status'], cleanEnv({
+    AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
-    AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status'
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status',
+    AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
   }));
   assert.equal(result.status, 75);
   assert.match(result.stderr, /SANDBOX_CONTROL_BROKER_UNAVAILABLE/);
@@ -187,17 +189,22 @@ function runSandboxClient(
     cwd: fixture.root,
     env: {
       ...cleanEnv(),
+      AGENT_INFRA_TASK_ID: TASK_ID,
       AGENT_INFRA_CONTROL_DIR: fixture.channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: fixture.statusDir,
       AGENT_INFRA_CONTROL_TOKEN: fixture.token,
-      AGENT_INFRA_CONTROL_GENERATION: fixture.generation
+      AGENT_INFRA_CONTROL_GENERATION: fixture.generation,
+      AGENT_INFRA_RUNTIME_DIR: path.join(fixture.controlRoot, 'runtime')
     },
     encoding: 'utf8'
   });
+  const stdout = result.stdout?.toString() ?? '';
+  const stderr = result.stderr?.toString() ?? '';
+  if (!stdout) throw new Error(`sandbox client produced no JSON (status=${result.status}, stderr=${stderr})`);
   return {
     status: result.status,
-    payload: JSON.parse(result.stdout?.toString() ?? '') as Record<string, unknown>,
-    stderr: result.stderr?.toString() ?? ''
+    payload: JSON.parse(stdout) as Record<string, unknown>,
+    stderr
   };
 }
 

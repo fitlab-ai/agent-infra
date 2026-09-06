@@ -55,7 +55,7 @@ test('active source with a valid completion receipt remains finalized-stale afte
   assert.equal(accessSandboxTaskView(view, 'progress').allowed, false);
 });
 
-test('broker restart preserves stale or unknown evidence unless completed source is revalidated', () => {
+test('broker restart preserves stale or unknown evidence until a new re-entry projection', () => {
   const stale = taskViewAfterFinalization({ taskId, generation, requestId, receipt });
   const active = projectSandboxTaskView({
     mode: 'task-bound', taskId, generation, source: 'active', sourceMatches: true
@@ -69,7 +69,7 @@ test('broker restart preserves stale or unknown evidence unless completed source
     mode: 'task-bound', taskId, generation, source: 'completed', sourceMatches: true,
     receipt, requestId
   });
-  assert.equal(mergeSandboxTaskView(completed, stale).state, 'current');
+  assert.equal(mergeSandboxTaskView(completed, stale).state, 'finalized-stale');
 });
 
 test('receipt and source conflicts fail closed as unknown', () => {

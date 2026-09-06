@@ -120,6 +120,8 @@ test('test runner strips inherited sandbox control authority before loading test
     "    key.toUpperCase().startsWith('AGENT_INFRA_CONTROL_')",
     "  ), false);",
     "  assert.equal(process.env.AGENT_INFRA_TEST_SENTINEL, 'preserved');",
+    "  assert.equal(process.env.AGENT_INFRA_TASK_ID, undefined);",
+    "  assert.equal(process.env.AGENT_INFRA_RUNTIME_DIR, undefined);",
     "  assert.notEqual(process.env.NODE_TEST_CONTEXT, 'inherited-context');",
     '});',
     ''
@@ -133,6 +135,8 @@ test('test runner strips inherited sandbox control authority before loading test
         agent_infra_control_token: 'live-token',
         Agent_Infra_Control_Dir: path.join(root, 'live-channel'),
         aGeNt_InFrA_cOnTrOl_FuTuRe: 'future-authority',
+        AGENT_INFRA_TASK_ID: 'TASK-20260904-002344',
+        AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime'),
         Node_Test_Context: 'inherited-context',
         AGENT_INFRA_TEST_SENTINEL: 'preserved'
       }

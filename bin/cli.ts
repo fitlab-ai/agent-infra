@@ -20,7 +20,7 @@ const USAGE = `agent-infra ${VERSION} - bootstrap AI collaboration infrastructur
 Usage: ai <command> [options]
 
 Commands:
-  agent-client    List, inspect, enable, disable, or configure Agent Clients
+  agent-client    List, status, enable, disable, or configure Agent Clients
   cp <ssh-alias>  Copy local clipboard image to a remote macOS clipboard or Linux sandbox over SSH
   data            Capture, verify, audit, repair, and export process data
   decide          Record a ruling; code-stage decisions require explicit implementation intent

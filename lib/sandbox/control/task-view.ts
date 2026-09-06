@@ -203,9 +203,6 @@ export function mergeSandboxTaskView(
   previous: SandboxTaskView
 ): SandboxTaskView {
   if (previous.state !== 'finalized-stale' && previous.state !== 'unknown') return canonical;
-  if (canonical.state === 'current' && canonical.observedSource === 'completed' && canonical.receipt !== null) {
-    return canonical;
-  }
   return previous;
 }
 

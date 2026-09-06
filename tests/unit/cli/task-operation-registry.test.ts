@@ -28,6 +28,23 @@ function commands(descriptors: readonly TaskOperationDescriptor[], command: stri
   return descriptors.filter((item) => item.command === command);
 }
 
+const actualPublicSelectors: Readonly<Record<string, readonly string[]>> = {
+  'agent-client': ['list', 'status', 'enable', 'disable', 'configure'],
+  cp: ['cp'],
+  data: ['capture', 'verify', 'audit', 'repair', 'export'],
+  decide: ['decide'],
+  help: ['help'],
+  init: ['init'],
+  merge: ['merge'],
+  run: ['create-task', 'task-skill', 'recreate'],
+  sandbox: ['create', 'exec', 'ls', 'show', 'prune', 'rebuild', 'refresh', 'rm', 'start', 'vm'],
+  server: ['start', 'stop', 'status', 'logs', '__daemon'],
+  task: ['cat', 'decisions', 'files', 'grep', 'issue-body', 'log', 'ls', 'show', 'status'],
+  sync: ['sync'],
+  update: ['update'],
+  version: ['version']
+};
+
 test('dispatcher route inventories have explicit descriptors in both directions', () => {
   for (const [routes, descriptors] of [
     [INTERNAL_DISPATCHER_ROUTES, INTERNAL_OPERATION_DESCRIPTORS],
@@ -45,6 +62,20 @@ test('dispatcher route inventories have explicit descriptors in both directions'
     keys.add(key);
     assert.equal(item.guardBeforeImport, true);
   }
+});
+
+test('public descriptor selectors match the actual command dispatchers', () => {
+  assert.deepEqual(
+    Object.fromEntries(PUBLIC_DISPATCHER_ROUTES.map((route) => [
+      route,
+      commands(PUBLIC_OPERATION_DESCRIPTORS, route).map((item) => item.selector).sort()
+    ])),
+    Object.fromEntries(Object.entries(actualPublicSelectors).map(([route, selectors]) => [route, [...selectors].sort()]))
+  );
+  assert.equal(resolveTaskOperation('public', 'agent-client', ['status'])?.selector, 'status');
+  assert.equal(resolveTaskOperation('public', 'agent-client', ['inspect']), null);
+  assert.equal(resolveTaskOperation('public', 'sandbox', ['enter']), null);
+  assert.equal(resolveTaskOperation('public', 'server', ['__daemon'])?.selector, '__daemon');
 });
 
 test('non-prefix task mutation routes resolve to task-bound descriptors', () => {
@@ -70,12 +101,17 @@ test('delegated control selectors reuse the same internal descriptors', () => {
 });
 
 test('task-view guard refuses stale progress before a route can import its module', () => {
+  const taskEnv = {
+    AGENT_INFRA_TASK_ID: staleView.taskId!,
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_DIR: '/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
+    AGENT_INFRA_RUNTIME_DIR: '/runtime'
+  };
   assert.throws(
     () => guardTaskOperation('internal', 'git-workflow', ['commit'], {
-      env: {
-        AGENT_INFRA_TASK_ID: staleView.taskId!,
-        AGENT_INFRA_CONTROL_STATUS_DIR: '/unused'
-      },
+      env: taskEnv,
       taskView: staleView
     }),
     (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_VIEW_FINALIZED:')
@@ -83,12 +119,51 @@ test('task-view guard refuses stale progress before a route can import its modul
   assert.doesNotThrow(() => guardTaskOperation('internal', 'task-warning', [
     staleView.taskId!, 'list'
   ], {
+    env: taskEnv,
+    taskView: staleView
+  }));
+  for (const help of ['help', '-h', '--help']) {
+    assert.throws(
+      () => guardTaskOperation('internal', 'git-workflow', ['commit', help], { env: taskEnv, taskView: staleView }),
+      (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_VIEW_FINALIZED:')
+    );
+  }
+});
+
+test('task-bound guard rejects incomplete markers and cross-task references', () => {
+  assert.throws(
+    () => guardTaskOperation('internal', 'git-workflow', ['commit'], {
+      env: { AGENT_INFRA_TASK_ID: staleView.taskId!, AGENT_INFRA_CONTROL_STATUS_DIR: '/status' },
+      taskView: staleView
+    }),
+    (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_VIEW_MARKER_INVALID:')
+  );
+  assert.doesNotThrow(() => guardTaskOperation('internal', 'git-workflow', ['commit'], {
     env: {
-      AGENT_INFRA_TASK_ID: staleView.taskId!,
-      AGENT_INFRA_CONTROL_STATUS_DIR: '/unused'
+      AGENT_INFRA_CONTROL_TOKEN: 'token',
+      AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+      AGENT_INFRA_CONTROL_DIR: '/control',
+      AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
+      AGENT_INFRA_RUNTIME_DIR: '/runtime'
     },
     taskView: staleView
   }));
+  assert.throws(
+    () => guardTaskOperation('internal', 'task-event', [
+      'TASK-20990101-010101', 'started'
+    ], {
+      env: {
+        AGENT_INFRA_TASK_ID: staleView.taskId!,
+        AGENT_INFRA_CONTROL_TOKEN: 'token',
+        AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+        AGENT_INFRA_CONTROL_DIR: '/control',
+        AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
+        AGENT_INFRA_RUNTIME_DIR: '/runtime'
+      },
+      taskView: { ...staleView, state: 'current', observedSource: 'active', reasonCode: null }
+    }),
+    (error: unknown) => error instanceof Error && error.message.startsWith('SANDBOX_TASK_REF_MISMATCH:')
+  );
 });
 
 test('host-direct routes remain unchanged without task-bound markers', () => {

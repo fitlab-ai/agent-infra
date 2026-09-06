@@ -1189,7 +1189,7 @@ test('task-finalization client exposes accepted result loss as a structured unkn
       AGENT_INFRA_CONTROL_DIR: channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
       AGENT_INFRA_TASK_ID: undefined,
-      AGENT_INFRA_RUNTIME_DIR: undefined
+      AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }));
@@ -1330,6 +1330,7 @@ test('task-bound finalization rejects a new request after accepted response loss
     assert.equal(firstClient.exitCode, 1);
     assert.equal((firstClient.payload.error as { code?: string }).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
     assert.equal(firstClient.payload.accepted, true);
+    assert.ok(firstExecution.stdout, firstExecution.stderr);
     assert.equal(JSON.parse(firstExecution.stdout).status, 'completed');
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
 
