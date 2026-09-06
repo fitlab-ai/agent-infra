@@ -143,6 +143,16 @@ if (taskControlCommand) {
     await platformChecks(process.argv.slice(3));
     break;
   }
+  case 'platform-security': {
+    const { platformSecurity } = await import('../lib/internal/platform-security.ts');
+    await platformSecurity(process.argv.slice(3));
+    break;
+  }
+  case 'platform-metadata': {
+    const { platformMetadata } = await import('../lib/internal/platform-metadata.ts');
+    await platformMetadata(process.argv.slice(3));
+    break;
+  }
   case 'task-context': {
     const { taskContext } = await import('../lib/internal/task-context.ts');
     taskContext(process.argv.slice(3));

@@ -19,20 +19,18 @@ description: >
 
 如果任一条件失败，停止并输出对应错误。
 
-### 2. 运行初始化脚本
+### 2. 运行 milestones runtime intent
 
 执行以下命令，完成整套里程碑初始化流程：
 
 ```bash
-bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
+agent-infra-internal platform-metadata init-milestones $ARGUMENTS
 ```
 
-脚本与 `.agents/rules/label-milestone-setup.md` 共同负责：
-- 创建并清理临时工作目录
-- 检测是否传入 `--history`
-- 扫描所有 `v*` Git tag，按 SemVer precedence 选择最高合法版本；没有合法版本时使用兼容默认值 `0.1.0`，且不读取任何生态 manifest
-- 由 provider 叶子读取并写入当前里程碑
-- 构建目标里程碑集合，并且只创建缺失标题
+runtime intent 与 `.agents/rules/label-milestone-setup.md` 共同负责：
+- 接收 `--history` 请求并规划目标里程碑
+- 按既定基线、history、状态和标题幂等契约生成结果
+- 由 runtime/provider 读取并写入当前里程碑
 - 输出最终执行摘要
 
 ### 3. 标准里程碑定义
@@ -78,8 +76,8 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 
 ## 错误处理
 
-- provider 能力、认证或仓库访问失败：如实报告脚本的非零退出状态和诊断输出；不得声称远端已变更。
-- 版本解析失败：提示 "Unable to determine current version baseline"
-- `--history` 模式下未找到合法 SemVer `v*` git tags：提示 "No valid SemVer history tags found matching v*; only standard milestones will be created"
+- 平台能力、认证或仓库访问失败：如实报告 runtime 的非零退出状态和诊断输出；不得声称远端已变更。
+- 版本解析失败：报告 runtime 返回的版本基线错误
+- `--history` 模式下未找到合法 SemVer `v*` git tags：报告 runtime 返回的 history 诊断
 - 权限不足：提示 "No permission to manage milestones in this repository"
 - API 限流：提示 "platform API rate limit reached, please retry later"

@@ -40,9 +40,6 @@ test("custom platforms fall back to generic platform templates", async () => {
     ".agents/rules/pr-sync.md",
     ".agents/rules/release-commands.md",
     ".agents/rules/security-alerts.md",
-    ".agents/scripts/security-alerts.sh",
-    ".agents/skills/init-labels/scripts/init-labels.sh",
-    ".agents/skills/init-milestones/scripts/init-milestones.sh",
     ".git-hooks/check-large-files.cjs",
     ".git-hooks/check-version-format.sh"
   ];
@@ -102,9 +99,6 @@ test("custom platforms fall back to generic platform templates", async () => {
     );
 
     [
-      ".agents/skills/init-labels/scripts/init-labels.sh",
-      ".agents/skills/init-milestones/scripts/init-milestones.sh",
-      ".agents/scripts/security-alerts.sh",
       ".git-hooks/check-large-files.cjs",
       ".git-hooks/check-version-format.sh"
     ].forEach((target) => {

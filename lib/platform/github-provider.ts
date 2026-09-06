@@ -16,8 +16,11 @@ import type {
   CheckRunSnapshot,
   GitEvidenceSnapshot,
   IssueSnapshot,
+  LabelReconciliation,
   MutationReceipt,
+  MilestoneInitialization,
   PlatformContextSnapshot,
+  PlatformError,
   ProviderOperationContext,
   PlatformProvider,
   PlatformProviderFactoryInput,
@@ -29,14 +32,17 @@ import type {
   RemoteCommentSnapshot,
   RequiredCheckSnapshot,
   ReviewSnapshot,
+  SecurityAlertKind,
+  SecurityAlertSnapshot,
   VerificationRemoteFacts
 } from './provider-contract.ts';
 import { resourceIdentityNumber, resourceIdentityString } from './resource-identity.ts';
-import { syncLabelDelta } from './in-label-sync.ts';
+import { extractPullRequestFileNames, syncLabelDelta } from './in-label-sync.ts';
 
 const CURRENT_USER_QUERY = 'query { viewer { login } }';
 const ISSUE_TYPES_QUERY = `query($owner:String!){organization(login:$owner){issueTypes(first:20){nodes{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}}}}}`;
 const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id issueType{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{id name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{id name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{id name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{id name}}}}}}}}`;
+const CLOSING_ISSUES_QUERY = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number} pageInfo{hasNextPage endCursor}}}}}';
 
 function parseGitHubRemote(remote: string): string | null {
   const trimmed = remote.trim().replace(/\.git$/, '');
@@ -340,6 +346,29 @@ function createReceipt(remoteId: string): ProviderResult<MutationReceipt> {
   return { ok: true, value: { changed: true, remoteId } };
 }
 
+function partialFailure<T>(response: { ok: false; error: PlatformError }, value: T): ProviderResult<T> {
+  return { ok: false, error: response.error, value };
+}
+
+function labelReconciliation(
+  created: string[],
+  updated: string[],
+  removed: string[],
+  skipped: string[]
+): LabelReconciliation {
+  return {
+    changed: created.length > 0 || updated.length > 0 || removed.length > 0,
+    created,
+    updated,
+    removed,
+    skipped
+  };
+}
+
+function milestoneInitialization(created: string[], skipped: string[]): MilestoneInitialization {
+  return { changed: created.length > 0, created, skipped };
+}
+
 function githubResourceToken(identity: ResourceIdentity | null | undefined): string | null {
   return resourceIdentityString(identity) || (identity?.kind === 'number' ? String(identity.value) : null);
 }
@@ -371,7 +400,7 @@ function syncLabels(
   return { status: changed ? 'applied' as const : 'no-op' as const, changed, error: null };
 }
 
-function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'verification'> {
+function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'issues' | 'comments' | 'changeRequests' | 'checks' | 'reviews' | 'releases' | 'securityAlerts' | 'repositoryMetadata' | 'verification'> {
   const issues: NonNullable<PlatformProvider['issues']> = {
     async listLabels({ context }) {
       const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/labels?per_page=100`], { cwd: context.workingDirectory });
@@ -624,6 +653,58 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (!fetched.ok) return fetched;
       return { ok: true, value: changeRequestSnapshot(fetched.value) };
     },
+    async listFiles({ context, target }) {
+      const number = resourceIdentityNumber(target);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const response = client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository(context)}/pulls/${number}/files?per_page=100`], { cwd: context.workingDirectory });
+      if (!response.ok) return response;
+      const files = extractPullRequestFileNames(response.value);
+      return files
+        ? { ok: true, value: files }
+        : invalid('IN_LABEL_SYNC_FILES_INVALID', 'Pull request files response is incomplete');
+    },
+    async listClosingIssues({ context, target }) {
+      const number = resourceIdentityNumber(target);
+      if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
+      const [owner, name] = repository(context).split('/');
+      if (!owner || !name) return invalid('IN_LABEL_SYNC_REPOSITORY_INVALID', 'Repository identity is invalid');
+      const identities: ResourceIdentity[] = [];
+      let cursor: string | null = null;
+      for (;;) {
+        const args = ['api', 'graphql', '-f', `query=${CLOSING_ISSUES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`];
+        if (cursor) args.push('-F', `cursor=${cursor}`);
+        const response = client.json<unknown>(args, { cwd: context.workingDirectory });
+        if (!response.ok) return response;
+        const connection = (response.value as {
+          data?: { repository?: { pullRequest?: { closingIssuesReferences?: {
+            nodes?: unknown[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+          } } } };
+        })?.data?.repository?.pullRequest?.closingIssuesReferences;
+        if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) {
+          return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue response is incomplete');
+        }
+        for (const node of connection.nodes) {
+          const issue = Number((node as { number?: unknown })?.number);
+          if (!Number.isSafeInteger(issue) || issue <= 0) {
+            return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue identity is invalid');
+          }
+          identities.push({ kind: 'number', value: issue });
+        }
+        if (!connection.pageInfo.hasNextPage) {
+          const seen = new Set<string>();
+          return { ok: true, value: identities.filter((identity) => {
+            const key = `${identity.kind}:${identity.value}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }) };
+        }
+        if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === cursor) {
+          return invalid('IN_LABEL_SYNC_ASSOCIATION_INVALID', 'Closing Issue pagination cursor is invalid');
+        }
+        cursor = connection.pageInfo.endCursor;
+      }
+    },
     async listClosing({ context, issue }) {
       const number = resourceIdentityNumber(issue);
       if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
@@ -867,20 +948,148 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     }
   };
 
+  const securityAlerts: NonNullable<PlatformProvider['securityAlerts']> = {
+    async inspect({ context, kind, number }): Promise<ProviderResult<SecurityAlertSnapshot>> {
+      if (!Number.isSafeInteger(number) || number <= 0) return invalid('SECURITY_NUMBER_INVALID', 'Alert number must be a positive integer');
+      const suffix = kind === 'dependabot' ? 'dependabot' : kind === 'code-scanning' ? 'code-scanning' : null;
+      if (!suffix) return invalid('SECURITY_KIND_INVALID', 'Alert kind is invalid');
+      const response = client.json<any>(['api', `repos/${repository(context)}/${suffix}/alerts/${number}`], { cwd: context.workingDirectory });
+      if (!response.ok) return response;
+      const data = response.value;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return invalid('SECURITY_RESPONSE_INVALID', 'The platform returned an invalid security alert');
+      const value: SecurityAlertSnapshot = {
+        kind,
+        number,
+        state: typeof data.state === 'string' ? data.state : 'invalid',
+        data
+      };
+      return { ok: true, value };
+    },
+    async dismiss({ context, kind, number, reason, comment }): Promise<ProviderResult<MutationReceipt>> {
+      const suffix = kind === 'dependabot' ? 'dependabot' : kind === 'code-scanning' ? 'code-scanning' : null;
+      if (!suffix) return invalid('SECURITY_KIND_INVALID', 'Alert kind is invalid');
+      if (!Number.isSafeInteger(number) || number <= 0) return invalid('SECURITY_NUMBER_INVALID', 'Alert number must be a positive integer');
+      const response = client.json<any>(['api', `repos/${repository(context)}/${suffix}/alerts/${number}`, '-X', 'PATCH', '--input', '-'], {
+        cwd: context.workingDirectory,
+        method: 'PATCH',
+        input: JSON.stringify({ state: 'dismissed', dismissed_reason: reason, dismissed_comment: comment })
+      });
+      if (!response.ok) return response;
+      return createReceipt(String(response.value?.id || `${kind}:${number}`));
+    }
+  };
+
+  const repositoryMetadata: NonNullable<PlatformProvider['repositoryMetadata']> = {
+    async reconcileLabels({ context, desired, cleanupStaleIn }): Promise<ProviderResult<LabelReconciliation>> {
+      const endpoint = `repos/${repository(context)}/labels?per_page=100`;
+      const listed = client.json<any>(['api', '--paginate', '--slurp', endpoint], { cwd: context.workingDirectory });
+      if (!listed.ok) return listed;
+      if (!Array.isArray(listed.value)) return invalid('LABEL_RESPONSE_INVALID', 'The platform returned an invalid label list');
+      const values = Array.isArray(listed.value)
+        ? listed.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
+        : [];
+      if (values.some((entry: any) => !entry || typeof entry.name !== 'string' || !entry.name)) {
+        return invalid('LABEL_RESPONSE_INVALID', 'The platform returned a label without a valid name');
+      }
+      const current = new Map<string, any>(values.map((entry: any) => [String(entry.name), entry]));
+      const created: string[] = [];
+      const updated: string[] = [];
+      const skipped: string[] = [];
+      const removed: string[] = [];
+      for (const label of desired) {
+        const existing = current.get(label.name);
+        if (!existing) {
+          const response = client.json(['api', `repos/${repository(context)}/labels`, '-X', 'POST', '--input', '-'], {
+            cwd: context.workingDirectory,
+            method: 'POST',
+            input: JSON.stringify({ name: label.name, color: label.color, description: label.description })
+          });
+          if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
+          created.push(label.name);
+          continue;
+        }
+        const sameColor = typeof existing.color === 'string' && existing.color.toUpperCase() === label.color.toUpperCase();
+        const sameDescription = String(existing.description || '') === label.description;
+        if (sameColor && sameDescription) {
+          skipped.push(label.name);
+          continue;
+        }
+        const response = client.json(['api', `repos/${repository(context)}/labels/${encodeURIComponent(label.name)}`, '-X', 'PATCH', '--input', '-'], {
+          cwd: context.workingDirectory,
+          method: 'PATCH',
+          input: JSON.stringify({ new_name: label.name, color: label.color, description: label.description })
+        });
+        if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
+        updated.push(label.name);
+      }
+      const desiredNames = new Set(desired.map((label) => label.name));
+      if (cleanupStaleIn) {
+        for (const name of current.keys()) {
+          if (!name.startsWith('in:') || desiredNames.has(name)) continue;
+          const response = client.text(['api', `repos/${repository(context)}/labels/${encodeURIComponent(name)}`, '-X', 'DELETE'], {
+            cwd: context.workingDirectory,
+            method: 'DELETE'
+          });
+          if (!response.ok) return partialFailure(response, labelReconciliation(created, updated, removed, skipped));
+          removed.push(name);
+        }
+      }
+      return {
+        ok: true,
+        value: {
+          changed: created.length > 0 || updated.length > 0 || removed.length > 0,
+          created,
+          updated,
+          removed,
+          skipped
+        }
+      };
+    },
+    async reconcileMilestones({ context, desired }): Promise<ProviderResult<MilestoneInitialization>> {
+      const listed = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/milestones?state=all&per_page=100`], { cwd: context.workingDirectory });
+      if (!listed.ok) return listed;
+      if (!Array.isArray(listed.value)) return invalid('MILESTONE_RESPONSE_INVALID', 'The platform returned an invalid milestone list');
+      const values = Array.isArray(listed.value)
+        ? listed.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry])
+        : [];
+      if (values.some((entry: any) => !entry || typeof entry.title !== 'string' || !entry.title)) {
+        return invalid('MILESTONE_RESPONSE_INVALID', 'The platform returned a milestone without a valid title');
+      }
+      const existing = new Set(values.map((entry: any) => String(entry.title)));
+      const created: string[] = [];
+      const skipped: string[] = [];
+      for (const milestone of desired) {
+        if (existing.has(milestone.title)) {
+          skipped.push(milestone.title);
+          continue;
+        }
+        const response = client.json(['api', `repos/${repository(context)}/milestones`, '-X', 'POST', '--input', '-'], {
+          cwd: context.workingDirectory,
+          method: 'POST',
+          input: JSON.stringify({ title: milestone.title, description: milestone.description, state: milestone.state })
+        });
+        if (!response.ok) return partialFailure(response, milestoneInitialization(created, skipped));
+        existing.add(milestone.title);
+        created.push(milestone.title);
+      }
+      return { ok: true, value: { changed: created.length > 0, created, skipped } };
+    }
+  };
+
   const verification: NonNullable<PlatformProvider['verification']> = {
     async fetchRemoteFacts(input) {
       const issue = input.issue && issues.inspect
         ? await issues.inspect({ context: input.context, target: input.issue })
         : { ok: true as const, value: null };
-      if (!issue.ok) return issue;
+      if (!issue.ok) return { ok: false, error: issue.error };
       const commentFacts = input.includeComments && input.issue && comments.list
         ? await comments.list({ context: input.context, parent: input.issue })
         : { ok: true as const, value: [] as RemoteCommentSnapshot[] };
-      if (!commentFacts.ok) return commentFacts;
+      if (!commentFacts.ok) return { ok: false, error: commentFacts.error };
       const changeRequest = input.changeRequest && changeRequests.inspect
         ? await changeRequests.inspect({ context: input.context, target: input.changeRequest })
         : { ok: true as const, value: null };
-      if (!changeRequest.ok) return changeRequest;
+      if (!changeRequest.ok) return { ok: false, error: changeRequest.error };
       return {
         ok: true,
         value: {
@@ -894,7 +1103,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     }
   };
 
-  return { issues, comments, changeRequests, checks, reviews, releases, verification };
+  return { issues, comments, changeRequests, checks, reviews, releases, securityAlerts, repositoryMetadata, verification };
 }
 
 function createGitHubProvider(
