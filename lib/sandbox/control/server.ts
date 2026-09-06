@@ -703,6 +703,17 @@ export async function serveSandboxControl(
   let bindingBackoffMs: number = timing.parkedBindingInitialMs;
   try {
     if (!brokerOwns()) return;
+    if (taskView.state === 'current' && taskView.observedSource === 'completed') {
+      // Recheck durable re-entry evidence before publishing a trusted startup view.
+      const unverified = { ...taskView, state: 'unknown' as const,
+        reasonCode: 'SANDBOX_COMPLETED_REENTRY_EVIDENCE_INVALID' };
+      try {
+        taskView = await completedReentryView(manifest, inspectContainer) ?? unverified;
+      } catch {
+        taskView = unverified;
+      }
+      if (!brokerOwns()) return;
+    }
     writeSandboxControlStatus(manifest, broker, 'starting', null, null, Date.now(), taskView);
     if (!brokerOwns()) return;
     appendBrokerAudit(manifest, 'broker-start', {

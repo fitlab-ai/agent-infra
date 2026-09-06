@@ -81,3 +81,57 @@ for (const field of ['id', 'status'] as const) {
     await assert.rejects(completedReentryView(f.manifest, f.inspect), /SANDBOX_COMPLETED_REENTRY_EVIDENCE_INVALID/);
   });
 }
+
+for (const scenario of ['valid', 'task-id', 'source', 'missing-evidence', 'stale'] as const) {
+  test(`broker restart revalidates completed identity: ${scenario}`, async (t) => {
+    const f = fixture(t);
+    const { captureSandboxAuthority } = await import('../../../lib/sandbox/engines/authority.ts');
+    const { serveSandboxControl } = await import('../../../lib/sandbox/control/server.ts');
+    const evidence = await prepareCompletedReentry(f.manifest, f.inspect);
+    if (scenario !== 'stale') publishCompletedReentry(f.manifest, evidence);
+    const statusPath = path.join(f.manifest.publicStatusDir, 'status.json');
+    const previous = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+    if (scenario !== 'stale') {
+      previous.taskView = await completedReentryView(f.manifest, f.inspect);
+      fs.writeFileSync(statusPath, JSON.stringify(previous));
+    }
+    if (scenario === 'task-id') {
+      const file = path.join(f.source, 'task.md');
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/^id:.*$/m, 'id: TASK-20990101-010101'));
+    } else if (scenario === 'source') {
+      fs.renameSync(f.source, f.source + '-old');
+      fs.mkdirSync(f.source);
+      fs.copyFileSync(path.join(f.source + '-old', 'task.md'), path.join(f.source, 'task.md'));
+      fs.rmSync(f.source + '-old', { recursive: true });
+    } else if (scenario === 'missing-evidence') {
+      fs.unlinkSync(path.join(path.dirname(f.manifest.processingDir), 'completed-reentry.json'));
+    }
+    const authorityEvidence = captureSandboxAuthority('native', {
+      env: { DOCKER_CONTEXT: 'default' }, lockDomain: 'a'.repeat(64),
+      probe: (_cmd, args) => ({ status: 0, signal: null,
+        stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'fixture-daemon-id' : { ApiVersion: '1.50' }),
+        stderr: '', pid: 1, output: [] })
+    });
+    const manifestPath = path.join(path.dirname(f.manifest.processingDir), 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...f.manifest, authorityEvidence }));
+    const abort = new AbortController();
+    const running = serveSandboxControl(manifestPath, abort.signal, { inspectContainer: f.inspect });
+    try {
+      let observed = previous;
+      for (let i = 0; i < 100; i++) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        observed = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+        if (observed.broker.brokerId === 'fixture-broker') continue;
+        if (scenario !== 'valid') assert.notEqual(observed.taskView.state, 'current');
+        if (observed.state === 'healthy') break;
+      }
+      assert.notEqual(observed.broker.brokerId, 'fixture-broker');
+      assert.equal(observed.state, 'healthy');
+      assert.equal(observed.taskView.state, scenario === 'valid' ? 'current' : scenario === 'stale' ? 'finalized-stale' : 'unknown');
+      if (scenario === 'valid') assert.equal(observed.taskView.observedSource, 'completed');
+    } finally {
+      abort.abort();
+      await running;
+    }
+  });
+}
