@@ -34,7 +34,8 @@
       "required_patterns": [
         "^### 审查决定$",
         "^\\$ "
-      ]
+      ],
+      "schema": "review-analysis"
     },
     "decision-details": {},
     "review-summary": {

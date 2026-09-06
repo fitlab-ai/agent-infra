@@ -96,6 +96,14 @@ Complete the code implementation coverage in `reference/report-template.md`. App
 
 ### 5. Write the Review Report
 
+Before writing this round's `{review-artifact}`, create the controlled review skeleton:
+
+```bash
+agent-infra-internal task-artifact {task-id} init --family review-code --artifact {review-artifact}
+```
+
+The skeleton does not generate a verdict, findings, or counts; complete review content is required before summary finalization. If structural finalization returns one provably safe error, call `task-artifact {task-id} repair --family review-code --artifact {review-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`, then rerun the original finalizer.
+
 Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 > The report format and severity layout live in `reference/report-template.md`. Read `reference/report-template.md` before writing the review.

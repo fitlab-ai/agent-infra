@@ -49,6 +49,43 @@ test('task-artifact inspect returns one read-only JSON context', () => {
   assert.deepEqual(fs.readdirSync(f.dir).sort(), before);
 });
 
+test('task-artifact init creates a non-semantic skeleton and is idempotent', () => {
+  const f = fixture();
+  const first = run(f.root, [f.id, 'init', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(first.status, 0, `${first.stderr}\n${first.stdout}`);
+  const created = JSON.parse(first.stdout);
+  assert.equal(created.status, 'applied');
+  const content = fs.readFileSync(path.join(f.dir, 'plan.md'), 'utf8');
+  assert.match(content, /artifact-context:TASK-20260101-000001:plan:1/);
+  assert.equal((content.match(/artifact-section:plan:/g) ?? []).length, 8);
+
+  const before = fs.readFileSync(path.join(f.dir, 'plan.md'));
+  const second = run(f.root, [f.id, 'init', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(second.status, 0, `${second.stderr}\n${second.stdout}`);
+  assert.equal(JSON.parse(second.stdout).status, 'no-op');
+  assert.deepEqual(fs.readFileSync(path.join(f.dir, 'plan.md')), before);
+});
+
+test('task-artifact repair requires the finalizer baseline and changes one heading only', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'plan.md');
+  const sections = ['问题理解', '约束条件', '方案对比', '技术方法', '实施步骤', '文件清单', '验证策略', '状态核对'];
+  fs.writeFileSync(artifact, ['# Plan', ...sections.flatMap((section) => [`## ${section}`, 'content']), '```text', '$ git status -s', '```'].join('\n'));
+  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('## 问题理解\n', '## 问题理解：\n'));
+  const finalizer = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(finalizer.status, 1, finalizer.stdout);
+  const failed = JSON.parse(finalizer.stdout);
+  const repaired = run(f.root, [
+    f.id, 'repair', '--family', 'plan', '--artifact', 'plan.md',
+    '--expected-sha256', failed.artifactSha256,
+    '--expected-semantic-digest', failed.semanticDigest
+  ]);
+  assert.equal(repaired.status, 0, `${repaired.stderr}\n${repaired.stdout}`);
+  const result = JSON.parse(repaired.stdout);
+  assert.equal(result.status, 'applied');
+  assert.equal(fs.readFileSync(artifact, 'utf8').includes('## 问题理解：'), false);
+});
+
 test('task-artifact reports usage and domain failures with nonzero exit codes', () => {
   const f = fixture();
   const usage = run(f.root, [f.id, 'inspect', '--family']);

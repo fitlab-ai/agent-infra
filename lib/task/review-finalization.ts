@@ -14,6 +14,8 @@ import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
+import { getArtifactSchema } from './artifact-schema.ts';
+import { inspectArtifactStructure } from './artifact-operations.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -26,6 +28,7 @@ type ReviewFinalizationErrorCode =
   | 'REVIEW_SUMMARY_NOT_FOUND'
   | 'REVIEW_SUMMARY_PLACEHOLDER_INVALID'
   | 'REVIEW_SUMMARY_COUNT_MISMATCH'
+  | 'REVIEW_ARTIFACT_STRUCTURE_INVALID'
   | 'REVIEW_DECISION_DETAIL_INVALID'
   | 'REVIEW_ARTIFACT_CONFLICT'
   | 'REVIEW_PROVENANCE_INVALID'
@@ -166,6 +169,18 @@ function finalizeReviewSummaryUnlocked(
     artifactContent = fileSystem.readFileSync(validated.artifact.path);
   } catch (error) {
     return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId);
+  }
+  if (artifactContent.includes('artifact-section:')) {
+    const schema = getArtifactSchema(spec.family);
+    const structure = schema ? inspectArtifactStructure(artifactContent, schema) : null;
+    if (structure && !structure.ok) {
+      return failed(
+        request,
+        'REVIEW_ARTIFACT_STRUCTURE_INVALID',
+        structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '),
+        resolved.taskId
+      );
+    }
   }
   if (!openReviewRound(taskContent, spec.action, parsedArtifact.round)) {
     return failed(

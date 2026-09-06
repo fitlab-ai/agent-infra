@@ -199,6 +199,23 @@ test('review summary parser fails closed on partial, mixed, or duplicate summary
   for (const content of invalid) assert.equal(parseReviewSummary(content).ok, false);
 });
 
+test('review summary parser ignores fenced examples and reads the visible summary', () => {
+  const parsed = parseReviewSummary(`# Review
+
+\`\`\`markdown
+## Review Summary
+- **Overall Verdict**: Rejected
+- **Findings (AI-actionable)**: 9 blockers, 0 majors, 0 minors
+\`\`\`
+
+## Review Summary
+- **Overall Verdict**: Approved
+- **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors
+`);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.summary.verdict, 'Approved');
+});
+
 test('review finalization fails closed and preserves a clearly informal duplicate', () => {
   const f = domainFixture();
   fs.appendFileSync(

@@ -39,7 +39,8 @@
         "^- \\*\\*Reviewed Diff Base\\*\\*[:：]\\s*[0-9a-f]{40,64}\\s*$",
         "^- \\*\\*Reviewed Diff Fingerprint\\*\\*[:：]\\s*sha256:[0-9a-f]{64}\\s*$",
         "^- \\*\\*Reviewed Snapshot Tree\\*\\*[:：]\\s*[0-9a-f]{40,64}\\s*$"
-      ]
+      ],
+      "schema": "review-code"
     },
     "decision-details": {},
     "review-summary": {

@@ -1,5 +1,7 @@
 # 实现报告模板
 
+> 写入本报告前，先用 `task-artifact init` 创建对应骨架，并保留每个 `artifact-section` marker；骨架不包含语义结果。
+
 创建 `code.md` 或 `code-r{N}.md` 时，使用以下结构。
 
 ## 输出模板

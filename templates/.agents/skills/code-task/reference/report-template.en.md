@@ -1,5 +1,7 @@
 # Code Report Template
 
+> Before writing this report, use `task-artifact init` to create the skeleton and preserve every `artifact-section` marker; the skeleton contains no semantic result.
+
 Use this structure when creating `code.md` or `code-r{N}.md`.
 
 ## Output Template

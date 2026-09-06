@@ -34,7 +34,8 @@
       "required_patterns": [
         "^### Approval Decision$",
         "^\\$ "
-      ]
+      ],
+      "schema": "review-plan"
     },
     "decision-details": {},
     "review-summary": {

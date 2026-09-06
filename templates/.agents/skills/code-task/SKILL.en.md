@@ -116,6 +116,14 @@ After the checkpoint succeeds, when task.md has an `issue_number`, run `agent-in
 
 ### 9. Write the Code Report
 
+Before writing this round's `{code-artifact}`, create the controlled report skeleton:
+
+```bash
+agent-infra-internal task-artifact {task-id} init --family code --artifact {code-artifact}
+```
+
+The skeleton contains identity metadata, stable section markers, and required headings only; real implementation and verification content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, call `task-artifact {task-id} repair --family code --artifact {code-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`, then rerun the same finalizer.
+
 Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 > Read `reference/report-template.md` before writing the report.

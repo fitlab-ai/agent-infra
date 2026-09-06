@@ -29,7 +29,8 @@
       ],
       "required_patterns": [
         "^\\$ "
-      ]
+      ],
+      "schema": "analysis"
     },
     "activity-log": {
       "expected_action_pattern": "(Analyze Task|Requirement Analysis) \\(Round \\d+\\)"

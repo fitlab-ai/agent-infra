@@ -11,21 +11,10 @@ import { receiptForOutput, sha256File } from './artifact-receipts.ts';
 import { isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
 import type { InvalidationDocument } from './invalidation.ts';
 import { validateQualificationAudit } from './qualification-audit.ts';
+import { ARTIFACT_FAMILY_CATALOG } from './artifact-schema.ts';
+import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-schema.ts';
 
-const artifactFamilyCatalog = [
-  { family: 'analysis', sectionAliases: ['分析', 'Analysis'], heading: '分析', labels: ['需求分析报告', 'Requirements Analysis'] },
-  { family: 'review-analysis', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['需求分析审查', 'Analysis Review'] },
-  { family: 'plan', sectionAliases: ['设计', 'Design'], heading: '设计', labels: ['技术方案', 'Technical Plan'] },
-  { family: 'review-plan', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['技术方案审查', 'Plan Review'] },
-  { family: 'code', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['实现报告', 'Implementation Report'] },
-  { family: 'review-code', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['代码审查', 'Code Review'] },
-  { family: 'manual-validation', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['人工验证', 'Manual Validation'] },
-  { family: 'validation-run', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['验证运行证据', 'Validation Run Evidence'] },
-  { family: 'pr-review', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['PR 审查报告', 'PR Review Report'] }
-] as const;
-
-type ArtifactFamily = (typeof artifactFamilyCatalog)[number]['family'];
-type ArtifactFamilySpec = (typeof artifactFamilyCatalog)[number];
+const artifactFamilyCatalog = ARTIFACT_FAMILY_CATALOG;
 type ArtifactIdentity = {
   family: ArtifactFamily;
   round: number;

@@ -40,6 +40,10 @@
 
 修复次数只存在于当前 skill invocation 的内存上下文，不写入 task.md、ledger 或公共 receipt。不得按错误码、技能或问题类型设置不同的正常预算。
 
+## 共享结构引擎
+
+报告骨架由 `agent-infra-internal task-artifact {task-id} init --family {family} --artifact {artifact}` 创建。骨架只写身份、标题和 `artifact-section:{family}:{section-id}` marker，不代表语义完成；槽位必须由当前 skill 填入真实内容。finalizer 返回单一可证明结构操作时，使用同一返回值的 SHA 和 semantic digest 调用 `task-artifact {task-id} repair --family {family} --artifact {artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`。repair 只执行共享引擎给出的一个结构操作，不写 task.md、ledger、receipt、Git 或平台资源，之后必须完整重跑原 finalizer。
+
 ## 完成事件与用户输出
 
 - 最终一次完整 finalizer 成功后，必须使用同一次返回的 provenance、账本状态、verdict 和计数发布 review completed 事件；`stageStatus.canAdvance=true` 且结论为 Approved 时才可生成跨阶段 next-step 命令，`canAdvance=false` 时仍须登记结果并路由到同阶段修订/复审。

@@ -29,14 +29,18 @@
       ],
       "required_patterns": [
         "^\\$ "
-      ]
+      ],
+      "schema": "code"
     },
     "implementation-input": {},
     "activity-log": {
       "expected_action_pattern": "(Code Task|Code) \\(Round \\d+(?:(?:, fix for review-code(?:-r\\d+)?\\.md)|(?:, decision II-[1-9]\\d*))?\\)"
     },
     "review-ledger": {
-      "stage_scope": ["analysis", "plan"]
+      "stage_scope": [
+        "analysis",
+        "plan"
+      ]
     },
     "platform-sync": {
       "when": "issue_number_exists",

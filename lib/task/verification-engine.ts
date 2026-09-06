@@ -36,6 +36,8 @@ import { resolveDeliveryTarget } from "./delivery-target.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
 import { validateQualificationAudit } from "./qualification-audit.ts";
+import { getArtifactSchema } from "./artifact-schema.ts";
+import { inspectArtifactStructure } from "./artifact-operations.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -615,6 +617,16 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     if (!qualification.ok) return failResult("artifact", `${path.basename(artifactPath)} has qualification audit errors: ${qualification.code}: ${qualification.message}`);
   }
   const requiredSections = config.required_sections || [];
+  const schemaFamily = skillName === "review-analysis"
+    ? "review-analysis"
+    : skillName === "review-plan" ? "review-plan" : skillName === "review-code" ? "review-code" : null;
+  if (schemaFamily && content.includes("artifact-section:")) {
+    const schema = getArtifactSchema(schemaFamily);
+    const structure = schema ? inspectArtifactStructure(content, schema) : null;
+    if (structure && !structure.ok) {
+      return failResult("artifact", `${path.basename(artifactPath)} has shared structural errors: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}`);
+    }
+  }
   const localFamily = skillName === "analyze-task"
     ? "analysis"
     : skillName === "plan-task" ? "plan" : skillName === "code-task" ? "code" : null;

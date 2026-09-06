@@ -72,6 +72,14 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ### 5. 编写审查报告
 
+在首次写入本轮 `{review-artifact}` 前，先创建受控审查骨架：
+
+```bash
+agent-infra-internal task-artifact {task-id} init --family review-plan --artifact {review-artifact}
+```
+
+骨架不生成审查结论、发现或计数；完成审查内容后才能进入 summary finalizer。结构 finalizer 返回可证明的单个错误时，使用其 SHA 和 semantic digest 调用 `task-artifact {task-id} repair --family review-plan --artifact {review-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`，再重跑原 finalizer。
+
 创建 `.agents/workspace/active/{task-id}/{review-artifact}`。
 
 > 报告格式见 `reference/report-template.md`。写报告前先读取 `reference/report-template.md`。
