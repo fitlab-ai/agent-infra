@@ -436,7 +436,10 @@ function verifyWorktreePermit(
     ? inspectRecoveredWorktree(permit.snapshot.worktree, permit.snapshot.recovery, options)
     : inspectWorktree(permit.snapshot.worktree, options);
   if (current.status === 'failed') throw new Error(`Unable to verify worktree permit: ${current.message}`);
-  if (current.snapshot.identity !== permit.snapshot.identity || (permit.mode === 'clean' && current.status !== 'clean')) {
+  const sameTarget = current.snapshot.worktree === permit.snapshot.worktree
+    && current.snapshot.branch === permit.snapshot.branch;
+  if (!sameTarget || (permit.mode === 'clean'
+    && (current.snapshot.identity !== permit.snapshot.identity || current.status !== 'clean'))) {
     throw new Error(`Worktree changed after authorization: ${permit.snapshot.worktree}`);
   }
   return current.snapshot;

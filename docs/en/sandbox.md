@@ -150,7 +150,7 @@ The control broker publishes a read-only health view inside the container and re
 
 Control timing is centralized in an injectable policy: the production defaults are a 250 ms control tick, 5 s slow checks and container heartbeat, 1 s initial parked backoff growing to 5 s, and a 7 s quiesce deadline. Tests may supply shorter values without changing the safety state machine. The canonical control manifest has one current, versionless schema containing the exact container identity, controlled labels, and root-relative `runtimeDir`; request, response, status, lease, execution, broker-owner, and controller records retain their own independent protocol versions. Materialization creates the control directories and an in-memory draft only. After container identity and labels are inspected, finalization atomically publishes the complete manifest, and only then may the broker start. A missing, versioned, incomplete, or unknown manifest fails closed with a container-only recreation/rebuild instruction; it is not parsed or migrated as a compatibility format. Task-bound containers mount `runtimeDir` read-write at `/run/agent-infra/runtime`, with client state under `runtime/clients/<client>/<store>`, while direct-host execution uses the repository-local `.agents/workspace/.runtime/codex-*` fallback. Failed or uncertain replacement operations retain the control root and evidence.
 
-Explicit `ai sandbox rm` and `--purge` use the exact recorded container ID. They quiesce the broker and executions, wait through the soft-stop phase, remove the exact container, verify authoritative exact-ID absence, recheck the manifest and owner generation, and only then use remaining-deadline force cleanup. A not-found result for the exact ID is not confused with a newly recreated container using the same name. Unknown inspection, removal failure, owner replacement, or an exhausted deadline leaves the control root and evidence in place for a later controlled retry.
+Explicit `ai sandbox rm` and `--purge` use the exact recorded container ID. Creation records a redacted Docker authority fingerprint (route, daemon identity, and API version); cleanup must verify that authority before replaying the route. The verified Docker CLI query uses `container ls --all --no-trunc --filter id=<full-id>` with a fixed machine-readable ID format, and only a successful zero-row result proves exact absence. They quiesce the broker and executions, wait through the soft-stop phase, remove the exact container, verify authoritative exact-ID absence, recheck the manifest and owner generation, and only then use remaining-deadline force cleanup. A not-found result for the exact ID is not confused with a newly recreated container using the same name. Unknown inspection, removal failure, owner replacement, or an exhausted deadline leaves the control root and evidence in place for a later controlled retry. Cleanup serializes contenders with a per-user native file lock stored outside the control tree; the lock object is retained for future retries.
 
 Host-dependent checks run through the internal `agent-infra-internal task-validate <branch | task-ref> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command>` entry point, mechanically invoked by the `run-manual-validation` skill. The default `snapshot` scope runs the command in a temporary detached worktree at the task branch commit and always removes it. `inplace` acquires a host-owned lease, waits for the broker to park, stops the sandbox container, runs against the original worktree, and then restores the branch, container, lease, and broker health. Readiness treats task view, runtime, and control as separate signals; the runtime signal performs a non-destructive write/read/delete probe. A fresh readiness check may restart once for a settling runtime mount, but readiness never rotates a generation or cleans old runtime evidence. The `run-manual-validation` skill records sanitized `validation-run` evidence; `complete-manual-validation` remains the separate maintainer confirmation step.
 
@@ -197,8 +197,19 @@ All removal paths inspect every target worktree before destructive cleanup.
 Staged, unstaged, conflicted, or non-ignored untracked changes make batch,
 purge, prune, `--yes`, and other non-interactive removal fail closed. A single
 interactive `ai sandbox rm <branch>` may discard changes only after displaying
-the exact dirty snapshot and receiving a separate confirmation that defaults
-to no. If the snapshot changes before deletion, authorization expires.
+the dirty snapshot and receiving a separate confirmation that defaults
+to no. Discard authorizes loss of later changes in that same worktree and branch;
+clean-only authorization still expires if the snapshot changes.
+
+Normal task-bound cleanup follows successful `complete-task`, short-ID release,
+and movement to the completed task directory. Use the full `TASK-id` for cleanup;
+a released short ID may refer to another task. Exceptional cleanup is an explicit
+operator decision to discard the selected sandbox and rebuild it, and may stop
+running executions. Both paths retain exact container authority/identity, managed
+path and ownership checks, and stop execution before host cleanup. They do not
+promise atomic source-instance moves against unrelated host programs replacing
+the selected directories concurrently. No privileged host service is required.
+An unreachable engine or an unknown removal result remains retryable, not success.
 Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
 behind by older versions or interrupted cleanup, then `ai sandbox prune` to
 remove only dirs without an active sandbox container.

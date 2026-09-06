@@ -93,6 +93,7 @@ test("package metadata supports scoped npm publishing", () => {
     "@clack/prompts",
     "@larksuiteoapi/node-sdk",
     "cross-spawn",
+    "fs-ext-extra-prebuilt",
     "picocolors",
     "semver",
     "smol-toml",

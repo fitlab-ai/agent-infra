@@ -68,6 +68,18 @@ const manifest: SandboxControlManifest = {
   project: 'p',
   container: 'p-dev-feature',
   containerIdentity: { id: 'container-id', labels: {} },
+  authorityEvidence: {
+    version: 1,
+    provider: 'native',
+    lockDomain: 'a'.repeat(64),
+    routeKind: 'default',
+    routeSelector: { source: 'docker-default' },
+    normalizedEndpoint: 'docker-default',
+    endpointFingerprint: 'b'.repeat(64),
+    daemonIdentity: { kind: 'docker-server-id', fingerprint: 'c'.repeat(64) },
+    apiVersion: { major: 1, minor: 50 },
+    authorityFingerprint: 'd'.repeat(64)
+  },
   branch: 'feature',
   mode: 'task-bound',
   taskId: 'TASK-20260809-010203',

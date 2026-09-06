@@ -142,7 +142,7 @@ v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑�
 
 控制时序集中在可注入的 policy 中：生产默认 control tick 为 250ms，慢速检查和容器 heartbeat 为 5s，parked 退避从 1s 增长到 5s，quiesce deadline 为 7s。测试可以注入更短的值，不需要改变安全状态机。canonical control manifest 只有一份 current、无 version 的 schema，包含精确 container identity、受控 labels 和 root-relative `runtimeDir`；request、response、status、lease、execution、broker owner 与 controller 记录继续保留各自独立的协议版本。materialize 阶段只创建 control 目录并保留内存 draft；完成 container identity 和 labels 检查后，finalize 才通过原子写入发布完整 manifest，随后才能启动 broker。缺失、带 version、字段不完整或未知的 manifest 会 fail closed，并给出 container-only recreation/rebuild 指引；不会按兼容格式解析或迁移。task-bound 容器会把 `runtimeDir` 以读写方式挂载到 `/run/agent-infra/runtime`，客户端状态位于 `runtime/clients/<client>/<store>`，direct-host 则使用仓库内 `.agents/workspace/.runtime/codex-*` fallback。替换失败或结果不确定时保留 control root 和证据。
 
-显式 `ai sandbox rm` 和 `--purge` 使用 manifest 记录的精确容器 ID：先 quiesce broker 与 execution，等待软停止阶段，再删除精确容器，确认 exact-ID 得到权威 absent，重新核对 manifest、owner 与 generation，最后才使用剩余 deadline 做 force cleanup。精确 ID 的 not-found 不会被同名新容器混淆。inspect 未知、删除失败、owner 被替换或 deadline 耗尽时，会保留 control root 与证据，等待下一次受控重试。
+显式 `ai sandbox rm` 和 `--purge` 使用 manifest 记录的精确容器 ID。创建时会记录脱敏后的 Docker authority 指纹（route、daemon identity 和 API version），清理前必须先复核该 authority 并按同一路由重放。复核使用 `container ls --all --no-trunc --filter id=<full-id>` 及固定的 machine-readable ID 格式；只有命令成功且输出确认为零行时，才证明精确资源 absent。随后先 quiesce broker 与 execution，等待软停止阶段，再删除精确容器，重新确认 exact-ID 得到权威 absent，复核 manifest、owner 与 generation，最后才使用剩余 deadline 做 force cleanup。精确 ID 的 not-found 不会被同名新容器混淆。inspect 未知、删除失败、owner 被替换或 deadline 耗尽时，会保留 control root 与证据，等待下一次受控重试。清理竞争者使用位于 control tree 外的每用户 native 文件锁串行化；锁对象会保留给后续重试使用。
 
 依赖宿主环境的校验统一通过内部命令 `agent-infra-internal task-validate <branch | task-ref> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command>` 执行，由 `run-manual-validation` 技能机械调用。默认 `snapshot` 在任务分支 commit 对应的临时 detached worktree 中运行命令，并保证清理。`inplace` 获取宿主 lease、等待 broker 进入 parked、停止沙箱容器、对原 worktree 运行命令，随后恢复分支、容器、lease 与 broker 健康状态。ready 检查把 task view、runtime、control 作为三个独立信号；runtime 会执行无损的 write/read/delete 探针。新容器的 runtime mount settling 最多触发一次 restart/recheck，但 ready 路径不会轮换 generation，也不会清理旧 runtime evidence。`run-manual-validation` 技能只记录去敏的 `validation-run` 证据；`complete-manual-validation` 仍是独立的维护者确认步骤。
 
@@ -172,7 +172,9 @@ tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/
 
 这两条路径硬编码，不暴露 `.airc.json` 配置项。首次 `create` 时会自动创建宿主目录；执行 `ai sandbox rm <branch>` 删除时会附带询问是否清理（默认 yes）。`ai sandbox rm --unbound` 批量删除所有**未绑定 active 任务**的沙箱（即 `ai sandbox ls` 中短号为 `-` 的行）；可加 `--dry-run` 预览，或 `--yes` 跳过普通确认（非交互 shell 中必须显式传 `--yes`）。`ai sandbox rm --purge` 则拆除项目的**全部**沙箱（容器、worktree、镜像、VM）。**破坏性变更**：`--all` 已移除；旧调用会返回迁移错误，必须改用 `--unbound`。
 
-所有删除路径都会在破坏性清理前检查全部目标 worktree。存在 staged、unstaged、冲突或非 ignored untracked 修改时，批量删除、purge、prune、`--yes` 和其他非交互删除都会 fail closed。只有交互式 `ai sandbox rm <branch>` 可以在展示精确 dirty snapshot 后，通过一次默认否定的独立确认放弃修改；删除前 snapshot 一旦变化，授权立即失效。
+所有删除路径都会在破坏性清理前检查全部目标 worktree。存在 staged、unstaged、冲突或非 ignored untracked 修改时，批量删除、purge、prune、`--yes` 和其他非交互删除都会 fail closed。只有交互式 `ai sandbox rm <branch>` 可以在展示 dirty snapshot 后，通过一次默认否定的独立确认丢弃该 worktree。丢弃授权包含同一 worktree、同一分支内随后产生的修改；仅允许清理干净 worktree 的授权仍会在 snapshot 变化时失效。
+
+正常任务沙箱清理发生在 `complete-task` 成功、短号释放、任务移入 completed 目录之后。删除时使用完整 `TASK-id`，因为已释放的短号可能已指向另一任务。异常清理表示操作者明确决定丢弃选定沙箱并重建，允许终止其中运行。两种路径都保留精确容器 authority/身份、受管路径和归属检查，并在宿主清理前停止执行；不承诺抵御其他宿主程序在清理期间并发替换选定目录的源实例原子移动保证。不需要特权宿主服务。引擎不可达或删除结果未知仍保留可重试状态，不能报告成功。
 可先用 `ai sandbox prune --dry-run` 查看旧版本或异常中断遗留的孤儿 per-branch 状态目录，再用 `ai sandbox prune` 只删除没有活跃 sandbox 容器对应的目录。
 已有沙箱可通过 `ai sandbox start --recreate <task-ref-or-branch>` 加载托管挂载点变更，包括已移除的挂载。readiness 会先识别过期的 mount plan，再授权 container-only replacement，并保留 worktree。
 

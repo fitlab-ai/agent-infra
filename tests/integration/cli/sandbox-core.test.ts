@@ -9,6 +9,7 @@ import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycl
 import { sandboxManagedPathKey } from "../../../lib/sandbox/commands/rm.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
+import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
 
 import {
   cliArgs,
@@ -342,13 +343,21 @@ function writeTaskBoundControlEvidence(
   fs.mkdirSync(publicStatusDir, { recursive: true });
   fs.mkdirSync(processingDir, { recursive: true });
   fs.mkdirSync(path.join(controlRoot, "runtime"), { recursive: true });
+  const containerId = "f".repeat(64);
+  const authorityEvidence = captureSandboxAuthority("docker-desktop", {
+    lockDomain: "a".repeat(64),
+    probe: (_cmd, args) => ({
+      status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? "fixture-daemon-id" : { ApiVersion: "1.50" }), stderr: "", pid: 1, output: []
+    })
+  });
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
     engine: "docker-desktop",
     repoRoot: repoDir,
     worktreeRoot: repoDir,
     project,
     container,
-    containerIdentity: { id: "fixture-container-id", labels: {} },
+    containerIdentity: { id: containerId, labels: {} },
+    authorityEvidence,
     branch,
     mode: "task-bound",
     taskId,

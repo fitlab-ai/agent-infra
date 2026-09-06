@@ -54,6 +54,7 @@
     "@clack/prompts": "1.7.0",
     "@larksuiteoapi/node-sdk": "^1.68.0",
     "cross-spawn": "^7.0.6",
+    "fs-ext-extra-prebuilt": "2.2.13",
     "picocolors": "1.1.1",
     "semver": "^7.8.1",
     "smol-toml": "^1.6.1",

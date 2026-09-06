@@ -167,6 +167,12 @@ function inplaceFixture({ includeContainer = true }: { includeContainer?: boolea
   fs.writeFileSync(control.manifestPath, `${JSON.stringify({
     engine: 'docker-desktop', repoRoot: repoDir, worktreeRoot: repoDir,
     project, container: containerName, containerIdentity: { id: 'fixture-container-id', labels: {} },
+    authorityEvidence: {
+      version: 1, provider: 'docker-desktop', lockDomain: 'a'.repeat(64), routeKind: 'context',
+      routeSelector: { context: 'desktop-linux' }, normalizedEndpoint: 'docker-context://desktop-linux',
+      endpointFingerprint: 'b'.repeat(64), daemonIdentity: { kind: 'docker-server-id', fingerprint: 'c'.repeat(64) },
+      apiVersion: { major: 1, minor: 50 }, authorityFingerprint: 'd'.repeat(64)
+    },
     branch, mode: 'task-bound', taskId, token: 'fixture-token', generation,
     channelDir: control.channelDir, publicStatusDir: control.statusDir,
     processingDir: control.processingDir, runtimeDir: control.runtimeDir

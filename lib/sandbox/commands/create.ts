@@ -92,6 +92,12 @@ import {
 } from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
+import {
+  captureSandboxAuthority,
+  commandForSandboxAuthority,
+  verifySandboxAuthority,
+  type SandboxAuthorityEvidenceV1
+} from '../engines/authority.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { ensureSandboxDiscoveryReadmes } from '../readme-scaffold.ts';
 import { removeDirRecursive } from '../../remove-dir.ts';
@@ -923,6 +929,24 @@ function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts:
   return runTaskCommand(command.cmd, command.args, opts);
 }
 
+function runSandboxAuthorityTaskCommand(
+  authority: SandboxAuthorityEvidenceV1,
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string } = {}
+): string {
+  const command = commandForSandboxAuthority(authority, cmd, args);
+  return runTaskCommand(command.cmd, command.args, opts);
+}
+
+function runSandboxAuthoritySafeCommand(
+  authority: SandboxAuthorityEvidenceV1,
+  args: string[]
+): string {
+  const command = commandForSandboxAuthority(authority, 'docker', args);
+  return runSafe(command.cmd, command.args);
+}
+
 // `docker run` args for mounting a tool's containerMount as an in-container
 // tmpfs. containerMount is an in-container path, so it is NOT engine-converted.
 export function buildTmpfsRunArgs(containerMount: string, tmpfs: { size?: string }): string[] {
@@ -1481,8 +1505,11 @@ export async function create(args: string[]): Promise<void> {
             const tzFlags = hostTz ? ['-e', `TZ=${hostTz}`] : [];
 
             let createdContainerRef: string | null = null;
+            let creationAuthority: SandboxAuthorityEvidenceV1 | null = null;
             try {
-              const dockerRunId = runEngineTaskCommand(engine, 'docker', [
+              creationAuthority = captureSandboxAuthority(engine);
+              commandForSandboxAuthority(creationAuthority, 'docker');
+              const dockerRunId = runSandboxAuthorityTaskCommand(creationAuthority, 'docker', [
               'run',
               '-d',
               '--init',
@@ -1537,11 +1564,11 @@ export async function create(args: string[]): Promise<void> {
               effectiveConfig.imageName
               ]);
               createdContainerRef = dockerRunId.trim();
-              const containerId = runEngineTaskCommand(engine, 'docker', [
+              const containerId = runSandboxAuthorityTaskCommand(creationAuthority, 'docker', [
                 'inspect', '--format', '{{.Id}}', dockerRunId.trim()
               ]).trim();
               if (!containerId) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
-              const rawContainerLabels = runEngineTaskCommand(engine, 'docker', [
+              const rawContainerLabels = runSandboxAuthorityTaskCommand(creationAuthority, 'docker', [
                 'inspect', '--format', '{{json .Config.Labels}}', containerId
               ]).trim();
               let inspectedLabels: unknown;
@@ -1566,10 +1593,18 @@ export async function create(args: string[]): Promise<void> {
               for (const [key, expected] of Object.entries(expectedLabels)) {
                 if (labels[key] !== expected) throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
               }
+              const authorityEvidence = captureSandboxAuthority(engine, {
+                route: creationAuthority,
+                lockDomain: creationAuthority.lockDomain
+              });
+              if (verifySandboxAuthority(creationAuthority, authorityEvidence).state !== 'verified') {
+                throw new Error('SANDBOX_AUTHORITY_DRIFT_DURING_CREATE');
+              }
               finalizeSandboxControlManifest(control, {
                 engine,
                 id: containerId,
-                labels: expectedLabels
+                labels: expectedLabels,
+                authorityEvidence
               });
               replacementLease.clearQuiescing();
               await startSandboxControlBroker(effectiveConfig.repoRoot, control.manifestPath);
@@ -1580,8 +1615,13 @@ export async function create(args: string[]): Promise<void> {
               createdTmpfsSeedPlan = tmpfsSeedPlan;
             } catch (error) {
               if (createdContainerRef) {
-                runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
-                runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
+                if (creationAuthority) {
+                  runSandboxAuthoritySafeCommand(creationAuthority, ['stop', createdContainerRef]);
+                  runSandboxAuthoritySafeCommand(creationAuthority, ['rm', createdContainerRef]);
+                } else {
+                  runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
+                  runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
+                }
               }
               if (!hadExistingControlRoot) removeDirRecursive(control.root);
               if (replacementCutover) {
