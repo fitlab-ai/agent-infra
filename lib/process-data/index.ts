@@ -10,6 +10,7 @@ import { readAppliedOverlays, repairSnapshot } from './repair.ts';
 import { collectGitHubBoundary, resolveGitHubRepository } from './sources.ts';
 import { canonicalJsonBytes, createObjectStore, findSnapshot, publishSnapshotV2, verifySnapshot } from './store.ts';
 import { createGitHubClient } from '../platform/github-client.ts';
+import { PUBLIC_CLI_ROUTE_SELECTORS } from '../internal/cli-route-inventory.ts';
 
 import type { NormalizedRecord } from './types.ts';
 
@@ -22,6 +23,7 @@ Commands:
   repair <snapshot-id> [--root <dir>] [--apply]
   export <snapshot-id> [--root <dir>] [--repairs none|applied] [--as-of <ISO>] [--output <file|->]
 `;
+const DATA_OPERATIONS = PUBLIC_CLI_ROUTE_SELECTORS.data;
 
 type ParsedArgs = { positionals: string[]; options: Map<string, string | true> };
 
@@ -256,6 +258,11 @@ async function cmdData(args: string[]): Promise<number> {
     return command ? 0 : 1;
   }
   try {
+    if (!DATA_OPERATIONS.includes(command as typeof DATA_OPERATIONS[number])) {
+      process.stderr.write(`Unknown data command: ${command}\n`);
+      process.stdout.write(USAGE);
+      return 1;
+    }
     switch (command) {
       case 'capture': return capture(rest);
       case 'verify': return verify(rest);

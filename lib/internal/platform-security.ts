@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { dismissSecurityAlert, readCommentFile, readSecurityAlert } from '../platform/security-alerts.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-security read --kind <dependabot|code-scanning> --number <number> [--cwd <path>]
        agent-infra-internal platform-security dismiss --kind <dependabot|code-scanning> --number <number> --reason <reason> --comment-file <path> [--cwd <path>]
@@ -38,8 +39,14 @@ function required(values: Map<string, string>, flag: string): string | null {
 }
 
 async function platformSecurity(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-security', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const action = args[0];
+  if (!internalHandlerRoute('platform-security', 'read', action ?? '')
+    && !internalHandlerRoute('platform-security', 'dismiss', action ?? '')) {
+    fail('a valid operation is required');
+    return;
+  }
   if (action !== 'read' && action !== 'dismiss') { fail('a valid operation is required'); return; }
   const parsed = parseOptions(args.slice(1));
   if (!parsed) { fail('invalid security alert options'); return; }

@@ -6,7 +6,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { CLI_PATH, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 import {
   createDirectHostExecutionContext,
   createSandboxExecutorExecutionContext,
@@ -28,6 +28,19 @@ function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, command, ...args], {
+    cwd: os.tmpdir(),
+    env,
+    encoding: 'utf8'
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout?.toString() ?? '',
+    stderr: result.stderr?.toString() ?? ''
+  };
+}
+
+function runPublic(args: string[], env: NodeJS.ProcessEnv): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(process.execPath, [CLI_PATH, ...args], {
     cwd: os.tmpdir(),
     env,
     encoding: 'utf8'
@@ -70,12 +83,42 @@ test('task control without sandbox markers uses the direct-host entry', () => {
   assert.match(result.stdout, /Usage: agent-infra-internal task-lifecycle/);
 });
 
-test('complete sandbox markers use the client entry without executing local authority', () => {
-  const result = run('task-orchestration', ['TASK-20260809-010203', 'status'], cleanEnv({
+test('branch-only control markers keep non-task public commands on the host entry', () => {
+  const result = runPublic(['version'], cleanEnv({
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status'
+  }));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /agent-infra v/);
+  assert.equal(result.stderr, '');
+});
+
+test('top-level usage and version aliases remain available in task-bound environments', () => {
+  const env = cleanEnv({
+    AGENT_INFRA_TASK_ID: TASK_ID,
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation',
+    AGENT_INFRA_CONTROL_DIR: '/missing/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status',
+    AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
+  });
+  for (const args of [[], ['help'], ['--version'], ['-v']]) {
+    const result = runPublic(args, env);
+    assert.equal(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
+    assert.notEqual(result.stdout, '');
+  }
+});
+
+test('complete sandbox markers use the client entry without executing local authority', () => {
+  const result = run('task-orchestration', ['TASK-20260809-010203', 'status'], cleanEnv({
+    AGENT_INFRA_TASK_ID: TASK_ID,
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation',
+    AGENT_INFRA_CONTROL_DIR: '/missing/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status',
+    AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
   }));
   assert.equal(result.status, 75);
   assert.match(result.stderr, /SANDBOX_CONTROL_BROKER_UNAVAILABLE/);
@@ -187,17 +230,22 @@ function runSandboxClient(
     cwd: fixture.root,
     env: {
       ...cleanEnv(),
+      AGENT_INFRA_TASK_ID: TASK_ID,
       AGENT_INFRA_CONTROL_DIR: fixture.channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: fixture.statusDir,
       AGENT_INFRA_CONTROL_TOKEN: fixture.token,
-      AGENT_INFRA_CONTROL_GENERATION: fixture.generation
+      AGENT_INFRA_CONTROL_GENERATION: fixture.generation,
+      AGENT_INFRA_RUNTIME_DIR: path.join(fixture.controlRoot, 'runtime')
     },
     encoding: 'utf8'
   });
+  const stdout = result.stdout?.toString() ?? '';
+  const stderr = result.stderr?.toString() ?? '';
+  if (!stdout) throw new Error(`sandbox client produced no JSON (status=${result.status}, stderr=${stderr})`);
   return {
     status: result.status,
-    payload: JSON.parse(result.stdout?.toString() ?? '') as Record<string, unknown>,
-    stderr: result.stderr?.toString() ?? ''
+    payload: JSON.parse(stdout) as Record<string, unknown>,
+    stderr
   };
 }
 

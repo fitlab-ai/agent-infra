@@ -4,6 +4,7 @@ import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
+import type { SandboxTaskView } from './task-view.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
 export const SANDBOX_CONTROL_MAX_LOGICAL_RECORDS = 1024;
@@ -109,9 +110,9 @@ export type SandboxControlResponse = Readonly<{
   payload?: SandboxControlPayloadReference | null;
 }>;
 export type SandboxControlStatus = Readonly<{
-  version: 2; generation: string; broker: ProcessIdentity & { brokerId: string };
+  version: 3; generation: string; broker: ProcessIdentity & { brokerId: string };
   state: 'starting' | 'healthy' | 'busy' | 'parked'; reasonCode: string | null;
-  activeRequestId: string | null; updatedAt: number;
+  activeRequestId: string | null; updatedAt: number; taskView: SandboxTaskView;
 }>;
 export type SandboxControlLease = Readonly<{
   version: 2; generation: string; nonce: string; owner: ProcessIdentity;

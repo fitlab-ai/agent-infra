@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 
+import {
+  formatTaskViewDiagnostic,
+  guardTaskOperation,
+  TaskViewOperationError
+} from '../lib/internal/task-operation-registry.ts';
+import { INTERNAL_HANDLER_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
+
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
 if (major < 22 || (major === 22 && minor < 9)) {
   process.stderr.write(
@@ -9,7 +16,24 @@ if (major < 22 || (major === 22 && minor < 9)) {
 }
 
 const command = process.argv[2] || '';
+const internalRouteRegistered = Object.hasOwn(INTERNAL_HANDLER_ROUTE_SELECTORS, command);
 const taskControlCommand = command === 'task-lifecycle' || command === 'task-orchestration' || command === 'task-finalization';
+
+let taskViewGuardFailed = false;
+try {
+  const guard = guardTaskOperation('internal', command, process.argv.slice(3));
+  if (guard.taskView && guard.descriptor.effect === 'diagnostic') {
+    process.stderr.write(formatTaskViewDiagnostic(guard.taskView));
+  }
+} catch (error) {
+  taskViewGuardFailed = true;
+  if (error instanceof TaskViewOperationError) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = error.exitCode;
+  } else {
+    throw error;
+  }
+}
 
 function taskControlTransportFailure(message: string): never {
   process.stdout.write(`${JSON.stringify({
@@ -19,7 +43,7 @@ function taskControlTransportFailure(message: string): never {
   process.exit(1);
 }
 
-if (taskControlCommand) {
+if (!taskViewGuardFailed && taskControlCommand) {
   const env = process.env;
   const executorMarked = Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
   const controlKeys = [
@@ -60,7 +84,7 @@ if (taskControlCommand) {
       }
     }
   }
-} else switch (command) {
+} else if (!taskViewGuardFailed && internalRouteRegistered) switch (command) {
 
   case 'task-create': {
     const { taskCreate } = await import('../lib/internal/task-create.ts');

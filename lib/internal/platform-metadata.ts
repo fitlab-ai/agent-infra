@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { initializeLabels, initializeMilestones } from '../platform/repository-metadata.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-metadata init-labels [--cleanup-stale-in] [--cwd <path>]
        agent-infra-internal platform-metadata init-milestones [--history] [--cwd <path>]
@@ -46,8 +47,14 @@ function parseOptions(args: string[]): { cwd: string; cleanup: boolean; history:
 }
 
 async function platformMetadata(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-metadata', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const action = args[0];
+  if (!internalHandlerRoute('platform-metadata', 'init-labels', action ?? '')
+    && !internalHandlerRoute('platform-metadata', 'init-milestones', action ?? '')) {
+    fail('a valid operation is required');
+    return;
+  }
   if (action !== 'init-labels' && action !== 'init-milestones') { fail('a valid operation is required'); return; }
   const parsed = parseOptions(args.slice(1));
   if (!parsed) { fail('invalid metadata options'); return; }

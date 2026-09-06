@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { publishReleaseNotes, releaseNoteContext, stageReleaseNotes } from '../platform/release-notes.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 type ParsedOptions = Readonly<{ values: ReadonlyMap<string, string>; switches: ReadonlySet<string> }>;
 
@@ -37,8 +38,9 @@ function finish(result: { status: string; [key: string]: unknown }): void {
 }
 
 async function platformReleaseNotes(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-release-notes', args)) return;
   const [action, ...rest] = args;
-  if (action === 'context') {
+  if (internalHandlerRoute('platform-release-notes', 'context', action ?? '')) {
     const parsed = parseOptions(rest, ['--cwd', '--history-limit', '--from-tag', '--to-tag', '--branch']);
     if (!parsed) return finish(invalidInput('invalid context options'));
     const cwd = path.resolve(parsed.values.get('--cwd') || process.cwd());
@@ -51,7 +53,7 @@ async function platformReleaseNotes(args: string[] = []): Promise<void> {
     }, { cwd }));
     return;
   }
-  if (action === 'stage') {
+  if (internalHandlerRoute('platform-release-notes', 'stage', action ?? '')) {
     const parsed = parseOptions(rest, ['--cwd', '--notes-file']);
     if (!parsed) return finish(invalidInput('invalid stage options'));
     const notesFile = parsed.values.get('--notes-file');
@@ -62,7 +64,7 @@ async function platformReleaseNotes(args: string[] = []): Promise<void> {
     ));
     return;
   }
-  if (action === 'publish') {
+  if (internalHandlerRoute('platform-release-notes', 'publish', action ?? '')) {
     const parsed = parseOptions(
       rest,
       ['--cwd', '--notes-file', '--tag', '--title', '--expected-sha256'],

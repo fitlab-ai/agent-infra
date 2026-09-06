@@ -6,6 +6,7 @@ import { applyQualificationProposal } from '../task/qualification-intents.ts';
 import type { QualificationProposalRequest } from '../task/qualification-intents.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-qualification <task-ref> <proposal|confirm|supersede|revoke> --input <json-file> [--dry-run]\n`;
 
@@ -17,6 +18,17 @@ function fail(message: string, code = 'QUALIFICATION_PROPOSAL_INVALID'): void {
 
 async function taskQualification(args: string[] = []): Promise<void> {
   const [taskRef, operation] = args;
+  const registered = [
+    internalHandlerRoute('task-qualification', 'proposal', operation ?? ''),
+    internalHandlerRoute('task-qualification', 'confirm', operation ?? ''),
+    internalHandlerRoute('task-qualification', 'supersede', operation ?? ''),
+    internalHandlerRoute('task-qualification', 'revoke', operation ?? '')
+  ].some(Boolean);
+  if (!registered) {
+    fail('task ref and a valid qualification operation are required');
+    return;
+  }
+  if (!ensureInternalHandlerRoute('task-qualification', args)) return;
   if (!taskRef || !['proposal', 'confirm', 'supersede', 'revoke'].includes(operation ?? '')) { fail('task ref and a valid qualification operation are required'); return; }
   let inputPath = '';
   let dryRun = false;

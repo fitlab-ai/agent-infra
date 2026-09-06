@@ -5,6 +5,7 @@ import { inspectPlatformPullRequestByNumber } from '../platform/pull-requests.ts
 import { listPrReviews, publishPrReview } from '../platform/pr-review.ts';
 import type { PrReviewEvent } from '../platform/pr-review.ts';
 import type { PlatformResult } from '../platform/types.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-pr-review inspect --pr <token> [--cwd <path>]
        agent-infra-internal platform-pr-review list --pr <token> [--cwd <path>]
@@ -51,9 +52,14 @@ function readBodyFile(value: string, cwd: string): string {
 }
 
 async function platformPrReview(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-pr-review', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['inspect', 'list', 'publish'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || ![
+    internalHandlerRoute('platform-pr-review', 'inspect', operation),
+    internalHandlerRoute('platform-pr-review', 'list', operation),
+    operation === 'publish'
+  ].some(Boolean)) { fail('a valid operation is required'); return; }
   const parsed = parse(args, 1);
   if (parsed.error) { fail(parsed.error); return; }
   const values = parsed.values;
@@ -67,19 +73,24 @@ async function platformPrReview(args: string[] = []): Promise<void> {
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
   const pr = values.pr;
   if (typeof pr !== 'string' || !pr) { fail(`${operation} requires --pr <token>`); return; }
-  if (operation === 'inspect') {
+  if (internalHandlerRoute('platform-pr-review', 'inspect', operation)) {
     finish(await inspectPlatformPullRequestByNumber(pr, { cwd }));
     return;
   }
-  if (operation === 'list') {
+  if (internalHandlerRoute('platform-pr-review', 'list', operation)) {
     finish(await listPrReviews(pr, { cwd }));
     return;
   }
   const scope = typeof values.scope === 'string' ? values.scope : '';
+  const publishSelector = /^TASK-\d{8}-\d{6}$/u.test(scope) ? 'publish-task' : /^pr\d+$/u.test(scope) ? 'publish-pr' : '';
   const round = Number(values.round);
   const commit = typeof values.commit === 'string' ? values.commit : '';
   const event = values.event as string;
   if (!scope || !/^(?:pr\d+|TASK-\d{8}-\d{6})$/.test(scope)) { fail('publish requires --scope <taskId|pr{N}>'); return; }
+  if (!internalHandlerRoute('platform-pr-review', 'publish-task', publishSelector)
+    && !internalHandlerRoute('platform-pr-review', 'publish-pr', publishSelector)) {
+    fail('publish scope is not registered'); return;
+  }
   if (!Number.isInteger(round) || round <= 0) { fail('publish requires a positive --round'); return; }
   if (!/^[0-9a-f]{7,40}$/i.test(commit)) { fail('publish requires --commit <sha>'); return; }
   if (!['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(event)) { fail('publish requires --event <COMMENT|APPROVE|REQUEST_CHANGES>'); return; }

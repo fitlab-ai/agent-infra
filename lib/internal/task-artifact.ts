@@ -3,6 +3,7 @@ import { finalizeLocalArtifact } from '../task/local-artifact-finalization.ts';
 import type { LocalArtifactFamily } from '../task/local-artifact-finalization.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { loadVerificationConfig } from '../task/verification-config.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> finalize-local --family <analysis|plan|code> --artifact <artifact>\n\nInspect workflow artifact context or finalize a local analysis/plan/code artifact without changing task state.\n`;
 
@@ -13,10 +14,12 @@ function failUsage(message: string): void {
 }
 
 function taskArtifact(args: string[] = []): void {
+  if (!ensureInternalHandlerRoute('task-artifact', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (args.length < 2) { failUsage('task ref and operation are required'); return; }
   const operation = args[1];
-  if (operation !== 'inspect' && operation !== 'finalize-local') { failUsage(`unknown operation '${operation}'`); return; }
+  if (!internalHandlerRoute('task-artifact', 'inspect', operation ?? '')
+    && !internalHandlerRoute('task-artifact', 'finalize-local', operation ?? '')) { failUsage(`unknown operation '${operation}'`); return; }
   let family = '';
   let artifact = '';
   const seen = new Set<string>();
@@ -31,7 +34,7 @@ function taskArtifact(args: string[] = []): void {
     else artifact = value;
   }
   if (!family) { failUsage("option '--family' is required"); return; }
-  if (operation === 'inspect') {
+  if (internalHandlerRoute('task-artifact', 'inspect', operation ?? '')) {
     if (artifact) { failUsage("option '--artifact' is only valid for finalize-local"); return; }
     const result = resolveArtifactContext(args[0]!, family);
     const output = family === 'code' && result.codeMode ? {

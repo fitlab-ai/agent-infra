@@ -8,6 +8,7 @@ import {
   syncPlatformIssue
 } from '../platform/issues.ts';
 import type { IssueResult } from '../platform/issues.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-issue inspect <task-ref> [--cwd <path>]
        agent-infra-internal platform-issue create <task-ref> --agent <agent> [--dry-run] [--cwd <path>]
@@ -60,9 +61,15 @@ function oneOf(values: Record<string, string | boolean>, name: string, allowed: 
 }
 
 async function platformIssue(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-issue', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['inspect', 'create', 'bind', 'sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || ![
+    internalHandlerRoute('platform-issue', 'inspect', operation),
+    internalHandlerRoute('platform-issue', 'create', operation),
+    internalHandlerRoute('platform-issue', 'bind', operation),
+    internalHandlerRoute('platform-issue', 'sync', operation)
+  ].some(Boolean)) { fail('a valid operation is required'); return; }
   const taskRef = args[1];
   if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
   const parsed = parse(args, 2);
@@ -75,15 +82,15 @@ async function platformIssue(args: string[] = []): Promise<void> {
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
-  if (operation === 'inspect') { finish(await inspectPlatformIssue(taskRef, { cwd })); return; }
+  if (internalHandlerRoute('platform-issue', 'inspect', operation)) { finish(await inspectPlatformIssue(taskRef, { cwd })); return; }
   if (typeof values.agent !== 'string' || !values.agent) { fail(`${operation} requires --agent`); return; }
   const agent = normalizeAgentToken(values.agent);
   if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
-  if (operation === 'create') {
+  if (internalHandlerRoute('platform-issue', 'create', operation)) {
     finish(await createPlatformIssue(taskRef, { cwd, agent: values.agent, dryRun: values.dryRun === true })); return;
   }
-  if (operation === 'bind') {
+  if (internalHandlerRoute('platform-issue', 'bind', operation)) {
     if (typeof values.issue !== 'string' || !values.issue) { fail('bind requires --issue <token>'); return; }
     finish(await bindPlatformIssue(taskRef, { cwd, agent: values.agent, issue: values.issue, dryRun: values.dryRun === true })); return;
   }

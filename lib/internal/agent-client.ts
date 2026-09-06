@@ -9,6 +9,7 @@ import { normalizeCustomTUIs } from '../agent-clients/custom-tuis.ts';
 import { renderNextStepCommands } from '../agent-clients/next-steps.ts';
 import { getAgentClientModelSelection } from '../agent-clients/registry.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal agent-client <next-steps|model-selection> [options]\n';
 
@@ -35,7 +36,7 @@ function parseArgs(args: string[]): ParsedArgs | null {
     process.stdout.write(USAGE);
     return null;
   }
-  if (args[0] !== 'next-steps') {
+  if (!internalHandlerRoute('agent-client', 'next-steps', args[0] ?? '')) {
     failure('AGENT_CLIENT_PAYLOAD_INVALID', "operation must be 'next-steps'");
     return null;
   }
@@ -84,7 +85,8 @@ function parseArgs(args: string[]): ParsedArgs | null {
 }
 
 function agentClient(args: string[] = []): void {
-  if (args[0] === 'model-selection') {
+  if (!ensureInternalHandlerRoute('agent-client', args)) return;
+  if (internalHandlerRoute('agent-client', 'model-selection', args[0] ?? '')) {
     const values: Record<string, string> = {};
     const seen = new Set<string>();
     for (let index = 1; index < args.length; index += 1) {

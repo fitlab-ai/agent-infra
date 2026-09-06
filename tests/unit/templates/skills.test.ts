@@ -586,7 +586,7 @@ test("workflow verification consumers declare their business verification events
     "block-task": ["block-task.completed"],
     "cancel-task": ["cancel-task.completed"],
     "commit": ["commit.completed"],
-    "complete-task": ["complete-task.preflight", "complete-task.completed"],
+    "complete-task": ["complete-task.preflight"],
     "create-pr": ["create-pr.completed"],
     "create-task": ["create-task.completed"],
     "import-codescan": ["import-codescan.completed"],

@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 import { VERSION } from '../lib/version.ts';
+import {
+  formatTaskViewDiagnostic,
+  guardTaskOperation,
+  TaskViewOperationError
+} from '../lib/internal/task-operation-registry.ts';
+import { PUBLIC_CLI_COMMAND_ALIASES } from '../lib/internal/cli-route-inventory.ts';
 
 // Node.js version check
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
@@ -15,7 +21,7 @@ const USAGE = `agent-infra ${VERSION} - bootstrap AI collaboration infrastructur
 Usage: ai <command> [options]
 
 Commands:
-  agent-client    List, inspect, enable, disable, or configure Agent Clients
+  agent-client    List, status, enable, disable, or configure Agent Clients
   cp <ssh-alias>  Copy local clipboard image to a remote macOS clipboard or Linux sandbox over SSH
   data            Capture, verify, audit, repair, and export process data
   decide          Record a ruling; code-stage decisions require explicit implementation intent
@@ -43,15 +49,26 @@ Examples:
   npx @fitlab-ai/agent-infra init
 `;
 
-const COMMAND_ALIASES: Record<string, string> = {
-  s: 'sandbox',
-  t: 'task'
-};
-
 const rawCommand = process.argv[2] || '';
-const command = Object.hasOwn(COMMAND_ALIASES, rawCommand)
-  ? COMMAND_ALIASES[rawCommand]
+const command = Object.hasOwn(PUBLIC_CLI_COMMAND_ALIASES, rawCommand)
+  ? PUBLIC_CLI_COMMAND_ALIASES[rawCommand as keyof typeof PUBLIC_CLI_COMMAND_ALIASES]
   : rawCommand;
+
+let taskViewGuardFailed = false;
+try {
+  const guard = guardTaskOperation('public', command ?? '', process.argv.slice(3));
+  if (guard.taskView && guard.descriptor.effect === 'diagnostic') {
+    process.stderr.write(formatTaskViewDiagnostic(guard.taskView));
+  }
+} catch (error) {
+  taskViewGuardFailed = true;
+  if (error instanceof TaskViewOperationError) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = error.exitCode;
+  } else {
+    throw error;
+  }
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -73,7 +90,7 @@ async function importCommand(importPath: string) {
   }
 }
 
-switch (command) {
+if (!taskViewGuardFailed) switch (command) {
   case 'agent-client': {
     const imported = await importCommand('../lib/agent-client.ts');
     if (!imported) break;

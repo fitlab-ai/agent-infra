@@ -3,6 +3,7 @@ import type { WorkflowWarningIntent } from '../task/workflow-warning-intents.ts'
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-warning <task-ref> <add|set-status|list> [intent flags] [--dry-run]\n`;
 const FLAGS: Record<string, string> = {
@@ -18,9 +19,14 @@ function usageFailure(message: string): void {
 }
 
 async function taskWarning(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-warning', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
-  if (!taskRef || !kind || !['add', 'set-status', 'list'].includes(kind)) { usageFailure('task ref and a valid intent are required'); return; }
+  if (!taskRef || !kind || ![
+    internalHandlerRoute('task-warning', 'add', kind ?? ''),
+    internalHandlerRoute('task-warning', 'set-status', kind ?? ''),
+    internalHandlerRoute('task-warning', 'list', kind ?? '')
+  ].some(Boolean)) { usageFailure('task ref and a valid intent are required'); return; }
   const values: Record<string, unknown> = { kind, taskRef };
   const seen = new Set<string>();
   for (let index = 2; index < args.length; index += 1) {

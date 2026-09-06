@@ -286,6 +286,12 @@ function fixtureAuthorityEvidence() {
   });
 }
 
+function statusTaskView(taskId: string | null = 'TASK-20260809-010203') {
+  return taskId
+    ? { state: 'unknown', taskId, observedSource: 'unknown', receipt: null, reasonCode: 'SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE' }
+    : { state: 'not-applicable', taskId: null, observedSource: null, receipt: null, reasonCode: null };
+}
+
 function writeControlManifest(root: string, branch: string, generation = 'lifecycle-generation'): string {
   const manifestPath = path.join(root, 'manifest.json');
   const channelDir = path.join(root, 'channel');
@@ -587,9 +593,9 @@ for (const removalFails of [false, true]) {
         token: 'lifecycle-secret', generation: 'remove-stages-generation'
       })}\n`);
       fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
-        version: 2, generation: 'remove-stages-generation',
+        version: 3, generation: 'remove-stages-generation',
         broker: { pid: brokerProcess.pid, startTime: brokerStartTime, brokerId: 'stubborn-broker' },
-        state: 'busy', reasonCode: null, activeRequestId: 'stubborn-request', updatedAt: Date.now()
+        state: 'busy', reasonCode: null, activeRequestId: 'stubborn-request', updatedAt: Date.now(), taskView: statusTaskView()
       })}\n`);
       const executionDir = path.join(root, 'processing', 'stubborn-request');
       fs.mkdirSync(executionDir);
@@ -687,9 +693,9 @@ test('sandbox control lifecycle excludes a concurrent broker recovery after quie
       token: 'lifecycle-secret', generation: 'recovery-quiesce-generation'
     })}\n`);
     fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
-      version: 2, generation: 'recovery-quiesce-generation',
+      version: 3, generation: 'recovery-quiesce-generation',
       broker: { pid: 999_999_999, startTime: 0, brokerId: 'stale-broker' }, state: 'healthy',
-      reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+      reasonCode: null, activeRequestId: null, updatedAt: Date.now(), taskView: statusTaskView()
     })}\n`);
 
     const startup = startSandboxControlBroker(root, manifestPath).then(
@@ -760,8 +766,8 @@ test('sandbox control lifecycle terminates execution trees before forcing an unr
       token: 'lifecycle-secret', generation: 'forced-generation'
     })}\n`);
     fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
-      version: 2, generation: 'forced-generation', broker: { pid: broker.pid, startTime: brokerStartTime, brokerId: 'test-broker' },
-      state: 'healthy', reasonCode: null, activeRequestId: 'forced-request', updatedAt: Date.now()
+      version: 3, generation: 'forced-generation', broker: { pid: broker.pid, startTime: brokerStartTime, brokerId: 'test-broker' },
+      state: 'healthy', reasonCode: null, activeRequestId: 'forced-request', updatedAt: Date.now(), taskView: statusTaskView()
     })}\n`);
     const executionDir = path.join(root, 'processing', 'forced-request');
     fs.mkdirSync(executionDir);
@@ -1061,13 +1067,13 @@ test('sandbox control client tolerates a transient torn response but rejects sta
   const responseBrokerStartTime = getProcessStartTime(process.pid);
   assert.ok(responseBrokerStartTime);
   fs.writeFileSync(statusPath, `${JSON.stringify({
-    version: 2,
+    version: 3,
     generation: 'response-generation',
     broker: { pid: process.pid, startTime: responseBrokerStartTime, brokerId: 'test-broker' },
     state: 'healthy',
     reasonCode: null,
     activeRequestId: null,
-    updatedAt: Date.now()
+    updatedAt: Date.now(), taskView: statusTaskView(null)
   })}\n`);
   const clientModule = path.resolve('lib/sandbox/control/client.ts');
   const runClient = (): CollectedChild => {
@@ -1165,13 +1171,13 @@ test('task-finalization client exposes accepted result loss as a structured unkn
   assert.ok(startTime);
   const generation = 'finalization-generation';
   fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
-    version: 2,
+    version: 3,
     generation,
     broker: { pid: process.pid, startTime, brokerId: 'finalization-broker' },
     state: 'healthy',
     reasonCode: null,
     activeRequestId: null,
-    updatedAt: Date.now()
+    updatedAt: Date.now(), taskView: statusTaskView()
   })}\n`);
   const client = collectChild(spawn(process.execPath, [
     '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'),
@@ -1183,7 +1189,8 @@ test('task-finalization client exposes accepted result loss as a structured unkn
       AGENT_INFRA_CONTROL_TOKEN: 'finalization-secret',
       AGENT_INFRA_CONTROL_GENERATION: generation,
       AGENT_INFRA_CONTROL_DIR: channelDir,
-      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
+      AGENT_INFRA_TASK_ID: undefined
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }));
@@ -1258,13 +1265,16 @@ test('task-bound finalization rejects a new request after accepted response loss
     const startTime = getProcessStartTime(process.pid);
     assert.ok(startTime);
     fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
-      version: 2,
+      version: 3,
       generation,
       broker: { pid: process.pid, startTime, brokerId: 'finalization-compensation-broker' },
       state: 'healthy',
       reasonCode: null,
       activeRequestId: null,
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      taskView: {
+        state: 'current', taskId, observedSource: 'active', receipt: null, reasonCode: null
+      }
     })}\n`);
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
       version: 3,
@@ -1321,6 +1331,7 @@ test('task-bound finalization rejects a new request after accepted response loss
     assert.equal(firstClient.exitCode, 1);
     assert.equal((firstClient.payload.error as { code?: string }).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
     assert.equal(firstClient.payload.accepted, true);
+    assert.ok(firstExecution.stdout, firstExecution.stderr);
     assert.equal(JSON.parse(firstExecution.stdout).status, 'completed');
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
 

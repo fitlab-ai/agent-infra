@@ -7,6 +7,7 @@ import { loadShortIdByTaskId, normalizeShortIdInput } from '../task/short-id.ts'
 import { buildTuiCommand, renderPrompt, selectTui } from './tui.ts';
 import { getSkillRunSpec } from './skills.ts';
 import { runHostCommand, type RunProcessResult } from './host.ts';
+import { PUBLIC_CLI_ROUTE_SELECTORS } from '../internal/cli-route-inventory.ts';
 
 export type ParsedRunArgs = {
   skill: string;
@@ -107,6 +108,10 @@ export function parseRunArgs(args: string[]): ParsedRunArgs {
   if (!skill) throw new Error("option '--skill' is required");
   const spec = getSkillRunSpec(skill);
   if (!spec) throw new Error(`Unknown skill '${skill}'`);
+  const routeSelector = spec.kind === 'create' ? 'create-task' : recreate ? 'recreate' : 'task-skill';
+  if (!PUBLIC_CLI_ROUTE_SELECTORS.run.includes(routeSelector as typeof PUBLIC_CLI_ROUTE_SELECTORS.run[number])) {
+    throw new Error(`Unsupported run route '${routeSelector}'`);
+  }
   if (spec.kind === 'create') {
     if (taskRef !== null) throw new Error("create-task does not accept '--task'");
     if (recreate) throw new Error('--recreate is only valid for sandbox task runs');

@@ -11,6 +11,9 @@ import { AGENT_CLIENT_IDS, isAgentClientId } from './agent-clients/types.ts';
 import type { AgentClientState } from './agent-clients/types.ts';
 import { closePrompt, multiSelect } from './prompt.ts';
 import { resolveTemplateDir } from './paths.ts';
+import { PUBLIC_CLI_ROUTE_SELECTORS } from './internal/cli-route-inventory.ts';
+
+const AGENT_CLIENT_OPERATIONS = PUBLIC_CLI_ROUTE_SELECTORS['agent-client'];
 
 const USAGE = `Usage: ai agent-client <operation>
 
@@ -106,6 +109,12 @@ async function cmdAgentClient(args: string[]): Promise<number> {
   if (!operation || operation === '--help' || operation === '-h' || operation === 'help') {
     process.stdout.write(USAGE);
     return 0;
+  }
+  if (!AGENT_CLIENT_OPERATIONS.includes(operation as typeof AGENT_CLIENT_OPERATIONS[number])) {
+    throw new AgentClientCommandError(
+      'AGENT_CLIENT_OPERATION_INVALID',
+      `Unknown operation '${operation}'`
+    );
   }
 
   if (operation === 'list') {

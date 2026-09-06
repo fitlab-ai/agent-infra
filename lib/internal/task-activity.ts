@@ -9,6 +9,7 @@ import type {
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-activity <task-ref> pr-review-inspect
        agent-infra-internal task-activity <task-ref> pr-review-start --agent <agent> --artifact <canonical.md> --head <40hex> [--dry-run]
@@ -44,9 +45,16 @@ function usageFailure(message: string): void {
 }
 
 async function taskActivity(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-activity', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const [taskRef, kind] = args;
-  if (!taskRef || taskRef.startsWith('--') || !kind || !OPERATIONS.has(kind)) {
+  if (!taskRef || taskRef.startsWith('--') || !kind || !OPERATIONS.has(kind)
+    || ![
+      internalHandlerRoute('task-activity', 'pr-review-inspect', kind),
+      internalHandlerRoute('task-activity', 'pr-review-start', kind),
+      internalHandlerRoute('task-activity', 'pr-review-complete', kind),
+      internalHandlerRoute('task-activity', 'pr-review-terminate', kind)
+    ].some(Boolean)) {
     usageFailure('task ref and a supported PR review intent are required');
     return;
   }
@@ -72,7 +80,7 @@ async function taskActivity(args: string[] = []): Promise<void> {
   const allowed = ALLOWED[kind]!;
   const unexpected = Object.keys(values).find((key) => !allowed.has(key));
   if (unexpected) { usageFailure(`${kind} does not accept '${unexpected}'`); return; }
-  if (kind === 'pr-review-inspect') {
+  if (internalHandlerRoute('task-activity', 'pr-review-inspect', kind)) {
     const result = inspectPrReviewActivity(values as PrReviewInspectIntent);
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (result.status === 'failed') process.exitCode = 1;
@@ -81,9 +89,9 @@ async function taskActivity(args: string[] = []): Promise<void> {
   for (const key of COMMON) {
     if (values[key] === undefined) { usageFailure(`${kind} requires '${key}'`); return; }
   }
-  const operationRequired = kind === 'pr-review-complete'
+  const operationRequired = internalHandlerRoute('task-activity', 'pr-review-complete', kind)
     ? ['verdict', 'blockers', 'major', 'minor']
-    : kind === 'pr-review-terminate' ? ['outcome', 'reason'] : [];
+    : internalHandlerRoute('task-activity', 'pr-review-terminate', kind) ? ['outcome', 'reason'] : [];
   for (const key of operationRequired) {
     if (values[key] === undefined) { usageFailure(`${kind} requires '${key}'`); return; }
   }

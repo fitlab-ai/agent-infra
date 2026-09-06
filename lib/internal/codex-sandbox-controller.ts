@@ -2,6 +2,7 @@ import {
   runCodexSandboxController,
   verifyCodexSandboxControllerContextWithWarnings
 } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal codex-sandbox-controller <run|verify-context> [options]\n';
 
@@ -20,7 +21,10 @@ function parse(args: string[]): Readonly<{ operation: string; values: Readonly<R
     return null;
   }
   const operation = args[0];
-  if (!operation || !['run', 'verify-context'].includes(operation)) {
+  if (!operation || ![
+    internalHandlerRoute('codex-sandbox-controller', 'run', operation),
+    internalHandlerRoute('codex-sandbox-controller', 'verify-context', operation)
+  ].some(Boolean)) {
     process.stderr.write(USAGE);
     fail('CODEX_SANDBOX_CONTROLLER_PAYLOAD_INVALID', 'operation must be run or verify-context', 2);
     return null;
@@ -51,10 +55,11 @@ function parse(args: string[]): Readonly<{ operation: string; values: Readonly<R
 }
 
 async function codexSandboxController(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('codex-sandbox-controller', args)) return;
   const parsed = parse(args);
   if (!parsed || process.exitCode) return;
   try {
-    if (parsed.operation === 'verify-context') {
+    if (internalHandlerRoute('codex-sandbox-controller', 'verify-context', parsed.operation)) {
       const contextPath = parsed.values['--context']
         ?? process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
       if (!contextPath) throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_MISSING');

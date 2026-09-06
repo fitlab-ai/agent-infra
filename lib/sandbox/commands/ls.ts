@@ -11,6 +11,7 @@ import { detectEngine } from '../engine.ts';
 import { formatTable } from '../../table.ts';
 import { loadShortIdByTaskId } from '../../task/short-id.ts';
 import { fetchSandboxRows } from './list-running.ts';
+import { readSandboxControlStatusForRow } from './control-status.ts';
 
 export { containerListFormat, parseLabels } from './list-running.ts';
 
@@ -88,6 +89,12 @@ export function ls(args: string[] = []): void {
       process.stdout.write(`  ${line}\n`);
     }
     process.stdout.write(`  Total: ${ordered.length} containers\n`);
+    for (const row of ordered) {
+      const controlStatus = readSandboxControlStatusForRow(config, row);
+      process.stdout.write(
+        `  ${row.name}: health=${controlStatus?.state ?? 'unavailable'} task-view=${controlStatus?.taskView.state ?? 'unavailable'}\n`
+      );
+    }
     if (tableRows.some((r) => r.shortId === '-')) {
       process.stdout.write(
         `  SHORT '-' = no active task bound; that sandbox is free to remove with 'ai sandbox rm <branch>'.\n`

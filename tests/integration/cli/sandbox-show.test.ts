@@ -142,10 +142,20 @@ function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: stri
   return { repoRoot, activeDir, scriptPath, binDir };
 }
 
+function hostDirectEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env = gitSafeEnv(extra);
+  delete env.AGENT_INFRA_TASK_ID;
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('AGENT_INFRA_CONTROL_') || key === 'AGENT_INFRA_RUNTIME_DIR') delete env[key];
+  }
+  return env;
+}
+
 function runShow(args: string[], repoRoot: string, binDir: string) {
+  const env = envWithPrependedPath(hostDirectEnv({ HOME: repoRoot, USERPROFILE: repoRoot }), binDir);
   return spawnSync('node', cliArgs('sandbox', 'show', ...args), {
     cwd: repoRoot,
-    env: envWithPrependedPath(gitSafeEnv({ HOME: repoRoot, USERPROFILE: repoRoot }), binDir),
+    env,
     encoding: 'utf8'
   });
 }
@@ -183,7 +193,7 @@ test('ai sandbox show <bare-numeric> resolves the branch via the short-id regist
   );
   const alloc = spawnSync('node', [scriptPath, 'alloc', taskId], {
     cwd: repoRoot,
-    env: envWithPrependedPath(gitSafeEnv(), binDir),
+    env: envWithPrependedPath(hostDirectEnv(), binDir),
     encoding: 'utf8'
   });
   assert.equal(alloc.status, 0, alloc.stderr);

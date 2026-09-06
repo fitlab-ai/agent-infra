@@ -10,6 +10,7 @@ import {
 import type { CommentKind } from '../platform/issue-comments.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { backfillCompletionComments } from '../platform/completion-backfill.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment owner <task-ref> [--cwd <path>]
@@ -53,16 +54,22 @@ function readBodyFile(value: string, cwd: string): string {
 }
 
 async function platformComment(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-comment', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['list', 'owner', 'backfill', 'sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || ![
+    internalHandlerRoute('platform-comment', 'list', operation),
+    internalHandlerRoute('platform-comment', 'owner', operation),
+    internalHandlerRoute('platform-comment', 'backfill', operation),
+    internalHandlerRoute('platform-comment', 'sync', operation)
+  ].some(Boolean)) { fail('a valid operation is required'); return; }
   const hasTaskRef = operation !== 'list';
   const taskRef = hasTaskRef ? args[1] : undefined;
   if (hasTaskRef && (!taskRef || taskRef.startsWith('--'))) { fail(`${operation} requires a task ref`); return; }
   const parsed = parseFlags(args, hasTaskRef ? 2 : 1);
   if (parsed.error) { fail(parsed.error); return; }
   const cwd = path.resolve(typeof parsed.values.cwd === 'string' ? parsed.values.cwd : process.cwd());
-  if (operation === 'list') {
+  if (internalHandlerRoute('platform-comment', 'list', operation)) {
     const issue = parsed.values.issue;
     if (typeof issue !== 'string' || !issue) { fail('list requires --issue <token>'); return; }
     const unexpected = Object.keys(parsed.values).find((key) => !['issue', 'cwd'].includes(key));
@@ -70,13 +77,13 @@ async function platformComment(args: string[] = []): Promise<void> {
     finish(await listPlatformComments(issue, cwd));
     return;
   }
-  if (operation === 'owner') {
+  if (internalHandlerRoute('platform-comment', 'owner', operation)) {
     const unexpected = Object.keys(parsed.values).find((key) => key !== 'cwd');
     if (unexpected) { fail(`owner does not accept '--${unexpected}'`); return; }
     finish(await checkPlatformCommentOwner(taskRef!, { cwd }));
     return;
   }
-  if (operation === 'backfill') {
+  if (internalHandlerRoute('platform-comment', 'backfill', operation)) {
     const unexpected = Object.keys(parsed.values).find((key) => !['cwd', 'agent'].includes(key));
     if (unexpected) { fail(`backfill does not accept '--${unexpected}'`); return; }
     const agent = parsed.values.agent;
@@ -86,6 +93,7 @@ async function platformComment(args: string[] = []): Promise<void> {
     finish(await backfillCompletionComments(taskRef!, { cwd, agent: normalizedAgent }));
     return;
   }
+  if (!internalHandlerRoute('platform-comment', 'sync', operation)) { fail('operation is not registered'); return; }
   const kind = parsed.values.kind;
   const agent = parsed.values.agent;
   if (!['task', 'artifact', 'summary', 'cancel'].includes(String(kind))) { fail('sync requires a valid --kind'); return; }

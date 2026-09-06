@@ -158,7 +158,7 @@ If in-place recovery fails, the command stops before entering the container or s
 
 Tmpfs runtime data is deliberately ephemeral. Codex databases, logs, sessions, and other non-seeded files under `/home/devuser/.codex` cannot be recovered after tmpfs loss. Declared seed entries such as `config.toml` and `model-catalogs` are reconstructable from their read-only staging mounts; bind-mounted worktrees, credentials, shell configuration, and share directories remain host-persistent.
 
-`ai sandbox ls` keeps a compact view: it lists only the Containers table for the current project (the `#` row number, the `SHORT` task short id, names, status, workspace identity, full task ID, and branch). It no longer prints the worktree list or each tool's state paths. To inspect those details for one sandbox, use `ai sandbox show <branch | TASK-id | N>`: it prints the label-derived workspace identity, that branch's worktree path, and the per-tool state paths (Claude Code, Codex, Antigravity CLI, OpenCode). The argument follows the same contract as `ai sandbox exec` and `ai sandbox start`, so `ai sandbox show 11` resolves the active task short id via `.agents/workspace/active/.short-ids.json`.
+`ai sandbox ls` keeps a compact view: it lists the current project's Containers table (the `#` row number, the `SHORT` task short id, names, status, workspace identity, full task ID, and branch), followed by one health/task-view summary per container. To inspect full details for one sandbox, use `ai sandbox show <branch | TASK-id | N>`: it prints the label-derived workspace identity, that branch's worktree path, per-tool state paths (Claude Code, Codex, Antigravity CLI, OpenCode), broker health, and task-view details. The argument follows the same contract as `ai sandbox exec` and `ai sandbox start`, so `ai sandbox show 11` resolves the active task short id via `.agents/workspace/active/.short-ids.json`.
 
 Breaking migration for the next major version: task short ids now use bare digits only. Replace `#NN` with `NN`; quoted `#NN` input is rejected.
 
@@ -344,6 +344,25 @@ processing evidence and reservation remain for a later same-ID recovery. If a
 graceful shutdown observes a settled result, it attempts this same terminal
 publication before terminating the broker; an unsettled child keeps the
 accepted request in the unknown/retained-evidence path.
+
+### Health and task-view state
+
+`public/status.json` is version 3 and carries two independent dimensions:
+`state` describes broker health (`starting`, `healthy`, `busy`, or `parked`),
+while `taskView.state` describes task evidence (`not-applicable`, `current`,
+`finalized-stale`, or `unknown`). A healthy broker may therefore expose a
+`finalized-stale` task view. The task view is a validated projection of the
+canonical task source and finalization receipt, not a second completion
+authority. A completed view is read-only; a stale or unknown view allows
+diagnostics, explicit cleanup, and only matching original-request recovery,
+but rejects new task progress, artifact writes, terminal verdicts, and remote
+writes before task resolution or locking.
+
+Ordinary broker restart or `ai sandbox enter` does not clear stale state. A
+completed re-entry becomes `current` only after the canonical completed source,
+receipt identity, task ID, and container identity all match. `ai sandbox ls` and
+`ai sandbox show` print both health and task-view values so broker availability
+is not mistaken for task write authorization.
 
 ### Capacity and retention (HD-3/A)
 

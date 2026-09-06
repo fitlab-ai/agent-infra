@@ -4,6 +4,7 @@ import type { TaskEventRequest, Verdict } from '../task/events.ts';
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--orchestrated] [--dry-run]
 
@@ -31,8 +32,9 @@ function usageFailure(message: string): void {
 }
 
 async function taskEvent(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-event', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
-  if (args.length < 2) { usageFailure('task ref and event are required'); return; }
+  if (args.length < 2 || !internalHandlerRoute('task-event', 'event', args[1] ? 'event' : '')) { usageFailure('task ref and event are required'); return; }
   const request: TaskEventRequest = { taskRef: args[0]!, event: args[1]!, agent: '' };
   const seen = new Set<string>();
   for (let index = 2; index < args.length; index += 1) {

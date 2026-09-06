@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { resolvePlatformContext } from '../platform/context.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal platform-context resolve [--cwd <path>]\n';
 
@@ -11,8 +12,9 @@ function fail(message: string): void {
 }
 
 async function platformContext(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('platform-context', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
-  if (args[0] !== 'resolve') { fail("operation must be 'resolve'"); return; }
+  if (!internalHandlerRoute('platform-context', 'resolve', args[0] ?? '')) { fail("operation must be 'resolve'"); return; }
   let cwd = process.cwd();
   const seen = new Set<string>();
   for (let index = 1; index < args.length; index += 1) {

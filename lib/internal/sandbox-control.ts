@@ -12,6 +12,7 @@ import {
   controllerProofFromContext,
   verifyCodexSandboxControllerContextWithWarnings
 } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
+import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 function isCanonicalCodexPrepare(args: readonly string[]): boolean {
   if (args[1] !== 'prepare') return false;
@@ -87,8 +88,9 @@ function sandboxFinalizationClient(args: string[]): void {
 }
 
 async function sandboxControl(args: string[]): Promise<void> {
+  if (!ensureInternalHandlerRoute('sandbox-control', args)) return;
   const [operation, ...rest] = args;
-  if (operation === 'serve') {
+  if (internalHandlerRoute('sandbox-control', 'serve', operation ?? '')) {
     const manifestIndex = rest.indexOf('--manifest');
     const manifest = manifestIndex >= 0 ? rest[manifestIndex + 1] : undefined;
     if (!manifest) throw new Error('sandbox-control serve requires --manifest');
@@ -104,7 +106,7 @@ async function sandboxControl(args: string[]): Promise<void> {
     }
     return;
   }
-  if (operation === 'execute') {
+  if (internalHandlerRoute('sandbox-control', 'execute', operation ?? '')) {
     const requestIndex = rest.indexOf('--request');
     const nonceIndex = rest.indexOf('--nonce');
     const request = requestIndex >= 0 ? rest[requestIndex + 1] : undefined;
@@ -113,7 +115,7 @@ async function sandboxControl(args: string[]): Promise<void> {
     await runSandboxControlExecutor(request, nonce);
     return;
   }
-  if (operation === 'recover') {
+  if (internalHandlerRoute('sandbox-control', 'recover', operation ?? '')) {
     if (rest.length !== 1 || !rest[0]) throw new Error('sandbox-control recover requires <request-id>');
     let response;
     try {
@@ -131,7 +133,7 @@ async function sandboxControl(args: string[]): Promise<void> {
       : response.exitCode ?? 1;
     return;
   }
-  if (operation === 'client') {
+  if (internalHandlerRoute('sandbox-control', 'client', operation ?? '')) {
     const [family = '', ...commandArgs] = rest;
     if (family === 'task-finalization') {
       sandboxFinalizationClient(commandArgs);

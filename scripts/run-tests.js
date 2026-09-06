@@ -9,7 +9,9 @@ const env = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => {
     const normalized = key.toUpperCase();
     return normalized !== 'NODE_TEST_CONTEXT'
-      && !normalized.startsWith('AGENT_INFRA_CONTROL_');
+      && !normalized.startsWith('AGENT_INFRA_CONTROL_')
+      && normalized !== 'AGENT_INFRA_TASK_ID'
+      && normalized !== 'AGENT_INFRA_RUNTIME_DIR';
   })
 );
 const args = process.argv.slice(2);
