@@ -1999,6 +1999,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   })}\n`);
   const controlManifest = {
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    authorityEvidence: fixtureAuthorityEvidence(),
     containerIdentity: { id: 'container-id', labels: {} }, branch, mode: 'task-bound' as const, taskId: 'TASK-20260809-010203',
     token: 'recovery-secret', generation, channelDir, publicStatusDir: statusDir, processingDir,
     runtimeDir: path.join(root, 'runtime')
