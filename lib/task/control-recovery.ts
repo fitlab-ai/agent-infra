@@ -21,6 +21,7 @@ export type ControlRecoveryInput = Readonly<{
   binding: ControlRecoveryBinding;
   startedCommitted: boolean;
   terminalResult?: Readonly<Record<string, unknown>> | null;
+  criticalPhases?: readonly string[];
   domain?: Readonly<Record<string, unknown>> | null;
   journal?: Readonly<{
     exists: boolean;
@@ -30,6 +31,10 @@ export type ControlRecoveryInput = Readonly<{
   explicitRejection?: boolean;
   evidenceConflict?: boolean;
 }>;
+
+export const SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES = Object.freeze([
+  'completed', 'evidence-written', 'publish-authorized'
+] as const);
 
 export type ControlRecoveryDecision = Readonly<{
   outcome: ControlRecoveryOutcome;
@@ -112,6 +117,9 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
   if (!result) return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_TERMINAL_RESULT_MISSING' };
   if (!bindingMatchesResult(input.binding, result)) {
     return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_RESULT_BINDING_MISMATCH' };
+  }
+  if (!SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES.every((phase) => input.criticalPhases?.includes(phase))) {
+    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_CRITICAL_AUDIT_INCOMPLETE' };
   }
   const status = result.status;
   const failed = status === 'failed' || result.error !== null && result.error !== undefined;

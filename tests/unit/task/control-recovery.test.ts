@@ -5,8 +5,11 @@ import {
   digestControlRecoveryIntent,
   findSandboxControlRecoveryOperation,
   operationRecoveryBinding,
-  SANDBOX_CONTROL_RECOVERY_OPERATIONS
+  SANDBOX_CONTROL_RECOVERY_OPERATIONS,
+  SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES
 } from '../../../lib/task/control-recovery.ts';
+
+const criticalPhases = [...SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES];
 
 test('recovery registry covers lifecycle, finalization, route split, and orchestration intents', () => {
   assert.equal(findSandboxControlRecoveryOperation('task-lifecycle', 'complete')?.mutatesDomain, true);
@@ -39,11 +42,11 @@ test('route clean-completion requires the completed run and reviewed-head eviden
     lastReviewedCommit: 'head'
   };
   assert.equal(classifySandboxControlRecovery({
-    operation, binding, startedCommitted: true, terminalResult: result, domain: completeDomain
+    operation, binding, startedCommitted: true, terminalResult: result, domain: completeDomain, criticalPhases
   }).outcome, 'success');
   assert.equal(classifySandboxControlRecovery({
     operation, binding, startedCommitted: true, terminalResult: result,
-    domain: { consistent: false, status: 'completed', pendingDelegation: null }
+    domain: { consistent: false, status: 'completed', pendingDelegation: null }, criticalPhases
   }).outcome, 'unknown');
   assert.equal(classifySandboxControlRecovery({
     operation, binding, startedCommitted: true, terminalResult: result,
@@ -52,7 +55,7 @@ test('route clean-completion requires the completed run and reviewed-head eviden
       completionEvidence: completeDomain.completionEvidence,
       snapshot: { head: 'other', headTree: 'tree', worktreeTree: 'tree' },
       lastReviewedCommit: 'head'
-    }
+    }, criticalPhases
   }).outcome, 'unknown');
 });
 
@@ -69,7 +72,12 @@ test('every registered mutation requires a matching domain contract', () => {
       intentDigest: binding.intentDigest, status: 'completed', changed: true
     };
     assert.equal(classifySandboxControlRecovery({
-      operation, binding, startedCommitted: true, terminalResult: result, domain: { consistent: true }
+      operation,
+      binding,
+      startedCommitted: true,
+      terminalResult: result,
+      domain: { consistent: true },
+      criticalPhases,
     }).outcome, 'success', operation.intent);
     assert.equal(classifySandboxControlRecovery({
       operation, binding, startedCommitted: true, terminalResult: result
@@ -83,12 +91,12 @@ test('recovery matrix distinguishes explicit failure, journal partial state, and
   const failed = { requestId: lifecycleBinding.requestId, generation: lifecycleBinding.generation, taskId: lifecycleBinding.taskId, intentDigest: lifecycleBinding.intentDigest, status: 'failed', changed: true };
   assert.equal(classifySandboxControlRecovery({
     operation: lifecycle, binding: lifecycleBinding, startedCommitted: true, terminalResult: failed,
-    domain: { consistent: false }
+    domain: { consistent: false }, criticalPhases
   }).outcome, 'failure');
   const applied = { ...failed, status: 'applied' };
   assert.equal(classifySandboxControlRecovery({
     operation: lifecycle, binding: lifecycleBinding, startedCommitted: true, terminalResult: applied,
-    domain: { consistent: true }, journal: { exists: true, completedSteps: ['task-written'], failure: null }
+    domain: { consistent: true }, journal: { exists: true, completedSteps: ['task-written'], failure: null }, criticalPhases
   }).outcome, 'in-progress');
 
   for (const intent of ['route.read', 'status'] as const) {
@@ -97,11 +105,11 @@ test('recovery matrix distinguishes explicit failure, journal partial state, and
     const result = { requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId, intentDigest: binding.intentDigest, status: 'running', changed: false };
     assert.equal(classifySandboxControlRecovery({
       operation, binding, startedCommitted: true, terminalResult: result,
-      domain: { consistent: true, snapshotValid: true }
+      domain: { consistent: true, snapshotValid: true }, criticalPhases
     }).outcome, 'success', intent);
     assert.equal(classifySandboxControlRecovery({
       operation, binding, startedCommitted: true, terminalResult: { ...result, changed: true },
-      domain: { consistent: true, snapshotValid: true }
+      domain: { consistent: true, snapshotValid: true }, criticalPhases
     }).outcome, 'unknown', `${intent} changed unexpectedly`);
   }
 });
@@ -115,6 +123,22 @@ test('recovery rejects durable terminal results with conflicting bindings', () =
       requestId: binding.requestId, generation: 'other-generation', taskId: binding.taskId,
       intentDigest: binding.intentDigest, status: 'running', changed: true
     },
-    domain: { consistent: true }
+    domain: { consistent: true }, criticalPhases
   }).outcome, 'unknown');
+});
+
+test('recovery keeps a terminal result unknown when completion audit transitions are incomplete', () => {
+  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'complete')!;
+  const binding = operationRecoveryBinding('e'.repeat(32), 'generation-6', 'TASK-20260904-002407', operation.family, operation.intent);
+  const result = {
+    requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId,
+    intentDigest: binding.intentDigest, status: 'completed', changed: true
+  };
+  const decision = classifySandboxControlRecovery({
+    operation, binding, startedCommitted: true, terminalResult: result,
+    domain: { consistent: true }, criticalPhases: ['completed', 'evidence-written']
+  });
+  assert.deepEqual(decision, {
+    outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_CRITICAL_AUDIT_INCOMPLETE'
+  });
 });

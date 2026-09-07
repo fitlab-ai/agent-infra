@@ -6,7 +6,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { CLI_PATH, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { CLI_PATH, INTERNAL_CLI_PATH, filePath, sandboxControlSafeEnv } from '../../helpers.ts';
 import {
   createDirectHostExecutionContext,
   createSandboxExecutorExecutionContext,
@@ -55,6 +55,19 @@ function runPublic(args: string[], env: NodeJS.ProcessEnv): { status: number | n
   };
 }
 
+function runLauncher(command: string, args: string[], env: NodeJS.ProcessEnv): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(filePath('bin/internal-cli.sh'), [command, ...args], {
+    cwd: os.tmpdir(),
+    env,
+    encoding: 'utf8'
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout?.toString() ?? '',
+    stderr: result.stderr?.toString() ?? ''
+  };
+}
+
 function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
   const statusPath = path.join(statusDir, 'status.json');
   const deadline = Date.now() + timeoutMs;
@@ -92,16 +105,16 @@ test('task control without sandbox markers uses the direct-host entry in the iso
   assert.match(result.stdout, /Usage: agent-infra-internal task-lifecycle/);
 });
 
-test('preloaded fs mount probes cannot restore direct-host routing for task-control families', (t) => {
+test('the trusted launcher blocks preload bypass before the Node control router starts', (t) => {
   if (!fixedStatusMountPresent()) {
     t.skip('fixed status mount is unavailable in this host test environment');
     return;
   }
-  const preload = path.resolve('scripts/test-status-mount-exists-preload.cjs');
+  const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
   for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
-    const result = run(command, ['--help'], cleanEnv({ NODE_OPTIONS: `--require=${preload}` }));
+    const result = runLauncher(command, ['--help'], cleanEnv({ NODE_OPTIONS: `--require=${preload}` }));
     assert.equal(result.status, 1, `${command}: ${result.stderr}`);
-    assert.match(JSON.parse(result.stdout).error.message, /SANDBOX_CONTROL_IDENTITY_/u, command);
+    assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_IDENTITY_MISSING', command);
   }
 });
 

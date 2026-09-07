@@ -26,12 +26,13 @@
   "bin": {
     "agent-infra": "./dist/bin/cli.js",
     "ai": "./dist/bin/cli.js",
-    "agent-infra-internal": "./dist/bin/internal-cli.js"
+    "agent-infra-internal": "./bin/internal-cli.sh"
   },
   "files": [
     "dist/",
     "!dist/**/*.map",
     "bin/cli.ts",
+    "bin/internal-cli.sh",
     "lib/",
     "runtime/",
     "templates/"

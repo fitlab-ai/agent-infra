@@ -47,13 +47,15 @@ import {
   appendCriticalAudit,
   appendDiagnosticAudit,
   createSandboxControlAuditContext,
-  writeSandboxControlTransition
+  writeSandboxControlTransition,
+  readSandboxControlTransition
 } from './audit.ts';
 import { parseTaskControlOperation } from '../../task/control-authority.ts';
 import {
   classifySandboxControlRecovery,
   findSandboxControlRecoveryOperation,
-  operationRecoveryBinding
+  operationRecoveryBinding,
+  SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES
 } from '../../task/control-recovery.ts';
 import { readRun } from '../../task/orchestration.ts';
 import { captureRepositorySnapshot } from '../../task/workspace-snapshot.ts';
@@ -627,6 +629,17 @@ function readRecoveryDomain(
   return { domain: null, journal: emptyRecoveryJournal() };
 }
 
+function readCommittedCriticalPhases(manifest: SandboxControlManifest, requestId: string): readonly string[] {
+  return SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES.filter((phase) => {
+    try {
+      readSandboxControlTransition(manifest, requestId, phase);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 function recoveryResponse(
   manifest: SandboxControlManifest,
   manifestPath: string,
@@ -656,6 +669,7 @@ function recoveryResponse(
     binding,
     startedCommitted: true,
     terminalResult,
+    criticalPhases: readCommittedCriticalPhases(manifest, request.id),
     domain: recovery.domain,
     journal: recovery.journal
   });

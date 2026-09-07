@@ -39,6 +39,7 @@ import {
   writeSandboxControlResultEvidence,
   writeSandboxControlTerminalResult
 } from '../../../lib/sandbox/control/state.ts';
+import { writeSandboxControlTransition } from '../../../lib/sandbox/control/audit.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
@@ -2172,6 +2173,9 @@ test('broker recovery accepts a controller close after the registration was dura
     const processing = path.join(manifest.processingDir, requestId);
     fs.mkdirSync(path.join(processing, 'transitions'), { recursive: true });
     fs.writeFileSync(path.join(processing, 'transitions', 'started-committed.json'), '{}\n');
+    writeSandboxControlTransition(manifest, { requestId, phase: 'completed' });
+    writeSandboxControlTransition(manifest, { requestId, phase: 'evidence-written' });
+    writeSandboxControlTransition(manifest, { requestId, phase: 'publish-authorized' });
     const startTime = getProcessStartTime(process.pid);
     assert.ok(startTime);
     const proof = {
@@ -2636,6 +2640,10 @@ async function runFinalizationRecoveryCase(
       version: 2, generation, requestId, nonce: 'recovery-finalization-nonce',
       child: { pid: 999_999_999, startTime: 0, processGroupId: null }, phase: 'running', updatedAt: Date.now()
     })}\n`);
+    writeSandboxControlTransition(manifest, { requestId, phase: 'started-committed' });
+    writeSandboxControlTransition(manifest, { requestId, phase: 'completed' });
+    writeSandboxControlTransition(manifest, { requestId, phase: 'evidence-written' });
+    writeSandboxControlTransition(manifest, { requestId, phase: 'publish-authorized' });
     writeSandboxControlReservation(manifest, requestId, { logicalRecords: 0, bytes: 0 });
     const finalizationOutput = `${JSON.stringify({
       version: 1,

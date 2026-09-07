@@ -266,6 +266,23 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function trustedTaskControlLauncherPrefix(): string {
+  return [
+    '#!/bin/sh',
+    'set -eu',
+    'command=${1-}',
+    'case "$command" in',
+    '  task-lifecycle|task-orchestration|task-finalization)',
+    '    if [ -d /run/agent-infra/control-status ] && [ -z "${AGENT_INFRA_TASK_ID-}${AGENT_INFRA_CONTROL_TOKEN-}${AGENT_INFRA_CONTROL_GENERATION-}${AGENT_INFRA_CONTROL_DIR-}${AGENT_INFRA_CONTROL_STATUS_DIR-}${AGENT_INFRA_RUNTIME_DIR-}${AGENT_INFRA_EXECUTOR_MANIFEST-}" ]; then',
+    `      printf '%s\\n' '{"status":"failed","changed":false,"error":{"code":"SANDBOX_CONTROL_IDENTITY_MISSING","message":"sandbox control identity is present but its launch configuration is missing"}}'`,
+    '      exit 1',
+    '    fi',
+    '    ;;',
+    'esac',
+    'unset NODE_OPTIONS NODE_PATH'
+  ].join('\n') + '\n';
+}
+
 function prepareCodexSandboxController(
   input: ControllerInput,
   options: ControllerOptions = {}
@@ -351,9 +368,10 @@ function prepareCodexSandboxController(
     const shimDir = path.join(home, 'bin');
     fs.mkdirSync(shimDir, { mode: 0o700 });
     const internalCli = path.resolve(process.argv[1] ?? path.join(repoRoot, 'bin', 'internal-cli.ts'));
+    const launcherPrefix = trustedTaskControlLauncherPrefix();
     const source = internalCli.endsWith('.ts')
-      ? `#!/bin/sh\nexec ${shellQuote(process.execPath)} --experimental-strip-types ${shellQuote(internalCli)} "$@"\n`
-      : `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(internalCli)} "$@"\n`;
+      ? `${launcherPrefix}exec ${shellQuote(process.execPath)} --experimental-strip-types ${shellQuote(internalCli)} "$@"\n`
+      : `${launcherPrefix}exec ${shellQuote(process.execPath)} ${shellQuote(internalCli)} "$@"\n`;
     fs.writeFileSync(path.join(shimDir, 'agent-infra-internal'), source, { mode: 0o700 });
 
     const policy = [
