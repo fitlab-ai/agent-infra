@@ -32,11 +32,7 @@ const CODE_SECTIONS = [
 
 function artifact(family: LocalArtifactFamily = 'plan'): string {
   const taskId = 'TASK-20260101-000001';
-  let content = renderArtifactSkeleton({ taskId, family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
-  content = content.replace(
-    '## 状态核对\n<!-- artifact-section:',
-    '## 状态核对\n<!-- artifact-section:'
-  );
+  const content = renderArtifactSkeleton({ taskId, family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   return content.replace('## 状态核对\n<!-- artifact-section:plan:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```')
     .replace('## 状态核对\n<!-- artifact-section:code:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:code:state-check -->\n```text\n$ git status -s\n```')
     .replace('## 状态核对\n<!-- artifact-section:analysis:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:analysis:state-check -->\n```text\n$ git status -s\n```');

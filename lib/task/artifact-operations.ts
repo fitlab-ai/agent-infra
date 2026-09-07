@@ -157,6 +157,20 @@ function sectionBodyBounds(content: string, heading: { start: number }): { start
   return { start: headingEnd, end: next?.start ?? content.length };
 }
 
+function stripHtmlComments(content: string): string {
+  let result = '';
+  let cursor = 0;
+  while (cursor < content.length) {
+    const start = content.indexOf('<!--', cursor);
+    if (start < 0) return result + content.slice(cursor);
+    result += content.slice(cursor, start);
+    const end = content.indexOf('-->', start + 4);
+    if (end < 0) return result;
+    cursor = end + 3;
+  }
+  return result;
+}
+
 function diagnostic(
   code: ArtifactStructuralDiagnosticCode,
   message: string,
@@ -289,12 +303,12 @@ function inspectArtifactStructure(
       if (marker.start < bounds.start || marker.start >= bounds.end) {
         diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' is outside its section`, section.id, marker.line));
       }
-      const body = content.slice(bounds.start, bounds.end).replace(/<!--[\s\S]*?-->/g, '').trim();
+      const body = stripHtmlComments(content.slice(bounds.start, bounds.end)).trim();
       if (!body) diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, lineNumber(content, heading.start)));
     }
     if (marker && !heading && marker.standalone) {
       const nextHeading = scanned.headings.find((candidate) => candidate.start > marker.start && candidate.level <= 2);
-      const body = content.slice(marker.end, nextHeading?.start ?? content.length).replace(/<!--[\s\S]*?-->/g, '').trim();
+      const body = stripHtmlComments(content.slice(marker.end, nextHeading?.start ?? content.length)).trim();
       if (body && repairCandidates.length === 0) {
         repairCandidates.push(createSectionInsertionRepair(content, section, marker, locale));
       } else if (!body) {
