@@ -192,3 +192,26 @@ test('structure inspection fails closed for ambiguous insertion and reordered se
   assert.equal(order.ok, false);
   assert.ok(order.diagnostics.some((item) => item.code === 'ARTIFACT_SECTION_ORDER_INVALID'));
 });
+
+test('structure inspection fails closed when multiple required headings use trailing punctuation', () => {
+  const families = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
+
+  for (const family of families) {
+    const artifact = `${family}.md`;
+    const content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact })
+      .replaceAll('<!-- artifact-slot:empty -->', '内容');
+    const [first, second] = getArtifactSchema(family)!.sections;
+    const malformed = content
+      .replace(`## ${first!.headings.zh}\n`, `## ${first!.headings.zh}：\n`)
+      .replace(`## ${second!.headings.zh}\n`, `## ${second!.headings.zh}:\n`);
+    const inspection = inspectArtifactStructure(malformed, getArtifactSchema(family)!);
+
+    assert.equal(inspection.ok, false, family);
+    assert.equal(inspection.repair, null, family);
+    assert.equal(
+      inspection.diagnostics.filter((item) => item.code === 'ARTIFACT_HEADING_TRAILING_PUNCTUATION').length,
+      2,
+      family
+    );
+  }
+});

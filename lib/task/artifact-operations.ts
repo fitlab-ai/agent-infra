@@ -323,6 +323,17 @@ function inspectArtifactStructure(
   }
 
   for (const candidate of repairCandidates) {
+    if (candidate.kind === 'replace-line') {
+      diagnostics.push(diagnostic(
+        'ARTIFACT_HEADING_TRAILING_PUNCTUATION',
+        `visible required H2 '${candidate.from}' may be normalized to '${candidate.to}'`,
+        candidate.sectionId,
+        candidate.line,
+        true,
+        candidate
+      ));
+      continue;
+    }
     const missing = diagnostics.findIndex((item) => item.code === 'ARTIFACT_MISSING_SECTION' && item.sectionId === candidate.sectionId);
     if (missing >= 0) {
       const section = schema.sections.find((item) => item.id === candidate.sectionId)!;
@@ -354,18 +365,8 @@ function inspectArtifactStructure(
 
   const repair = repairCandidates.length === 1 && (
     diagnostics.length === 0 ||
-    (diagnostics.length === 1 && diagnostics[0]?.operation?.kind === 'insert-section')
+    (diagnostics.length === 1 && diagnostics[0]?.operation?.kind === repairCandidates[0]?.kind)
   ) ? repairCandidates[0]! : null;
-  if (repair && repair.kind === 'replace-line') {
-    diagnostics.push(diagnostic(
-      'ARTIFACT_HEADING_TRAILING_PUNCTUATION',
-      `visible required H2 '${repair.from}' may be normalized to '${repair.to}'`,
-      repair.sectionId,
-      repair.line,
-      true,
-      repair
-    ));
-  }
   return {
     ok: diagnostics.length === 0,
     family: schema.family,

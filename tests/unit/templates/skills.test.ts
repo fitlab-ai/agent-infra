@@ -14,6 +14,7 @@ import {
   renderPlaceholders,
   skillDocPaths
 } from "../../helpers.ts";
+import { getArtifactSchema } from "../../../lib/task/artifact-schema.ts";
 
 const skillDocFiles = [
   ...listFilesRecursive(".agents/skills"),
@@ -32,6 +33,12 @@ function sectionContent(content: string, heading: string): string {
   const end = nextHeading === -1 ? content.length : start + nextHeading;
 
   return content.slice(start, end).trim();
+}
+
+function reportSampleHeadings(content: string): string[] {
+  const sample = content.match(/```markdown\n([\s\S]*)\n```\s*$/);
+  assert.ok(sample, "report template should include a markdown sample");
+  return [...sample[1]!.matchAll(/^## (.+)$/gm)].map((match) => match[1]!);
 }
 
 test("all SKILL.md files have valid frontmatter", () => {
@@ -585,6 +592,41 @@ test("review report templates expose unresolved-count placeholders exactly once"
   });
 });
 
+test("report templates preserve the registry-defined section order", () => {
+  const templates: Array<{ family: "code" | "review-analysis" | "review-plan" | "review-code"; locale: "zh" | "en"; relativePath: string }> = [
+    { family: "code", locale: "zh", relativePath: ".agents/skills/code-task/reference/report-template.md" },
+    { family: "code", locale: "zh", relativePath: "templates/.agents/skills/code-task/reference/report-template.zh-CN.md" },
+    { family: "code", locale: "en", relativePath: "templates/.agents/skills/code-task/reference/report-template.en.md" },
+    { family: "review-analysis", locale: "zh", relativePath: ".agents/skills/review-analysis/reference/report-template.md" },
+    { family: "review-analysis", locale: "zh", relativePath: "templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md" },
+    { family: "review-analysis", locale: "en", relativePath: "templates/.agents/skills/review-analysis/reference/report-template.en.md" },
+    { family: "review-plan", locale: "zh", relativePath: ".agents/skills/review-plan/reference/report-template.md" },
+    { family: "review-plan", locale: "zh", relativePath: "templates/.agents/skills/review-plan/reference/report-template.zh-CN.md" },
+    { family: "review-plan", locale: "en", relativePath: "templates/.agents/skills/review-plan/reference/report-template.en.md" },
+    { family: "review-code", locale: "zh", relativePath: ".agents/skills/review-code/reference/report-template.md" },
+    { family: "review-code", locale: "zh", relativePath: "templates/.agents/skills/review-code/reference/report-template.zh-CN.md" },
+    { family: "review-code", locale: "en", relativePath: "templates/.agents/skills/review-code/reference/report-template.en.md" }
+  ];
+
+  templates.forEach(({ family, locale, relativePath }) => {
+    const schema = getArtifactSchema(family);
+    assert.ok(schema, `${relativePath} should map to an artifact schema`);
+    const expected = schema.sections.map((section) => section.headings[locale]);
+    const actual = reportSampleHeadings(read(relativePath));
+    const positions = expected.map((heading) => {
+      const matches = actual.flatMap((candidate, index) => candidate === heading ? [index] : []);
+      assert.equal(matches.length, 1, `${relativePath} should define '${heading}' once`);
+      return matches[0]!;
+    });
+
+    assert.deepEqual(
+      positions,
+      [...positions].sort((left, right) => left - right),
+      `${relativePath} should keep required sections in registry order`
+    );
+  });
+});
+
 test("workflow verification consumers declare their business verification events", () => {
   const expectations: Record<string, string[]> = {
     "analyze-task": ["analyze.awaiting-input", "analyze.completed"],
@@ -744,10 +786,10 @@ test("workflow report templates include evidence sections", () => {
     ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
     ["templates/.agents/skills/review-plan/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
     ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
-    ["templates/.agents/skills/code-task/reference/report-template.en.md", "## State Check", "## Evidence"],
-    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## State Check", "## Evidence"],
-    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## State Check", "## Evidence"],
-    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## State Check", "## Evidence"],
+    ["templates/.agents/skills/code-task/reference/report-template.en.md", "## State Check", "## Raw Evidence"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## State Check", "## Raw Evidence"],
+    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## State Check", "## Raw Evidence"],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## State Check", "## Raw Evidence"],
   ];
 
   reportTemplateCases.forEach(([relativePath, stateHeading, evidenceHeading]) => {
@@ -786,9 +828,9 @@ test("review report templates include the self-doubt section", () => {
     ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "## 自我质疑"],
     ["templates/.agents/skills/review-plan/reference/report-template.zh-CN.md", "## 自我质疑"],
     ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "## 自我质疑"],
-    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## Self-Doubt"],
-    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## Self-Doubt"],
-    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## Self-Doubt"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## Self-critique"],
+    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## Self-critique"],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## Self-critique"],
   ];
 
   selfDoubtCases.forEach(([relativePath, heading]) => {
@@ -919,7 +961,7 @@ test("review report templates expose shared coverage, traceability, and finding 
   const reportCases = ["review-analysis", "review-plan", "review-code"].flatMap((skill) => [
     { relativePath: `.agents/skills/${skill}/reference/report-template.md`, coverage: "检视覆盖声明", trace: "追踪矩阵" },
     { relativePath: `templates/.agents/skills/${skill}/reference/report-template.zh-CN.md`, coverage: "检视覆盖声明", trace: "追踪矩阵" },
-    { relativePath: `templates/.agents/skills/${skill}/reference/report-template.en.md`, coverage: "Review Coverage Declaration", trace: "Traceability Matrix" }
+    { relativePath: `templates/.agents/skills/${skill}/reference/report-template.en.md`, coverage: "Inspection Coverage", trace: "Traceability Matrix" }
   ]);
 
   reportCases.forEach(({ relativePath, coverage, trace }) => {
@@ -957,7 +999,7 @@ test("review-analysis report templates expose stage-specific coverage structures
   const reportCases: Array<[string, string]> = [
     [".agents/skills/review-analysis/reference/report-template.md", "需求分析专项覆盖"],
     ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "需求分析专项覆盖"],
-    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "Requirement Analysis Coverage"]
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "Requirements Analysis Coverage"]
   ];
   const expectedTables = [
     "| perspective_id | applicability | reviewed_scope | evidence | result_or_gap |",
@@ -1444,7 +1486,7 @@ test("review skill reports keep advisories outside the finding ledger", () => {
 
     for (const locale of ["en", "zh-CN"]) {
       const config = JSON.parse(read(`templates/.agents/skills/${skill}/config/verify.${locale}.json`));
-      const section = locale === "en" ? "Non-blocking Advisories" : "非阻塞建议";
+      const section = locale === "en" ? "Non-blocking Suggestions" : "非阻塞建议";
       assert.equal(config.checks.artifact.schema, skill);
       assert.match(
         read(`templates/.agents/skills/${skill}/reference/report-template.${locale}.md`),

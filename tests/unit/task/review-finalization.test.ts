@@ -195,6 +195,49 @@ test('review finalizer exposes a repair baseline and the shared repair can resto
   });
   assert.equal(repaired.status, 'applied');
   assert.match(fs.readFileSync(f.artifactPath, 'utf8'), /^## 检视覆盖声明$/m);
+
+  const finalized = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+  assert.equal(finalized.status, 'applied');
+  assert.equal(readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md')?.state, 'passed');
+
+  const retry = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+  assert.equal(retry.status, 'no-op');
+});
+
+test('review finalizer rejects a semantic mutation across a repair retry', () => {
+  const f = domainFixture();
+  const malformed = fs.readFileSync(f.artifactPath, 'utf8').replace('## 检视覆盖声明\n', '');
+  fs.writeFileSync(f.artifactPath, malformed);
+
+  const first = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+  assert.equal(first.status, 'failed');
+  assert.equal(first.repairable, true);
+  const beforeRetry = fs.readFileSync(f.artifactPath, 'utf8');
+  const firstIntent = readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
+
+  fs.writeFileSync(
+    f.artifactPath,
+    beforeRetry.replace('- **总体结论**：通过', '- **总体结论**：需要修改')
+  );
+  const second = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+
+  assert.equal(second.status, 'failed');
+  assert.equal(second.error?.code, 'REVIEW_PROVENANCE_INVALID');
+  assert.equal(second.repairable, false);
+  assert.equal(second.operation, null);
+  assert.deepEqual(readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), firstIntent);
 });
 
 test('review summary finalization is idempotent and rejects mismatched numeric counts', () => {

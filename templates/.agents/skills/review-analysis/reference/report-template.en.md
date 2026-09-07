@@ -14,11 +14,6 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 - **Review Input**:
   - `{analysis-artifact}` (the highest-round requirement-analysis artifact actually reviewed, e.g. `analysis-r2.md`; leave blank if it cannot be reliably determined)
 
-## State Check
-
-> Record the state-check command, review scope, key result, and uncovered parts; each command starts with `$ `.
-> Follow `.agents/rules/evidence-reporting.md`: record review scope, key result, and uncovered parts; do not paste complete successful stdout.
-
 ## Review Summary
 
 ## Qualification Audit Review
@@ -51,7 +46,7 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 - **Overall Verdict**: {Approved / Changes Requested / Rejected}
 - **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors / **Manual validation**: 0
 
-## Review Coverage Declaration
+## Inspection Coverage
 
 | pass_id | scope | evidence | result | gaps_or_assumptions |
 |---------|-------|----------|--------|---------------------|
@@ -61,7 +56,7 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 |---------|------------------|--------|--------|
 | {registry token} | {trigger or non-trigger evidence} | {yes / no / not-applicable} | {lens result} |
 
-## Requirement Analysis Coverage
+## Requirements Analysis Coverage
 
 | perspective_id | applicability | reviewed_scope | evidence | result_or_gap |
 |----------------|---------------|----------------|----------|---------------|
@@ -119,7 +114,7 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 **File**: `{file-path}:{line-number}`
 **Suggestion**: {improvement suggestion}
 
-## Non-blocking Advisories
+## Non-blocking Suggestions
 
 > Record only future optimizations that do not affect the current artifact's completeness, correctness, or acceptance. Advisories do not enter the disagreement ledger, finding counts, or verdict.
 
@@ -138,36 +133,6 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 > If this round has no Manual validation items, keep the section heading and write "None".
 
 
-## Review Disagreement Ledger Writeback
-
-> Record the structured intents to submit: use `task-ledger finding-upsert` for new findings and `finding-review` for prior responses. The core allocates `AN-N` and validates transitions; do not edit task.md table rows.
-> Every finding escalated to `needs-human-decision` must include a self-contained detail block per `.agents/rules/human-decision-context.md`, with evidence pointing to that stable anchor.
-
-## Evidence
-
-> Follow `.agents/rules/evidence-reporting.md`: pair each claim with a `$ ` command and proportionate result summary; Blockers, failures, blocking conditions, or disputes require a reproducible command, exact location, and decisive excerpt; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
-
-- Claim: {verified claim}
-```text
-$ {command}
-{result summary or decisive excerpt}
-```
-
-## Self-Doubt
-
-> Explicitly declare conclusions, inferences, and assumptions in this review that were **not directly verified**; downstream can rebut them on this basis. Write "None" if there are none.
-
-- {an unverified conclusion or inference; note why it was not verified and the impact if it is overturned}
-
-## Highlights
-
-- {what went well}
-
-## Alignment with Plan
-
-- [ ] Implementation matches the technical plan
-- [ ] No unintended scope expansion
-
 ## Conclusion and Recommendation
 
 ### Approval Decision
@@ -177,4 +142,39 @@ $ {command}
 
 ### Next Steps
 {recommended next step}
+
+## State Check
+
+> Record the state-check command, review scope, key result, and uncovered parts; each command starts with `$ `.
+> Follow `.agents/rules/evidence-reporting.md`: record review scope, key result, and uncovered parts; do not paste complete successful stdout.
+
+## Raw Evidence
+
+> Follow `.agents/rules/evidence-reporting.md`: pair each claim with a `$ ` command and proportionate result summary; Blockers, failures, blocking conditions, or disputes require a reproducible command, exact location, and decisive excerpt; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
+
+- Claim: {verified claim}
+```text
+$ {command}
+{result summary or decisive excerpt}
+```
+
+## Self-critique
+
+> Explicitly declare conclusions, inferences, and assumptions in this review that were **not directly verified**; downstream can rebut them on this basis. Write "None" if there are none.
+
+- {an unverified conclusion or inference; note why it was not verified and the impact if it is overturned}
+
+## Review Disagreement Ledger Write-back
+
+> Record the structured intents to submit: use `task-ledger finding-upsert` for new findings and `finding-review` for prior responses. The core allocates `AN-N` and validates transitions; do not edit task.md table rows.
+> Every finding escalated to `needs-human-decision` must include a self-contained detail block per `.agents/rules/human-decision-context.md`, with evidence pointing to that stable anchor.
+
+## Highlights
+
+- {what went well}
+
+## Alignment with Plan
+
+- [ ] Implementation matches the technical plan
+- [ ] No unintended scope expansion
 ```

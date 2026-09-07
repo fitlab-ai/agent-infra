@@ -14,11 +14,6 @@
 - **审查输入**：
   - `{plan-artifact}`（本轮实际检视的最高轮技术方案产物，如 `plan-r2.md`；无法可靠取得则留空）
 
-## 状态核对
-
-> 记录状态核对命令、审查范围、关键结果和未覆盖部分；每条命令以 `$ ` 开头。
-> 按 `.agents/rules/evidence-reporting.md` 同时记录审查范围、关键结果和未覆盖部分；正常成功不粘贴完整 stdout。
-
 ## 审查摘要
 
 ## 资格审计复核
@@ -148,10 +143,20 @@
 > 如本轮无人工校验项，保留段落标题并写「（无）」。
 
 
-## 审查分歧账本回写
+## 结论与建议
 
-> 本段记录将提交的结构化意图：新 finding 用 `task-ledger finding-upsert`，上一轮响应复核用 `finding-review`；由核心分配 `PL-N` 并校验状态机，禁止手写 task.md 表格。
-> 凡升级为 `needs-human-decision` 的 finding，必须按 `.agents/rules/human-decision-context.md` 在本报告中提供自足详情块，并让 evidence 指向该稳定锚点。
+### 审查决定
+- [ ] 通过
+- [ ] 需要修改
+- [ ] 拒绝
+
+### 下一步
+{recommended next step}
+
+## 状态核对
+
+> 记录状态核对命令、审查范围、关键结果和未覆盖部分；每条命令以 `$ ` 开头。
+> 按 `.agents/rules/evidence-reporting.md` 同时记录审查范围、关键结果和未覆盖部分；正常成功不粘贴完整 stdout。
 
 ## 证据原文
 
@@ -169,6 +174,11 @@ $ {command}
 
 - {未直接验证的结论或推断；说明为何未验证、若被推翻的影响}
 
+## 审查分歧账本回写
+
+> 本段记录将提交的结构化意图：新 finding 用 `task-ledger finding-upsert`，上一轮响应复核用 `finding-review`；由核心分配 `PL-N` 并校验状态机，禁止手写 task.md 表格。
+> 凡升级为 `needs-human-decision` 的 finding，必须按 `.agents/rules/human-decision-context.md` 在本报告中提供自足详情块，并让 evidence 指向该稳定锚点。
+
 ## 亮点
 
 - {what went well}
@@ -177,14 +187,4 @@ $ {command}
 
 - [ ] 实现与技术方案一致
 - [ ] 没有意外的范围扩张
-
-## 结论与建议
-
-### 审查决定
-- [ ] 通过
-- [ ] 需要修改
-- [ ] 拒绝
-
-### 下一步
-{recommended next step}
 ```
