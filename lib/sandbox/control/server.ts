@@ -50,6 +50,12 @@ import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
 import { resolveTaskRef } from '../../task/resolve-ref.ts';
+import {
+  mergeSandboxTaskView,
+  taskViewAfterFinalization,
+  taskViewForManifest,
+  type SandboxTaskView
+} from './task-view.ts';
 import { taskCreateOutputUnavailableResult } from '../../task/create-service.ts';
 
 type ActiveExecution = {

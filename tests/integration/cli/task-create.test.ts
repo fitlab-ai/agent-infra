@@ -76,13 +76,14 @@ async function runControlledTaskCreate(
   fs.mkdirSync(responsesDir);
   fs.mkdirSync(statusDir);
   fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
-    version: 2,
+    version: 3,
     generation,
     broker: { pid: process.pid, startTime: 0, brokerId: 'task-create-test-broker' },
     state: 'healthy',
     reasonCode: null,
     activeRequestId: null,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    taskView: { state: 'not-applicable', taskId: null, observedSource: null, receipt: null, reasonCode: null }
   })}\n`);
   const child = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
     cwd: root,

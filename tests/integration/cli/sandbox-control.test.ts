@@ -2146,7 +2146,17 @@ test('broker recovery returns inspectable task-create output when the payload is
 
     const recovered = spawnSync(process.execPath, [
       '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'recover', requestId
-    ], { cwd: path.resolve('.'), encoding: 'utf8', env: { ...process.env, AGENT_INFRA_CONTROL_DIR: manifest.channelDir } });
+    ], {
+      cwd: path.resolve('.'),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        AGENT_INFRA_CONTROL_TOKEN: manifest.token,
+        AGENT_INFRA_CONTROL_GENERATION: manifest.generation,
+        AGENT_INFRA_CONTROL_DIR: manifest.channelDir,
+        AGENT_INFRA_CONTROL_STATUS_DIR: manifest.publicStatusDir
+      }
+    });
     assert.equal(recovered.status, 1, recovered.stderr || recovered.stdout);
     assert.equal(recovered.stdout, response.stdout);
   } finally {
