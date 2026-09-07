@@ -162,29 +162,63 @@ function sourceSlice(piece: SourceChunk, start: number, end: number): string {
   return piece.content.slice(Math.max(0, start - piece.start), Math.max(0, end - piece.start));
 }
 
-function renderOversizedFenceChunk(piece: SourceChunk, fence: FenceRange, maxBytes: number): string {
-  const code = sourceSlice(piece, Math.max(piece.start, fence.openingEnd), Math.min(piece.end, fence.closingStart));
-  const delimiter = boundedFence(code, fence.character, maxBytes);
-  if (!delimiter) return escapeHtmlText(piece.content);
+function renderOversizedFenceChunk(piece: SourceChunk, fences: readonly FenceRange[], maxBytes: number): string {
+  const insertions = new Map<number, string[]>();
+  const omitted: Array<{ start: number; end: number }> = [];
+  const insert = (position: number, value: string) => {
+    const values = insertions.get(position) || [];
+    values.push(value);
+    insertions.set(position, values);
+  };
 
+  for (const fence of fences) {
+    if (piece.end <= fence.start || piece.start >= fence.end) continue;
+    const oversized = Buffer.byteLength(fence.opening, 'utf8') > maxBytes
+      || Buffer.byteLength(fence.closing, 'utf8') > maxBytes;
+    if (!oversized) {
+      if (piece.start > fence.start && piece.start < fence.end) insert(piece.start, fence.opening);
+      if (piece.end > fence.start && piece.end < fence.end) insert(piece.end, fence.closing);
+      continue;
+    }
+
+    const code = sourceSlice(piece, Math.max(piece.start, fence.openingEnd), Math.min(piece.end, fence.closingStart));
+    const delimiter = boundedFence(code, fence.character, maxBytes);
+    if (!delimiter) return escapeHtmlText(piece.content);
+    insert(Math.max(piece.start, fence.start), delimiter.opening);
+    insert(Math.min(piece.end, fence.end), delimiter.closing);
+    const openingStart = Math.max(piece.start, fence.start);
+    const openingEnd = Math.min(piece.end, fence.openingEnd);
+    if (openingStart < openingEnd) omitted.push({ start: openingStart, end: openingEnd });
+    const closingStart = Math.max(piece.start, fence.closingStart);
+    const closingEnd = Math.min(piece.end, fence.end);
+    if (closingStart < closingEnd) omitted.push({ start: closingStart, end: closingEnd });
+  }
+
+  const boundaries = new Set<number>([piece.start, piece.end]);
+  for (const position of insertions.keys()) boundaries.add(position);
+  for (const range of omitted) {
+    boundaries.add(range.start);
+    boundaries.add(range.end);
+  }
+  const points = [...boundaries].sort((left, right) => left - right);
   let content = '';
-  if (piece.start < fence.start) content += sourceSlice(piece, piece.start, Math.min(piece.end, fence.start));
-  if (piece.end > fence.start && piece.start < fence.end) {
-    content += delimiter.opening;
-    content += code;
-    if (!content.endsWith('\n')) content += '\n';
-    content += delimiter.closing;
-    if (piece.end > fence.end) content += sourceSlice(piece, fence.end, piece.end);
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index]!;
+    for (const value of insertions.get(point) || []) content += value;
+    const next = points[index + 1];
+    if (next === undefined) continue;
+    const skipped = omitted.some((range) => range.start <= point && next <= range.end);
+    if (!skipped) content += sourceSlice(piece, point, next);
   }
   return content;
 }
 
 function independentChunkContent(piece: SourceChunk, fences: readonly FenceRange[], maxBytes: number): string {
-  const oversizedFence = fences.find((fence) =>
+  const oversizedFence = fences.some((fence) =>
     piece.end > fence.start && piece.start < fence.end
     && (Buffer.byteLength(fence.opening, 'utf8') > maxBytes || Buffer.byteLength(fence.closing, 'utf8') > maxBytes)
   );
-  if (oversizedFence) return renderOversizedFenceChunk(piece, oversizedFence, maxBytes);
+  if (oversizedFence) return renderOversizedFenceChunk(piece, fences, maxBytes);
   const openingFence = fences.find((fence) => piece.start > fence.start && piece.start < fence.end);
   const closingFence = fences.find((fence) => piece.end > fence.start && piece.end < fence.end);
   let content = piece.content;
