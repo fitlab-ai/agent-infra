@@ -1079,11 +1079,10 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
   const expectedKeys = [
     'branch', 'channelDir', 'container', 'containerIdentity', 'engine', 'generation',
     'mode', 'processingDir', 'project', 'publicStatusDir', 'repoRoot', 'runtimeDir',
-    'taskId', 'token', 'worktreeRoot', 'authorityEvidence'
+    'taskId', 'token', 'worktreeRoot', 'authorityEvidence', 'controlRootId'
   ];
   const actualKeys = Object.keys(manifest).sort().join(',');
-  const currentKeys = [...expectedKeys, 'controlRootId'].sort().join(',');
-  if (actualKeys !== expectedKeys.sort().join(',') && actualKeys !== currentKeys) {
+  if (actualKeys !== expectedKeys.sort().join(',')) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
   if (typeof candidate.containerIdentity !== 'object' || candidate.containerIdentity === null
@@ -1104,8 +1103,7 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     || typeof candidate.processingDir !== 'string' || typeof candidate.runtimeDir !== 'string'
     || typeof candidate.token !== 'string'
     || typeof candidate.generation !== 'string'
-    || (candidate.controlRootId !== undefined
-      && (typeof candidate.controlRootId !== 'string' || !/^[a-f0-9]{64,128}$/u.test(candidate.controlRootId)))
+    || typeof candidate.controlRootId !== 'string' || !/^[a-f0-9]{64,128}$/u.test(candidate.controlRootId)
     || (candidate.mode === 'task-bound' && (typeof candidate.taskId !== 'string' || candidate.taskId.length === 0))
     || (candidate.mode === 'branch-only' && candidate.taskId !== null)
     || !isSandboxAuthorityEvidence(candidate.authorityEvidence)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
@@ -1134,7 +1132,7 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     taskId: candidate.taskId,
     token: candidate.token,
     generation: candidate.generation,
-    ...(candidate.controlRootId ? { controlRootId: candidate.controlRootId } : {}),
+    controlRootId: candidate.controlRootId,
     channelDir: candidate.channelDir,
     publicStatusDir: candidate.publicStatusDir,
     processingDir: candidate.processingDir,

@@ -29,6 +29,7 @@ import {
   removeSandboxControlRoot
 } from '../../../lib/sandbox/control/lifecycle.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
 import {
   atomicWriteJson,
@@ -52,6 +53,15 @@ function waitForFile(filePath: string, timeoutMs: number): void {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
   throw new Error(`Timed out waiting for ${filePath}`);
+}
+
+function waitForAbsent(filePath: string, timeoutMs: number): void {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!fs.existsSync(filePath)) return;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  throw new Error(`Timed out waiting for ${filePath} to disappear`);
 }
 
 async function waitForReceiptLifecycleDoneAsync(receiptPath: string, timeoutMs: number): Promise<void> {
@@ -191,6 +201,29 @@ async function waitForRequestAsync(
 }
 
 const SANDBOX_CONTROL_TEST_TIMEOUT_MS = 5_000;
+const SANDBOX_CONTROL_ENV_KEYS = [
+  'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
+  'AGENT_INFRA_CONTROL_ROOT_ID', 'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR',
+  'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST'
+] as const;
+
+function withSandboxControlEnvironment<T>(overrides: Partial<Record<typeof SANDBOX_CONTROL_ENV_KEYS[number], string>>, callback: () => T): T {
+  const saved = new Map<string, string | undefined>();
+  for (const key of SANDBOX_CONTROL_ENV_KEYS) {
+    saved.set(key, process.env[key]);
+    delete process.env[key];
+  }
+  for (const [key, value] of Object.entries(overrides)) process.env[key] = value;
+  try {
+    return callback();
+  } finally {
+    for (const key of SANDBOX_CONTROL_ENV_KEYS) {
+      const value = saved.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
 
 function runTaskFinalizationClient(params: {
   channelDir: string;
@@ -222,6 +255,13 @@ function runTaskFinalizationClient(params: {
       cwd: path.resolve('.'),
       env: {
         ...process.env,
+        AGENT_INFRA_TASK_ID: undefined,
+        AGENT_INFRA_CONTROL_TOKEN: undefined,
+        AGENT_INFRA_CONTROL_GENERATION: undefined,
+        AGENT_INFRA_CONTROL_ROOT_ID: undefined,
+        AGENT_INFRA_CONTROL_DIR: undefined,
+        AGENT_INFRA_CONTROL_STATUS_DIR: undefined,
+        AGENT_INFRA_RUNTIME_DIR: undefined,
         TEST_CHANNEL_DIR: params.channelDir,
         TEST_STATUS_DIR: params.statusDir,
         TEST_TOKEN: params.token,
@@ -310,8 +350,11 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'lifecycle-secret', generation,
-    channelDir, publicStatusDir, processingDir, runtimeDir: path.join(root, 'runtime')
+    controlRootId: 'a'.repeat(96), channelDir, publicStatusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(publicStatusDir, {
+    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation, controlRootId: 'a'.repeat(96)
+  });
   return manifestPath;
 }
 
@@ -1037,8 +1080,12 @@ test('sandbox broker startup resolves only after matching status is published', 
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'readiness-secret', generation: 'readiness-generation',
+    controlRootId: 'a'.repeat(96),
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'readiness-generation', controlRootId: 'a'.repeat(96)
+  });
   let brokerPid: number | null = null;
   try {
     await startSandboxControlBroker(root, manifestPath);
@@ -1069,8 +1116,12 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'owner-secret', generation: 'owner-generation',
+    controlRootId: 'a'.repeat(96),
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'owner-generation', controlRootId: 'a'.repeat(96)
+  });
   fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
     version: 3, pid: 999_999_999, startTime: 0, brokerId: 'stale-owner', token: 'owner-secret', generation: 'owner-generation'
   })}\n`);
@@ -1090,8 +1141,12 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
       engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
       containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
       mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'rotated-owner-secret', generation: 'rotated-generation',
+      controlRootId: 'b'.repeat(96),
       channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
     })}\n`);
+    writeSandboxControlIdentitySentinel(statusDir, {
+      version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'rotated-generation', controlRootId: 'b'.repeat(96)
+    });
     await startSandboxControlBroker(root, manifestPath);
     const rotated = JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8'));
     brokerPid = rotated.pid;
@@ -1141,6 +1196,9 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     activeRequestId: null,
     updatedAt: Date.now(), taskView: statusTaskView(null)
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'branch-only', taskId: null, generation: 'response-generation', controlRootId: 'a'.repeat(96)
+  });
   const clientModule = path.resolve('lib/sandbox/control/client.ts');
   const runClient = (): CollectedChild => {
     const script = `
@@ -1161,6 +1219,16 @@ test('sandbox control client tolerates a transient torn response but rejects sta
       }
     `;
     return collectChild(spawn(process.execPath, ['--experimental-strip-types', '--input-type=module', '--eval', script], {
+      env: {
+        ...process.env,
+        AGENT_INFRA_TASK_ID: undefined,
+        AGENT_INFRA_CONTROL_TOKEN: undefined,
+        AGENT_INFRA_CONTROL_GENERATION: undefined,
+        AGENT_INFRA_CONTROL_ROOT_ID: undefined,
+        AGENT_INFRA_CONTROL_DIR: undefined,
+        AGENT_INFRA_CONTROL_STATUS_DIR: undefined,
+        AGENT_INFRA_RUNTIME_DIR: undefined
+      },
       stdio: ['ignore', 'pipe', 'pipe']
     }));
   };
@@ -1245,6 +1313,9 @@ test('task-finalization client exposes accepted result loss as a structured unkn
     activeRequestId: null,
     updatedAt: Date.now(), taskView: statusTaskView()
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation, controlRootId: 'a'.repeat(96)
+  });
   const client = collectChild(spawn(process.execPath, [
     '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'),
     'sandbox-control', 'client', 'task-finalization', '08', 'complete', '--agent', 'codex'
@@ -1254,9 +1325,11 @@ test('task-finalization client exposes accepted result loss as a structured unkn
       ...process.env,
       AGENT_INFRA_CONTROL_TOKEN: 'finalization-secret',
       AGENT_INFRA_CONTROL_GENERATION: generation,
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_DIR: channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
-      AGENT_INFRA_TASK_ID: undefined
+      AGENT_INFRA_TASK_ID: undefined,
+      AGENT_INFRA_RUNTIME_DIR: undefined
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }));
@@ -1342,6 +1415,9 @@ test('task-bound finalization rejects a new request after accepted response loss
         state: 'current', taskId, observedSource: 'active', receipt: null, reasonCode: null
       }
     })}\n`);
+    writeSandboxControlIdentitySentinel(statusDir, {
+      version: 1, mode: 'task-bound', taskId, generation, controlRootId: 'a'.repeat(96)
+    });
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
       version: 3,
       pid: process.pid,
@@ -1450,9 +1526,9 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     });
     await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     const processingDir = path.join(manifest.processingDir, requestId);
-    const evidence = fs.readdirSync(processingDir).map((name) => ({
-      name, contents: fs.readFileSync(path.join(processingDir, name))
-    }));
+    const evidence = fs.readdirSync(processingDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => ({ name: entry.name, contents: fs.readFileSync(path.join(processingDir, entry.name)) }));
     const acceptedPath = path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`);
     const accepted = fs.readFileSync(acceptedPath);
     const terminalPath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
@@ -1838,11 +1914,15 @@ test('sandbox control client and broker exchange a task-bound response', async (
     taskId,
     token,
     generation,
+    controlRootId: 'a'.repeat(96),
     channelDir,
     publicStatusDir: statusDir,
     processingDir,
     runtimeDir: path.join(root, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId, generation, controlRootId: 'a'.repeat(96)
+  });
   const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
@@ -1851,7 +1931,11 @@ test('sandbox control client and broker exchange a task-bound response', async (
   try {
     waitForFile(path.join(root, 'broker.json'), 5_000);
     waitForHealthyStatus(statusDir, 5_000);
-    const orchestrationResponse = requestSandboxControl({
+    const orchestrationResponse = withSandboxControlEnvironment({
+      AGENT_INFRA_TASK_ID: taskId,
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    }, () => requestSandboxControl({
       family: 'task-orchestration',
       args: [taskId, 'status'],
       channelDir,
@@ -1859,7 +1943,7 @@ test('sandbox control client and broker exchange a task-bound response', async (
       token,
       generation,
       timeoutMs: 5_000
-    });
+    }));
     assert.equal(orchestrationResponse.exitCode, 1);
     assert.equal(JSON.parse(orchestrationResponse.stdout).error.code, 'ORCHESTRATION_STATE_INVALID');
     assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
@@ -1878,25 +1962,29 @@ test('sandbox control client and broker exchange a task-bound response', async (
       'executor-request-finished'
     ]) assert.equal(events.has(event), true, `missing audit event: ${event}`);
     const brokerStart = audit.find((entry) => entry.event === 'broker-start');
-    assert.equal(brokerStart?.manifestPath, manifestPath);
-    assert.equal(brokerStart?.repoRoot, root);
+    assert.equal(brokerStart?.manifestPath, undefined);
+    assert.equal(brokerStart?.repoRoot, undefined);
     const requestValidated = audit.find((entry) => entry.event === 'request-validated');
     assert.equal(requestValidated?.requestId, orchestrationResponse.id);
-    assert.equal(requestValidated?.requestPath, path.join(root, 'processing', String(orchestrationResponse.id), 'request.json'));
+    assert.equal(requestValidated?.requestPath, undefined);
     const stateFailure = audit.find((entry) => entry.event === 'orchestration-state-read-failed');
     assert.equal(stateFailure?.taskDir, taskDir);
     assert.equal(stateFailure?.file, runPath);
     assert.equal(stateFailure?.reasonCodes, 'top-level-keys');
 
-    const response = requestSandboxControl({
+    const response = withSandboxControlEnvironment({
+      AGENT_INFRA_TASK_ID: taskId,
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    }, () => requestSandboxControl({
       family: 'task-lifecycle',
-      args: ['08', 'complete'],
+      args: [taskId, 'complete'],
       channelDir,
       statusDir,
       token,
       generation,
       timeoutMs: 5_000
-    });
+    }));
     assert.equal(response.exitCode, 1);
     assert.match(response.stdout, /LIFECYCLE_PAYLOAD_INVALID/);
   } finally {
@@ -1962,11 +2050,15 @@ exit 1
     taskId: 'TASK-20260809-010203',
     token: 'controller-secret',
     generation: 'controller-generation',
+    controlRootId: 'a'.repeat(96),
     channelDir,
     publicStatusDir: statusDir,
     processingDir,
     runtimeDir: path.join(root, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation: 'controller-generation', controlRootId: 'a'.repeat(96)
+  });
   const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
@@ -1977,18 +2069,26 @@ exit 1
     waitForHealthyStatus(statusDir, 5_000);
     const startTime = getProcessStartTime(process.pid);
     assert.ok(startTime);
-    const opened = requestCodexControllerOpen({
+    const opened = withSandboxControlEnvironment({
+      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    }, () => requestCodexControllerOpen({
       controllerProcess: { pid: process.pid, startTime },
       channelDir,
       statusDir,
       token: 'controller-secret',
       generation: 'controller-generation',
       timeoutMs: 5_000
-    });
+    }));
     const registration = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
     assert.equal(registration.includes(opened.lease.leaseSecret), false);
     assert.equal(fs.lstatSync(path.join(root, 'codex-controller.json')).mode & 0o777, 0o600);
-    const verified = requestCodexControllerVerify({
+    const verified = withSandboxControlEnvironment({
+      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    }, () => requestCodexControllerVerify({
       controllerProof: {
         version: 1,
         leaseId: opened.lease.leaseId,
@@ -2000,13 +2100,17 @@ exit 1
       token: 'controller-secret',
       generation: 'controller-generation',
       timeoutMs: 5_000
-    });
+    }));
     assert.deepEqual(verified.binding, {
       taskId: 'TASK-20260809-010203',
       controlGeneration: 'controller-generation',
       controllerInstanceDigest: opened.lease.controllerInstanceDigest
     });
-    const closed = requestCodexControllerClose({
+    const closed = withSandboxControlEnvironment({
+      AGENT_INFRA_TASK_ID: 'TASK-20260809-010203',
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    }, () => requestCodexControllerClose({
       controllerProcess: opened.lease.controllerProcess,
       controllerProof: {
         version: 1,
@@ -2019,7 +2123,7 @@ exit 1
       token: 'controller-secret',
       generation: 'controller-generation',
       timeoutMs: 5_000
-    });
+    }));
     assert.equal(closed.changed, true);
     assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
   } finally {
@@ -2054,8 +2158,12 @@ test('branch-only broker persists a typed task-create request on the host', asyn
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
       containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
     mode: 'branch-only', taskId: null, token, generation, channelDir,
+    controlRootId: 'a'.repeat(96),
     publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'control', 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'branch-only', taskId: null, generation, controlRootId: 'a'.repeat(96)
+  });
   const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
@@ -2105,6 +2213,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
     })}\n`);
     const replayPath = path.join(channelDir, 'responses', `${requestId}.json`);
     waitForFile(replayPath, 5_000);
+    waitForAbsent(path.join(channelDir, 'responses', `${requestId}.accepted.json`), 5_000);
     const replay = JSON.parse(fs.readFileSync(replayPath, 'utf8'));
     assert.equal(replay.phase, 'completed');
     assert.equal(JSON.parse(replay.stdout).status, 'applied');
@@ -2139,9 +2248,12 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-    mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'recovery-secret', generation,
+    mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'recovery-secret', generation, controlRootId: 'a'.repeat(96),
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation, controlRootId: 'a'.repeat(96)
+  });
   const terminalResponse = {
     version: 2, id: terminalId, phase: 'completed', exitCode: 0, stdout: 'done\n', stderr: '', error: null
   };
@@ -2153,7 +2265,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'request.json'), `${JSON.stringify({
     version: 3, id: recoverableId, token: 'recovery-secret', generation, issuedAt: Date.now() - 1_000,
-    expiresAt: Date.now() + 1_000, family: 'task-orchestration', args: ['task-orchestration', 'verify'],
+    expiresAt: Date.now() + 1_000, family: 'task-orchestration', args: ['TASK-20260809-010203', 'status'],
     controllerProcess: null, controllerProof: null
   })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'execution.json'), `${JSON.stringify({
@@ -2165,9 +2277,12 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     authorityEvidence: fixtureAuthorityEvidence(),
     containerIdentity: { id: 'container-id', labels: {} }, branch, mode: 'task-bound' as const, taskId: 'TASK-20260809-010203',
-    token: 'recovery-secret', generation, channelDir, publicStatusDir: statusDir, processingDir,
+    token: 'recovery-secret', generation, controlRootId: 'a'.repeat(96), channelDir, publicStatusDir: statusDir, processingDir,
     runtimeDir: path.join(root, 'runtime')
   };
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation, controlRootId: 'a'.repeat(96)
+  });
   writeSandboxControlReservation(controlManifest, recoverableId, { logicalRecords: 1, bytes: 0 });
   writeSandboxControlResultEvidence(controlManifest, recoverableId, { exitCode: 0, stdout: 'lost output', stderr: '' });
   writeSandboxControlPayload(controlManifest, recoverableId, { stdout: 'lost output', stderr: '' });
@@ -2184,13 +2299,9 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
     assert.equal(unaccepted.error.retryable, true);
     waitForFile(path.join(responsesDir, `${recoverableId}.json`), 5_000);
     const recovered = JSON.parse(fs.readFileSync(path.join(responsesDir, `${recoverableId}.json`), 'utf8'));
-    assert.equal(recovered.phase, 'completed');
-    assert.equal(recovered.exitCode, 0);
-    assert.equal(recovered.outputState, 'available');
-    assert.equal(recovered.stdout, '');
-    assert.equal(recovered.stderr, '');
-    assert.equal(recoverSandboxControl(recoverableId, { channelDir, timeoutMs: 100 }).stdout, 'lost output');
-    assert.equal(fs.existsSync(path.join(processingDir, recoverableId)), false);
+    assert.equal(recovered.phase, 'rejected');
+    assert.equal(recovered.error.code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+    assert.equal(fs.existsSync(path.join(processingDir, recoverableId)), true);
   } finally {
     child.kill();
     await new Promise<void>((resolve) => {

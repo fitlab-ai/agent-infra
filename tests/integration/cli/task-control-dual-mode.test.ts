@@ -15,6 +15,7 @@ import {
 import { classifySandboxControlEnvironment } from '../../../lib/sandbox/control/client.ts';
 import { issueHumanOverride } from '../../../lib/task/human-override.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 
 function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -101,6 +102,7 @@ test('top-level usage and version aliases remain available in task-bound environ
     AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
+    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status',
     AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
@@ -117,6 +119,7 @@ test('complete sandbox markers use the client entry without executing local auth
     AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
+    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/missing/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status',
     AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
@@ -239,11 +242,15 @@ function sandboxFixture(): SandboxFixture {
     taskId: TASK_ID,
     token,
     generation,
+    controlRootId: 'a'.repeat(96),
     channelDir,
     publicStatusDir: statusDir,
     processingDir,
     runtimeDir: path.join(controlRoot, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1, mode: 'task-bound', taskId: TASK_ID, generation, controlRootId: 'a'.repeat(96)
+  });
   return { ...fixture, controlRoot, manifestPath, channelDir, statusDir, token, generation };
 }
 
@@ -263,6 +270,7 @@ function runSandboxClient(
       AGENT_INFRA_CONTROL_STATUS_DIR: fixture.statusDir,
       AGENT_INFRA_CONTROL_TOKEN: fixture.token,
       AGENT_INFRA_CONTROL_GENERATION: fixture.generation,
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_RUNTIME_DIR: path.join(fixture.controlRoot, 'runtime')
     },
     encoding: 'utf8'

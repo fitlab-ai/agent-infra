@@ -294,9 +294,11 @@ const TASK_CONTROL_MARKER_KEYS = [
 const TASK_CONTROL_CONFIG_KEYS = [
   'AGENT_INFRA_CONTROL_TOKEN',
   'AGENT_INFRA_CONTROL_GENERATION',
+  'AGENT_INFRA_CONTROL_ROOT_ID',
   'AGENT_INFRA_CONTROL_DIR',
   'AGENT_INFRA_CONTROL_STATUS_DIR'
 ] as const;
+export const SANDBOX_CONTROL_STATUS_MOUNT = '/run/agent-infra/control-status';
 
 type TaskMarkerState = 'none' | 'branch-only' | 'task-bound' | 'incomplete';
 
@@ -312,9 +314,18 @@ function taskMarkerState(env: NodeJS.ProcessEnv): TaskMarkerState {
   return 'incomplete';
 }
 
-export function resolveSandboxControlTransport(env: NodeJS.ProcessEnv = process.env): SandboxControlTransportDecision {
-  const statusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
-  const statusMounted = Boolean(statusDir && path.isAbsolute(statusDir) && fs.existsSync(statusDir));
+export function resolveSandboxControlTransport(
+  env: NodeJS.ProcessEnv = process.env,
+  options: Readonly<{ statusMountPath?: string }> = {}
+): SandboxControlTransportDecision {
+  const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
+  const fixedStatusDir = options.statusMountPath
+    ?? env.AGENT_INFRA_TEST_STATUS_MOUNT
+    ?? SANDBOX_CONTROL_STATUS_MOUNT;
+  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && fs.existsSync(configuredStatusDir)
+    ? configuredStatusDir
+    : path.isAbsolute(fixedStatusDir) && fs.existsSync(fixedStatusDir) ? fixedStatusDir : null;
+  const statusMounted = statusDir !== null;
   const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
     || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
     || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
@@ -325,7 +336,7 @@ export function resolveSandboxControlTransport(env: NodeJS.ProcessEnv = process.
   if (statusMounted) {
     let sentinel;
     try {
-      sentinel = readSandboxControlIdentitySentinel(statusDir!);
+      sentinel = readSandboxControlIdentitySentinel(statusDir);
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       return { kind: 'fail-closed', reasonCode: message.endsWith('MISSING')

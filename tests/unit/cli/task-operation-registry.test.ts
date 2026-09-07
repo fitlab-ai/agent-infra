@@ -11,6 +11,7 @@ import {
   PUBLIC_OPERATION_DESCRIPTORS,
   guardTaskOperation,
   resolveSandboxControlTransport,
+  SANDBOX_CONTROL_STATUS_MOUNT,
   resolveDelegatedTaskOperation,
   resolveTaskOperation,
   type TaskOperationDescriptor
@@ -155,6 +156,7 @@ test('task-view guard refuses stale progress before a route can import its modul
     AGENT_INFRA_TASK_ID: staleView.taskId!,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
     AGENT_INFRA_RUNTIME_DIR: '/runtime'
@@ -192,6 +194,7 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
     env: {
       AGENT_INFRA_CONTROL_TOKEN: 'token',
       AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_DIR: '/control',
       AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
       AGENT_INFRA_RUNTIME_DIR: undefined
@@ -206,6 +209,7 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
         AGENT_INFRA_TASK_ID: staleView.taskId!,
         AGENT_INFRA_CONTROL_TOKEN: 'token',
         AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+        AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
         AGENT_INFRA_CONTROL_DIR: '/control',
         AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
         AGENT_INFRA_RUNTIME_DIR: '/runtime'
@@ -223,6 +227,7 @@ test('task-bound git input identity is checked before the commit module can load
     AGENT_INFRA_TASK_ID: staleView.taskId!,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
     AGENT_INFRA_RUNTIME_DIR: '/runtime'
@@ -279,6 +284,20 @@ test('mounted sandbox control requires a matching identity sentinel', () => {
     assert.deepEqual(resolveSandboxControlTransport(baseEnv), { kind: 'broker-client', reasonCode: null });
     assert.deepEqual(resolveSandboxControlTransport({ ...baseEnv, AGENT_INFRA_CONTROL_ROOT_ID: 'b'.repeat(96) }), {
       kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH'
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('fixed status mount fails closed after all control environment variables are cleared', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-fixed-mount-'));
+  const statusDir = path.join(root, 'status');
+  fs.mkdirSync(statusDir);
+  try {
+    assert.equal(SANDBOX_CONTROL_STATUS_MOUNT, '/run/agent-infra/control-status');
+    assert.deepEqual(resolveSandboxControlTransport({}, { statusMountPath: statusDir }), {
+      kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_MISSING'
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

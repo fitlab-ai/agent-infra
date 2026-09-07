@@ -207,10 +207,8 @@ export async function prepareSandboxControlExecution(params: {
       if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
       const gateOwner = assertSandboxControlBrokerOwner(params.manifest);
       if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
-      if (!params.manifest.controlRootId) {
-        atomicWriteJson(executionPath(params.manifest, params.request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
-        if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
-      }
+      atomicWriteJson(executionPath(params.manifest, params.request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
+      if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
       child.send({ version: 1, nonce, owner: gateOwner });
     },
     completion,
@@ -542,18 +540,16 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   const manifestPath = process.env.AGENT_INFRA_EXECUTOR_MANIFEST;
   if (!manifestPath) throw new Error('SANDBOX_CONTROL_EXECUTOR_MANIFEST_MISSING');
   const manifest = readSandboxControlManifest(manifestPath);
-  if (manifest.controlRootId) {
-    const identity = validateSandboxControlIdentity({
-      publicStatusDir: manifest.publicStatusDir,
-      root: path.dirname(path.resolve(manifestPath)),
-      mode: manifest.mode,
-      taskId: manifest.taskId,
-      generation: manifest.generation,
-      controlRootId: manifest.controlRootId
-    });
-    if (identity.state !== 'valid') {
-      throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
-    }
+  const identity = validateSandboxControlIdentity({
+    publicStatusDir: manifest.publicStatusDir,
+    root: path.dirname(path.resolve(manifestPath)),
+    mode: manifest.mode,
+    taskId: manifest.taskId,
+    generation: manifest.generation,
+    controlRootId: manifest.controlRootId
+  });
+  if (identity.state !== 'valid') {
+    throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
   }
   const root = fs.realpathSync.native(process.cwd());
   const expectedRoot = safeRealpath(manifest.repoRoot);
@@ -600,10 +596,8 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
       phase: 'started-committed',
       outcome: 'in-progress'
     });
-    if (manifest.controlRootId) {
-      appendCriticalAudit(manifest, context, { transition: 'started-committed' });
-      writeSandboxControlTransition(manifest, { requestId: request.id, phase: 'started-committed' });
-    }
+    appendCriticalAudit(manifest, context, { transition: 'started-committed' });
+    writeSandboxControlTransition(manifest, { requestId: request.id, phase: 'started-committed' });
     const execution = readJsonExecution(executionPath(manifest, request.id));
     atomicWriteJson(executionPath(manifest, request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
     result = await executeRequest(manifest, manifestPath, request);

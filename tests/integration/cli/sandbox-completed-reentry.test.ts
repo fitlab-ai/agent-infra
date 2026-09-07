@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { completedReentryView, prepareCompletedReentry, publishCompletedReentry } from '../../../lib/sandbox/control/completed-reentry.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { mergeSandboxTaskView, taskViewAfterFinalization } from '../../../lib/sandbox/control/task-view.ts';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
 
@@ -31,9 +32,12 @@ function fixture(t: TestContext) {
   fs.writeFileSync(path.join(control, 'public', 'status.json'), JSON.stringify({ version: 3, generation,
     broker: { pid: process.pid, startTime: 1, brokerId: 'fixture-broker' }, state: 'healthy', reasonCode: null,
     activeRequestId: null, updatedAt: Date.now(), taskView: stale }));
+  writeSandboxControlIdentitySentinel(path.join(control, 'public'), {
+    version: 1, mode: 'task-bound', taskId, generation, controlRootId: 'a'.repeat(96)
+  });
   const manifest = { repoRoot: root, worktreeRoot: root, project: 'fixture', container: 'fixture-container',
     containerIdentity: { id: 'fixture-container-id', labels: {} }, branch: 'scratch', mode: 'task-bound', taskId,
-    generation, token: 'fixture-token', engine: 'native', channelDir: path.join(control, 'channel'),
+    generation, controlRootId: 'a'.repeat(96), token: 'fixture-token', engine: 'native', channelDir: path.join(control, 'channel'),
     publicStatusDir: path.join(control, 'public'), processingDir: path.join(control, 'processing'), runtimeDir: path.join(control, 'runtime')
   } as SandboxControlManifest;
   const inspect = async () => ({ state: 'found' as const, id: manifest.containerIdentity.id, labels: {}, running: true });

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import spawn from 'cross-spawn';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from './process-tree.js';
 import { acquireTestRunLock, releaseTestRunLock, testRunLockEnv } from './test-run-lock.js';
@@ -14,6 +16,9 @@ const env = Object.fromEntries(
       && normalized !== 'AGENT_INFRA_RUNTIME_DIR';
   })
 );
+// Keep test-created host-direct children independent of a real host mount.
+// Production transport discovery still uses the fixed mount by default.
+env.AGENT_INFRA_TEST_STATUS_MOUNT = path.join(os.tmpdir(), 'agent-infra-test-control-status-unmounted');
 const args = process.argv.slice(2);
 const skipBuild = args[0] === '--skip-build';
 if (skipBuild) args.shift();

@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
+import { sandboxControlSafeEnv } from '../../../lib/sandbox/control/server.ts';
 import {
-  sandboxControlSafeEnv,
   serveSandboxControl,
   writeSandboxControlResponse
 } from '../../../lib/sandbox/control/server.ts';
@@ -53,6 +53,7 @@ import {
   nodeEntryArgs
 } from '../../../lib/sandbox/control/executor.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../lib/sandbox/control/client.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import {
   closeCodexControllerRegistration,
   CodexControllerRegistrationError,
@@ -85,6 +86,7 @@ const manifest: SandboxControlManifest = {
   taskId: 'TASK-20260809-010203',
   token: 'secret',
   generation: 'generation-1',
+  controlRootId: 'a'.repeat(96),
   channelDir: '/channel',
   publicStatusDir: '/public',
   processingDir: '/processing',
@@ -910,6 +912,10 @@ test('control broker strips mixed-case sandbox authority from child environments
     agent_infra_control_token: 'live-token',
     Agent_Infra_Control_Dir: 'live-channel',
     aGeNt_InFrA_cOnTrOl_FuTuRe: 'future-authority',
+    AGENT_INFRA_TASK_ID: 'task-id',
+    AGENT_INFRA_RUNTIME_DIR: '/runtime',
+    AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest.json',
+    AGENT_INFRA_CONTROL_CONTROLLER_BINDING: 'binding',
     AGENT_INFRA_TEST_SENTINEL: 'preserved'
   }), {
     AGENT_INFRA_TEST_SENTINEL: 'preserved'
@@ -967,10 +973,14 @@ test('control broker ownership is acquired exclusively', async () => {
   fs.mkdirSync(channelDir, { recursive: true });
   fs.mkdirSync(publicStatusDir);
   fs.mkdirSync(processingDir);
+  const controlRootId = manifest.controlRootId;
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     ...manifest, repoRoot: root, worktreeRoot: root, branch, channelDir, publicStatusDir, processingDir,
     runtimeDir: path.join(root, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(publicStatusDir, {
+    version: 1, mode: manifest.mode, taskId: manifest.taskId, generation: manifest.generation, controlRootId
+  });
   fs.writeFileSync(path.join(root, 'broker.json'), '{}\n');
   const controller = new AbortController();
   controller.abort();

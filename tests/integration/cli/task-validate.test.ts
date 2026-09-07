@@ -6,9 +6,10 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 import { gitSafeEnv, initIsolatedGitRepo } from '../../helpers/git.ts';
-import { envWithPrependedPath, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
+import { envWithPrependedPath, sandboxControlSafeEnv, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
 import { sandboxControlPaths } from '../../../lib/sandbox/workspace-view.ts';
 import { SANDBOX_CONTROL_STATUS_STALE_MS } from '../../../lib/sandbox/control/protocol.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 
 const SHORT_ID_SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 const internalCli = path.resolve('bin/internal-cli.ts');
@@ -148,7 +149,9 @@ function inplaceFixture({ includeContainer = true }: { includeContainer?: boolea
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: ${branch}\nstatus: active\n---\n# Task\n`);
   fs.writeFileSync(path.join(repoDir, 'tracked.txt'), 'committed\n');
-  const allocation = spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', taskId], { cwd: repoDir, encoding: 'utf8', env: gitSafeEnv() });
+  const allocation = spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', taskId], {
+    cwd: repoDir, encoding: 'utf8', env: sandboxControlSafeEnv(gitSafeEnv())
+  });
   assert.equal(allocation.status, 0, allocation.stderr);
   const shortId = allocation.stdout.trim();
   spawnSync('git', ['add', '.'], { cwd: repoDir, env: gitSafeEnv() });
@@ -173,10 +176,13 @@ function inplaceFixture({ includeContainer = true }: { includeContainer?: boolea
       endpointFingerprint: 'b'.repeat(64), daemonIdentity: { kind: 'docker-server-id', fingerprint: 'c'.repeat(64) },
       apiVersion: { major: 1, minor: 50 }, authorityFingerprint: 'd'.repeat(64)
     },
-    branch, mode: 'task-bound', taskId, token: 'fixture-token', generation,
+    branch, mode: 'task-bound', taskId, token: 'fixture-token', generation, controlRootId: 'a'.repeat(96),
     channelDir: control.channelDir, publicStatusDir: control.statusDir,
     processingDir: control.processingDir, runtimeDir: control.runtimeDir
   })}\n`);
+  writeSandboxControlIdentitySentinel(control.statusDir, {
+    version: 1, mode: 'task-bound', taskId, generation, controlRootId: 'a'.repeat(96)
+  });
   const statusPath = path.join(control.statusDir, 'status.json');
   const writeStatus = (overrides: Record<string, unknown>) => {
     fs.writeFileSync(statusPath, `${JSON.stringify({
@@ -210,7 +216,9 @@ function fixture() {
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'fixture', agentClients: CANONICAL_AGENT_CLIENTS }));
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${id}\nbranch: ${branch}\nstatus: active\n---\n# Task\n`);
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'committed\n');
-  const allocation = spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', id], { cwd: root, encoding: 'utf8', env: gitSafeEnv() });
+  const allocation = spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', id], {
+    cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv(gitSafeEnv())
+  });
   assert.equal(allocation.status, 0, allocation.stderr);
   spawnSync('git', ['add', '.'], { cwd: root, env: gitSafeEnv() });
   const commit = spawnSync('git', ['commit', '-qm', 'fixture'], { cwd: root, env: gitSafeEnv() });

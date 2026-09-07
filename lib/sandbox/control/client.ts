@@ -125,7 +125,7 @@ function preflight(
 ): void {
   const identityPath = path.join(statusDir, 'identity.json');
   if (fs.existsSync(statusDir)) {
-    const identityRequired = Boolean(env.AGENT_INFRA_CONTROL_ROOT_ID);
+    const identityRequired = true;
     let identity;
     try {
       identity = readSandboxControlIdentitySentinel(statusDir);
@@ -139,7 +139,7 @@ function preflight(
     if (identity.generation !== generation) {
       clientError('SANDBOX_CONTROL_IDENTITY_GENERATION_MISMATCH', 'sandbox control identity generation does not match the request', false);
     }
-    if (identityRequired && identity.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
+    if (env.AGENT_INFRA_CONTROL_ROOT_ID && identity.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
       clientError('SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH', 'sandbox control identity root does not match the client configuration', false);
     }
     if (identityRequired && !fs.existsSync(identityPath)) {
@@ -238,7 +238,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   const taskViewEffect = taskViewEffectForRequest(request);
   preflight(statusDir, request.generation, taskViewEffect);
   const identityPath = path.join(statusDir, 'identity.json');
-  if (fs.existsSync(identityPath) || process.env.AGENT_INFRA_CONTROL_ROOT_ID) {
+  if (fs.existsSync(statusDir)) {
     const identity = readSandboxControlIdentitySentinel(statusDir);
     const requestTaskId = 'args' in request ? request.args[0] ?? null : null;
     if (identity.mode === 'task-bound'

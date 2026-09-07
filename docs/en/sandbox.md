@@ -288,6 +288,9 @@ never contains the control token. The host manifest and each broker/client
 compare these values before routing or executing a task operation. A missing,
 malformed, or conflicting sentinel fails closed. An old task-bound container
 must be stopped and recreated so it receives a current control root.
+Task-control dispatch also checks the fixed read-only status mount at
+`/run/agent-infra/control-status` when environment markers are absent; a
+discovered mount without a valid matching sentinel fails closed.
 
 The broker writes structured audit records with separate critical and
 diagnostic paths. Critical phases are durable and fsynced; failure before a

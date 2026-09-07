@@ -225,18 +225,16 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
   const internalCli = path.resolve(directory, '..', '..', 'bin', `internal-cli${extension}`);
   const manifest = readSandboxControlManifest(manifestPath);
   const root = path.dirname(manifestPath);
-  if (manifest.controlRootId) {
-    const identity = validateSandboxControlIdentity({
-      publicStatusDir: manifest.publicStatusDir,
-      root,
-      mode: manifest.mode,
-      taskId: manifest.taskId,
-      generation: manifest.generation,
-      controlRootId: manifest.controlRootId
-    });
-    if (identity.state !== 'valid') {
-      throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
-    }
+  const identity = validateSandboxControlIdentity({
+    publicStatusDir: manifest.publicStatusDir,
+    root,
+    mode: manifest.mode,
+    taskId: manifest.taskId,
+    generation: manifest.generation,
+    controlRootId: manifest.controlRootId
+  });
+  if (identity.state !== 'valid') {
+    throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
   }
   if (isSandboxControlRootQuiescing(root)) throw new Error('SANDBOX_CONTROL_QUIESCING');
   const brokerPath = path.join(root, 'broker.json');
@@ -352,18 +350,16 @@ async function ensureSandboxControlBroker(params: {
   });
   if (!fs.existsSync(control.manifestPath)) return;
   const validatedManifest = readSandboxControlManifest(control.manifestPath);
-  if (validatedManifest.controlRootId) {
-    const identity = validateSandboxControlIdentity({
-      publicStatusDir: validatedManifest.publicStatusDir,
-      root: control.root,
-      mode: validatedManifest.mode,
-      taskId: validatedManifest.taskId,
-      generation: validatedManifest.generation,
-      controlRootId: validatedManifest.controlRootId
-    });
-    if (identity.state !== 'valid') {
-      throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
-    }
+  const identity = validateSandboxControlIdentity({
+    publicStatusDir: validatedManifest.publicStatusDir,
+    root: control.root,
+    mode: validatedManifest.mode,
+    taskId: validatedManifest.taskId,
+    generation: validatedManifest.generation,
+    controlRootId: validatedManifest.controlRootId
+  });
+  if (identity.state !== 'valid') {
+    throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
   }
   const containerObservation = await inspectSandboxControlContainer(validatedManifest);
   if (containerObservation.state === 'unknown') {

@@ -1,8 +1,8 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SandboxControlManifest, SandboxControlFamily } from './protocol.ts';
-import { identityDigest as digestIdentity, readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
+import { identityDigest as digestIdentity } from './identity-sentinel.ts';
 import { acquireSandboxResourceLock } from './native-file-lock.ts';
 
 export const SANDBOX_CONTROL_AUDIT_PHASES = Object.freeze([
@@ -56,24 +56,13 @@ function fsyncDirectory(directory: string): void {
 }
 
 function manifestIdentityDigest(manifest: SandboxControlManifest): string {
-  if (manifest.controlRootId) {
-    try {
-      return digestIdentity({
-        version: 1,
-        mode: manifest.mode,
-        taskId: manifest.taskId,
-        generation: manifest.generation,
-        controlRootId: manifest.controlRootId
-      });
-    } catch {
-      // The broker performs the authoritative identity validation before accepting requests.
-    }
-  }
-  try {
-    return digestIdentity(readSandboxControlIdentitySentinel(manifest.publicStatusDir));
-  } catch {
-    return createHash('sha256').update(`${manifest.mode}\0${manifest.taskId ?? ''}\0${manifest.generation}`).digest('hex');
-  }
+  return digestIdentity({
+    version: 1,
+    mode: manifest.mode,
+    taskId: manifest.taskId,
+    generation: manifest.generation,
+    controlRootId: manifest.controlRootId
+  });
 }
 
 export function createSandboxControlAuditContext(

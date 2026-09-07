@@ -235,6 +235,8 @@ control-root/
 和不透明的 `controlRootId`，绝不包含 control token。宿主 manifest 以及每个 broker/client
 在路由或执行 task operation 前都会比较这些值。哨兵缺失、格式错误或发生冲突时会 fail
 closed。旧的 task-bound 容器必须停止并重建，才能获得新的 control root。
+task-control 分发在环境 marker 缺失时还会独立检查固定的只读状态挂载
+`/run/agent-infra/control-status`；发现挂载但缺少有效且匹配的哨兵时会 fail closed。
 
 broker 使用分开的 critical 与 diagnostic 路径写结构化审计记录。critical phase 会持久化并
 fsync；mutation 前失败会阻断请求，accepted start 后失败则保留不确定结果，绝不会授权重放。

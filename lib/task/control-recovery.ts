@@ -71,21 +71,33 @@ function bindingMatchesResult(binding: ControlRecoveryBinding, result: Readonly<
     && (result.intentDigest === undefined || result.intentDigest === binding.intentDigest);
 }
 
-function domainEvidenceMatches(operation: ControlRecoveryOperation, domain: Readonly<Record<string, unknown>> | null | undefined): boolean {
+function domainEvidenceMatches(
+  operation: ControlRecoveryOperation,
+  result: Readonly<Record<string, unknown>>,
+  domain: Readonly<Record<string, unknown>> | null | undefined
+): boolean {
   if (!domain) return false;
+  if (domain.consistent !== true) return false;
   if (operation.class === 'route.clean-completion') {
     const completion = domain.completionEvidence as Record<string, unknown> | undefined;
-    return domain.status === 'completed'
+    const snapshot = domain.snapshot as Record<string, unknown> | undefined;
+    const lastReviewedCommit = domain.lastReviewedCommit;
+    return result.status === 'completed'
+      && domain.status === 'completed'
       && domain.pendingDelegation === null
       && completion?.kind === 'reviewed-head-clean'
-      && typeof completion.observedAt === 'number'
+      && typeof completion.observedAt === 'string'
       && typeof completion.head === 'string'
       && typeof completion.headTree === 'string'
       && typeof completion.worktreeTree === 'string'
-      && typeof completion.lastReviewedCommit === 'string';
+      && typeof completion.lastReviewedCommit === 'string'
+      && snapshot?.head === completion.head
+      && snapshot.headTree === completion.headTree
+      && snapshot.worktreeTree === completion.worktreeTree
+      && lastReviewedCommit === completion.lastReviewedCommit;
   }
-  if (operation.class === 'read-only') return domain.snapshotValid === true;
-  return domain.consistent === true;
+  if (operation.class === 'read-only') return result.changed === false && domain.snapshotValid === true;
+  return true;
 }
 
 export function classifySandboxControlRecovery(input: ControlRecoveryInput): ControlRecoveryDecision {
@@ -97,7 +109,7 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
   if (!input.startedCommitted) {
     return { outcome: 'not-executed', responseReconstructable: false, reasonCode: 'RECOVERY_NOT_STARTED' };
   }
-  if (!result) return { outcome: 'in-progress', responseReconstructable: false, reasonCode: 'RECOVERY_TERMINAL_RESULT_MISSING' };
+  if (!result) return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_TERMINAL_RESULT_MISSING' };
   if (!bindingMatchesResult(input.binding, result)) {
     return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_RESULT_BINDING_MISMATCH' };
   }
@@ -109,11 +121,10 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
     }
     return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_FAILURE_EVIDENCE_INCOMPLETE' };
   }
-  if (input.operation.class === 'route.clean-completion' && result.changed !== true
-    && input.domain?.status === 'completed' && domainEvidenceMatches(input.operation, input.domain)) {
-    return { outcome: 'success', responseReconstructable: true, reasonCode: 'RECOVERY_ROUTE_COMPLETION_NOOP' };
+  if (result.changed === null) {
+    return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_RESULT_CHANGE_FLAG_MISSING' };
   }
-  if (!domainEvidenceMatches(input.operation, input.domain)) {
+  if (!domainEvidenceMatches(input.operation, result, input.domain)) {
     if (input.journal?.exists && (input.journal.completedSteps?.length ?? 0) > 0) {
       return { outcome: 'in-progress', responseReconstructable: false, reasonCode: 'RECOVERY_DOMAIN_EVIDENCE_INCOMPLETE' };
     }
@@ -122,7 +133,13 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
   if (input.operation.family === 'task-lifecycle' && input.journal?.exists) {
     return { outcome: input.journal.failure ? 'failure' : 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_LIFECYCLE_JOURNAL_PRESENT' };
   }
-  return { outcome: 'success', responseReconstructable: true, reasonCode: 'RECOVERY_TERMINAL_AND_DOMAIN_MATCH' };
+  return {
+    outcome: 'success',
+    responseReconstructable: true,
+    reasonCode: input.operation.class === 'route.clean-completion' && result.changed === false
+      ? 'RECOVERY_ROUTE_COMPLETION_NOOP'
+      : 'RECOVERY_TERMINAL_AND_DOMAIN_MATCH'
+  };
 }
 
 export function operationRecoveryBinding(

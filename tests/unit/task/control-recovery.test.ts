@@ -15,12 +15,12 @@ test('recovery registry covers lifecycle, finalization, route split, and orchest
   assert.equal(digestControlRecoveryIntent('task-lifecycle', 'complete').length, 64);
 });
 
-test('recovery keeps started requests without a terminal result in progress and never reconstructs success', () => {
+test('recovery keeps started requests without a terminal result unknown and never reconstructs success', () => {
   const binding = operationRecoveryBinding('a'.repeat(32), 'generation-1', 'TASK-20260904-002407', 'task-lifecycle', 'complete');
   const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'complete')!;
   const decision = classifySandboxControlRecovery({ operation, binding, startedCommitted: true });
   assert.deepEqual(decision, {
-    outcome: 'in-progress', responseReconstructable: false, reasonCode: 'RECOVERY_TERMINAL_RESULT_MISSING'
+    outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_TERMINAL_RESULT_MISSING'
   });
 });
 
@@ -29,17 +29,28 @@ test('route clean-completion requires the completed run and reviewed-head eviden
   const operation = findSandboxControlRecoveryOperation('task-orchestration', 'route.clean-completion')!;
   const result = { requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId, intentDigest: binding.intentDigest, status: 'completed', changed: true };
   const completeDomain = {
-    status: 'completed', pendingDelegation: null,
+    consistent: true, status: 'completed', pendingDelegation: null,
     completionEvidence: {
-      kind: 'reviewed-head-clean', observedAt: 10, head: 'head', headTree: 'tree',
+      kind: 'reviewed-head-clean', observedAt: '2026-09-07T00:00:00.000Z', head: 'head', headTree: 'tree',
       worktreeTree: 'tree', lastReviewedCommit: 'head'
-    }
+    },
+    snapshot: { head: 'head', headTree: 'tree', worktreeTree: 'tree' },
+    lastReviewedCommit: 'head'
   };
   assert.equal(classifySandboxControlRecovery({
     operation, binding, startedCommitted: true, terminalResult: result, domain: completeDomain
   }).outcome, 'success');
   assert.equal(classifySandboxControlRecovery({
     operation, binding, startedCommitted: true, terminalResult: result,
-    domain: { status: 'completed', pendingDelegation: null }
+    domain: { consistent: false, status: 'completed', pendingDelegation: null }
+  }).outcome, 'unknown');
+  assert.equal(classifySandboxControlRecovery({
+    operation, binding, startedCommitted: true, terminalResult: result,
+    domain: {
+      consistent: true, status: 'completed', pendingDelegation: null,
+      completionEvidence: completeDomain.completionEvidence,
+      snapshot: { head: 'other', headTree: 'tree', worktreeTree: 'tree' },
+      lastReviewedCommit: 'head'
+    }
   }).outcome, 'unknown');
 });
