@@ -37,7 +37,7 @@ import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
 import { validateQualificationAudit } from "./qualification-audit.ts";
 import { getArtifactSchema } from "./artifact-schema.ts";
-import { inspectArtifactStructure } from "./artifact-operations.ts";
+import { inspectArtifactContract } from "./artifact-operations.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -632,7 +632,7 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     ? "analysis"
     : skillName === "plan-task" ? "plan" : skillName === "code-task" ? "code" : null;
   if (schema) {
-    const structure = inspectArtifactStructure(content, schema);
+    const structure = inspectArtifactContract(content, schema);
     if (!structure.ok && !localFamily) {
       return failResult("artifact", `${path.basename(artifactPath)} has shared structural errors: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}`);
     }
@@ -640,7 +640,6 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
   if (localFamily) {
     const local = validateLocalArtifact(content, {
       family: localFamily,
-      requiredPatterns: (config.required_patterns || []).filter((pattern: unknown): pattern is string => typeof pattern === "string"),
       ...(taskContent ? { taskContent } : {}),
       artifact: path.basename(artifactPath)
     });
@@ -653,6 +652,12 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     return passResult(
       "artifact",
       `${path.basename(artifactPath)} passed (${schema?.sections.length ?? 0} sections)`
+    );
+  }
+  if (schema) {
+    return passResult(
+      "artifact",
+      `${path.basename(artifactPath)} passed (${schema.sections.length} sections)`
     );
   }
   const requiredSections = config.required_sections || [];

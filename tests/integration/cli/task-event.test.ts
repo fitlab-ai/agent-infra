@@ -43,7 +43,23 @@ function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
   const family = identity.family;
   let content = renderArtifactSkeleton({ taskId, family, artifact: path.basename(artifactPath) }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
+  content = appendReviewContract(content, family);
   fs.writeFileSync(artifactPath, `${content}\n## 资格审计\n\n${renderQualificationAudit(built.audit)}\n`);
+}
+
+function appendReviewContract(content: string, family: string): string {
+  if (!family.startsWith('review-')) return content;
+  let result = `${content}\n### 审查决定\n通过\n`;
+  if (family === 'review-code') {
+    result += [
+      '- **总体结论**：通过',
+      '- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`',
+      '- **审查差异基线**：bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      '- **审查差异指纹**：sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+      '- **审查快照树**：dddddddddddddddddddddddddddddddddddddddd'
+    ].join('\n') + '\n';
+  }
+  return result;
 }
 
 function fixture(step = 'requirement-analysis-review') {
@@ -159,7 +175,7 @@ function inspect(root: string, args: string[]) {
 function reviewCodeArtifact(input = 'code.md') {
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family: 'review-code', artifact: 'review-code.md' }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   content = content.replace('## 审查摘要\n<!-- artifact-section:review-code:summary -->\n内容', `## 审查摘要\n<!-- artifact-section:review-code:summary -->\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n- **审查输入**：\`${input}\``);
-  return content.replace('## 证据原文\n<!-- artifact-section:review-code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-code:evidence -->\n```text\n$ git status -s\n```');
+  return appendReviewContract(content.replace('## 证据原文\n<!-- artifact-section:review-code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-code:evidence -->\n```text\n$ git status -s\n```'), 'review-code');
 }
 
 function reviewArtifact(
@@ -171,7 +187,7 @@ function reviewArtifact(
   const family = title.includes('Plan') ? 'review-plan' : title.includes('Code') ? 'review-code' : 'review-analysis';
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   content = content.replace(`## 审查摘要\n<!-- artifact-section:${family}:summary -->\n内容`, `## 审查摘要\n<!-- artifact-section:${family}:summary -->\n- **总体结论**：${verdict}\n- **发现（AI 可处理）**：${counts.blockers} 阻塞项，${counts.major} 主要，${counts.minor} 次要 / **人工校验**：0\n- **审查输入**：\`${input}\``);
-  return content.replace(`## 证据原文\n<!-- artifact-section:${family}:evidence -->\n内容`, `## 证据原文\n<!-- artifact-section:${family}:evidence -->\n\`\`\`text\n$ git status -s\n\`\`\``);
+  return appendReviewContract(content.replace(`## 证据原文\n<!-- artifact-section:${family}:evidence -->\n内容`, `## 证据原文\n<!-- artifact-section:${family}:evidence -->\n\`\`\`text\n$ git status -s\n\`\`\``), family);
 }
 
 function sha256File(filePath: string) {
@@ -618,7 +634,7 @@ test('local completion uses the repository verification config for its language'
   const configDir = path.join(f.root, '.agents', 'skills', 'plan-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
-    checks: { artifact: { schema: 'plan', required_patterns: ['^\\$ '] } }
+    checks: { artifact: { schema: 'plan' } }
   }));
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   const artifact = path.join(f.dir, 'plan.md');
@@ -626,14 +642,13 @@ test('local completion uses the repository verification config for its language'
   content = content.replace('## State Check\n<!-- artifact-section:plan:state-check -->\ncontent', '## State Check\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');
   fs.writeFileSync(artifact, content);
   const artifactContent = fs.readFileSync(artifact, 'utf8');
-  const local = validateLocalArtifact(artifactContent, { family: 'plan', requiredPatterns: ['^\\$ '] });
+  const local = validateLocalArtifact(artifactContent, { family: 'plan' });
   assert.equal(local.ok, true, local.diagnostics.map((item) => item.message).join('; '));
   const finalized = finalizeLocalArtifact({
     taskRef: f.id,
     repoRoot: f.root,
     family: 'plan',
-    artifact: 'plan.md',
-    requiredPatterns: ['^\\$ ']
+    artifact: 'plan.md'
   });
   assert.equal(finalized.status, 'passed', finalized.error?.message);
 
@@ -1236,6 +1251,20 @@ test('review-code event completes the regular code review path', () => {
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /current_step: code-review/);
   assert.match(content, /`review-code\.md`/);
+});
+
+test('review completion rejects the same missing schema pattern used by finalization', () => {
+  const f = fixture('requirement-analysis-review');
+  fs.writeFileSync(path.join(f.dir, 'analysis.md'), '# Analysis\n');
+  const started = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md').replace('\n### 审查决定\n通过\n', '\n'));
+
+  const completed = completeReview(f, reviewScenarios[0]!, 'approved', { blockers: 0, major: 0, minor: 0 });
+
+  assert.equal(completed.status, 1);
+  assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+  assert.match(JSON.parse(completed.stdout).error.message, /ARTIFACT_REQUIRED_PATTERN_MISSING/);
 });
 
 for (const scenario of reviewScenarios) {

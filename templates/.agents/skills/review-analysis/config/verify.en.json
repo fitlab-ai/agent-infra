@@ -17,10 +17,6 @@
     },
     "artifact": {
       "file_pattern": "review-analysis.md|review-analysis-r{N}.md",
-      "required_patterns": [
-        "^### Approval Decision$",
-        "^\\$ "
-      ],
       "schema": "review-analysis"
     },
     "decision-details": {},

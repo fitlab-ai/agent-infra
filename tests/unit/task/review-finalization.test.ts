@@ -50,6 +50,7 @@ id: ${TASK_ID}
     .replaceAll('<!-- artifact-slot:empty -->', '内容')
     .replace(/## 审查摘要\n<!-- artifact-section:review-analysis:summary -->\n内容/, summary.trimEnd())
     .replace('## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n```text\n$ git status -s\n```');
+  review += '\n### 审查决定\n通过\n';
   fs.writeFileSync(artifactPath, review);
   return { root, dir, artifactPath };
 }
@@ -160,6 +161,23 @@ test('review finalization does not treat a done-only historical row as an open r
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
+});
+
+test('review finalizer rejects a missing schema pattern before summary mutation', () => {
+  const f = domainFixture();
+  const before = fs.readFileSync(f.artifactPath, 'utf8');
+  const invalid = before.replace('\n### 审查决定\n通过\n', '\n');
+  fs.writeFileSync(f.artifactPath, invalid);
+
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
+  assert.match(result.error?.message ?? '', /ARTIFACT_REQUIRED_PATTERN_MISSING/);
+  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });
 
 test('review finalizer exposes a repair baseline and the shared repair can restore the artifact', () => {

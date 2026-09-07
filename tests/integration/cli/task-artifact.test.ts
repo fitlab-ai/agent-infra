@@ -61,6 +61,23 @@ test('task-artifact init creates a non-semantic skeleton and is idempotent', () 
   assert.deepEqual(fs.readFileSync(path.join(f.dir, 'plan.md')), before);
 });
 
+test('task-artifact init rejects an existing historical artifact before no-op', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, 'historical plan artifact\n');
+  fs.writeFileSync(path.join(f.dir, 'task.md'), fs.readFileSync(path.join(f.dir, 'task.md'), 'utf8')
+    .replace('Plan Task (Round 1) [started]', 'Plan Task (Round 1)')
+    .replace('— started\n', '— completed\n')
+    .replace('## Activity Log\n', '## Activity Log\n\n- 2026-01-01 00:01:00+00:00 — **Plan Task (Round 2) [started]** by codex — started\n'));
+  const before = fs.readFileSync(artifact);
+
+  const stale = run(f.root, [f.id, 'init', '--family', 'plan', '--artifact', 'plan.md']);
+
+  assert.equal(stale.status, 1, `${stale.stderr}\n${stale.stdout}`);
+  assert.equal(JSON.parse(stale.stdout).error.code, 'ARTIFACT_INIT_CONTEXT_INVALID');
+  assert.deepEqual(fs.readFileSync(artifact), before);
+});
+
 test('task-artifact repair requires the finalizer baseline and changes one heading only', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
@@ -113,7 +130,7 @@ test('task-artifact finalize-local uses repository config from a nested working 
   const configDir = path.join(f.root, '.agents', 'skills', 'plan-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
-    checks: { artifact: { schema: 'plan', required_patterns: ['^\\$ '] } }
+    checks: { artifact: { schema: 'plan' } }
   }));
   let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: 'plan.md', locale: 'en' }).replaceAll('<!-- artifact-slot:empty -->', 'content');
   content = content.replace('## State Check\n<!-- artifact-section:plan:state-check -->\ncontent', '## State Check\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');

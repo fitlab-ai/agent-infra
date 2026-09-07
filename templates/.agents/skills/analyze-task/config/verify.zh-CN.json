@@ -18,9 +18,6 @@
     },
     "artifact": {
       "file_pattern": "analysis.md|analysis-r{N}.md",
-      "required_patterns": [
-        "^\\$ "
-      ],
       "schema": "analysis"
     },
     "activity-log": {

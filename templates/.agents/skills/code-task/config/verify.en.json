@@ -17,9 +17,6 @@
     },
     "artifact": {
       "file_pattern": "code.md|code-r{N}.md",
-      "required_patterns": [
-        "^\\$ "
-      ],
       "schema": "code"
     },
     "implementation-input": {},

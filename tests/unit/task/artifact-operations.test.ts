@@ -9,6 +9,7 @@ import { getArtifactSchema, renderArtifactSkeleton } from '../../../lib/task/art
 import {
   applyArtifactRepair,
   canonicalSemanticDigest,
+  inspectArtifactContract,
   inspectArtifactStructure,
   sha256Content
 } from '../../../lib/task/artifact-operations.ts';
@@ -213,5 +214,25 @@ test('structure inspection fails closed when multiple required headings use trai
       2,
       family
     );
+  }
+});
+
+test('shared artifact contract enforces localized review patterns from the schema registry', () => {
+  for (const locale of ['zh-CN', 'en'] as const) {
+    const content = renderArtifactSkeleton({
+      taskId: 'TASK-20260101-000001',
+      family: 'review-code',
+      artifact: 'review-code.md',
+      locale
+    }).replaceAll('<!-- artifact-slot:empty -->', 'content')
+      + (locale === 'en'
+        ? '\n### Approval Decision\nChanges Requested\n- **Overall Verdict**: Changes Requested\n- **Review Baseline Commit**: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n- **Reviewed Diff Base**: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n- **Reviewed Diff Fingerprint**: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n- **Reviewed Snapshot Tree**: dddddddddddddddddddddddddddddddddddddddd\n$ git status -s\n'
+        : '\n### 审查决定\n需要修改\n- **总体结论**：需要修改\n- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n- **审查差异基线**：bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n- **审查差异指纹**：sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n- **审查快照树**：dddddddddddddddddddddddddddddddddddddddd\n$ git status -s\n');
+    assert.equal(inspectArtifactContract(content, getArtifactSchema('review-code')!).ok, true, locale);
+
+    const invalid = content.replace(/^### (?:审查决定|Approval Decision)$/m, '### Decision');
+    const result = inspectArtifactContract(invalid, getArtifactSchema('review-code')!);
+    assert.equal(result.ok, false, locale);
+    assert.ok(result.diagnostics.some((item) => item.code === 'ARTIFACT_REQUIRED_PATTERN_MISSING'), locale);
   }
 });

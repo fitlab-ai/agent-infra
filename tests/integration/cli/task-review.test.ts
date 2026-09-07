@@ -50,6 +50,16 @@ current_step: ${scenario.step}
     `## Raw Evidence\n<!-- artifact-section:${scenario.family}:evidence -->\ncontent`,
     `## Raw Evidence\n<!-- artifact-section:${scenario.family}:evidence -->\n\`\`\`text\n$ git status -s\n\`\`\``
   );
+  content += `\n### Approval Decision\nChanges Requested\n`;
+  if (scenario.family === 'review-code') {
+    content += [
+      '- **Overall Verdict**: Changes Requested',
+      '- **Review Baseline Commit**: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`',
+      '- **Reviewed Diff Base**: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      '- **Reviewed Diff Fingerprint**: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+      '- **Reviewed Snapshot Tree**: dddddddddddddddddddddddddddddddddddddddd'
+    ].join('\n') + '\n';
+  }
   fs.writeFileSync(path.join(dir, artifact), content);
   return { root, dir, artifact };
 }

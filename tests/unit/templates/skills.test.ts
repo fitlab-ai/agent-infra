@@ -695,6 +695,7 @@ test("workflow artifact gates require state check evidence", () => {
       if (schemaFamilies[skill]) {
         assert.equal(artifact.schema, schemaFamilies[skill], `${relativePath} should use the shared artifact schema`);
         assert.equal("required_sections" in artifact, false, `${relativePath} should not duplicate schema sections`);
+        assert.equal("required_patterns" in artifact, false, `${relativePath} should not duplicate schema patterns`);
       } else {
         sections.forEach((section) => {
           assert.ok(
@@ -703,10 +704,12 @@ test("workflow artifact gates require state check evidence", () => {
           );
         });
       }
-      assert.ok(
-        artifact.required_patterns.includes("^\\$ "),
-        `${relativePath} should require a shell prompt evidence line`
-      );
+      if (!schemaFamilies[skill]) {
+        assert.ok(
+          artifact.required_patterns.includes("^\\$ "),
+          `${relativePath} should require a shell prompt evidence line`
+        );
+      }
     });
   });
 });
@@ -758,9 +761,6 @@ test("workflow verify config language variants keep only artifact language field
 
     if ("required_sections" in enComparable.checks.artifact) enComparable.checks.artifact.required_sections = [];
     if ("required_sections" in zhComparable.checks.artifact) zhComparable.checks.artifact.required_sections = [];
-    enComparable.checks.artifact.required_patterns = [];
-    zhComparable.checks.artifact.required_patterns = [];
-
     assert.deepEqual(enComparable, zhComparable, `${skill} variants should differ only in artifact language fields`);
     assert.deepEqual(
       JSON.parse(read(`.agents/skills/${skill}/config/verify.json`)),
@@ -769,11 +769,6 @@ test("workflow verify config language variants keep only artifact language field
     );
   });
 
-  const reviewEn = JSON.parse(read("templates/.agents/skills/review-code/config/verify.en.json"));
-  const reviewZh = JSON.parse(read("templates/.agents/skills/review-code/config/verify.zh-CN.json"));
-
-  assert.ok(reviewEn.checks.artifact.required_patterns.includes("^### Approval Decision$"));
-  assert.ok(reviewZh.checks.artifact.required_patterns.includes("^### 审查决定$"));
 });
 
 test("workflow report templates include evidence sections", () => {
@@ -1857,9 +1852,8 @@ test("analyze-task and plan-task docs require field re-estimation in update step
   });
 });
 
-test("review-code EN verify config locks down Overall Verdict value range", () => {
-  const enConfig = JSON.parse(read("templates/.agents/skills/review-code/config/verify.en.json"));
-  const verdictPattern = (enConfig.checks.artifact.required_patterns as string[])
+test("review-code schema locks down Overall Verdict value range", () => {
+  const verdictPattern = getArtifactSchema("review-code")!.requiredPatterns
     .find((p) => p.includes("Overall Verdict"));
   assert.ok(verdictPattern, "EN verify config should include an Overall Verdict pattern");
 

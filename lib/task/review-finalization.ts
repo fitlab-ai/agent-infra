@@ -15,7 +15,7 @@ import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
-import { canonicalSemanticDigest, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
+import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { readArtifactRepairIntent, writeArtifactRepairIntent } from './artifact-repair-intent.ts';
 import type { ArtifactRepairOperation } from './artifact-operations.ts';
 
@@ -183,7 +183,7 @@ function finalizeReviewSummaryUnlocked(
     return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId);
   }
   const schema = getArtifactSchema(spec.family);
-  const structure = schema ? inspectArtifactStructure(artifactContent, schema) : null;
+  const structure = schema ? inspectArtifactContract(artifactContent, schema) : null;
   const artifactSha256 = sha256Content(artifactContent);
   const artifactSemanticDigest = canonicalSemanticDigest(artifactContent);
   let repairIntent;

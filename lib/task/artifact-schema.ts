@@ -134,11 +134,19 @@ function buildSections(family: ArtifactSchemaFamily): readonly ArtifactSection[]
 
 const ARTIFACT_SCHEMAS: readonly ArtifactSchema[] = [
   { family: 'analysis', title: { zh: '需求分析报告', en: 'Requirements Analysis' }, sections: buildSections('analysis'), requiredPatterns: ['^\\$ '] },
-  { family: 'review-analysis', title: { zh: '需求分析审查报告', en: 'Analysis Review Report' }, sections: buildSections('review-analysis'), requiredPatterns: ['^### 审查决定$', '^\\$ '] },
+  { family: 'review-analysis', title: { zh: '需求分析审查报告', en: 'Analysis Review Report' }, sections: buildSections('review-analysis'), requiredPatterns: ['^### (?:审查决定|Approval Decision)$', '^\\$ '] },
   { family: 'plan', title: { zh: '技术方案', en: 'Technical Plan' }, sections: buildSections('plan'), requiredPatterns: ['^\\$ '] },
-  { family: 'review-plan', title: { zh: '技术方案审查报告', en: 'Plan Review Report' }, sections: buildSections('review-plan'), requiredPatterns: ['^### 审查决定$', '^\\$ '] },
+  { family: 'review-plan', title: { zh: '技术方案审查报告', en: 'Plan Review Report' }, sections: buildSections('review-plan'), requiredPatterns: ['^### (?:审查决定|Approval Decision)$', '^\\$ '] },
   { family: 'code', title: { zh: '实现报告', en: 'Implementation Report' }, sections: buildSections('code'), requiredPatterns: ['^\\$ '] },
-  { family: 'review-code', title: { zh: '代码审查报告', en: 'Code Review Report' }, sections: buildSections('review-code'), requiredPatterns: ['^### 审查决定$', '^\\$ '] }
+  { family: 'review-code', title: { zh: '代码审查报告', en: 'Code Review Report' }, sections: buildSections('review-code'), requiredPatterns: [
+    '^### (?:审查决定|Approval Decision)$',
+    '^\\$ ',
+    '^- \\*\\*(?:总体结论|Overall Verdict)\\*\\*[:：]\\s*(?:通过|需要修改|拒绝|Approved|Changes Requested|Rejected)\\s*$',
+    '^- \\*\\*(?:审查基线提交|Review Baseline Commit)\\*\\*[:：]\\s*\\S',
+    '^- \\*\\*(?:审查差异基线|Reviewed Diff Base)\\*\\*[:：]\\s*[0-9a-f]{40,64}\\s*$',
+    '^- \\*\\*(?:审查差异指纹|Reviewed Diff Fingerprint)\\*\\*[:：]\\s*sha256:[0-9a-f]{64}\\s*$',
+    '^- \\*\\*(?:审查快照树|Reviewed Snapshot Tree)\\*\\*[:：]\\s*[0-9a-f]{40,64}\\s*$'
+  ] }
 ];
 
 function getArtifactSchema(family: string): ArtifactSchema | null {

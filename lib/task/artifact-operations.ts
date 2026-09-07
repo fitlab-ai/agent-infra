@@ -36,7 +36,8 @@ type ArtifactStructuralDiagnosticCode =
   | 'ARTIFACT_MARKER_MISMATCH'
   | 'ARTIFACT_EMPTY_SECTION'
   | 'ARTIFACT_SECTION_ORDER_INVALID'
-  | 'ARTIFACT_HEADING_TRAILING_PUNCTUATION';
+  | 'ARTIFACT_HEADING_TRAILING_PUNCTUATION'
+  | 'ARTIFACT_REQUIRED_PATTERN_MISSING';
 
 type ArtifactStructuralDiagnostic = Readonly<{
   code: ArtifactStructuralDiagnosticCode;
@@ -376,6 +377,44 @@ function inspectArtifactStructure(
   };
 }
 
+function inspectArtifactPatterns(
+  content: string,
+  schema: ArtifactSchema
+): ArtifactStructureResult {
+  const diagnostics = schema.requiredPatterns
+    .filter((pattern) => !new RegExp(pattern, 'm').test(content))
+    .map((pattern) => diagnostic(
+      'ARTIFACT_REQUIRED_PATTERN_MISSING',
+      `artifact is missing required pattern '${pattern}'`,
+      null,
+      null
+    ));
+  return {
+    ok: diagnostics.length === 0,
+    family: schema.family,
+    semanticDigest: canonicalSemanticDigest(content),
+    diagnostics,
+    repair: null
+  };
+}
+
+function inspectArtifactContract(
+  content: string,
+  schema: ArtifactSchema
+): ArtifactStructureResult {
+  const structure = inspectArtifactStructure(content, schema);
+  const patterns = inspectArtifactPatterns(content, schema);
+  const diagnostics = [...structure.diagnostics, ...patterns.diagnostics];
+  const repair = patterns.diagnostics.length === 0 ? structure.repair : null;
+  return {
+    ok: diagnostics.length === 0,
+    family: schema.family,
+    semanticDigest: canonicalSemanticDigest(content, repair),
+    diagnostics,
+    repair
+  };
+}
+
 function resultFailure(code: string, message: string): ArtifactFileResult {
   return { status: 'failed', changed: false, artifactSha256: null, semanticDigest: null, operation: null, error: { code, message } };
 }
@@ -571,6 +610,8 @@ export {
   applyArtifactRepair,
   canonicalSemanticDigest,
   initializeArtifactSkeleton,
+  inspectArtifactContract,
+  inspectArtifactPatterns,
   inspectArtifactStructure,
   sha256Content
 };

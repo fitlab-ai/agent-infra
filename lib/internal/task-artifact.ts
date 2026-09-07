@@ -3,10 +3,10 @@ import path from 'node:path';
 
 import { resolveArtifactContext } from '../task/artifact-lifecycle.ts';
 import { parseArtifactName } from '../task/artifact-lifecycle.ts';
+import { locateActivityLog, pairEntries, startedBackedRows } from '../task/activity-log.ts';
 import { finalizeLocalArtifact } from '../task/local-artifact-finalization.ts';
 import type { LocalArtifactFamily } from '../task/local-artifact-finalization.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { loadVerificationConfig } from '../task/verification-config.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 import { getArtifactSchema } from '../task/artifact-schema.ts';
 import {
@@ -21,6 +21,31 @@ function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'ARTIFACT_PAYLOAD_INVALID', message } })}\n`);
   process.stderr.write(USAGE);
   process.exitCode = 2;
+}
+
+function hasOpenLocalArtifactRound(taskDir: string, family: string, round: number): boolean {
+  try {
+    const activity = locateActivityLog(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'));
+    if (!activity) return false;
+    const label = family === 'analysis'
+      ? 'Analyze Task'
+      : family === 'review-analysis'
+        ? 'Review Analysis'
+        : family === 'plan'
+          ? 'Plan Task'
+          : family === 'review-plan'
+            ? 'Review Plan'
+            : family === 'code'
+              ? 'Code Task'
+              : 'Review Code';
+    const qualifier = family === 'code'
+      ? '(?:, (?:fix for review-code(?:-r\\d+)?\\.md|decision II-[1-9]\\d*))?'
+      : '';
+    const expected = new RegExp(`^${label} \\(Round ${round}${qualifier}\\)$`);
+    return startedBackedRows(pairEntries(activity.entries)).some((row) => expected.test(row.step) && !row.done);
+  } catch {
+    return false;
+  }
 }
 
 function taskArtifact(args: string[] = []): void {
@@ -93,6 +118,21 @@ function taskArtifact(args: string[] = []): void {
       process.exitCode = 1;
       return;
     }
+    const context = resolveArtifactContext(args[0]!, family);
+    const isNextArtifact = context.status === 'ready' && context.next?.name === artifact;
+    const isCurrentOpenArtifact = context.status === 'ready'
+      && context.taskDir !== null
+      && hasOpenLocalArtifactRound(context.taskDir, family, parsed.round);
+    if (!isNextArtifact && !isCurrentOpenArtifact) {
+      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'ARTIFACT_INIT_CONTEXT_INVALID', message: context.error?.message ?? `artifact '${artifact}' is not the next ${family} artifact` } })}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!context.taskId || !context.taskDir) {
+      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'ARTIFACT_INIT_CONTEXT_INVALID', message: `artifact '${artifact}' does not match ${family}` } })}\n`);
+      process.exitCode = 1;
+      return;
+    }
     try {
       const existing = fs.lstatSync(path.join(resolved.taskDir, artifact));
       if (existing.isSymbolicLink() || !existing.isFile()) {
@@ -110,17 +150,6 @@ function taskArtifact(args: string[] = []): void {
         process.exitCode = 1;
         return;
       }
-    }
-    const context = resolveArtifactContext(args[0]!, family);
-    if (context.status !== 'ready' || !context.next || context.next.name !== artifact) {
-      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'ARTIFACT_INIT_CONTEXT_INVALID', message: context.error?.message ?? `artifact '${artifact}' is not the next ${family} artifact` } })}\n`);
-      process.exitCode = 1;
-      return;
-    }
-    if (!context.taskId || !context.taskDir) {
-      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'ARTIFACT_INIT_CONTEXT_INVALID', message: `artifact '${artifact}' does not match ${family}` } })}\n`);
-      process.exitCode = 1;
-      return;
     }
     const result = initializeArtifactSkeleton({
       repoRoot: resolved.repoRoot,
@@ -187,28 +216,11 @@ function taskArtifact(args: string[] = []): void {
     failUsage("finalize-local only supports 'analysis', 'plan', and 'code'");
     return;
   }
-  const skillName = family === 'analysis' ? 'analyze-task' : family === 'plan' ? 'plan-task' : 'code-task';
-  let config: { requiredSections?: readonly string[]; requiredPatterns?: readonly string[] } = {};
-  try {
-    const loaded = loadVerificationConfig(repositoryRoot, skillName);
-    const artifactConfig = loaded.checks.artifact;
-    if (artifactConfig && typeof artifactConfig === 'object' && !Array.isArray(artifactConfig)) {
-      const sections = artifactConfig.required_sections;
-      const patterns = artifactConfig.required_patterns;
-      config = {
-        requiredSections: Array.isArray(sections) ? sections.filter((value): value is string => typeof value === 'string') : undefined,
-        requiredPatterns: Array.isArray(patterns) ? patterns.filter((value): value is string => typeof value === 'string') : undefined
-      };
-    }
-  } catch {
-    // Isolated fixture repositories may not contain the project's verification config.
-  }
   const result = finalizeLocalArtifact({
     taskRef: args[0]!,
     family: family as LocalArtifactFamily,
     artifact,
-    repoRoot: repositoryRoot,
-    ...config
+    repoRoot: repositoryRoot
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;

@@ -7,7 +7,7 @@ import {
 } from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
-import { canonicalSemanticDigest, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
+import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { readArtifactRepairIntent, writeArtifactRepairIntent } from './artifact-repair-intent.ts';
 import type { ArtifactRepairIntent } from './artifact-repair-intent.ts';
@@ -19,8 +19,6 @@ const LOCAL_ARTIFACT_REQUIRED_SECTIONS: Readonly<Record<LocalArtifactFamily, rea
   plan: getArtifactSchema('plan')!.sections.map((section) => section.headings.zh),
   code: getArtifactSchema('code')!.sections.map((section) => section.headings.zh)
 };
-
-const LOCAL_ARTIFACT_REQUIRED_PATTERNS = ['^\\$ '];
 
 type LocalArtifactDiagnosticCode =
   | 'LOCAL_ARTIFACT_EMPTY'
@@ -48,7 +46,6 @@ type LocalArtifactDiagnostic = {
 type LocalArtifactValidationOptions = {
   family: LocalArtifactFamily;
   requiredSections?: readonly string[];
-  requiredPatterns?: readonly string[];
   taskContent?: string;
   artifact?: string;
 };
@@ -67,7 +64,6 @@ type LocalArtifactFinalizationRequest = {
   artifact: string;
   repoRoot?: string;
   requiredSections?: readonly string[];
-  requiredPatterns?: readonly string[];
 };
 
 type LocalArtifactFinalizationResult = {
@@ -145,7 +141,7 @@ function validateLocalArtifact(
   options: LocalArtifactValidationOptions
 ): LocalArtifactValidationResult {
   const schema = getArtifactSchema(options.family)!;
-  const patterns = options.requiredPatterns ?? LOCAL_ARTIFACT_REQUIRED_PATTERNS;
+  const patterns = schema.requiredPatterns;
   const diagnostics: LocalArtifactDiagnostic[] = [];
   const scanned = scanVisibleMarkdown(content);
   const structure = inspectArtifactStructure(content, schema);
@@ -172,10 +168,12 @@ function validateLocalArtifact(
     }
   }
 
-  for (const pattern of patterns.filter((item) => !isStatusPattern(item))) {
-    if (!new RegExp(pattern, 'm').test(content)) {
-      diagnostics.push({ code: 'LOCAL_REQUIRED_PATTERN_MISSING', message: `artifact is missing required pattern '${pattern}'`, repairable: false, line: null });
-    }
+  const patternInspection = inspectArtifactPatterns(content, {
+    ...schema,
+    requiredPatterns: patterns.filter((item) => !isStatusPattern(item))
+  });
+  for (const item of patternInspection.diagnostics) {
+    diagnostics.push({ code: 'LOCAL_REQUIRED_PATTERN_MISSING', message: item.message, repairable: false, line: null });
   }
 
   const decisionDetails = inspectDecisionDetailDuplicates(content);
@@ -273,7 +271,6 @@ function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): Local
   const result = validateLocalArtifact(content, {
     family: request.family,
     requiredSections: request.requiredSections,
-    requiredPatterns: request.requiredPatterns,
     taskContent,
     artifact: request.artifact
   });
@@ -415,7 +412,6 @@ function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): Local
 }
 
 export {
-  LOCAL_ARTIFACT_REQUIRED_PATTERNS,
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
   consumeLocalArtifactFinalizationIntent,
   finalizeLocalArtifact,

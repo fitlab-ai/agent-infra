@@ -17,9 +17,6 @@
     },
     "artifact": {
       "file_pattern": "plan.md|plan-r{N}.md",
-      "required_patterns": [
-        "^\\$ "
-      ],
       "schema": "plan"
     },
     "activity-log": {

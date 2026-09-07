@@ -21,6 +21,9 @@ function loadVerificationConfig(repositoryRoot: string, skillName: string): Veri
     if (schema !== undefined && (typeof schema !== 'string' || !getArtifactSchema(schema))) {
       throw new Error(`config/verify.json has unknown artifact schema '${String(schema)}' for skill '${skillName}'`);
     }
+    if (schema !== undefined && 'required_patterns' in artifact) {
+      throw new Error(`config/verify.json must not duplicate required_patterns for schema '${String(schema)}' in skill '${skillName}'`);
+    }
   }
   return { ...(parsed.skill ? { skill: parsed.skill } : {}), checks: parsed.checks };
 }

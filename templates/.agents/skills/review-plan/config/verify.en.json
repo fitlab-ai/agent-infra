@@ -17,10 +17,6 @@
     },
     "artifact": {
       "file_pattern": "review-plan.md|review-plan-r{N}.md",
-      "required_patterns": [
-        "^### Approval Decision$",
-        "^\\$ "
-      ],
       "schema": "review-plan"
     },
     "decision-details": {},
