@@ -163,11 +163,11 @@ function sourceSlice(piece: SourceChunk, start: number, end: number): string {
 }
 
 function renderOversizedFenceChunk(piece: SourceChunk, fences: readonly FenceRange[], maxBytes: number): string {
-  const insertions = new Map<number, string[]>();
+  const insertions = new Map<number, Array<{ value: string; ensureLineStart: boolean }>>();
   const omitted: Array<{ start: number; end: number }> = [];
-  const insert = (position: number, value: string) => {
+  const insert = (position: number, value: string, ensureLineStart = false) => {
     const values = insertions.get(position) || [];
-    values.push(value);
+    values.push({ value, ensureLineStart });
     insertions.set(position, values);
   };
 
@@ -177,7 +177,7 @@ function renderOversizedFenceChunk(piece: SourceChunk, fences: readonly FenceRan
       || Buffer.byteLength(fence.closing, 'utf8') > maxBytes;
     if (!oversized) {
       if (piece.start > fence.start && piece.start < fence.end) insert(piece.start, fence.opening);
-      if (piece.end > fence.start && piece.end < fence.end) insert(piece.end, fence.closing);
+      if (piece.end > fence.start && piece.end < fence.end) insert(piece.end, fence.closing, true);
       continue;
     }
 
@@ -185,7 +185,7 @@ function renderOversizedFenceChunk(piece: SourceChunk, fences: readonly FenceRan
     const delimiter = boundedFence(code, fence.character, maxBytes);
     if (!delimiter) return escapeHtmlText(piece.content);
     insert(Math.max(piece.start, fence.start), delimiter.opening);
-    insert(Math.min(piece.end, fence.end), delimiter.closing);
+    insert(Math.min(piece.end, fence.end), delimiter.closing, true);
     const openingStart = Math.max(piece.start, fence.start);
     const openingEnd = Math.min(piece.end, fence.openingEnd);
     if (openingStart < openingEnd) omitted.push({ start: openingStart, end: openingEnd });
@@ -204,7 +204,10 @@ function renderOversizedFenceChunk(piece: SourceChunk, fences: readonly FenceRan
   let content = '';
   for (let index = 0; index < points.length; index += 1) {
     const point = points[index]!;
-    for (const value of insertions.get(point) || []) content += value;
+    for (const insertion of insertions.get(point) || []) {
+      if (insertion.ensureLineStart && content.length > 0 && !content.endsWith('\n')) content += '\n';
+      content += insertion.value;
+    }
     const next = points[index + 1];
     if (next === undefined) continue;
     const skipped = omitted.some((range) => range.start <= point && next <= range.end);
