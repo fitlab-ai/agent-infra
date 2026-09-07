@@ -320,7 +320,6 @@ export function resolveSandboxControlTransport(
 ): SandboxControlTransportDecision {
   const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
   const fixedStatusDir = options.statusMountPath
-    ?? env.AGENT_INFRA_TEST_STATUS_MOUNT
     ?? SANDBOX_CONTROL_STATUS_MOUNT;
   const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && fs.existsSync(configuredStatusDir)
     ? configuredStatusDir

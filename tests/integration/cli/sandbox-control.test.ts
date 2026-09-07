@@ -33,9 +33,11 @@ import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/contro
 import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
 import {
   atomicWriteJson,
+  createSandboxControlTerminalResult,
   writeSandboxControlPayload,
   writeSandboxControlReservation,
-  writeSandboxControlResultEvidence
+  writeSandboxControlResultEvidence,
+  writeSandboxControlTerminalResult
 } from '../../../lib/sandbox/control/state.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
@@ -1521,7 +1523,7 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     const issuedAt = Date.now();
     atomicWriteJson(path.join(manifest.channelDir, 'requests', `${requestId}.json`), {
       version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
-      issuedAt, expiresAt: issuedAt + 2_000, family: 'task-lifecycle', args: ['08', 'complete'],
+      issuedAt, expiresAt: issuedAt + 2_000, family: 'task-lifecycle', args: ['08', 'complete', '--agent', 'codex'],
       controllerProcess: null, controllerProof: null
     });
     await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
@@ -1537,6 +1539,16 @@ test('broker recovery cleans up a normally published large-output terminal', asy
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     const terminal = fs.readFileSync(terminalPath, 'utf8');
+    if (!evidence.some((entry) => entry.name === 'terminal-result.json')) {
+      evidence.push({
+        name: 'terminal-result.json',
+        contents: Buffer.from(`${JSON.stringify(createSandboxControlTerminalResult(manifest, {
+          id: requestId,
+          family: 'task-lifecycle',
+          operation: 'complete'
+        }, output))}\n`)
+      });
+    }
     controller.abort();
     await server;
     assert.equal(JSON.parse(terminal).outputState, 'available');
@@ -2494,7 +2506,32 @@ async function runFinalizationRecoveryCase(
       child: { pid: 999_999_999, startTime: 0, processGroupId: null }, phase: 'running', updatedAt: Date.now()
     })}\n`);
     writeSandboxControlReservation(manifest, requestId, { logicalRecords: 0, bytes: 0 });
-    writeSandboxControlResultEvidence(manifest, requestId, { exitCode: 0, stdout: 'finalization output', stderr: '' });
+    const finalizationOutput = `${JSON.stringify({
+      version: 1,
+      status: 'completed',
+      changed: false,
+      accepted: true,
+      result: {
+        status: 'completed',
+        changed: false,
+        taskId,
+        lifecycle: { status: 'no-op', changed: false, error: null },
+        taskComment: null,
+        verification: { status: 'no-op', changed: false, error: null },
+        completedSteps: ['lifecycle', 'verification'],
+        pendingSteps: [],
+        result: label === 'warnings' ? 'completed_with_warnings' : 'completed',
+        warnings: [],
+        error: null
+      },
+      error: null
+    })}\n`;
+    writeSandboxControlResultEvidence(manifest, requestId, { exitCode: 0, stdout: finalizationOutput, stderr: '' });
+    writeSandboxControlTerminalResult(manifest, {
+      id: requestId,
+      family: 'task-finalization',
+      operation: 'complete'
+    }, finalizationOutput);
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`), `${JSON.stringify({
       version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
     })}\n`);

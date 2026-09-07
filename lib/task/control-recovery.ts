@@ -116,7 +116,7 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
   const status = result.status;
   const failed = status === 'failed' || result.error !== null && result.error !== undefined;
   if (failed) {
-    if (input.operation.mutatesDomain && input.domain && input.domain.consistent === false) {
+    if (input.domain && input.domain.consistent === false) {
       return { outcome: 'failure', responseReconstructable: true, reasonCode: 'RECOVERY_TERMINAL_FAILURE' };
     }
     return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_FAILURE_EVIDENCE_INCOMPLETE' };
@@ -131,7 +131,14 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
     return { outcome: 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_DOMAIN_EVIDENCE_MISSING' };
   }
   if (input.operation.family === 'task-lifecycle' && input.journal?.exists) {
-    return { outcome: input.journal.failure ? 'failure' : 'unknown', responseReconstructable: false, reasonCode: 'RECOVERY_LIFECYCLE_JOURNAL_PRESENT' };
+    if (input.journal.failure) {
+      return { outcome: 'failure', responseReconstructable: true, reasonCode: 'RECOVERY_LIFECYCLE_JOURNAL_FAILURE' };
+    }
+    return {
+      outcome: input.journal.completedSteps && input.journal.completedSteps.length > 0 ? 'in-progress' : 'unknown',
+      responseReconstructable: false,
+      reasonCode: 'RECOVERY_LIFECYCLE_JOURNAL_PRESENT'
+    };
   }
   return {
     outcome: 'success',

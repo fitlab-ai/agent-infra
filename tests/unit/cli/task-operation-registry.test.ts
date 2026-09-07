@@ -303,3 +303,15 @@ test('fixed status mount fails closed after all control environment variables ar
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('ordinary environment variables cannot select the production status mount', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-env-mount-'));
+  const fakeMount = path.join(root, 'status');
+  fs.mkdirSync(fakeMount);
+  try {
+    const decision = resolveSandboxControlTransport({ AGENT_INFRA_TEST_STATUS_MOUNT: fakeMount });
+    assert.notEqual(decision.kind, 'broker-client');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

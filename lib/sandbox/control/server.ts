@@ -70,6 +70,7 @@ import {
 import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
+import { readCodexControllerRegistration } from './controller-registration.ts';
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
@@ -386,21 +387,166 @@ function genericRecoveryResponse(
   };
 }
 
+type RecoveryJournalEvidence = Readonly<{
+  exists: boolean;
+  completedSteps: readonly string[];
+  failure: string | null;
+}>;
+
+type RecoveryDomainEvidence = Readonly<{
+  domain: Readonly<Record<string, unknown>> | null;
+  journal: RecoveryJournalEvidence;
+}>;
+
+function parseRecoveryOutput(output: string | null): Record<string, unknown> | null {
+  if (output === null) return null;
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    if (record.result && typeof record.result === 'object' && !Array.isArray(record.result)) {
+      return record.result as Record<string, unknown>;
+    }
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+function emptyRecoveryJournal(): RecoveryJournalEvidence {
+  return { exists: false, completedSteps: [], failure: null };
+}
+
+function readLifecycleJournalEvidence(repoRoot: string, taskId: string): RecoveryJournalEvidence {
+  const journalPath = locateHotTaskDirs(repoRoot, taskId)
+    .map((entry) => path.join(entry.taskDir, '.task-lifecycle.json'))
+    .find((candidate) => fs.existsSync(candidate));
+  if (!journalPath) return emptyRecoveryJournal();
+  try {
+    const value = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as Record<string, unknown>;
+    const completedSteps = Array.isArray(value.completedSteps)
+      ? value.completedSteps.filter((step): step is string => typeof step === 'string')
+      : [];
+    const failure = value.failure && typeof value.failure === 'object' && !Array.isArray(value.failure)
+      && typeof (value.failure as Record<string, unknown>).code === 'string'
+      ? (value.failure as Record<string, unknown>).code as string
+      : null;
+    return { exists: true, completedSteps, failure };
+  } catch {
+    return { exists: true, completedSteps: [], failure: 'SANDBOX_CONTROL_LIFECYCLE_JOURNAL_INVALID' };
+  }
+}
+
+function taskCreateDomainEvidence(
+  manifest: SandboxControlManifest,
+  output: Record<string, unknown> | null
+): Readonly<Record<string, unknown>> {
+  if (!output || !['applied', 'no-op', 'degraded'].includes(String(output.status))) {
+    return { consistent: false };
+  }
+  const task = output.task && typeof output.task === 'object' && !Array.isArray(output.task)
+    ? output.task as Record<string, unknown> : null;
+  const taskId = typeof task?.id === 'string' ? task.id : null;
+  const shortId = typeof task?.shortId === 'string' ? task.shortId : null;
+  if (!taskId || !shortId) return { consistent: false };
+  try {
+    const resolved = resolveTaskRef(taskId, { repoRoot: manifest.repoRoot });
+    const shortIds = loadShortIdByTaskId(manifest.repoRoot);
+    return {
+      consistent: resolved.ok && resolved.taskId === taskId && resolved.state === 'active' && shortIds.get(taskId) === shortId,
+      taskId,
+      shortId
+    };
+  } catch {
+    return { consistent: false };
+  }
+}
+
+function controllerDomainEvidence(
+  manifest: SandboxControlManifest,
+  manifestPath: string,
+  request: SandboxControlRequest,
+  output: Record<string, unknown> | null
+): Readonly<Record<string, unknown>> {
+  if (!output || output.error !== null || typeof output.status !== 'string') return { consistent: false };
+  try {
+    const registration = readCodexControllerRegistration(manifestPath);
+    if (request.family !== 'codex-controller') return { consistent: false };
+    if (request.command === 'open') {
+      const lease = output.lease && typeof output.lease === 'object' && !Array.isArray(output.lease)
+        ? output.lease as Record<string, unknown> : null;
+      return {
+        consistent: output.status === 'opened' && output.changed === true
+          && lease?.taskId === registration.taskId
+          && lease.controlGeneration === registration.controlGeneration
+          && lease.controllerInstanceDigest === registration.controllerInstanceDigest
+          && registration.taskId === manifest.taskId
+          && registration.controlGeneration === manifest.generation
+      };
+    }
+    if (request.command === 'verify') {
+      const binding = output.binding && typeof output.binding === 'object' && !Array.isArray(output.binding)
+        ? output.binding as Record<string, unknown> : null;
+      return {
+        consistent: output.status === 'verified' && output.changed === false
+          && binding?.taskId === registration.taskId
+          && binding.controlGeneration === registration.controlGeneration
+          && binding.controllerInstanceDigest === registration.controllerInstanceDigest
+      };
+    }
+    return { consistent: false };
+  } catch {
+    return { consistent: request.family === 'codex-controller' && request.command === 'close'
+      && output?.status === 'closed' && output.changed === false };
+  }
+}
+
+function orchestrationDomainEvidence(
+  operation: ReturnType<typeof findSandboxControlRecoveryOperation>,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>,
+  output: Record<string, unknown> | null,
+  run: ReturnType<typeof readRun> | null
+): Readonly<Record<string, unknown>> {
+  if (!operation || !output) return { consistent: false };
+  const outputRun = output.run && typeof output.run === 'object' && !Array.isArray(output.run)
+    ? output.run as Record<string, unknown> : null;
+  const runMatches = outputRun === null ? run === null : run !== null && JSON.stringify(run) === JSON.stringify(outputRun);
+  if (operation.class === 'read-only') {
+    return {
+      consistent: output.status === terminalResult.status && output.changed === terminalResult.changed && runMatches,
+      snapshotValid: true,
+      status: run?.status ?? terminalResult.status,
+      pendingDelegation: run?.pendingDelegation ?? null
+    };
+  }
+  if (!run || !outputRun) return { consistent: false };
+  return {
+    consistent: output.status === terminalResult.status && output.changed === terminalResult.changed && runMatches,
+    status: run.status,
+    pendingDelegation: run.pendingDelegation
+  };
+}
+
 function readRecoveryDomain(
   manifest: SandboxControlManifest,
+  manifestPath: string,
   request: SandboxControlRequest,
   operation: ReturnType<typeof findSandboxControlRecoveryOperation>,
-  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>
-): Readonly<Record<string, unknown>> | null {
-  if (!operation) return null;
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>,
+  payloadOutput: string | null
+): RecoveryDomainEvidence {
+  if (!operation) return { domain: null, journal: emptyRecoveryJournal() };
   const taskRef = request.family === 'task-finalization'
     ? manifest.taskId
     : 'args' in request ? request.args[0] ?? null : manifest.taskId;
-  if (!taskRef && operation.family !== 'task-create' && operation.family !== 'codex-controller') return null;
+  const output = parseRecoveryOutput(payloadOutput);
+  if (!taskRef && operation.family !== 'task-create' && operation.family !== 'codex-controller') {
+    return { domain: null, journal: emptyRecoveryJournal() };
+  }
 
   if (operation.family === 'task-finalization') {
     const taskId = manifest.taskId;
-    if (!taskId) return null;
+    if (!taskId) return { domain: null, journal: emptyRecoveryJournal() };
     try {
       const receipt = readTaskFinalizationReceipt(manifest.repoRoot, taskId);
       const resolved = resolveTaskRef(taskId, { repoRoot: manifest.repoRoot });
@@ -408,118 +554,132 @@ function readRecoveryDomain(
         && receipt.controlBinding?.generation === manifest.generation
         && receipt.controlBinding.requestId === request.id
         && receipt.lifecycle === 'done');
-      return { consistent, completedSteps: terminalResult.completedSteps };
+      return { domain: { consistent, completedSteps: terminalResult.completedSteps }, journal: emptyRecoveryJournal() };
     } catch {
-      return { consistent: false };
+      return { domain: { consistent: false }, journal: emptyRecoveryJournal() };
     }
   }
 
   if (operation.family === 'task-lifecycle') {
-    if (!taskRef || !terminalResult.targetState) return null;
+    if (!taskRef || !terminalResult.targetState) return { domain: null, journal: emptyRecoveryJournal() };
+    const journal = readLifecycleJournalEvidence(manifest.repoRoot, taskRef);
     try {
       const resolved = resolveTaskRef(taskRef, { repoRoot: manifest.repoRoot });
       const shortIds = loadShortIdByTaskId(manifest.repoRoot);
       const shortIdMatches = terminalResult.targetState === 'active'
         ? shortIds.has(resolved.ok ? resolved.taskId : taskRef)
         : !shortIds.has(resolved.ok ? resolved.taskId : taskRef);
-      const taskId = resolved.ok ? resolved.taskId : taskRef;
-      const journal = locateHotTaskDirs(manifest.repoRoot, taskId)
-        .map((entry) => path.join(entry.taskDir, '.task-lifecycle.json'))
-        .find((candidate) => fs.existsSync(candidate));
       return {
-        consistent: resolved.ok && resolved.state === terminalResult.targetState && shortIdMatches,
-        journal: { exists: Boolean(journal), completedSteps: terminalResult.completedSteps, failure: null }
+        domain: { consistent: resolved.ok && resolved.state === terminalResult.targetState && shortIdMatches },
+        journal
       };
     } catch {
-      return { consistent: false };
+      return { domain: { consistent: false }, journal };
     }
   }
 
   if (operation.family === 'task-orchestration') {
-    if (!taskRef) return null;
+    if (!taskRef) return { domain: null, journal: emptyRecoveryJournal() };
     try {
       const resolved = resolveTaskRef(taskRef, { repoRoot: manifest.repoRoot });
-      if (!resolved.ok) return { consistent: false };
+      if (!resolved.ok) return { domain: { consistent: false }, journal: emptyRecoveryJournal() };
       const run = readRun(resolved.taskDir);
-      if (!run) return { consistent: false };
+      if (!run && operation.class !== 'read-only') return { domain: { consistent: false }, journal: emptyRecoveryJournal() };
       if (operation.class === 'route.clean-completion') {
         const snapshot = captureRepositorySnapshot(manifest.repoRoot);
         const metadata = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
-        const completion = run.completionEvidence;
-        const consistent = run.status === 'completed'
+        const completion = run?.completionEvidence ?? null;
+        const consistent = run !== null && run.status === 'completed'
           && run.pendingDelegation === null
           && completion !== null
           && completion.kind === 'reviewed-head-clean'
+          && terminalResult.completionEvidence !== null
+          && JSON.stringify(completion) === JSON.stringify(terminalResult.completionEvidence)
           && snapshot.head === completion.head
           && snapshot.headTree === completion.headTree
           && snapshot.worktreeTree === completion.worktreeTree
           && metadata.last_reviewed_commit === completion.lastReviewedCommit;
         return {
-          consistent,
-          status: run.status,
-          pendingDelegation: run.pendingDelegation,
-          completionEvidence: completion,
-          snapshot,
-          lastReviewedCommit: metadata.last_reviewed_commit
+          domain: {
+            consistent,
+            status: run?.status ?? null,
+            pendingDelegation: run?.pendingDelegation ?? null,
+            completionEvidence: completion,
+            snapshot,
+            lastReviewedCommit: metadata.last_reviewed_commit
+          },
+          journal: emptyRecoveryJournal()
         };
       }
-      return { consistent: true, snapshotValid: true, status: run.status, pendingDelegation: run.pendingDelegation };
+      return { domain: orchestrationDomainEvidence(operation, terminalResult, output, run), journal: emptyRecoveryJournal() };
     } catch {
-      return { consistent: false };
+      return { domain: { consistent: false }, journal: emptyRecoveryJournal() };
     }
   }
 
-  return { consistent: true };
+  if (operation.family === 'task-create') {
+    return { domain: taskCreateDomainEvidence(manifest, output), journal: emptyRecoveryJournal() };
+  }
+  if (operation.family === 'codex-controller') {
+    return { domain: controllerDomainEvidence(manifest, manifestPath, request, output), journal: emptyRecoveryJournal() };
+  }
+  return { domain: null, journal: emptyRecoveryJournal() };
 }
 
 function recoveryResponse(
   manifest: SandboxControlManifest,
+  manifestPath: string,
   request: SandboxControlRequest,
   evidence: ReturnType<typeof readSandboxControlResultEvidence>,
-  payload: ReturnType<typeof readSandboxControlPayload> | null
+  payload: ReturnType<typeof readSandboxControlPayload> | null,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>
 ): SandboxControlResponse | null {
-  const operationName = recoveryOperationKey(request, null, payload?.stdout);
+  const operationName = recoveryOperationKey(request, terminalResult, payload?.stdout);
   const operation = operationName ? findSandboxControlRecoveryOperation(request.family, operationName) : null;
   if (!operation) return null;
+  if (payload) {
+    const payloadTerminal = createSandboxControlTerminalResult(manifest, {
+      id: request.id, family: request.family, operation: operationName
+    }, payload.stdout);
+    if (JSON.stringify(payloadTerminal) !== JSON.stringify(terminalResult)) return unknown(request.id);
+  }
   let finalization: FinalizationRecovery | null = null;
-  let terminalOutput = payload?.stdout ?? null;
-  if (!terminalOutput && request.family === 'task-finalization' && evidence.exitCode === 0) {
+  if (request.family === 'task-finalization' && evidence.exitCode === 0) {
     finalization = finalizationRecoveryResponse(manifest, request.id, evidence.exitCode);
     if (finalization.status === 'deferred') return null;
-    terminalOutput = finalization.response?.stdout ?? null;
   }
-  const terminalResult = terminalOutput !== null
-    ? createSandboxControlTerminalResult(manifest, { id: request.id, family: request.family, operation: operationName }, terminalOutput)
-    : null;
-  if (!terminalResult) return null;
+  const recovery = readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);
   const binding = operationRecoveryBinding(request.id, manifest.generation, manifest.taskId, request.family, operationName!);
   const decision = classifySandboxControlRecovery({
     operation,
     binding,
     startedCommitted: true,
     terminalResult,
-    domain: readRecoveryDomain(manifest, request, operation, terminalResult)
+    domain: recovery.domain,
+    journal: recovery.journal
   });
   if (decision.outcome === 'unknown' || decision.outcome === 'in-progress') return unknown(request.id);
   if (decision.outcome === 'not-executed') return notExecuted(request.id);
   if (decision.outcome !== 'success' && decision.outcome !== 'failure') return null;
   if (request.family === 'task-finalization' && evidence.exitCode === 0) {
-    finalization ??= finalizationRecoveryResponse(manifest, request.id, evidence.exitCode);
-    return finalization.status === 'matched' ? finalization.response ?? null : null;
+    if (finalization?.status !== 'matched') return null;
+    return finalization.response ?? null;
   }
   return genericRecoveryResponse(request, evidence.exitCode, payload);
 }
 
 function terminalMatchesEvidence(
   manifest: SandboxControlManifest,
+  manifestPath: string,
   request: SandboxControlRequest,
   response: SandboxControlResponse,
   evidence: ReturnType<typeof readSandboxControlResultEvidence>,
   payload: ReturnType<typeof readSandboxControlPayload> | null,
-  payloadInvalid: boolean
+  payloadInvalid: boolean,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>
 ): { valid: boolean; payloadReferenced: boolean } {
   if (request.family === 'task-finalization' && evidence.exitCode === 0) {
-    const expected = recoveryResponse(manifest, request, evidence, payload);
+    const expected = recoveryResponse(manifest, manifestPath, request, evidence, payload, terminalResult);
     return {
       valid: expected !== null && JSON.stringify(response) === JSON.stringify(expected),
       payloadReferenced: false
@@ -695,7 +855,7 @@ function assertCurrentSandboxControlIdentity(manifest: SandboxControlManifest, m
   }
 }
 
-function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner, brokerOwns: () => boolean): boolean {
+function recoverProcessing(manifest: SandboxControlManifest, manifestPath: string, broker: BrokerOwner, brokerOwns: () => boolean): boolean {
   for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/.test(entry.name)) continue;
     if (!brokerOwns()) return false;
@@ -795,8 +955,15 @@ function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner
         }
       }
       if (terminal && (!request || !resultEvidence)) continue;
+      if (!terminalResult) {
+        if (terminal) continue;
+        if (!brokerOwns()) return false;
+        if (!resultEvidence || !request || payloadInvalid) continue;
+        writeSandboxControlResponse(manifest, unknown(entry.name));
+        continue;
+      }
       if (terminal && request && resultEvidence) {
-        const reconciliation = terminalMatchesEvidence(manifest, request, existingTerminalResponse!, resultEvidence, payload, payloadInvalid);
+        const reconciliation = terminalMatchesEvidence(manifest, manifestPath, request, existingTerminalResponse!, resultEvidence, payload, payloadInvalid, terminalResult);
         if (!reconciliation.valid) continue;
         payloadReferenced = reconciliation.payloadReferenced;
         if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
@@ -807,7 +974,7 @@ function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner
       if (!terminal) {
         if (!brokerOwns()) return false;
         if (!resultEvidence || !request || payloadInvalid) continue;
-        const recovered = recoveryResponse(manifest, request, resultEvidence, payload);
+        const recovered = recoveryResponse(manifest, manifestPath, request, resultEvidence, payload, terminalResult);
         if (!recovered) continue;
         if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
           const view = publishFinalizationTaskView(manifest, broker, request.id, 'starting', null, null);
@@ -971,7 +1138,7 @@ export async function serveSandboxControl(
       processingDir: manifest.processingDir,
       internalCliPath: options.internalCliPath ?? process.argv[1] ?? null
     });
-    if (!recoverProcessing(manifest, broker, brokerOwns)) return;
+    if (!recoverProcessing(manifest, manifestPath, broker, brokerOwns)) return;
     try {
       const published = readSandboxControlStatus(manifest.publicStatusDir);
       if (published.generation === manifest.generation) taskView = published.taskView;
