@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,7 +10,10 @@ import { canonicalTaskCreateCandidate, validateTaskCreateCandidate } from '../..
 
 const internalCli = path.resolve('bin/internal-cli.ts');
 const hostEnvironment = Object.fromEntries(
-  Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_INFRA_CONTROL_'))
+  Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_INFRA_CONTROL_')
+    && key !== 'AGENT_INFRA_TASK_ID'
+    && key !== 'AGENT_INFRA_RUNTIME_DIR'
+    && key !== 'AGENT_INFRA_EXECUTOR_MANIFEST')
 );
 
 function fixture(): string {
@@ -40,6 +43,85 @@ function candidate() {
       acceptanceCriteria: ['A task is persisted.'], openQuestions: []
     }
   };
+}
+
+async function waitForRequestAsync(requestsDir: string, timeoutMs: number): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const request = fs.readdirSync(requestsDir).find((name) => name.endsWith('.json'));
+    if (request) return request;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for a request in ${requestsDir}`);
+}
+
+async function runControlledTaskCreate(
+  responseFor: (requestId: string) => object,
+  options: { removeAcceptedMarkerAfterTerminal?: boolean } = {}
+): Promise<{
+  requestId: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}> {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  const channelDir = path.join(root, 'control');
+  const requestsDir = path.join(channelDir, 'requests');
+  const responsesDir = path.join(channelDir, 'responses');
+  const statusDir = path.join(root, 'status');
+  const generation = 'task-create-test-generation';
+  fs.writeFileSync(input, JSON.stringify(candidate()));
+  fs.mkdirSync(requestsDir, { recursive: true });
+  fs.mkdirSync(responsesDir);
+  fs.mkdirSync(statusDir);
+  fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
+    version: 3,
+    generation,
+    broker: { pid: process.pid, startTime: 0, brokerId: 'task-create-test-broker' },
+    state: 'healthy',
+    reasonCode: null,
+    activeRequestId: null,
+    updatedAt: Date.now(),
+    taskView: { state: 'not-applicable', taskId: null, observedSource: null, receipt: null, reasonCode: null }
+  })}\n`);
+  const child = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+    cwd: root,
+    env: {
+      ...hostEnvironment,
+      AGENT_INFRA_CONTROL_TOKEN: 'task-create-test-token',
+      AGENT_INFRA_CONTROL_GENERATION: generation,
+      AGENT_INFRA_CONTROL_DIR: channelDir,
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+  child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+  const result = new Promise<number>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code) => resolve(code ?? 1));
+  });
+  try {
+    const requestName = await waitForRequestAsync(requestsDir, 2_000);
+    const requestId = requestName.slice(0, -5);
+    fs.writeFileSync(path.join(responsesDir, `${requestId}.accepted.json`), `${JSON.stringify({
+      version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
+    })}\n`);
+    fs.writeFileSync(path.join(responsesDir, `${requestId}.json`), `${JSON.stringify(responseFor(requestId))}\n`);
+    if (options.removeAcceptedMarkerAfterTerminal) {
+      fs.rmSync(path.join(responsesDir, `${requestId}.accepted.json`));
+    }
+    return { requestId, exitCode: await result, stdout, stderr };
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    await result.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 test('task-create internal CLI persists a task and replays as no-op', () => {
@@ -124,4 +206,66 @@ test('task-create internal CLI rejects symbolic-link input without writing', () 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('task-create internal CLI returns controlled recovery evidence when the broker is unavailable', () => {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  fs.writeFileSync(input, JSON.stringify(candidate()));
+  try {
+    const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...hostEnvironment,
+        AGENT_INFRA_CONTROL_TOKEN: 'controlled-token',
+        AGENT_INFRA_CONTROL_GENERATION: 'controlled-generation',
+        AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
+        AGENT_INFRA_CONTROL_STATUS_DIR: path.join(root, 'status')
+      }
+    });
+    assert.equal(result.status, 2);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 'blocked');
+    assert.equal(payload.error.code, 'SANDBOX_CONTROL_BROKER_UNAVAILABLE');
+    assert.deepEqual(payload.control, {
+      requestId: null,
+      accepted: false,
+      recovery: 'new-request-id'
+    });
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create preserves accepted evidence for a broker result-unknown terminal', async () => {
+  const result = await runControlledTaskCreate((requestId) => ({
+    version: 2, id: requestId, phase: 'rejected', exitCode: null, stdout: '',
+    stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN: accepted execution ended without a provable result\n',
+    error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'SANDBOX_CONTROL_RESULT_UNKNOWN: result unknown', retryable: false }
+  }));
+  assert.equal(result.exitCode, 1, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.error.code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+  assert.deepEqual(payload.control, {
+    requestId: result.requestId,
+    accepted: true,
+    recovery: 'same-request-id'
+  });
+});
+
+test('task-create preserves accepted evidence when an accepted terminal response is invalid', async () => {
+  const result = await runControlledTaskCreate((requestId) => ({
+    version: 2, id: requestId, phase: 'completed', exitCode: 0, stdout: '', stderr: '', error: null,
+    outputState: 'available', payload: null
+  }), { removeAcceptedMarkerAfterTerminal: true });
+  assert.equal(result.exitCode, 1, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.error.code, 'SANDBOX_CONTROL_RESPONSE_INVALID');
+  assert.deepEqual(payload.control, {
+    requestId: result.requestId,
+    accepted: true,
+    recovery: 'same-request-id'
+  });
 });

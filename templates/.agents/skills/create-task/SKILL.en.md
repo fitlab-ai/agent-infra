@@ -126,6 +126,14 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - `blocked`: retain the candidate and retry the same file after the transient problem is fixed.
 - `failed`: report the stable error code. Never modify and retry a candidate under the same idempotency key.
 
+A controlled invocation may return `control` request evidence: `accepted: true`
+with `recovery: none` means the current result can be consumed; `accepted: false`
+with `recovery: new-request-id` means the request was not admitted and the same
+candidate may be retried with a new outer request ID after the transient problem
+is fixed; `recovery: same-request-id` or `recovery: inspect-domain-state` means
+the request was accepted, so do not create a new candidate or replay it
+automatically. Recover with the original request or inspect host task state first.
+
 ### 4. Platform Failure Compatibility
 
 The host service owns platform cascading. The compatibility recovery commands remain visible in the host warning and are not run from the sandbox:

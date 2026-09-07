@@ -12,6 +12,13 @@ import { verifyTaskEvent } from './verification.ts';
 type TaskCreateStatus = 'applied' | 'no-op' | 'degraded' | 'failed' | 'blocked';
 type TaskCreateOperation = { name: string; status: string; reasonCode: string | null };
 type TaskCreateWarning = { code: string; severity: string; action: string };
+type TaskCreateRecovery = 'none' | 'same-request-id' | 'new-request-id' | 'inspect-domain-state';
+type TaskCreateControl = Readonly<{
+  requestId: string | null;
+  accepted: boolean;
+  recovery: TaskCreateRecovery;
+}>;
+type TaskCreateError = { code: string; message: string; retryable: boolean };
 type TaskCreateResult = Readonly<{
   status: TaskCreateStatus;
   changed: boolean;
@@ -19,7 +26,8 @@ type TaskCreateResult = Readonly<{
   issue: { number: number; url: string } | null;
   operations: readonly TaskCreateOperation[];
   warnings: readonly TaskCreateWarning[];
-  error: { code: string; message: string; retryable: boolean } | null;
+  error: TaskCreateError | null;
+  control?: TaskCreateControl;
 }>;
 
 type CreateTaskOptions = Readonly<{
@@ -41,6 +49,116 @@ const DEFAULT_DEPENDENCIES: TaskCreateDependencies = {
   syncComment: syncPlatformComment,
   addWarning: applyWorkflowWarningIntent
 };
+
+function invalidTaskCreateResult(): never {
+  throw new Error('TASK_CREATE_RESULT_INVALID');
+}
+
+function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  return Object.keys(value).sort().join(',') === [...expected].sort().join(',');
+}
+
+function validTaskReference(value: unknown): boolean {
+  return value === null || (typeof value === 'string' && value.length > 0);
+}
+
+function validTaskCreateError(value: unknown): value is TaskCreateError {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const error = value as Record<string, unknown>;
+  return exactKeys(error, ['code', 'message', 'retryable'])
+    && typeof error.code === 'string' && /^[A-Z][A-Z0-9_]+$/u.test(error.code)
+    && typeof error.message === 'string'
+    && typeof error.retryable === 'boolean';
+}
+
+function validTaskCreateControl(value: unknown): value is TaskCreateControl {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const control = value as Record<string, unknown>;
+  return exactKeys(control, ['accepted', 'recovery', 'requestId'])
+    && validTaskReference(control.requestId)
+    && typeof control.accepted === 'boolean'
+    && ['none', 'same-request-id', 'new-request-id', 'inspect-domain-state'].includes(control.recovery as string);
+}
+
+export function parseTaskCreateResult(value: unknown): TaskCreateResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalidTaskCreateResult();
+  const result = value as Record<string, unknown>;
+  if (!exactKeys(result, ['changed', 'control', 'error', 'issue', 'operations', 'status', 'task', 'warnings'])
+    && !exactKeys(result, ['changed', 'error', 'issue', 'operations', 'status', 'task', 'warnings'])) {
+    return invalidTaskCreateResult();
+  }
+  if (!['applied', 'no-op', 'degraded', 'failed', 'blocked'].includes(result.status as string)
+    || typeof result.changed !== 'boolean'
+    || !result.task || typeof result.task !== 'object' || Array.isArray(result.task)
+    || !exactKeys(result.task as Record<string, unknown>, ['id', 'shortId'])
+    || !validTaskReference((result.task as { id?: unknown }).id)
+    || !validTaskReference((result.task as { shortId?: unknown }).shortId)
+    || !Array.isArray(result.operations)
+    || !result.operations.every((operation) => {
+      if (!operation || typeof operation !== 'object' || Array.isArray(operation)) return false;
+      const value = operation as Record<string, unknown>;
+      return exactKeys(value, ['name', 'reasonCode', 'status'])
+        && typeof value.name === 'string' && typeof value.status === 'string'
+        && (value.reasonCode === null || typeof value.reasonCode === 'string');
+    })
+    || !Array.isArray(result.warnings)
+    || !result.warnings.every((warning) => {
+      if (!warning || typeof warning !== 'object' || Array.isArray(warning)) return false;
+      const value = warning as Record<string, unknown>;
+      return exactKeys(value, ['action', 'code', 'severity'])
+        && typeof value.action === 'string' && typeof value.code === 'string' && typeof value.severity === 'string';
+    })
+    || (result.issue !== null && (
+      !result.issue || typeof result.issue !== 'object' || Array.isArray(result.issue)
+      || !exactKeys(result.issue as Record<string, unknown>, ['number', 'url'])
+      || !Number.isSafeInteger((result.issue as { number?: unknown }).number)
+      || ((result.issue as { number: number }).number) <= 0
+      || typeof (result.issue as { url?: unknown }).url !== 'string'
+    ))
+    || (result.error !== null && !validTaskCreateError(result.error))
+    || ('control' in result && !validTaskCreateControl(result.control))) {
+    return invalidTaskCreateResult();
+  }
+  if (result.status === 'blocked' && !(result.error as TaskCreateError | null)?.retryable) return invalidTaskCreateResult();
+  if (result.status === 'failed' && !(result.error as TaskCreateError | null)) return invalidTaskCreateResult();
+  return result as unknown as TaskCreateResult;
+}
+
+export function projectTaskCreateResult(result: TaskCreateResult, control: TaskCreateControl): TaskCreateResult {
+  return { ...result, control };
+}
+
+export function taskCreateExitCode(result: Pick<TaskCreateResult, 'status'>): number {
+  return result.status === 'blocked' ? 2 : result.status === 'failed' ? 1 : 0;
+}
+
+export function taskCreateFailure(
+  error: TaskCreateError,
+  control?: TaskCreateControl
+): TaskCreateResult {
+  return {
+    status: error.retryable ? 'blocked' : 'failed',
+    changed: false,
+    task: { id: null, shortId: null },
+    issue: null,
+    operations: [],
+    warnings: [],
+    error,
+    ...(control ? { control } : {})
+  };
+}
+
+export function taskCreateOutputUnavailableResult(requestId: string): TaskCreateResult {
+  return taskCreateFailure({
+    code: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE',
+    message: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: task-create result output was not retained; inspect domain state before retrying',
+    retryable: false
+  }, {
+    requestId,
+    accepted: true,
+    recovery: 'inspect-domain-state'
+  });
+}
 
 async function verifyCreatedTask(repoRoot: string, taskId: string): Promise<{ operation: TaskCreateOperation; error: TaskCreateResult['error'] }> {
   const verification = await verifyTaskEvent(
@@ -91,10 +209,7 @@ async function createTask(value: unknown, options: CreateTaskOptions): Promise<T
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const code = /^([A-Z][A-Z0-9_]+)/.exec(message)?.[1] ?? 'TASK_CREATE_FAILED';
-    return {
-      status: 'failed', changed: false, task: { id: null, shortId: null }, issue: null,
-      operations: [], warnings: [], error: { code, message, retryable: code === 'TASK_CREATE_LOCK_TIMEOUT' }
-    };
+    return taskCreateFailure({ code, message, retryable: code === 'TASK_CREATE_LOCK_TIMEOUT' });
   }
 
   const operations: TaskCreateOperation[] = [{
@@ -168,4 +283,14 @@ async function createTask(value: unknown, options: CreateTaskOptions): Promise<T
 }
 
 export { createTask };
-export type { CreateTaskOptions, TaskCreateDependencies, TaskCreateOperation, TaskCreateResult, TaskCreateStatus, TaskCreateWarning };
+export type {
+  CreateTaskOptions,
+  TaskCreateControl,
+  TaskCreateDependencies,
+  TaskCreateError,
+  TaskCreateOperation,
+  TaskCreateRecovery,
+  TaskCreateResult,
+  TaskCreateStatus,
+  TaskCreateWarning
+};

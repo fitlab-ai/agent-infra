@@ -12,7 +12,13 @@ import {
   validateTaskCreateCandidate,
   type TaskCreateCandidateV1
 } from '../../../lib/task/create.ts';
-import { createTask } from '../../../lib/task/create-service.ts';
+import {
+  createTask,
+  parseTaskCreateResult,
+  projectTaskCreateResult,
+  taskCreateExitCode,
+  taskCreateOutputUnavailableResult
+} from '../../../lib/task/create-service.ts';
 import { lockKey } from '../../../lib/task/task-execution-lock.ts';
 
 const candidate: TaskCreateCandidateV1 = {
@@ -267,4 +273,46 @@ test('platform failure preserves the local task and records a warning intent', a
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('task-create result projection preserves control recovery evidence without changing the domain result', async () => {
+  const root = fixture();
+  try {
+    const domainResult = await createTask(candidate, {
+      repoRoot: root,
+      agentInfraVersion: 'v0.9.5'
+    });
+    const projected = projectTaskCreateResult(domainResult, {
+      requestId: '0123456789abcdef0123456789abcdef',
+      accepted: true,
+      recovery: 'none'
+    });
+
+    assert.deepEqual(projected.task, domainResult.task);
+    assert.deepEqual(projected.control, {
+      requestId: '0123456789abcdef0123456789abcdef',
+      accepted: true,
+      recovery: 'none'
+    });
+    assert.deepEqual(parseTaskCreateResult(projected), projected);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create output-unavailable fallback is a failed result with inspectable recovery evidence', () => {
+  const result = taskCreateOutputUnavailableResult('fedcba9876543210fedcba9876543210');
+  assert.equal(result.status, 'failed');
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.task, { id: null, shortId: null });
+  assert.equal(result.issue, null);
+  assert.deepEqual(result.control, {
+    requestId: 'fedcba9876543210fedcba9876543210',
+    accepted: true,
+    recovery: 'inspect-domain-state'
+  });
+  assert.equal(result.error?.code, 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE');
+  assert.equal(result.error?.retryable, false);
+  assert.equal(taskCreateExitCode(result), 1);
+  assert.deepEqual(parseTaskCreateResult(result), result);
 });

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
+import { classifySandboxControlEnvironment } from '../lib/sandbox/control/client.ts';
 import {
   formatTaskViewDiagnostic,
   guardTaskOperation,
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
 import { INTERNAL_HANDLER_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
-
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
 if (major < 22 || (major === 22 && minor < 9)) {
   process.stderr.write(
@@ -44,25 +44,11 @@ function taskControlTransportFailure(message: string): never {
 }
 
 if (!taskViewGuardFailed && taskControlCommand) {
-  const env = process.env;
-  const executorMarked = Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
-  const controlKeys = [
-    'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
-    'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR'
-  ];
-  const hasControlMarker = controlKeys.some((key) => Boolean(env[key]))
-    || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING);
-  const taskBindingMarker = hasControlMarker && Boolean(env.AGENT_INFRA_TASK_ID);
-  const hasCompleteClientConfig = controlKeys.every((key) => Boolean(env[key]))
-    && !env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING
-    && (!taskBindingMarker || Boolean(env.AGENT_INFRA_RUNTIME_DIR));
-  if (executorMarked) {
-    taskControlTransportFailure('executor context is only valid for sandbox-control execute');
+  const environment = classifySandboxControlEnvironment();
+  if (environment.kind === 'invalid') {
+    taskControlTransportFailure(environment.message ?? 'sandbox client control configuration is invalid');
   }
-  if ((hasControlMarker || taskBindingMarker) && !hasCompleteClientConfig) {
-    taskControlTransportFailure('sandbox client control configuration is incomplete or conflicting');
-  }
-  if (hasCompleteClientConfig) {
+  if (environment.kind === 'controlled') {
     const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
     await sandboxControl(['client', command, ...process.argv.slice(3)]);
   } else {
