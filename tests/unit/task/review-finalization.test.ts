@@ -6,6 +6,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { finalizeReviewSummary } from '../../../lib/task/review-finalization.ts';
+import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+import { applyArtifactRepair } from '../../../lib/task/artifact-operations.ts';
+import { readArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
 import {
   finalizeReviewSummaryContent,
   parseReviewSummary,
@@ -38,15 +41,16 @@ id: ${TASK_ID}
 - 2026-01-01 00:00:00+00:00 — **Review Analysis (Round 1) [started]** by codex — started
 `);
   const artifactPath = path.join(dir, 'review-analysis.md');
-  fs.writeFileSync(artifactPath, `# Review
-
-- **Review Input**: \`analysis.md\`
-
-## Review Summary
-
-- **Overall Verdict**: Approved
-- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors
-`);
+  const summary = `## 审查摘要
+<!-- artifact-section:review-analysis:summary -->
+- **总体结论**：通过
+- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要
+`;
+  let review = renderArtifactSkeleton({ taskId: TASK_ID, family: 'review-analysis', artifact: 'review-analysis.md' })
+    .replaceAll('<!-- artifact-slot:empty -->', '内容')
+    .replace(/## 审查摘要\n<!-- artifact-section:review-analysis:summary -->\n内容/, summary.trimEnd())
+    .replace('## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n```text\n$ git status -s\n```');
+  fs.writeFileSync(artifactPath, review);
   return { root, dir, artifactPath };
 }
 
@@ -156,6 +160,41 @@ test('review finalization does not treat a done-only historical row as an open r
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
+});
+
+test('review finalizer exposes a repair baseline and the shared repair can restore the artifact', () => {
+  const f = domainFixture();
+  const malformed = fs.readFileSync(f.artifactPath, 'utf8').replace('## 检视覆盖声明\n', '');
+  fs.writeFileSync(f.artifactPath, malformed);
+
+  const failed = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
+  assert.match(failed.artifactSha256 ?? '', /^[a-f0-9]{64}$/);
+  assert.match(failed.semanticDigest ?? '', /^[a-f0-9]{64}$/);
+  assert.equal(failed.repairable, true);
+  assert.equal(failed.operation?.kind, 'insert-section');
+  const intent = readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
+  assert.equal(intent?.state, 'awaiting-repair');
+  assert.equal(intent?.artifactSha256, failed.artifactSha256);
+  assert.equal(intent?.semanticDigest, failed.semanticDigest);
+
+  const repaired = applyArtifactRepair({
+    repoRoot: f.root,
+    taskId: TASK_ID,
+    taskDir: f.dir,
+    family: 'review-analysis',
+    artifact: 'review-analysis.md',
+    expectedSha256: failed.artifactSha256!,
+    expectedSemanticDigest: failed.semanticDigest!,
+    operation: failed.operation!
+  });
+  assert.equal(repaired.status, 'applied');
+  assert.match(fs.readFileSync(f.artifactPath, 'utf8'), /^## 检视覆盖声明$/m);
 });
 
 test('review summary finalization is idempotent and rejects mismatched numeric counts', () => {

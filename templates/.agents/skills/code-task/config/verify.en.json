@@ -17,16 +17,6 @@
     },
     "artifact": {
       "file_pattern": "code.md|code-r{N}.md",
-      "required_sections": [
-        "Implementation Input",
-        "Modified Files",
-        "Key Code Explanation",
-        "Test Results",
-        "Differences from Plan",
-        "Items for Review",
-        "State Check",
-        "Evidence"
-      ],
       "required_patterns": [
         "^\\$ "
       ],

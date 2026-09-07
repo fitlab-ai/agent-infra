@@ -70,6 +70,19 @@ test('qualification audit round-trips and rejects stale or unknown dependencies'
   if (!invalid.ok) assert.equal(invalid.code, 'QUALIFICATION_CONSTRAINT_DIGEST_MISMATCH');
 });
 
+test('qualification audit accepts review audit heading aliases', () => {
+  const built = buildQualificationAudit(taskContent());
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  const rendered = renderQualificationAudit(built.audit);
+
+  for (const heading of ['## 资格审计复核', '## Qualification Audit Review']) {
+    const parsed = parseQualificationAudit(`${heading}\n\n${rendered}`);
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) assert.equal(parsed.audit.present, true);
+  }
+});
+
 test('qualification audit rejects candidate snapshots that diverge from task input', () => {
   const built = buildQualificationAudit(taskContent());
   assert.equal(built.ok, true);

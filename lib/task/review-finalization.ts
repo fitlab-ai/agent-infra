@@ -15,7 +15,9 @@ import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
-import { inspectArtifactStructure } from './artifact-operations.ts';
+import { canonicalSemanticDigest, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
+import { writeArtifactRepairIntent } from './artifact-repair-intent.ts';
+import type { ArtifactRepairOperation } from './artifact-operations.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -51,6 +53,10 @@ type ReviewFinalizationResult = {
   stage: string;
   artifact: string;
   stageStatus: LedgerStageStatus | null;
+  artifactSha256: string | null;
+  semanticDigest: string | null;
+  repairable: boolean;
+  operation: ArtifactRepairOperation | null;
   operations: readonly {
     kind: 'artifact';
     artifact: string;
@@ -91,7 +97,8 @@ function failed(
   code: ReviewFinalizationErrorCode,
   message: string,
   taskId: string | null = null,
-  stageStatus: LedgerStageStatus | null = null
+  stageStatus: LedgerStageStatus | null = null,
+  extra: Partial<ReviewFinalizationResult> = {}
 ): ReviewFinalizationResult {
   return {
     status: 'failed',
@@ -102,8 +109,13 @@ function failed(
     stage: request.stage,
     artifact: request.artifact,
     stageStatus,
+    artifactSha256: null,
+    semanticDigest: null,
+    repairable: false,
+    operation: null,
     operations: [],
-    error: { code, message }
+    error: { code, message },
+    ...extra
   };
 }
 
@@ -170,17 +182,43 @@ function finalizeReviewSummaryUnlocked(
   } catch (error) {
     return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId);
   }
-  if (artifactContent.includes('artifact-section:')) {
-    const schema = getArtifactSchema(spec.family);
-    const structure = schema ? inspectArtifactStructure(artifactContent, schema) : null;
-    if (structure && !structure.ok) {
-      return failed(
-        request,
-        'REVIEW_ARTIFACT_STRUCTURE_INVALID',
-        structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '),
-        resolved.taskId
-      );
+  const schema = getArtifactSchema(spec.family);
+  const structure = schema ? inspectArtifactStructure(artifactContent, schema) : null;
+  if (structure && !structure.ok) {
+    const repairable = structure.repair !== null && structure.diagnostics.length === 1 && structure.diagnostics[0]?.repairable === true;
+    if (repairable) {
+      try {
+        writeArtifactRepairIntent(resolved.repoRoot, {
+          version: 1,
+          taskId: resolved.taskId,
+          family: spec.family,
+          artifact: request.artifact,
+          state: 'awaiting-repair',
+          baselineSemanticDigest: structure.semanticDigest,
+          artifactSha256: sha256Content(artifactContent),
+          semanticDigest: structure.semanticDigest
+        });
+      } catch (error) {
+        return failed(request, 'REVIEW_PROVENANCE_INVALID', `cannot record repair provenance: ${String(error)}`, resolved.taskId, null, {
+          artifactSha256: sha256Content(artifactContent),
+          semanticDigest: structure.semanticDigest,
+          operation: structure.repair
+        });
+      }
     }
+    return failed(
+      request,
+      'REVIEW_ARTIFACT_STRUCTURE_INVALID',
+      structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '),
+      resolved.taskId,
+      null,
+      {
+        artifactSha256: sha256Content(artifactContent),
+        semanticDigest: structure.semanticDigest,
+        repairable,
+        operation: structure.repair
+      }
+    );
   }
   if (!openReviewRound(taskContent, spec.action, parsedArtifact.round)) {
     return failed(
@@ -248,7 +286,10 @@ function finalizeReviewSummaryUnlocked(
   }
   if (!transformed.changed) {
     return {
-      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus),
+      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus, {
+        artifactSha256: sha256Content(artifactContent),
+        semanticDigest: canonicalSemanticDigest(artifactContent)
+      }),
       status: 'no-op',
       error: null
     };
@@ -256,7 +297,10 @@ function finalizeReviewSummaryUnlocked(
   const operations = [{ kind: 'artifact' as const, artifact: request.artifact, operation: 'update' as const }];
   if (request.dryRun) {
     return {
-      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus),
+      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus, {
+        artifactSha256: sha256Content(transformed.content),
+        semanticDigest: canonicalSemanticDigest(transformed.content)
+      }),
       status: 'planned',
       changed: true,
       operations,
@@ -301,6 +345,10 @@ function finalizeReviewSummaryUnlocked(
     stage,
     artifact: request.artifact,
     stageStatus,
+    artifactSha256: sha256Content(transformed.content),
+    semanticDigest: canonicalSemanticDigest(transformed.content),
+    repairable: false,
+    operation: null,
     operations,
     error: null
   };

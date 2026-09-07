@@ -111,7 +111,7 @@ When this round introduces a new key design decision, first run `agent-infra-int
 Before writing this round's `{plan-artifact}`, create the controlled report skeleton:
 
 ```bash
-agent-infra-internal task-artifact {task-id} init --family plan --artifact {plan-artifact}
+agent-infra-internal task-artifact {task-id} init --family plan --artifact {plan-artifact} --locale en
 ```
 
 The skeleton contains identity metadata, stable section markers, and required headings only; real plan content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, call `task-artifact {task-id} repair --family plan --artifact {plan-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`, then rerun the same finalizer.

@@ -17,16 +17,6 @@
     },
     "artifact": {
       "file_pattern": "code.md|code-r{N}.md",
-      "required_sections": [
-        "实现输入",
-        "变更文件",
-        "关键代码说明",
-        "测试结果",
-        "与方案的差异",
-        "供审查关注的内容",
-        "状态核对",
-        "证据原文"
-      ],
       "required_patterns": [
         "^\\$ "
       ],

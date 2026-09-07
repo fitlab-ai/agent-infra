@@ -17,16 +17,6 @@
     },
     "artifact": {
       "file_pattern": "plan.md|plan-r{N}.md",
-      "required_sections": [
-        "Problem Understanding",
-        "Constraints",
-        "Option Comparison",
-        "Technical Approach",
-        "Implementation Steps",
-        "File List",
-        "Verification Strategy",
-        "State Check"
-      ],
       "required_patterns": [
         "^\\$ "
       ],

@@ -17,20 +17,6 @@
     },
     "artifact": {
       "file_pattern": "review-code.md|review-code-r{N}.md",
-      "required_sections": [
-        "Review Summary",
-        "Review Coverage Declaration",
-        "Code Implementation Coverage",
-        "Traceability Matrix",
-        "Findings",
-        "Non-blocking Advisories",
-        "Manual Validation Items",
-        "Conclusion and Recommendations",
-        "State Check",
-        "Evidence",
-        "Self-Doubt",
-        "Review Disagreement Ledger Writeback"
-      ],
       "required_patterns": [
         "^### Approval Decision$",
         "^\\$ ",

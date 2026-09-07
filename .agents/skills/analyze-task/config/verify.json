@@ -18,15 +18,6 @@
     },
     "artifact": {
       "file_pattern": "analysis.md|analysis-r{N}.md",
-      "required_sections": [
-        "需求来源",
-        "需求理解",
-        "相关文件",
-        "影响评估",
-        "技术风险",
-        "工作量和复杂度评估",
-        "状态核对"
-      ],
       "required_patterns": [
         "^\\$ "
       ],

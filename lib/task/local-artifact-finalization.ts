@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 
 import { inspectDecisionDetailDuplicates, scanVisibleMarkdown } from './decision-details.ts';
 import {
@@ -10,7 +9,8 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
-import type { ArtifactSchema } from './artifact-schema.ts';
+import { readArtifactRepairIntent, writeArtifactRepairIntent } from './artifact-repair-intent.ts';
+import type { ArtifactRepairIntent } from './artifact-repair-intent.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
@@ -84,38 +84,7 @@ type LocalArtifactFinalizationResult = {
   error: { code: string; message: string } | null;
 };
 
-type LocalArtifactFinalizationIntent = Readonly<{
-  version: 1;
-  taskId: string;
-  family: LocalArtifactFamily;
-  artifact: string;
-  state: 'awaiting-repair' | 'passed' | 'consumed';
-  baselineSemanticDigest: string | null;
-  artifactSha256: string;
-  semanticDigest: string;
-}>;
-
-function finalizationIntentRoot(repoRoot: string): string {
-  return path.join(repoRoot, '.agents', 'workspace', '.local-artifact-finalization-intents');
-}
-
-function finalizationIntentPath(repoRoot: string, taskId: string, family: LocalArtifactFamily, artifact: string): string {
-  return path.join(finalizationIntentRoot(repoRoot), `${taskId}-${family}-${artifact}.json`);
-}
-
-function isFinalizationIntent(value: unknown): value is LocalArtifactFinalizationIntent {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const intent = value as Record<string, unknown>;
-  return intent.version === 1
-    && typeof intent.taskId === 'string' && intent.taskId.length > 0
-    && (intent.family === 'analysis' || intent.family === 'plan' || intent.family === 'code')
-    && typeof intent.artifact === 'string' && intent.artifact.length > 0
-    && (intent.state === 'awaiting-repair' || intent.state === 'passed' || intent.state === 'consumed')
-    && (intent.baselineSemanticDigest === null || (typeof intent.baselineSemanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.baselineSemanticDigest)))
-    && typeof intent.artifactSha256 === 'string' && /^[a-f0-9]{64}$/.test(intent.artifactSha256)
-    && typeof intent.semanticDigest === 'string' && /^[a-f0-9]{64}$/.test(intent.semanticDigest)
-    && (intent.state === 'awaiting-repair' ? intent.baselineSemanticDigest === intent.semanticDigest : true);
-}
+type LocalArtifactFinalizationIntent = ArtifactRepairIntent;
 
 function readLocalArtifactFinalizationIntent(
   repoRoot: string,
@@ -123,27 +92,11 @@ function readLocalArtifactFinalizationIntent(
   family: LocalArtifactFamily,
   artifact: string
 ): LocalArtifactFinalizationIntent | null {
-  const target = finalizationIntentPath(repoRoot, taskId, family, artifact);
-  if (!fs.existsSync(target)) return null;
-  const value = JSON.parse(fs.readFileSync(target, 'utf8')) as unknown;
-  if (!isFinalizationIntent(value) || value.taskId !== taskId || value.family !== family || value.artifact !== artifact) {
-    throw new Error('LOCAL_FINALIZATION_INTENT_INVALID: finalization provenance schema is invalid');
-  }
-  return value;
+  return readArtifactRepairIntent(repoRoot, taskId, family, artifact);
 }
 
 function writeLocalArtifactFinalizationIntent(repoRoot: string, value: LocalArtifactFinalizationIntent): void {
-  if (!isFinalizationIntent(value)) throw new Error('LOCAL_FINALIZATION_INTENT_INVALID: finalization provenance schema is invalid');
-  const directory = finalizationIntentRoot(repoRoot);
-  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const target = finalizationIntentPath(repoRoot, value.taskId, value.family, value.artifact);
-  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(value)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  try { fs.renameSync(temporary, target); }
-  catch (error) {
-    try { fs.unlinkSync(temporary); } catch { /* preserve primary error */ }
-    throw error;
-  }
+  writeArtifactRepairIntent(repoRoot, value);
 }
 
 function consumeLocalArtifactFinalizationIntent(
@@ -155,24 +108,6 @@ function consumeLocalArtifactFinalizationIntent(
   const consumed = { ...intent, state: 'consumed' as const };
   writeLocalArtifactFinalizationIntent(repoRoot, consumed);
   return consumed;
-}
-
-function requiredSections(family: LocalArtifactFamily): readonly string[] {
-  return LOCAL_ARTIFACT_REQUIRED_SECTIONS[family];
-}
-
-function localSchema(family: LocalArtifactFamily, sections: readonly string[]): ArtifactSchema {
-  const base = getArtifactSchema(family)!;
-  if (sections.length === base.sections.length && sections.every((heading, index) => heading === base.sections[index]!.headings.zh || heading === base.sections[index]!.headings.en)) return base;
-  return {
-    ...base,
-    sections: sections.map((heading, index) => ({
-      id: `custom-${index + 1}`,
-      order: index + 1,
-      headings: { zh: heading, en: heading },
-      marker: `artifact-section:${family}:custom-${index + 1}`
-    }))
-  };
 }
 
 function localDiagnosticCode(code: string): LocalArtifactDiagnosticCode | null {
@@ -209,27 +144,29 @@ function validateLocalArtifact(
   content: string,
   options: LocalArtifactValidationOptions
 ): LocalArtifactValidationResult {
-  const sections = options.requiredSections ?? requiredSections(options.family);
+  const schema = getArtifactSchema(options.family)!;
   const patterns = options.requiredPatterns ?? LOCAL_ARTIFACT_REQUIRED_PATTERNS;
   const diagnostics: LocalArtifactDiagnostic[] = [];
   const scanned = scanVisibleMarkdown(content);
-  const structure = inspectArtifactStructure(content, localSchema(options.family, sections));
+  const structure = inspectArtifactStructure(content, schema);
   for (const item of structure.diagnostics) {
     const mapped = localDiagnostic(item);
     if (mapped) diagnostics.push(mapped);
   }
 
-  const statusSection = sections.find((section) => section === '状态核对' || section.toLowerCase() === 'state check');
+  const statusSection = schema.sections.find((section) => section.id === 'state-check');
   if (statusSection) {
     const statusHeading = scanned.headings.find((heading) => (
-      heading.level === 2 && (heading.text === statusSection || heading.text === `${statusSection}:` || heading.text === `${statusSection}：`)
+      heading.level === 2 && [statusSection.headings.zh, statusSection.headings.en].some((name) => (
+        heading.text === name || heading.text === `${name}:` || heading.text === `${name}：`
+      ))
     ));
     if (statusHeading) {
       const next = scanned.headings.find((candidate) => candidate.start > statusHeading.start && candidate.level <= 2);
       const body = content.slice(statusHeading.end, next?.start ?? content.length);
       for (const pattern of patterns.filter(isStatusPattern)) {
         if (!new RegExp(pattern, 'm').test(body)) {
-          diagnostics.push({ code: 'LOCAL_STATUS_COMMAND_MISSING', message: `status section '${statusSection}' is missing required command output`, repairable: false, line: content.slice(0, statusHeading.start).split('\n').length });
+          diagnostics.push({ code: 'LOCAL_STATUS_COMMAND_MISSING', message: `status section '${statusHeading.text}' is missing required command output`, repairable: false, line: content.slice(0, statusHeading.start).split('\n').length });
         }
       }
     }

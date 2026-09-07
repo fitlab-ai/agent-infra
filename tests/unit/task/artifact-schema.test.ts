@@ -49,11 +49,30 @@ test('artifact skeleton contains identity metadata and non-semantic section mark
   assert.ok(structure.diagnostics.some((item) => item.code === 'ARTIFACT_EMPTY_SECTION'));
 });
 
+test('all six schema families validate filled skeletons in both locales', () => {
+  for (const schema of ARTIFACT_SCHEMAS) {
+    for (const locale of ['zh-CN', 'en'] as const) {
+      const content = renderArtifactSkeleton({
+        taskId: 'TASK-20260101-000001',
+        family: schema.family,
+        artifact: `${schema.family}.md`,
+        locale
+      }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+      const result = inspectArtifactStructure(content, schema);
+      assert.equal(result.ok, true, `${schema.family}/${locale} should satisfy its shared schema`);
+    }
+  }
+});
+
 test('structure scanner ignores fenced headings and proposes one safe punctuation repair', () => {
-  const headings = getArtifactSchema('analysis')!.sections.map((section, index) => (
-    `## ${index === 0 ? `${section.headings.zh}：` : section.headings.zh}\n内容`
-  ));
-  const content = ['# Analysis', '```markdown', '## 需求来源', '```', ...headings].join('\n');
+  const content = [
+    '```markdown',
+    '## 需求来源',
+    '```',
+    renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family: 'analysis', artifact: 'analysis.md' })
+      .replace('## 需求来源\n', '## 需求来源：\n')
+      .replaceAll('<!-- artifact-slot:empty -->', '内容')
+  ].join('\n');
   const structure = inspectArtifactStructure(content, getArtifactSchema('analysis')!);
 
   assert.equal(structure.ok, false);

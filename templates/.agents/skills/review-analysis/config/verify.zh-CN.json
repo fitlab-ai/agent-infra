@@ -17,20 +17,6 @@
     },
     "artifact": {
       "file_pattern": "review-analysis.md|review-analysis-r{N}.md",
-      "required_sections": [
-        "审查摘要",
-        "检视覆盖声明",
-        "需求分析专项覆盖",
-        "追踪矩阵",
-        "问题清单",
-        "非阻塞建议",
-        "人工校验项",
-        "结论与建议",
-        "状态核对",
-        "证据原文",
-        "自我质疑",
-        "审查分歧账本回写"
-      ],
       "required_patterns": [
         "^### 审查决定$",
         "^\\$ "

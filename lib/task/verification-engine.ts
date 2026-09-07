@@ -616,24 +616,30 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     const qualification = validateQualificationAudit(taskContent, content, { artifact: path.basename(artifactPath) });
     if (!qualification.ok) return failResult("artifact", `${path.basename(artifactPath)} has qualification audit errors: ${qualification.code}: ${qualification.message}`);
   }
-  const requiredSections = config.required_sections || [];
-  const schemaFamily = skillName === "review-analysis"
-    ? "review-analysis"
-    : skillName === "review-plan" ? "review-plan" : skillName === "review-code" ? "review-code" : null;
-  if (schemaFamily && content.includes("artifact-section:")) {
-    const schema = getArtifactSchema(schemaFamily);
-    const structure = schema ? inspectArtifactStructure(content, schema) : null;
-    if (structure && !structure.ok) {
-      return failResult("artifact", `${path.basename(artifactPath)} has shared structural errors: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}`);
-    }
-  }
+  const schemaFamily = skillName === "analyze-task"
+    ? "analysis"
+    : skillName === "review-analysis"
+      ? "review-analysis"
+      : skillName === "plan-task"
+        ? "plan"
+        : skillName === "review-plan"
+          ? "review-plan"
+          : skillName === "code-task"
+            ? "code"
+            : skillName === "review-code" ? "review-code" : null;
+  const schema = schemaFamily ? getArtifactSchema(schemaFamily) : null;
   const localFamily = skillName === "analyze-task"
     ? "analysis"
     : skillName === "plan-task" ? "plan" : skillName === "code-task" ? "code" : null;
+  if (schema) {
+    const structure = inspectArtifactStructure(content, schema);
+    if (!structure.ok && !localFamily) {
+      return failResult("artifact", `${path.basename(artifactPath)} has shared structural errors: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}`);
+    }
+  }
   if (localFamily) {
     const local = validateLocalArtifact(content, {
       family: localFamily,
-      requiredSections: requiredSections.filter((section: unknown): section is string => typeof section === "string"),
       requiredPatterns: (config.required_patterns || []).filter((pattern: unknown): pattern is string => typeof pattern === "string"),
       ...(taskContent ? { taskContent } : {}),
       artifact: path.basename(artifactPath)
@@ -646,9 +652,10 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     }
     return passResult(
       "artifact",
-      `${path.basename(artifactPath)} passed (${requiredSections.length} sections)`
+      `${path.basename(artifactPath)} passed (${schema?.sections.length ?? 0} sections)`
     );
   }
+  const requiredSections = config.required_sections || [];
   const missingSections = requiredSections.filter(
     (section: any) => !new RegExp(`^##\\s+${escapeRegExp(section)}\\s*$`, "m").test(content)
   );

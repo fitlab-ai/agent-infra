@@ -3,6 +3,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { scanVisibleMarkdown } from './decision-details.ts';
+import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
+import { readArtifactRepairIntent } from './artifact-repair-intent.ts';
 import {
   getArtifactSchema,
   renderArtifactSkeleton
@@ -33,6 +35,7 @@ type ArtifactStructuralDiagnosticCode =
   | 'ARTIFACT_MARKER_DUPLICATE'
   | 'ARTIFACT_MARKER_MISMATCH'
   | 'ARTIFACT_EMPTY_SECTION'
+  | 'ARTIFACT_SECTION_ORDER_INVALID'
   | 'ARTIFACT_HEADING_TRAILING_PUNCTUATION';
 
 type ArtifactStructuralDiagnostic = Readonly<{
@@ -126,9 +129,9 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function markerEntries(content: string): Array<{ marker: string; start: number; end: number; line: number }> {
-  const entries: Array<{ marker: string; start: number; end: number; line: number }> = [];
-  for (const line of sourceLines(content)) {
+function markerEntries(content: string): Array<{ marker: string; start: number; end: number; line: number; standalone: boolean }> {
+  const entries: Array<{ marker: string; start: number; end: number; line: number; standalone: boolean }> = [];
+  for (const line of scanVisibleMarkdown(content).lines) {
     const match = line.text.match(/<!--\s*(artifact-section:[^\s>]+)\s*-->/g);
     if (!match) continue;
     for (const raw of match) {
@@ -138,7 +141,8 @@ function markerEntries(content: string): Array<{ marker: string; start: number; 
         marker,
         start: line.start + offset,
         end: line.start + offset + raw.length,
-        line: lineNumber(content, line.start)
+        line: lineNumber(content, line.start),
+        standalone: line.text.trim() === raw
       });
     }
   }
@@ -188,12 +192,39 @@ function createHeadingRepair(
   };
 }
 
+function createSectionInsertionRepair(
+  content: string,
+  section: ArtifactSection,
+  marker: { start: number; line: number },
+  locale: 'zh-CN' | 'en'
+): ArtifactRepairOperation {
+  return {
+    kind: 'insert-section',
+    sectionId: section.id,
+    line: marker.line,
+    from: '',
+    to: `## ${section.headings[locale === 'en' ? 'en' : 'zh']}\n`,
+    start: marker.start,
+    end: marker.start
+  };
+}
+
+function applyRepairOperation(content: string, operation: ArtifactRepairOperation): string | null {
+  if (operation.start < 0 || operation.end < operation.start || operation.end > content.length) return null;
+  if (operation.kind === 'insert-section') {
+    if (operation.from !== '' || operation.start !== operation.end || !operation.to) return null;
+    return `${content.slice(0, operation.start)}${operation.to}${content.slice(operation.end)}`;
+  }
+  const raw = content.slice(operation.start, operation.end);
+  const offset = raw.indexOf(operation.from);
+  if (!operation.from || offset < 0 || raw.indexOf(operation.from, offset + operation.from.length) >= 0) return null;
+  return `${content.slice(0, operation.start)}${raw.slice(0, offset)}${operation.to}${raw.slice(offset + operation.from.length)}${content.slice(operation.end)}`;
+}
+
 function canonicalContent(content: string, operation: ArtifactRepairOperation | null = null): string {
   let normalized = content;
   if (operation) {
-    const raw = normalized.slice(operation.start, operation.end);
-    const replaced = raw.replace(operation.from, operation.to);
-    if (replaced !== raw) normalized = `${normalized.slice(0, operation.start)}${replaced}${normalized.slice(operation.end)}`;
+    normalized = applyRepairOperation(normalized, operation) ?? normalized;
   }
   normalized = normalized.replace(/\r\n/g, '\n');
   normalized = normalized.replace(/^<!--\s*artifact-context:[^\n]+-->\s*\n?/gm, '');
@@ -208,8 +239,7 @@ function canonicalSemanticDigest(content: string, operation: ArtifactRepairOpera
 
 function inspectArtifactStructure(
   content: string,
-  schema: ArtifactSchema,
-  options: { requireMarkers?: boolean } = {}
+  schema: ArtifactSchema
 ): ArtifactStructureResult {
   const diagnostics: ArtifactStructuralDiagnostic[] = [];
   const scanned = scanVisibleMarkdown(content);
@@ -239,34 +269,80 @@ function inspectArtifactStructure(
   }
 
   const markers = markerEntries(content);
-  const markerMode = options.requireMarkers === true || markers.length > 0;
-  if (markerMode) {
-    for (const section of schema.sections) {
-      const matches = markers.filter((entry) => entry.marker === section.marker);
-      if (matches.length === 0) {
-        diagnostics.push(diagnostic('ARTIFACT_MARKER_MISSING', `section marker '${section.marker}' is missing`, section.id, null));
-      } else if (matches.length > 1) {
-        diagnostics.push(diagnostic('ARTIFACT_MARKER_DUPLICATE', `section marker '${section.marker}' is duplicated`, section.id, matches[1]!.line));
-      }
-      const heading = headingsBySection.get(section.id)?.[0];
-      if (heading && matches.length === 1) {
-        const bounds = sectionBodyBounds(content, heading);
-        if (matches[0]!.start < bounds.start || matches[0]!.start >= bounds.end) {
-          diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' is outside its section`, section.id, matches[0]!.line));
-        }
-        const body = content.slice(bounds.start, bounds.end).replace(/<!--[\s\S]*?-->/g, '').trim();
-        if (!body) diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, lineNumber(content, heading.start)));
-      }
+  const englishHeadings = scanned.headings.filter((heading) => heading.level === 2 && schema.sections.some((section) => section.headings.en === heading.text)).length;
+  const chineseHeadings = scanned.headings.filter((heading) => heading.level === 2 && schema.sections.some((section) => section.headings.zh === heading.text)).length;
+  const locale = englishHeadings > chineseHeadings ? 'en' : 'zh-CN';
+  for (const section of schema.sections) {
+    const matches = markers.filter((entry) => entry.marker === section.marker);
+    if (matches.length === 0) {
+      diagnostics.push(diagnostic('ARTIFACT_MARKER_MISSING', `section marker '${section.marker}' is missing`, section.id, null));
+    } else if (matches.length > 1) {
+      diagnostics.push(diagnostic('ARTIFACT_MARKER_DUPLICATE', `section marker '${section.marker}' is duplicated`, section.id, matches[1]!.line));
     }
-    for (const marker of markers) {
-      if (!schema.sections.some((section) => markerPattern(section.marker).test(`<!-- ${marker.marker} -->`))) {
-        diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `unknown section marker '${marker.marker}'`, null, marker.line));
+    const marker = matches[0];
+    const heading = headingsBySection.get(section.id)?.[0];
+    if (marker && !marker.standalone) {
+      diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' must occupy its own visible line`, section.id, marker.line));
+    }
+    if (marker && heading) {
+      const bounds = sectionBodyBounds(content, heading);
+      if (marker.start < bounds.start || marker.start >= bounds.end) {
+        diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' is outside its section`, section.id, marker.line));
+      }
+      const body = content.slice(bounds.start, bounds.end).replace(/<!--[\s\S]*?-->/g, '').trim();
+      if (!body) diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, lineNumber(content, heading.start)));
+    }
+    if (marker && !heading && marker.standalone) {
+      const nextHeading = scanned.headings.find((candidate) => candidate.start > marker.start && candidate.level <= 2);
+      const body = content.slice(marker.end, nextHeading?.start ?? content.length).replace(/<!--[\s\S]*?-->/g, '').trim();
+      if (body && repairCandidates.length === 0) {
+        repairCandidates.push(createSectionInsertionRepair(content, section, marker, locale));
+      } else if (!body) {
+        diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, marker.line));
       }
     }
   }
+  for (const marker of markers) {
+    if (!schema.sections.some((section) => markerPattern(section.marker).test(`<!-- ${marker.marker} -->`))) {
+      diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `unknown section marker '${marker.marker}'`, null, marker.line));
+    }
+  }
 
-  const repair = repairCandidates.length === 1 && diagnostics.length === 0 ? repairCandidates[0]! : null;
-  if (repair) {
+  for (const candidate of repairCandidates) {
+    const missing = diagnostics.findIndex((item) => item.code === 'ARTIFACT_MISSING_SECTION' && item.sectionId === candidate.sectionId);
+    if (missing >= 0) {
+      const section = schema.sections.find((item) => item.id === candidate.sectionId)!;
+      diagnostics.splice(missing, 1, diagnostic(
+        'ARTIFACT_MISSING_SECTION',
+        `required section '${section.headings.zh}' is missing and can be inserted at its unique marker`,
+        candidate.sectionId,
+        candidate.line,
+        true,
+        candidate
+      ));
+    }
+  }
+
+  const orderedHeadings = schema.sections.flatMap((section) => {
+    const heading = headingsBySection.get(section.id)?.[0];
+    return heading ? [{ section, start: heading.start }] : [];
+  });
+  if (orderedHeadings.some((item, index) => index > 0 && item.start <= orderedHeadings[index - 1]!.start)) {
+    diagnostics.push(diagnostic('ARTIFACT_SECTION_ORDER_INVALID', 'required sections are not in schema order', null, null));
+  }
+  const orderedMarkers = schema.sections.flatMap((section) => {
+    const marker = markers.find((entry) => entry.marker === section.marker);
+    return marker ? [{ section, start: marker.start }] : [];
+  });
+  if (orderedMarkers.some((item, index) => index > 0 && item.start <= orderedMarkers[index - 1]!.start)) {
+    diagnostics.push(diagnostic('ARTIFACT_SECTION_ORDER_INVALID', 'section markers are not in schema order', null, null));
+  }
+
+  const repair = repairCandidates.length === 1 && (
+    diagnostics.length === 0 ||
+    (diagnostics.length === 1 && diagnostics[0]?.operation?.kind === 'insert-section')
+  ) ? repairCandidates[0]! : null;
+  if (repair && repair.kind === 'replace-line') {
     diagnostics.push(diagnostic(
       'ARTIFACT_HEADING_TRAILING_PUNCTUATION',
       `visible required H2 '${repair.from}' may be normalized to '${repair.to}'`,
@@ -298,6 +374,53 @@ function resultNoOp(content: string): ArtifactFileResult {
     operation: null,
     error: null
   };
+}
+
+function validateRepairContext(request: ArtifactRepairRequest, content: string): { ok: true } | { ok: false; code: string; message: string } {
+  const round = artifactRound(request.family, request.artifact);
+  if (round === null) return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'artifact round is not canonical' };
+  const contextPattern = /^<!--\s*artifact-context:([^:\s]+):([^:\s]+):(\d+)\s*-->\s*$/;
+  const contexts = scanVisibleMarkdown(content).lines
+    .map((line) => line.text.trim().match(contextPattern))
+    .filter((match): match is RegExpMatchArray => match !== null);
+  if (contexts.length !== 1
+    || contexts[0]![1] !== request.taskId
+    || contexts[0]![2] !== request.family
+    || Number(contexts[0]![3]) !== round) {
+    return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'artifact context marker does not match the requested task, family, and round' };
+  }
+  let taskContent: string;
+  try { taskContent = fs.readFileSync(path.join(request.taskDir, 'task.md'), 'utf8'); }
+  catch (error) { return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: `cannot read task lifecycle context: ${String(error)}` }; }
+  const activity = locateActivityLog(taskContent);
+  if (!activity) return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'task has no unique Activity Log section' };
+  const label: Record<ArtifactSchemaFamily, string> = {
+    analysis: 'Analyze Task',
+    'review-analysis': 'Review Analysis',
+    plan: 'Plan Task',
+    'review-plan': 'Review Plan',
+    code: 'Code Task',
+    'review-code': 'Review Code'
+  };
+  const escaped = escapeRegExp(label[request.family]);
+  const qualifier = request.family === 'code'
+    ? '(?:, (?:fix for review-code(?:-r(?:[2-9]|[1-9]\\d+))?\\.md|decision II-[1-9]\\d+))?'
+    : '';
+  const expected = new RegExp(`^${escaped} \\(Round ${round}${qualifier}\\)$`);
+  const open = startedBackedRows(pairEntries(activity.entries)).filter((row) => expected.test(row.step) && !row.done);
+  if (open.length !== 1) {
+    return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: `artifact '${request.artifact}' does not have exactly one matching open started lifecycle event` };
+  }
+  let intent;
+  try { intent = readArtifactRepairIntent(request.repoRoot, request.taskId, request.family, request.artifact); }
+  catch (error) { return { ok: false, code: 'ARTIFACT_REPAIR_PROVENANCE_INVALID', message: String(error) }; }
+  if (!intent || intent.state !== 'awaiting-repair') {
+    return { ok: false, code: 'ARTIFACT_REPAIR_PROVENANCE_INVALID', message: 'artifact has no awaiting-repair finalization provenance' };
+  }
+  if (intent.artifactSha256 !== request.expectedSha256 || intent.semanticDigest !== request.expectedSemanticDigest) {
+    return { ok: false, code: 'ARTIFACT_REPAIR_PROVENANCE_INVALID', message: 'repair request does not match the current finalization provenance' };
+  }
+  return { ok: true };
 }
 
 function artifactRound(family: ArtifactSchemaFamily, artifact: string): number | null {
@@ -332,18 +455,23 @@ function applyRepairUnlocked(request: ArtifactRepairRequest): ArtifactFileResult
   catch (error) { return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', String(error)); }
   const actualSha256 = sha256Content(content);
   if (actualSha256 !== request.expectedSha256) return resultFailure('ARTIFACT_REPAIR_BASELINE_MISMATCH', 'artifact SHA-256 does not match the expected repair baseline');
+  const context = validateRepairContext(request, content);
+  if (!context.ok) return resultFailure(context.code, context.message);
   const inspection = inspectArtifactStructure(content, schema);
   if (!inspection.repair || inspection.diagnostics.length !== 1) {
     return resultFailure('ARTIFACT_REPAIR_UNSAFE', inspection.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ') || 'no deterministic structural repair is available');
   }
-  if (inspection.repair.kind !== request.operation.kind || inspection.repair.sectionId !== request.operation.sectionId || inspection.repair.from !== request.operation.from || inspection.repair.to !== request.operation.to) {
+  if (inspection.repair.kind !== request.operation.kind
+    || inspection.repair.sectionId !== request.operation.sectionId
+    || inspection.repair.from !== request.operation.from
+    || inspection.repair.to !== request.operation.to
+    || inspection.repair.start !== request.operation.start
+    || inspection.repair.end !== request.operation.end) {
     return resultFailure('ARTIFACT_REPAIR_OPERATION_MISMATCH', 'repair operation does not match the current artifact structure');
   }
   if (inspection.semanticDigest !== request.expectedSemanticDigest) return resultFailure('ARTIFACT_REPAIR_BASELINE_MISMATCH', 'artifact semantic digest does not match the expected repair baseline');
-  const rawLine = content.slice(inspection.repair.start, inspection.repair.end);
-  const replacement = rawLine.replace(inspection.repair.from, inspection.repair.to);
-  if (replacement === rawLine) return resultFailure('ARTIFACT_REPAIR_NO_PROGRESS', 'repair operation would not change artifact bytes');
-  const transformed = `${content.slice(0, inspection.repair.start)}${replacement}${content.slice(inspection.repair.end)}`;
+  const transformed = applyRepairOperation(content, inspection.repair);
+  if (transformed === null) return resultFailure('ARTIFACT_REPAIR_OPERATION_MISMATCH', 'repair operation does not match the current artifact bytes');
   if (transformed === content) return resultFailure('ARTIFACT_REPAIR_NO_PROGRESS', 'repair operation produced no byte change');
   const tempPath = path.join(request.taskDir, `.${request.artifact}.repair-${process.pid}-${Date.now()}.tmp`);
   let mode = 0o600;

@@ -40,6 +40,10 @@ If any condition fails, stop immediately without invoking a model edit. The mode
 
 The repair count exists only in the in-memory context of the current skill invocation. Do not write it to `task.md`, the ledger, or a public receipt. Do not create different normal budgets by error code, skill, or problem type.
 
+## Shared Structural Engine
+
+The report skeleton is created by `agent-infra-internal task-artifact {task-id} init --family {family} --artifact {artifact}`. The skeleton writes only identity, headings, and `artifact-section:{family}:{section-id}` markers; it does not represent semantic completion. The current skill must fill each slot with real content. When the finalizer returns one provably safe structural operation, use that result's SHA and semantic digest with `task-artifact {task-id} repair --family {family} --artifact {artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`. Repair executes only the one operation from the shared engine, does not write `task.md`, the ledger, receipts, Git, or platform resources, and must be followed by a complete rerun of the original finalizer.
+
 ## Completion Events and User Output
 
 - After the final complete finalizer result succeeds, publish the review completed event using that same result's provenance, ledger state, verdict, and counts. Generate cross-stage next-step commands only when `stageStatus.canAdvance=true` and the verdict is Approved; when `canAdvance=false`, still record the result and route to same-stage revision/review.

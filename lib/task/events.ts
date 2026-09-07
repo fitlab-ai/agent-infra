@@ -130,12 +130,9 @@ function localArtifactValidationConfig(repoRoot: string, family: LocalArtifactFa
   try {
     const artifact = loadVerificationConfig(repoRoot, skillName).checks.artifact;
     if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return fallback;
-    const sections = artifact.required_sections;
     const patterns = artifact.required_patterns;
     return {
-      requiredSections: Array.isArray(sections)
-        ? sections.filter((value): value is string => typeof value === 'string')
-        : fallback.requiredSections,
+      requiredSections: fallback.requiredSections,
       requiredPatterns: Array.isArray(patterns)
         ? patterns.filter((value): value is string => typeof value === 'string')
         : fallback.requiredPatterns
@@ -696,12 +693,10 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       catch (error) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read qualification audit from ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
-      if (reviewContent.includes('artifact-section:')) {
-        const schema = getArtifactSchema(eventIdentity.family);
-        const structure = schema ? inspectArtifactStructure(reviewContent, schema) : null;
-        if (structure && !structure.ok) {
-          return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `shared artifact structure invalid: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-        }
+      const schema = getArtifactSchema(eventIdentity.family);
+      const structure = schema ? inspectArtifactStructure(reviewContent, schema) : null;
+      if (structure && !structure.ok) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `shared artifact structure invalid: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
       const expected = expectedQualificationRelations(content, eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code');
       if (!expected.ok) {

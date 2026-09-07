@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { gitSafeEnv, initIsolatedGitRepo } from "../../helpers.ts";
 import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
+import { renderArtifactSkeleton } from "../../../lib/task/artifact-schema.ts";
 import {
   buildTaskContent,
   buildTaskFrontmatter,
@@ -44,82 +45,40 @@ function setupReviewRepo(tempRoot: string) {
 }
 
 function buildReviewArtifact(verdictLine: string, baseline: string, reviewedFingerprint: string, reviewedTree: string) {
-  return [
-    "# 代码审查报告",
-    "",
-    "## 状态核对",
-    "",
-    "```text",
-    "$ git status -s",
-    "```",
-    "",
-    "## 审查摘要",
-    "",
-    "- **审查者**：codex",
-    `- **审查目标提交**：${baseline}`,
-    `- **审查已检视提交**：${baseline}`,
-    `- **审查基线提交**：${baseline}`,
-    `- **审查差异基线**：${baseline}`,
-    `- **审查差异指纹**：${reviewedFingerprint}`,
-    `- **审查快照树**：${reviewedTree}`,
-    `- ${verdictLine}`,
-    "- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0",
-    "",
-    "## 检视覆盖声明",
-    "",
-    "| pass_id | scope | evidence | result | gaps_or_assumptions |",
-    "|---------|-------|----------|--------|---------------------|",
-    "| pass-1..5 | fixture | fixture | covered | none |",
-    "",
-    "| lens_id | trigger_evidence | loaded | result |",
-    "|---------|------------------|--------|--------|",
-    "| documentation-antipatterns | fixture | not-applicable | not triggered |",
-    "",
-    "## 代码实现专项覆盖",
-    "",
-    "| context_id | changed_lines | related_context | uncovered_area | result_or_gap |",
-    "|------------|---------------|-----------------|----------------|---------------|",
-    "| fixture | fixture | fixture | none | covered |",
-    "",
-    "## 追踪矩阵",
-    "",
-    "| source_id | upstream | reviewed_target | verification | status_or_gap |",
-    "|-----------|----------|-----------------|--------------|---------------|",
-    "| fixture | fixture | fixture | fixture | covered |",
-    "",
-    "## 问题清单",
-    "",
+  const content = renderArtifactSkeleton({
+    taskId: TASK_ID,
+    family: "review-code",
+    artifact: "review-code.md"
+  });
+  const bodies = [
+    [
+      "- **审查者**：codex",
+      `- **审查目标提交**：${baseline}`,
+      `- **审查已检视提交**：${baseline}`,
+      `- **审查基线提交**：${baseline}`,
+      `- **审查差异基线**：${baseline}`,
+      `- **审查差异指纹**：${reviewedFingerprint}`,
+      `- **审查快照树**：${reviewedTree}`,
+      `- ${verdictLine}`,
+      "- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0"
+    ].join("\n"),
+    "| pass_id | scope | evidence | result | gaps_or_assumptions |\n|---------|-------|----------|--------|---------------------|\n| pass-1..5 | fixture | fixture | covered | none |",
+    "| context_id | changed_lines | related_context | uncovered_area | result_or_gap |\n|------------|---------------|-----------------|----------------|---------------|\n| fixture | fixture | fixture | none | covered |",
+    "| source_id | upstream | reviewed_target | verification | status_or_gap |\n|-----------|----------|-----------------|--------------|---------------|\n| fixture | fixture | fixture | fixture | covered |",
     "（无）",
-    "",
-    "## 非阻塞建议",
-    "",
     "（无）",
-    "",
-    "## 人工校验项",
-    "",
     "（无）",
-    "",
-    "## 审查分歧账本回写",
-    "",
-    "（本轮无新发现）",
-    "",
-    "## 证据原文",
-    "",
-    "- 断言：审查通过。",
-    "```text",
-    "$ true",
-    "```",
-    "",
-    "## 自我质疑",
-    "",
+    "### 审查决定\n\n- [x] 通过",
+    "```text\n$ git status -s\n```",
+    "```text\n$ true\n```",
     "（无）",
-    "",
-    "## 结论与建议",
-    "",
-    "### 审查决定",
-    "",
-    "- [x] 通过"
-  ].join("\n");
+    "（本轮无新发现）"
+  ];
+  let result = content;
+  for (const body of bodies) {
+    result = result.replace("<!-- artifact-slot:empty -->", body);
+  }
+  return result;
 }
 
 function buildReviewTask(baseline: string, overrides: Record<string, string | number> = {}) {

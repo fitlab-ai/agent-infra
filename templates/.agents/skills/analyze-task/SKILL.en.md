@@ -137,7 +137,7 @@ Follow the `analysis` step in `.agents/workflows/feature-development.yaml`:
 Before writing this round's `{analysis-artifact}`, create the controlled report skeleton:
 
 ```bash
-agent-infra-internal task-artifact {task-id} init --family analysis --artifact {analysis-artifact}
+agent-infra-internal task-artifact {task-id} init --family analysis --artifact {analysis-artifact} --locale en
 ```
 
 The skeleton contains identity metadata, stable section markers, and required headings only; real analysis content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, call `task-artifact {task-id} repair --family analysis --artifact {analysis-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`, then rerun the same finalizer.
