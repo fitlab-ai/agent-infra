@@ -2,7 +2,7 @@
 
 在导入或关闭依赖告警、代码扫描告警前，先阅读本规则。
 
-## 共享意图入口
+## 共享 runtime intent 入口
 
 所有调用方都使用 runtime security intent，并解析其单个 JSON 结果：
 
