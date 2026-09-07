@@ -15,6 +15,7 @@ import {
   validateRelatedMarkerSet
 } from '../../../lib/platform/issue-comments.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
+import { sanitizeMarkdownDocument } from '../../../lib/platform/comment-safety.ts';
 
 test('task comments preserve frontmatter and body in reversible details format', () => {
   const task = '---\nid: TASK-20260101-000001\ntype: feature\n---\n\n# Task\n\nBody | `code`\n';
@@ -59,6 +60,21 @@ test('artifact chunking sanitizes dynamic content before applying the byte limit
   });
   assert.match(chunk!.content, /&lt;MiXeD&gt;unsafe&lt;\/MiXeD&gt;/);
   assert.match(chunk!.content, /&lt;!-- sync-issue:TASK-1:task --&gt;/);
+});
+
+test('artifact chunks preserve fenced HTML when each chunk is parsed independently', () => {
+  const body = ['before', '```html', '<details>', 'x'.repeat(1200), '</details>', '```', 'after'].join('\n');
+  const chunks = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'code.md', agent: 'codex', body, byteLimit: 300
+  });
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
+  assert.ok(chunks.some((chunk) => chunk.body.includes('<details>')));
+  for (const chunk of chunks) {
+    const parsed = sanitizeMarkdownDocument(chunk.body);
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) assert.equal(parsed.value.includes('&lt;/details&gt;'), false);
+  }
 });
 
 test('pr-review artifacts chunk under the pr-review stem with round titles', () => {

@@ -16,7 +16,13 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityNumber } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
-import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument } from './comment-safety.ts';
+import {
+  CONTROL_MARKER_PATTERN,
+  fenceRanges,
+  renderSafeCodeFence,
+  sanitizeMarkdownDocument
+} from './comment-safety.ts';
+import type { FenceRange } from './comment-safety.ts';
 
 type RemoteComment = { id: number | string; body: string; user?: { login?: string } };
 type RenderedChunk = { marker: string; body: string; content: string; part: number; total: number };
@@ -104,13 +110,16 @@ function artifactIdentity(artifact: string): { stem: string; title: string } {
   return { stem, title: `${base}（Round ${round}）` };
 }
 
-function chunkByUtf8(content: string, maxBytes: number): string[] {
+type SourceChunk = { content: string; start: number; end: number };
+
+function chunkByUtf8(content: string, maxBytes: number): SourceChunk[] {
   if (maxBytes <= 0) throw new Error('comment byte limit is too small');
-  const chunks: string[] = [];
-  let remaining = content;
-  while (remaining) {
+  const chunks: SourceChunk[] = [];
+  let start = 0;
+  while (start < content.length) {
+    const remaining = content.slice(start);
     if (Buffer.byteLength(remaining, 'utf8') <= maxBytes) {
-      chunks.push(remaining);
+      chunks.push({ content: remaining, start, end: content.length });
       break;
     }
     let bytes = 0;
@@ -125,10 +134,22 @@ function chunkByUtf8(content: string, maxBytes: number): string[] {
     }
     const cut = newlineIndex > 0 ? newlineIndex : index;
     if (cut === 0) throw new Error('comment byte limit cannot fit one Unicode code point');
-    chunks.push(remaining.slice(0, cut));
-    remaining = remaining.slice(cut);
+    chunks.push({ content: remaining.slice(0, cut), start, end: start + cut });
+    start += cut;
   }
-  return chunks.length > 0 ? chunks : [''];
+  return chunks.length > 0 ? chunks : [{ content: '', start: 0, end: 0 }];
+}
+
+function independentChunkContent(piece: SourceChunk, fences: readonly FenceRange[]): string {
+  const openingFence = fences.find((fence) => piece.start > fence.start && piece.start < fence.end);
+  const closingFence = fences.find((fence) => piece.end > fence.start && piece.end < fence.end);
+  let content = piece.content;
+  if (openingFence) content = openingFence.opening + content;
+  if (closingFence) {
+    if (!content.endsWith('\n')) content += '\n';
+    content += closingFence.closing;
+  }
+  return content;
 }
 
 function buildArtifactChunk(
@@ -140,7 +161,8 @@ function buildArtifactChunk(
   part: number,
   total: number,
   chunked: boolean,
-  backfill: boolean
+  backfill: boolean,
+  renderedContent = content
 ): RenderedChunk {
   const marker = chunked ? MARKERS.artifactChunk(taskId, stem, part, total) : MARKERS.artifact(taskId, stem);
   const heading = chunked ? `## ${title}（${part}/${total}）` : `## ${title}`;
@@ -152,7 +174,7 @@ function buildArtifactChunk(
     '',
     `> **${agent}** · ${taskId}`,
     '',
-    content,
+    renderedContent,
     '',
     footer(agent, taskId)
   ].join('\n'));
@@ -176,23 +198,37 @@ function chunkArtifactComment(input: {
   if (Buffer.byteLength(single.body, 'utf8') <= byteLimit) return [single];
 
   let total = 2;
-  let pieces: string[] = [];
+  let payloadLimit = Number.POSITIVE_INFINITY;
+  const ranges = fenceRanges(safeBody);
+  if (!ranges.ok) throw new Error(`${ranges.error.code}: artifact body: ${ranges.error.message} at offset ${ranges.error.offset}`);
   for (;;) {
     const probe = buildArtifactChunk(
       input.taskId, identity.stem, identity.title, input.agent, '', total, total, true, Boolean(input.backfill)
     );
     const available = byteLimit - Buffer.byteLength(probe.body, 'utf8');
-    pieces = chunkByUtf8(safeBody, available);
-    if (pieces.length === total) break;
-    total = pieces.length;
+    const sourceLimit = Math.min(available, payloadLimit);
+    if (sourceLimit <= 0) throw new Error('comment byte limit is too small for an artifact chunk');
+    const pieces = chunkByUtf8(safeBody, sourceLimit);
+    if (pieces.length !== total) {
+      total = pieces.length;
+      continue;
+    }
+    const chunks = pieces.map((piece, index) => buildArtifactChunk(
+      input.taskId,
+      identity.stem,
+      identity.title,
+      input.agent,
+      piece.content,
+      index + 1,
+      total,
+      true,
+      Boolean(input.backfill),
+      independentChunkContent(piece, ranges.value)
+    ));
+    const overflow = Math.max(...chunks.map((chunk) => Buffer.byteLength(chunk.body, 'utf8') - byteLimit));
+    if (overflow <= 0) return chunks;
+    payloadLimit = sourceLimit - overflow;
   }
-  return pieces.map((content, index) => {
-    const chunk = buildArtifactChunk(
-      input.taskId, identity.stem, identity.title, input.agent, content, index + 1, total, true, Boolean(input.backfill)
-    );
-    if (Buffer.byteLength(chunk.body, 'utf8') > byteLimit) throw new Error('rendered comment exceeds byte limit');
-    return chunk;
-  });
 }
 
 function findMarkerComments(comments: RemoteComment[], marker: string): RemoteComment[] {

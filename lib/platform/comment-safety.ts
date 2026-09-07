@@ -2,7 +2,14 @@ type SanitizationError = { code: 'COMMENT_DOCUMENT_INVALID'; message: string; of
 type SanitizationResult<T> = { ok: true; value: T } | { ok: false; error: SanitizationError };
 type SanitizationOptions = { reservedMarkers?: readonly RegExp[] };
 type PlaceholderSplit = { prefix: string; suffix: string };
-type FenceRange = { start: number; end: number };
+type FenceRange = {
+  start: number;
+  end: number;
+  openingEnd: number;
+  closingStart: number;
+  opening: string;
+  closing: string;
+};
 type Line = { start: number; end: number; text: string };
 
 const CONTROL_MARKER_PATTERN = /<!--\s*(?:sync-issue|sync-pr|last-commit)\b[\s\S]*?-->|<!--\s*canonical-pr-change-report\s*-->/gi;
@@ -48,16 +55,23 @@ function closesFence(line: string, fence: { character: '`' | '~'; length: number
 
 function fenceRanges(value: string): SanitizationResult<FenceRange[]> {
   const ranges: FenceRange[] = [];
-  let fence: { character: '`' | '~'; length: number; start: number } | null = null;
+  let fence: { character: '`' | '~'; length: number; start: number; openingEnd: number } | null = null;
   for (const line of linesOf(value)) {
     if (!fence) {
       const opening = openingFence(line.text);
       if (opening === 'invalid') return invalid('fenced code info string is invalid', line.start);
-      if (opening) fence = { ...opening, start: line.start };
+      if (opening) fence = { ...opening, start: line.start, openingEnd: line.end };
       continue;
     }
     if (closesFence(line.text, fence)) {
-      ranges.push({ start: fence.start, end: line.end });
+      ranges.push({
+        start: fence.start,
+        end: line.end,
+        openingEnd: fence.openingEnd,
+        closingStart: line.start,
+        opening: value.slice(fence.start, fence.openingEnd),
+        closing: value.slice(line.start, line.end)
+      });
       fence = null;
     }
   }
@@ -226,8 +240,9 @@ export {
   escapeHtmlAttribute,
   escapeHtmlText,
   escapeMarkdownLiteral,
+  fenceRanges,
   renderSafeCodeFence,
   sanitizeMarkdownDocument,
   splitDocumentPlaceholder
 };
-export type { SanitizationError, SanitizationOptions, SanitizationResult };
+export type { FenceRange, SanitizationError, SanitizationOptions, SanitizationResult };
