@@ -300,6 +300,20 @@ const TASK_CONTROL_CONFIG_KEYS = [
 ] as const;
 export const SANDBOX_CONTROL_STATUS_MOUNT = '/run/agent-infra/control-status';
 
+function nativeDirectoryExists(candidate: string): boolean {
+  try {
+    // The fixed mount is a trust anchor. Do not use a mutable node:fs export:
+    // a preload must not turn a mounted sandbox into the direct-host path by
+    // replacing the ordinary filesystem probe.
+    const binding = (process as unknown as {
+      binding(name: string): { internalModuleStat(filePath: string): number }
+    }).binding('fs');
+    return binding.internalModuleStat(candidate) === 1;
+  } catch {
+    return false;
+  }
+}
+
 type TaskMarkerState = 'none' | 'branch-only' | 'task-bound' | 'incomplete';
 
 function taskMarkerState(env: NodeJS.ProcessEnv): TaskMarkerState {
@@ -321,9 +335,9 @@ export function resolveSandboxControlTransport(
   const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
   const fixedStatusDir = options.statusMountPath
     ?? SANDBOX_CONTROL_STATUS_MOUNT;
-  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && fs.existsSync(configuredStatusDir)
+  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && nativeDirectoryExists(configuredStatusDir)
     ? configuredStatusDir
-    : path.isAbsolute(fixedStatusDir) && fs.existsSync(fixedStatusDir) ? fixedStatusDir : null;
+    : path.isAbsolute(fixedStatusDir) && nativeDirectoryExists(fixedStatusDir) ? fixedStatusDir : null;
   const statusMounted = statusDir !== null;
   const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
     || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)

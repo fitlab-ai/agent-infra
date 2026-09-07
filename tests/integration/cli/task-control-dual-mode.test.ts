@@ -16,6 +16,7 @@ import { classifySandboxControlEnvironment } from '../../../lib/sandbox/control/
 import { issueHumanOverride } from '../../../lib/task/human-override.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
+import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/internal/task-operation-registry.ts';
 
 function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -79,10 +80,29 @@ function initializeRepository(root: string): string {
   return execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8' }).trim();
 }
 
-test('task control without sandbox markers uses the direct-host entry', () => {
+function fixedStatusMountPresent(): boolean {
+  try {
+    return fs.lstatSync(SANDBOX_CONTROL_STATUS_MOUNT).isDirectory();
+  } catch { return false; }
+}
+
+test('task control without sandbox markers uses the direct-host entry in the isolated host harness', () => {
   const result = run('task-lifecycle', ['--help'], cleanEnv());
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Usage: agent-infra-internal task-lifecycle/);
+});
+
+test('preloaded fs mount probes cannot restore direct-host routing for task-control families', (t) => {
+  if (!fixedStatusMountPresent()) {
+    t.skip('fixed status mount is unavailable in this host test environment');
+    return;
+  }
+  const preload = path.resolve('scripts/test-status-mount-exists-preload.cjs');
+  for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
+    const result = run(command, ['--help'], cleanEnv({ NODE_OPTIONS: `--require=${preload}` }));
+    assert.equal(result.status, 1, `${command}: ${result.stderr}`);
+    assert.match(JSON.parse(result.stdout).error.message, /SANDBOX_CONTROL_IDENTITY_/u, command);
+  }
 });
 
 test('branch-only control markers keep non-task public commands on the host entry', () => {

@@ -495,9 +495,10 @@ function controllerDomainEvidence(
       };
     }
     return { consistent: false };
-  } catch {
+  } catch (error) {
     return { consistent: request.family === 'codex-controller' && request.command === 'close'
-      && output?.status === 'closed' && output.changed === false };
+      && (error as { code?: string }).code === 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_MISSING'
+      && output?.status === 'closed' && typeof output.changed === 'boolean' };
   }
 }
 
@@ -919,6 +920,10 @@ function recoverProcessing(manifest: SandboxControlManifest, manifestPath: strin
       }
       if (transitionProtocolActive && startedCommitted && !terminalResult) {
         if (!brokerOwns()) return false;
+        if (!terminateSandboxControlExecution(execution)) {
+          throw new Error(`SANDBOX_CONTROL_EXECUTION_STILL_RUNNING: ${entry.name}`);
+        }
+        appendDiagnosticAudit(manifest, 'orphan-tree-terminated', { requestId: entry.name });
         writeSandboxControlResponse(manifest, unknown(entry.name));
         continue;
       }

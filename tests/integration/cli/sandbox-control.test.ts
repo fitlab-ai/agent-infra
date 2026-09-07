@@ -57,6 +57,18 @@ function waitForFile(filePath: string, timeoutMs: number): void {
   throw new Error(`Timed out waiting for ${filePath}`);
 }
 
+function readJsonFileAfterPublication(filePath: string, timeoutMs: number): Record<string, unknown> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>;
+    } catch {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  throw new Error(`Timed out waiting for JSON in ${filePath}`);
+}
+
 function waitForAbsent(filePath: string, timeoutMs: number): void {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -2144,6 +2156,125 @@ exit 1
       if (child.exitCode !== null || child.signalCode !== null) resolve();
       else child.once('exit', () => resolve());
     });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('broker recovery accepts a controller close after the registration was durably removed', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-close-recovery-'));
+  const requestId = '99999999-9999-4999-8999-999999999999';
+  let server: Promise<void> | undefined;
+  let controller: AbortController | undefined;
+  try {
+    const manifestPath = writeControlManifest(root, initializeRepository(root), 'controller-close-recovery-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    fs.mkdirSync(path.join(manifest.channelDir, 'responses'), { recursive: true });
+    const processing = path.join(manifest.processingDir, requestId);
+    fs.mkdirSync(path.join(processing, 'transitions'), { recursive: true });
+    fs.writeFileSync(path.join(processing, 'transitions', 'started-committed.json'), '{}\n');
+    const startTime = getProcessStartTime(process.pid);
+    assert.ok(startTime);
+    const proof = {
+      version: 1 as const,
+      leaseId: 'b'.repeat(64),
+      leaseSecret: 'c'.repeat(64),
+      controllerProcess: { pid: process.pid, startTime }
+    };
+    fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
+      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
+      family: 'codex-controller', command: 'close', args: [],
+      controllerProcess: proof.controllerProcess, controllerProof: proof
+    })}\n`);
+    fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
+      version: 2, generation: manifest.generation, requestId, nonce: 'controller-close-recovery',
+      child: { pid: 999_999_999, startTime: 0, processGroupId: null }, phase: 'running', updatedAt: Date.now()
+    })}\n`);
+    writeSandboxControlReservation(manifest, requestId, { logicalRecords: 1, bytes: 0 });
+    const output = `${JSON.stringify({ version: 1, status: 'closed', changed: true, lease: null, error: null })}\n`;
+    writeSandboxControlResultEvidence(manifest, requestId, { exitCode: 0, stdout: output, stderr: '' });
+    writeSandboxControlPayload(manifest, requestId, { stdout: output, stderr: '' });
+    writeSandboxControlTerminalResult(manifest, { id: requestId, family: 'codex-controller', operation: 'close' }, output);
+    fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`), `${JSON.stringify({
+      version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
+    })}\n`);
+
+    controller = new AbortController();
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', 5_000);
+    const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
+    waitForFile(responsePath, 5_000);
+    const response = readJsonFileAfterPublication(responsePath, 5_000);
+    assert.equal(response.phase, 'completed');
+    const payload = readJsonFileAfterPublication(path.join(manifest.channelDir, 'responses', `${requestId}.payload.json`), 5_000);
+    assert.equal((JSON.parse(String(payload.stdout)) as { changed: boolean }).changed, true);
+    assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
+    assert.equal(fs.existsSync(processing), false);
+  } finally {
+    controller?.abort();
+    if (server) await server;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('broker recovery terminates a live started executor before retaining unknown', onPlatforms('linux'), async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-orphan-executor-recovery-'));
+  const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let server: Promise<void> | undefined;
+  let controller: AbortController | undefined;
+  let child: ReturnType<typeof spawn> | undefined;
+  try {
+    const manifestPath = writeControlManifest(root, initializeRepository(root), 'orphan-executor-recovery-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    fs.mkdirSync(path.join(manifest.channelDir, 'responses'), { recursive: true });
+    const processing = path.join(manifest.processingDir, requestId);
+    fs.mkdirSync(path.join(processing, 'transitions'), { recursive: true });
+    fs.writeFileSync(path.join(processing, 'transitions', 'started-committed.json'), '{}\n');
+    child = spawn(process.execPath, ['--eval', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+    await new Promise<void>((resolve, reject) => {
+      child?.once('spawn', () => resolve());
+      child?.once('error', reject);
+    });
+    const startTime = getProcessStartTime(child.pid!);
+    assert.ok(startTime);
+    fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
+      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
+      family: 'task-orchestration', args: ['TASK-20260809-010203', 'status'],
+      controllerProcess: null, controllerProof: null
+    })}\n`);
+    fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
+      version: 2, generation: manifest.generation, requestId, nonce: 'orphan-executor-recovery',
+      child: { pid: child.pid, startTime, processGroupId: child.pid }, phase: 'running', updatedAt: Date.now()
+    })}\n`);
+    writeSandboxControlReservation(manifest, requestId, { logicalRecords: 1, bytes: 0 });
+
+    controller = new AbortController();
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', 5_000);
+    const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
+    waitForFile(responsePath, 5_000);
+    const response = JSON.parse(fs.readFileSync(responsePath, 'utf8')) as Record<string, unknown>;
+    assert.equal(response.phase, 'rejected');
+    assert.equal((response.error as Record<string, unknown>).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+    assert.equal(fs.existsSync(processing), true);
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && isProcessAlive(child.pid!)) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(isProcessAlive(child.pid!), false);
+  } finally {
+    controller?.abort();
+    if (server) await server;
+    if (child && isProcessAlive(child.pid!)) {
+      try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already exited */ }
+    }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
