@@ -212,6 +212,9 @@ root 的写权限或宿主控制 authority。
 ```text
 control-root/
 ├── manifest.json
+├── public/
+│   ├── identity.json
+│   └── status.json
 ├── broker.json
 ├── channel/
 │   ├── requests/<request-id>.json
@@ -225,9 +228,27 @@ control-root/
 │   ├── reservation.json
 │   └── result.json
 ├── consumed/<request-id>
-├── public/status.json
 └── audit.ndjson
 ```
+
+`public/identity.json` 是只读挂载的沙箱身份哨兵，包含当前 mode、任务绑定、generation
+和不透明的 `controlRootId`，绝不包含 control token。宿主 manifest 以及每个 broker/client
+在路由或执行 task operation 前都会比较这些值。哨兵缺失、格式错误或发生冲突时会 fail
+closed。旧的 task-bound 容器必须停止并重建，才能获得新的 control root。
+
+broker 使用分开的 critical 与 diagnostic 路径写结构化审计记录。critical phase 会持久化并
+fsync；mutation 前失败会阻断请求，accepted start 后失败则保留不确定结果，绝不会授权重放。
+审计字段会过滤 token、凭据、proof、参数和原始输出。请求仍在 processing 时，audit 文件可以
+暂时超过 1 MiB 软阈值；只有所有 processing 目录都有 terminal transition 后才会在共享锁内
+rename、fsync 旧段并轮换。
+
+当前请求还会在 `processing/<request-id>/transitions/` 下写入不可变 transition record，覆盖
+`accepted-committed`、`started-committed` 和 `published-committed` 等边界。`terminal-result.json`
+把持久化结果绑定到 request ID、generation、operation digest、源/目标状态和 completed steps。
+broker recovery 只能依据这份绑定以及对应 operation 的领域证据重建 response，区分
+not-executed、in-progress、success、failure 和 unknown。已经 started 但缺少匹配 terminal 或
+领域证据的请求保持 unknown，不会重放。编排 route read 与 `route.clean-completion` 分开；后者
+只有在 reviewed head 和 clean-worktree completion evidence 完整时才允许 success。
 
 client 首先检查 `status.json` 中的 generation 和 broker heartbeat，然后把请求写入
 私有临时文件，再 rename 为 `requests/<request-id>.json`。请求包含协议版本、请求

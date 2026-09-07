@@ -4,6 +4,7 @@ import { classifySandboxControlEnvironment } from '../lib/sandbox/control/client
 import {
   formatTaskViewDiagnostic,
   guardTaskOperation,
+  resolveSandboxControlTransport,
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
 import { INTERNAL_HANDLER_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
@@ -41,6 +42,13 @@ function taskControlTransportFailure(message: string): never {
     error: { code: 'TASK_CONTROL_TRANSPORT_INVALID', message }
   })}\n`);
   process.exit(1);
+}
+
+if (taskControlCommand) {
+  const transport = resolveSandboxControlTransport(process.env);
+  if (transport.kind === 'fail-closed') {
+    taskControlTransportFailure(transport.reasonCode ?? 'sandbox control configuration is invalid');
+  }
 }
 
 if (!taskViewGuardFailed && taskControlCommand) {

@@ -10,6 +10,7 @@ import {
   PUBLIC_DISPATCHER_ROUTES,
   PUBLIC_OPERATION_DESCRIPTORS,
   guardTaskOperation,
+  resolveSandboxControlTransport,
   resolveDelegatedTaskOperation,
   resolveTaskOperation,
   type TaskOperationDescriptor
@@ -21,6 +22,7 @@ import {
   PUBLIC_CLI_ROUTE_SELECTORS
 } from '../../../lib/internal/cli-route-inventory.ts';
 import type { SandboxTaskView } from '../../../lib/sandbox/control/task-view.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 
 const staleView: SandboxTaskView = {
   state: 'finalized-stale',
@@ -254,4 +256,31 @@ test('task-bound git input identity is checked before the commit module can load
 test('host-direct routes remain unchanged without task-bound markers', () => {
   assert.doesNotThrow(() => guardTaskOperation('internal', 'git-workflow', ['commit'], { env: {} }));
   assert.doesNotThrow(() => guardTaskOperation('public', 'decide', ['--task', '11'], { env: {} }));
+});
+
+test('mounted sandbox control requires a matching identity sentinel', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-identity-'));
+  const statusDir = path.join(root, 'status');
+  const generation = 'registry-generation';
+  const controlRootId = 'a'.repeat(96);
+  fs.mkdirSync(statusDir);
+  const baseEnv = {
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: generation,
+    AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
+    AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
+    AGENT_INFRA_CONTROL_ROOT_ID: controlRootId
+  };
+  try {
+    assert.equal(resolveSandboxControlTransport(baseEnv).kind, 'fail-closed');
+    writeSandboxControlIdentitySentinel(statusDir, {
+      version: 1, mode: 'branch-only', taskId: null, generation, controlRootId
+    });
+    assert.deepEqual(resolveSandboxControlTransport(baseEnv), { kind: 'broker-client', reasonCode: null });
+    assert.deepEqual(resolveSandboxControlTransport({ ...baseEnv, AGENT_INFRA_CONTROL_ROOT_ID: 'b'.repeat(96) }), {
+      kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH'
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -23,6 +23,7 @@ import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
+import { readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
 
@@ -122,6 +123,29 @@ function preflight(
   now = Date.now(),
   env: NodeJS.ProcessEnv = process.env
 ): void {
+  const identityPath = path.join(statusDir, 'identity.json');
+  if (fs.existsSync(statusDir)) {
+    const identityRequired = Boolean(env.AGENT_INFRA_CONTROL_ROOT_ID);
+    let identity;
+    try {
+      identity = readSandboxControlIdentitySentinel(statusDir);
+    } catch (error) {
+      if (!identityRequired) return;
+      const code = error instanceof Error && error.message.endsWith('MISSING')
+        ? 'SANDBOX_CONTROL_IDENTITY_MISSING'
+        : 'SANDBOX_CONTROL_IDENTITY_MALFORMED';
+      clientError(code, 'sandbox control identity is missing or invalid', false);
+    }
+    if (identity.generation !== generation) {
+      clientError('SANDBOX_CONTROL_IDENTITY_GENERATION_MISMATCH', 'sandbox control identity generation does not match the request', false);
+    }
+    if (identityRequired && identity.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
+      clientError('SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH', 'sandbox control identity root does not match the client configuration', false);
+    }
+    if (identityRequired && !fs.existsSync(identityPath)) {
+      clientError('SANDBOX_CONTROL_IDENTITY_MISSING', 'sandbox control identity is missing', false);
+    }
+  }
   let status;
   try {
     status = readSandboxControlStatus(statusDir);
@@ -213,6 +237,19 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   const statusDir = params.statusDir ?? process.env.AGENT_INFRA_CONTROL_STATUS_DIR ?? '/run/agent-infra/control-status';
   const taskViewEffect = taskViewEffectForRequest(request);
   preflight(statusDir, request.generation, taskViewEffect);
+  const identityPath = path.join(statusDir, 'identity.json');
+  if (fs.existsSync(identityPath) || process.env.AGENT_INFRA_CONTROL_ROOT_ID) {
+    const identity = readSandboxControlIdentitySentinel(statusDir);
+    const requestTaskId = 'args' in request ? request.args[0] ?? null : null;
+    if (identity.mode === 'task-bound'
+      && ((process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_TASK_ID !== identity.taskId)
+        || (requestTaskId && requestTaskId !== identity.taskId))) {
+      clientError('SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH', 'request task does not match the sandbox identity', false);
+    }
+    if (identity.mode === 'branch-only' && request.family === 'task-finalization') {
+      clientError('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot finalize tasks', false);
+    }
+  }
   const encoded = `${JSON.stringify(request)}\n`;
   if (Buffer.byteLength(encoded, 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
     clientError('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit', false, false, request.id);

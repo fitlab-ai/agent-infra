@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   accessSandboxTaskView,
@@ -13,11 +14,17 @@ import {
   PUBLIC_CLI_SELECTOR_ALIASES,
   internalRouteSelector
 } from './cli-route-inventory.ts';
+import { readSandboxControlIdentitySentinel } from '../sandbox/control/identity-sentinel.ts';
 
 export type TaskOperationDispatcher = 'public' | 'internal';
 export type TaskOperationScope = 'task-bound' | 'non-task' | 'conditional';
 export type TaskOperationEffect = TaskViewAccessEffect;
 export type TaskRefSource = 'argv' | 'environment' | 'none' | 'delegated' | 'input';
+
+export type SandboxControlTransportDecision = Readonly<{
+  kind: 'direct-host' | 'broker-client' | 'fail-closed';
+  reasonCode: string | null;
+}>;
 
 export type TaskOperationDescriptor = Readonly<{
   dispatcher: TaskOperationDispatcher;
@@ -284,6 +291,13 @@ const TASK_CONTROL_MARKER_KEYS = [
   'AGENT_INFRA_CONTROL_STATUS_DIR'
 ] as const;
 
+const TASK_CONTROL_CONFIG_KEYS = [
+  'AGENT_INFRA_CONTROL_TOKEN',
+  'AGENT_INFRA_CONTROL_GENERATION',
+  'AGENT_INFRA_CONTROL_DIR',
+  'AGENT_INFRA_CONTROL_STATUS_DIR'
+] as const;
+
 type TaskMarkerState = 'none' | 'branch-only' | 'task-bound' | 'incomplete';
 
 function taskMarkerState(env: NodeJS.ProcessEnv): TaskMarkerState {
@@ -296,6 +310,51 @@ function taskMarkerState(env: NodeJS.ProcessEnv): TaskMarkerState {
   if (taskId && controls && runtime) return 'task-bound';
   if (!taskId && controls && !runtime) return 'branch-only';
   return 'incomplete';
+}
+
+export function resolveSandboxControlTransport(env: NodeJS.ProcessEnv = process.env): SandboxControlTransportDecision {
+  const statusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
+  const statusMounted = Boolean(statusDir && path.isAbsolute(statusDir) && fs.existsSync(statusDir));
+  const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
+    || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
+    || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
+  const hasCompleteConfig = TASK_CONTROL_CONFIG_KEYS.every((key) => Boolean(env[key]));
+  const taskBound = Boolean(env.AGENT_INFRA_TASK_ID);
+  const runtime = Boolean(env.AGENT_INFRA_RUNTIME_DIR);
+
+  if (statusMounted) {
+    let sentinel;
+    try {
+      sentinel = readSandboxControlIdentitySentinel(statusDir!);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      return { kind: 'fail-closed', reasonCode: message.endsWith('MISSING')
+        ? 'SANDBOX_CONTROL_IDENTITY_MISSING'
+        : 'SANDBOX_CONTROL_IDENTITY_MALFORMED' };
+    }
+    if (sentinel.generation !== env.AGENT_INFRA_CONTROL_GENERATION) {
+      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_GENERATION_MISMATCH' };
+    }
+    if (env.AGENT_INFRA_CONTROL_ROOT_ID && sentinel.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
+      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH' };
+    }
+    if (sentinel.mode === 'task-bound'
+      && (sentinel.taskId !== env.AGENT_INFRA_TASK_ID || !runtime)) {
+      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH' };
+    }
+    if (sentinel.mode === 'branch-only' && (taskBound || runtime)) {
+      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH' };
+    }
+    if (!hasCompleteConfig) {
+      return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
+    }
+    return { kind: 'broker-client', reasonCode: null };
+  }
+  if (!hasAnyMarker) return { kind: 'direct-host', reasonCode: null };
+  if (!hasCompleteConfig || (taskBound && !runtime) || (!taskBound && runtime)) {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
+  }
+  return { kind: 'broker-client', reasonCode: null };
 }
 
 export function hasTaskBoundMarker(env: NodeJS.ProcessEnv = process.env): boolean {

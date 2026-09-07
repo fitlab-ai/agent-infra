@@ -60,9 +60,10 @@ import {
   type BrokerOwner
 } from './control/lifecycle.ts';
 import {
-  appendSandboxControlAudit,
   readSandboxControlStatus
 } from './control/state.ts';
+import { validateSandboxControlIdentity } from './control/identity-sentinel.ts';
+import { appendDiagnosticAudit as appendControlDiagnosticAudit } from './control/audit.ts';
 import { inspectSandboxControlContainer } from './control/container-identity.ts';
 import {
   SANDBOX_CONTROL_FUTURE_SKEW_MS,
@@ -224,6 +225,19 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
   const internalCli = path.resolve(directory, '..', '..', 'bin', `internal-cli${extension}`);
   const manifest = readSandboxControlManifest(manifestPath);
   const root = path.dirname(manifestPath);
+  if (manifest.controlRootId) {
+    const identity = validateSandboxControlIdentity({
+      publicStatusDir: manifest.publicStatusDir,
+      root,
+      mode: manifest.mode,
+      taskId: manifest.taskId,
+      generation: manifest.generation,
+      controlRootId: manifest.controlRootId
+    });
+    if (identity.state !== 'valid') {
+      throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
+    }
+  }
   if (isSandboxControlRootQuiescing(root)) throw new Error('SANDBOX_CONTROL_QUIESCING');
   const brokerPath = path.join(root, 'broker.json');
   let brokerSnapshot: string | null = null;
@@ -296,8 +310,8 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
       }
     }
     if (replacedBrokerRecord) {
-      appendSandboxControlAudit(manifest, 'broker-observed-crash');
-      appendSandboxControlAudit(manifest, 'broker-restart');
+      appendControlDiagnosticAudit(manifest, 'broker-observed-crash');
+      appendControlDiagnosticAudit(manifest, 'broker-restart');
     }
     child = spawn(
       process.execPath,
@@ -338,6 +352,19 @@ async function ensureSandboxControlBroker(params: {
   });
   if (!fs.existsSync(control.manifestPath)) return;
   const validatedManifest = readSandboxControlManifest(control.manifestPath);
+  if (validatedManifest.controlRootId) {
+    const identity = validateSandboxControlIdentity({
+      publicStatusDir: validatedManifest.publicStatusDir,
+      root: control.root,
+      mode: validatedManifest.mode,
+      taskId: validatedManifest.taskId,
+      generation: validatedManifest.generation,
+      controlRootId: validatedManifest.controlRootId
+    });
+    if (identity.state !== 'valid') {
+      throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
+    }
+  }
   const containerObservation = await inspectSandboxControlContainer(validatedManifest);
   if (containerObservation.state === 'unknown') {
     throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${containerObservation.reason}`);

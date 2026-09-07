@@ -1539,6 +1539,8 @@ export async function create(args: string[]): Promise<void> {
               'AGENT_INFRA_CONTROL_DIR=/run/agent-infra/control',
               '-e',
               'AGENT_INFRA_CONTROL_STATUS_DIR=/run/agent-infra/control-status',
+              '-e',
+              `AGENT_INFRA_CONTROL_ROOT_ID=${control.controlRootId}`,
               ...(target.workspace.mode === 'task-bound'
                 ? ['-e', 'AGENT_INFRA_RUNTIME_DIR=/run/agent-infra/runtime']
                 : []),

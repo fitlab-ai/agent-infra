@@ -13,12 +13,13 @@ import {
 import { applyTaskFinalization } from '../../task/finalization.ts';
 import { bindSandboxControlTask, validateSandboxControlRequest, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
 import {
-  appendSandboxControlAudit,
   atomicWriteJson,
   executionPath,
   readActiveLease,
   terminateSandboxControlExecution
 } from './state.ts';
+import { appendDiagnosticAudit, createSandboxControlAuditContext, appendCriticalAudit, writeSandboxControlTransition } from './audit.ts';
+import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   createSandboxExecutorExecutionContext,
   dispatchTaskControlOperation,
@@ -86,7 +87,7 @@ function appendExecutorAudit(
   fields: Record<string, string | number | boolean | null> = {}
 ): void {
   try {
-    appendSandboxControlAudit(manifest, event, { source: 'executor', ...fields });
+    appendDiagnosticAudit(manifest, event, { source: 'executor', ...fields });
   } catch {
     // Diagnostics must never change the control protocol.
   }
@@ -206,8 +207,10 @@ export async function prepareSandboxControlExecution(params: {
       if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
       const gateOwner = assertSandboxControlBrokerOwner(params.manifest);
       if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
-      atomicWriteJson(executionPath(params.manifest, params.request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
-      if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
+      if (!params.manifest.controlRootId) {
+        atomicWriteJson(executionPath(params.manifest, params.request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
+        if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
+      }
       child.send({ version: 1, nonce, owner: gateOwner });
     },
     completion,
@@ -539,6 +542,19 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   const manifestPath = process.env.AGENT_INFRA_EXECUTOR_MANIFEST;
   if (!manifestPath) throw new Error('SANDBOX_CONTROL_EXECUTOR_MANIFEST_MISSING');
   const manifest = readSandboxControlManifest(manifestPath);
+  if (manifest.controlRootId) {
+    const identity = validateSandboxControlIdentity({
+      publicStatusDir: manifest.publicStatusDir,
+      root: path.dirname(path.resolve(manifestPath)),
+      mode: manifest.mode,
+      taskId: manifest.taskId,
+      generation: manifest.generation,
+      controlRootId: manifest.controlRootId
+    });
+    if (identity.state !== 'valid') {
+      throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
+    }
+  }
   const root = fs.realpathSync.native(process.cwd());
   const expectedRoot = safeRealpath(manifest.repoRoot);
   if (expectedRoot !== root) {
@@ -568,6 +584,28 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   let result: SandboxControlExecutionResult;
   try {
     assertSandboxControlExecutorAuthority(manifest, gateOwner);
+    const operation = request.family === 'task-lifecycle' || request.family === 'task-orchestration'
+      ? (() => {
+        try { return parseTaskControlOperation(request.family, request.args); } catch { return null; }
+      })()
+      : null;
+    const context = createSandboxControlAuditContext(manifest, {
+      requestId: request.id,
+      family: request.family,
+      operation: operation?.family === 'task-orchestration'
+        ? operation.intent
+        : operation?.family === 'task-lifecycle'
+          ? operation.request.intent
+          : request.family === 'task-finalization' ? request.operation : null,
+      phase: 'started-committed',
+      outcome: 'in-progress'
+    });
+    if (manifest.controlRootId) {
+      appendCriticalAudit(manifest, context, { transition: 'started-committed' });
+      writeSandboxControlTransition(manifest, { requestId: request.id, phase: 'started-committed' });
+    }
+    const execution = readJsonExecution(executionPath(manifest, request.id));
+    atomicWriteJson(executionPath(manifest, request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
     result = await executeRequest(manifest, manifestPath, request);
   } catch (error) {
     appendExecutorAudit(manifest, 'executor-authority-or-dispatch-failed', {
@@ -594,6 +632,12 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);
   process.exitCode = result.exitCode;
+}
+
+function readJsonExecution(filePath: string): SandboxControlExecution {
+  const value = JSON.parse(fs.readFileSync(filePath, 'utf8')) as SandboxControlExecution;
+  if (!value || value.requestId.length === 0) throw new Error('SANDBOX_CONTROL_EXECUTION_INVALID');
+  return value;
 }
 
 export function disconnectExecutor(child: ChildProcess): void {

@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
+import {
+  createSandboxControlIdentitySentinel,
+  writeSandboxControlIdentitySentinel
+} from './control/identity-sentinel.ts';
 
 export type SandboxWorkspaceView = Readonly<{
   root: string;
@@ -55,6 +59,7 @@ export type SandboxControlSetup = Readonly<{
   manifestDraft: SandboxControlManifestDraft;
   token: string;
   generation: string;
+  controlRootId: string;
 }>;
 
 export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 'containerIdentity' | 'engine' | 'authorityEvidence'> & {
@@ -234,6 +239,12 @@ export function materializeSandboxControl(params: Readonly<{
   }
   const token = randomBytes(32).toString('hex');
   const generation = randomBytes(16).toString('hex');
+  const identitySentinel = createSandboxControlIdentitySentinel({
+    mode: params.identity.mode,
+    taskId: params.identity.mode === 'task-bound' ? params.identity.taskId : null,
+    generation
+  });
+  writeSandboxControlIdentitySentinel(statusDir, identitySentinel);
   const repoRoot = fs.realpathSync.native(params.repoRoot);
   const manifestDraft: SandboxControlManifestDraft = {
     engine: params.engine ?? 'docker',
@@ -246,12 +257,13 @@ export function materializeSandboxControl(params: Readonly<{
     taskId: params.identity.mode === 'task-bound' ? params.identity.taskId : null,
     token,
     generation,
+    controlRootId: identitySentinel.controlRootId,
     channelDir,
     publicStatusDir: statusDir,
     processingDir,
     runtimeDir
   };
-  return { root, channelDir, statusDir, runtimeDir, manifestPath, manifestDraft, token, generation };
+  return { root, channelDir, statusDir, runtimeDir, manifestPath, manifestDraft, token, generation, controlRootId: identitySentinel.controlRootId };
 }
 
 export function finalizeSandboxControlManifest(

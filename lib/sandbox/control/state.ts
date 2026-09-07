@@ -101,6 +101,84 @@ export function reservationPath(manifest: SandboxControlManifest, requestId: str
   return path.join(manifest.processingDir, requestId, 'reservation.json');
 }
 
+export type SandboxControlTerminalResult = Readonly<{
+  version: 1;
+  requestId: string;
+  generation: string;
+  taskId: string | null;
+  intentDigest: string;
+  sourceState: string | null;
+  targetState: string | null;
+  status: string;
+  completedSteps: readonly string[];
+}>;
+
+export function terminalResultPath(manifest: SandboxControlManifest, requestId: string): string {
+  if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
+  return path.join(manifest.processingDir, requestId, 'terminal-result.json');
+}
+
+export function createSandboxControlTerminalResult(
+  manifest: SandboxControlManifest,
+  request: Readonly<{ id: string; family: string; operation?: string | null }>,
+  output: string
+): SandboxControlTerminalResult {
+  let parsed: Record<string, unknown> = {};
+  try {
+    const value = JSON.parse(output) as unknown;
+    if (value && typeof value === 'object' && !Array.isArray(value)) parsed = value as Record<string, unknown>;
+  } catch {
+    // A non-JSON command result is still a terminal failure/success receipt.
+  }
+  const nested = parsed.result && typeof parsed.result === 'object' && !Array.isArray(parsed.result)
+    ? parsed.result as Record<string, unknown> : parsed;
+  const operation = request.operation ?? (typeof parsed.intent === 'string' ? parsed.intent : null) ?? '';
+  return {
+    version: 1,
+    requestId: request.id,
+    generation: manifest.generation,
+    taskId: manifest.taskId,
+    intentDigest: createHash('sha256').update(`${request.family}\0${operation}`, 'utf8').digest('hex'),
+    sourceState: typeof nested.sourceState === 'string' ? nested.sourceState : null,
+    targetState: typeof nested.targetState === 'string' ? nested.targetState : null,
+    status: typeof nested.status === 'string' ? nested.status : 'completed',
+    completedSteps: Array.isArray(nested.completedSteps)
+      ? nested.completedSteps.filter((step): step is string => typeof step === 'string')
+      : []
+  };
+}
+
+export function writeSandboxControlTerminalResult(
+  manifest: SandboxControlManifest,
+  request: Readonly<{ id: string; family: string; operation?: string | null }>,
+  output: string
+): SandboxControlTerminalResult {
+  const result = createSandboxControlTerminalResult(manifest, request, output);
+  const filePath = terminalResultPath(manifest, request.id);
+  try {
+    atomicWriteJsonNoReplace(filePath, result);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'SANDBOX_CONTROL_TERMINAL_ALREADY_EXISTS') throw error;
+    const existing = readSandboxControlTerminalResult(filePath);
+    if (JSON.stringify(existing) !== JSON.stringify(result)) throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_CONFLICT');
+  }
+  return readSandboxControlTerminalResult(filePath);
+}
+
+export function readSandboxControlTerminalResult(filePath: string): SandboxControlTerminalResult {
+  const value = readJsonFile(filePath) as Partial<SandboxControlTerminalResult> | null;
+  if (!value || value.version !== 1 || typeof value.requestId !== 'string'
+    || typeof value.generation !== 'string' || (value.taskId !== null && typeof value.taskId !== 'string')
+    || typeof value.intentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.intentDigest)
+    || (value.sourceState !== null && typeof value.sourceState !== 'string')
+    || (value.targetState !== null && typeof value.targetState !== 'string')
+    || typeof value.status !== 'string' || !Array.isArray(value.completedSteps)
+    || value.completedSteps.some((step) => typeof step !== 'string')) {
+    throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
+  }
+  return value as SandboxControlTerminalResult;
+}
+
 export function readSandboxControlResultEvidence(filePath: string): SandboxControlResultEvidence {
   assertRegularFile(filePath);
   const raw = fs.readFileSync(filePath, 'utf8');

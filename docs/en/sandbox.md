@@ -263,6 +263,9 @@ manifest and is not necessarily the same host path as the container path):
 ```text
 control-root/
 ├── manifest.json
+├── public/
+│   ├── identity.json
+│   └── status.json
 ├── broker.json
 ├── channel/
 │   ├── requests/<request-id>.json
@@ -276,9 +279,36 @@ control-root/
 │   ├── reservation.json
 │   └── result.json
 ├── consumed/<request-id>
-├── public/status.json
 └── audit.ndjson
 ```
+
+`public/identity.json` is the read-only sandbox identity sentinel. It contains
+the current mode, task binding, generation, and an opaque `controlRootId`; it
+never contains the control token. The host manifest and each broker/client
+compare these values before routing or executing a task operation. A missing,
+malformed, or conflicting sentinel fails closed. An old task-bound container
+must be stopped and recreated so it receives a current control root.
+
+The broker writes structured audit records with separate critical and
+diagnostic paths. Critical phases are durable and fsynced; failure before a
+mutation blocks the request, while failure after an accepted start preserves
+an uncertain result and never authorizes replay. Audit fields are filtered so
+tokens, credentials, proofs, arguments, and raw output are not logged. The
+audit file may exceed its soft 1 MiB limit while a request is active; rotation
+waits until every processing directory has a terminal transition, then
+renames and fsyncs the old segment under the shared lock.
+
+Each current request also has immutable transition records under
+`processing/<request-id>/transitions/`, including `accepted-committed`,
+`started-committed`, and `published-committed` when those boundaries are
+reached. `terminal-result.json` binds the durable result to the request ID,
+generation, operation digest, source/target state, and completed steps. Broker
+recovery reconstructs a response only from this binding plus the operation's
+domain evidence. It distinguishes not-executed, in-progress, success,
+failure, and unknown; a started request without matching terminal or domain
+evidence remains unknown and is not replayed. Orchestration route reads are
+separate from `route.clean-completion`, whose success requires the reviewed
+head and clean-worktree completion evidence.
 
 The client first checks the generation and broker heartbeat in `status.json`.
 It then writes a request to a private temporary file and renames it to
