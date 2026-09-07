@@ -579,6 +579,34 @@ test("sandbox rm --unbound exits 0 with a notice when nothing is removable", () 
   }
 });
 
+test("sandbox rm --unbound scans auxiliary roots when Docker has no rows", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-aux-empty-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: ""
+    });
+    const auxiliaryRoot = path.join(
+      fixture.repoDir,
+      ".agents",
+      "workspace",
+      ".task-commit-intents"
+    );
+    fs.mkdirSync(auxiliaryRoot, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--dry-run"]);
+
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /EMPTY-AUX-PARENT/);
+    assert.equal(fs.existsSync(auxiliaryRoot), true);
+    const calls = fixture.readDockerCalls();
+    assert.equal(hasDockerVerb(calls, "stop"), false);
+    assert.equal(hasDockerVerb(calls, "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound removes completed rows while preserving evidenced protected rows", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-mixed-protected-"));
   const completedTaskId = "TASK-20260101-000006";

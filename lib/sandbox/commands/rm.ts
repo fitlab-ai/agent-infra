@@ -49,6 +49,11 @@ import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
 import { fetchSandboxRows, type SandboxRow } from './list-running.ts';
 import {
+  cleanupIntermediateFiles,
+  formatIntermediateCleanupReport,
+  scanIntermediateCleanup
+} from '../intermediate-cleanup.ts';
+import {
   createCleanPermit,
   createDiscardPermit,
   formatWorktreeSnapshot,
@@ -64,7 +69,7 @@ import type {
 
 const USAGE = `Usage:
   ai sandbox rm <branch | TASK-id | short id> Remove one sandbox; use a full TASK-id for a task-bound sandbox and a branch for branch-only sandboxes
-  ai sandbox rm --unbound [--dry-run] [--yes] Remove completed task-bound and branch-only sandboxes; active, blocked, and archive tasks are protected
+  ai sandbox rm --unbound [--dry-run] [--yes] Remove completed task-bound and branch-only sandboxes and verified auxiliary state; active, blocked, and archive tasks are protected
   ai sandbox rm --purge                     Tear down ALL sandboxes for the project (containers, worktrees, image, VM)`;
 export { assertManagedPath } from '../managed-fs.ts';
 
@@ -779,6 +784,7 @@ type RmOneOptions = {
   permits?: ReadonlyMap<string, WorktreeRemovalPermit>;
   allowDirtyDiscard?: boolean;
   prompt?: PromptDependencies;
+  cleanupIntermediate?: boolean;
 };
 
 type PromptDependencies = {
@@ -1213,6 +1219,10 @@ async function rmOne(
   const { effectiveBranch, engine, matchedContainers, existingWorktrees, toolCandidates } = target;
   const { workspace, controlRoots, workspaceViewRoots } = target;
   preflightRmTarget(config, target);
+  const auxiliaryTaskId = workspace.mode === 'task-bound' ? workspace.taskId : null;
+  if (auxiliaryTaskId && options.cleanupIntermediate !== false) {
+    scanIntermediateCleanup(config.repoRoot, { taskIds: [auxiliaryTaskId] });
+  }
   const confirm = options.prompt?.confirm ?? p.confirm;
   const isCancel = options.prompt?.isCancel ?? p.isCancel;
 
@@ -1604,11 +1614,15 @@ async function rmOne(
   const completedJournals = advanceRemovalJournals(config.project, target, targetDigest, 'completed', resourceLocks);
   for (const journal of completedJournals) clearSandboxRemovalJournalRecord(journal);
 
-  if (!options.quiet) {
-    p.outro(pc.green('Sandbox removed'));
-  }
+  if (!options.quiet) p.outro(pc.green('Sandbox removed'));
   } finally {
     for (const lock of [...resourceLocks.values()].reverse()) lock.release();
+  }
+  if (auxiliaryTaskId && options.cleanupIntermediate !== false) {
+    const report = cleanupIntermediateFiles(config.repoRoot, { taskIds: [auxiliaryTaskId] });
+    if (!options.quiet) {
+      for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
+    }
   }
 }
 
@@ -1621,6 +1635,7 @@ async function rmPurge(
   const confirm = prompt.confirm ?? p.confirm;
   const isCancel = prompt.isCancel ?? p.isCancel;
   p.intro(pc.cyan(`Removing all sandboxes for ${config.project}`));
+  scanIntermediateCleanup(config.repoRoot);
 
   const worktrees = fs.existsSync(config.worktreeBase)
     ? fs.readdirSync(config.worktreeBase)
@@ -1747,6 +1762,8 @@ async function rmPurge(
 
   if (isManagedEngine(engine)) {
     if (engine === ENGINES.WSL2) {
+      const report = cleanupIntermediateFiles(config.repoRoot);
+      for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
       p.log.warn('Windows uses Docker Desktop with WSL2. Stop it from Docker Desktop or run "wsl --shutdown" manually.');
       p.outro(pc.green('All project sandboxes removed'));
       return;
@@ -1761,6 +1778,9 @@ async function rmPurge(
       stopManagedVm(config);
     }
   }
+
+  const report = cleanupIntermediateFiles(config.repoRoot);
+  for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
 
   p.outro(pc.green('All project sandboxes removed'));
 }
@@ -1780,11 +1800,7 @@ async function rmUnbound(
   const rows = [...running, ...nonRunning];
 
   p.intro(pc.cyan(`Removing sandboxes not bound to an active task for ${config.project}`));
-
-  if (rows.length === 0) {
-    p.outro('No removable sandboxes: every container is bound to an active task (or none exist)');
-    return;
-  }
+  const intermediatePreview = scanIntermediateCleanup(config.repoRoot);
 
   const candidates: CleanupCandidate[] = rows.map((row) => {
     if (!row.branch || !row.workspaceMode || row.workspaceMode === 'legacy-invalid') {
@@ -1852,7 +1868,10 @@ async function rmUnbound(
     }
   }
 
-  if (removableGroups.length === 0) {
+  for (const line of formatIntermediateCleanupReport(intermediatePreview)) p.log.message(line);
+
+  const hasAuxiliaryWork = intermediatePreview.items.some((candidate) => candidate.disposition === 'planned');
+  if (removableGroups.length === 0 && !hasAuxiliaryWork) {
     p.outro('No removable sandboxes: every container is bound to a protected task (or none exist)');
     return;
   }
@@ -1892,13 +1911,17 @@ async function rmUnbound(
         target: group.target,
         cleanupTarget: group.cleanupTarget,
         permits,
-        allowDirtyDiscard: false
+        allowDirtyDiscard: false,
+        cleanupIntermediate: false
       });
     } catch (error) {
       failedRows += group.candidates.length;
       failures.push({ branch: group.cleanupTarget.branch, message: error instanceof Error ? error.message : String(error) });
     }
   }
+
+  const intermediateReport = cleanupIntermediateFiles(config.repoRoot);
+  for (const line of formatIntermediateCleanupReport(intermediateReport)) p.log.message(line);
 
   if (failures.length > 0) {
     for (const failure of failures) {

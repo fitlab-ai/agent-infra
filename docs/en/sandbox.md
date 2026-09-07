@@ -204,6 +204,21 @@ tears down **all** project sandboxes (containers, worktrees, image, VM).
 **Breaking change:** `--all` has been removed; old calls fail with a migration
 error and must use `--unbound`.
 
+The task-bound `ai sandbox rm` path, `--unbound`, and `--purge` also scan the
+repository's canonical task auxiliary roots. They delete only a consumed local artifact finalization
+intent or a synced commit intent when the terminal task, completion receipt,
+artifact or Git identity, and path ownership checks all match. Empty canonical
+auxiliary roots may be removed one level at a time. Task documents, artifacts,
+completion receipts, orchestration evidence, run metadata and output, lifecycle
+records, process-data, control state, and user data remain protected.
+
+`--unbound` performs this scan even when Docker reports no sandbox rows, so a
+later retry can find cleanup-only work. `--dry-run` reports planned, protected,
+skipped, deleted, failed, and remaining items with reason codes without stopping
+containers or deleting files. Corrupt records, active or blocked tasks, unknown
+names, symlinks, changed identities, open recovery warnings, and incomplete Git
+evidence remain protected for a later diagnosis.
+
 All removal paths inspect every target worktree before destructive cleanup.
 Staged, unstaged, conflicted, or non-ignored untracked changes make batch,
 purge, prune, `--yes`, and other non-interactive removal fail closed. A single

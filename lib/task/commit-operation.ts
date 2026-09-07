@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 
 import { commitExplicitPaths, inspectGitWorkflow, pushGitRefs } from '../git/workflow.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
+import { checkpointCommitMatches } from './commit-identity.ts';
 import { resolveTaskContext, resolveTaskRef } from './resolve-ref.ts';
 import { commitPushDecision } from './commit-policy.ts';
 import { mergeOperationWarnings, type OperationWarning } from './operation-outcome.ts';
@@ -261,21 +262,6 @@ function syncTaskCommit(
   }
 }
 
-function checkpointChildMatches(task: BoundTask, intent: NonNullable<ReturnType<typeof readCheckpointIntent>>, head: string): boolean {
-  try {
-    const parent = gitText(task.repoRoot, ['rev-parse', `${head}^`]);
-    const tree = gitText(task.repoRoot, ['rev-parse', `${head}^{tree}`]);
-    const message = gitText(task.repoRoot, ['show', '-s', '--format=%s', head]);
-    const changed = gitText(task.repoRoot, ['diff-tree', '--no-commit-id', '--name-only', '-r', head]).split('\n').filter(Boolean).sort();
-    return parent === intent.expectedHead
-      && tree === intent.expectedTree
-      && message === intent.message
-      && JSON.stringify(changed) === JSON.stringify([...intent.paths].sort());
-  } catch {
-    return false;
-  }
-}
-
 function checkpointIdentity(input: CommitOperationInput, task: BoundTask, delivery: CommitDelivery): Parameters<typeof checkpointIntentDigest>[0] {
   if (delivery.mode !== 'local') throw new Error('checkpoint identity requires local delivery');
   return {
@@ -352,7 +338,7 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
           operations: [{ name: 'commit', status: 'no-op' as const }], error: null
         };
       }
-      if (inspected.snapshot.head !== identity.expectedHead && !checkpointChildMatches(task!, pendingIntent, inspected.snapshot.head)) return {
+      if (inspected.snapshot.head !== identity.expectedHead && !checkpointCommitMatches(task!.repoRoot, pendingIntent, inspected.snapshot.head)) return {
         status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
         error: { code: 'COMMIT_INTENT_HEAD_CONFLICT', message: 'Current HEAD does not match the pending checkpoint intent' }
       };
