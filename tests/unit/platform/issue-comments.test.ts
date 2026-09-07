@@ -15,6 +15,7 @@ import {
   validateRelatedMarkerSet
 } from '../../../lib/platform/issue-comments.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
+import { sanitizeMarkdownDocument } from '../../../lib/platform/comment-safety.ts';
 
 test('task comments preserve frontmatter and body in reversible details format', () => {
   const task = '---\nid: TASK-20260101-000001\ntype: feature\n---\n\n# Task\n\nBody | `code`\n';
@@ -23,6 +24,22 @@ test('task comments preserve frontmatter and body in reversible details format',
   assert.match(rendered, /<details><summary>元数据 \(frontmatter\)<\/summary>/);
   assert.match(rendered, /```yaml\n---\nid: TASK-20260101-000001\ntype: feature\n---\n```/);
   assert.match(rendered, /# Task\n\nBody \| `code`/);
+});
+
+test('comment renderers encode mixed-case HTML while preserving fenced examples and markers', () => {
+  const rendered = renderTaskComment([
+    '# Task',
+    '',
+    '<DiV data-x="1">unsafe</DiV>',
+    '',
+    '```html',
+    '<DiV>example</DiV>',
+    '<!-- sync-pr:TASK-1:summary -->',
+    '```'
+  ].join('\n'), 'TASK-20260101-000001', 'codex');
+  assert.match(rendered, /&lt;DiV data-x=&quot;1&quot;&gt;unsafe&lt;\/DiV&gt;/);
+  assert.match(rendered, /<DiV>example<\/DiV>/);
+  assert.match(rendered, /&lt;!-- sync-pr:TASK-1:summary --&gt;/);
 });
 
 test('artifact chunking is UTF-8 safe, bounded and lossless', () => {
@@ -34,6 +51,82 @@ test('artifact chunking is UTF-8 safe, bounded and lossless', () => {
   assert.ok(chunks.every((chunk) => Buffer.byteLength(chunk.body, 'utf8') <= 240));
   assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
   assert.equal(chunks[0]!.marker, MARKERS.artifactChunk('TASK-20260101-000001', 'code', 1, chunks.length));
+});
+
+test('artifact chunking sanitizes dynamic content before applying the byte limit', () => {
+  const [chunk] = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'code.md', agent: 'codex',
+    body: '<MiXeD>unsafe</MiXeD> <!-- sync-issue:TASK-1:task -->'
+  });
+  assert.match(chunk!.content, /&lt;MiXeD&gt;unsafe&lt;\/MiXeD&gt;/);
+  assert.match(chunk!.content, /&lt;!-- sync-issue:TASK-1:task --&gt;/);
+});
+
+test('artifact chunks preserve fenced HTML when each chunk is parsed independently', () => {
+  const body = ['before', '```html', '<details>', 'x'.repeat(1200), '</details>', '```', 'after'].join('\n');
+  const chunks = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'code.md', agent: 'codex', body, byteLimit: 300
+  });
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
+  assert.ok(chunks.some((chunk) => chunk.body.includes('<details>')));
+  for (const chunk of chunks) {
+    const parsed = sanitizeMarkdownDocument(chunk.body);
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) assert.equal(parsed.value.includes('&lt;/details&gt;'), false);
+  }
+});
+
+test('artifact chunks bound oversized fence lines without losing source content', () => {
+  const bodies = [
+    ['```' + 'a'.repeat(60_000), '<details>unsafe</details>', '```', 'after'].join('\n'),
+    ['~~~html', '<details>unsafe</details>', '~'.repeat(60_000), 'after'].join('\n')
+  ];
+  for (const body of bodies) {
+    const chunks = chunkArtifactComment({
+      taskId: 'TASK-20260101-000001', artifact: 'code.md', agent: 'codex', body
+    });
+    assert.ok(chunks.length > 1);
+    assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
+    assert.ok(chunks.every((chunk) => Buffer.byteLength(chunk.body, 'utf8') <= 60_000));
+    for (const chunk of chunks) assert.equal(sanitizeMarkdownDocument(chunk.body).ok, true);
+  }
+});
+
+test('artifact chunks keep adjacent fences independently parseable', () => {
+  const body = [
+    '```' + 'a'.repeat(60_000),
+    '<details>oversized</details>',
+    '```',
+    '```html',
+    '<details>ordinary</details>',
+    'x'.repeat(120_000),
+    '```',
+    'after'
+  ].join('\n');
+  const chunks = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'code.md', agent: 'codex', body
+  });
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
+  assert.ok(chunks.every((chunk) => Buffer.byteLength(chunk.body, 'utf8') <= 60_000));
+  for (const chunk of chunks) assert.equal(sanitizeMarkdownDocument(chunk.body).ok, true);
+});
+
+test('artifact chunks keep oversized fence closers on their own line', () => {
+  const body = [
+    '```' + 'a'.repeat(60_000),
+    'x'.repeat(120_000),
+    '```',
+    'after'
+  ].join('\n');
+  const chunks = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'code.md', agent: 'codex', body
+  });
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
+  assert.ok(chunks.every((chunk) => Buffer.byteLength(chunk.body, 'utf8') <= 60_000));
+  for (const chunk of chunks) assert.equal(sanitizeMarkdownDocument(chunk.body).ok, true);
 });
 
 test('pr-review artifacts chunk under the pr-review stem with round titles', () => {
@@ -152,7 +245,25 @@ test('comment sync preserves source @ content', async () => {
   assert.equal(comments.length, 1);
 });
 
-test('comment sync transports artifact content without content validation', async () => {
+test('comment sync rejects malformed content before reading or writing remote comments', async () => {
+  const root = syncFixture();
+  fs.appendFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), '\n<DiV\n');
+  let calls = 0;
+  const client = {
+    version() { calls += 1; return { ok: true, value: '2.72.0' }; },
+    json() { calls += 1; throw new Error('remote read must not be attempted'); },
+    text() { calls += 1; throw new Error('remote write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = await syncPlatformComment('TASK-20260101-000001', {
+    kind: 'task', agent: 'codex', cwd: root, client
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'COMMENT_PAYLOAD_INVALID');
+  assert.equal(calls, 0);
+});
+
+test('comment sync transports safe artifact Markdown without changing its link syntax', async () => {
   const root = syncFixture();
   const artifactPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md');
   fs.writeFileSync(artifactPath, '# Analysis\n\n[local](/workspace/file.md)\n');

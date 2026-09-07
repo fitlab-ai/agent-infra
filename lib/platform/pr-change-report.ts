@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { escapeHtmlText } from './comment-safety.ts';
 
 const REPORT_FILE_NAME = 'pr-change-report.json';
 const REPORT_VERSION = 1 as const;
@@ -483,22 +484,15 @@ function representativePath(file: ChangeFile): string {
   return file.newPath || file.oldPath || '';
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-    .replaceAll('\r', '\\r')
-    .replaceAll('\n', '\\n');
+function escapeReportText(value: string): string {
+  return escapeHtmlText(value).replaceAll('\r', '\\r').replaceAll('\n', '\\n');
 }
 
 function renderRepresentativePath(file: ChangeFile): string {
   const paths = file.oldPath && file.newPath && file.oldPath !== file.newPath
     ? [file.oldPath, file.newPath]
     : [representativePath(file)];
-  return paths.map((filePath) => `<code>${escapeHtml(filePath)}</code>`).join(' → ');
+  return paths.map((filePath) => `<code>${escapeReportText(filePath)}</code>`).join(' → ');
 }
 
 function representativeScore(file: ChangeFile, metric: 'lines' | 'bytes'): number {
@@ -551,12 +545,12 @@ function renderEvidence(evidence: Evidence): string {
         ? `:${evidence.startLine}`
         : `:${evidence.startLine}-${evidence.endLine}`
       : `:${evidence.startLine ?? evidence.endLine}`;
-  return `  - 证据：<code>${escapeHtml(evidence.path)}</code>${location}：${escapeHtml(evidence.detail)}`;
+  return `  - 证据：<code>${escapeReportText(evidence.path)}</code>${location}：${escapeReportText(evidence.detail)}`;
 }
 
 function renderPrechecks(checks: Precheck[]): string[] {
   return checks.flatMap((check) => [
-    `- **${PRECHECK_LABELS[check.id]}（${check.id}）**：${check.verdict === 'pass' ? '通过' : '需复核'}。${escapeHtml(check.rationale)}`,
+    `- **${PRECHECK_LABELS[check.id]}（${check.id}）**：${check.verdict === 'pass' ? '通过' : '需复核'}。${escapeReportText(check.rationale)}`,
     ...check.evidence.slice(0, 1).map(renderEvidence)
   ]);
 }
