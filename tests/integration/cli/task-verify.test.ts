@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 
 import { filePath, INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
 function boundFact(number = 42, branch = 'feature', state: 'open' | 'closed' = 'open') {
   return encodePrDeliveryFact(buildBoundFact({
@@ -21,6 +22,15 @@ function writeJson(filePath: string, value: unknown) {
   fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`);
 }
 
+function codeArtifact(taskId: string, artifact: string): string {
+  let content = renderArtifactSkeleton({ taskId, family: 'code', artifact })
+    .replaceAll('<!-- artifact-slot:empty -->', '内容');
+  return content.replace(
+    '## 状态核对\n<!-- artifact-section:code:state-check -->\n内容',
+    '## 状态核对\n<!-- artifact-section:code:state-check -->\n```text\n$ git status -s\n```'
+  );
+}
+
 test('internal task-verify resolves task identity and invokes the typed engine', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verify-integration-'));
   try {
@@ -30,8 +40,10 @@ test('internal task-verify resolves task identity and invokes the typed engine',
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'disabled' }));
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
-    fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
-    writeJson(path.join(root, '.agents/skills/code-task/config/verify.json'), { skill: 'code-task', checks: {} });
+    fs.writeFileSync(path.join(dir, 'code.md'), codeArtifact(id, 'code.md'));
+    writeJson(path.join(root, '.agents/skills/code-task/config/verify.json'), {
+      skill: 'code-task', checks: { artifact: { schema: 'code' } }
+    });
     writeJson(path.join(root, '.agents/skills/complete-task/config/verify.json'), {
       skill: 'complete-task', checks: { 'required-pr-delivery': {} }
     });
@@ -60,14 +72,10 @@ test('code artifact verification applies the local structural contract', () => {
     const dir = path.join(root, '.agents', 'workspace', 'active', id);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
-    fs.writeFileSync(path.join(dir, 'code.md'), fs.readFileSync('tests/fixtures/validate-artifact/valid-code.md'));
+    fs.writeFileSync(path.join(dir, 'code.md'), codeArtifact(id, 'code.md'));
     writeJson(path.join(root, '.agents/skills/code-task/config/verify.json'), {
       skill: 'code-task', checks: {
-        artifact: {
-          file_pattern: 'code.md|code-r{N}.md',
-          required_sections: ['实现输入', '变更文件', '关键代码说明', '测试结果', '与方案的差异', '供审查关注的内容', '状态核对', '证据原文'],
-          required_patterns: ['^\\$ ']
-        }
+        artifact: { file_pattern: 'code.md|code-r{N}.md', schema: 'code' }
       }
     });
 
@@ -79,6 +87,31 @@ test('code artifact verification applies the local structural contract', () => {
     const failed = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(failed.status, 1);
     assert.match(failed.stdout, /LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('review artifact verification uses the schema pattern contract', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verify-review-artifact-'));
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    const id = 'TASK-20260101-000001';
+    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
+    const content = renderArtifactSkeleton({ taskId: id, family: 'review-analysis', artifact: 'review-analysis.md' })
+      .replaceAll('<!-- artifact-slot:empty -->', 'content')
+      .replace('## 审查摘要\n<!-- artifact-section:review-analysis:summary -->\ncontent', '## 审查摘要\n<!-- artifact-section:review-analysis:summary -->\n- **总体结论**：通过')
+      .replace('## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\ncontent', '## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n```text\n$ git status -s\n```');
+    fs.writeFileSync(path.join(dir, 'review-analysis.md'), content);
+    writeJson(path.join(root, '.agents/skills/review-analysis/config/verify.json'), {
+      skill: 'review-analysis', checks: { artifact: { schema: 'review-analysis' } }
+    });
+
+    const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'review-analysis.completed', '--artifact', 'review-analysis.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /ARTIFACT_REQUIRED_PATTERN_MISSING/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

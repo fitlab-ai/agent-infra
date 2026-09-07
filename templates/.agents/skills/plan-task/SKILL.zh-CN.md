@@ -111,6 +111,14 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
 
 ### 6. 输出计划文档
 
+在首次写入本轮 `{plan-artifact}` 前，先创建受控报告骨架：
+
+```bash
+agent-infra-internal task-artifact {task-id} init --family plan --artifact {plan-artifact}
+```
+
+骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实方案内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，使用其 SHA 和 semantic digest 调用 `task-artifact {task-id} repair --family plan --artifact {plan-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`，然后完整重跑 finalizer。
+
 创建 `.agents/workspace/active/{task-id}/{plan-artifact}`。
 
 ### 7. 更新任务状态

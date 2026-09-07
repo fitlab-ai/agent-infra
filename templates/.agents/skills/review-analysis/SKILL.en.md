@@ -69,6 +69,14 @@ Check requirement completeness, risks, affected scope, open questions, and effor
 
 ### 5. Write Review Report
 
+Before writing this round's `{review-artifact}`, create the controlled review skeleton:
+
+```bash
+agent-infra-internal task-artifact {task-id} init --family review-analysis --artifact {review-artifact} --locale en
+```
+
+The skeleton contains identity metadata, stable section markers, and required headings only; complete review content is required before summary finalization. If structural finalization returns one provably safe error, call `task-artifact {task-id} repair --family review-analysis --artifact {review-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`, then rerun the original finalizer.
+
 Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 > Read `reference/report-template.md` before writing the report.

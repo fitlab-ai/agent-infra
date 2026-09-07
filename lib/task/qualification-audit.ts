@@ -5,7 +5,7 @@ import { parseTable } from './sections.ts';
 
 const TASK_CONSTRAINT_HEADINGS = ['约束', 'Constraints'] as const;
 const TASK_CANDIDATE_HEADINGS = ['候选与否决方案', 'Candidate and Rejected Options', 'Candidates and Rejected Options', 'Candidates and Rejected Alternatives'] as const;
-const AUDIT_HEADINGS = ['资格审计', 'Qualification Audit'] as const;
+const AUDIT_HEADINGS = ['资格审计', '资格审计复核', 'Qualification Audit', 'Qualification Audit Review'] as const;
 const CONFIRMATION_HEADINGS = ['资格确认记录', 'Qualification Confirmations'] as const;
 const AUDIT_SUBSECTIONS = ['约束依赖', '候选资格', '分类结果', '上游关系', '依赖快照'] as const;
 const AUDIT_SUBSECTION_HEADINGS: Record<(typeof AUDIT_SUBSECTIONS)[number], readonly string[]> = {

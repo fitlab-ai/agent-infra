@@ -14,6 +14,7 @@ import {
   renderPlaceholders,
   skillDocPaths
 } from "../../helpers.ts";
+import { getArtifactSchema } from "../../../lib/task/artifact-schema.ts";
 
 const skillDocFiles = [
   ...listFilesRecursive(".agents/skills"),
@@ -32,6 +33,12 @@ function sectionContent(content: string, heading: string): string {
   const end = nextHeading === -1 ? content.length : start + nextHeading;
 
   return content.slice(start, end).trim();
+}
+
+function reportSampleHeadings(content: string): string[] {
+  const sample = content.match(/```markdown\n([\s\S]*)\n```\s*$/);
+  assert.ok(sample, "report template should include a markdown sample");
+  return [...sample[1]!.matchAll(/^## (.+)$/gm)].map((match) => match[1]!);
 }
 
 test("all SKILL.md files have valid frontmatter", () => {
@@ -393,6 +400,18 @@ test("lifecycle report producers reference the shared evidence rule", () => {
   });
 });
 
+test("local artifact repair rules enumerate the shared structural operations", () => {
+  for (const relativePath of [
+    ".agents/rules/local-artifact-repair.md",
+    "templates/.agents/rules/local-artifact-repair.en.md",
+    "templates/.agents/rules/local-artifact-repair.zh-CN.md"
+  ]) {
+    const content = read(relativePath);
+    assert.ok(content.includes("replace-line"), `${relativePath} should authorize replace-line`);
+    assert.ok(content.includes("insert-section"), `${relativePath} should authorize insert-section`);
+  }
+});
+
 test("review skills declare one initial finalizer before their completion event", () => {
   const stages = [
     { skill: "review-analysis", stage: "analysis" },
@@ -573,6 +592,41 @@ test("review report templates expose unresolved-count placeholders exactly once"
   });
 });
 
+test("report templates preserve the registry-defined section order", () => {
+  const templates: Array<{ family: "code" | "review-analysis" | "review-plan" | "review-code"; locale: "zh" | "en"; relativePath: string }> = [
+    { family: "code", locale: "zh", relativePath: ".agents/skills/code-task/reference/report-template.md" },
+    { family: "code", locale: "zh", relativePath: "templates/.agents/skills/code-task/reference/report-template.zh-CN.md" },
+    { family: "code", locale: "en", relativePath: "templates/.agents/skills/code-task/reference/report-template.en.md" },
+    { family: "review-analysis", locale: "zh", relativePath: ".agents/skills/review-analysis/reference/report-template.md" },
+    { family: "review-analysis", locale: "zh", relativePath: "templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md" },
+    { family: "review-analysis", locale: "en", relativePath: "templates/.agents/skills/review-analysis/reference/report-template.en.md" },
+    { family: "review-plan", locale: "zh", relativePath: ".agents/skills/review-plan/reference/report-template.md" },
+    { family: "review-plan", locale: "zh", relativePath: "templates/.agents/skills/review-plan/reference/report-template.zh-CN.md" },
+    { family: "review-plan", locale: "en", relativePath: "templates/.agents/skills/review-plan/reference/report-template.en.md" },
+    { family: "review-code", locale: "zh", relativePath: ".agents/skills/review-code/reference/report-template.md" },
+    { family: "review-code", locale: "zh", relativePath: "templates/.agents/skills/review-code/reference/report-template.zh-CN.md" },
+    { family: "review-code", locale: "en", relativePath: "templates/.agents/skills/review-code/reference/report-template.en.md" }
+  ];
+
+  templates.forEach(({ family, locale, relativePath }) => {
+    const schema = getArtifactSchema(family);
+    assert.ok(schema, `${relativePath} should map to an artifact schema`);
+    const expected = schema.sections.map((section) => section.headings[locale]);
+    const actual = reportSampleHeadings(read(relativePath));
+    const positions = expected.map((heading) => {
+      const matches = actual.flatMap((candidate, index) => candidate === heading ? [index] : []);
+      assert.equal(matches.length, 1, `${relativePath} should define '${heading}' once`);
+      return matches[0]!;
+    });
+
+    assert.deepEqual(
+      positions,
+      [...positions].sort((left, right) => left - right),
+      `${relativePath} should keep required sections in registry order`
+    );
+  });
+});
+
 test("workflow verification consumers declare their business verification events", () => {
   const expectations: Record<string, string[]> = {
     "analyze-task": ["analyze.awaiting-input", "analyze.completed"],
@@ -630,16 +684,32 @@ test("workflow artifact gates require state check evidence", () => {
       const artifact = config.checks.artifact;
 
       assert.ok(artifact, `${relativePath} should declare an artifact check`);
-      sections.forEach((section) => {
+      const schemaFamilies: Record<string, string> = {
+        "analyze-task": "analysis",
+        "review-analysis": "review-analysis",
+        "plan-task": "plan",
+        "review-plan": "review-plan",
+        "code-task": "code",
+        "review-code": "review-code"
+      };
+      if (schemaFamilies[skill]) {
+        assert.equal(artifact.schema, schemaFamilies[skill], `${relativePath} should use the shared artifact schema`);
+        assert.equal("required_sections" in artifact, false, `${relativePath} should not duplicate schema sections`);
+        assert.equal("required_patterns" in artifact, false, `${relativePath} should not duplicate schema patterns`);
+      } else {
+        sections.forEach((section) => {
+          assert.ok(
+            artifact.required_sections.includes(section),
+            `${relativePath} should require the ${section} section`
+          );
+        });
+      }
+      if (!schemaFamilies[skill]) {
         assert.ok(
-          artifact.required_sections.includes(section),
-          `${relativePath} should require the ${section} section`
+          artifact.required_patterns.includes("^\\$ "),
+          `${relativePath} should require a shell prompt evidence line`
         );
-      });
-      assert.ok(
-        artifact.required_patterns.includes("^\\$ "),
-        `${relativePath} should require a shell prompt evidence line`
-      );
+      }
     });
   });
 });
@@ -689,11 +759,8 @@ test("workflow verify config language variants keep only artifact language field
     const enComparable = structuredClone(enConfig);
     const zhComparable = structuredClone(zhConfig);
 
-    enComparable.checks.artifact.required_sections = [];
-    zhComparable.checks.artifact.required_sections = [];
-    enComparable.checks.artifact.required_patterns = [];
-    zhComparable.checks.artifact.required_patterns = [];
-
+    if ("required_sections" in enComparable.checks.artifact) enComparable.checks.artifact.required_sections = [];
+    if ("required_sections" in zhComparable.checks.artifact) zhComparable.checks.artifact.required_sections = [];
     assert.deepEqual(enComparable, zhComparable, `${skill} variants should differ only in artifact language fields`);
     assert.deepEqual(
       JSON.parse(read(`.agents/skills/${skill}/config/verify.json`)),
@@ -702,11 +769,6 @@ test("workflow verify config language variants keep only artifact language field
     );
   });
 
-  const reviewEn = JSON.parse(read("templates/.agents/skills/review-code/config/verify.en.json"));
-  const reviewZh = JSON.parse(read("templates/.agents/skills/review-code/config/verify.zh-CN.json"));
-
-  assert.ok(reviewEn.checks.artifact.required_patterns.includes("^### Approval Decision$"));
-  assert.ok(reviewZh.checks.artifact.required_patterns.includes("^### 审查决定$"));
 });
 
 test("workflow report templates include evidence sections", () => {
@@ -719,10 +781,10 @@ test("workflow report templates include evidence sections", () => {
     ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
     ["templates/.agents/skills/review-plan/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
     ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
-    ["templates/.agents/skills/code-task/reference/report-template.en.md", "## State Check", "## Evidence"],
-    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## State Check", "## Evidence"],
-    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## State Check", "## Evidence"],
-    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## State Check", "## Evidence"],
+    ["templates/.agents/skills/code-task/reference/report-template.en.md", "## State Check", "## Raw Evidence"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## State Check", "## Raw Evidence"],
+    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## State Check", "## Raw Evidence"],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## State Check", "## Raw Evidence"],
   ];
 
   reportTemplateCases.forEach(([relativePath, stateHeading, evidenceHeading]) => {
@@ -761,9 +823,9 @@ test("review report templates include the self-doubt section", () => {
     ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "## 自我质疑"],
     ["templates/.agents/skills/review-plan/reference/report-template.zh-CN.md", "## 自我质疑"],
     ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "## 自我质疑"],
-    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## Self-Doubt"],
-    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## Self-Doubt"],
-    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## Self-Doubt"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## Self-critique"],
+    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## Self-critique"],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## Self-critique"],
   ];
 
   selfDoubtCases.forEach(([relativePath, heading]) => {
@@ -894,7 +956,7 @@ test("review report templates expose shared coverage, traceability, and finding 
   const reportCases = ["review-analysis", "review-plan", "review-code"].flatMap((skill) => [
     { relativePath: `.agents/skills/${skill}/reference/report-template.md`, coverage: "检视覆盖声明", trace: "追踪矩阵" },
     { relativePath: `templates/.agents/skills/${skill}/reference/report-template.zh-CN.md`, coverage: "检视覆盖声明", trace: "追踪矩阵" },
-    { relativePath: `templates/.agents/skills/${skill}/reference/report-template.en.md`, coverage: "Review Coverage Declaration", trace: "Traceability Matrix" }
+    { relativePath: `templates/.agents/skills/${skill}/reference/report-template.en.md`, coverage: "Inspection Coverage", trace: "Traceability Matrix" }
   ]);
 
   reportCases.forEach(({ relativePath, coverage, trace }) => {
@@ -932,7 +994,7 @@ test("review-analysis report templates expose stage-specific coverage structures
   const reportCases: Array<[string, string]> = [
     [".agents/skills/review-analysis/reference/report-template.md", "需求分析专项覆盖"],
     ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "需求分析专项覆盖"],
-    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "Requirement Analysis Coverage"]
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "Requirements Analysis Coverage"]
   ];
   const expectedTables = [
     "| perspective_id | applicability | reviewed_scope | evidence | result_or_gap |",
@@ -1134,10 +1196,7 @@ test("review verify configs require shared review report sections", () => {
       [`templates/.agents/skills/${skill}/config/verify.zh-CN.json`, ["检视覆盖声明", "追踪矩阵"]],
       [`templates/.agents/skills/${skill}/config/verify.en.json`, ["Review Coverage Declaration", "Traceability Matrix"]]
     ] as Array<[string, string[]]>) {
-      const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
-      sections.forEach((section) => {
-        assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
-      });
+      assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, skill);
     }
   }
 });
@@ -1148,9 +1207,7 @@ test("review-analysis verify configs require stage-specific coverage", () => {
     ["templates/.agents/skills/review-analysis/config/verify.zh-CN.json", "需求分析专项覆盖"],
     ["templates/.agents/skills/review-analysis/config/verify.en.json", "Requirement Analysis Coverage"]
   ] as Array<[string, string]>) {
-    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
-
-    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+    assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-analysis");
   }
 });
 
@@ -1160,9 +1217,7 @@ test("review-plan verify configs require architecture coverage", () => {
     ["templates/.agents/skills/review-plan/config/verify.zh-CN.json", "技术方案架构覆盖"],
     ["templates/.agents/skills/review-plan/config/verify.en.json", "Technical Plan Architecture Coverage"]
   ] as Array<[string, string]>) {
-    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
-
-    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+    assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-plan");
   }
 });
 
@@ -1172,9 +1227,7 @@ test("review-code verify configs require implementation coverage", () => {
     ["templates/.agents/skills/review-code/config/verify.zh-CN.json", "代码实现专项覆盖"],
     ["templates/.agents/skills/review-code/config/verify.en.json", "Code Implementation Coverage"]
   ] as Array<[string, string]>) {
-    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
-
-    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+    assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-code");
   }
 });
 
@@ -1424,12 +1477,12 @@ test("review handshake skills submit ledger changes through structured intents",
 test("review skill reports keep advisories outside the finding ledger", () => {
   for (const skill of ["review-analysis", "review-plan", "review-code"]) {
     const localConfig = JSON.parse(read(`.agents/skills/${skill}/config/verify.json`));
-    assert.ok(localConfig.checks.artifact.required_sections.includes("非阻塞建议"));
+    assert.equal(localConfig.checks.artifact.schema, skill);
 
     for (const locale of ["en", "zh-CN"]) {
       const config = JSON.parse(read(`templates/.agents/skills/${skill}/config/verify.${locale}.json`));
-      const section = locale === "en" ? "Non-blocking Advisories" : "非阻塞建议";
-      assert.ok(config.checks.artifact.required_sections.includes(section));
+      const section = locale === "en" ? "Non-blocking Suggestions" : "非阻塞建议";
+      assert.equal(config.checks.artifact.schema, skill);
       assert.match(
         read(`templates/.agents/skills/${skill}/reference/report-template.${locale}.md`),
         new RegExp(`^## ${section}$`, "m")
@@ -1799,9 +1852,8 @@ test("analyze-task and plan-task docs require field re-estimation in update step
   });
 });
 
-test("review-code EN verify config locks down Overall Verdict value range", () => {
-  const enConfig = JSON.parse(read("templates/.agents/skills/review-code/config/verify.en.json"));
-  const verdictPattern = (enConfig.checks.artifact.required_patterns as string[])
+test("review-code schema locks down Overall Verdict value range", () => {
+  const verdictPattern = getArtifactSchema("review-code")!.requiredPatterns
     .find((p) => p.includes("Overall Verdict"));
   assert.ok(verdictPattern, "EN verify config should include an Overall Verdict pattern");
 

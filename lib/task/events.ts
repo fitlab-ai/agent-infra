@@ -35,14 +35,11 @@ import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 import { allowsManualOverride } from './guard-override.ts';
 import {
-  LOCAL_ARTIFACT_REQUIRED_PATTERNS,
-  LOCAL_ARTIFACT_REQUIRED_SECTIONS,
   consumeLocalArtifactFinalizationIntent,
   readLocalArtifactFinalizationIntent,
   validateLocalArtifact
 } from './local-artifact-finalization.ts';
 import type { LocalArtifactFamily, LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
-import { loadVerificationConfig } from './verification-config.ts';
 import { buildLifecycleFacts, canStart } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
 import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
@@ -50,6 +47,8 @@ import type { InvalidationTargetKind } from './invalidation.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
 import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
 import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
+import { getArtifactSchema } from './artifact-schema.ts';
+import { inspectArtifactContract } from './artifact-operations.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -118,30 +117,6 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'validation-run.started': { optional: ['round'] },
   'validation-run.completed': { required: ['artifact'], optional: ['round'] }
 };
-
-function localArtifactValidationConfig(repoRoot: string, family: LocalArtifactFamily) {
-  const fallback = {
-    requiredSections: LOCAL_ARTIFACT_REQUIRED_SECTIONS[family],
-    requiredPatterns: LOCAL_ARTIFACT_REQUIRED_PATTERNS
-  };
-  const skillName = family === 'analysis' ? 'analyze-task' : family === 'plan' ? 'plan-task' : 'code-task';
-  try {
-    const artifact = loadVerificationConfig(repoRoot, skillName).checks.artifact;
-    if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return fallback;
-    const sections = artifact.required_sections;
-    const patterns = artifact.required_patterns;
-    return {
-      requiredSections: Array.isArray(sections)
-        ? sections.filter((value): value is string => typeof value === 'string')
-        : fallback.requiredSections,
-      requiredPatterns: Array.isArray(patterns)
-        ? patterns.filter((value): value is string => typeof value === 'string')
-        : fallback.requiredPatterns
-    };
-  } catch {
-    return fallback;
-  }
-}
 
 function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | null {
   if (!eventCatalog.includes(request.event as TaskEventName)) return { code: 'EVENT_UNKNOWN', message: `unknown task event '${request.event}'` };
@@ -694,6 +669,11 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       catch (error) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read qualification audit from ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
+      const schema = getArtifactSchema(eventIdentity.family);
+      const structure = schema ? inspectArtifactContract(reviewContent, schema) : null;
+      if (structure && !structure.ok) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `shared artifact structure invalid: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
       const expected = expectedQualificationRelations(content, eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code');
       if (!expected.ok) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${expected.code}: ${expected.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
@@ -716,11 +696,8 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       catch (error) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read ${completedArtifact.name}: ${String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
-      const validationConfig = localArtifactValidationConfig(resolved.repoRoot, localFamily);
       const local = validateLocalArtifact(artifactContent, {
         family: localFamily,
-        requiredSections: validationConfig.requiredSections,
-        requiredPatterns: validationConfig.requiredPatterns,
         taskContent: content,
         artifact: completedArtifact.name
       });

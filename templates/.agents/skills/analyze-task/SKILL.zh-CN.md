@@ -137,6 +137,14 @@ agent-infra-internal task-event {task-id} analyze.started --agent {standard-agen
 
 ### 6. 输出分析文档
 
+在首次写入本轮 `{analysis-artifact}` 前，先创建受控报告骨架：
+
+```bash
+agent-infra-internal task-artifact {task-id} init --family analysis --artifact {analysis-artifact}
+```
+
+骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实分析内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，使用其 SHA 和 semantic digest 调用 `task-artifact {task-id} repair --family analysis --artifact {analysis-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`，然后完整重跑 finalizer。
+
 > 步骤 6–9 属**场景 A（正常产出）**路径。**场景 B（提问早退）**已在步骤 4 内完成状态更新、task 评论同步与校验并 STOP，不进入这些步骤。
 
 创建 `.agents/workspace/active/{task-id}/{analysis-artifact}`。

@@ -56,7 +56,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-ledger': ['decision-next-id', 'stage-status', 'finding-upsert', 'finding-respond', 'finding-review', 'decision-upsert', 'rework-intent-upsert'],
   'task-warning': ['list', 'add', 'set-status'],
   'task-activity': ['pr-review-inspect', 'pr-review-start', 'pr-review-complete', 'pr-review-terminate'],
-  'task-artifact': ['inspect', 'finalize-local'],
+  'task-artifact': ['inspect', 'init', 'repair', 'finalize-local'],
   'task-orchestration': ['status', 'progress'],
   'task-review': ['finalize-summary'],
   'task-event': ['event'],

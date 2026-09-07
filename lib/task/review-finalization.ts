@@ -14,6 +14,10 @@ import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
+import { getArtifactSchema } from './artifact-schema.ts';
+import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
+import { readArtifactRepairIntent, writeArtifactRepairIntent } from './artifact-repair-intent.ts';
+import type { ArtifactRepairOperation } from './artifact-operations.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -26,6 +30,7 @@ type ReviewFinalizationErrorCode =
   | 'REVIEW_SUMMARY_NOT_FOUND'
   | 'REVIEW_SUMMARY_PLACEHOLDER_INVALID'
   | 'REVIEW_SUMMARY_COUNT_MISMATCH'
+  | 'REVIEW_ARTIFACT_STRUCTURE_INVALID'
   | 'REVIEW_DECISION_DETAIL_INVALID'
   | 'REVIEW_ARTIFACT_CONFLICT'
   | 'REVIEW_PROVENANCE_INVALID'
@@ -48,6 +53,10 @@ type ReviewFinalizationResult = {
   stage: string;
   artifact: string;
   stageStatus: LedgerStageStatus | null;
+  artifactSha256: string | null;
+  semanticDigest: string | null;
+  repairable: boolean;
+  operation: ArtifactRepairOperation | null;
   operations: readonly {
     kind: 'artifact';
     artifact: string;
@@ -88,7 +97,8 @@ function failed(
   code: ReviewFinalizationErrorCode,
   message: string,
   taskId: string | null = null,
-  stageStatus: LedgerStageStatus | null = null
+  stageStatus: LedgerStageStatus | null = null,
+  extra: Partial<ReviewFinalizationResult> = {}
 ): ReviewFinalizationResult {
   return {
     status: 'failed',
@@ -99,8 +109,13 @@ function failed(
     stage: request.stage,
     artifact: request.artifact,
     stageStatus,
+    artifactSha256: null,
+    semanticDigest: null,
+    repairable: false,
+    operation: null,
     operations: [],
-    error: { code, message }
+    error: { code, message },
+    ...extra
   };
 }
 
@@ -167,6 +182,80 @@ function finalizeReviewSummaryUnlocked(
   } catch (error) {
     return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId);
   }
+  const schema = getArtifactSchema(spec.family);
+  const structure = schema ? inspectArtifactContract(artifactContent, schema) : null;
+  const artifactSha256 = sha256Content(artifactContent);
+  const artifactSemanticDigest = canonicalSemanticDigest(artifactContent);
+  let repairIntent;
+  try {
+    repairIntent = readArtifactRepairIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact);
+  } catch (error) {
+    return failed(request, 'REVIEW_PROVENANCE_INVALID', String(error), resolved.taskId, null, {
+      artifactSha256,
+      semanticDigest: artifactSemanticDigest
+    });
+  }
+  if (structure && !structure.ok) {
+    const repairable = structure.repair !== null && structure.diagnostics.length === 1 && structure.diagnostics[0]?.repairable === true;
+    if (repairable) {
+      if (repairIntent && (
+        repairIntent.state !== 'awaiting-repair' ||
+        repairIntent.artifactSha256 !== artifactSha256 ||
+        repairIntent.semanticDigest !== structure.semanticDigest
+      )) {
+        return failed(request, 'REVIEW_PROVENANCE_INVALID', 'a different review repair baseline is already recorded for this artifact', resolved.taskId, null, {
+          artifactSha256,
+          semanticDigest: structure.semanticDigest
+        });
+      }
+      try {
+        if (!repairIntent) {
+          writeArtifactRepairIntent(resolved.repoRoot, {
+            version: 1,
+            taskId: resolved.taskId,
+            family: spec.family,
+            artifact: request.artifact,
+            state: 'awaiting-repair',
+            baselineSemanticDigest: structure.semanticDigest,
+            artifactSha256,
+            semanticDigest: structure.semanticDigest
+          });
+        }
+      } catch (error) {
+        return failed(request, 'REVIEW_PROVENANCE_INVALID', `cannot record repair provenance: ${String(error)}`, resolved.taskId, null, {
+          artifactSha256,
+          semanticDigest: structure.semanticDigest,
+          operation: structure.repair
+        });
+      }
+    }
+    return failed(
+      request,
+      'REVIEW_ARTIFACT_STRUCTURE_INVALID',
+      structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '),
+      resolved.taskId,
+      null,
+      {
+        artifactSha256,
+        semanticDigest: structure.semanticDigest,
+        repairable,
+        operation: structure.repair
+      }
+    );
+  }
+  if (repairIntent?.state === 'awaiting-repair' && repairIntent.baselineSemanticDigest !== artifactSemanticDigest) {
+    return failed(request, 'REVIEW_PROVENANCE_INVALID', 'the repaired review artifact semantic digest does not match the recorded repair baseline', resolved.taskId, null, {
+      artifactSha256,
+      semanticDigest: artifactSemanticDigest
+    });
+  }
+  if ((repairIntent?.state === 'passed' || repairIntent?.state === 'consumed')
+    && (repairIntent.artifactSha256 !== artifactSha256 || repairIntent.semanticDigest !== artifactSemanticDigest)) {
+    return failed(request, 'REVIEW_PROVENANCE_INVALID', 'the review artifact changed after its finalization provenance was recorded', resolved.taskId, null, {
+      artifactSha256,
+      semanticDigest: artifactSemanticDigest
+    });
+  }
   if (!openReviewRound(taskContent, spec.action, parsedArtifact.round)) {
     return failed(
       request,
@@ -232,8 +321,26 @@ function finalizeReviewSummaryUnlocked(
     return failed(request, transformed.code, transformed.message, resolved.taskId, stageStatus);
   }
   if (!transformed.changed) {
+    if (repairIntent?.state === 'awaiting-repair') {
+      try {
+        writeArtifactRepairIntent(resolved.repoRoot, {
+          ...repairIntent,
+          state: 'passed',
+          artifactSha256,
+          semanticDigest: artifactSemanticDigest
+        });
+      } catch (error) {
+        return failed(request, 'REVIEW_PROVENANCE_INVALID', `cannot record repaired review provenance: ${String(error)}`, resolved.taskId, stageStatus, {
+          artifactSha256,
+          semanticDigest: artifactSemanticDigest
+        });
+      }
+    }
     return {
-      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus),
+      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus, {
+        artifactSha256,
+        semanticDigest: artifactSemanticDigest
+      }),
       status: 'no-op',
       error: null
     };
@@ -241,7 +348,10 @@ function finalizeReviewSummaryUnlocked(
   const operations = [{ kind: 'artifact' as const, artifact: request.artifact, operation: 'update' as const }];
   if (request.dryRun) {
     return {
-      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus),
+      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus, {
+        artifactSha256: sha256Content(transformed.content),
+        semanticDigest: canonicalSemanticDigest(transformed.content)
+      }),
       status: 'planned',
       changed: true,
       operations,
@@ -277,6 +387,21 @@ function finalizeReviewSummaryUnlocked(
     cleanupTemp(fileSystem, tempPath);
     return failed(request, 'REVIEW_RENAME_FAILED', String(error), resolved.taskId, stageStatus);
   }
+  if (repairIntent?.state === 'awaiting-repair') {
+    try {
+      writeArtifactRepairIntent(resolved.repoRoot, {
+        ...repairIntent,
+        state: 'passed',
+        artifactSha256: sha256Content(transformed.content),
+        semanticDigest: canonicalSemanticDigest(transformed.content)
+      });
+    } catch (error) {
+      return failed(request, 'REVIEW_PROVENANCE_INVALID', `cannot record repaired review provenance: ${String(error)}`, resolved.taskId, stageStatus, {
+        artifactSha256: sha256Content(transformed.content),
+        semanticDigest: canonicalSemanticDigest(transformed.content)
+      });
+    }
+  }
   return {
     status: 'applied',
     changed: true,
@@ -286,6 +411,10 @@ function finalizeReviewSummaryUnlocked(
     stage,
     artifact: request.artifact,
     stageStatus,
+    artifactSha256: sha256Content(transformed.content),
+    semanticDigest: canonicalSemanticDigest(transformed.content),
+    repairable: false,
+    operation: null,
     operations,
     error: null
   };

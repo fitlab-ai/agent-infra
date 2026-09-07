@@ -527,7 +527,7 @@ for (const c of implementSyncCases) {
 test("validate-artifact platform-sync preserves source @ content when comparing artifact data", () => withTempRoot("agent-infra-platform-sync-content-policy-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
   const taskContent = buildTaskContent({ issue_number: "65" });
-  const artifactContent = "# Code\n\n@2x\n";
+  const artifactContent = `${loadFixture("valid-code.md")}@2x\n`;
   write(path.join(ctx.taskDir, "task.md"), taskContent);
   write(path.join(ctx.taskDir, "code.md"), artifactContent);
   writeJson(ctx.issuePath, buildIssuePayload());

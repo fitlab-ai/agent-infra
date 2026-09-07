@@ -1,5 +1,7 @@
 # Code Report Template
 
+> Before writing this report, use `task-artifact init` to create the skeleton and preserve every `artifact-section` marker; the skeleton contains no semantic result.
+
 Use this structure when creating `code.md` or `code-r{N}.md`.
 
 ## Output Template
@@ -44,12 +46,7 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 | task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
 | --- | --- | --- |
 
-## State Check
-
-> Record the state-check command, task/artifact scope, key result, and uncovered parts; each command starts with `$ `.
-> Follow `.agents/rules/evidence-reporting.md`: record task/artifact scope, key result, and uncovered parts; do not paste complete successful stdout.
-
-## Modified Files
+## Changed Files
 
 ### New Files
 - `{file-path}` - {description}
@@ -57,7 +54,7 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 ### Modified Files
 - `{file-path}` - {change summary}
 
-## Key Code Explanation
+## Key Code Notes
 
 ### {Module/Feature Name}
 **File**: `{file-path}:{line-number}`
@@ -83,16 +80,6 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 ```
 
 
-## Evidence
-
-> Follow `.agents/rules/evidence-reporting.md`: pair each claim with a `$ ` command and proportionate result summary; include a decisive raw excerpt only for failures, blocking conditions, or disputes.
-
-- Claim: {verified claim}
-```text
-$ {command}
-{result summary or decisive excerpt}
-```
-
 ## Differences from Plan
 
 {describe any deviation from the approved plan}
@@ -105,11 +92,26 @@ $ {command}
 |------|----------|----------|
 | {finding} | {accepted / adjusted / refuted / cannot-judge} | {fix file:line, or counter-evidence file:line / raw command output} |
 
-## Items for Review
+## Review Focus
 
 **Focus areas for reviewers**:
 - {item 1}
 - {item 2}
+
+## State Check
+
+> Record the state-check command, task/artifact scope, key result, and uncovered parts; each command starts with `$ `.
+> Follow `.agents/rules/evidence-reporting.md`: record task/artifact scope, key result, and uncovered parts; do not paste complete successful stdout.
+
+## Raw Evidence
+
+> Follow `.agents/rules/evidence-reporting.md`: pair each claim with a `$ ` command and proportionate result summary; include a decisive raw excerpt only for failures, blocking conditions, or disputes.
+
+- Claim: {verified claim}
+```text
+$ {command}
+{result summary or decisive excerpt}
+```
 
 ## Known Issues
 

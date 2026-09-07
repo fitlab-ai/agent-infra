@@ -5,7 +5,7 @@
 ## 分析、方案和代码产物完成前门禁
 
 - `analyze-task`、`plan-task` 和 `code-task` 必须在发布 completed 事件前调用 `task-artifact ... finalize-local`；只有同一次返回的 `artifactSha256` 和 `semanticDigest` 才能传给 completed 事件。
-- `finalize-local` 不修改产物或任务状态，但会在仓库工作区写入一次性的本地 provenance intent。返回 `failed` 时，只有 `repairable=true` 且诊断明确为单行替换，模型才可在同一产物中执行一次最小编辑，然后完整重跑同一调用；每次实际字节修改计一次，最多 8 次。
+- `finalize-local` 不修改产物或任务状态，但会在仓库工作区写入一次性的本地 provenance intent。返回 `failed` 时，只有 `repairable=true` 且诊断明确为一个可证明安全的结构操作（当前共享引擎操作为 `replace-line` 或 `insert-section`），模型才可在同一产物中执行一次最小编辑，然后完整重跑同一调用；每次实际字节修改计一次，最多 8 次。
 - 首次可修复失败的 semantic digest 会保存在该 intent 中；后续 `passed` 必须匹配该基线，completed event 还必须在任务锁内验证并在写 task.md 前原子转换为 `consumed` 状态。消费失败时不得写任务；转换后的 intent 是可重试的 durable 记录，成功写入后不再执行可能失败的后置删除。不得用重新计算的新摘要替换失败基线，也不得绕过 finalizer 直接发布 completed event。
 - 返回 `failed`、无进展、诊断或指纹重复时不得发布 completed 事件；返回 `passed` 后也不得重新扫描或手工补写摘要。
 
@@ -39,6 +39,10 @@
 8. 每次 skill invocation 最多允许 8 次实际 artifact 修改作为紧急熔断。该上限只防止死循环和资源失控，不是正常业务停止条件，也不表示最多只能修复 8 个问题。达到上限时保留最后结构化诊断并停止。
 
 修复次数只存在于当前 skill invocation 的内存上下文，不写入 task.md、ledger 或公共 receipt。不得按错误码、技能或问题类型设置不同的正常预算。
+
+## 共享结构引擎
+
+报告骨架由 `agent-infra-internal task-artifact {task-id} init --family {family} --artifact {artifact}` 创建。骨架只写身份、标题和 `artifact-section:{family}:{section-id}` marker，不代表语义完成；槽位必须由当前 skill 填入真实内容。finalizer 返回单一可证明结构操作时，使用同一返回值的 SHA 和 semantic digest 调用 `task-artifact {task-id} repair --family {family} --artifact {artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`。repair 只执行共享引擎给出的一个结构操作，不写 task.md、ledger、receipt、Git 或平台资源，之后必须完整重跑原 finalizer。
 
 ## 完成事件与用户输出
 

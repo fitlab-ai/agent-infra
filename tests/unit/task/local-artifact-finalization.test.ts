@@ -5,6 +5,7 @@ import {
   validateLocalArtifact,
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
+import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 
 const PLAN_SECTIONS = [
@@ -30,11 +31,11 @@ const CODE_SECTIONS = [
 ] as const;
 
 function artifact(family: LocalArtifactFamily = 'plan'): string {
-  if (family === 'code') {
-    return ['# 实现报告', '', ...CODE_SECTIONS.flatMap(([heading, body]) => [`## ${heading}`, body, ''])].join('\n');
-  }
-  const title = family === 'plan' ? '# 技术方案' : '# 需求分析报告';
-  return [title, '', ...PLAN_SECTIONS.flatMap(([heading, body]) => [`## ${heading}`, body, ''])].join('\n');
+  const taskId = 'TASK-20260101-000001';
+  const content = renderArtifactSkeleton({ taskId, family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+  return content.replace('## 状态核对\n<!-- artifact-section:plan:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```')
+    .replace('## 状态核对\n<!-- artifact-section:code:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:code:state-check -->\n```text\n$ git status -s\n```')
+    .replace('## 状态核对\n<!-- artifact-section:analysis:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:analysis:state-check -->\n```text\n$ git status -s\n```');
 }
 
 function diagnostic(result: ReturnType<typeof validateLocalArtifact>, code: string) {
@@ -46,7 +47,7 @@ function diagnostic(result: ReturnType<typeof validateLocalArtifact>, code: stri
 
 test('local artifact validation ignores fenced headings and commands', () => {
   const content = artifact().replace(
-    '## 验证策略\n验证方法',
+    '## 验证策略\n<!-- artifact-section:plan:verification -->\n内容',
     '```md\n## 验证策略：\n$ fake command\n```'
   );
 
@@ -64,7 +65,7 @@ test('one visible required H2 with one trailing colon is repairable and preserve
   assert.equal(repair.repairable, true);
   assert.equal(repair.from, '验证策略：');
   assert.equal(repair.to, '验证策略');
-  assert.equal(repair.line, 21);
+  assert.equal(repair.line, 28);
 
   const repaired = validateLocalArtifact(malformed.replace('## 验证策略：', '## 验证策略'), { family: 'plan' });
   assert.equal(repaired.ok, true);
@@ -75,7 +76,7 @@ test('non-whitelisted content changes and ambiguous candidates fail closed', () 
   const valid = validateLocalArtifact(artifact(), { family: 'plan' });
   assert.equal(valid.ok, true);
 
-  const changed = validateLocalArtifact(artifact().replace('验证方法', '验证方法已改变'), { family: 'plan' });
+  const changed = validateLocalArtifact(artifact().replace('## 验证策略\n<!-- artifact-section:plan:verification -->\n内容', '## 验证策略\n<!-- artifact-section:plan:verification -->\n验证方法已改变'), { family: 'plan' });
   assert.equal(changed.ok, true);
   assert.notEqual(changed.semanticDigest, valid.semanticDigest);
 
