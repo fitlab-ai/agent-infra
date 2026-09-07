@@ -25,6 +25,22 @@ test('task comments preserve frontmatter and body in reversible details format',
   assert.match(rendered, /# Task\n\nBody \| `code`/);
 });
 
+test('comment renderers encode mixed-case HTML while preserving fenced examples and markers', () => {
+  const rendered = renderTaskComment([
+    '# Task',
+    '',
+    '<DiV data-x="1">unsafe</DiV>',
+    '',
+    '```html',
+    '<DiV>example</DiV>',
+    '<!-- sync-pr:TASK-1:summary -->',
+    '```'
+  ].join('\n'), 'TASK-20260101-000001', 'codex');
+  assert.match(rendered, /&lt;DiV data-x=&quot;1&quot;&gt;unsafe&lt;\/DiV&gt;/);
+  assert.match(rendered, /<DiV>example<\/DiV>/);
+  assert.match(rendered, /&lt;!-- sync-pr:TASK-1:summary --&gt;/);
+});
+
 test('artifact chunking is UTF-8 safe, bounded and lossless', () => {
   const body = `${'中文🙂'.repeat(80)}\n${'x'.repeat(120)}`;
   const chunks = chunkArtifactComment({
@@ -34,6 +50,15 @@ test('artifact chunking is UTF-8 safe, bounded and lossless', () => {
   assert.ok(chunks.every((chunk) => Buffer.byteLength(chunk.body, 'utf8') <= 240));
   assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
   assert.equal(chunks[0]!.marker, MARKERS.artifactChunk('TASK-20260101-000001', 'code', 1, chunks.length));
+});
+
+test('artifact chunking sanitizes dynamic content before applying the byte limit', () => {
+  const [chunk] = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'code.md', agent: 'codex',
+    body: '<MiXeD>unsafe</MiXeD> <!-- sync-issue:TASK-1:task -->'
+  });
+  assert.match(chunk!.content, /&lt;MiXeD&gt;unsafe&lt;\/MiXeD&gt;/);
+  assert.match(chunk!.content, /&lt;!-- sync-issue:TASK-1:task --&gt;/);
 });
 
 test('pr-review artifacts chunk under the pr-review stem with round titles', () => {
@@ -152,7 +177,25 @@ test('comment sync preserves source @ content', async () => {
   assert.equal(comments.length, 1);
 });
 
-test('comment sync transports artifact content without content validation', async () => {
+test('comment sync rejects malformed content before reading or writing remote comments', async () => {
+  const root = syncFixture();
+  fs.appendFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), '\n<DiV\n');
+  let calls = 0;
+  const client = {
+    version() { calls += 1; return { ok: true, value: '2.72.0' }; },
+    json() { calls += 1; throw new Error('remote read must not be attempted'); },
+    text() { calls += 1; throw new Error('remote write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = await syncPlatformComment('TASK-20260101-000001', {
+    kind: 'task', agent: 'codex', cwd: root, client
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'COMMENT_PAYLOAD_INVALID');
+  assert.equal(calls, 0);
+});
+
+test('comment sync transports safe artifact Markdown without changing its link syntax', async () => {
   const root = syncFixture();
   const artifactPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md');
   fs.writeFileSync(artifactPath, '# Analysis\n\n[local](/workspace/file.md)\n');

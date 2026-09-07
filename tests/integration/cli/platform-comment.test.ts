@@ -90,6 +90,37 @@ test('platform-comment preserves source content including local-looking artifact
   }
 });
 
+test('platform-comment CLI encodes mixed-case HTML and rejects malformed content before remote writes', () => {
+  const f = fixture();
+  try {
+    const taskPath = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
+    fs.appendFileSync(taskPath, [
+      '',
+      '<TaBlE>unsafe</TaBlE>',
+      '',
+      '```html',
+      '<TaBlE>example</TaBlE>',
+      '<!-- sync-issue:TASK-1:task -->',
+      '```',
+      ''
+    ].join('\n'));
+    const rendered = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
+    assert.equal(rendered.status, 0, rendered.stderr || rendered.stdout);
+    const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
+    assert.match(comments[0]!.body, /&lt;TaBlE&gt;unsafe&lt;\/TaBlE&gt;/);
+    assert.match(comments[0]!.body, /<TaBlE>example<\/TaBlE>/);
+    assert.match(comments[0]!.body, /&lt;!-- sync-issue:TASK-1:task --&gt;/);
+
+    fs.writeFileSync(taskPath, `${fs.readFileSync(taskPath, 'utf8')}\n<BadTag\n`);
+    const rejected = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
+    assert.equal(rejected.status, 1);
+    assert.equal(JSON.parse(rejected.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('platform task comment sync transports receipt evidence with the task document', () => {
   const f = fixture();
   try {

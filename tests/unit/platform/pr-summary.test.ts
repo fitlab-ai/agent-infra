@@ -99,6 +99,7 @@ type ResolvedContextClientOptions = {
   deleteCalls?: { value: number };
   commentWrites?: { value: number };
   comments?: Array<{ id: number; body: string }>;
+  writtenBodies?: string[];
   pullRequestFailureAt?: number;
 };
 
@@ -113,7 +114,7 @@ function resolvedContextClient(
   let pullRequestCalls = 0;
   return {
     version: () => ({ ok: true, value: '2.72.0' }),
-    json: (args: string[]) => {
+    json: (args: string[], request?: { input?: string }) => {
       if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (args[0] === 'api' && args[1] === 'repos/acme/widgets') {
         repositoryCalls += 1;
@@ -138,6 +139,7 @@ function resolvedContextClient(
       if (args.some((value: string) => value.includes('/issues/42/comments'))) {
         if (args.includes('POST') || args.includes('PATCH')) {
           if (options.commentWrites) options.commentWrites.value += 1;
+          if (options.writtenBodies && request?.input) options.writtenBodies.push(JSON.parse(request.input).body);
           return { ok: true, value: { id: 9 } };
         }
         if (failure === 'duplicate') {
@@ -289,6 +291,65 @@ test('summary-sync renders the task-bound report and publishes one canonical com
     assert.equal(result.nextAction, 'watch-pr');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('summary-sync sanitizes the template around the canonical placeholder and protects fenced markers', async () => {
+  const fixture = summaryFixture();
+  const writtenBodies: string[] = [];
+  try {
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: [
+        'Intro <ScRiPt>alert(1)</ScRiPt>',
+        '',
+        '```html',
+        '<div>example</div>',
+        '<!-- sync-pr:TASK-1:summary -->',
+        '```',
+        '',
+        '<!-- canonical-pr-change-report -->'
+      ].join('\n'),
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { writtenBodies })
+    });
+    assert.equal(result.status, 'applied');
+    assert.equal(writtenBodies.length, 1);
+    assert.match(writtenBodies[0]!, /Intro &lt;ScRiPt&gt;alert\(1\)&lt;\/ScRiPt&gt;/);
+    assert.match(writtenBodies[0]!, /&lt;!-- sync-pr:TASK-1:summary --&gt;/);
+    assert.match(writtenBodies[0]!, /<code>README\.md<\/code>/);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('summary-sync rejects missing, duplicated, fenced, and nested placeholders before writing', async () => {
+  for (const body of [
+    'Summary',
+    '<!-- canonical-pr-change-report -->\n<!-- canonical-pr-change-report -->',
+    '```\n<!-- canonical-pr-change-report -->\n```',
+    '<!-- wrapper <!-- canonical-pr-change-report --> -->'
+  ]) {
+    const fixture = summaryFixture();
+    const commentWrites = { value: 0 };
+    try {
+      const result = await syncPullRequestSummary(fixture.taskId, {
+        cwd: fixture.root,
+        agent: 'codex',
+        body,
+        changeReportFile: fixture.reportPath,
+        primaryResult: 'no_op',
+        strict: true,
+        client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites })
+      });
+      assert.equal(result.status, 'failed');
+      assert.equal(result.error?.code, 'PR_SUMMARY_BODY_CONTRACT_INVALID');
+      assert.equal(commentWrites.value, 0);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
   }
 });
 

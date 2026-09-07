@@ -11,6 +11,7 @@ import type { PrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { LoadedContext, PlatformClient } from './context.ts';
 import { normalizeCommentContent } from './issue-comments.ts';
+import { CONTROL_MARKER_PATTERN, escapeHtmlText, sanitizeMarkdownDocument, splitDocumentPlaceholder } from './comment-safety.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
@@ -19,6 +20,7 @@ import type { PlatformChangeRequestSnapshot } from './adapters.ts';
 import type { ChangeRequestSnapshot } from './provider-contract.ts';
 import {
   buildPrChangeReport,
+  CANONICAL_REPORT_PLACEHOLDER,
   readPrChangeReport,
   replaceCanonicalReportPlaceholder,
   runMechanicalChangeReport,
@@ -57,11 +59,7 @@ function summaryMarker(taskId: string): string {
 }
 
 function escapeSummaryAuditText(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\r\n?/g, '\n');
+  return escapeHtmlText(value).replace(/\r\n?/g, '\n');
 }
 
 function renderSummaryAuditLine(value: string): string {
@@ -528,7 +526,30 @@ async function syncPullRequestSummary(
       if (!report.ok) return fail('failed', context, platformError(report.error));
       const checked = currentReportCheck(report.value, initial.value, taskContent, resolved.repoRoot);
       if (!checked.ok) return fail('failed', context, checked.error);
-      const replaced = replaceCanonicalReportPlaceholder(options.body, report.value);
+      const placeholder = CANONICAL_REPORT_PLACEHOLDER;
+      const split = splitDocumentPlaceholder(options.body, placeholder);
+      if (!split.ok) return fail('failed', context, {
+        code: 'PR_SUMMARY_BODY_CONTRACT_INVALID',
+        message: split.error.message,
+        retryable: false
+      });
+      const prefix = sanitizeMarkdownDocument(split.value.prefix, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+      const suffix = sanitizeMarkdownDocument(split.value.suffix, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+      if (!prefix.ok) {
+        return fail('failed', context, {
+          code: 'PR_SUMMARY_BODY_CONTRACT_INVALID',
+          message: `${prefix.error.message} at offset ${prefix.error.offset}`,
+          retryable: false
+        });
+      }
+      if (!suffix.ok) {
+        return fail('failed', context, {
+          code: 'PR_SUMMARY_BODY_CONTRACT_INVALID',
+          message: `${suffix.error.message} at offset ${suffix.error.offset}`,
+          retryable: false
+        });
+      }
+      const replaced = replaceCanonicalReportPlaceholder(`${prefix.value}${placeholder}${suffix.value}`, report.value);
       if (!replaced.ok) return fail('failed', context, platformError(replaced.error));
       const desired = buildPullRequestSummary(resolved.taskId, replaced.value, initial.value.head.sha, renderHumanOverrideAudit(taskContent));
       if (!isSafeSummaryEnvelope(desired, resolved.taskId)) return fail('failed', context, {

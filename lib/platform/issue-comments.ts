@@ -16,6 +16,7 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityNumber } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
+import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument } from './comment-safety.ts';
 
 type RemoteComment = { id: number | string; body: string; user?: { login?: string } };
 type RenderedChunk = { marker: string; body: string; content: string; part: number; total: number };
@@ -66,15 +67,22 @@ function splitFrontmatter(content: string): { frontmatter: string | null; body: 
   return { frontmatter: match[1]!, body: content.slice(match[0].length).replace(/^\r?\n/, '') };
 }
 
+function sanitizeCommentBody(value: string, label: string): string {
+  const result = sanitizeMarkdownDocument(value, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  if (!result.ok) throw new Error(`${result.error.code}: ${label}: ${result.error.message} at offset ${result.error.offset}`);
+  return result.value;
+}
+
 function footer(agent: string, taskId: string): string {
   return `---\n*由 ${agent} 自动生成 · 内部追踪：${taskId}*`;
 }
 
 function renderTaskComment(content: string, taskId: string, agent: string): string {
   const split = splitFrontmatter(content);
+  const safeBody = sanitizeCommentBody(split.body, 'task body');
   const taskBody = split.frontmatter === null
-    ? split.body
-    : `<details><summary>元数据 (frontmatter)</summary>\n\n\`\`\`yaml\n---\n${split.frontmatter}\n---\n\`\`\`\n\n</details>\n\n${split.body}`;
+    ? safeBody
+    : `<details><summary>元数据 (frontmatter)</summary>\n\n${renderSafeCodeFence(`---\n${split.frontmatter}\n---`, 'yaml')}\n\n</details>\n\n${safeBody}`;
   return normalizeCommentContent([
     MARKERS.task(taskId),
     '## 任务文件',
@@ -161,8 +169,9 @@ function chunkArtifactComment(input: {
 }): RenderedChunk[] {
   const byteLimit = input.byteLimit || 60_000;
   const identity = artifactIdentity(input.artifact);
+  const safeBody = sanitizeCommentBody(input.body, 'artifact body');
   const single = buildArtifactChunk(
-    input.taskId, identity.stem, identity.title, input.agent, input.body, 1, 1, false, Boolean(input.backfill)
+    input.taskId, identity.stem, identity.title, input.agent, safeBody, 1, 1, false, Boolean(input.backfill)
   );
   if (Buffer.byteLength(single.body, 'utf8') <= byteLimit) return [single];
 
@@ -173,7 +182,7 @@ function chunkArtifactComment(input: {
       input.taskId, identity.stem, identity.title, input.agent, '', total, total, true, Boolean(input.backfill)
     );
     const available = byteLimit - Buffer.byteLength(probe.body, 'utf8');
-    pieces = chunkByUtf8(input.body, available);
+    pieces = chunkByUtf8(safeBody, available);
     if (pieces.length === total) break;
     total = pieces.length;
   }
@@ -224,7 +233,7 @@ function hasResolvedPlatformContext(context: PlatformResult): boolean {
 
 function bodyEnvelope(marker: string, title: string, taskId: string, agent: string, body: string): string {
   return normalizeCommentContent([
-    marker, `## ${title}`, '', `> **${agent}** · ${taskId}`, '', body.replace(/\n+$/, ''), '', footer(agent, taskId)
+    marker, `## ${title}`, '', `> **${agent}** · ${taskId}`, '', sanitizeCommentBody(body, `${title} body`).replace(/\n+$/, ''), '', footer(agent, taskId)
   ].join('\n'));
 }
 
@@ -334,6 +343,15 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false }
     });
   }
+  let desired: RenderedChunk[];
+  try {
+    desired = expectedComments(resolved.taskId, taskContent, resolved.taskDir, options);
+  } catch (error) {
+    return platformResult('failed', {
+      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask) },
+      error: { code: 'COMMENT_PAYLOAD_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
+    });
+  }
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!hasResolvedPlatformContext(context) || !loaded.ok) return context;
@@ -356,16 +374,6 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     });
   }
 
-  let desired: RenderedChunk[];
-  try {
-    desired = expectedComments(resolved.taskId, taskContent, resolved.taskDir, options);
-  } catch (error) {
-    return platformResult('failed', {
-      ...contextFields(context),
-      resource: { kind: 'issue', number: issue },
-      error: { code: 'COMMENT_PAYLOAD_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
-    });
-  }
   const existing = relatedComments(listed.value, markerPrefix(resolved.taskId, options));
   if (!validateRelatedMarkerSet(existing, markerPrefix(resolved.taskId, options)).ok) {
     return platformResult('failed', {
