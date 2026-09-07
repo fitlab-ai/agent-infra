@@ -393,6 +393,18 @@ test("lifecycle report producers reference the shared evidence rule", () => {
   });
 });
 
+test("local artifact repair rules enumerate the shared structural operations", () => {
+  for (const relativePath of [
+    ".agents/rules/local-artifact-repair.md",
+    "templates/.agents/rules/local-artifact-repair.en.md",
+    "templates/.agents/rules/local-artifact-repair.zh-CN.md"
+  ]) {
+    const content = read(relativePath);
+    assert.ok(content.includes("replace-line"), `${relativePath} should authorize replace-line`);
+    assert.ok(content.includes("insert-section"), `${relativePath} should authorize insert-section`);
+  }
+});
+
 test("review skills declare one initial finalizer before their completion event", () => {
   const stages = [
     { skill: "review-analysis", stage: "analysis" },
