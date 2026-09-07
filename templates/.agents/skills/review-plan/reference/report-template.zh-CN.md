@@ -1,5 +1,7 @@
 # 审查报告模板
 
+> 写入本报告前，先用 `task-artifact init --family review-plan` 创建骨架，并保留每个 `artifact-section` marker；骨架不包含审查结论。
+
 编写 `review-plan.md` 或 `review-plan-r{N}.md` 时使用本模板。
 
 ## 输出模板

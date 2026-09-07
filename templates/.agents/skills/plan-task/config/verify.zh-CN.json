@@ -17,25 +17,18 @@
     },
     "artifact": {
       "file_pattern": "plan.md|plan-r{N}.md",
-      "required_sections": [
-        "问题理解",
-        "约束条件",
-        "方案对比",
-        "技术方法",
-        "实施步骤",
-        "文件清单",
-        "验证策略",
-        "状态核对"
-      ],
       "required_patterns": [
         "^\\$ "
-      ]
+      ],
+      "schema": "plan"
     },
     "activity-log": {
       "expected_action_pattern": "(Plan Task|Technical Design) \\(Round \\d+\\)"
     },
     "review-ledger": {
-      "stage_scope": ["analysis"]
+      "stage_scope": [
+        "analysis"
+      ]
     },
     "platform-sync": {
       "when": "issue_number_exists",

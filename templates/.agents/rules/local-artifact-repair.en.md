@@ -5,7 +5,7 @@ This rule applies when `analyze-task`, `plan-task`, or `code-task` handles **the
 ## Pre-completion gate for analysis, plan, and code artifacts
 
 - `analyze-task`, `plan-task`, and `code-task` must call `task-artifact ... finalize-local` before publishing a completed event; pass only that call's `artifactSha256` and `semanticDigest` to the completed event.
-- `finalize-local` does not modify the artifact or task state, but it writes a one-shot local provenance intent in the repository workspace. After `failed`, the model may make one minimal edit in the same artifact only when `repairable=true` and the diagnostic explicitly describes a one-line replacement, then rerun the same call completely; count each byte-changing edit, up to 8.
+- `finalize-local` does not modify the artifact or task state, but it writes a one-shot local provenance intent in the repository workspace. After `failed`, the model may make one minimal edit in the same artifact only when `repairable=true` and the diagnostic explicitly describes one provably safe structural operation (the current shared engine operations are `replace-line` and `insert-section`), then rerun the same call completely; count each byte-changing edit, up to 8.
 - The first repairable failure's semantic digest is retained in that intent; a later `passed` result must match the baseline, and the completed event must verify and atomically transition the same intent to `consumed` before writing `task.md` under the task lock. A consumption failure must not write the task; the consumed intent is durable and retryable, so no failure-prone post-write deletion is attempted. Do not replace a failed baseline with a newly computed digest or publish a completed event without the finalizer.
 - After `failed`, no progress, or a repeated diagnostic or fingerprint, do not publish a completed event. After `passed`, do not rescan or manually write summary data.
 
@@ -39,6 +39,10 @@ If any condition fails, stop immediately without invoking a model edit. The mode
 8. Allow at most 8 actual artifact edits per skill invocation as an emergency circuit breaker. This cap only prevents infinite loops and resource exhaustion; it is not a normal business stop condition and does not mean that at most eight problems may be repaired. Preserve the final structured diagnostic when the cap is reached.
 
 The repair count exists only in the in-memory context of the current skill invocation. Do not write it to `task.md`, the ledger, or a public receipt. Do not create different normal budgets by error code, skill, or problem type.
+
+## Shared Structural Engine
+
+The report skeleton is created by `agent-infra-internal task-artifact {task-id} init --family {family} --artifact {artifact}`. The skeleton writes only identity, headings, and `artifact-section:{family}:{section-id}` markers; it does not represent semantic completion. The current skill must fill each slot with real content. When the finalizer returns one provably safe structural operation, use that result's SHA and semantic digest with `task-artifact {task-id} repair --family {family} --artifact {artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`. Repair executes only the one operation from the shared engine, does not write `task.md`, the ledger, receipts, Git, or platform resources, and must be followed by a complete rerun of the original finalizer.
 
 ## Completion Events and User Output
 

@@ -1,5 +1,7 @@
 # Review Report Template
 
+> Before writing this report, use `task-artifact init --family review-code` to create the skeleton and preserve every `artifact-section` marker; the skeleton contains no review conclusion.
+
 Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## Output Template

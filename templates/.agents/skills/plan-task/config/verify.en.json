@@ -17,25 +17,18 @@
     },
     "artifact": {
       "file_pattern": "plan.md|plan-r{N}.md",
-      "required_sections": [
-        "Problem Understanding",
-        "Constraints",
-        "Option Comparison",
-        "Technical Approach",
-        "Implementation Steps",
-        "File List",
-        "Verification Strategy",
-        "State Check"
-      ],
       "required_patterns": [
         "^\\$ "
-      ]
+      ],
+      "schema": "plan"
     },
     "activity-log": {
       "expected_action_pattern": "(Plan Task|Technical Design) \\(Round \\d+\\)"
     },
     "review-ledger": {
-      "stage_scope": ["analysis"]
+      "stage_scope": [
+        "analysis"
+      ]
     },
     "platform-sync": {
       "when": "issue_number_exists",

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -37,17 +38,19 @@ current_step: ${scenario.step}
 ## Activity Log
 
 - 2026-01-01 00:00:00+00:00 — **${scenario.family === 'review-analysis' ? 'Review Analysis' : scenario.family === 'review-plan' ? 'Review Plan' : 'Review Code'} (Round 1) [started]** by codex — started
-`);
+  `);
   const artifact = `${scenario.family}.md`;
-  fs.writeFileSync(path.join(dir, artifact), `# Review
-
-- **Review Input**: \`${scenario.input}\`
-
-## Review Summary
-
-- **Overall Verdict**: Changes Requested
-${line}
-`);
+  let content = renderArtifactSkeleton({ taskId: TASK_ID, family: scenario.family, artifact, locale: 'en' })
+    .replaceAll('<!-- artifact-slot:empty -->', 'content');
+  content = content.replace(
+    `## Review Summary\n<!-- artifact-section:${scenario.family}:summary -->\ncontent`,
+    `## Review Summary\n<!-- artifact-section:${scenario.family}:summary -->\n- **Overall Verdict**: Changes Requested\n${line}`
+  );
+  content = content.replace(
+    `## Raw Evidence\n<!-- artifact-section:${scenario.family}:evidence -->\ncontent`,
+    `## Raw Evidence\n<!-- artifact-section:${scenario.family}:evidence -->\n\`\`\`text\n$ git status -s\n\`\`\``
+  );
+  fs.writeFileSync(path.join(dir, artifact), content);
   return { root, dir, artifact };
 }
 

@@ -17,24 +17,11 @@
     },
     "artifact": {
       "file_pattern": "review-plan.md|review-plan-r{N}.md",
-      "required_sections": [
-        "Review Summary",
-        "Review Coverage Declaration",
-        "Technical Plan Architecture Coverage",
-        "Traceability Matrix",
-        "Findings",
-        "Non-blocking Advisories",
-        "Manual Validation Items",
-        "Conclusion and Recommendations",
-        "State Check",
-        "Evidence",
-        "Self-Doubt",
-        "Review Disagreement Ledger Writeback"
-      ],
       "required_patterns": [
         "^### Approval Decision$",
         "^\\$ "
-      ]
+      ],
+      "schema": "review-plan"
     },
     "decision-details": {},
     "review-summary": {

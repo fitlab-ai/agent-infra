@@ -17,26 +17,20 @@
     },
     "artifact": {
       "file_pattern": "code.md|code-r{N}.md",
-      "required_sections": [
-        "Implementation Input",
-        "Modified Files",
-        "Key Code Explanation",
-        "Test Results",
-        "Differences from Plan",
-        "Items for Review",
-        "State Check",
-        "Evidence"
-      ],
       "required_patterns": [
         "^\\$ "
-      ]
+      ],
+      "schema": "code"
     },
     "implementation-input": {},
     "activity-log": {
       "expected_action_pattern": "(Code Task|Code) \\(Round \\d+(?:(?:, fix for review-code(?:-r\\d+)?\\.md)|(?:, decision II-[1-9]\\d*))?\\)"
     },
     "review-ledger": {
-      "stage_scope": ["analysis", "plan"]
+      "stage_scope": [
+        "analysis",
+        "plan"
+      ]
     },
     "platform-sync": {
       "when": "issue_number_exists",

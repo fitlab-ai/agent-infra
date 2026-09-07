@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-artifact-cli-'));
@@ -13,7 +14,7 @@ function fixture() {
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: requirement-analysis-review\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: requirement-analysis-review\n---\n\n# Task\n\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
   return { root, id, dir };
 }
@@ -23,17 +24,11 @@ function run(root: string, args: string[]) {
 }
 
 function localArtifact(family: 'analysis' | 'plan' | 'code', suffix = ''): string {
-  const sections = family === 'analysis'
-    ? ['需求来源', '需求理解', '相关文件', '影响评估', '技术风险', '工作量和复杂度评估', '状态核对']
-    : family === 'plan'
-      ? ['问题理解', '约束条件', '方案对比', '技术方法', '实施步骤', '文件清单', '验证策略', '状态核对']
-      : ['实现输入', '变更文件', '关键代码说明', '测试结果', '与方案的差异', '供审查关注的内容'];
-  return [
-    `# ${family}`,
-    ...sections.flatMap((section) => [`## ${section}`, '内容']),
-    ...(family === 'code' ? ['## 状态核对', '```text', '$ git status -s', '```', '## 证据原文', '验证输出'] : ['```text', '$ git status -s', '```']),
-    suffix
-  ].join('\n');
+  let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` })
+    .replaceAll('<!-- artifact-slot:empty -->', '内容');
+  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
+  if (family === 'code') content = content.replace('## 证据原文\n<!-- artifact-section:code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:code:evidence -->\n验证输出');
+  return `${content}${suffix}`;
 }
 
 test('task-artifact inspect returns one read-only JSON context', () => {
@@ -47,6 +42,43 @@ test('task-artifact inspect returns one read-only JSON context', () => {
   assert.deepEqual(result.next, { round: 1, name: 'plan.md' });
   assert.equal(result.inputs[0].name, 'analysis.md');
   assert.deepEqual(fs.readdirSync(f.dir).sort(), before);
+});
+
+test('task-artifact init creates a non-semantic skeleton and is idempotent', () => {
+  const f = fixture();
+  const first = run(f.root, [f.id, 'init', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(first.status, 0, `${first.stderr}\n${first.stdout}`);
+  const created = JSON.parse(first.stdout);
+  assert.equal(created.status, 'applied');
+  const content = fs.readFileSync(path.join(f.dir, 'plan.md'), 'utf8');
+  assert.match(content, /artifact-context:TASK-20260101-000001:plan:1/);
+  assert.equal((content.match(/artifact-section:plan:/g) ?? []).length, 8);
+
+  const before = fs.readFileSync(path.join(f.dir, 'plan.md'));
+  const second = run(f.root, [f.id, 'init', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(second.status, 0, `${second.stderr}\n${second.stdout}`);
+  assert.equal(JSON.parse(second.stdout).status, 'no-op');
+  assert.deepEqual(fs.readFileSync(path.join(f.dir, 'plan.md')), before);
+});
+
+test('task-artifact repair requires the finalizer baseline and changes one heading only', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'plan.md');
+  let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact }).replaceAll('<!-- artifact-slot:empty -->', 'content');
+  content = content.replace('## 状态核对\n<!-- artifact-section:plan:state-check -->\ncontent', '## 状态核对\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');
+  fs.writeFileSync(artifact, content.replace('## 问题理解\n', '## 问题理解：\n'));
+  const finalizer = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(finalizer.status, 1, finalizer.stdout);
+  const failed = JSON.parse(finalizer.stdout);
+  const repaired = run(f.root, [
+    f.id, 'repair', '--family', 'plan', '--artifact', 'plan.md',
+    '--expected-sha256', failed.artifactSha256,
+    '--expected-semantic-digest', failed.semanticDigest
+  ]);
+  assert.equal(repaired.status, 0, `${repaired.stderr}\n${repaired.stdout}`);
+  const result = JSON.parse(repaired.stdout);
+  assert.equal(result.status, 'applied');
+  assert.equal(fs.readFileSync(artifact, 'utf8').includes('## 问题理解：'), false);
 });
 
 test('task-artifact reports usage and domain failures with nonzero exit codes', () => {
@@ -78,19 +110,14 @@ test('task-artifact finalize-local returns stable digests without mutating a val
 
 test('task-artifact finalize-local uses repository config from a nested working directory', () => {
   const f = fixture();
-  const sections = ['Problem Understanding', 'Constraints', 'Options Comparison', 'Technical Approach', 'Implementation Steps', 'File List', 'Verification Strategy', 'State Check'];
   const configDir = path.join(f.root, '.agents', 'skills', 'plan-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
-    checks: { artifact: { required_sections: sections, required_patterns: ['^\\$ '] } }
+    checks: { artifact: { schema: 'plan', required_patterns: ['^\\$ '] } }
   }));
-  fs.writeFileSync(path.join(f.dir, 'plan.md'), [
-    '# Technical Plan',
-    ...sections.flatMap((section) => [`## ${section}`, 'content']),
-    '```text',
-    '$ git status -s',
-    '```'
-  ].join('\n'));
+  let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: 'plan.md', locale: 'en' }).replaceAll('<!-- artifact-slot:empty -->', 'content');
+  content = content.replace('## State Check\n<!-- artifact-section:plan:state-check -->\ncontent', '## State Check\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), content);
   const nested = path.join(f.root, 'nested');
   fs.mkdirSync(nested);
 

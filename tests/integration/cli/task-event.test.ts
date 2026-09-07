@@ -19,6 +19,7 @@ import {
 } from '../../../lib/task/local-artifact-finalization.ts';
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
+import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
 function enableQualification(taskPath: string) {
   fs.appendFileSync(taskPath, `\n## \u7ea6\u675f\n\n| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| C-1 | Keep recovery bounded | derived | task-input | task.md | task.md#\u7ea6\u675f |  |  |\n\n## \u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848\n\n| candidate_id | statement | status | constraint_ids | impact | evidence |\n| --- | --- | --- | --- | --- | --- |\n| A | Rebuild the earliest stale stage | qualified | C-1 | bounded recovery | task.md#\u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848 |\n`);
@@ -27,6 +28,7 @@ function enableQualification(taskPath: string) {
 function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
   const taskContent = fs.readFileSync(taskPath, 'utf8');
   const identity = parseQualificationArtifactName(path.basename(artifactPath));
+  if (!identity || identity.family === 'manual-validation' || identity.family === 'validation-run' || identity.family === 'pr-review') return;
   const expected = identity && (identity.family === 'analysis' || identity.family === 'review-analysis'
     || identity.family === 'plan' || identity.family === 'review-plan'
     || identity.family === 'code' || identity.family === 'review-code')
@@ -37,7 +39,11 @@ function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
   const built = buildQualificationAudit(taskContent, { upstreamRelations: expected.relations });
   assert.equal(built.ok, true);
   if (!built.ok) return;
-  fs.writeFileSync(artifactPath, `# Current artifact\n\n## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
+  const taskId = taskContent.match(/^id:\s*(TASK-\d{8}-\d{6})\s*$/m)?.[1] ?? 'TASK-20260101-000001';
+  const family = identity.family;
+  let content = renderArtifactSkeleton({ taskId, family, artifact: path.basename(artifactPath) }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
+  fs.writeFileSync(artifactPath, `${content}\n## 资格审计\n\n${renderQualificationAudit(built.audit)}\n`);
 }
 
 function fixture(step = 'requirement-analysis-review') {
@@ -151,7 +157,9 @@ function inspect(root: string, args: string[]) {
 }
 
 function reviewCodeArtifact(input = 'code.md') {
-  return `# Code Review\n\n- **审查输入**：\`${input}\`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n`;
+  let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family: 'review-code', artifact: 'review-code.md' }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+  content = content.replace('## 审查摘要\n<!-- artifact-section:review-code:summary -->\n内容', `## 审查摘要\n<!-- artifact-section:review-code:summary -->\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n- **审查输入**：\`${input}\``);
+  return content.replace('## 证据原文\n<!-- artifact-section:review-code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-code:evidence -->\n```text\n$ git status -s\n```');
 }
 
 function reviewArtifact(
@@ -160,7 +168,10 @@ function reviewArtifact(
   verdict = '通过',
   counts: ReviewCounts = { blockers: 0, major: 0, minor: 0 }
 ) {
-  return `# ${title}\n\n- **审查输入**：\`${input}\`\n\n## 审查摘要\n\n- **总体结论**：${verdict}\n- **发现（AI 可处理）**：${counts.blockers} 阻塞项，${counts.major} 主要，${counts.minor} 次要 / **人工校验**：0\n`;
+  const family = title.includes('Plan') ? 'review-plan' : title.includes('Code') ? 'review-code' : 'review-analysis';
+  let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+  content = content.replace(`## 审查摘要\n<!-- artifact-section:${family}:summary -->\n内容`, `## 审查摘要\n<!-- artifact-section:${family}:summary -->\n- **总体结论**：${verdict}\n- **发现（AI 可处理）**：${counts.blockers} 阻塞项，${counts.major} 主要，${counts.minor} 次要 / **人工校验**：0\n- **审查输入**：\`${input}\``);
+  return content.replace(`## 证据原文\n<!-- artifact-section:${family}:evidence -->\n内容`, `## 证据原文\n<!-- artifact-section:${family}:evidence -->\n\`\`\`text\n$ git status -s\n\`\`\``);
 }
 
 function sha256File(filePath: string) {
@@ -168,28 +179,10 @@ function sha256File(filePath: string) {
 }
 
 function localArtifact(family: LocalArtifactFamily, suffix = '') {
-  const sections = family === 'plan'
-    ? [
-        ['问题理解', '范围说明'], ['约束条件', '当前契约'], ['方案对比', '采用方案 A'],
-        ['技术方法', '实现方法'], ['实施步骤', '步骤一'], ['文件清单', '文件列表'],
-        ['验证策略', '验证方法']
-      ]
-    : family === 'code'
-      ? [
-          ['实现输入', '本轮实现输入'], ['变更文件', '文件列表'], ['关键代码说明', '实现说明'],
-          ['测试结果', '测试通过'], ['与方案的差异', '无'], ['供审查关注的内容', '完成门禁'],
-        ]
-      : [
-          ['需求来源', '用户描述'], ['需求理解', '范围说明'], ['相关文件', '文件列表'],
-          ['影响评估', '影响说明'], ['技术风险', '风险说明'], ['工作量和复杂度评估', '复杂度说明']
-        ];
-  return [
-    family === 'plan' ? '# 技术方案' : family === 'code' ? '# 实现报告' : '# 需求分析报告', '',
-    ...sections.flatMap(([heading, body]) => [`## ${heading}`, body, '']),
-    ...(family === 'code' ? [] : ['## 状态核对']),
-    ...(family === 'code' ? ['## 状态核对', '```text', '$ git status -s', '```', '## 证据原文', '验证输出'] : ['```text', '$ git status -s', '```']),
-    suffix
-  ].join('\n');
+  let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
+  if (family === 'code') content = content.replace('## 证据原文\n<!-- artifact-section:code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:code:evidence -->\n验证输出');
+  return `${content}${suffix}`;
 }
 
 function completionDigestArgs(dir: string, artifact: string, family: LocalArtifactFamily): string[] {
@@ -211,7 +204,10 @@ function addReceipt(file: string, receipt: ArtifactReceipt) {
 }
 
 function codeReport(plan = 'plan.md') {
-  return localArtifact('code').replace('本轮实现输入', `- **模式**：init\n- **方案输入**：\`${plan}\`\n- **审查输入**：\`N/A\`\n- **裁决输入**：N/A\n- **账本 ID**：N/A\n- **裁决证据**：N/A\n- **需求摘要**：完成实现报告门禁\n`);
+  return localArtifact('code').replace(
+    '## 实现输入\n<!-- artifact-section:code:input -->\n内容',
+    `## 实现输入\n<!-- artifact-section:code:input -->\n- **模式**：init\n- **方案输入**：\`${plan}\`\n- **审查输入**：\`N/A\`\n- **裁决输入**：N/A\n- **账本 ID**：N/A\n- **裁决证据**：N/A\n- **需求摘要**：完成实现报告门禁\n`
+  );
 }
 
 type ReviewCounts = { blockers: number; major: number; minor: number };
@@ -619,24 +615,24 @@ test('local repair provenance rejects semantic mutation between finalizer retrie
 
 test('local completion uses the repository verification config for its language', () => {
   const f = fixture();
-  const sections = ['Problem Understanding', 'Constraints', 'Options Comparison', 'Technical Approach', 'Implementation Steps', 'File List', 'Verification Strategy', 'State Check'];
   const configDir = path.join(f.root, '.agents', 'skills', 'plan-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
-    checks: { artifact: { required_sections: sections, required_patterns: ['^\\$ '] } }
+    checks: { artifact: { schema: 'plan', required_patterns: ['^\\$ '] } }
   }));
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   const artifact = path.join(f.dir, 'plan.md');
-  fs.writeFileSync(artifact, ['# Technical Plan', '', ...sections.flatMap((section) => [`## ${section}`, 'content']), '```text', '$ git status -s', '```'].join('\n'));
-  const content = fs.readFileSync(artifact, 'utf8');
-  const local = validateLocalArtifact(content, { family: 'plan', requiredSections: sections, requiredPatterns: ['^\\$ '] });
+  let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: 'plan.md', locale: 'en' }).replaceAll('<!-- artifact-slot:empty -->', 'content');
+  content = content.replace('## State Check\n<!-- artifact-section:plan:state-check -->\ncontent', '## State Check\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');
+  fs.writeFileSync(artifact, content);
+  const artifactContent = fs.readFileSync(artifact, 'utf8');
+  const local = validateLocalArtifact(artifactContent, { family: 'plan', requiredPatterns: ['^\\$ '] });
   assert.equal(local.ok, true, local.diagnostics.map((item) => item.message).join('; '));
   const finalized = finalizeLocalArtifact({
     taskRef: f.id,
     repoRoot: f.root,
     family: 'plan',
     artifact: 'plan.md',
-    requiredSections: sections,
     requiredPatterns: ['^\\$ ']
   });
   assert.equal(finalized.status, 'passed', finalized.error?.message);
@@ -657,7 +653,7 @@ test('completed event preserves source @ content without blocking task state', (
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan', '\n@2x\n'));
   const before = fs.readFileSync(f.file);
   const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
-  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
   assert.notDeepEqual(fs.readFileSync(f.file), before);
 });
 
@@ -1529,7 +1525,7 @@ test('decision code event clears the review baseline and consumes its input on c
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
     '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4', ...digests
   ]);
-  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
   assert.equal(JSON.parse(completed.stdout).implementationInput, 'II-1');
   content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /\| II-1 .*\| consumed \| code-r2\.md \|/);

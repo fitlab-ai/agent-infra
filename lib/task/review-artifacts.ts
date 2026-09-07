@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { scanVisibleMarkdown } from './decision-details.ts';
+
 type ReviewFindingCounts = {
   blocker: number;
   major: number;
@@ -77,29 +79,21 @@ function normalizeVerdict(raw: unknown): ReviewVerdict | '' {
 }
 
 function extractSection(content: string, names: string[]): string {
-  const lines = content.split(/\r?\n/);
   const nameSet = new Set(names);
-  const start = lines.findIndex((line) => {
-    const match = line.trim().match(/^##\s+(.+?)\s*$/);
-    return match ? nameSet.has(match[1]!) : false;
-  });
-  if (start === -1) return '';
-  const sectionLines = [];
-  for (let index = start + 1; index < lines.length; index += 1) {
-    if (/^##\s+/.test(lines[index]!)) break;
-    sectionLines.push(lines[index]);
-  }
-  return sectionLines.join('\n');
+  const scanned = scanVisibleMarkdown(content);
+  const heading = scanned.headings.find((item) => item.level === 2 && nameSet.has(item.text));
+  if (!heading) return '';
+  const next = scanned.headings.find((item) => item.start > heading.start && item.level <= 2);
+  return content.slice(heading.end, next?.start ?? content.length);
 }
 
 function summaryBounds(content: string): { start: number; end: number } | null {
-  const headings = [...content.matchAll(/^##\s+(.+?)\s*$/gm)]
-    .map((match) => ({ index: match.index, end: match.index + match[0].length, name: match[1]! }));
-  const summaries = headings.filter((heading) => SUMMARY_HEADINGS.has(heading.name));
+  const scanned = scanVisibleMarkdown(content);
+  const summaries = scanned.headings.filter((heading) => heading.level === 2 && SUMMARY_HEADINGS.has(heading.text));
   if (summaries.length !== 1) return null;
   const summary = summaries[0]!;
-  const next = headings.find((heading) => heading.index > summary.index);
-  return { start: summary.end, end: next?.index ?? content.length };
+  const next = scanned.headings.find((heading) => heading.start > summary.start && heading.level <= 2);
+  return { start: summary.end, end: next?.start ?? content.length };
 }
 
 function uniqueLine(
@@ -107,14 +101,19 @@ function uniqueLine(
   bounds: { start: number; end: number },
   pattern: RegExp
 ): { value: string; start: number; end: number } | null {
-  const section = content.slice(bounds.start, bounds.end);
-  const matches = [...section.matchAll(pattern)];
+  const matches: Array<{ value: string; index: number; length: number }> = [];
+  for (const line of scanVisibleMarkdown(content).lines) {
+    if (line.start < bounds.start || line.start >= bounds.end) continue;
+    pattern.lastIndex = 0;
+    const match = pattern.exec(line.text);
+    if (match) matches.push({ value: match[1]!, index: line.start + match.index, length: match[0].length });
+  }
   if (matches.length !== 1) return null;
   const match = matches[0]!;
   return {
-    value: match[1]!,
-    start: bounds.start + match.index,
-    end: bounds.start + match.index + match[0].length
+    value: match.value,
+    start: match.index,
+    end: match.index + match.length
   };
 }
 

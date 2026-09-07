@@ -17,26 +17,20 @@
     },
     "artifact": {
       "file_pattern": "code.md|code-r{N}.md",
-      "required_sections": [
-        "实现输入",
-        "变更文件",
-        "关键代码说明",
-        "测试结果",
-        "与方案的差异",
-        "供审查关注的内容",
-        "状态核对",
-        "证据原文"
-      ],
       "required_patterns": [
         "^\\$ "
-      ]
+      ],
+      "schema": "code"
     },
     "implementation-input": {},
     "activity-log": {
       "expected_action_pattern": "(Code Task|Code) \\(Round \\d+(?:(?:, fix for review-code(?:-r\\d+)?\\.md)|(?:, decision II-[1-9]\\d*))?\\)"
     },
     "review-ledger": {
-      "stage_scope": ["analysis", "plan"]
+      "stage_scope": [
+        "analysis",
+        "plan"
+      ]
     },
     "platform-sync": {
       "when": "issue_number_exists",

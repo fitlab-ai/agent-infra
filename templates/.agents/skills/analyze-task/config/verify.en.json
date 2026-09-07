@@ -18,18 +18,10 @@
     },
     "artifact": {
       "file_pattern": "analysis.md|analysis-r{N}.md",
-      "required_sections": [
-        "Requirement Source",
-        "Requirement Understanding",
-        "Related Files",
-        "Impact Assessment",
-        "Technical Risks",
-        "Effort and Complexity Assessment",
-        "State Check"
-      ],
       "required_patterns": [
         "^\\$ "
-      ]
+      ],
+      "schema": "analysis"
     },
     "activity-log": {
       "expected_action_pattern": "(Analyze Task|Requirement Analysis) \\(Round \\d+\\)"

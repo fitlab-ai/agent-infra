@@ -393,6 +393,18 @@ test("lifecycle report producers reference the shared evidence rule", () => {
   });
 });
 
+test("local artifact repair rules enumerate the shared structural operations", () => {
+  for (const relativePath of [
+    ".agents/rules/local-artifact-repair.md",
+    "templates/.agents/rules/local-artifact-repair.en.md",
+    "templates/.agents/rules/local-artifact-repair.zh-CN.md"
+  ]) {
+    const content = read(relativePath);
+    assert.ok(content.includes("replace-line"), `${relativePath} should authorize replace-line`);
+    assert.ok(content.includes("insert-section"), `${relativePath} should authorize insert-section`);
+  }
+});
+
 test("review skills declare one initial finalizer before their completion event", () => {
   const stages = [
     { skill: "review-analysis", stage: "analysis" },
@@ -630,12 +642,25 @@ test("workflow artifact gates require state check evidence", () => {
       const artifact = config.checks.artifact;
 
       assert.ok(artifact, `${relativePath} should declare an artifact check`);
-      sections.forEach((section) => {
-        assert.ok(
-          artifact.required_sections.includes(section),
-          `${relativePath} should require the ${section} section`
-        );
-      });
+      const schemaFamilies: Record<string, string> = {
+        "analyze-task": "analysis",
+        "review-analysis": "review-analysis",
+        "plan-task": "plan",
+        "review-plan": "review-plan",
+        "code-task": "code",
+        "review-code": "review-code"
+      };
+      if (schemaFamilies[skill]) {
+        assert.equal(artifact.schema, schemaFamilies[skill], `${relativePath} should use the shared artifact schema`);
+        assert.equal("required_sections" in artifact, false, `${relativePath} should not duplicate schema sections`);
+      } else {
+        sections.forEach((section) => {
+          assert.ok(
+            artifact.required_sections.includes(section),
+            `${relativePath} should require the ${section} section`
+          );
+        });
+      }
       assert.ok(
         artifact.required_patterns.includes("^\\$ "),
         `${relativePath} should require a shell prompt evidence line`
@@ -689,8 +714,8 @@ test("workflow verify config language variants keep only artifact language field
     const enComparable = structuredClone(enConfig);
     const zhComparable = structuredClone(zhConfig);
 
-    enComparable.checks.artifact.required_sections = [];
-    zhComparable.checks.artifact.required_sections = [];
+    if ("required_sections" in enComparable.checks.artifact) enComparable.checks.artifact.required_sections = [];
+    if ("required_sections" in zhComparable.checks.artifact) zhComparable.checks.artifact.required_sections = [];
     enComparable.checks.artifact.required_patterns = [];
     zhComparable.checks.artifact.required_patterns = [];
 
@@ -1134,10 +1159,7 @@ test("review verify configs require shared review report sections", () => {
       [`templates/.agents/skills/${skill}/config/verify.zh-CN.json`, ["检视覆盖声明", "追踪矩阵"]],
       [`templates/.agents/skills/${skill}/config/verify.en.json`, ["Review Coverage Declaration", "Traceability Matrix"]]
     ] as Array<[string, string[]]>) {
-      const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
-      sections.forEach((section) => {
-        assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
-      });
+      assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, skill);
     }
   }
 });
@@ -1148,9 +1170,7 @@ test("review-analysis verify configs require stage-specific coverage", () => {
     ["templates/.agents/skills/review-analysis/config/verify.zh-CN.json", "需求分析专项覆盖"],
     ["templates/.agents/skills/review-analysis/config/verify.en.json", "Requirement Analysis Coverage"]
   ] as Array<[string, string]>) {
-    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
-
-    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+    assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-analysis");
   }
 });
 
@@ -1160,9 +1180,7 @@ test("review-plan verify configs require architecture coverage", () => {
     ["templates/.agents/skills/review-plan/config/verify.zh-CN.json", "技术方案架构覆盖"],
     ["templates/.agents/skills/review-plan/config/verify.en.json", "Technical Plan Architecture Coverage"]
   ] as Array<[string, string]>) {
-    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
-
-    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+    assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-plan");
   }
 });
 
@@ -1172,9 +1190,7 @@ test("review-code verify configs require implementation coverage", () => {
     ["templates/.agents/skills/review-code/config/verify.zh-CN.json", "代码实现专项覆盖"],
     ["templates/.agents/skills/review-code/config/verify.en.json", "Code Implementation Coverage"]
   ] as Array<[string, string]>) {
-    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
-
-    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+    assert.equal(JSON.parse(read(relativePath)).checks.artifact.schema, "review-code");
   }
 });
 
@@ -1424,12 +1440,12 @@ test("review handshake skills submit ledger changes through structured intents",
 test("review skill reports keep advisories outside the finding ledger", () => {
   for (const skill of ["review-analysis", "review-plan", "review-code"]) {
     const localConfig = JSON.parse(read(`.agents/skills/${skill}/config/verify.json`));
-    assert.ok(localConfig.checks.artifact.required_sections.includes("非阻塞建议"));
+    assert.equal(localConfig.checks.artifact.schema, skill);
 
     for (const locale of ["en", "zh-CN"]) {
       const config = JSON.parse(read(`templates/.agents/skills/${skill}/config/verify.${locale}.json`));
       const section = locale === "en" ? "Non-blocking Advisories" : "非阻塞建议";
-      assert.ok(config.checks.artifact.required_sections.includes(section));
+      assert.equal(config.checks.artifact.schema, skill);
       assert.match(
         read(`templates/.agents/skills/${skill}/reference/report-template.${locale}.md`),
         new RegExp(`^## ${section}$`, "m")
