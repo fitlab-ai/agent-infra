@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import {
   cleanupIntermediateFiles,
+  createSandboxControlBindingVerifier,
   scanIntermediateCleanup
 } from '../../../lib/sandbox/intermediate-cleanup.ts';
+import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import {
   checkpointIntentDigest,
   writeCheckpointIntent,
@@ -82,6 +85,69 @@ function writeConsumedIntent(root: string, taskDir: string): string {
   fs.mkdirSync(intentDir, { recursive: true });
   fs.writeFileSync(path.join(intentDir, `${TASK_ID}-plan-${artifact}.json`), `${JSON.stringify(intent)}\n`);
   return path.join(intentDir, `${TASK_ID}-plan-${artifact}.json`);
+}
+
+function writeBoundControlEvidence(root: string): string {
+  const generation = 'generation-1';
+  const requestId = 'a'.repeat(16);
+  const controlRoot = path.join(root, 'control', 'demo-container', 'identity');
+  const channelDir = path.join(controlRoot, 'channel');
+  const publicStatusDir = path.join(controlRoot, 'public');
+  const processingDir = path.join(controlRoot, 'processing');
+  fs.mkdirSync(path.join(processingDir, requestId), { recursive: true });
+  fs.mkdirSync(channelDir, { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(path.join(controlRoot, 'runtime'), { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, 'manifest.json'), `${JSON.stringify({
+    engine: 'docker-desktop',
+    repoRoot: root,
+    worktreeRoot: root,
+    project: 'demo',
+    container: 'demo-container',
+    containerIdentity: { id: 'f'.repeat(64), labels: {} },
+    authorityEvidence: captureSandboxAuthority('docker-desktop', {
+      lockDomain: 'b'.repeat(64),
+      probe: (_command, args) => ({
+        status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'daemon' : { ApiVersion: '1.50' }),
+        stderr: '', pid: 1, output: []
+      })
+    }),
+    branch: 'feature/cleanup',
+    mode: 'task-bound',
+    taskId: TASK_ID,
+    token: 'token',
+    generation,
+    channelDir,
+    publicStatusDir,
+    processingDir,
+    runtimeDir: path.join(controlRoot, 'runtime')
+  })}\n`);
+  fs.writeFileSync(path.join(publicStatusDir, 'status.json'), `${JSON.stringify({
+    version: 3,
+    generation,
+    broker: { pid: 999_999_999, startTime: 0, brokerId: 'broker' },
+    state: 'healthy',
+    reasonCode: null,
+    activeRequestId: null,
+    updatedAt: Date.now(),
+    taskView: {
+      state: 'current',
+      taskId: TASK_ID,
+      observedSource: 'completed',
+      receipt: { receiptId: 'receipt-1', revision: 1, generation, requestId },
+      reasonCode: null
+    }
+  })}\n`);
+  const emptySha = createHash('sha256').update('').digest('hex');
+  fs.writeFileSync(path.join(processingDir, requestId, 'result.json'), `${JSON.stringify({
+    version: 1, id: requestId, generation, exitCode: 0, stdoutBytes: 0, stderrBytes: 0,
+    stdoutSha256: emptySha, stderrSha256: emptySha, captureState: 'metadata-only'
+  })}\n`);
+  const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
+  const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as Record<string, unknown>;
+  receipt.controlBinding = { generation, requestId };
+  fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`);
+  return controlRoot;
 }
 
 function writeSyncedIntent(root: string): string {
@@ -184,6 +250,12 @@ test('intermediate cleanup verifies synced commit identity and removes empty aux
     assert.equal(result.items.some((item) => item.kind === 'COMMIT-SYNCED' && item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
     assert.equal(result.items.some((item) => item.kind === 'EMPTY-AUX-PARENT' && item.disposition === 'deleted'), true);
+    assert.equal(
+      result.items.some((item) => item.kind === 'EMPTY-AUX-PARENT'
+        && item.path.endsWith(path.join('.agents', 'workspace', '.task-commit-intents'))
+        && item.disposition === 'deleted'),
+      true
+    );
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -214,6 +286,20 @@ test('intermediate cleanup requires an explicit verifier for bound finalization 
     const protectedReport = scanIntermediateCleanup(fixture.root);
     assert.equal(protectedReport.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
     const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: () => true });
+    assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
+    assert.equal(fs.existsSync(target), false);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('intermediate cleanup accepts only terminal control evidence for bound receipts', () => {
+  const fixture = taskFixture();
+  try {
+    const target = writeConsumedIntent(fixture.root, fixture.taskDir);
+    const controlRoot = writeBoundControlEvidence(fixture.root);
+    const verifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: verifier });
     assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
   } finally {

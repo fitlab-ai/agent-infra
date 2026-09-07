@@ -20,6 +20,12 @@ import {
 import { parseArtifactName } from '../task/artifact-lifecycle.ts';
 import { enumerateAllTaskDirs, type TaskWorkspaceState } from '../task/resolve-ref.ts';
 import { withRepositoryMutationLock, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { readSandboxControlManifest } from './control/lifecycle.ts';
+import {
+  readSandboxControlResultEvidence,
+  readSandboxControlStatus,
+  resultEvidencePath
+} from './control/state.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const LOCAL_INTENT_RE = /^(TASK-\d{8}-\d{6})-(analysis|plan|code)-(.+\.md)\.json$/;
@@ -130,6 +136,85 @@ function safeLstat(root: string, target: string, expect: 'file' | 'directory'): 
     }
   }
   return null;
+}
+
+type ControlBinding = Readonly<{ generation: string; requestId: string }>;
+type ControlBindingVerifier = NonNullable<IntermediateCleanupOptions['controlBindingVerifier']>;
+
+function controlBindingKey(taskId: string, binding: ControlBinding): string {
+  return `${taskId}\0${binding.generation}\0${binding.requestId}`;
+}
+
+function controlRootExists(root: string): boolean {
+  try { return fs.lstatSync(root).isDirectory() && !fs.lstatSync(root).isSymbolicLink(); }
+  catch { return false; }
+}
+
+function terminalControlBindingEvidence(
+  repoRootInput: string,
+  controlRootInput: string,
+  taskId: string,
+  binding: ControlBinding
+): boolean {
+  const repoRoot = path.resolve(repoRootInput);
+  const controlRoot = path.resolve(controlRootInput);
+  if (!TASK_ID_RE.test(taskId) || !controlRootExists(controlRoot)) return false;
+  const manifestPath = path.join(controlRoot, 'manifest.json');
+  const manifestIdentity = safeLstat(controlRoot, manifestPath, 'file');
+  if (!manifestIdentity) return false;
+  let manifest;
+  try { manifest = readSandboxControlManifest(manifestPath); }
+  catch { return false; }
+  if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId
+    || path.resolve(manifest.repoRoot) !== repoRoot || manifest.generation !== binding.generation
+    || path.resolve(manifest.channelDir) !== path.join(controlRoot, 'channel')
+    || path.resolve(manifest.publicStatusDir) !== path.join(controlRoot, 'public')
+    || path.resolve(manifest.processingDir) !== path.join(controlRoot, 'processing')
+    || path.resolve(manifest.runtimeDir) !== path.join(controlRoot, 'runtime')) return false;
+  try {
+    if (fs.existsSync(path.join(controlRoot, 'lease.json'))) return false;
+    const status = readSandboxControlStatus(manifest.publicStatusDir);
+    const viewReceipt = status.taskView.receipt;
+    if (status.generation !== binding.generation || status.state !== 'healthy'
+      || status.activeRequestId !== null || status.taskView.state !== 'current'
+      || status.taskView.observedSource !== 'completed' || status.taskView.taskId !== taskId
+      || !viewReceipt || viewReceipt.generation !== binding.generation
+      || viewReceipt.requestId !== binding.requestId) return false;
+    const evidence = readSandboxControlResultEvidence(resultEvidencePath(manifest, binding.requestId));
+    return evidence.id === binding.requestId
+      && evidence.generation === binding.generation
+      && evidence.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+function createSandboxControlBindingVerifier(
+  repoRoot: string,
+  controlRoots: readonly string[]
+): ControlBindingVerifier {
+  const roots = [...new Set(controlRoots.map((candidate) => path.resolve(candidate)))];
+  const captured = roots.flatMap((controlRoot) => {
+    let manifest;
+    try { manifest = readSandboxControlManifest(path.join(controlRoot, 'manifest.json')); }
+    catch { return []; }
+    const receipt = (() => {
+      try { return readSandboxControlStatus(manifest.publicStatusDir).taskView.receipt; }
+      catch { return null; }
+    })();
+    if (!receipt || !terminalControlBindingEvidence(repoRoot, controlRoot, manifest.taskId ?? '', receipt)) return [];
+    return [{
+      controlRoot,
+      taskId: manifest.taskId!,
+      key: controlBindingKey(manifest.taskId!, receipt)
+    }];
+  });
+  return (taskId, binding) => captured.some((candidate) => (
+    candidate.taskId === taskId
+    && candidate.key === controlBindingKey(taskId, binding)
+    && (!controlRootExists(candidate.controlRoot)
+      || terminalControlBindingEvidence(repoRoot, candidate.controlRoot, taskId, binding))
+  ));
 }
 
 function inspectTaskRecords(repoRoot: string, taskIds?: ReadonlySet<string>): Map<string, TaskRecord> {
@@ -420,6 +505,12 @@ function cleanupIntermediateFiles(
         if (candidate.taskId || candidate.item.disposition !== 'planned') continue;
         items[index] = removeCandidate(items[index]!);
       }
+      const knownPaths = new Set(items.map((candidate) => candidate.path));
+      for (const { item: candidate } of scanInternal(repoRoot, options)) {
+        if (candidate.kind !== 'EMPTY-AUX-PARENT' || candidate.disposition !== 'planned'
+          || knownPaths.has(candidate.path)) continue;
+        items.push(removeCandidate(candidate));
+      }
       return buildReport(items, false);
     });
   } catch {
@@ -441,6 +532,7 @@ function formatIntermediateCleanupReport(report: IntermediateCleanupReport): str
 
 export {
   cleanupIntermediateFiles,
+  createSandboxControlBindingVerifier,
   formatIntermediateCleanupReport,
   scanIntermediateCleanup
 };

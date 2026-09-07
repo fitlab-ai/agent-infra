@@ -50,6 +50,7 @@ import type { SandboxTool } from '../tools.ts';
 import { fetchSandboxRows, type SandboxRow } from './list-running.ts';
 import {
   cleanupIntermediateFiles,
+  createSandboxControlBindingVerifier,
   formatIntermediateCleanupReport,
   scanIntermediateCleanup
 } from '../intermediate-cleanup.ts';
@@ -792,6 +793,24 @@ type PromptDependencies = {
   isCancel?: typeof p.isCancel;
 };
 
+function projectSandboxControlRoots(config: SandboxConfig): string[] {
+  const projectRoot = path.join(config.controlBase, config.project);
+  let containers: fs.Dirent[];
+  try { containers = fs.readdirSync(projectRoot, { withFileTypes: true }); }
+  catch { return []; }
+  return containers
+    .filter((container) => container.isDirectory())
+    .flatMap((container) => {
+      const containerRoot = path.join(projectRoot, container.name);
+      let identities: fs.Dirent[];
+      try { identities = fs.readdirSync(containerRoot, { withFileTypes: true }); }
+      catch { return []; }
+      return identities
+        .filter((identity) => identity.isDirectory())
+        .map((identity) => path.join(containerRoot, identity.name));
+    });
+}
+
 function recoveryContexts(
   config: SandboxConfig,
   target: RmTarget,
@@ -1220,8 +1239,14 @@ async function rmOne(
   const { workspace, controlRoots, workspaceViewRoots } = target;
   preflightRmTarget(config, target);
   const auxiliaryTaskId = workspace.mode === 'task-bound' ? workspace.taskId : null;
+  const controlBindingVerifier = auxiliaryTaskId
+    ? createSandboxControlBindingVerifier(config.repoRoot, controlRoots)
+    : undefined;
   if (auxiliaryTaskId && options.cleanupIntermediate !== false) {
-    scanIntermediateCleanup(config.repoRoot, { taskIds: [auxiliaryTaskId] });
+    scanIntermediateCleanup(config.repoRoot, {
+      taskIds: [auxiliaryTaskId],
+      ...(controlBindingVerifier ? { controlBindingVerifier } : {})
+    });
   }
   const confirm = options.prompt?.confirm ?? p.confirm;
   const isCancel = options.prompt?.isCancel ?? p.isCancel;
@@ -1619,7 +1644,10 @@ async function rmOne(
     for (const lock of [...resourceLocks.values()].reverse()) lock.release();
   }
   if (auxiliaryTaskId && options.cleanupIntermediate !== false) {
-    const report = cleanupIntermediateFiles(config.repoRoot, { taskIds: [auxiliaryTaskId] });
+    const report = cleanupIntermediateFiles(config.repoRoot, {
+      taskIds: [auxiliaryTaskId],
+      ...(controlBindingVerifier ? { controlBindingVerifier } : {})
+    });
     if (!options.quiet) {
       for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
     }
@@ -1634,8 +1662,12 @@ async function rmPurge(
   const engine = detectEngine(config);
   const confirm = prompt.confirm ?? p.confirm;
   const isCancel = prompt.isCancel ?? p.isCancel;
+  const controlBindingVerifier = createSandboxControlBindingVerifier(
+    config.repoRoot,
+    projectSandboxControlRoots(config)
+  );
   p.intro(pc.cyan(`Removing all sandboxes for ${config.project}`));
-  scanIntermediateCleanup(config.repoRoot);
+  scanIntermediateCleanup(config.repoRoot, { controlBindingVerifier });
 
   const worktrees = fs.existsSync(config.worktreeBase)
     ? fs.readdirSync(config.worktreeBase)
@@ -1762,7 +1794,7 @@ async function rmPurge(
 
   if (isManagedEngine(engine)) {
     if (engine === ENGINES.WSL2) {
-      const report = cleanupIntermediateFiles(config.repoRoot);
+      const report = cleanupIntermediateFiles(config.repoRoot, { controlBindingVerifier });
       for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
       p.log.warn('Windows uses Docker Desktop with WSL2. Stop it from Docker Desktop or run "wsl --shutdown" manually.');
       p.outro(pc.green('All project sandboxes removed'));
@@ -1779,7 +1811,7 @@ async function rmPurge(
     }
   }
 
-  const report = cleanupIntermediateFiles(config.repoRoot);
+  const report = cleanupIntermediateFiles(config.repoRoot, { controlBindingVerifier });
   for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
 
   p.outro(pc.green('All project sandboxes removed'));
@@ -1791,6 +1823,10 @@ async function rmUnbound(
   options: { dryRun: boolean; assumeYes: boolean }
 ): Promise<void> {
   const engine = detectEngine(config);
+  const controlBindingVerifier = createSandboxControlBindingVerifier(
+    config.repoRoot,
+    projectSandboxControlRoots(config)
+  );
   const { running, nonRunning } = fetchSandboxRows(
     engine,
     sandboxLabel(config),
@@ -1800,7 +1836,7 @@ async function rmUnbound(
   const rows = [...running, ...nonRunning];
 
   p.intro(pc.cyan(`Removing sandboxes not bound to an active task for ${config.project}`));
-  const intermediatePreview = scanIntermediateCleanup(config.repoRoot);
+  const intermediatePreview = scanIntermediateCleanup(config.repoRoot, { controlBindingVerifier });
 
   const candidates: CleanupCandidate[] = rows.map((row) => {
     if (!row.branch || !row.workspaceMode || row.workspaceMode === 'legacy-invalid') {
@@ -1859,6 +1895,12 @@ async function rmUnbound(
   const removableGroups = groups.filter(({ cleanupTarget }) =>
     cleanupTarget.taskState === 'completed' || cleanupTarget.taskState === 'branch-only'
   );
+  const rowTaskIds = new Set(groups.flatMap(({ cleanupTarget }) => (
+    cleanupTarget.workspace.mode === 'task-bound' ? [cleanupTarget.workspace.taskId] : []
+  )));
+  const cleanupOnlyTaskIds = new Set(intermediatePreview.items
+    .filter((candidate) => candidate.disposition === 'planned' && candidate.taskId !== null && !rowTaskIds.has(candidate.taskId))
+    .map((candidate) => candidate.taskId!));
   const removable = removableGroups.flatMap(({ candidates: groupCandidates }) => groupCandidates);
   for (const { candidates: groupCandidates, cleanupTarget } of groups.filter(({ cleanupTarget }) =>
     cleanupTarget.taskState !== 'completed' && cleanupTarget.taskState !== 'branch-only'
@@ -1903,7 +1945,15 @@ async function rmUnbound(
 
   const failures: { branch: string; message: string }[] = [];
   let failedRows = 0;
+  const successfulTaskIds = new Set<string>();
+  const successfulControlVerifiers = new Map<string, ReturnType<typeof createSandboxControlBindingVerifier>>();
   for (const group of removableGroups) {
+    const taskId = group.cleanupTarget.workspace.mode === 'task-bound'
+      ? group.cleanupTarget.workspace.taskId
+      : null;
+    const groupControlBindingVerifier = taskId
+      ? createSandboxControlBindingVerifier(config.repoRoot, group.target.controlRoots)
+      : null;
     try {
       await rmOne(config, tools, group.cleanupTarget.branch, {
         assumeYes: options.assumeYes,
@@ -1914,13 +1964,25 @@ async function rmUnbound(
         allowDirtyDiscard: false,
         cleanupIntermediate: false
       });
+      if (taskId) {
+        successfulTaskIds.add(taskId);
+        if (groupControlBindingVerifier) successfulControlVerifiers.set(taskId, groupControlBindingVerifier);
+      }
     } catch (error) {
       failedRows += group.candidates.length;
       failures.push({ branch: group.cleanupTarget.branch, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  const intermediateReport = cleanupIntermediateFiles(config.repoRoot);
+  const auxiliaryTaskIds = [...new Set([...successfulTaskIds, ...cleanupOnlyTaskIds])].sort();
+  const finalControlBindingVerifier = (taskId: string, binding: { generation: string; requestId: string }): boolean => (
+    successfulControlVerifiers.get(taskId)?.(taskId, binding)
+      ?? controlBindingVerifier(taskId, binding)
+  );
+  const intermediateReport = cleanupIntermediateFiles(config.repoRoot, {
+    taskIds: auxiliaryTaskIds,
+    controlBindingVerifier: finalControlBindingVerifier
+  });
   for (const line of formatIntermediateCleanupReport(intermediateReport)) p.log.message(line);
 
   if (failures.length > 0) {

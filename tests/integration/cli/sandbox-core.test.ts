@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { semanticDigest, sha256Content } from "../../../lib/task/local-artifact-finalization.ts";
 import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycle.ts";
 import { sandboxManagedPathKey } from "../../../lib/sandbox/commands/rm.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
@@ -336,7 +337,8 @@ function writeTaskBoundControlEvidence(
   project: string,
   container: string,
   taskId: string,
-  branch: string
+  branch: string,
+  containerId = "f".repeat(64)
 ): string {
   const controlRoot = sandboxControlPaths({
     base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
@@ -351,7 +353,6 @@ function writeTaskBoundControlEvidence(
   fs.mkdirSync(publicStatusDir, { recursive: true });
   fs.mkdirSync(processingDir, { recursive: true });
   fs.mkdirSync(path.join(controlRoot, "runtime"), { recursive: true });
-  const containerId = "f".repeat(64);
   const authorityEvidence = captureSandboxAuthority("docker-desktop", {
     lockDomain: "a".repeat(64),
     probe: (_cmd, args) => ({
@@ -393,6 +394,44 @@ function writeTaskBoundControlEvidence(
     }
   })}\n`, "utf8");
   return controlRoot;
+}
+
+function writeCompletedTaskWithConsumedPlan(repoDir: string, taskId: string, branch: string): void {
+  const taskDir = path.join(repoDir, ".agents", "workspace", "completed", taskId);
+  const plan = "# Plan\n";
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nstatus: completed\nbranch: ${branch}\n---\n# body\n`, "utf8");
+  fs.writeFileSync(path.join(taskDir, "plan.md"), plan, "utf8");
+
+  const intentRoot = path.join(repoDir, ".agents", "workspace", ".local-artifact-finalization-intents");
+  fs.mkdirSync(intentRoot, { recursive: true });
+  fs.writeFileSync(path.join(intentRoot, `${taskId}-plan-plan.md.json`), `${JSON.stringify({
+    version: 1,
+    taskId,
+    family: "plan",
+    artifact: "plan.md",
+    state: "consumed",
+    baselineSemanticDigest: null,
+    artifactSha256: sha256Content(plan),
+    semanticDigest: semanticDigest(plan)
+  })}\n`, "utf8");
+
+  const receiptRoot = path.join(repoDir, ".agents", "workspace", ".task-finalization");
+  fs.mkdirSync(receiptRoot, { recursive: true });
+  fs.writeFileSync(path.join(receiptRoot, `${taskId}.json`), `${JSON.stringify({
+    version: 2,
+    taskId,
+    intent: "complete",
+    receiptId: `${taskId}-receipt`,
+    revision: 1,
+    lifecycle: "done",
+    taskComment: "done",
+    verification: "done",
+    warningProjection: "done",
+    warnings: [],
+    updatedAt: new Date().toISOString(),
+    lastError: null
+  })}\n`, "utf8");
 }
 
 function addSandboxWorktree(
@@ -640,6 +679,50 @@ test("sandbox rm --unbound removes completed rows while preserving evidenced pro
     assert.equal(fs.existsSync(blockedShell), true);
     assert.match(result.stdout, /Skipped protected sandbox sb-blocked/);
     assert.equal(fixture.readDockerCalls().filter((call) => call[0] === "rm").length, 1);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound cleans auxiliary state only for successful task-bound groups", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-partial-task-cleanup-"));
+  const failedTaskId = "TASK-20260101-000011";
+  const successfulTaskId = "TASK-20260101-000012";
+  const failedBranch = "failed-group";
+  const successfulBranch = "successful-group";
+  const failedContainer = "sb-failed-group";
+  const successfulContainer = "sb-successful-group";
+  const failedContainerId = "1".repeat(64);
+  const successfulContainerId = "2".repeat(64);
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow(failedContainer, failedBranch, "demo", "task-bound", failedTaskId),
+        sandboxRow(successfulContainer, successfulBranch, "demo", "task-bound", successfulTaskId)
+      ].join("\n")
+    });
+    writeCompletedTaskWithConsumedPlan(fixture.repoDir, failedTaskId, failedBranch);
+    writeCompletedTaskWithConsumedPlan(fixture.repoDir, successfulTaskId, successfulBranch);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", failedContainer, failedTaskId, failedBranch, failedContainerId);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", successfulContainer, successfulTaskId, successfulBranch, successfulContainerId);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"], {
+      DOCKER_INSPECT_NO_MOUNTS: "1",
+      DOCKER_REMOVAL_UPDATES_INSPECT: "1",
+      DOCKER_INSPECT_IDS: JSON.stringify({
+        [failedContainer]: failedContainerId,
+        [successfulContainer]: successfulContainerId
+      }),
+      DOCKER_EXIT_FOR_RM_ID: failedContainerId,
+      DOCKER_EXIT_FOR_RM_ID_CODE: "1"
+    });
+
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    const intentRoot = path.join(fixture.repoDir, ".agents", "workspace", ".local-artifact-finalization-intents");
+    assert.equal(fs.existsSync(path.join(intentRoot, `${failedTaskId}-plan-plan.md.json`)), true);
+    assert.equal(fs.existsSync(path.join(intentRoot, `${successfulTaskId}-plan-plan.md.json`)), false, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /Failed to remove sandbox container|partial/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
