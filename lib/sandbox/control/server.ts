@@ -365,8 +365,10 @@ function terminalMatchesEvidence(
     };
   }
   if (response.outputState === 'unavailable') {
-    const expected = genericRecoveryResponse(request, evidence.exitCode, null);
-    return { valid: JSON.stringify(response) === JSON.stringify(expected), payloadReferenced: false };
+    const causes = ['recovery', 'publish'] as const;
+    const valid = causes.some((cause) => JSON.stringify(response)
+      === JSON.stringify(genericRecoveryResponse(request, evidence.exitCode, null, cause)));
+    return { valid, payloadReferenced: false };
   }
   return {
     valid: response.payload === undefined

@@ -244,6 +244,8 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
       }
       let response: SandboxControlResponse;
       try {
+        // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
+        accepted = true;
         response = readPublishedResponse(raw, request.id, channelDir, accepted);
         malformedResponseRaw = null;
       } catch (error) {
@@ -326,6 +328,8 @@ export function recoverSandboxControl(requestId: string, params: Readonly<{
       }
       let response: SandboxControlResponse;
       try {
+        // The request-specific terminal proves the broker claimed the request; preserve recovery evidence if marker cleanup won the race.
+        accepted = true;
         response = readPublishedResponse(raw, requestId, channelDir, accepted);
         malformedResponseRaw = null;
       } catch (error) {

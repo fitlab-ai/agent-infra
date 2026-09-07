@@ -2194,7 +2194,7 @@ test('broker restart accepts an existing unavailable task-create terminal', asyn
     const terminal = {
       version: 2, id: requestId, phase: 'completed', exitCode: 0,
       stdout: `${JSON.stringify(taskCreateOutputUnavailableResult(requestId))}\n`,
-      stderr: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
+      stderr: 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n',
       error: null, outputState: 'unavailable', payload: null
     };
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.json`), `${JSON.stringify(terminal)}\n`);

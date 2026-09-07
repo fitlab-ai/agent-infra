@@ -55,7 +55,10 @@ async function waitForRequestAsync(requestsDir: string, timeoutMs: number): Prom
   throw new Error(`Timed out waiting for a request in ${requestsDir}`);
 }
 
-async function runControlledTaskCreate(responseFor: (requestId: string) => object): Promise<{
+async function runControlledTaskCreate(
+  responseFor: (requestId: string) => object,
+  options: { removeAcceptedMarkerAfterTerminal?: boolean } = {}
+): Promise<{
   requestId: string;
   exitCode: number;
   stdout: string;
@@ -109,6 +112,9 @@ async function runControlledTaskCreate(responseFor: (requestId: string) => objec
       version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
     })}\n`);
     fs.writeFileSync(path.join(responsesDir, `${requestId}.json`), `${JSON.stringify(responseFor(requestId))}\n`);
+    if (options.removeAcceptedMarkerAfterTerminal) {
+      fs.rmSync(path.join(responsesDir, `${requestId}.accepted.json`));
+    }
     return { requestId, exitCode: await result, stdout, stderr };
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
@@ -252,7 +258,7 @@ test('task-create preserves accepted evidence when an accepted terminal response
   const result = await runControlledTaskCreate((requestId) => ({
     version: 2, id: requestId, phase: 'completed', exitCode: 0, stdout: '', stderr: '', error: null,
     outputState: 'available', payload: null
-  }));
+  }), { removeAcceptedMarkerAfterTerminal: true });
   assert.equal(result.exitCode, 1, result.stderr || result.stdout);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.error.code, 'SANDBOX_CONTROL_RESPONSE_INVALID');
