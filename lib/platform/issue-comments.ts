@@ -18,6 +18,7 @@ import { resourceIdentityNumber } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 import {
   CONTROL_MARKER_PATTERN,
+  escapeHtmlText,
   fenceRanges,
   renderSafeCodeFence,
   sanitizeMarkdownDocument
@@ -140,7 +141,50 @@ function chunkByUtf8(content: string, maxBytes: number): SourceChunk[] {
   return chunks.length > 0 ? chunks : [{ content: '', start: 0, end: 0 }];
 }
 
-function independentChunkContent(piece: SourceChunk, fences: readonly FenceRange[]): string {
+function longestFenceLineRun(content: string, character: '`' | '~'): number {
+  const pattern = new RegExp(`^ {0,3}(${character}+)[ \\t]*(?:\\n|$)`, 'gm');
+  let longest = 0;
+  for (const match of content.matchAll(pattern)) longest = Math.max(longest, match[1]!.length);
+  return longest;
+}
+
+function boundedFence(content: string, sourceCharacter: '`' | '~', maxBytes: number): { opening: string; closing: string } | null {
+  const candidates: Array<'`' | '~'> = sourceCharacter === '`' ? ['~', '`'] : ['`', '~'];
+  for (const character of candidates) {
+    const length = Math.max(3, longestFenceLineRun(content, character) + 1);
+    const delimiter = character.repeat(length);
+    if (Buffer.byteLength(delimiter, 'utf8') * 2 + 2 <= maxBytes) return { opening: `${delimiter}\n`, closing: `${delimiter}\n` };
+  }
+  return null;
+}
+
+function sourceSlice(piece: SourceChunk, start: number, end: number): string {
+  return piece.content.slice(Math.max(0, start - piece.start), Math.max(0, end - piece.start));
+}
+
+function renderOversizedFenceChunk(piece: SourceChunk, fence: FenceRange, maxBytes: number): string {
+  const code = sourceSlice(piece, Math.max(piece.start, fence.openingEnd), Math.min(piece.end, fence.closingStart));
+  const delimiter = boundedFence(code, fence.character, maxBytes);
+  if (!delimiter) return escapeHtmlText(piece.content);
+
+  let content = '';
+  if (piece.start < fence.start) content += sourceSlice(piece, piece.start, Math.min(piece.end, fence.start));
+  if (piece.end > fence.start && piece.start < fence.end) {
+    content += delimiter.opening;
+    content += code;
+    if (!content.endsWith('\n')) content += '\n';
+    content += delimiter.closing;
+    if (piece.end > fence.end) content += sourceSlice(piece, fence.end, piece.end);
+  }
+  return content;
+}
+
+function independentChunkContent(piece: SourceChunk, fences: readonly FenceRange[], maxBytes: number): string {
+  const oversizedFence = fences.find((fence) =>
+    piece.end > fence.start && piece.start < fence.end
+    && (Buffer.byteLength(fence.opening, 'utf8') > maxBytes || Buffer.byteLength(fence.closing, 'utf8') > maxBytes)
+  );
+  if (oversizedFence) return renderOversizedFenceChunk(piece, oversizedFence, maxBytes);
   const openingFence = fences.find((fence) => piece.start > fence.start && piece.start < fence.end);
   const closingFence = fences.find((fence) => piece.end > fence.start && piece.end < fence.end);
   let content = piece.content;
@@ -223,7 +267,7 @@ function chunkArtifactComment(input: {
       total,
       true,
       Boolean(input.backfill),
-      independentChunkContent(piece, ranges.value)
+      independentChunkContent(piece, ranges.value, sourceLimit)
     ));
     const overflow = Math.max(...chunks.map((chunk) => Buffer.byteLength(chunk.body, 'utf8') - byteLimit));
     if (overflow <= 0) return chunks;

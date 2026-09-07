@@ -7,6 +7,7 @@ type FenceRange = {
   end: number;
   openingEnd: number;
   closingStart: number;
+  character: '`' | '~';
   opening: string;
   closing: string;
 };
@@ -69,6 +70,7 @@ function fenceRanges(value: string): SanitizationResult<FenceRange[]> {
         end: line.end,
         openingEnd: fence.openingEnd,
         closingStart: line.start,
+        character: fence.character,
         opening: value.slice(fence.start, fence.openingEnd),
         closing: value.slice(line.start, line.end)
       });

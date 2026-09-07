@@ -77,6 +77,22 @@ test('artifact chunks preserve fenced HTML when each chunk is parsed independent
   }
 });
 
+test('artifact chunks bound oversized fence lines without losing source content', () => {
+  const bodies = [
+    ['```' + 'a'.repeat(60_000), '<details>unsafe</details>', '```', 'after'].join('\n'),
+    ['~~~html', '<details>unsafe</details>', '~'.repeat(60_000), 'after'].join('\n')
+  ];
+  for (const body of bodies) {
+    const chunks = chunkArtifactComment({
+      taskId: 'TASK-20260101-000001', artifact: 'code.md', agent: 'codex', body
+    });
+    assert.ok(chunks.length > 1);
+    assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
+    assert.ok(chunks.every((chunk) => Buffer.byteLength(chunk.body, 'utf8') <= 60_000));
+    for (const chunk of chunks) assert.equal(sanitizeMarkdownDocument(chunk.body).ok, true);
+  }
+});
+
 test('pr-review artifacts chunk under the pr-review stem with round titles', () => {
   const body = `${'# PR Review\n'.repeat(1)}${'内容 '.repeat(80)}`;
   const chunks = chunkArtifactComment({
