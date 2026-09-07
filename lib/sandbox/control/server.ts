@@ -56,6 +56,7 @@ import {
   taskViewForManifest,
   type SandboxTaskView
 } from './task-view.ts';
+import { taskCreateOutputUnavailableResult } from '../../task/create-service.ts';
 
 type ActiveExecution = {
   request: SandboxControlRequest;
@@ -300,17 +301,21 @@ function outputMatchesEvidence(output: string, bytes: number, sha256: string): b
 }
 
 function genericRecoveryResponse(
-  requestId: string,
-  evidence: ReturnType<typeof readSandboxControlResultEvidence>,
-  payload: ReturnType<typeof readSandboxControlPayload> | null
+  request: SandboxControlRequest,
+  exitCode: number,
+  payload: ReturnType<typeof readSandboxControlPayload> | null,
+  cause: 'publish' | 'recovery' = 'recovery'
 ): SandboxControlResponse {
+  const outputUnavailable = request.family === 'task-create' && !payload;
   return {
     version: 2,
-    id: requestId,
+    id: request.id,
     phase: 'completed',
-    exitCode: evidence.exitCode,
-    stdout: '',
-    stderr: payload ? '' : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
+    exitCode,
+    stdout: outputUnavailable ? `${JSON.stringify(taskCreateOutputUnavailableResult(request.id))}\n` : '',
+    stderr: payload ? '' : cause === 'publish'
+      ? 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n'
+      : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
     error: null,
     outputState: payload ? 'available' : 'unavailable',
     payload: payload ? payloadReference(payload) : null
@@ -327,7 +332,7 @@ function recoveryResponse(
     const finalization = finalizationRecoveryResponse(manifest, request.id, evidence.exitCode);
     return finalization.status === 'matched' ? finalization.response ?? null : null;
   }
-  return genericRecoveryResponse(request.id, evidence, payload);
+  return genericRecoveryResponse(request, evidence.exitCode, payload);
 }
 
 function terminalMatchesEvidence(
@@ -366,8 +371,10 @@ function terminalMatchesEvidence(
     };
   }
   if (response.outputState === 'unavailable') {
-    const expected = genericRecoveryResponse(request.id, evidence, null);
-    return { valid: JSON.stringify(response) === JSON.stringify(expected), payloadReferenced: false };
+    const causes = ['recovery', 'publish'] as const;
+    const valid = causes.some((cause) => JSON.stringify(response)
+      === JSON.stringify(genericRecoveryResponse(request, evidence.exitCode, null, cause)));
+    return { valid, payloadReferenced: false };
   }
   return {
     valid: response.payload === undefined
@@ -399,7 +406,7 @@ function publishExecutionResult(
     if (sandboxControlEncodedJsonBytes(inline) <= SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES) {
       terminal = inline;
     }
-    let payload = null;
+    let payload: ReturnType<typeof createSandboxControlPayload> | null = null;
     if (!terminal) {
       try {
         payload = createSandboxControlPayload(manifest, request.id, normalized);
@@ -412,17 +419,7 @@ function publishExecutionResult(
       } catch {
         payload = null;
       }
-      terminal = {
-        version: 2,
-        id: request.id,
-        phase: 'completed',
-        exitCode: normalized.exitCode,
-        stdout: '',
-        stderr: payload ? '' : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n',
-        error: null,
-        outputState: payload ? 'available' : 'unavailable',
-        payload: payload ? payloadReference(payload) : null
-      };
+      terminal = genericRecoveryResponse(request, normalized.exitCode, payload, 'publish');
     }
   }
   if (!brokerOwns()) return false;
@@ -563,7 +560,7 @@ function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner
               || response.payload.stdoutSha256 !== payload.stdoutSha256
               || response.payload.stderrSha256 !== payload.stderrSha256) throw new Error('payload missing or mismatched');
             payloadReferenced = true;
-          } else if (terminal && (response.outputState !== undefined
+          } else if (terminal && ((response.outputState !== undefined && response.outputState !== 'unavailable')
             || response.payload !== undefined && response.payload !== null)) {
             throw new Error('payload state invalid');
           }
@@ -611,7 +608,13 @@ function delay(ms: number): Promise<void> {
 }
 
 export function sandboxControlSafeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith('AGENT_INFRA_CONTROL_')));
+  return Object.fromEntries(Object.entries(env).filter(([key]) => {
+    const normalized = key.toUpperCase();
+    return !normalized.startsWith('AGENT_INFRA_CONTROL_')
+      && normalized !== 'AGENT_INFRA_TASK_ID'
+      && normalized !== 'AGENT_INFRA_RUNTIME_DIR'
+      && normalized !== 'AGENT_INFRA_EXECUTOR_MANIFEST';
+  }));
 }
 
 export async function serveSandboxControl(

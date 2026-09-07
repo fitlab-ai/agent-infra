@@ -125,6 +125,13 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - `blocked`：保留 candidate 文件，修复暂态问题后用同一文件重试。
 - `failed`：报告稳定错误码；幂等冲突时不得改写原 key 或原 candidate 后重试。
 
+受控调用可能在结果中返回 `control` 请求证据：`accepted: true` 且
+`recovery: none` 表示可以消费当前结果；`accepted: false` 且
+`recovery: new-request-id` 表示请求尚未受理，暂态问题恢复后才能用同一份
+candidate 和新的 outer request ID 重试；`recovery: same-request-id` 或
+`recovery: inspect-domain-state` 表示请求已经受理，不得创建新的 candidate 或
+自动重放，必须先使用原 request 检查结果或宿主任务状态。
+
 ### 4. 平台失败兼容说明
 
 平台级联由宿主服务完成。兼容的人工恢复命令仍由宿主 warning 指引，不在沙箱内执行：

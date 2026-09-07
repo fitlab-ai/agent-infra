@@ -12,6 +12,7 @@ import {
   createSandboxExecutorExecutionContext,
   dispatchTaskControlOperation
 } from '../../../lib/task/control-authority.ts';
+import { classifySandboxControlEnvironment } from '../../../lib/sandbox/control/client.ts';
 import { issueHumanOverride } from '../../../lib/task/human-override.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 
@@ -147,6 +148,33 @@ test('task-bound marker requires its runtime binding before entering the client'
   }));
   assert.equal(result.status, 1);
   assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CONTROL_TRANSPORT_INVALID');
+});
+
+test('shared sandbox control environment classification is fail-closed and distinguishes workspace modes', () => {
+  const base = {
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: 'generation',
+    AGENT_INFRA_CONTROL_DIR: '/control',
+    AGENT_INFRA_CONTROL_STATUS_DIR: '/status'
+  };
+  assert.equal(classifySandboxControlEnvironment(cleanEnv()).kind, 'direct');
+  assert.equal(classifySandboxControlEnvironment(cleanEnv(base)).kind, 'controlled');
+  assert.equal(classifySandboxControlEnvironment(cleanEnv({
+    ...base,
+    AGENT_INFRA_TASK_ID: TASK_ID,
+    AGENT_INFRA_RUNTIME_DIR: '/runtime'
+  })).kind, 'controlled');
+
+  for (const env of [
+    { AGENT_INFRA_CONTROL_TOKEN: 'token' },
+    { AGENT_INFRA_TASK_ID: TASK_ID },
+    { ...base, AGENT_INFRA_RUNTIME_DIR: '/runtime' },
+    { ...base, AGENT_INFRA_TASK_ID: TASK_ID },
+    { ...base, AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest' },
+    { ...base, AGENT_INFRA_CONTROL_CONTROLLER_BINDING: '{}' }
+  ]) {
+    assert.equal(classifySandboxControlEnvironment(cleanEnv(env)).kind, 'invalid');
+  }
 });
 
 const TASK_ID = 'TASK-20260809-010203';
