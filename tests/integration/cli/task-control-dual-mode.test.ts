@@ -87,6 +87,23 @@ function runLauncher(command: string, args: string[], env: NodeJS.ProcessEnv): {
   };
 }
 
+test('internal launcher resolves its package path when invoked through a symlink', onPlatforms('linux', 'darwin'), () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-launcher-link-'));
+  const launcherLink = path.join(temporaryRoot, 'agent-infra-internal');
+  try {
+    fs.symlinkSync(filePath('bin/internal-cli.sh'), launcherLink);
+    const result = spawnSync(launcherLink, ['agent-client', '--help'], {
+      cwd: os.tmpdir(),
+      env: cleanEnv(),
+      encoding: 'utf8'
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Usage:/u);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
   const statusPath = path.join(statusDir, 'status.json');
   const deadline = Date.now() + timeoutMs;
