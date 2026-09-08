@@ -1323,6 +1323,59 @@ test("sandbox purge preserves a rich removal journal for its real recovery path"
   }
 });
 
+test("sandbox purge preserves a default early-phase removal journal for recovery", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-early-journal-"));
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  const branch = "feature/early-purge-journal";
+  try {
+    process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, "TASK-20260824-000008", branch);
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => removeSandboxControlRoot(evidence.controlRoot, {
+        inspectContainer: async () => ({
+          state: "found",
+          id: FIXTURE_CONTAINER_ID,
+          running: false,
+          labels: {}
+        }),
+        removeContainer: async () => { throw new Error("fixture container removal failed"); },
+        retainRemovalJournal: true
+      })),
+      /fixture container removal failed/
+    );
+
+    const before = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(before);
+    assert.equal(before.phase, "container-removal");
+    fs.rmSync(evidence.controlRoot, { recursive: true, force: true });
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+        confirm: async () => false,
+        isCancel: (value): value is symbol => false
+      })),
+      /SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING/
+    );
+
+    const after = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(after);
+    assert.equal(after.phase, "container-removal");
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm preserves a replacement after a share cleanup phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-phase-retry-"));

@@ -47,6 +47,7 @@ import { acquireSandboxResourceLock, type SandboxResourceLock } from '../control
 import { toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
 import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
+import { getProcessStartTime } from '../../server/process-state.ts';
 import { fetchSandboxRows, type SandboxRow } from './list-running.ts';
 import {
   cleanupIntermediateFiles,
@@ -1175,6 +1176,7 @@ async function removeProjectControlRoots(
 }
 
 function isDefaultPurgeRemovalJournal(journal: SandboxRemovalJournal): boolean {
+  if (journal.phase !== 'carrier-removed' && journal.phase !== 'completed') return false;
   const { target } = journal;
   const container = path.basename(path.dirname(target.controlRoot));
   const expectedTargetDigest = createHash('sha256')
@@ -1209,7 +1211,11 @@ function completePurgeRemovalJournals(config: SandboxConfig): void {
     });
     try {
       let current = journal;
-      if (current.owner.pid !== process.pid) {
+      const currentProcessStartTime = getProcessStartTime(process.pid);
+      const ownedByCurrentProcess = currentProcessStartTime !== null
+        && current.owner.pid === process.pid
+        && current.owner.startTime === currentProcessStartTime;
+      if (!ownedByCurrentProcess) {
         current = claimSandboxRemovalJournal(current, { resourceLock });
       }
       while (sandboxRemovalPhaseIndex(current.phase) < sandboxRemovalPhaseIndex('completed')) {
