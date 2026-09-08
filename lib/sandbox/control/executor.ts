@@ -240,10 +240,16 @@ async function executeTaskWorkflowRequest(
     if (!artifact || !manifest.taskProjectionDir || !manifest.taskProjectionTopology) {
       return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'TASK_WORKFLOW_REQUEST_INVALID', message: 'artifact landing requires a canonical artifact' } })}\n`, stderr: '' };
     }
-    const preflightFamily = request.workflow.family
-      ?? (typeof request.workflow.fields?.family === 'string' ? request.workflow.fields.family : undefined)
-      ?? (typeof request.workflow.fields?.stage === 'string' ? request.workflow.fields.stage : undefined);
-    if (preflightFamily !== 'analysis' && preflightFamily !== 'plan' && preflightFamily !== 'code') {
+    const stage = request.workflow.fields?.stage;
+    const preflightFamily = command === 'review-finalize-summary'
+      ? (stage === 'analysis' || stage === 'plan' || stage === 'code' ? `review-${stage}` : undefined)
+      : request.workflow.family
+        ?? (typeof request.workflow.fields?.family === 'string' ? request.workflow.fields.family : undefined)
+        ?? (typeof request.workflow.fields?.stage === 'string' ? request.workflow.fields.stage : undefined);
+    const validPreflightFamily = command === 'review-finalize-summary'
+      ? preflightFamily === 'review-analysis' || preflightFamily === 'review-plan' || preflightFamily === 'review-code'
+      : preflightFamily === 'analysis' || preflightFamily === 'plan' || preflightFamily === 'code';
+    if (!validPreflightFamily) {
       return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'TASK_WORKFLOW_REQUEST_INVALID', message: 'host-control preflight requires an artifact family' } })}\n`, stderr: '' };
     }
     let preflight: HostControlResponse;
@@ -252,7 +258,7 @@ async function executeTaskWorkflowRequest(
         endpoint: process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint(),
         request: hostControlRequestForCommand(
           'task-artifact',
-          [request.workflow.taskId, 'inspect', '--family', preflightFamily],
+          [request.workflow.taskId, 'inspect', '--family', preflightFamily as string],
           manifest.repoRoot
         )
       });
@@ -340,7 +346,6 @@ async function executeTaskWorkflowRequest(
             return workflowResult(finalized);
           }
 
-          const stage = request.workflow.fields?.stage;
           if (typeof stage !== 'string') return workflowFailure('TASK_WORKFLOW_REQUEST_INVALID', 'review finalization requires a review stage');
           const prepared = prepareReviewSummaryCandidate({
             taskRef: request.workflow.taskId,
