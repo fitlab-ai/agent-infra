@@ -119,6 +119,12 @@ async function cmdSync(): Promise<void> {
     replacements
   );
   ok('Updated .agents/scripts/lib/agent-infra-package.js');
+  renderFile(
+    path.join(templateDir, '.agents', 'scripts', 'package.json'),
+    path.join('.agents', 'scripts', 'package.json'),
+    replacements
+  );
+  ok('Updated .agents/scripts/package.json');
   const added = {
     managed: workflowPlan.projectAssets.registry.managed.filter(
       (entry) => !currentRegistry.managed.includes(entry)

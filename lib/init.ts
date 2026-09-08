@@ -288,6 +288,12 @@ async function cmdInit(): Promise<void> {
     replacements
   );
   ok('Installed .agents/scripts/lib/agent-infra-package.js');
+  renderFile(
+    path.join(templateDir, '.agents', 'scripts', 'package.json'),
+    path.join('.agents', 'scripts', 'package.json'),
+    replacements
+  );
+  ok('Installed .agents/scripts/package.json');
 
   const reconcileResult = applyAgentClientReconciliation(workflowPlan);
   for (const target of reconcileResult.applied) ok(`Installed ${target}`);
