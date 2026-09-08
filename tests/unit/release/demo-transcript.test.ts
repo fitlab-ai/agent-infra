@@ -115,6 +115,6 @@ test('canonical transcript covers the fixed init prompts and generated tree', ()
     'Agent Client project integrations', 'Template sources', 'Skill sources',
     'Project initialized successfully!',
     'demo$ tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst',
-    '.agents/', '.claude/', '.opencode/', '9 directories, 2 files'
+    '.agents/', '.agents/scripts/package.json', '.claude/', '.opencode/', '9 directories, 3 files'
   ]) assert.match(transcript, new RegExp(visibleText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });

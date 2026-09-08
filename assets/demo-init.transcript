@@ -32,6 +32,7 @@ demo$ ai init
 
   ✓ Installed .agents/skills/update-agent-infra/
   ✓ Installed .agents/scripts/lib/agent-infra-package.js
+  ✓ Installed .agents/scripts/package.json
   ✓ Installed .claude/commands/update-agent-infra.md
   ✓ Installed .opencode/commands/update-agent-infra.md
   ✓ Generated .agents/.airc.json
@@ -54,7 +55,8 @@ demo$ ai init
 demo$ tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst
 .agents/
 ├── scripts
-│   └── lib
+│   ├── lib
+│   └── package.json
 └── skills
     └── update-agent-infra
 .claude/
@@ -64,5 +66,5 @@ demo$ tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst
 └── commands
     └── update-agent-infra.md
 
-9 directories, 2 files
+9 directories, 3 files
 demo$
