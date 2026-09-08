@@ -636,6 +636,77 @@ test('task workflow skips authoritative landing when host-control preflight is u
   }
 });
 
+test('task workflow treats a completed host transport with a nonzero domain result as a failure before landing', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workflow-domain-failure-'));
+  const taskId = 'TASK-20260101-000001';
+  const projectionRoot = path.join(root, 'projection');
+  const authoritativeTaskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(projectionRoot, { recursive: true });
+  fs.mkdirSync(authoritativeTaskDir, { recursive: true });
+  fs.writeFileSync(path.join(projectionRoot, 'code.md'), 'candidate\n');
+  const boundManifest = {
+    ...manifest,
+    repoRoot: root,
+    worktreeRoot: root,
+    taskId,
+    token: 'workflow-token',
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    channelDir: path.join(root, 'channel'),
+    runtimeDir: path.join(root, 'runtime'),
+    taskProjectionDir: projectionRoot,
+    taskProjectionTopology: captureProjectionTopology(projectionRoot)
+  } satisfies SandboxControlManifest;
+  const workflowId = 'abcdefabcdefabcdefabcdefabcdefab';
+  const request: SandboxControlRequest = {
+    version: 3,
+    id: workflowId,
+    token: boundManifest.token,
+    generation: boundManifest.generation,
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'task-workflow',
+    args: [],
+    controllerProcess: null,
+    controllerProof: null,
+    workflow: {
+      version: 1,
+      id: workflowId,
+      taskId,
+      generation: boundManifest.generation,
+      operation: 'artifact-finalize-local',
+      artifact: 'code.md',
+      family: 'code',
+      fields: { taskRef: taskId, family: 'code' }
+    }
+  };
+  try {
+    const result = await executeRequest(boundManifest, path.join(root, 'manifest.json'), request, {
+      requestHostControl: async () => ({
+        version: 1,
+        id: workflowId,
+        status: 'completed',
+        exitCode: 0,
+        result: {
+          stdout: `${JSON.stringify({ status: 'refused', error: { code: 'TASK_ARTIFACT_CONTEXT_REFUSED', message: 'domain rejected the artifact' } })}\n`,
+          stderr: '',
+          exitCode: 1
+        },
+        error: null
+      })
+    });
+    assert.equal(result.exitCode, 1);
+    assert.equal(JSON.parse(result.stdout).error.code, 'TASK_ARTIFACT_CONTEXT_REFUSED');
+    assert.equal(fs.existsSync(path.join(authoritativeTaskDir, 'code.md')), false);
+    const audit = fs.existsSync(path.join(root, 'audit.ndjson'))
+      ? fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>)
+      : [];
+    assert.equal(audit.some((entry) => entry.event === 'task-workflow-artifact-landed'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('typed controller verify returns only the live task binding without spawning or mutating state', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-verify-executor-'));
   const manifestPath = path.join(root, 'manifest.json');

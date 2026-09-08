@@ -11,6 +11,16 @@ import {
   type TaskCreateResult
 } from '../../task/create-service.ts';
 import { applyTaskFinalization } from '../../task/finalization.ts';
+import { parseArtifactName } from '../../task/artifact-lifecycle.ts';
+import {
+  finalizeLocalArtifact,
+  finalizeLocalArtifactContent,
+  type LocalArtifactFamily
+} from '../../task/local-artifact-finalization.ts';
+import { prepareReviewSummaryCandidate } from '../../task/review-finalization.ts';
+import { resolveTaskRef } from '../../task/resolve-ref.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from '../../task/task-execution-lock.ts';
+import { loadVerificationConfig } from '../../task/verification-config.ts';
 import { bindSandboxControlTask, validateSandboxControlRequest, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
 import {
   atomicWriteJson,
@@ -26,7 +36,7 @@ import {
   parseTaskControlOperation,
   type TaskControlOperation
 } from '../../task/control-authority.ts';
-import { landProjectionArtifact, workflowArguments, workflowCommandForOperation, type TaskProjectionManifest } from './task-workflow.ts';
+import { landProjectionArtifact, readProjectionArtifact, workflowArguments, workflowCommandForOperation, type TaskProjectionManifest } from './task-workflow.ts';
 import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type BrokerOwner } from './lifecycle.ts';
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
@@ -141,6 +151,79 @@ function resultAuditFields(result: SandboxControlExecutionResult): Record<string
   };
 }
 
+function workflowFailure(code: string, message: string): SandboxControlExecutionResult {
+  return {
+    exitCode: 1,
+    stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code, message } })}\n`,
+    stderr: ''
+  };
+}
+
+function workflowResult(result: unknown): SandboxControlExecutionResult {
+  const status = result && typeof result === 'object' && !Array.isArray(result)
+    && typeof (result as { status?: unknown }).status === 'string'
+    ? (result as { status: string }).status
+    : 'failed';
+  return {
+    exitCode: status === 'failed' ? 1 : 0,
+    stdout: `${JSON.stringify(result)}\n`,
+    stderr: ''
+  };
+}
+
+function localArtifactVerificationOptions(
+  repoRoot: string,
+  family: LocalArtifactFamily
+): Readonly<{ requiredSections?: readonly string[]; requiredPatterns?: readonly string[] }> {
+  const skillName = family === 'analysis' ? 'analyze-task' : family === 'plan' ? 'plan-task' : 'code-task';
+  try {
+    const loaded = loadVerificationConfig(repoRoot, skillName);
+    const artifact = loaded.checks.artifact;
+    if (artifact && typeof artifact === 'object' && !Array.isArray(artifact)) {
+      const sections = artifact.required_sections;
+      const patterns = artifact.required_patterns;
+      return {
+        requiredSections: Array.isArray(sections) ? sections.filter((value): value is string => typeof value === 'string') : undefined,
+        requiredPatterns: Array.isArray(patterns) ? patterns.filter((value): value is string => typeof value === 'string') : undefined
+      };
+    }
+  } catch {
+    // Isolated task projections may not contain the repository verification configuration.
+  }
+  return {};
+}
+
+function hostPreflightFailure(response: HostControlResponse): Readonly<{ code: string; message: string }> | null {
+  if (response.status !== 'completed' || response.exitCode !== 0) {
+    return { code: 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', message: 'host-control worker preflight failed' };
+  }
+  const result = response.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return null;
+  }
+  const worker = result as { exitCode?: unknown; stdout?: unknown };
+  if (worker.exitCode !== undefined && worker.exitCode !== 0) {
+    let domain: Record<string, unknown> | null = null;
+    if (typeof worker.stdout === 'string') {
+      try {
+        const parsed = JSON.parse(worker.stdout) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) domain = parsed as Record<string, unknown>;
+      } catch {
+        // Preserve the stable host-authority failure below.
+      }
+    }
+    const error = domain?.error;
+    const domainError = error && typeof error === 'object' && !Array.isArray(error)
+      ? error as { code?: unknown; message?: unknown }
+      : null;
+    return {
+      code: typeof domainError?.code === 'string' ? domainError.code : 'SANDBOX_CONTROL_HOST_AUTHORITY_FAILED',
+      message: typeof domainError?.message === 'string' ? domainError.message : 'host-control worker returned a domain failure'
+    };
+  }
+  return null;
+}
+
 async function executeTaskWorkflowRequest(
   manifest: SandboxControlManifest,
   request: Extract<SandboxControlRequest, { family: 'task-workflow' }>,
@@ -176,29 +259,129 @@ async function executeTaskWorkflowRequest(
     } catch {
       return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', message: 'host-control service is unavailable' } })}\n`, stderr: '' };
     }
-    if (preflight.status !== 'completed' || preflight.exitCode !== 0) {
-      return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', message: 'host-control worker preflight failed' } })}\n`, stderr: '' };
-    }
-    const landing = await landProjectionArtifact({
+    const preflightFailure = hostPreflightFailure(preflight);
+    if (preflightFailure) return workflowFailure(preflightFailure.code, preflightFailure.message);
+    const projectionManifest = {
       version: 1,
       taskId: request.workflow.taskId,
       generation: request.workflow.generation,
       projectionRoot: manifest.taskProjectionDir,
       authoritativeTaskDir: path.join(manifest.repoRoot, '.agents', 'workspace', 'active', request.workflow.taskId),
       topology: { verified: true, ancestors: manifest.taskProjectionTopology }
-    } satisfies TaskProjectionManifest, {
-      artifact,
-      ...(request.workflow.expectedSha256 === undefined ? {} : { expectedSha256: request.workflow.expectedSha256 })
-    });
-    appendExecutorAudit(manifest, 'task-workflow-artifact-landed', {
-      requestId: request.workflow.id,
-      sandboxTaskId: request.workflow.taskId,
-      workflowOperation: request.workflow.operation,
-      artifact,
-      bytes: landing.bytes,
-      sha256: landing.sha256,
-      semanticDigest: landing.semanticDigest
-    });
+    } satisfies TaskProjectionManifest;
+    try {
+      return await withTaskExecutionLock(
+        manifest.repoRoot,
+        request.workflow.taskId,
+        `sandbox-control.${command}`,
+        async () => {
+          const expectedSha256 = request.workflow.expectedSha256;
+          const read = await readProjectionArtifact(projectionManifest, {
+            artifact,
+            ...(expectedSha256 === undefined ? {} : { expectedSha256 })
+          });
+          if (command === 'artifact-finalize-local') {
+            const family = preflightFamily as LocalArtifactFamily;
+            const parsedArtifact = parseArtifactName(artifact);
+            if (!parsedArtifact || parsedArtifact.family !== family) {
+              return workflowResult(finalizeLocalArtifact({
+                taskRef: request.workflow.taskId,
+                family,
+                artifact,
+                repoRoot: manifest.repoRoot
+              }));
+            }
+            const resolved = resolveTaskRef(request.workflow.taskId, { repoRoot: manifest.repoRoot });
+            if (!resolved.ok) {
+              return workflowResult(finalizeLocalArtifact({
+                taskRef: request.workflow.taskId,
+                family,
+                artifact,
+                repoRoot: manifest.repoRoot
+              }));
+            }
+            const localRequest = {
+              taskRef: request.workflow.taskId,
+              family,
+              artifact,
+              repoRoot: manifest.repoRoot,
+              ...localArtifactVerificationOptions(manifest.repoRoot, family)
+            };
+            const candidateResult = finalizeLocalArtifactContent(
+              localRequest,
+              resolved,
+              read.bytes.toString('utf8'),
+              { persistIntent: false }
+            );
+            if (candidateResult.status === 'failed') return workflowResult(candidateResult);
+            if (request.workflow.expectedSemanticDigest !== undefined
+              && candidateResult.semanticDigest !== request.workflow.expectedSemanticDigest) {
+              return workflowFailure(
+                'TASK_ARTIFACT_SEMANTIC_DIGEST_MISMATCH',
+                'projection artifact semantic digest does not match the workflow request'
+              );
+            }
+            const landing = await landProjectionArtifact(projectionManifest, {
+              artifact,
+              expectedSha256: read.sha256
+            });
+            const finalized = finalizeLocalArtifact(localRequest);
+            if (finalized.status === 'passed') {
+              appendExecutorAudit(manifest, 'task-workflow-artifact-landed', {
+                requestId: request.workflow.id,
+                sandboxTaskId: request.workflow.taskId,
+                workflowOperation: request.workflow.operation,
+                artifact,
+                bytes: landing.bytes,
+                sha256: landing.sha256,
+                semanticDigest: finalized.semanticDigest
+              });
+            }
+            return workflowResult(finalized);
+          }
+
+          const stage = request.workflow.fields?.stage;
+          if (typeof stage !== 'string') return workflowFailure('TASK_WORKFLOW_REQUEST_INVALID', 'review finalization requires a review stage');
+          const prepared = prepareReviewSummaryCandidate({
+            taskRef: request.workflow.taskId,
+            stage,
+            artifact,
+            ...(request.workflow.fields?.orchestrated === true ? { orchestrated: true } : {}),
+            ...(request.workflow.fields?.dryRun === true ? { dryRun: true } : {})
+          }, read.bytes.toString('utf8'), { repoRoot: manifest.repoRoot });
+          if (prepared.result.status === 'failed' || prepared.result.status === 'planned') {
+            return workflowResult(prepared.result);
+          }
+          const landing = await landProjectionArtifact(projectionManifest, {
+            artifact,
+            expectedSha256: read.sha256,
+            transform: prepared.result.status === 'applied'
+              ? () => Buffer.from(prepared.content, 'utf8')
+              : undefined
+          });
+          appendExecutorAudit(manifest, 'task-workflow-artifact-landed', {
+            requestId: request.workflow.id,
+            sandboxTaskId: request.workflow.taskId,
+            workflowOperation: request.workflow.operation,
+            artifact,
+            bytes: landing.bytes,
+            sha256: landing.sha256,
+            semanticDigest: landing.semanticDigest
+          });
+          return workflowResult(prepared.result);
+        }
+      );
+    } catch (error) {
+      if (error instanceof TaskExecutionLockError) {
+        return workflowFailure(error.code, error.message);
+      }
+      return workflowFailure(
+        error instanceof Error && /^([A-Z][A-Z0-9_]+)/u.test(error.message)
+          ? /^([A-Z][A-Z0-9_]+)/u.exec(error.message)?.[1] ?? 'TASK_WORKFLOW_FAILED'
+          : 'TASK_WORKFLOW_FAILED',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
   }
   const childEnv = safeEnv(process.env);
   for (const key of ['AGENT_INFRA_TASK_ID', 'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_EXECUTOR_MANIFEST']) delete childEnv[key];

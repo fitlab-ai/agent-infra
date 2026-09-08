@@ -421,6 +421,125 @@ function finalizeReviewSummaryUnlocked(
   };
 }
 
+type ReviewSummaryCandidatePreparation = Readonly<{
+  result: ReviewFinalizationResult;
+  content: string;
+}>;
+
+function prepareReviewSummaryCandidate(
+  request: ReviewFinalizationRequest,
+  artifactContent: string,
+  options: ReviewFinalizationOptions = {}
+): ReviewSummaryCandidatePreparation {
+  const stage = request.stage as ReviewStage;
+  const spec = STAGES[stage];
+  if (!spec) return { result: failed(request, 'REVIEW_STAGE_INVALID', `unsupported review stage '${request.stage}'`), content: artifactContent };
+  if (!request.taskRef || !request.artifact) {
+    return { result: failed(request, 'REVIEW_PAYLOAD_INVALID', 'taskRef, stage, and artifact are required'), content: artifactContent };
+  }
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return { result: failed(request, resolved.code, resolved.message, resolved.taskId), content: artifactContent };
+  if (resolved.state !== 'active' && !allowsManualOverride(options.manualOverride, 'review-finalization', 'TASK_STATE_MISMATCH')) {
+    return { result: failed(request, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId), content: artifactContent };
+  }
+  const parsedArtifact = parseArtifactName(request.artifact);
+  if (!parsedArtifact || parsedArtifact.family !== spec.family) {
+    return {
+      result: failed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${spec.family}`, resolved.taskId),
+      content: artifactContent
+    };
+  }
+  let taskContent: string;
+  try { taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
+  catch (error) {
+    return { result: failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId), content: artifactContent };
+  }
+  if (!openReviewRound(taskContent, spec.action, parsedArtifact.round)) {
+    return {
+      result: failed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', `${request.artifact} does not have one matching open started review event`, resolved.taskId),
+      content: artifactContent
+    };
+  }
+  const execution = validateLifecycleExecution(request.taskRef, {
+    mode: request.orchestrated ? 'orchestrated' : 'standalone',
+    identity: {
+      stage: spec.family,
+      round: parsedArtifact.round,
+      artifact: request.artifact,
+      role: 'reviewer'
+    },
+    dryRun: request.dryRun
+  }, { repoRoot: options.repoRoot });
+  if (!execution.ok) {
+    return {
+      result: failed(
+        request,
+        'REVIEW_PROVENANCE_INVALID',
+        `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`,
+        resolved.taskId
+      ),
+      content: artifactContent
+    };
+  }
+  let rows;
+  try {
+    const ledger = parseLedgerDocument(taskContent);
+    if (!ledger.present) {
+      return { result: failed(request, 'REVIEW_LEDGER_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`, resolved.taskId), content: artifactContent };
+    }
+    rows = ledger.rows;
+  } catch (error) {
+    return { result: failed(request, 'REVIEW_LEDGER_INVALID', String(error), resolved.taskId), content: artifactContent };
+  }
+  const ledgerError = validateLedgerRows(rows);
+  if (ledgerError) {
+    return {
+      result: failed(request, 'REVIEW_LEDGER_INVALID', `${ledgerError.code}: ${ledgerError.message}`, resolved.taskId),
+      content: artifactContent
+    };
+  }
+  const stageStatus = summarizeLedgerStage(rows, stage);
+  const detailInspection = inspectDecisionDetailDuplicates(artifactContent);
+  if (!detailInspection.ok) {
+    return {
+      result: failed(request, 'REVIEW_DECISION_DETAIL_INVALID', `${detailInspection.code}: ${detailInspection.message}`, resolved.taskId, stageStatus),
+      content: artifactContent
+    };
+  }
+  const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts);
+  if (!transformed.ok) {
+    return { result: failed(request, transformed.code, transformed.message, resolved.taskId, stageStatus), content: artifactContent };
+  }
+  const operations = [{ kind: 'artifact' as const, artifact: request.artifact, operation: 'update' as const }];
+  if (!transformed.changed) {
+    return {
+      result: { ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus), status: 'no-op', error: null },
+      content: artifactContent
+    };
+  }
+  if (request.dryRun) {
+    return {
+      result: { ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus), status: 'planned', changed: true, operations, error: null },
+      content: artifactContent
+    };
+  }
+  return {
+    result: {
+      status: 'applied',
+      changed: true,
+      intent: 'finalize-summary',
+      requestRef: request.taskRef,
+      taskId: resolved.taskId,
+      stage,
+      artifact: request.artifact,
+      stageStatus,
+      operations,
+      error: null
+    },
+    content: transformed.content
+  };
+}
+
 function finalizeReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
@@ -446,11 +565,12 @@ function finalizeReviewSummary(
   }
 }
 
-export { finalizeReviewSummary };
+export { finalizeReviewSummary, prepareReviewSummaryCandidate };
 export type {
   ReviewFinalizationError,
   ReviewFinalizationErrorCode,
   ReviewFinalizationOptions,
   ReviewFinalizationRequest,
-  ReviewFinalizationResult
+  ReviewFinalizationResult,
+  ReviewSummaryCandidatePreparation
 };

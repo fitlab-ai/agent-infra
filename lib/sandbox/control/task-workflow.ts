@@ -248,8 +248,30 @@ export async function landProjectionArtifact(
     expectedSha256?: string;
     validate?: (bytes: Buffer) => void | Promise<void>;
     semanticDigest?: (bytes: Buffer) => string;
+    transform?: (bytes: Buffer) => Buffer | Promise<Buffer>;
   }>
 ): Promise<Readonly<{ artifact: string; bytes: number; sha256: string; semanticDigest: string | null }>> {
+  const stable = await readProjectionArtifact(manifest, input);
+  const target = path.join(manifest.authoritativeTaskDir, input.artifact);
+  await writeAtomicFile(target, stable.bytes);
+  return {
+    artifact: input.artifact,
+    bytes: stable.bytes.length,
+    sha256: stable.sha256,
+    semanticDigest: stable.semanticDigest
+  };
+}
+
+export async function readProjectionArtifact(
+  manifest: TaskProjectionManifest,
+  input: Readonly<{
+    artifact: string;
+    expectedSha256?: string;
+    validate?: (bytes: Buffer) => void | Promise<void>;
+    semanticDigest?: (bytes: Buffer) => string;
+    transform?: (bytes: Buffer) => Buffer | Promise<Buffer>;
+  }>
+): Promise<Readonly<{ artifact: string; bytes: Buffer; sha256: string; semanticDigest: string | null }>> {
   if (!canonicalArtifactName(input.artifact)) throw new SecureFileError('TASK_ARTIFACT_WRITE_DENIED', 'artifact must be a canonical top-level basename');
   verifyProjectionTopology(manifest);
   assertAuthoritativeDirectory(manifest.authoritativeTaskDir);
@@ -261,10 +283,10 @@ export async function landProjectionArtifact(
     ...(input.expectedSha256 ? { expectedSha256: input.expectedSha256 } : {})
   });
   await input.validate?.(stable.bytes);
-  const semanticDigest = input.semanticDigest?.(stable.bytes) ?? null;
-  const target = path.join(manifest.authoritativeTaskDir, input.artifact);
-  await writeAtomicFile(target, stable.bytes);
-  return { artifact: input.artifact, bytes: stable.bytes.length, sha256: stable.sha256, semanticDigest };
+  const bytes = input.transform ? await input.transform(stable.bytes) : stable.bytes;
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const semanticDigest = input.semanticDigest?.(bytes) ?? null;
+  return { artifact: input.artifact, bytes, sha256, semanticDigest };
 }
 
 export function taskWorkflowAuditFields(request: TaskWorkflowRequest, result: Readonly<{ bytes?: number; sha256?: string; semanticDigest?: string | null; outcome: string }>): Readonly<Record<string, string | number | null>> {
