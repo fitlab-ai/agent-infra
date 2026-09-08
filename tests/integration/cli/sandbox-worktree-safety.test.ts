@@ -153,20 +153,55 @@ async function withFixtureDocker<T>(
 function spawnSandboxCli(
   fixture: ReturnType<typeof writeSandboxEngineFixture>,
   tmpDir: string,
-  args: string[]
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv = {},
+  input?: string
 ) {
+  const env: NodeJS.ProcessEnv = {
+    ...envWithPrependedPath(gitSafeEnv(), fixture.binDir),
+    HOME: tmpDir,
+    USERPROFILE: tmpDir,
+    DOCKER_LOG_PATH: fixture.logPath,
+    ...extraEnv
+  };
+  if (extraEnv.AGENT_INFRA_TASK_ID === "") {
+    for (const key of [
+      "AGENT_INFRA_CONTROL_DIR",
+      "AGENT_INFRA_CONTROL_GENERATION",
+      "AGENT_INFRA_CONTROL_STATUS_DIR",
+      "AGENT_INFRA_CONTROL_TOKEN",
+      "AGENT_INFRA_RUNTIME_DIR",
+      "AGENT_INFRA_TASK_ID"
+    ]) delete env[key];
+  }
   return spawnSync(process.execPath, cliArgs("sandbox", ...args), {
     cwd: fixture.repoDir,
-    env: {
-      ...envWithPrependedPath(gitSafeEnv(), fixture.binDir),
-      HOME: tmpDir,
-      USERPROFILE: tmpDir,
-      DOCKER_LOG_PATH: fixture.logPath
-    },
+    env,
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
+    input,
     timeout: 15_000
   });
+}
+
+function writeAuxiliaryCleanupCrashPreload(tmpDir: string): string {
+  const preload = path.join(tmpDir, "crash-before-auxiliary-cleanup.cjs");
+  fs.writeFileSync(preload, `
+const fs = require("node:fs");
+const controlRoot = process.env.AGENT_INFRA_TEST_CONTROL_ROOT;
+const auxiliaryRoot = ".local-artifact-finalization-intents";
+const originalUnlinkSync = fs.unlinkSync;
+let injected = false;
+fs.unlinkSync = function unlinkSync(target, options) {
+  if (!injected && controlRoot && !fs.existsSync(controlRoot)
+    && String(target).includes(auxiliaryRoot)) {
+    injected = true;
+    process.exit(91);
+  }
+  return originalUnlinkSync.call(this, target, options);
+};
+`, "utf8");
+  return preload;
 }
 
 function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpDir: string): SandboxConfig {
@@ -1151,7 +1186,6 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
 });
 
 test("sandbox cleanup consumes a completed removal journal through each cleanup entrypoint", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   for (const entrypoint of ["single", "unbound", "purge"] as const) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-rm-journal-${entrypoint}-`));
     const branch = `feature/journal-${entrypoint}`;
@@ -1159,43 +1193,43 @@ test("sandbox cleanup consumes a completed removal journal through each cleanup 
     const previousHome = process.env.HOME;
     const previousUserProfile = process.env.USERPROFILE;
     const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
-    const originalRmSync = fs.rmSync;
-    let journalClearBlocked = false;
     try {
       process.env.HOME = tmpDir;
       process.env.USERPROFILE = tmpDir;
       process.env.DOCKER_INSPECT_NOT_FOUND = "1";
-      const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+      const row = entrypoint === "unbound"
+        ? `demo-dev-${branch.replaceAll("/", "..")}`
+          + `\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox=true,`
+          + `demo.sandbox.workspace-mode=task-bound,demo.sandbox.task-id=${taskId}`
+        : "";
+      const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: row });
       const config = rmOneConfig(fixture, tmpDir);
       const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
-      const cleanupTarget = {
-        requestedRef: taskId,
-        branch,
-        workspace: { mode: "task-bound" as const, taskId },
-        taskState: "completed" as const
+      const statusPath = path.join(evidence.controlRoot, "public", "status.json");
+      const status = JSON.parse(fs.readFileSync(statusPath, "utf8")) as Record<string, unknown>;
+      status.taskView = {
+        state: "unknown",
+        taskId,
+        observedSource: "unknown",
+        receipt: null,
+        reasonCode: "SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE"
       };
-
-      fs.rmSync = ((targetPath, options) => {
-        const resolved = String(targetPath);
-        if (!journalClearBlocked && !fs.existsSync(evidence.controlRoot)
-          && resolved.includes(`${path.sep}sandbox-removal-journal${path.sep}`)
-          && resolved.endsWith(".json")) {
-          journalClearBlocked = true;
-          throw new Error("INJECTED_CRASH_BEFORE_AUXILIARY_CLEANUP");
-        }
-        return originalRmSync(targetPath, options);
-      }) as typeof fs.rmSync;
-
-      await assert.rejects(
-        () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
-          assumeYes: true,
-          cleanupIntermediate: false,
-          cleanupTarget,
-          target: evidence.target
-        })),
-        /INJECTED_CRASH_BEFORE_AUXILIARY_CLEANUP/
-      );
-      fs.rmSync = originalRmSync;
+      fs.writeFileSync(statusPath, `${JSON.stringify(status)}\n`, "utf8");
+      const preload = writeAuxiliaryCleanupCrashPreload(tmpDir);
+      const args = entrypoint === "single"
+        ? ["rm", taskId]
+        : entrypoint === "unbound"
+          ? ["rm", "--unbound", "--yes"]
+          : ["rm", "--purge"];
+      const input = entrypoint === "purge" ? "n\n" : undefined;
+      const first = spawnSandboxCli(fixture, tmpDir, args, {
+        AGENT_INFRA_TASK_ID: "",
+        DOCKER_INSPECT_NOT_FOUND: entrypoint === "unbound" ? "0" : "1",
+        DOCKER_REMOVAL_UPDATES_INSPECT: entrypoint === "unbound" ? "1" : "0",
+        NODE_OPTIONS: `--require=${preload}`,
+        AGENT_INFRA_TEST_CONTROL_ROOT: evidence.controlRoot
+      }, input);
+      assert.equal(first.status, 91, `${first.stdout}\n${first.stderr}`);
 
       assert.equal(fs.existsSync(evidence.controlRoot), false);
       assert.equal(fs.existsSync(evidence.intentPath), true);
@@ -1203,37 +1237,18 @@ test("sandbox cleanup consumes a completed removal journal through each cleanup 
         .find((candidate) => candidate.target.controlRoot === path.resolve(evidence.controlRoot));
       assert.ok(journal);
       assert.equal(journal.phase, "completed");
-      const journalPath = path.join(
-        tmpDir,
-        ".agent-infra",
-        "sandbox-removal-journal",
-        journal.lockDomain,
-        `${journal.carrierIdentityDigest}.json`
-      );
-      const persistedJournal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
-      persistedJournal.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
-      fs.writeFileSync(journalPath, `${JSON.stringify(persistedJournal)}\n`, "utf8");
+      assert.notEqual(journal.owner.pid, process.pid);
+      fs.writeFileSync(path.join(tmpDir, "docker-state.txt"), "", "utf8");
 
-      if (entrypoint === "single") {
-        await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
-          assumeYes: true,
-          cleanupTarget,
-          target: evidence.target
-        }));
-      } else if (entrypoint === "unbound") {
-        const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
-        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-      } else {
-        await withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
-          confirm: async () => false,
-          isCancel: (value): value is symbol => false
-        }));
-      }
+      const second = spawnSandboxCli(fixture, tmpDir, args, {
+        AGENT_INFRA_TASK_ID: "",
+        DOCKER_INSPECT_NOT_FOUND: "0"
+      }, input);
+      assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
 
       assert.equal(fs.existsSync(evidence.intentPath), false);
       assert.equal(listSandboxRemovalJournals({ branch, project: config.project }).length, 0);
     } finally {
-      fs.rmSync = originalRmSync;
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
       if (previousUserProfile === undefined) delete process.env.USERPROFILE;

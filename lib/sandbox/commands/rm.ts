@@ -1174,6 +1174,32 @@ async function removeProjectControlRoots(
   return containers;
 }
 
+function completePurgeRemovalJournals(config: SandboxConfig): void {
+  const projectRoot = path.resolve(config.controlBase, config.project);
+  for (const journal of listSandboxRemovalJournals({ project: config.project })) {
+    const relativeRoot = path.relative(projectRoot, path.resolve(journal.target.controlRoot));
+    if (relativeRoot === '' || relativeRoot === '..' || relativeRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relativeRoot)) {
+      continue;
+    }
+    const resourceLock = acquireSandboxResourceLock(`${journal.engine}:${journal.containerId}`, {
+      lockDomain: journal.lockDomain
+    });
+    try {
+      let current = journal;
+      if (current.owner.pid !== process.pid) {
+        current = claimSandboxRemovalJournal(current, { resourceLock });
+      }
+      while (sandboxRemovalPhaseIndex(current.phase) < sandboxRemovalPhaseIndex('completed')) {
+        const next = SANDBOX_REMOVAL_JOURNAL_PHASES[sandboxRemovalPhaseIndex(current.phase) + 1];
+        if (!next) throw new Error('SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID');
+        current = advanceSandboxRemovalJournalPhase(current, next, { resourceLock });
+      }
+    } finally {
+      resourceLock.release();
+    }
+  }
+}
+
 function inspectionBlockers(inspections: readonly WorktreeInspection[]): WorktreeInspection[] {
   return inspections.filter((inspection) => inspection.status !== 'clean');
 }
@@ -1671,7 +1697,7 @@ async function rmOne(
         targetDigest
       })) clearSandboxRemovalJournalRecord(journal);
     }
-  } else {
+  } else if (!auxiliaryTaskId || options.cleanupIntermediate !== false) {
     for (const journal of listSandboxRemovalJournals({
       branch: effectiveBranch,
       project: config.project,
@@ -1840,6 +1866,7 @@ async function rmPurge(
 
   if (isManagedEngine(engine)) {
     if (engine === ENGINES.WSL2) {
+      completePurgeRemovalJournals(config);
       cleanupPurgeAuxiliary();
       p.log.warn('Windows uses Docker Desktop with WSL2. Stop it from Docker Desktop or run "wsl --shutdown" manually.');
       p.outro(pc.green('All project sandboxes removed'));
@@ -1856,6 +1883,7 @@ async function rmPurge(
     }
   }
 
+  completePurgeRemovalJournals(config);
   cleanupPurgeAuxiliary();
 
   p.outro(pc.green('All project sandboxes removed'));
