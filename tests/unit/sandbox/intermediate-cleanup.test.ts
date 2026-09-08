@@ -10,6 +10,7 @@ import {
   removeIntermediateCleanupCandidates,
   scanIntermediateCleanup
 } from '../../../lib/sandbox/intermediate-cleanup.ts';
+import { cleanupIntermediateUnderRemovalCoordinator } from '../../../lib/sandbox/commands/rm.ts';
 import { createSandboxControlBindingVerifier } from '../../../lib/sandbox/control/lifecycle.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import {
@@ -296,6 +297,22 @@ test('intermediate cleanup deletion runs inside the caller-owned task lock', () 
       const result = cleanupIntermediateFiles(fixture.root);
       assert.equal(fs.existsSync(target), false);
       assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
+    });
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('production cleanup coordinator preserves candidates while the task lock is busy', () => {
+  const fixture = taskFixture();
+  try {
+    const target = writeConsumedIntent(fixture.root, fixture.taskDir);
+    withTaskExecutionLock(fixture.root, TASK_ID, 'test-holder', () => {
+      const result = cleanupIntermediateUnderRemovalCoordinator(fixture.root);
+      assert.equal(fs.existsSync(target), true);
+      assert.equal(result.items.some((item) => (
+        item.disposition === 'protected' && item.reason === 'TASK_LOCK_BUSY'
+      )), true);
     });
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });

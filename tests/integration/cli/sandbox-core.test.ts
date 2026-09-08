@@ -722,6 +722,8 @@ test("sandbox rm --unbound cleans auxiliary state only for successful task-bound
     const intentRoot = path.join(fixture.repoDir, ".agents", "workspace", ".local-artifact-finalization-intents");
     assert.equal(fs.existsSync(path.join(intentRoot, `${failedTaskId}-plan-plan.md.json`)), true);
     assert.equal(fs.existsSync(path.join(intentRoot, `${successfulTaskId}-plan-plan.md.json`)), false, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, new RegExp(`deleted LFAI-CONSUMED .*${successfulTaskId}`));
+    assert.match(`${result.stdout}\n${result.stderr}`, new RegExp(`protected LFAI-CONSUMED .*${failedTaskId}.*SANDBOX_ROW_REMOVAL_FAILED`));
     assert.match(`${result.stdout}\n${result.stderr}`, /Failed to remove sandbox container|partial/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

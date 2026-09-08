@@ -835,7 +835,7 @@ function intermediateCleanupKey(item: IntermediateCleanupItem): string {
 }
 
 function cleanupIntermediateUnderRemovalCoordinator(
-  config: SandboxConfig,
+  repoRoot: string,
   options: IntermediateCleanupCoordinatorOptions = {}
 ): IntermediateCleanupReport {
   const scanOptions: IntermediateCleanupOptions = {
@@ -843,7 +843,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
     ...(options.taskIds === undefined ? {} : { taskIds: options.taskIds }),
     ...(options.controlBindingVerifier === undefined ? {} : { controlBindingVerifier: options.controlBindingVerifier })
   };
-  const initial = scanIntermediateCleanup(config.repoRoot, scanOptions);
+  const initial = scanIntermediateCleanup(repoRoot, scanOptions);
   if (options.dryRun) return initial;
 
   const items = [...initial.items];
@@ -858,7 +858,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
 
   for (const taskId of [...byTask.keys()].sort()) {
     const execute = (): void => {
-      const refreshed = scanIntermediateCleanup(config.repoRoot, {
+      const refreshed = scanIntermediateCleanup(repoRoot, {
         ...scanOptions,
         taskIds: [taskId]
       });
@@ -874,7 +874,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
     };
     try {
       if (lockedTaskIds.has(taskId)) execute();
-      else withTaskExecutionLock(config.repoRoot, taskId, 'sandbox-removal', execute);
+      else withTaskExecutionLock(repoRoot, taskId, 'sandbox-removal', execute);
     } catch {
       for (const index of byTask.get(taskId) ?? []) {
         const candidate = items[index]!;
@@ -889,7 +889,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
   }
 
   const knownPaths = new Set(items.map((candidate) => intermediateCleanupKey(candidate)));
-  for (const candidate of scanIntermediateCleanup(config.repoRoot, scanOptions).items) {
+  for (const candidate of scanIntermediateCleanup(repoRoot, scanOptions).items) {
     if (candidate.kind !== 'EMPTY-AUX-PARENT' || candidate.disposition !== 'planned'
       || knownPaths.has(intermediateCleanupKey(candidate))) continue;
     items.push(removeIntermediateCleanupCandidate(candidate));
@@ -900,6 +900,34 @@ function cleanupIntermediateUnderRemovalCoordinator(
     status: remaining.some((candidate) => candidate.disposition === 'failed') ? 'partial' : 'completed',
     items,
     remaining
+  };
+}
+
+function protectIntermediateCleanupReport(
+  report: IntermediateCleanupReport,
+  reason: string
+): IntermediateCleanupReport {
+  const items = report.items.map((item) => item.disposition === 'planned'
+    ? { ...item, disposition: 'protected' as const, reason }
+    : item
+  );
+  return {
+    status: 'partial',
+    items,
+    remaining: items.filter((item) => item.disposition !== 'deleted' && item.disposition !== 'skipped')
+  };
+}
+
+function mergeIntermediateCleanupReports(
+  reports: readonly IntermediateCleanupReport[]
+): IntermediateCleanupReport {
+  const items = reports.flatMap((report) => report.items);
+  return {
+    status: reports.some((report) => report.status === 'partial') || items.some((item) => item.disposition === 'failed')
+      ? 'partial'
+      : 'completed',
+    items,
+    remaining: items.filter((item) => item.disposition !== 'deleted' && item.disposition !== 'skipped')
   };
 }
 
@@ -1374,14 +1402,14 @@ async function runRmOneUnderRepositoryLock(
   tools: SandboxTool[],
   branch: string,
   options: RmOneOptions = {}
-): Promise<void> {
+): Promise<IntermediateCleanupReport | null> {
   const target = options.target ?? resolveRmTarget(
     config,
     tools,
     options.cleanupTarget ?? resolveSandboxCleanupTarget(branch, config.repoRoot)
   );
   const taskId = target.workspace.mode === 'task-bound' ? target.workspace.taskId : null;
-  const execute = (): Promise<void> => rmOneCore(config, tools, branch, { ...options, target });
+  const execute = (): Promise<IntermediateCleanupReport | null> => rmOneCore(config, tools, branch, { ...options, target });
   return taskId
     ? withTaskExecutionLock(config.repoRoot, taskId, 'sandbox-removal', execute)
     : execute();
@@ -1393,7 +1421,7 @@ async function rmOne(
   branch: string,
   options: RmOneOptions = {}
 ): Promise<void> {
-  return withRepositoryMutationLock(config.repoRoot, () => runRmOneUnderRepositoryLock(config, tools, branch, options));
+  await withRepositoryMutationLock(config.repoRoot, () => runRmOneUnderRepositoryLock(config, tools, branch, options));
 }
 
 async function rmOneCore(
@@ -1401,7 +1429,7 @@ async function rmOneCore(
   tools: SandboxTool[],
   branch: string,
   options: RmOneOptions = {}
-): Promise<void> {
+): Promise<IntermediateCleanupReport | null> {
   const target = options.target ?? resolveRmTarget(
     config,
     tools,
@@ -1479,7 +1507,7 @@ async function rmOneCore(
           });
   if (isCancel(shouldRemoveWorktree)) {
     p.outro('Cancelled');
-    return;
+    return null;
   }
 
   const shouldDeleteBranch = recoveredRemovalChoice
@@ -1494,7 +1522,7 @@ async function rmOneCore(
       : false;
   if (isCancel(shouldDeleteBranch)) {
     p.outro('Cancelled');
-    return;
+    return null;
   }
 
   const sharePath = path.resolve(shareBranchDir(config, effectiveBranch));
@@ -1510,7 +1538,7 @@ async function rmOneCore(
       : false;
   if (isCancel(shouldRemoveShare)) {
     p.outro('Cancelled');
-    return;
+    return null;
   }
 
   const committedTarget = persistedTarget
@@ -1801,17 +1829,19 @@ async function rmOneCore(
 
   advanceRemovalJournals(config.project, target, targetDigest, 'completed', resourceLocks);
 
+  let auxiliaryReport: IntermediateCleanupReport | null = null;
   if (auxiliaryTaskId) {
     const finalControlBindingVerifier = projectSandboxControlBindingVerifier(
       config,
       controlRoots,
       listSandboxRemovalJournals({ branch: effectiveBranch, project: config.project, targetDigest })
     );
-    const report = cleanupIntermediateUnderRemovalCoordinator(config, {
+    const report = cleanupIntermediateUnderRemovalCoordinator(config.repoRoot, {
       taskIds: [auxiliaryTaskId],
       controlBindingVerifier: finalControlBindingVerifier,
       lockedTaskIds: new Set([auxiliaryTaskId])
     });
+    auxiliaryReport = report;
     if (!options.quiet) {
       for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
     }
@@ -1831,6 +1861,7 @@ async function rmOneCore(
   }
 
   if (!options.quiet) p.outro(pc.green('Sandbox removed'));
+  return auxiliaryReport;
   } finally {
     for (const lock of [...resourceLocks.values()].reverse()) lock.release();
   }
@@ -1980,7 +2011,7 @@ async function rmPurgeCore(
   pruneSandboxDanglingImages(config, engine);
 
   const cleanupPurgeAuxiliary = (): void => {
-    const report = cleanupIntermediateUnderRemovalCoordinator(config, {
+    const report = cleanupIntermediateUnderRemovalCoordinator(config.repoRoot, {
       controlBindingVerifier: projectSandboxControlBindingVerifier(config)
     });
     for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
@@ -2148,10 +2179,11 @@ async function rmUnboundCore(
   }
 
   const failures: { branch: string; message: string }[] = [];
+  const actualReports: IntermediateCleanupReport[] = [];
   let failedRows = 0;
   for (const group of removableGroups) {
     try {
-      await runRmOneUnderRepositoryLock(config, tools, group.cleanupTarget.branch, {
+      const report = await runRmOneUnderRepositoryLock(config, tools, group.cleanupTarget.branch, {
         assumeYes: options.assumeYes,
         quiet: true,
         target: group.target,
@@ -2159,21 +2191,35 @@ async function rmUnboundCore(
         permits,
         allowDirtyDiscard: false
       });
+      if (report) actualReports.push(report);
     } catch (error) {
       failedRows += group.candidates.length;
       failures.push({ branch: group.cleanupTarget.branch, message: error instanceof Error ? error.message : String(error) });
+      const taskId = group.cleanupTarget.workspace.mode === 'task-bound'
+        ? group.cleanupTarget.workspace.taskId
+        : null;
+      if (taskId) {
+        const failedReport = cleanupIntermediateUnderRemovalCoordinator(config.repoRoot, {
+          dryRun: true,
+          taskIds: [taskId],
+          controlBindingVerifier
+        });
+        actualReports.push(protectIntermediateCleanupReport(failedReport, 'SANDBOX_ROW_REMOVAL_FAILED'));
+      }
     }
   }
 
   const auxiliaryTaskIds = [...cleanupOnlyTaskIds].sort();
   const finalControlBindingVerifier = projectSandboxControlBindingVerifier(config);
-  const intermediateReport = cleanupIntermediateUnderRemovalCoordinator(config, {
+  const cleanupOnlyReport = cleanupIntermediateUnderRemovalCoordinator(config.repoRoot, {
     taskIds: auxiliaryTaskIds,
     controlBindingVerifier: finalControlBindingVerifier
   });
+  actualReports.push(cleanupOnlyReport);
+  const intermediateReport = mergeIntermediateCleanupReports(actualReports);
   for (const line of formatIntermediateCleanupReport(intermediateReport)) p.log.message(line);
 
-  if (intermediateReport.remaining.every((item) => item.taskId === null)) {
+  if (cleanupOnlyReport.remaining.every((item) => item.taskId === null)) {
     for (const taskId of auxiliaryTaskIds) {
       let branch: string;
       try {
@@ -2259,4 +2305,4 @@ export async function rm(args: string[]): Promise<void> {
   await rmOne(config, tools, cleanupTarget.branch, { cleanupTarget });
 }
 
-export { authorizeWorktrees, rmOne, rmPurge };
+export { authorizeWorktrees, cleanupIntermediateUnderRemovalCoordinator, rmOne, rmPurge };
