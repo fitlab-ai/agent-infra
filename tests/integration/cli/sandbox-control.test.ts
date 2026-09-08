@@ -12,10 +12,8 @@ import {
   requestSandboxControl,
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
-import {
-  cleanupIntermediateFiles,
-  createSandboxControlBindingVerifier
-} from '../../../lib/sandbox/intermediate-cleanup.ts';
+import { cleanupIntermediateFiles } from '../../../lib/sandbox/intermediate-cleanup.ts';
+import { createSandboxControlBindingVerifier } from '../../../lib/sandbox/control/lifecycle.ts';
 import {
   advanceSandboxRemovalJournalPhase,
   claimSandboxRemovalJournal,

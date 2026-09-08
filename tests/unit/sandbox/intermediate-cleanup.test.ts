@@ -8,9 +8,9 @@ import path from 'node:path';
 
 import {
   cleanupIntermediateFiles,
-  createSandboxControlBindingVerifier,
   scanIntermediateCleanup
 } from '../../../lib/sandbox/intermediate-cleanup.ts';
+import { createSandboxControlBindingVerifier } from '../../../lib/sandbox/control/lifecycle.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import {
   checkpointIntentDigest,

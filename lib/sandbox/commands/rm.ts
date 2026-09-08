@@ -34,6 +34,7 @@ import {
   advanceSandboxRemovalJournalPhase,
   claimSandboxRemovalJournal,
   clearSandboxRemovalJournalRecord,
+  createSandboxControlBindingVerifier,
   listSandboxRemovalJournals,
   removeSandboxControlRoot,
   readSandboxControlManifest,
@@ -51,7 +52,6 @@ import { getProcessStartTime } from '../../server/process-state.ts';
 import { fetchSandboxRows, type SandboxRow } from './list-running.ts';
 import {
   cleanupIntermediateFiles,
-  createSandboxControlBindingVerifier,
   formatIntermediateCleanupReport,
   scanIntermediateCleanup
 } from '../intermediate-cleanup.ts';
@@ -812,6 +812,13 @@ function projectSandboxControlRoots(config: SandboxConfig): string[] {
     });
 }
 
+function projectSandboxControlBindingVerifier(
+  config: SandboxConfig,
+  controlRoots: readonly string[] = projectSandboxControlRoots(config),
+  removalJournals: readonly SandboxRemovalJournal[] = listSandboxRemovalJournals({ project: config.project })
+): ReturnType<typeof createSandboxControlBindingVerifier> {
+  return createSandboxControlBindingVerifier(config.repoRoot, controlRoots, removalJournals);
+}
 function recoveryContexts(
   config: SandboxConfig,
   target: RmTarget,
@@ -1155,22 +1162,16 @@ async function removeProjectControlRoots(
   assertManagedPath(config.controlBase, projectRoot);
   const projectStat = fs.lstatSync(projectRoot);
   if (!projectStat.isDirectory() || projectStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
-  for (const container of fs.readdirSync(projectRoot, { withFileTypes: true })) {
-    if (!container.isDirectory() || container.isSymbolicLink()) continue;
-    const containerRoot = path.join(projectRoot, container.name);
-    for (const identity of fs.readdirSync(containerRoot, { withFileTypes: true })) {
-      if (!identity.isDirectory() || identity.isSymbolicLink()) continue;
-      const root = path.join(containerRoot, identity.name);
-      const manifestPath = path.join(root, 'manifest.json');
-      if (!fs.existsSync(manifestPath)) throw new Error(`SANDBOX_CONTROL_TARGET_EVIDENCE_MISSING: ${root}`);
-      const manifest = readSandboxControlManifest(manifestPath);
-      containers.add(manifest.container);
-      await removeSandboxControlRoot(root, {
-        inspectContainer: (timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }),
-        removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs),
-        ...(options.retainRemovalJournal ? { retainRemovalJournal: true } : {})
-      });
-    }
+  for (const root of projectSandboxControlRoots(config)) {
+    const manifestPath = path.join(root, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) throw new Error(`SANDBOX_CONTROL_TARGET_EVIDENCE_MISSING: ${root}`);
+    const manifest = readSandboxControlManifest(manifestPath);
+    containers.add(manifest.container);
+    await removeSandboxControlRoot(root, {
+      inspectContainer: (timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }),
+      removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs),
+      ...(options.retainRemovalJournal ? { retainRemovalJournal: true } : {})
+    });
   }
   return containers;
 }
@@ -1312,15 +1313,6 @@ async function rmOne(
     project: config.project,
     targetDigest
   });
-  const controlBindingVerifier = auxiliaryTaskId
-    ? createSandboxControlBindingVerifier(config.repoRoot, controlRoots, existingJournals)
-    : undefined;
-  if (auxiliaryTaskId && options.cleanupIntermediate !== false) {
-    scanIntermediateCleanup(config.repoRoot, {
-      taskIds: [auxiliaryTaskId],
-      ...(controlBindingVerifier ? { controlBindingVerifier } : {})
-    });
-  }
   const persistedTarget = existingJournals[0]?.target;
   for (const journal of existingJournals) {
     if (!persistedTarget) break;
@@ -1703,14 +1695,10 @@ async function rmOne(
     for (const lock of [...resourceLocks.values()].reverse()) lock.release();
   }
   if (auxiliaryTaskId && options.cleanupIntermediate !== false) {
-    const finalControlBindingVerifier = createSandboxControlBindingVerifier(
-      config.repoRoot,
+    const finalControlBindingVerifier = projectSandboxControlBindingVerifier(
+      config,
       controlRoots,
-      listSandboxRemovalJournals({
-        branch: effectiveBranch,
-        project: config.project,
-        targetDigest
-      })
+      listSandboxRemovalJournals({ branch: effectiveBranch, project: config.project, targetDigest })
     );
     const report = cleanupIntermediateFiles(config.repoRoot, {
       taskIds: [auxiliaryTaskId],
@@ -1743,14 +1731,7 @@ async function rmPurge(
   const engine = detectEngine(config);
   const confirm = prompt.confirm ?? p.confirm;
   const isCancel = prompt.isCancel ?? p.isCancel;
-  const removalJournals = listSandboxRemovalJournals({ project: config.project });
-  const controlBindingVerifier = createSandboxControlBindingVerifier(
-    config.repoRoot,
-    projectSandboxControlRoots(config),
-    removalJournals
-  );
   p.intro(pc.cyan(`Removing all sandboxes for ${config.project}`));
-  scanIntermediateCleanup(config.repoRoot, { controlBindingVerifier });
 
   const worktrees = fs.existsSync(config.worktreeBase)
     ? fs.readdirSync(config.worktreeBase)
@@ -1879,11 +1860,7 @@ async function rmPurge(
 
   const cleanupPurgeAuxiliary = (): void => {
     const report = cleanupIntermediateFiles(config.repoRoot, {
-      controlBindingVerifier: createSandboxControlBindingVerifier(
-        config.repoRoot,
-        projectSandboxControlRoots(config),
-        listSandboxRemovalJournals({ project: config.project })
-      )
+      controlBindingVerifier: projectSandboxControlBindingVerifier(config)
     });
     for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
     if (!report.remaining.some((item) => item.taskId !== null)) {
@@ -1924,12 +1901,7 @@ async function rmUnbound(
   options: { dryRun: boolean; assumeYes: boolean }
 ): Promise<void> {
   const engine = detectEngine(config);
-  const removalJournals = listSandboxRemovalJournals({ project: config.project });
-  const controlBindingVerifier = createSandboxControlBindingVerifier(
-    config.repoRoot,
-    projectSandboxControlRoots(config),
-    removalJournals
-  );
+  const controlBindingVerifier = projectSandboxControlBindingVerifier(config);
   const { running, nonRunning } = fetchSandboxRows(
     engine,
     sandboxLabel(config),
@@ -2073,11 +2045,7 @@ async function rmUnbound(
   }
 
   const auxiliaryTaskIds = [...new Set([...successfulTaskIds, ...cleanupOnlyTaskIds])].sort();
-  const finalControlBindingVerifier = createSandboxControlBindingVerifier(
-    config.repoRoot,
-    projectSandboxControlRoots(config),
-    listSandboxRemovalJournals({ project: config.project })
-  );
+  const finalControlBindingVerifier = projectSandboxControlBindingVerifier(config);
   const intermediateReport = cleanupIntermediateFiles(config.repoRoot, {
     taskIds: auxiliaryTaskIds,
     controlBindingVerifier: finalControlBindingVerifier
