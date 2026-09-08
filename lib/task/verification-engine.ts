@@ -781,12 +781,9 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const reportInput = field("裁决输入", "Decision Input");
   const reportLedger = field("账本 ID", "Ledger ID");
   const reportEvidence = field("裁决证据", "Decision Evidence");
-  const normalizedReportInput = /^N\/A(?:（[^`\n]*）|\([^`\n]*\))$/.test(reportInput)
-    ? "N/A"
-    : reportInput;
 
   if (!actionDecision) {
-    if (normalizedReportInput && normalizedReportInput !== "N/A") {
+    if (reportInput && reportInput !== "N/A") {
       return failResult("implementation-input", "Non-decision code action must report Decision Input as N/A");
     }
     return passResult("implementation-input", "Non-decision implementation input identity is consistent");

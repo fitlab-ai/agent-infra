@@ -72,21 +72,3 @@ test('implementation input gate rejects identity and consumption mismatches', as
     }
   }
 });
-
-test('implementation input gate accepts an N/A decision input with a parenthetical note', async () => {
-  const f = fixture();
-  try {
-    const taskPath = path.join(f.taskDir, 'task.md');
-    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace('decision II-1', 'fix for review-code.md'));
-    const artifactPath = path.join(f.taskDir, 'code-r2.md');
-    fs.writeFileSync(artifactPath, fs.readFileSync(artifactPath, 'utf8')
-      .replace('- **模式**：decision', '- **模式**：fix')
-      .replace('- **裁决输入**：`II-1`', '- **裁决输入**：N/A（本轮修复审查发现）')
-      .replace('- **账本 ID**：`CD-1`', '- **账本 ID**：N/A')
-      .replace('- **裁决证据**：`task.md#HDR-1`', '- **裁决证据**：N/A'));
-    const result = await run(f.taskDir);
-    assert.equal(result.status, 'pass');
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
