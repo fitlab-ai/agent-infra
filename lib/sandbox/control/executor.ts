@@ -30,6 +30,12 @@ import { landProjectionArtifact, workflowArguments, workflowCommandForOperation,
 import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type BrokerOwner } from './lifecycle.ts';
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
+  hostControlRequestForCommand,
+  requestHostControl,
+  type HostControlResponse
+} from '../../host-control/client.ts';
+import { resolveHostControlEndpoint } from '../../host-control/path.ts';
+import {
   closeCodexControllerRegistration,
   CodexControllerRegistrationError,
   openCodexControllerRegistration,
@@ -137,7 +143,8 @@ function resultAuditFields(result: SandboxControlExecutionResult): Record<string
 
 async function executeTaskWorkflowRequest(
   manifest: SandboxControlManifest,
-  request: Extract<SandboxControlRequest, { family: 'task-workflow' }>
+  request: Extract<SandboxControlRequest, { family: 'task-workflow' }>,
+  requestHostControlImpl: typeof requestHostControl = requestHostControl
 ): Promise<SandboxControlExecutionResult> {
   const command = request.workflow.operation;
   const args = workflowArguments(request.workflow);
@@ -149,6 +156,28 @@ async function executeTaskWorkflowRequest(
     const artifact = request.workflow.artifact;
     if (!artifact || !manifest.taskProjectionDir || !manifest.taskProjectionTopology) {
       return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'TASK_WORKFLOW_REQUEST_INVALID', message: 'artifact landing requires a canonical artifact' } })}\n`, stderr: '' };
+    }
+    const preflightFamily = request.workflow.family
+      ?? (typeof request.workflow.fields?.family === 'string' ? request.workflow.fields.family : undefined)
+      ?? (typeof request.workflow.fields?.stage === 'string' ? request.workflow.fields.stage : undefined);
+    if (preflightFamily !== 'analysis' && preflightFamily !== 'plan' && preflightFamily !== 'code') {
+      return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'TASK_WORKFLOW_REQUEST_INVALID', message: 'host-control preflight requires an artifact family' } })}\n`, stderr: '' };
+    }
+    let preflight: HostControlResponse;
+    try {
+      preflight = await requestHostControlImpl({
+        endpoint: process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint(),
+        request: hostControlRequestForCommand(
+          'task-artifact',
+          [request.workflow.taskId, 'inspect', '--family', preflightFamily],
+          manifest.repoRoot
+        )
+      });
+    } catch {
+      return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', message: 'host-control service is unavailable' } })}\n`, stderr: '' };
+    }
+    if (preflight.status !== 'completed' || preflight.exitCode !== 0) {
+      return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', message: 'host-control worker preflight failed' } })}\n`, stderr: '' };
     }
     const landing = await landProjectionArtifact({
       version: 1,
@@ -385,6 +414,7 @@ function finalizationResult(result: Awaited<ReturnType<typeof applyTaskFinalizat
 type ExecuteRequestOptions = Readonly<{
   buildIdentity?: typeof computeLifecycleBuildIdentity;
   resolveControllerBinding?: typeof resolveCodexControllerBinding;
+  requestHostControl?: typeof requestHostControl;
 }>;
 
 async function executeRequestInner(
@@ -460,7 +490,7 @@ async function executeRequestInner(
       return controllerFailure(error);
     }
   }
-  if (request.family === 'task-workflow') return executeTaskWorkflowRequest(manifest, request);
+  if (request.family === 'task-workflow') return executeTaskWorkflowRequest(manifest, request, options.requestHostControl);
   if (request.family === 'task-finalization') {
     const operation = parseTaskControlOperation(
       'task-finalization', [manifest.taskId!, 'complete', '--agent', request.agent]

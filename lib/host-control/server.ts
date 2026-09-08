@@ -17,6 +17,7 @@ import {
   type HostControlRequest,
   type HostControlResponse
 } from './client.ts';
+import { appendHostControlAudit } from './audit.ts';
 
 export type HostControlDispatch = (request: HostControlRequest) => unknown | Promise<unknown>;
 
@@ -105,6 +106,7 @@ export type RunningHostControlServer = Readonly<{
 
 export async function startHostControlServer(options: HostControlServerOptions): Promise<RunningHostControlServer> {
   const endpoint = options.endpoint ?? resolveHostControlEndpoint();
+  const audit = options.audit ?? ((entry: HostControlAudit) => appendHostControlAudit(endpoint, entry));
   prepareHostControlDirectory(endpoint);
   ensureHostControlWorkerToken(endpoint);
   try {
@@ -114,7 +116,9 @@ export async function startHostControlServer(options: HostControlServerOptions):
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  const server = net.createServer({ allowHalfOpen: true }, (socket) => { void handleConnection(socket, options); });
+  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
+    void handleConnection(socket, { ...options, audit });
+  });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(endpoint, () => { server.off('error', reject); resolve(); });

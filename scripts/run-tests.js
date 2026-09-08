@@ -83,7 +83,10 @@ function finish(result) {
 
 async function startHostControlTestService(projectRoot) {
   if (!testRunLock?.owned) return;
-  hostControlReadyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-host-control-'));
+  const testRoot = process.platform === 'darwin'
+    ? fs.realpathSync.native(os.homedir())
+    : os.tmpdir();
+  hostControlReadyDir = fs.mkdtempSync(path.join(testRoot, '.agent-infra-host-control-'));
   const readyPath = path.join(hostControlReadyDir, 'ready');
   env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = path.join(hostControlReadyDir, 'host-control.sock');
   hostControlService = spawn(process.execPath, [

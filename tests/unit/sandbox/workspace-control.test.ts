@@ -19,7 +19,8 @@ import {
   SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
   SANDBOX_CONTROL_RESERVATION_BYTES,
   validateSandboxControlRequest,
-  type SandboxControlManifest
+  type SandboxControlManifest,
+  type SandboxControlRequest
 } from '../../../lib/sandbox/control/protocol.ts';
 import {
   appendSandboxControlAudit,
@@ -52,6 +53,7 @@ import {
   executeRequest,
   nodeEntryArgs
 } from '../../../lib/sandbox/control/executor.ts';
+import { captureProjectionTopology } from '../../../lib/sandbox/control/task-workflow.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../lib/sandbox/control/client.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import {
@@ -574,6 +576,64 @@ test('controller proof rejection occurs before the domain child and workspace mu
   });
   assert.match(missingProof.stdout, /CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED/);
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
+});
+
+test('task workflow skips authoritative landing when host-control preflight is unavailable', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workflow-preflight-'));
+  const taskId = 'TASK-20260101-000001';
+  const projectionRoot = path.join(root, 'projection');
+  const authoritativeTaskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(projectionRoot, { recursive: true });
+  fs.mkdirSync(authoritativeTaskDir, { recursive: true });
+  fs.writeFileSync(path.join(projectionRoot, 'code.md'), 'candidate\n');
+  const boundManifest = {
+    ...manifest,
+    repoRoot: root,
+    worktreeRoot: root,
+    taskId,
+    token: 'workflow-token',
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    channelDir: path.join(root, 'channel'),
+    runtimeDir: path.join(root, 'runtime'),
+    taskProjectionDir: projectionRoot,
+    taskProjectionTopology: captureProjectionTopology(projectionRoot)
+  } satisfies SandboxControlManifest;
+  const workflowId = 'abcdefabcdefabcdefabcdefabcdefab';
+  const request: SandboxControlRequest = {
+    version: 3,
+    id: workflowId,
+    token: boundManifest.token,
+    generation: boundManifest.generation,
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'task-workflow',
+    args: [],
+    controllerProcess: null,
+    controllerProof: null,
+    workflow: {
+      version: 1,
+      id: workflowId,
+      taskId,
+      generation: boundManifest.generation,
+      operation: 'artifact-finalize-local',
+      artifact: 'code.md',
+      family: 'code',
+      fields: { taskRef: taskId, family: 'code' }
+    }
+  };
+  try {
+    const result = await executeRequest(boundManifest, path.join(root, 'manifest.json'), request, {
+      requestHostControl: async () => { throw new Error('HOST_CONTROL_ENDPOINT_MISSING'); }
+    });
+    assert.equal(result.exitCode, 1);
+    assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE');
+    assert.equal(fs.existsSync(path.join(authoritativeTaskDir, 'code.md')), false);
+    const audit = fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.equal(audit.some((entry) => entry.event === 'task-workflow-artifact-landed'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('typed controller verify returns only the live task binding without spawning or mutating state', async () => {
