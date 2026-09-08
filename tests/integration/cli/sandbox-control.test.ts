@@ -13,6 +13,10 @@ import {
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
 import {
+  cleanupIntermediateFiles,
+  createSandboxControlBindingVerifier
+} from '../../../lib/sandbox/intermediate-cleanup.ts';
+import {
   advanceSandboxRemovalJournalPhase,
   claimSandboxRemovalJournal,
   clearSandboxRemovalJournal,
@@ -36,6 +40,7 @@ import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
 import { taskCreateOutputUnavailableResult } from '../../../lib/task/create-service.ts';
+import { semanticDigest, sha256Content } from '../../../lib/task/local-artifact-finalization.ts';
 import { onPlatforms } from '../../helpers.ts';
 
 function waitForFile(filePath: string, timeoutMs: number): void {
@@ -326,6 +331,21 @@ function writeFinalizationTaskFixture(root: string, taskId: string): void {
     '| id | stage | round | severity | status | evidence |',
     '|----|-------|-------|----------|--------|----------|', '', '## Activity Log', ''
   ].join('\n'));
+}
+
+function writeConsumedLocalIntent(root: string, taskId: string): string {
+  const taskDir = path.join(root, '.agents', 'workspace', 'completed', taskId);
+  const artifact = 'plan.md';
+  const content = '# Plan\n';
+  fs.writeFileSync(path.join(taskDir, artifact), content);
+  const intentDir = path.join(root, '.agents', 'workspace', '.local-artifact-finalization-intents');
+  fs.mkdirSync(intentDir, { recursive: true });
+  const intentPath = path.join(intentDir, `${taskId}-plan-${artifact}.json`);
+  fs.writeFileSync(intentPath, `${JSON.stringify({
+    version: 1, taskId, family: 'plan', artifact, state: 'consumed', baselineSemanticDigest: null,
+    artifactSha256: sha256Content(content), semanticDigest: semanticDigest(content)
+  })}\n`);
+  return intentPath;
 }
 
 test('sandbox control lifecycle fails closed when a manifest has no owner evidence', async () => {
@@ -1549,6 +1569,58 @@ test('task-finalization settles and commits the canonical terminal before gracef
     assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.json`)), true);
     assert.equal(fs.existsSync(path.join(manifest.processingDir, evidence.requestId)), false);
     assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.accepted.json`)), false);
+  } finally {
+    controller.abort();
+    await server?.catch(() => undefined);
+    await clientResult?.catch(() => undefined);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('intermediate cleanup accepts the persistent terminal after broker processing cleanup', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-intermediate-cleanup-'));
+  const taskId = 'TASK-20260809-010203';
+  const generation = 'finalization-intermediate-cleanup-generation';
+  const controller = new AbortController();
+  let server: Promise<void> | undefined;
+  let clientResult: Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> | undefined;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    writeFinalizationTaskFixture(root, taskId);
+    const manifest = readSandboxControlManifest(manifestPath);
+    const resultEvidence = observeResultEvidence(t, manifest.processingDir);
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null,
+      internalCliPath: path.resolve('bin/internal-cli.ts')
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    clientResult = runTaskFinalizationClient({
+      channelDir: manifest.channelDir,
+      statusDir: manifest.publicStatusDir,
+      token: manifest.token,
+      generation,
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+    });
+    const evidence = await resultEvidence;
+    const client = await clientResult;
+    assert.equal(client.exitCode, 0, client.stderr);
+    controller.abort();
+    await server;
+    assert.equal(fs.existsSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.json`)), true);
+    assert.equal(fs.existsSync(path.join(manifest.processingDir, evidence.requestId)), false);
+
+    const completedTaskPath = path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md');
+    fs.writeFileSync(completedTaskPath, fs.readFileSync(completedTaskPath, 'utf8').replace(
+      'status: completed\n', 'status: completed\nbranch: feature/finalization\n'
+    ));
+    const target = writeConsumedLocalIntent(root, taskId);
+    const verifier = createSandboxControlBindingVerifier(root, [path.dirname(manifestPath)]);
+    const report = cleanupIntermediateFiles(root, { taskIds: [taskId], controlBindingVerifier: verifier });
+    assert.equal(report.items.some((item) => item.disposition === 'deleted'), true);
+    assert.equal(fs.existsSync(target), false);
   } finally {
     controller.abort();
     await server?.catch(() => undefined);

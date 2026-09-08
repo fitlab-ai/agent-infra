@@ -94,8 +94,9 @@ function writeBoundControlEvidence(root: string): string {
   const channelDir = path.join(controlRoot, 'channel');
   const publicStatusDir = path.join(controlRoot, 'public');
   const processingDir = path.join(controlRoot, 'processing');
-  fs.mkdirSync(path.join(processingDir, requestId), { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
   fs.mkdirSync(channelDir, { recursive: true });
+  fs.mkdirSync(path.join(channelDir, 'responses'), { recursive: true });
   fs.mkdirSync(publicStatusDir, { recursive: true });
   fs.mkdirSync(path.join(controlRoot, 'runtime'), { recursive: true });
   fs.writeFileSync(path.join(controlRoot, 'manifest.json'), `${JSON.stringify({
@@ -138,15 +139,23 @@ function writeBoundControlEvidence(root: string): string {
       reasonCode: null
     }
   })}\n`);
-  const emptySha = createHash('sha256').update('').digest('hex');
-  fs.writeFileSync(path.join(processingDir, requestId, 'result.json'), `${JSON.stringify({
-    version: 1, id: requestId, generation, exitCode: 0, stdoutBytes: 0, stderrBytes: 0,
-    stdoutSha256: emptySha, stderrSha256: emptySha, captureState: 'metadata-only'
-  })}\n`);
   const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
   const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as Record<string, unknown>;
   receipt.controlBinding = { generation, requestId };
   fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`);
+  const result = {
+    status: 'completed', changed: false, taskId: TASK_ID,
+    lifecycle: { status: 'no-op', changed: false, error: null },
+    taskComment: { status: 'no-op', changed: false, error: null },
+    verification: { status: 'no-op', changed: false, error: null },
+    completedSteps: ['lifecycle', 'task-comment', 'verification'], pendingSteps: [],
+    result: 'completed', warnings: [], error: null
+  };
+  fs.writeFileSync(path.join(channelDir, 'responses', `${requestId}.json`), `${JSON.stringify({
+    version: 2, id: requestId, phase: 'completed', exitCode: 0,
+    stdout: `${JSON.stringify({ version: 1, status: 'completed', changed: false, accepted: true, result, error: null })}\n`,
+    stderr: '', error: null
+  })}\n`);
   return controlRoot;
 }
 
@@ -303,6 +312,55 @@ test('intermediate cleanup accepts only terminal control evidence for bound rece
     assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
   } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('intermediate cleanup reuses captured terminal evidence after the control root is deleted', () => {
+  const fixture = taskFixture();
+  try {
+    const target = writeConsumedIntent(fixture.root, fixture.taskDir);
+    const controlRoot = writeBoundControlEvidence(fixture.root);
+    const verifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
+    fs.rmSync(controlRoot, { recursive: true, force: true });
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: verifier });
+    assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
+    assert.equal(fs.existsSync(target), false);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('intermediate cleanup protects a bound receipt when the captured control root is replaced', () => {
+  const fixture = taskFixture();
+  try {
+    const target = writeConsumedIntent(fixture.root, fixture.taskDir);
+    const controlRoot = writeBoundControlEvidence(fixture.root);
+    const verifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
+    fs.rmSync(controlRoot, { recursive: true, force: true });
+    fs.writeFileSync(controlRoot, 'replacement\n');
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: verifier });
+    assert.equal(fs.existsSync(target), true);
+    assert.equal(result.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('intermediate cleanup protects a bound receipt when the captured control root becomes a symlink', onPlatforms('linux', 'darwin'), () => {
+  const fixture = taskFixture();
+  const replacement = fs.mkdtempSync(path.join(os.tmpdir(), 'intermediate-cleanup-replacement-'));
+  try {
+    const target = writeConsumedIntent(fixture.root, fixture.taskDir);
+    const controlRoot = writeBoundControlEvidence(fixture.root);
+    const verifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
+    fs.rmSync(controlRoot, { recursive: true, force: true });
+    fs.symlinkSync(replacement, controlRoot, 'junction');
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: verifier });
+    assert.equal(fs.existsSync(target), true);
+    assert.equal(result.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
+  } finally {
+    fs.rmSync(replacement, { recursive: true, force: true });
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });

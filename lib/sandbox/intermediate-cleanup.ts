@@ -22,9 +22,8 @@ import { enumerateAllTaskDirs, type TaskWorkspaceState } from '../task/resolve-r
 import { withRepositoryMutationLock, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { readSandboxControlManifest } from './control/lifecycle.ts';
 import {
-  readSandboxControlResultEvidence,
-  readSandboxControlStatus,
-  resultEvidencePath
+  readJsonFile,
+  readSandboxControlStatus
 } from './control/state.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
@@ -140,14 +139,72 @@ function safeLstat(root: string, target: string, expect: 'file' | 'directory'): 
 
 type ControlBinding = Readonly<{ generation: string; requestId: string }>;
 type ControlBindingVerifier = NonNullable<IntermediateCleanupOptions['controlBindingVerifier']>;
+type DirectoryIdentity = Readonly<{ dev: string; ino: string }>;
 
 function controlBindingKey(taskId: string, binding: ControlBinding): string {
   return `${taskId}\0${binding.generation}\0${binding.requestId}`;
 }
 
-function controlRootExists(root: string): boolean {
-  try { return fs.lstatSync(root).isDirectory() && !fs.lstatSync(root).isSymbolicLink(); }
-  catch { return false; }
+function controlRootIdentity(root: string): DirectoryIdentity | null {
+  try {
+    const stat = fs.lstatSync(root);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+    return { dev: String(stat.dev), ino: String(stat.ino) };
+  } catch {
+    return null;
+  }
+}
+
+function controlRootState(
+  root: string,
+  expected: DirectoryIdentity
+): 'missing' | 'same' | 'replaced' {
+  let stat: fs.Stats;
+  try { stat = fs.lstatSync(root); }
+  catch (error) { return errorCode(error) === 'ENOENT' ? 'missing' : 'replaced'; }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) return 'replaced';
+  return String(stat.dev) === expected.dev && String(stat.ino) === expected.ino ? 'same' : 'replaced';
+}
+
+function taskFinalizationReceiptComplete(
+  receipt: TaskFinalizationReceipt,
+  taskId: string,
+  binding: ControlBinding
+): boolean {
+  return receipt.taskId === taskId
+    && receipt.lifecycle === 'done'
+    && receipt.taskComment !== 'pending'
+    && receipt.verification !== 'pending'
+    && receipt.warningProjection === 'done'
+    && receipt.lastError === null
+    && receipt.warnings.every((warning) => warning.status !== 'open')
+    && receipt.controlBinding?.generation === binding.generation
+    && receipt.controlBinding.requestId === binding.requestId;
+}
+
+function expectedFinalizationTerminalResponse(
+  taskId: string,
+  requestId: string,
+  receipt: TaskFinalizationReceipt
+): Record<string, unknown> {
+  const pendingSteps = [
+    receipt.taskComment === 'pending' ? 'task-comment' : null,
+    receipt.verification === 'pending' ? 'verification' : null
+  ].filter((step): step is string => step !== null);
+  const completedSteps = ['lifecycle', receipt.taskComment === 'pending' ? null : 'task-comment', receipt.verification === 'pending' ? null : 'verification']
+    .filter((step): step is string => step !== null);
+  const result = {
+    status: 'completed', changed: false, taskId,
+    lifecycle: { status: 'no-op', changed: false, error: null },
+    taskComment: receipt.taskComment === 'pending' ? null : { status: 'no-op', changed: false, error: null },
+    verification: receipt.verification === 'pending' ? null : { status: 'no-op', changed: false, error: null },
+    completedSteps, pendingSteps, result: 'completed', warnings: [], error: null
+  };
+  return {
+    version: 2, id: requestId, phase: 'completed', exitCode: 0,
+    stdout: `${JSON.stringify({ version: 1, status: 'completed', changed: false, accepted: true, result, error: null })}\n`,
+    stderr: '', error: null
+  };
 }
 
 function terminalControlBindingEvidence(
@@ -158,7 +215,7 @@ function terminalControlBindingEvidence(
 ): boolean {
   const repoRoot = path.resolve(repoRootInput);
   const controlRoot = path.resolve(controlRootInput);
-  if (!TASK_ID_RE.test(taskId) || !controlRootExists(controlRoot)) return false;
+  if (!TASK_ID_RE.test(taskId) || !controlRootIdentity(controlRoot)) return false;
   const manifestPath = path.join(controlRoot, 'manifest.json');
   const manifestIdentity = safeLstat(controlRoot, manifestPath, 'file');
   if (!manifestIdentity) return false;
@@ -172,18 +229,32 @@ function terminalControlBindingEvidence(
     || path.resolve(manifest.processingDir) !== path.join(controlRoot, 'processing')
     || path.resolve(manifest.runtimeDir) !== path.join(controlRoot, 'runtime')) return false;
   try {
-    if (fs.existsSync(path.join(controlRoot, 'lease.json'))) return false;
+    const leasePath = path.join(controlRoot, 'lease.json');
+    try {
+      fs.lstatSync(leasePath);
+      return false;
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') return false;
+    }
+    const receipt = readTaskFinalizationReceipt(repoRoot, taskId);
+    if (!receipt || !taskFinalizationReceiptComplete(receipt, taskId, binding)) {
+      return false;
+    }
     const status = readSandboxControlStatus(manifest.publicStatusDir);
     const viewReceipt = status.taskView.receipt;
+    const terminalTaskView = (status.taskView.state === 'current' && status.taskView.observedSource === 'completed')
+      || (status.taskView.state === 'finalized-stale' && status.taskView.observedSource === 'active');
     if (status.generation !== binding.generation || status.state !== 'healthy'
-      || status.activeRequestId !== null || status.taskView.state !== 'current'
-      || status.taskView.observedSource !== 'completed' || status.taskView.taskId !== taskId
+      || status.activeRequestId !== null || !terminalTaskView || status.taskView.taskId !== taskId
       || !viewReceipt || viewReceipt.generation !== binding.generation
-      || viewReceipt.requestId !== binding.requestId) return false;
-    const evidence = readSandboxControlResultEvidence(resultEvidencePath(manifest, binding.requestId));
-    return evidence.id === binding.requestId
-      && evidence.generation === binding.generation
-      && evidence.exitCode === 0;
+      || viewReceipt.requestId !== binding.requestId
+      || viewReceipt.receiptId !== receipt.receiptId
+      || viewReceipt.revision !== receipt.revision) return false;
+    const responsePath = path.join(manifest.channelDir, 'responses', `${binding.requestId}.json`);
+    if (!safeLstat(path.join(controlRoot, 'channel'), responsePath, 'file')) return false;
+    const actual = readJsonFile(responsePath);
+    const expected = expectedFinalizationTerminalResponse(taskId, binding.requestId, receipt);
+    return JSON.stringify(actual) === JSON.stringify(expected);
   } catch {
     return false;
   }
@@ -198,6 +269,8 @@ function createSandboxControlBindingVerifier(
     let manifest;
     try { manifest = readSandboxControlManifest(path.join(controlRoot, 'manifest.json')); }
     catch { return []; }
+    const rootIdentity = controlRootIdentity(controlRoot);
+    if (!rootIdentity) return [];
     const receipt = (() => {
       try { return readSandboxControlStatus(manifest.publicStatusDir).taskView.receipt; }
       catch { return null; }
@@ -206,15 +279,16 @@ function createSandboxControlBindingVerifier(
     return [{
       controlRoot,
       taskId: manifest.taskId!,
-      key: controlBindingKey(manifest.taskId!, receipt)
+      key: controlBindingKey(manifest.taskId!, receipt),
+      rootIdentity
     }];
   });
-  return (taskId, binding) => captured.some((candidate) => (
-    candidate.taskId === taskId
-    && candidate.key === controlBindingKey(taskId, binding)
-    && (!controlRootExists(candidate.controlRoot)
-      || terminalControlBindingEvidence(repoRoot, candidate.controlRoot, taskId, binding))
-  ));
+  return (taskId, binding) => captured.some((candidate) => {
+    if (candidate.taskId !== taskId || candidate.key !== controlBindingKey(taskId, binding)) return false;
+    const state = controlRootState(candidate.controlRoot, candidate.rootIdentity);
+    return state === 'missing'
+      || state === 'same' && terminalControlBindingEvidence(repoRoot, candidate.controlRoot, taskId, binding);
+  });
 }
 
 function inspectTaskRecords(repoRoot: string, taskIds?: ReadonlySet<string>): Map<string, TaskRecord> {
@@ -263,8 +337,8 @@ function receiptGate(
   try { receipt = readTaskFinalizationReceipt(repoRoot, task.taskId); }
   catch { return 'FINALIZATION_RECEIPT_INVALID'; }
   if (!receipt) return 'FINALIZATION_RECEIPT_MISSING';
-  if (receipt.lifecycle !== 'done' || receipt.taskComment !== 'done'
-    || receipt.verification !== 'done' || receipt.warningProjection !== 'done') {
+  if (receipt.lifecycle !== 'done' || receipt.taskComment === 'pending'
+    || receipt.verification === 'pending' || receipt.warningProjection !== 'done') {
     return 'FINALIZATION_RECEIPT_PENDING';
   }
   if (receipt.lastError !== null || receipt.warnings.some((warning) => warning.status === 'open')) {
