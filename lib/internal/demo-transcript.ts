@@ -311,7 +311,7 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
   const ptyModule = await loadNodePty();
   if (!ptyModule) return { status: 'failed', reasonCode: 'DEMO_TRANSCRIPT_UNAVAILABLE', message: '@lydell/node-pty is unavailable' };
 
-  const project = DEMO_PROJECT_PATH;
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-project-'));
   const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-shim-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-home-'));
   const globalGitConfig = path.join(home, 'empty-gitconfig');
@@ -369,7 +369,7 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
       else await new Promise((resolve) => setTimeout(resolve, 150));
     };
 
-    await send(DEMO_VISIBLE_COMMANDS.prepare);
+    await send(DEMO_VISIBLE_COMMANDS.prepare.replaceAll(DEMO_PROJECT_PATH, project));
     await send(DEMO_VISIBLE_COMMANDS.git);
     await send(DEMO_VISIBLE_COMMANDS.init, /Project name/);
     await send('', /Organization/);

@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 import { INTERNAL_CLI_PATH, gitSafeEnv, onPlatforms } from '../../helpers.ts';
-import { collectDemoTranscript, sha256Transcript } from '../../../lib/internal/demo-transcript.ts';
+import { collectDemoTranscript, DEMO_PROJECT_PATH, sha256Transcript } from '../../../lib/internal/demo-transcript.ts';
 
 type Fixture = { root: string; origin: string; preload: string; tools: string; environment: NodeJS.ProcessEnv };
 
@@ -69,6 +69,29 @@ test('demo collector fixes the shell prompt across hostnames', onPlatforms('linu
     else process.env.PATH = previousPath;
     if (previousHostname === undefined) delete process.env.HOSTNAME;
     else process.env.HOSTNAME = previousHostname;
+    cleanup(input);
+  }
+});
+
+test('demo collector preserves an existing canonical project directory', onPlatforms('linux', 'darwin'), async () => {
+  const input = fixture();
+  const canonicalExisted = fs.existsSync(DEMO_PROJECT_PATH);
+  const sentinel = path.join(DEMO_PROJECT_PATH, `.demo-collector-sentinel-${process.pid}-${Date.now()}`);
+  const previousPath = process.env.PATH;
+  try {
+    fs.mkdirSync(DEMO_PROJECT_PATH, { recursive: true });
+    fs.writeFileSync(sentinel, 'preserve');
+    fs.mkdirSync(path.join(input.root, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(input.root, 'dist', 'bin', 'cli.js'), '');
+    process.env.PATH = input.environment.PATH;
+    const collected = await collectDemoTranscript(input.root);
+    assert.equal(collected.status, 'ok', collected.status === 'failed' ? collected.message : '');
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'preserve');
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    fs.rmSync(sentinel, { force: true });
+    if (!canonicalExisted && fs.existsSync(DEMO_PROJECT_PATH) && fs.readdirSync(DEMO_PROJECT_PATH).length === 0) fs.rmdirSync(DEMO_PROJECT_PATH);
     cleanup(input);
   }
 });
