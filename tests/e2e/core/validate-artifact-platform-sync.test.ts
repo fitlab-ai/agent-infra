@@ -38,6 +38,8 @@ import {
   write,
   writeJson
 } from "./validate-artifact-helpers.ts";
+import { CONTROL_MARKER_PATTERN, sanitizeMarkdownDocument } from "../../../lib/platform/comment-safety.ts";
+
 const taskId = "TASK-20260328-000001";
 const summaryComment = "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good.";
 const summaryCommentWithSha = (sha: string) => (
@@ -591,6 +593,31 @@ test("validate-artifact platform-sync preserves source @ content when comparing 
   writeJson(ctx.issuePath, buildIssuePayload());
   writeJson(ctx.commentsPath, [
     { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+    { body: buildTaskComment(taskId, taskContent) }
+  ]);
+
+  const result = await runValidatorWithFakeGh(
+    ["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"],
+    ctx,
+    { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+}));
+
+test("validate-artifact platform-sync compares sanitized artifact content", () => withTempRoot("agent-infra-platform-sync-sanitized-content-", async (tempRoot) => {
+  const ctx = setupPlatformSyncEnv(tempRoot);
+  const taskContent = buildTaskContent({ issue_number: "65" });
+  const artifactContent = `${loadFixture("valid-code.md")}\n<!-- artifact-section:code:summary -->\n`;
+  const sanitized = sanitizeMarkdownDocument(artifactContent, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  assert.equal(sanitized.ok, true);
+  if (!sanitized.ok) return;
+
+  write(path.join(ctx.taskDir, "task.md"), taskContent);
+  write(path.join(ctx.taskDir, "code.md"), artifactContent);
+  writeJson(ctx.issuePath, buildIssuePayload());
+  writeJson(ctx.commentsPath, [
+    { body: buildArtifactComment(taskId, "code.md", "实现报告", sanitized.value) },
     { body: buildTaskComment(taskId, taskContent) }
   ]);
 

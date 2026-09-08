@@ -585,6 +585,11 @@ function checkCommentContent(context: any, remoteData: any): any {
   );
 }
 
+function sanitizeArtifactContent(content: string): string {
+  const result = sanitizeMarkdownDocument(content, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  return result.ok ? result.value : content;
+}
+
 function checkTaskCommentContent(context: any, remoteData: any): any {
   if (!context.config.verify_task_comment_content) {
     return null;
