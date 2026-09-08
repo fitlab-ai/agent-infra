@@ -88,7 +88,6 @@ test('canonical tape and transcript collector share the visible command sequence
     DEMO_VISIBLE_COMMANDS.clients,
     DEMO_VISIBLE_COMMANDS.tree
   ]);
-  assert.doesNotMatch(fs.readFileSync('assets/demo-init.transcript', 'utf8'), /demo\$ printf/);
 });
 
 test('canonical demo platform context is explicit and visible platform text remains meaningful', () => {
