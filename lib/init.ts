@@ -61,6 +61,7 @@ const PLATFORM_DEFAULT_ENGINES = Object.freeze({
   darwin: 'colima',
   win32: 'wsl2'
 });
+const DEMO_PLATFORM_ENV = 'AGENT_INFRA_DEMO_PLATFORM';
 
 function detectProjectName(): string {
   try {
@@ -86,6 +87,12 @@ function detectOrgName(): string {
     // no remote
   }
   return '';
+}
+
+function resolveInitPlatform(): NodeJS.Platform {
+  const override = process.env[DEMO_PLATFORM_ENV];
+  if (override === 'linux' || override === 'darwin' || override === 'win32') return override;
+  return platform();
 }
 
 const VALID_NAME_RE = /^[a-zA-Z0-9_.@-]+$/;
@@ -160,7 +167,7 @@ async function cmdInit(): Promise<void> {
     return;
   }
 
-  const currentPlatform = platform();
+  const currentPlatform = resolveInitPlatform();
   const defaultEngine = PLATFORM_DEFAULT_ENGINES[currentPlatform as keyof typeof PLATFORM_DEFAULT_ENGINES];
   const engineChoices = enginesForPlatform(currentPlatform).sort((left, right) => {
     if (left === defaultEngine) return -1;
@@ -323,4 +330,4 @@ async function cmdInit(): Promise<void> {
   }
 }
 
-export { cmdInit };
+export { cmdInit, resolveInitPlatform };

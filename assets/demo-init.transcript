@@ -1,4 +1,4 @@
-demo$ cd /tmp/my-awesome-project
+demo$ rm -rf /tmp/my-awesome-project && mkdir -p /tmp/my-awesome-project && cd /tmp/my-awesome-project
 demo$ git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git
 demo$ ai init
 
@@ -51,8 +51,7 @@ demo$ ai init
   This will render all templates and set up the full
   AI collaboration infrastructure.
 
-demo$ printf '\033]9;agent-infra-demo-checkpoint\007'
-demo$ tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst && printf '\033]9;agent-infra-demo-tree-checkpoint\007'
+demo$ tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst
 .agents/
 ├── scripts
 │   └── lib
@@ -66,4 +65,4 @@ demo$ tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst && printf '\033]9;agent
     └── update-agent-infra.md
 
 9 directories, 2 files
-demo$ exit
+demo$

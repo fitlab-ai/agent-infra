@@ -86,6 +86,89 @@ function removeIfPresent(filePath: string, io: PromotionFs): void {
   if (io.existsSync(filePath)) io.unlinkSync(filePath);
 }
 
+function samePath(left: string, right: string): boolean {
+  return path.normalize(path.resolve(left)) === path.normalize(path.resolve(right));
+}
+
+function pathIsInside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative !== '' && !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`);
+}
+
+function existingStat(filePath: string, io: PromotionFs): fs.Stats | null {
+  try {
+    return io.lstatSync(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function validatePromotionJournal(cwd: string, journal: PromotionJournal, io: PromotionFs): PromotionJournal {
+  if (!journal || typeof journal !== 'object') throw new Error('promotion journal is invalid');
+  if (journal.version !== 1 || !['prepared', 'promoting', 'committed'].includes(journal.phase)) {
+    throw new Error('promotion journal is invalid');
+  }
+  if (typeof journal.generation !== 'string' || !journal.generation || /[\r\n]/u.test(journal.generation)) {
+    throw new Error('promotion journal generation is invalid');
+  }
+  if (!Array.isArray(journal.entries) || journal.entries.length !== DEMO_ASSET_NAMES.length) {
+    throw new Error('promotion journal entries are invalid');
+  }
+  if (!Number.isInteger(journal.currentIndex) || journal.currentIndex < -1 || journal.currentIndex >= journal.entries.length) {
+    throw new Error('promotion journal index is invalid');
+  }
+
+  const assets = path.join(cwd, 'assets');
+  const assetsStat = existingStat(assets, io);
+  if (!assetsStat || assetsStat.isSymbolicLink() || !assetsStat.isDirectory()) {
+    throw new Error('promotion assets directory is invalid');
+  }
+
+  if (typeof journal.directory !== 'string' || path.isAbsolute(journal.directory)) {
+    throw new Error('promotion journal directory is invalid');
+  }
+  const directory = path.resolve(cwd, journal.directory);
+  const directoryName = path.basename(directory);
+  if (!directoryName.startsWith(PROMOTION_DIR_PREFIX) || directoryName === PROMOTION_DIR_PREFIX
+    || journal.directory !== path.relative(cwd, directory)
+    || !samePath(directory, path.join(assets, directoryName))) {
+    throw new Error('promotion journal directory is invalid');
+  }
+  const directoryStat = existingStat(directory, io);
+  if (directoryStat && (directoryStat.isSymbolicLink() || !directoryStat.isDirectory())) {
+    throw new Error('promotion journal directory is invalid');
+  }
+
+  const targets = assetTargets(cwd);
+  for (const [index, name] of DEMO_ASSET_NAMES.entries()) {
+    const entry = journal.entries[index];
+    if (!entry || entry.name !== name || typeof entry.target !== 'string' || typeof entry.staging !== 'string'
+      || typeof entry.backup !== 'string' || typeof entry.existed !== 'boolean'
+      || (entry.oldSha256 !== null && typeof entry.oldSha256 !== 'string')
+      || typeof entry.newSha256 !== 'string') {
+      throw new Error('promotion journal entry is invalid');
+    }
+    const target = targets[name];
+    const staging = path.join(directory, path.basename(target));
+    const backup = path.join(directory, `old-${name}`);
+    if (!samePath(entry.target, target) || !samePath(entry.staging, staging) || !samePath(entry.backup, backup)) {
+      throw new Error(`promotion journal path is invalid: ${name}`);
+    }
+    for (const [label, filePath] of [['target', target], ['staging', staging], ['backup', backup]] as const) {
+      if (!pathIsInside(assets, filePath)) throw new Error(`promotion journal path is invalid: ${name}.${label}`);
+      const stat = existingStat(filePath, io);
+      if (stat && (stat.isSymbolicLink() || !stat.isFile())) {
+        throw new Error(`promotion journal path is invalid: ${name}.${label}`);
+      }
+    }
+    if (entry.existed !== (entry.oldSha256 !== null)) {
+      throw new Error(`promotion journal entry is invalid: ${name}`);
+    }
+  }
+  return journal;
+}
+
 function cleanupJournal(journal: PromotionJournal, cwd: string, io: PromotionFs): void {
   for (const entry of journal.entries) {
     removeIfPresent(entry.staging, io);
@@ -138,10 +221,10 @@ function recoverDemoPromotion(cwd: string, io: PromotionFs = fs): PromotionResul
   if (!io.existsSync(target)) return null;
   let journal: PromotionJournal;
   try {
+    const journalStat = io.lstatSync(target);
+    if (journalStat.isSymbolicLink() || !journalStat.isFile()) throw new Error('promotion journal is invalid');
     journal = JSON.parse(io.readFileSync(target, 'utf8')) as PromotionJournal;
-    if (journal.version !== 1 || !Array.isArray(journal.entries) || !['prepared', 'promoting', 'committed'].includes(journal.phase)) {
-      throw new Error('promotion journal is invalid');
-    }
+    journal = validatePromotionJournal(cwd, journal, io);
     if (journal.phase === 'committed') {
       try { verifyTargets(journal.entries, io, 'new'); }
       catch { restoreOld(journal, io); }
@@ -223,7 +306,11 @@ function promoteDemoAssets(cwd: string, staging: DemoAssetPaths, generation: str
   } catch (error) {
     try {
       if (io.existsSync(journalPath(cwd))) {
-        const persisted = JSON.parse(io.readFileSync(journalPath(cwd), 'utf8')) as PromotionJournal;
+        const persisted = validatePromotionJournal(
+          cwd,
+          JSON.parse(io.readFileSync(journalPath(cwd), 'utf8')) as PromotionJournal,
+          io
+        );
         if (persisted.phase === 'committed') {
           verifyTargets(persisted.entries, io, 'new');
           return {

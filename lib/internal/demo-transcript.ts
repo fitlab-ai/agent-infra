@@ -12,6 +12,16 @@ const CHECKPOINT = '\u001b]9;agent-infra-demo-checkpoint\u0007';
 const TREE_CHECKPOINT = '\u001b]9;agent-infra-demo-tree-checkpoint\u0007';
 const TEMP_PROJECT_PATTERN = /(^|[\s"'`=])((?:[A-Za-z]:[\\/]|[\\/])(?:[^\\/\s"'`]+[\\/])*agent-infra-demo-project-[^\s"'`]+)/g;
 
+const DEMO_PROJECT_PATH = '/tmp/my-awesome-project';
+const DEMO_VISIBLE_COMMANDS = Object.freeze({
+  prepare: `rm -rf ${DEMO_PROJECT_PATH} && mkdir -p ${DEMO_PROJECT_PATH} && cd ${DEMO_PROJECT_PATH}`,
+  git: 'git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git',
+  init: 'ai init',
+  language: 'en',
+  clients: '1,2,3,4',
+  tree: 'tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst'
+});
+
 type TranscriptSuccess = { status: 'ok'; transcript: string; sha256: string };
 type TranscriptFailure = { status: 'failed'; reasonCode: 'DEMO_TRANSCRIPT_UNAVAILABLE' | 'DEMO_TRANSCRIPT_FAILED'; message: string };
 type TranscriptResult = TranscriptSuccess | TranscriptFailure;
@@ -293,15 +303,20 @@ function waitFor(output: () => string, pattern: RegExp, timeoutMs: number): Prom
   });
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
   const ptyModule = await loadNodePty();
   if (!ptyModule) return { status: 'failed', reasonCode: 'DEMO_TRANSCRIPT_UNAVAILABLE', message: '@lydell/node-pty is unavailable' };
 
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-project-'));
+  const project = DEMO_PROJECT_PATH;
   const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-shim-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-home-'));
   const globalGitConfig = path.join(home, 'empty-gitconfig');
   const localCli = path.join(cwd, 'dist', 'bin', 'cli.js');
+  const basePath = process.env.PATH ?? '';
   let processHandle: ReturnType<typeof ptyModule.spawn> | null = null;
   let output = '';
   let exited: { exitCode: number; signal?: number | string } | null = null;
@@ -311,9 +326,16 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
     fs.writeFileSync(globalGitConfig, '');
     for (const name of ['ai', 'agent-infra']) {
       const shim = path.join(shimDir, name);
-      fs.writeFileSync(shim, `#!/bin/sh\nexec node ${JSON.stringify(localCli)} "$@"\n`);
+      const checkpoint = name === 'ai' ? `\nprintf '${CHECKPOINT}'\n` : '';
+      fs.writeFileSync(shim, `#!/bin/sh\nnode ${JSON.stringify(localCli)} "$@"\nstatus=$?${checkpoint}\nexit $status\n`);
       fs.chmodSync(shim, 0o755);
     }
+    const treeShim = path.join(shimDir, 'tree');
+    fs.writeFileSync(
+      treeShim,
+      `#!/bin/sh\nPATH=${shellQuote(basePath)} command tree "$@"\nstatus=$?\nprintf '${TREE_CHECKPOINT}'\nexit $status\n`
+    );
+    fs.chmodSync(treeShim, 0o755);
     const environment = {
       ...process.env,
       HOME: home,
@@ -322,6 +344,7 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
       LANG: 'C.UTF-8',
       LC_ALL: 'C.UTF-8',
       GIT_CONFIG_GLOBAL: globalGitConfig,
+      AGENT_INFRA_DEMO_PLATFORM: 'linux',
       TERM_PROGRAM: '',
       PS1: 'demo$ ',
       PROMPT: 'demo$ ',
@@ -346,20 +369,20 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
       else await new Promise((resolve) => setTimeout(resolve, 150));
     };
 
-    await send(`cd ${project}`);
-    await send('git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git');
-    await send('ai init', /Project name/);
+    await send(DEMO_VISIBLE_COMMANDS.prepare);
+    await send(DEMO_VISIBLE_COMMANDS.git);
+    await send(DEMO_VISIBLE_COMMANDS.init, /Project name/);
     await send('', /Organization/);
     await send('', /Language/);
-    await send('en', /Sandbox engine/);
+    await send(DEMO_VISIBLE_COMMANDS.language, /Sandbox engine/);
     await send('', /Platform/);
     await send('', /Agent Client project integrations/);
-    await send('1,2,3,4', /Template sources/);
+    await send(DEMO_VISIBLE_COMMANDS.clients, /Template sources/);
     await send('', /Skill sources/);
     await send('', /(?:initialized|success|created)/i);
-    await send(`printf '\\033]9;agent-infra-demo-checkpoint\\007'`, /agent-infra-demo-checkpoint/);
-    await send(`tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst && printf '\\033]9;agent-infra-demo-tree-checkpoint\\007'`, /agent-infra-demo-tree-checkpoint/);
-    await send('exit');
+    await waitFor(() => output, /agent-infra-demo-checkpoint/, DEMO_TIMEOUT_MS);
+    await send(DEMO_VISIBLE_COMMANDS.tree, /agent-infra-demo-tree-checkpoint/);
+    processHandle.write('\u0004');
     await waitFor(() => exited ? 'exited' : '', /exited/, 5_000);
 
     if (!output.includes(CHECKPOINT)) throw new Error('demo transcript checkpoint marker was not emitted');
@@ -380,5 +403,5 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
   }
 }
 
-export { DEMO_COLUMNS, DEMO_ROWS, collectDemoTranscript, normalizeVisibleTranscript, sha256Transcript };
+export { DEMO_COLUMNS, DEMO_PROJECT_PATH, DEMO_ROWS, DEMO_VISIBLE_COMMANDS, collectDemoTranscript, normalizeVisibleTranscript, sha256Transcript };
 export type { TranscriptCollector, TranscriptFailure, TranscriptResult, TranscriptSuccess };

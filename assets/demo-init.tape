@@ -27,7 +27,7 @@ Set WindowBarSize 40
 # as a stray glyph in the first frame. Unregistering the hook here keeps the
 # recording identical across iTerm, Terminal.app, tmux, and CI.
 Hide
-Type "autoload -Uz add-zsh-hook 2>/dev/null; add-zsh-hook -d precmd omz_termsupport_cwd 2>/dev/null; clear"
+Type "autoload -Uz add-zsh-hook 2>/dev/null; add-zsh-hook -d precmd omz_termsupport_cwd 2>/dev/null; export AGENT_INFRA_DEMO_PLATFORM=linux; export PS1='demo$ '; export PROMPT='demo$ '; export RPS1=''; export RPROMPT=''; clear"
 Enter
 Sleep 200ms
 Show
@@ -65,7 +65,7 @@ Enter
 Wait+Screen /Sandbox engine/
 Sleep 1s
 
-# Prompt 4: Sandbox engine — accept default (colima)
+# Prompt 4: Sandbox engine — accept default (native)
 Enter
 Wait+Screen /Platform/
 Sleep 1s

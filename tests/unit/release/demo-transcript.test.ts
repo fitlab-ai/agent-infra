@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import {
   DEMO_COLUMNS,
+  DEMO_VISIBLE_COMMANDS,
   DEMO_ROWS,
   normalizeVisibleTranscript,
   sha256Transcript
@@ -48,13 +49,40 @@ test('normalization preserves visible prompt changes', () => {
   );
 });
 
+test('canonical tape and transcript collector share the visible command sequence', () => {
+  const tape = fs.readFileSync(path.resolve('assets/demo-init.tape'), 'utf8');
+  const visibleTape = tape.slice(tape.indexOf('\nShow\n'));
+  const tapeCommands = [...visibleTape.matchAll(/^Type "([^"]+)"$/gmu)].map((match) => match[1]);
+
+  assert.deepEqual(tapeCommands, [
+    DEMO_VISIBLE_COMMANDS.prepare,
+    DEMO_VISIBLE_COMMANDS.git,
+    DEMO_VISIBLE_COMMANDS.init,
+    DEMO_VISIBLE_COMMANDS.language,
+    DEMO_VISIBLE_COMMANDS.clients,
+    DEMO_VISIBLE_COMMANDS.tree
+  ]);
+  assert.doesNotMatch(fs.readFileSync('assets/demo-init.transcript', 'utf8'), /demo\$ printf/);
+});
+
+test('canonical demo platform context is explicit and visible platform text remains meaningful', () => {
+  const tape = fs.readFileSync(path.resolve('assets/demo-init.tape'), 'utf8');
+  assert.match(tape, /AGENT_INFRA_DEMO_PLATFORM=linux/);
+  const transcript = fs.readFileSync('assets/demo-init.transcript', 'utf8');
+  assert.match(transcript, /Sandbox engine \(linux\)/);
+  assert.notEqual(
+    normalizeVisibleTranscript('Sandbox engine (linux)\n'),
+    normalizeVisibleTranscript('Sandbox engine (darwin)\n')
+  );
+});
+
 test('canonical transcript covers the fixed init prompts and generated tree', () => {
   const transcriptPath = path.resolve('assets/demo-init.transcript');
   const digestPath = path.resolve('assets/demo-init.transcript.sha256');
   const transcript = fs.readFileSync(transcriptPath, 'utf8');
   assert.equal(fs.readFileSync(digestPath, 'utf8').trim(), sha256Transcript(transcript));
   for (const visibleText of [
-    'demo$ cd /tmp/my-awesome-project',
+    `demo$ ${DEMO_VISIBLE_COMMANDS.prepare}`,
     'demo$ git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git',
     'demo$ ai init',
     'Project name', 'Organization / owner', 'Language', 'Sandbox engine', 'Platform',

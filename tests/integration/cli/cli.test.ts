@@ -311,6 +311,22 @@ test("agent-infra init prompts with platform-specific sandbox engine choices", (
   assert.match(initSource, /`Sandbox engine \(\$\{currentPlatform\}\)`/);
 });
 
+test("agent-infra init accepts the canonical demo platform context at the CLI boundary", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-demo-platform-"));
+  try {
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: ["testproj", "testorg", "", "", "", "", "", ""].join("\n") + "\n",
+      encoding: "utf8",
+      env: { ...process.env, AGENT_INFRA_DEMO_PLATFORM: "linux" }
+    });
+    const config = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8"));
+    assert.deepEqual(config.sandbox.engine, { linux: "native" });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("agent-infra init accepts a custom platform selected from the menu", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
   const cli = CLI_PATH;

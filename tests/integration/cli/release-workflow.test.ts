@@ -39,6 +39,7 @@ printf '%s\\n' '.agents'
 while IFS= read -r line; do
   [ "$line" = "exit" ] && break
 done
+exit 0
 `);
   fs.chmodSync(fakeZsh, 0o755);
   execFileSync('git', ['add', '.'], { cwd: root });

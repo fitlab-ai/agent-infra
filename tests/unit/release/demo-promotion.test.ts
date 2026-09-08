@@ -10,6 +10,7 @@ import {
   promoteDemoAssets,
   recoverDemoPromotion
 } from '../../../lib/internal/demo-promotion.ts';
+import { sha256Bytes } from '../../../lib/internal/demo-promotion.ts';
 import type { DemoAssetPaths, PromotionFs } from '../../../lib/internal/demo-promotion.ts';
 
 function fixture() {
@@ -51,6 +52,50 @@ function assertNoPromotionArtifacts(assets: string) {
   assert.equal(fs.existsSync(journalPath(path.dirname(assets))), false);
   assert.equal(fs.readdirSync(assets).some((name) => name.includes('.demo-init.promotion.json.tmp-')), false);
   assert.equal(fs.readdirSync(assets).some((name) => name.startsWith('.demo-init.promotion-')), false);
+}
+
+function isPromotionBackupPath(filePath: fs.PathLike): boolean {
+  const value = String(filePath);
+  return [path.posix.basename(value), path.win32.basename(value)].some((name) => name.startsWith('old-'));
+}
+
+function writeInterruptedJournal(
+  root: string,
+  staging: DemoAssetPaths,
+  phaseIndex: number,
+  afterReplacement: boolean
+): void {
+  const assets = path.join(root, 'assets');
+  const directory = path.relative(root, path.dirname(staging.gif));
+  const entries = DEMO_ASSET_NAMES.map((name) => {
+    const target = targetFor(assets, name);
+    const backup = path.join(path.dirname(staging[name]), `old-${name}`);
+    fs.copyFileSync(target, backup);
+    return {
+      name,
+      target,
+      staging: staging[name],
+      backup,
+      existed: true,
+      oldSha256: sha256Bytes(fs.readFileSync(target)),
+      newSha256: sha256Bytes(fs.readFileSync(staging[name]))
+    };
+  });
+  if (afterReplacement) {
+    for (let index = 0; index <= phaseIndex; index += 1) {
+      const name = DEMO_ASSET_NAMES[index]!;
+      fs.copyFileSync(staging[name], targetFor(assets, name));
+      fs.unlinkSync(staging[name]);
+    }
+  }
+  fs.writeFileSync(journalPath(root), JSON.stringify({
+    version: 1,
+    generation: `interrupted-${phaseIndex}-${afterReplacement ? 'after' : 'before'}`,
+    phase: 'promoting',
+    currentIndex: phaseIndex,
+    directory,
+    entries
+  }, null, 2));
 }
 
 function withJournalFault(root: string, writeNumber: number, alsoBreakRestore = false): PromotionFs {
@@ -148,7 +193,7 @@ test('cleanup failure preserves a committed generation for recovery', () => {
   const io = {
     ...fs,
     unlinkSync(filePath: fs.PathLike) {
-      if (!injected && String(filePath).includes('/old-')) {
+      if (!injected && isPromotionBackupPath(filePath)) {
         injected = true;
         throw new Error('injected cleanup failure');
       }
@@ -169,6 +214,12 @@ test('cleanup failure preserves a committed generation for recovery', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('cleanup fault predicate recognizes POSIX and Windows backup paths', () => {
+  assert.equal(isPromotionBackupPath(path.posix.join('/tmp', 'old-gif')), true);
+  assert.equal(isPromotionBackupPath(path.win32.join('C:\\tmp', 'old-gif')), true);
+  assert.equal(isPromotionBackupPath(path.posix.join('/tmp', 'demo-init.gif')), false);
 });
 
 test('promotion records and replaces a previously absent target', () => {
@@ -200,5 +251,44 @@ test('an interrupted rollback remains recoverable from the promotion journal', (
     assert.equal(fs.existsSync(path.join(assets, '.demo-init.promotion.json')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const [index, name] of DEMO_ASSET_NAMES.entries()) {
+  for (const afterReplacement of [false, true]) {
+    test(`fresh recovery restores all assets after interruption ${afterReplacement ? 'after' : 'before'} replacing ${name}`, () => {
+      const { root, assets, staging } = fixture();
+      try {
+        writeInterruptedJournal(root, staging, index, afterReplacement);
+        const recovered = recoverDemoPromotion(root);
+        assert.deepEqual(recovered, { status: 'committed', code: null, message: null });
+        assertTargets(root, 'old');
+        assertNoPromotionArtifacts(assets);
+        assert.equal(recoverDemoPromotion(root), null);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+test('recovery rejects a journal path outside assets without deleting it', () => {
+  const { root, assets, staging } = fixture();
+  const sentinel = path.join(path.dirname(root), 'demo-promotion-sentinel');
+  fs.writeFileSync(sentinel, 'keep me\n');
+  try {
+    writeInterruptedJournal(root, staging, 0, true);
+    const journal = JSON.parse(fs.readFileSync(journalPath(root), 'utf8')) as { entries: Array<{ target: string }> };
+    journal.entries[0]!.target = sentinel;
+    fs.writeFileSync(journalPath(root), JSON.stringify(journal));
+
+    const recovered = recoverDemoPromotion(root);
+    assert.equal(recovered?.status, 'failed');
+    assert.equal(recovered?.code, 'DEMO_PROMOTION_RECOVERY_REQUIRED');
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep me\n');
+    assert.equal(fs.existsSync(journalPath(root)), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(sentinel, { force: true });
   }
 });
