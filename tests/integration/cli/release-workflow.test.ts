@@ -122,6 +122,43 @@ test('demo collector handles a temporary root with spaces and shell metacharacte
   }
 });
 
+test('demo collector does not evaluate shell syntax in the local CLI path', onPlatforms('linux', 'darwin'), async () => {
+  const input = fixture();
+  const markerName = `demo-transcript-shell-${process.pid}-${Date.now()}`;
+  const marker = path.join(os.tmpdir(), markerName);
+  const unsafeRoot = path.join(os.tmpdir(), `demo$(touch ${markerName})`);
+  const previousPath = process.env.PATH;
+  try {
+    fs.mkdirSync(path.join(unsafeRoot, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(unsafeRoot, 'dist', 'bin', 'cli.js'), '');
+    fs.writeFileSync(path.join(input.tools, 'zsh'), [
+      '#!/bin/sh',
+      "printf '%s' 'demo$ '",
+      'ai >/dev/null 2>&1 || true',
+      "printf '%s\\n' 'Project name' 'Organization' 'Language' 'Sandbox engine' 'Platform' 'Agent Client project integrations' 'Template sources' 'Skill sources' 'initialized'",
+      "printf '\\033]9;agent-infra-demo-checkpoint\\007'",
+      "printf '\\033]9;agent-infra-demo-tree-checkpoint\\007'",
+      "printf '%s\\n' '.agents'",
+      'while IFS= read -r line; do',
+      '  [ "$line" = "exit" ] && break',
+      'done',
+      'exit 0',
+      ''
+    ].join('\n'));
+    fs.chmodSync(path.join(input.tools, 'zsh'), 0o755);
+    process.env.PATH = input.environment.PATH;
+    const collected = await collectDemoTranscript(unsafeRoot);
+    assert.equal(collected.status, 'ok', collected.status === 'failed' ? collected.message : '');
+    assert.equal(fs.existsSync(marker), false);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    fs.rmSync(marker, { force: true });
+    fs.rmSync(unsafeRoot, { recursive: true, force: true });
+    cleanup(input);
+  }
+});
+
 function runCli(input: Fixture, ...args: string[]) {
   const env: NodeJS.ProcessEnv = { ...gitSafeEnv(), ...input.environment, NODE_OPTIONS: `--import=${pathToFileURL(input.preload).href}` };
   for (const key of [

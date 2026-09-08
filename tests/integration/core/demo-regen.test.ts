@@ -219,7 +219,7 @@ test("normalize-gif-duration distributes delays to hit the target duration", () 
       }
     );
 
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, result.stderr || result.error?.message || result.stdout);
 
     const delays = readGifDelays(gifPath);
     assert.equal(delays.length, 663);
@@ -332,6 +332,43 @@ test("demo-regen works without a local settings tape", () => {
     assert.match(result.stdout, /Normalized: 4 frames, 6250ms, total 25\.0s/);
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test("demo-regen does not evaluate shell syntax in the local CLI path", () => {
+  const fixture = setupDemoRegenFixture({ withLocalSettings: false });
+  const markerName = `demo-regen-shell-${process.pid}-${Date.now()}`;
+  const unsafeRepoDir = path.join(os.tmpdir(), `demo-regen$(touch ${markerName})`);
+  const marker = path.join(unsafeRepoDir, markerName);
+  try {
+    fs.renameSync(fixture.repoDir, unsafeRepoDir);
+    fs.writeFileSync(
+      path.join(unsafeRepoDir, "bin", "vhs"),
+      `#!/bin/sh
+set -e
+ai >/dev/null 2>&1 || true
+cp "$1" "$TEST_CAPTURE_TAPE"
+cp "$TEST_SOURCE_GIF" assets/demo-init.webm
+`,
+      "utf8"
+    );
+    fs.chmodSync(path.join(unsafeRepoDir, "bin", "vhs"), 0o755);
+    const result = spawnSync("/bin/sh", ["scripts/demo-regen.sh"], {
+      cwd: unsafeRepoDir,
+      encoding: "utf8",
+      env: {
+        ...fixture.env,
+        PATH: [path.join(unsafeRepoDir, "bin"), process.env.PATH, "/usr/bin", "/bin"].filter(Boolean).join(path.delimiter),
+        TEST_CAPTURE_TAPE: path.join(unsafeRepoDir, "captured.tape"),
+        TEST_SOURCE_GIF: path.join(unsafeRepoDir, "source.gif")
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.error?.message || result.stdout);
+    assert.equal(fs.existsSync(marker), false);
+  } finally {
+    fs.rmSync(marker, { force: true });
+    fs.rmSync(unsafeRepoDir, { recursive: true, force: true });
   }
 });
 

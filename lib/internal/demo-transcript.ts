@@ -337,7 +337,7 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
     for (const name of ['ai', 'agent-infra']) {
       const shim = path.join(shimDir, name);
       const checkpoint = name === 'ai' ? `\nprintf '${CHECKPOINT}'\n` : '';
-      fs.writeFileSync(shim, `#!/bin/sh\nnode ${JSON.stringify(localCli)} "$@"\nstatus=$?${checkpoint}\nexit $status\n`);
+      fs.writeFileSync(shim, `#!/bin/sh\n"$AGENT_INFRA_DEMO_NODE" "$AGENT_INFRA_DEMO_CLI" "$@"\nstatus=$?${checkpoint}\nexit $status\n`);
       fs.chmodSync(shim, 0o755);
     }
     const treeShim = path.join(shimDir, 'tree');
@@ -354,6 +354,8 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
       LANG: 'C.UTF-8',
       LC_ALL: 'C.UTF-8',
       GIT_CONFIG_GLOBAL: globalGitConfig,
+      AGENT_INFRA_DEMO_NODE: process.execPath,
+      AGENT_INFRA_DEMO_CLI: localCli,
       AGENT_INFRA_DEMO_PLATFORM: 'linux',
       TERM_PROGRAM: '',
       PS1: 'demo$ ',
@@ -371,7 +373,7 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
     });
     processHandle.onData((data) => { output += data; });
     processHandle.onExit((event) => { exited = event; });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitFor(() => output, /demo\$ /, DEMO_TIMEOUT_MS);
 
     const send = async (command: string, expected?: RegExp) => {
       processHandle!.write(`${command}\r`);

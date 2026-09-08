@@ -17,6 +17,7 @@ target_duration=25  # seconds — fixed across all machines
 max_bytes=4194304
 repo_root=$(pwd)
 local_cli="$repo_root/dist/bin/cli.js"
+export AGENT_INFRA_DEMO_CLI="$local_cli"
 
 tmp=$(mktemp).tape
 shim_dir=$(mktemp -d)
@@ -35,9 +36,9 @@ if [ ! -f "$local_cli" ]; then
 fi
 
 for name in ai agent-infra; do
-  cat >"$shim_dir/$name" <<SHIM
+  cat >"$shim_dir/$name" <<'SHIM'
 #!/bin/sh
-exec node "$local_cli" "\$@"
+exec "${AGENT_INFRA_DEMO_NODE:-node}" "$AGENT_INFRA_DEMO_CLI" "$@"
 SHIM
   chmod +x "$shim_dir/$name"
 done
