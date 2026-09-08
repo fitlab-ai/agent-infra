@@ -140,6 +140,29 @@ function safeLstat(root: string, target: string, expect: 'file' | 'directory'): 
 type ControlBinding = Readonly<{ generation: string; requestId: string }>;
 type ControlBindingVerifier = NonNullable<IntermediateCleanupOptions['controlBindingVerifier']>;
 type DirectoryIdentity = Readonly<{ dev: string; ino: string }>;
+type SandboxRemovalJournalEvidence = Readonly<{
+  phase: string;
+  generation: string;
+  target: Readonly<{
+    branch: string;
+    controlRoot: string;
+  }>;
+}>;
+
+const REMOVAL_PROOF_PHASES = new Set([
+  'carrier-removed',
+  'workspace-finalizing',
+  'workspace-removed',
+  'branch-finalizing',
+  'branch-removed',
+  'tool-finalizing',
+  'tool-removed',
+  'shell-finalizing',
+  'shell-removed',
+  'share-finalizing',
+  'share-removed',
+  'completed'
+]);
 
 function controlBindingKey(taskId: string, binding: ControlBinding): string {
   return `${taskId}\0${binding.generation}\0${binding.requestId}`;
@@ -164,6 +187,15 @@ function controlRootState(
   catch (error) { return errorCode(error) === 'ENOENT' ? 'missing' : 'replaced'; }
   if (stat.isSymbolicLink() || !stat.isDirectory()) return 'replaced';
   return String(stat.dev) === expected.dev && String(stat.ino) === expected.ino ? 'same' : 'replaced';
+}
+
+function controlRootIsAbsent(root: string): boolean {
+  try {
+    fs.lstatSync(root);
+    return false;
+  } catch (error) {
+    return errorCode(error) === 'ENOENT';
+  }
 }
 
 function taskFinalizationReceiptComplete(
@@ -260,9 +292,32 @@ function terminalControlBindingEvidence(
   }
 }
 
+function removedControlBindingEvidence(
+  repoRootInput: string,
+  journal: SandboxRemovalJournalEvidence,
+  taskId: string,
+  binding: ControlBinding
+): boolean {
+  const repoRoot = path.resolve(repoRootInput);
+  if (!REMOVAL_PROOF_PHASES.has(journal.phase)
+    || journal.generation !== binding.generation
+    || !path.isAbsolute(journal.target.controlRoot)) return false;
+  const controlRoot = path.resolve(journal.target.controlRoot);
+  if (!controlRootIsAbsent(controlRoot)) return false;
+  const task = inspectTaskRecords(repoRoot, new Set([taskId])).get(taskId);
+  if (!task || task.frontmatter.id !== taskId || task.frontmatter.branch !== journal.target.branch) return false;
+  try {
+    const receipt = readTaskFinalizationReceipt(repoRoot, taskId);
+    return receipt !== null && taskFinalizationReceiptComplete(receipt, taskId, binding);
+  } catch {
+    return false;
+  }
+}
+
 function createSandboxControlBindingVerifier(
   repoRoot: string,
-  controlRoots: readonly string[]
+  controlRoots: readonly string[],
+  removalJournals: readonly SandboxRemovalJournalEvidence[] = []
 ): ControlBindingVerifier {
   const roots = [...new Set(controlRoots.map((candidate) => path.resolve(candidate)))];
   const captured = roots.flatMap((controlRoot) => {
@@ -288,7 +343,7 @@ function createSandboxControlBindingVerifier(
     const state = controlRootState(candidate.controlRoot, candidate.rootIdentity);
     return state === 'missing'
       || state === 'same' && terminalControlBindingEvidence(repoRoot, candidate.controlRoot, taskId, binding);
-  });
+  }) || removalJournals.some((journal) => removedControlBindingEvidence(repoRoot, journal, taskId, binding));
 }
 
 function inspectTaskRecords(repoRoot: string, taskIds?: ReadonlySet<string>): Map<string, TaskRecord> {
