@@ -35,12 +35,12 @@ Show
 # ── Prepare a demo project directory ──
 Type "rm -rf /tmp/my-awesome-project && mkdir -p /tmp/my-awesome-project && cd /tmp/my-awesome-project"
 Enter
-Wait
+Wait+Screen /demo\$/
 Sleep 500ms
 
 Type "git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git"
 Enter
-Wait
+Wait+Screen /demo\$/
 Sleep 500ms
 
 # ── Initialize agent-infra ──
@@ -93,5 +93,5 @@ Sleep 5s
 # ── Show generated structure ──
 Type "tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst"
 Enter
-Wait
+Wait+Screen /\.agents\//
 Sleep 4s

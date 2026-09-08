@@ -10,8 +10,9 @@ const DEMO_ROWS = 40;
 const DEMO_TIMEOUT_MS = 30_000;
 const CHECKPOINT = '\u001b]9;agent-infra-demo-checkpoint\u0007';
 const TREE_CHECKPOINT = '\u001b]9;agent-infra-demo-tree-checkpoint\u0007';
-const TEMP_PROJECT_PATTERN = /(^|[\s"'`=])((?:[A-Za-z]:[\\/]|[\\/])(?:[^\\/\s"'`]+[\\/])*agent-infra-demo-project-[^\s"'`]+)/g;
-const QUOTED_TEMP_PROJECT_PATTERN = /(^|[\s"'`=])('(?:[^']|'\\'')*\/agent-infra-demo-project-(?:[^']|'\\'')*')(?=[\s"'`=]|$)/g;
+const TEMP_PROJECT_PATTERN = /(^|[\s"'`=])((?:[A-Za-z]:[\\/]|[\\/])(?:[^\\/\s"'`]+[\\/])*(?:agent-infra-demo-project-|agent-infra-demo-|agent-infra-)[^\s"'`]+)/g;
+const QUOTED_TEMP_PROJECT_PATTERN = /(^|[\s"'`=])('(?:[^']|'\\'')*\/(?:agent-infra-demo-project-|agent-infra-demo-|agent-infra-)(?:[^']|'\\'')*')(?=[\s"'`=]|$)/g;
+const QUOTED_RELATIVE_TEMP_PROJECT_PATTERN = /(^|[\s"'`=])('(?:[^']|'\\'')*(?:agent-infra-demo-project-|agent-infra-demo-|agent-infra-)(?:[^']|'\\'')*')(?=[\s"'`=]|$)/g;
 
 const DEMO_PROJECT_PATH = '/tmp/my-awesome-project';
 const DEMO_VISIBLE_COMMANDS = Object.freeze({
@@ -281,13 +282,14 @@ class TerminalDisplay {
 function normalizeDemoPaths(value: string): string {
   return value
     .replace(QUOTED_TEMP_PROJECT_PATTERN, '$1/tmp/my-awesome-project')
+    .replace(QUOTED_RELATIVE_TEMP_PROJECT_PATTERN, '$1/tmp/my-awesome-project')
     .replace(TEMP_PROJECT_PATTERN, '$1/tmp/my-awesome-project');
 }
 
 function normalizeVisibleTranscript(value: string): string {
   const display = new TerminalDisplay();
   display.feed(normalizeDemoPaths(value));
-  return display.render();
+  return normalizeDemoPaths(display.render());
 }
 
 function sha256Transcript(value: string): string {
@@ -318,7 +320,8 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
   const ptyModule = await loadNodePty();
   if (!ptyModule) return { status: 'failed', reasonCode: 'DEMO_TRANSCRIPT_UNAVAILABLE', message: '@lydell/node-pty is unavailable' };
 
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-project-'));
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-'));
+  const projectName = path.basename(project);
   const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-shim-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-home-'));
   const globalGitConfig = path.join(home, 'empty-gitconfig');
@@ -364,7 +367,7 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
       PS4: '+ '
     };
     processHandle = ptyModule.spawn('zsh', ['-f', '-i'], {
-      name: 'xterm-256color', cols: DEMO_COLUMNS, rows: DEMO_ROWS, cwd, env: environment
+      name: 'xterm-256color', cols: DEMO_COLUMNS, rows: DEMO_ROWS, cwd: path.dirname(project), env: environment
     });
     processHandle.onData((data) => { output += data; });
     processHandle.onExit((event) => { exited = event; });
@@ -376,7 +379,7 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
       else await new Promise((resolve) => setTimeout(resolve, 150));
     };
 
-    await send(buildDemoPrepareCommand(project));
+    await send(buildDemoPrepareCommand(projectName));
     await send(DEMO_VISIBLE_COMMANDS.git);
     await send(DEMO_VISIBLE_COMMANDS.init, /Project name/);
     await send('', /Organization/);
