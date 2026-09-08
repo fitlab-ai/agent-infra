@@ -14,6 +14,10 @@ import {
   listSandboxRemovalJournals
 } from "../../../lib/sandbox/control/lifecycle.ts";
 import {
+  semanticDigest,
+  sha256Content
+} from "../../../lib/task/local-artifact-finalization.ts";
+import {
   cliArgs,
   envWithPrependedPath,
   gitSafeEnv,
@@ -194,6 +198,157 @@ function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpD
     refreshIntervalDays: 7,
     dockerfile: null,
     vm: { cpu: null, memory: null, disk: null }
+  };
+}
+
+function writeTaskBoundCleanupEvidence(
+  config: SandboxConfig,
+  taskId: string,
+  branch: string
+): { controlRoot: string; intentPath: string; target: {
+  branch: string;
+  effectiveBranch: string;
+  engine: "docker-desktop";
+  matchedContainers: never[];
+  existingWorktrees: never[];
+  toolCandidates: never[];
+  workspace: { mode: "task-bound"; taskId: string };
+  controlRoots: string[];
+  workspaceViewRoots: never[];
+} } {
+  const taskDir = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(taskDir, "task.md"),
+    `---\nid: ${taskId}\nstatus: completed\nbranch: ${branch}\n---\n`,
+    "utf8"
+  );
+  const finalizationDir = path.join(config.repoRoot, ".agents", "workspace", ".task-finalization");
+  fs.mkdirSync(finalizationDir, { recursive: true });
+  const generation = "task-bound-generation";
+  const requestId = "a".repeat(16);
+  fs.writeFileSync(
+    path.join(finalizationDir, `${taskId}.json`),
+    `${JSON.stringify({
+      version: 2,
+      taskId,
+      intent: "complete",
+      receiptId: "receipt-1",
+      revision: 1,
+      lifecycle: "done",
+      taskComment: "done",
+      verification: "done",
+      warningProjection: "done",
+      warnings: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      lastError: null,
+      controlBinding: { generation, requestId }
+    })}\n`,
+    "utf8"
+  );
+
+  const artifact = "plan.md";
+  const content = "# Plan\n";
+  fs.writeFileSync(path.join(taskDir, artifact), content, "utf8");
+  const intentDir = path.join(config.repoRoot, ".agents", "workspace", ".local-artifact-finalization-intents");
+  fs.mkdirSync(intentDir, { recursive: true });
+  const intentPath = path.join(intentDir, `${taskId}-plan-${artifact}.json`);
+  fs.writeFileSync(intentPath, `${JSON.stringify({
+    version: 1,
+    taskId,
+    family: "plan",
+    artifact,
+    state: "consumed",
+    baselineSemanticDigest: null,
+    artifactSha256: sha256Content(content),
+    semanticDigest: semanticDigest(content)
+  })}\n`, "utf8");
+
+  const container = `${config.containerPrefix}-${branch.replaceAll("/", "..")}`;
+  const controlRoot = sandboxControlPaths({
+    base: config.controlBase,
+    project: config.project,
+    container,
+    identity: { mode: "task-bound", taskId }
+  }).root;
+  const channelDir = path.join(controlRoot, "channel");
+  const publicStatusDir = path.join(controlRoot, "public");
+  const processingDir = path.join(controlRoot, "processing");
+  fs.mkdirSync(path.join(channelDir, "responses"), { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
+  fs.mkdirSync(path.join(controlRoot, "runtime"), { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+    engine: "docker-desktop",
+    repoRoot: config.repoRoot,
+    worktreeRoot: config.repoRoot,
+    project: config.project,
+    container,
+    containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} },
+    authorityEvidence: fixtureAuthorityEvidence(),
+    branch,
+    mode: "task-bound",
+    taskId,
+    token: "task-bound-token",
+    generation,
+    channelDir,
+    publicStatusDir,
+    processingDir,
+    runtimeDir: path.join(controlRoot, "runtime")
+  })}\n`, "utf8");
+  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+    version: 3,
+    generation,
+    broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+    state: "healthy",
+    reasonCode: null,
+    activeRequestId: null,
+    updatedAt: Date.now(),
+    taskView: {
+      state: "current",
+      taskId,
+      observedSource: "completed",
+      receipt: { receiptId: "receipt-1", revision: 1, generation, requestId },
+      reasonCode: null
+    }
+  })}\n`, "utf8");
+  const result = {
+    status: "completed",
+    changed: false,
+    taskId,
+    lifecycle: { status: "no-op", changed: false, error: null },
+    taskComment: { status: "no-op", changed: false, error: null },
+    verification: { status: "no-op", changed: false, error: null },
+    completedSteps: ["lifecycle", "task-comment", "verification"],
+    pendingSteps: [],
+    result: "completed",
+    warnings: [],
+    error: null
+  };
+  fs.writeFileSync(path.join(channelDir, "responses", `${requestId}.json`), `${JSON.stringify({
+    version: 2,
+    id: requestId,
+    phase: "completed",
+    exitCode: 0,
+    stdout: `${JSON.stringify({ version: 1, status: "completed", changed: false, accepted: true, result, error: null })}\n`,
+    stderr: "",
+    error: null
+  })}\n`, "utf8");
+
+  return {
+    controlRoot,
+    intentPath,
+    target: {
+      branch,
+      effectiveBranch: branch,
+      engine: "docker-desktop",
+      matchedContainers: [],
+      existingWorktrees: [],
+      toolCandidates: [],
+      workspace: { mode: "task-bound", taskId },
+      controlRoots: [controlRoot],
+      workspaceViewRoots: []
+    }
   };
 }
 
@@ -992,6 +1147,101 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
     assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox cleanup consumes a completed removal journal through each cleanup entrypoint", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  for (const entrypoint of ["single", "unbound", "purge"] as const) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-rm-journal-${entrypoint}-`));
+    const branch = `feature/journal-${entrypoint}`;
+    const taskId = `TASK-20260824-${entrypoint === "single" ? "000004" : entrypoint === "unbound" ? "000005" : "000006"}`;
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+    const originalRmSync = fs.rmSync;
+    let journalClearBlocked = false;
+    try {
+      process.env.HOME = tmpDir;
+      process.env.USERPROFILE = tmpDir;
+      process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+      const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+      const config = rmOneConfig(fixture, tmpDir);
+      const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+      const cleanupTarget = {
+        requestedRef: taskId,
+        branch,
+        workspace: { mode: "task-bound" as const, taskId },
+        taskState: "completed" as const
+      };
+
+      fs.rmSync = ((targetPath, options) => {
+        const resolved = String(targetPath);
+        if (!journalClearBlocked && !fs.existsSync(evidence.controlRoot)
+          && resolved.includes(`${path.sep}sandbox-removal-journal${path.sep}`)
+          && resolved.endsWith(".json")) {
+          journalClearBlocked = true;
+          throw new Error("INJECTED_CRASH_BEFORE_AUXILIARY_CLEANUP");
+        }
+        return originalRmSync(targetPath, options);
+      }) as typeof fs.rmSync;
+
+      await assert.rejects(
+        () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+          assumeYes: true,
+          cleanupIntermediate: false,
+          cleanupTarget,
+          target: evidence.target
+        })),
+        /INJECTED_CRASH_BEFORE_AUXILIARY_CLEANUP/
+      );
+      fs.rmSync = originalRmSync;
+
+      assert.equal(fs.existsSync(evidence.controlRoot), false);
+      assert.equal(fs.existsSync(evidence.intentPath), true);
+      const journal = listSandboxRemovalJournals({ branch, project: config.project })
+        .find((candidate) => candidate.target.controlRoot === path.resolve(evidence.controlRoot));
+      assert.ok(journal);
+      assert.equal(journal.phase, "completed");
+      const journalPath = path.join(
+        tmpDir,
+        ".agent-infra",
+        "sandbox-removal-journal",
+        journal.lockDomain,
+        `${journal.carrierIdentityDigest}.json`
+      );
+      const persistedJournal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+      persistedJournal.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
+      fs.writeFileSync(journalPath, `${JSON.stringify(persistedJournal)}\n`, "utf8");
+
+      if (entrypoint === "single") {
+        await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+          assumeYes: true,
+          cleanupTarget,
+          target: evidence.target
+        }));
+      } else if (entrypoint === "unbound") {
+        const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      } else {
+        await withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+          confirm: async () => false,
+          isCancel: (value): value is symbol => false
+        }));
+      }
+
+      assert.equal(fs.existsSync(evidence.intentPath), false);
+      assert.equal(listSandboxRemovalJournals({ branch, project: config.project }).length, 0);
+    } finally {
+      fs.rmSync = originalRmSync;
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+      else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   }
 });
 

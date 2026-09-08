@@ -351,8 +351,19 @@ test('intermediate cleanup reconstructs terminal evidence from a removal journal
     assert.equal(protectedReport.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
     assert.equal(fs.existsSync(target), true);
 
-    const secondVerifier = createSandboxControlBindingVerifier(fixture.root, [], [{
+    const incompleteVerifier = createSandboxControlBindingVerifier(fixture.root, [], [{
       phase: 'carrier-removed',
+      generation: 'generation-1',
+      target: { branch: 'feature/cleanup', controlRoot }
+    }]);
+    const incompleteReport = cleanupIntermediateFiles(fixture.root, {
+      controlBindingVerifier: incompleteVerifier
+    });
+    assert.equal(incompleteReport.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
+    assert.equal(fs.existsSync(target), true);
+
+    const secondVerifier = createSandboxControlBindingVerifier(fixture.root, [], [{
+      phase: 'completed',
       generation: 'generation-1',
       target: { branch: 'feature/cleanup', controlRoot }
     }]);

@@ -150,17 +150,6 @@ type SandboxRemovalJournalEvidence = Readonly<{
 }>;
 
 const REMOVAL_PROOF_PHASES = new Set([
-  'carrier-removed',
-  'workspace-finalizing',
-  'workspace-removed',
-  'branch-finalizing',
-  'branch-removed',
-  'tool-finalizing',
-  'tool-removed',
-  'shell-finalizing',
-  'shell-removed',
-  'share-finalizing',
-  'share-removed',
   'completed'
 ]);
 
