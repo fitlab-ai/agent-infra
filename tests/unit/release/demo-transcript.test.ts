@@ -63,7 +63,10 @@ test('normalization canonicalizes quoted temporary paths with shell metacharacte
   const project = '/tmp/demo collector;safe/agent-infra-demo-project-123';
   const command = `demo$ rm -rf '${project}' && mkdir -p '${project}' && cd '${project}'\n`;
 
-  assert.equal(normalizeVisibleTranscript(command), `demo$ ${DEMO_VISIBLE_COMMANDS.prepare}\n`);
+  assert.equal(
+    normalizeVisibleTranscript(command),
+    "demo$ rm -rf /tmp/my-awesome-project && mkdir -p /tmp/my-awesome-project && cd /tmp/my-awesome-project\n"
+  );
 });
 
 test('canonical tape and transcript collector share the visible command sequence', () => {

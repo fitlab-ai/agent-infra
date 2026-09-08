@@ -15,7 +15,7 @@ const QUOTED_TEMP_PROJECT_PATTERN = /(^|[\s"'`=])('(?:[^']|'\\'')*\/agent-infra-
 
 const DEMO_PROJECT_PATH = '/tmp/my-awesome-project';
 const DEMO_VISIBLE_COMMANDS = Object.freeze({
-  prepare: `rm -rf ${shellQuote(DEMO_PROJECT_PATH)} && mkdir -p ${shellQuote(DEMO_PROJECT_PATH)} && cd ${shellQuote(DEMO_PROJECT_PATH)}`,
+  prepare: `rm -rf ${DEMO_PROJECT_PATH} && mkdir -p ${DEMO_PROJECT_PATH} && cd ${DEMO_PROJECT_PATH}`,
   git: 'git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git',
   init: 'ai init',
   language: 'en',
@@ -280,7 +280,7 @@ class TerminalDisplay {
 
 function normalizeDemoPaths(value: string): string {
   return value
-    .replace(QUOTED_TEMP_PROJECT_PATTERN, "$1'/tmp/my-awesome-project'")
+    .replace(QUOTED_TEMP_PROJECT_PATTERN, '$1/tmp/my-awesome-project')
     .replace(TEMP_PROJECT_PATTERN, '$1/tmp/my-awesome-project');
 }
 
@@ -311,7 +311,7 @@ function shellQuote(value: string): string {
 }
 
 function buildDemoPrepareCommand(project: string): string {
-  return DEMO_VISIBLE_COMMANDS.prepare.replaceAll(shellQuote(DEMO_PROJECT_PATH), shellQuote(project));
+  return DEMO_VISIBLE_COMMANDS.prepare.replaceAll(DEMO_PROJECT_PATH, shellQuote(project));
 }
 
 async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {

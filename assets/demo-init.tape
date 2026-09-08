@@ -33,7 +33,7 @@ Sleep 200ms
 Show
 
 # ── Prepare a demo project directory ──
-Type "rm -rf '/tmp/my-awesome-project' && mkdir -p '/tmp/my-awesome-project' && cd '/tmp/my-awesome-project'"
+Type "rm -rf /tmp/my-awesome-project && mkdir -p /tmp/my-awesome-project && cd /tmp/my-awesome-project"
 Enter
 Wait
 Sleep 500ms
