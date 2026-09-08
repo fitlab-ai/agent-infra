@@ -133,23 +133,23 @@ function validateCustomTUIContract(contract) {
   }
 }
 
-function compileRegistry() {
+function compileRegistry(outputDir) {
   const tscPath = path.join(rootDir, 'node_modules', 'typescript', 'bin', 'tsc');
   execFileSync(
     process.execPath,
-    [tscPath, '-p', path.join(rootDir, 'tsconfig.json')],
+    [tscPath, '-p', path.join(rootDir, 'tsconfig.json'), '--outDir', outputDir],
     { cwd: rootDir, stdio: 'inherit' }
   );
 }
 
-async function buildInlineContent() {
+async function buildInlineContent(outputDir) {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const defaults = JSON.parse(fs.readFileSync(path.join(rootDir, 'lib', 'defaults.json'), 'utf8'));
   const registryModule = await import(
-    pathToFileURL(path.join(rootDir, 'dist', 'lib', 'agent-clients', 'registry.js')).href
+    pathToFileURL(path.join(outputDir, 'lib', 'agent-clients', 'registry.js')).href
   );
   const customTUIModule = await import(
-    pathToFileURL(path.join(rootDir, 'dist', 'lib', 'agent-clients', 'custom-tuis.js')).href
+    pathToFileURL(path.join(outputDir, 'lib', 'agent-clients', 'custom-tuis.js')).href
   );
   const manifest = registryModule.createAgentClientManifest();
   const customTUIContract = customTUIModule.CUSTOM_TUI_CONTRACT;
@@ -181,8 +181,18 @@ async function buildInlineContent() {
 
 async function main() {
   const checkOnly = process.argv.includes('--check');
-  if (checkOnly) compileRegistry();
-  const nextContent = await buildInlineContent();
+  let nextContent;
+  if (checkOnly) {
+    const outputDir = fs.mkdtempSync(path.join(rootDir, '.inline-check-'));
+    try {
+      compileRegistry(outputDir);
+      nextContent = await buildInlineContent(outputDir);
+    } finally {
+      fs.rmSync(outputDir, { recursive: true, force: true });
+    }
+  } else {
+    nextContent = await buildInlineContent(path.join(rootDir, 'dist'));
+  }
 
   if (checkOnly) {
     for (const targetPath of targetPaths) {

@@ -4,6 +4,8 @@
 
 ## Build prerequisites and troubleshooting
 
+Sandbox file locks load the Node-API prebuilt binaries shipped with `fs-native-extensions` on macOS, Linux, and Windows x64/ARM64. Cleanup requires a successfully loaded lock module; loading failures produce `SANDBOX_LOCK_UNSUPPORTED`. See [the contributor guide](../../CONTRIBUTING.md#native-sandbox-lock-dependency) for loading checks.
+
 Sandbox creation and rebuilding require Docker Buildx with a working BuildKit builder. agent-infra checks the selected engine and Docker context before inspecting or building an image:
 
 ```bash

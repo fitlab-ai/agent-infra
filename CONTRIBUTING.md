@@ -49,15 +49,13 @@ Refer to the project's `README.md` for more guidance on how to set up the develo
 
 ### Native sandbox lock dependency
 
-Sandbox tests require a working `fs-ext-extra-prebuilt` native module. The project approves its pinned install script for npm versions that block dependency scripts by default. After changing Node.js versions, verify the module with `node -e "require('fs-ext-extra-prebuilt')"`.
-
-On Node.js 26, version 2.2.13 can report a successful install without compiling when npm hoists `nan`. If loading the module fails, build it directly with npm's bundled node-gyp (requires Python and a C++ toolchain), then rerun the tests:
+Sandbox locks use `fs-native-extensions`, which ships Node-API prebuilt binaries for macOS, Linux, and Windows on x64 and ARM64. Node.js loads the binary for the current platform directly. Check loading with:
 
 ```bash
-node "$(npm config get node-gyp)" rebuild --directory=node_modules/fs-ext-extra-prebuilt
-node -e "require('fs-ext-extra-prebuilt')"
-npm test
+node -e "require('fs-native-extensions')"
 ```
+
+Pack smoke installs with `--ignore-scripts` and exercises real lock contention on Node.js 22, 24, and 26 across all three operating systems. If loading fails, verify that the package contains a binary compatible with the system architecture and runtime.
 
 ## Branch Management
 

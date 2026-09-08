@@ -622,9 +622,12 @@ test("non-GitHub init full sync excludes GitHub lifecycle workflows", async () =
 });
 
 test("build output is up-to-date", () => {
+  const artifact = filePath("dist/lib/sandbox/tool-types.js");
+  const before = fs.statSync(artifact, { bigint: true });
   execFileSync(process.execPath, [filePath("scripts/build-inline.js"), "--check"], {
     encoding: "utf8"
   });
+  assert.equal(fs.statSync(artifact, { bigint: true }).mtimeNs, before.mtimeNs);
 });
 
 test("agent-infra init rejects invalid input", () => {

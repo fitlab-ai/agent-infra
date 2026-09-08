@@ -4,21 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-type NativeFsExt = Readonly<{
-  flockSync: (fd: number, flags: string) => void;
-  lockFileExSync: (fd: number, flags: number, offsetLow: number, offsetHigh: number, lengthLow: number, lengthHigh: number) => void;
-  unlockFileExSync: (fd: number, offsetLow: number, offsetHigh: number, lengthLow: number, lengthHigh: number) => void;
-  constants: Readonly<{
-    LOCKFILE_EXCLUSIVE_LOCK: number;
-    LOCKFILE_FAIL_IMMEDIATELY: number;
-  }>;
-  getNativeModuleSource?: () => string;
+type NativeFsExtensions = Readonly<{
+  tryLock: (fd: number) => boolean;
+  unlock: (fd: number) => void;
 }>;
 
 export type SandboxLockCapability = Readonly<{
   supported: boolean;
-  primitive: 'flock' | 'LockFileEx' | 'unavailable';
-  binarySource: string | null;
+  primitive: 'flock' | 'F_OFD_SETLK' | 'LockFileEx' | 'unavailable';
   reason?: string;
 }>;
 
@@ -38,12 +31,18 @@ export type SandboxResourceLock = Readonly<{
 
 const require = createRequire(import.meta.url);
 const LOCK_ROOT_NAME = path.join('.agent-infra', 'sandbox-locks');
+const LOCK_PRIMITIVE = process.platform === 'win32' ? 'LockFileEx'
+  : process.platform === 'linux' ? 'F_OFD_SETLK' : 'flock';
 
-function loadNative(): NativeFsExt {
+function loadNative(): NativeFsExtensions {
   try {
-    return require('fs-ext-extra-prebuilt') as NativeFsExt;
-  } catch {
-    throw new Error('SANDBOX_LOCK_UNSUPPORTED: native lock module is unavailable');
+    return require('fs-native-extensions') as NativeFsExtensions;
+  } catch (error) {
+    throw new Error(
+      `SANDBOX_LOCK_UNSUPPORTED: native lock module is unavailable for Node ${process.version} (${process.platform}-${process.arch}). `
+      + 'Verify that fs-native-extensions includes a prebuilt binary for this platform and reinstall @fitlab-ai/agent-infra. '
+      + `Cause: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -97,8 +96,7 @@ export function resolveSandboxLockNamespace(
   const home = path.resolve(options.home ?? os.homedir());
   const lockRoot = path.join(home, LOCK_ROOT_NAME);
   assertPrivateDirectory(lockRoot, home);
-  const primitive = process.platform === 'win32' ? 'LockFileEx' : 'flock';
-  const lockDomain = options.lockDomain ?? digest(`${process.platform}\0${process.arch}\0${primitive}`);
+  const lockDomain = options.lockDomain ?? digest(`${process.platform}\0${process.arch}\0${LOCK_PRIMITIVE}`);
   if (!/^[a-f0-9]{64}$/u.test(lockDomain)) throw new Error('SANDBOX_LOCK_DOMAIN_INVALID');
   const domainDirectory = path.join(lockRoot, lockDomain);
   assertPrivateDirectory(domainDirectory, home);
@@ -122,17 +120,15 @@ export function stableSandboxLockPath(
 
 export function probeNativeLockCapability(): SandboxLockCapability {
   try {
-    const native = loadNative();
+    loadNative();
     return {
       supported: true,
-      primitive: process.platform === 'win32' ? 'LockFileEx' : 'flock',
-      binarySource: native.getNativeModuleSource?.() ?? null
+      primitive: LOCK_PRIMITIVE
     };
   } catch (error) {
     return {
       supported: false,
       primitive: 'unavailable',
-      binarySource: null,
       reason: error instanceof Error ? error.message : String(error)
     };
   }
@@ -159,15 +155,22 @@ export function acquireSandboxResourceLock(
     const noFollow = process.platform !== 'win32' && typeof fs.constants.O_NOFOLLOW === 'number'
       ? fs.constants.O_NOFOLLOW : 0;
     fd = fs.openSync(namespace.lockPath, fs.constants.O_CREAT | fs.constants.O_RDWR | noFollow, 0o600);
-    if (process.platform !== 'win32') fs.chmodSync(namespace.lockPath, 0o600);
-    if (process.platform === 'win32') {
-      native.lockFileExSync(
-        fd,
-        native.constants.LOCKFILE_EXCLUSIVE_LOCK | native.constants.LOCKFILE_FAIL_IMMEDIATELY,
-        0, 0, 1, 0
-      );
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile()) throw new Error('lock object must be a regular file');
+    if (process.platform !== 'win32') {
+      if (typeof process.getuid === 'function' && opened.uid !== process.getuid()) {
+        throw new Error('lock object owner mismatch');
+      }
+      fs.fchmodSync(fd, 0o600);
+    }
+    if (!native.tryLock(fd)) {
+      fs.closeSync(fd);
+      fd = undefined;
     } else {
-      native.flockSync(fd, 'exnb');
+      const current = fs.lstatSync(namespace.lockPath);
+      if (!current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) {
+        throw new Error('lock object changed during acquisition');
+      }
     }
   } catch (error) {
     try {
@@ -175,12 +178,9 @@ export function acquireSandboxResourceLock(
     } catch {
       // Preserve the lock acquisition error.
     }
-    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
-    if (['EAGAIN', 'EACCES', 'EWOULDBLOCK'].includes(code)) {
-      throw new Error('SANDBOX_LOCK_BUSY');
-    }
     throw new Error(`SANDBOX_LOCK_UNSUPPORTED: ${error instanceof Error ? error.message : String(error)}`);
   }
+  if (fd === undefined) throw new Error('SANDBOX_LOCK_BUSY');
 
   let released = false;
   return {
@@ -192,8 +192,7 @@ export function acquireSandboxResourceLock(
       let failure: unknown = null;
       try {
         if (fd === undefined) throw new Error('descriptor is missing');
-        if (process.platform === 'win32') native.unlockFileExSync(fd, 0, 0, 1, 0);
-        else native.flockSync(fd, 'un');
+        native.unlock(fd);
       } catch (error) {
         failure = error;
       } finally {

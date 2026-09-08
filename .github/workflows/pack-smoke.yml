@@ -12,14 +12,14 @@ concurrency:
 
 jobs:
   pack-smoke:
-    name: npm pack + install (${{ matrix.os }})
+    name: npm pack + install (${{ matrix.os }} / Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [22]
+        node: [22, 24, 26]
     permissions:
       contents: read
     steps:
@@ -40,6 +40,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify native lock process lifecycle
+        run: node --experimental-strip-types --test tests/e2e/sandbox/native-file-lock.test.ts
+
       - name: Pack tarball
         shell: bash
         run: |
@@ -57,13 +60,37 @@ jobs:
           mkdir -p "$SMOKE_DIR"
           cd "$SMOKE_DIR"
           npm init -y >/dev/null
-          npm install "$TARBALL"
+          npm install --ignore-scripts "$TARBALL"
 
       - name: Smoke - version
         shell: bash
         run: |
           cd "$RUNNER_TEMP/agent-infra-smoke"
           ./node_modules/.bin/agent-infra version
+
+      - name: Smoke - native file lock
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/agent-infra-smoke"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import path from 'node:path';
+          import { acquireSandboxResourceLock } from './node_modules/@fitlab-ai/agent-infra/dist/lib/sandbox/control/native-file-lock.js';
+          const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pack-native-lock-'));
+          try {
+            const first = acquireSandboxResourceLock('pack-smoke', { home });
+            try {
+              assert.throws(() => acquireSandboxResourceLock('pack-smoke', { home }), /SANDBOX_LOCK_BUSY/);
+            } finally {
+              first.release();
+            }
+            acquireSandboxResourceLock('pack-smoke', { home }).release();
+          } finally {
+            fs.rmSync(home, { recursive: true, force: true });
+          }
+          JS
 
       - name: Smoke - sandbox --help
         shell: bash

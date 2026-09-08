@@ -4,6 +4,8 @@
 
 ## 构建前置条件与排障
 
+沙箱文件锁在 macOS、Linux、Windows x64/ARM64 上加载 `fs-native-extensions` 随包提供的 Node-API 预编译二进制。清理流程要求锁模块成功加载，加载失败时返回 `SANDBOX_LOCK_UNSUPPORTED`。加载检查见[贡献指南](../../CONTRIBUTING.zh-CN.md#沙箱原生锁依赖)。
+
 创建和重建沙箱需要 Docker Buildx，以及可用的 BuildKit builder。agent-infra 会在检查或构建镜像之前，针对所选引擎和 Docker context 执行：
 
 ```bash
