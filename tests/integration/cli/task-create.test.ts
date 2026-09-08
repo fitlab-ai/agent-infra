@@ -47,14 +47,16 @@ function candidate() {
   };
 }
 
-function qualificationCandidate() {
+function qualificationCandidate(alternativeCount = 2) {
+  const base = candidate();
   return {
-    ...candidate(),
+    ...base,
     title: 'Create a qualification-aware task through internal CLI',
     taskInput: {
-      ...candidate().taskInput,
+      ...base.taskInput,
       constraints: ['Keep lifecycle routing deterministic.'],
-      alternatives: ['Use the canonical task renderer.', 'Add a second qualification writer.']
+      alternatives: Array.from({ length: alternativeCount }, (_, index) =>
+        index === 0 ? 'Use the canonical task renderer.' : index === 1 ? 'Add a second qualification writer.' : `Candidate alternative ${index + 1}`)
     }
   };
 }
@@ -187,6 +189,36 @@ test('task-create internal CLI keeps qualification tables separate and routes li
     if (facts.ok) assert.equal(recommendNext(facts.facts).action, 'analysis');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create internal CLI parses and routes 27 and 50 qualification candidates', () => {
+  for (const alternativeCount of [27, 50]) {
+    const root = fixture();
+    const input = path.join(root, 'candidate.json');
+    fs.writeFileSync(input, JSON.stringify(qualificationCandidate(alternativeCount)));
+    try {
+      const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+        cwd: root, encoding: 'utf8', env: hostEnvironment
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const taskId = JSON.parse(result.stdout).task.id as string;
+      const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+      const content = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+      const qualification = parseTaskQualification(content);
+      assert.equal(qualification.ok, true);
+      if (!qualification.ok) continue;
+      const ids = qualification.qualification.candidates.map((row) => row.candidateId);
+      assert.equal(ids.length, alternativeCount);
+      assert.equal(new Set(ids).size, alternativeCount);
+      assert.equal(ids[26], 'AA');
+      if (alternativeCount === 50) assert.equal(ids[49], 'AX');
+      const facts = buildLifecycleFacts(taskDir, content);
+      assert.equal(facts.ok, true);
+      if (facts.ok) assert.equal(recommendNext(facts.facts).action, 'analysis');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

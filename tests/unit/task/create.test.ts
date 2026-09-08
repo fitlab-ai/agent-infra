@@ -192,6 +192,33 @@ test('local task creation keeps constraint and candidate qualification tables se
   }
 });
 
+test('local task creation supports 50 qualification candidates with unique parser-safe ids', () => {
+  const root = fixture();
+  const wideCandidate: TaskCreateCandidateV1 = {
+    ...qualificationCandidate,
+    taskInput: {
+      ...qualificationCandidate.taskInput,
+      alternatives: Array.from({ length: 50 }, (_, index) => `Candidate alternative ${index + 1}`)
+    }
+  };
+  try {
+    const result = createLocalTask(wideCandidate, { repoRoot: root, agentInfraVersion: 'v0.9.5' });
+    const content = fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', result.task.id, 'task.md'), 'utf8');
+    const parsed = parseTaskQualification(content);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    const ids = parsed.qualification.candidates.map((row) => row.candidateId);
+    assert.equal(ids.length, 50);
+    assert.equal(ids[0], 'A');
+    assert.equal(ids[25], 'Z');
+    assert.equal(ids[26], 'AA');
+    assert.equal(ids[49], 'AX');
+    assert.equal(new Set(ids).size, 50);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('local task creation rejects an invalid qualification template before publishing state', () => {
   const root = fixture();
   try {

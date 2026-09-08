@@ -195,6 +195,17 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function candidateIdFor(index: number): string {
+  let value = index + 1;
+  let id = '';
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    id = `${String.fromCharCode(65 + remainder)}${id}`;
+    value = Math.floor((value - 1) / 26);
+  }
+  return id;
+}
+
 function appendCanonicalRows(content: string, heading: string, columns: readonly string[], rows: readonly (readonly string[])[]): string {
   if (rows.length === 0) return content;
   const table = renderTable(columns, rows);
@@ -231,7 +242,7 @@ function validateRenderedQualification(content: string, candidate: TaskCreateCan
     throw new Error('TASK_CREATE_QUALIFICATION_INVALID: rendered task qualification contract is missing');
   }
   const expectedConstraintIds = candidate.taskInput.constraints.map((_, index) => `C-${index + 1}`);
-  const expectedCandidateIds = candidate.taskInput.alternatives.map((_, index) => String.fromCharCode(65 + index));
+  const expectedCandidateIds = candidate.taskInput.alternatives.map((_, index) => candidateIdFor(index));
   const actualConstraintIds = parsed.qualification.constraints.map((row) => row.constraintId);
   const actualCandidateIds = parsed.qualification.candidates.map((row) => row.candidateId);
   if (JSON.stringify(actualConstraintIds) !== JSON.stringify(expectedConstraintIds)
@@ -298,7 +309,7 @@ function renderTask(params: Readonly<{
     constraintIds[index]!, statement, 'assumption', 'create-task', 'taskInput', 'create-task input', '', ''
   ]));
   content = appendCanonicalRows(content, '候选与否决方案', CANDIDATE_COLUMNS, candidate.taskInput.alternatives.map((statement, index) => [
-    String.fromCharCode(65 + index), statement, 'pending', constraintIds.join(','), 'requires qualification', 'create-task input'
+    candidateIdFor(index), statement, 'pending', constraintIds.join(','), 'requires qualification', 'create-task input'
   ]));
   content = content.replace('- **关联 Issue**：#XXX', '- **关联 Issue**：N/A');
   content = content.replace('- **关联 PR**：#XXX', '- **关联 PR**：N/A');
