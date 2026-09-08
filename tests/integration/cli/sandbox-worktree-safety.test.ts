@@ -11,7 +11,8 @@ import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
 import {
   clearSandboxRemovalJournalRecord,
-  listSandboxRemovalJournals
+  listSandboxRemovalJournals,
+  removeSandboxControlRoot
 } from "../../../lib/sandbox/control/lifecycle.ts";
 import {
   semanticDigest,
@@ -1257,6 +1258,68 @@ test("sandbox cleanup consumes a completed removal journal through each cleanup 
       else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  }
+});
+
+test("sandbox purge preserves a rich removal journal for its real recovery path", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-rich-journal-"));
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  const branch = "feature/rich-purge-journal";
+  try {
+    process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, "TASK-20260824-000007", branch);
+    const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
+    fs.mkdirSync(share, { recursive: true });
+    const richTarget = {
+      branch,
+      project: config.project,
+      controlRoot: path.resolve(evidence.controlRoot),
+      targetDigest: "b".repeat(64),
+      permitDigest: "c".repeat(64),
+      removeWorktree: false,
+      removeBranch: false,
+      removeShare: true,
+      worktreePaths: [],
+      workspaceViewPaths: [],
+      toolPaths: [],
+      shellPaths: [],
+      sharePath: share,
+      permits: []
+    } as const;
+
+    await withFixtureDocker(fixture, () => removeSandboxControlRoot(evidence.controlRoot, {
+      inspectContainer: async () => ({ state: "absent", id: FIXTURE_CONTAINER_ID }),
+      removeContainer: async () => {},
+      retainRemovalJournal: true,
+      removalTarget: richTarget
+    }));
+    const before = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(before);
+    assert.equal(before.phase, "carrier-removed");
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+        confirm: async () => false,
+        isCancel: (value): value is symbol => false
+      })),
+      /SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING/
+    );
+
+    const after = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(after);
+    assert.equal(after.phase, "carrier-removed");
+    assert.equal(fs.existsSync(share), true);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 

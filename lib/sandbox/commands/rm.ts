@@ -1174,13 +1174,36 @@ async function removeProjectControlRoots(
   return containers;
 }
 
+function isDefaultPurgeRemovalJournal(journal: SandboxRemovalJournal): boolean {
+  const { target } = journal;
+  const container = path.basename(path.dirname(target.controlRoot));
+  const expectedTargetDigest = createHash('sha256')
+    .update(`${target.project}\0${target.branch}\0${container}\0${path.join(target.controlRoot, 'channel')}`)
+    .digest('hex');
+  return target.targetDigest === expectedTargetDigest
+    && target.permitDigest === createHash('sha256').update('none').digest('hex')
+    && !target.removeWorktree
+    && !target.removeBranch
+    && !target.removeShare
+    && target.worktreePaths.length === 0
+    && target.workspaceViewPaths.length === 0
+    && target.toolPaths.length === 0
+    && target.shellPaths.length === 0
+    && target.permits.length === 0
+    && target.sharePath === path.join(target.controlRoot, 'share');
+}
+
 function completePurgeRemovalJournals(config: SandboxConfig): void {
   const projectRoot = path.resolve(config.controlBase, config.project);
-  for (const journal of listSandboxRemovalJournals({ project: config.project })) {
+  const projectJournals = listSandboxRemovalJournals({ project: config.project }).filter((journal) => {
     const relativeRoot = path.relative(projectRoot, path.resolve(journal.target.controlRoot));
-    if (relativeRoot === '' || relativeRoot === '..' || relativeRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relativeRoot)) {
-      continue;
-    }
+    return relativeRoot !== '' && relativeRoot !== '..'
+      && !relativeRoot.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeRoot);
+  });
+  if (projectJournals.some((journal) => !isDefaultPurgeRemovalJournal(journal))) {
+    throw new Error('SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING');
+  }
+  for (const journal of projectJournals) {
     const resourceLock = acquireSandboxResourceLock(`${journal.engine}:${journal.containerId}`, {
       lockDomain: journal.lockDomain
     });
@@ -1859,7 +1882,7 @@ async function rmPurge(
     for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
     if (!report.remaining.some((item) => item.taskId !== null)) {
       for (const journal of listSandboxRemovalJournals({ project: config.project })) {
-        clearSandboxRemovalJournalRecord(journal);
+        if (journal.phase === 'completed') clearSandboxRemovalJournalRecord(journal);
       }
     }
   };
