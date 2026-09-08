@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   DEMO_ASSET_NAMES,
+  journalPath,
   promoteDemoAssets,
   recoverDemoPromotion
 } from '../../../lib/internal/demo-promotion.ts';
@@ -32,34 +33,153 @@ function targetFor(assets: string, name: keyof DemoAssetPaths): string {
   return path.join(assets, name === 'gif' ? 'demo-init.gif' : `demo-init.transcript${name === 'sha256' ? '.sha256' : ''}`);
 }
 
-function withRenameFault(target: string, alsoBreakRestore = false): PromotionFs {
-  let injected = false;
+function assertTargets(root: string, expected: 'old' | 'new', absent: keyof DemoAssetPaths | null = null) {
+  const assets = path.join(root, 'assets');
+  for (const name of DEMO_ASSET_NAMES) {
+    const target = targetFor(assets, name);
+    if (expected === 'old' && absent === name) {
+      assert.equal(fs.existsSync(target), false, target);
+      continue;
+    }
+    assert.equal(fs.readFileSync(target, 'utf8'), expected === 'old'
+      ? `old ${name}\n`
+      : name === 'gif' ? 'GIF89a-new' : name === 'sha256' ? 'new transcript digest\n' : 'new transcript\n');
+  }
+}
+
+function assertNoPromotionArtifacts(assets: string) {
+  assert.equal(fs.existsSync(journalPath(path.dirname(assets))), false);
+  assert.equal(fs.readdirSync(assets).some((name) => name.includes('.demo-init.promotion.json.tmp-')), false);
+  assert.equal(fs.readdirSync(assets).some((name) => name.startsWith('.demo-init.promotion-')), false);
+}
+
+function withJournalFault(root: string, writeNumber: number, alsoBreakRestore = false): PromotionFs {
+  let journalWrites = 0;
   let restoreBroken = false;
   return {
     ...fs,
     renameSync(source: fs.PathLike, destination: fs.PathLike) {
-      if (!injected && String(destination) === target && String(source).includes('.demo-init.promotion-')) {
-        injected = true;
-        throw new Error(`injected replacement failure for ${target}`);
+      if (String(destination) === journalPath(root) && String(source).includes('.promotion.json.tmp-')) {
+        journalWrites += 1;
+        if (journalWrites === writeNumber) throw new Error(`injected journal failure ${writeNumber}`);
       }
-      if (alsoBreakRestore && !restoreBroken && String(destination) === target && String(source).includes('.restore-')) {
+      if (alsoBreakRestore && !restoreBroken && String(destination).endsWith('demo-init.gif') && String(source).includes('.restore-')) {
         restoreBroken = true;
-        throw new Error(`injected rollback failure for ${target}`);
+        throw new Error('injected rollback failure');
       }
       return fs.renameSync(source, destination);
     }
   } as unknown as PromotionFs;
 }
 
-test('promotion rolls all three targets back when any replacement fails', () => {
+for (const [index, name] of DEMO_ASSET_NAMES.entries()) {
+  test(`promotion rolls back when journal write fails before replacing ${name}`, () => {
+    const { root, assets, staging } = fixture();
+    try {
+      const result = promoteDemoAssets(root, staging, `before-${name}`, withJournalFault(root, 2 + index * 2));
+      assert.equal(result.status, 'failed');
+      assert.equal(result.code, 'DEMO_PROMOTION_FAILED');
+      assertTargets(root, 'old');
+      assertNoPromotionArtifacts(assets);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test(`promotion rolls back when journal write fails after replacing ${name}`, () => {
+    const { root, assets, staging } = fixture();
+    try {
+      const result = promoteDemoAssets(root, staging, `after-${name}`, withJournalFault(root, 3 + index * 2));
+      assert.equal(result.status, 'failed');
+      assert.equal(result.code, 'DEMO_PROMOTION_FAILED');
+      assertTargets(root, 'old');
+      assertNoPromotionArtifacts(assets);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test('promotion rolls back when a promoted target fails validation', () => {
+  const { root, assets, staging } = fixture();
+  let replaced = false;
+  let injected = false;
+  const io = {
+    ...fs,
+    renameSync(source: fs.PathLike, destination: fs.PathLike) {
+      if (String(destination) === targetFor(assets, 'transcript') && String(source).includes('.demo-init.promotion-')) replaced = true;
+      return fs.renameSync(source, destination);
+    },
+    readFileSync(filePath: fs.PathLike, options?: any) {
+      if (replaced && !injected && String(filePath) === targetFor(assets, 'transcript')) {
+        injected = true;
+        return Buffer.from('corrupt target');
+      }
+      return fs.readFileSync(filePath, options);
+    }
+  } as unknown as PromotionFs;
+  try {
+    const result = promoteDemoAssets(root, staging, 'validation-failure', io);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.code, 'DEMO_PROMOTION_FAILED');
+    assertTargets(root, 'old');
+    assertNoPromotionArtifacts(assets);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('promotion rolls back when the committed journal cannot be written', () => {
   const { root, assets, staging } = fixture();
   try {
-    const result = promoteDemoAssets(root, staging, 'generation-1', withRenameFault(targetFor(assets, 'transcript')));
+    const result = promoteDemoAssets(root, staging, 'committed-journal-failure', withJournalFault(root, 8));
     assert.equal(result.status, 'failed');
-    assert.equal(fs.readFileSync(targetFor(assets, 'gif'), 'utf8'), 'old gif\n');
-    assert.equal(fs.readFileSync(targetFor(assets, 'transcript'), 'utf8'), 'old transcript\n');
-    assert.equal(fs.readFileSync(targetFor(assets, 'sha256'), 'utf8'), 'old sha256\n');
-    assert.equal(fs.existsSync(path.join(assets, '.demo-init.promotion.json')), false);
+    assert.equal(result.code, 'DEMO_PROMOTION_FAILED');
+    assertTargets(root, 'old');
+    assertNoPromotionArtifacts(assets);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cleanup failure preserves a committed generation for recovery', () => {
+  const { root, assets, staging } = fixture();
+  let injected = false;
+  const io = {
+    ...fs,
+    unlinkSync(filePath: fs.PathLike) {
+      if (!injected && String(filePath).includes('/old-')) {
+        injected = true;
+        throw new Error('injected cleanup failure');
+      }
+      return fs.unlinkSync(filePath);
+    }
+  } as unknown as PromotionFs;
+  try {
+    const result = promoteDemoAssets(root, staging, 'cleanup-failure', io);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.code, 'DEMO_PROMOTION_CLEANUP_FAILED');
+    assertTargets(root, 'new');
+    assert.equal(fs.existsSync(journalPath(root)), true);
+
+    const recovered = recoverDemoPromotion(root);
+    assert.deepEqual(recovered, { status: 'committed', code: null, message: null });
+    assertTargets(root, 'new');
+    assertNoPromotionArtifacts(assets);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('promotion records and replaces a previously absent target', () => {
+  const { root, assets, staging } = fixture();
+  const absent: keyof DemoAssetPaths = 'transcript';
+  fs.unlinkSync(targetFor(assets, absent));
+  try {
+    const result = promoteDemoAssets(root, staging, 'absent-target', fs as unknown as PromotionFs);
+    assert.deepEqual(result, { status: 'committed', code: null, message: null });
+    assertTargets(root, 'new');
+    assertNoPromotionArtifacts(assets);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -69,7 +189,7 @@ test('an interrupted rollback remains recoverable from the promotion journal', (
   const { root, assets, staging } = fixture();
   const target = targetFor(assets, 'gif');
   try {
-    const result = promoteDemoAssets(root, staging, 'generation-2', withRenameFault(target, true));
+    const result = promoteDemoAssets(root, staging, 'generation-2', withJournalFault(root, 3, true));
     assert.equal(result.status, 'failed');
     assert.equal(result.code, 'DEMO_PROMOTION_RECOVERY_REQUIRED');
     assert.equal(fs.existsSync(path.join(assets, '.demo-init.promotion.json')), true);

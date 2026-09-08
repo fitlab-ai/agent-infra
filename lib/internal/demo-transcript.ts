@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { loadNodePty } from '../sandbox/clipboard/node-pty.ts';
 
-const DEMO_COLUMNS = 96;
+const DEMO_COLUMNS = 128;
 const DEMO_ROWS = 40;
 const DEMO_TIMEOUT_MS = 30_000;
 const CHECKPOINT = '\u001b]9;agent-infra-demo-checkpoint\u0007';
@@ -322,7 +322,16 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
       LANG: 'C.UTF-8',
       LC_ALL: 'C.UTF-8',
       GIT_CONFIG_GLOBAL: globalGitConfig,
-      TERM_PROGRAM: ''
+      TERM_PROGRAM: '',
+      PS1: 'demo$ ',
+      PROMPT: 'demo$ ',
+      RPS1: '',
+      RPROMPT: '',
+      PS2: 'demo> ',
+      PROMPT2: 'demo> ',
+      PS3: 'demo? ',
+      PROMPT3: 'demo? ',
+      PS4: '+ '
     };
     processHandle = ptyModule.spawn('zsh', ['-f', '-i'], {
       name: 'xterm-256color', cols: DEMO_COLUMNS, rows: DEMO_ROWS, cwd, env: environment

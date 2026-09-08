@@ -76,12 +76,22 @@ async function runOptionalDemo(
   const vhs = run(cwd, 'vhs', ['--version']);
   if (vhs.status !== 0) {
     discardPromotion();
-    return { status: 'skipped', reasonCode: 'VHS_MISSING', message: null, outputPath: null };
+    return {
+      status: 'failed',
+      reasonCode: 'VHS_MISSING',
+      message: String(vhs.stderr || vhs.stdout) || 'VHS is required to record the changed demo transcript',
+      outputPath: null
+    };
   }
   const ffmpeg = run(cwd, 'ffmpeg', ['-version']);
   if (ffmpeg.status !== 0) {
     discardPromotion();
-    return { status: 'skipped', reasonCode: 'FFMPEG_MISSING', message: null, outputPath: null };
+    return {
+      status: 'failed',
+      reasonCode: 'FFMPEG_MISSING',
+      message: String(ffmpeg.stderr || ffmpeg.stdout) || 'ffmpeg is required to record the changed demo transcript',
+      outputPath: null
+    };
   }
   const stagedOutputPath = path.relative(cwd, promotion.staging.gif).replaceAll(path.sep, '/');
   const demo = run(cwd, 'npm', ['run', 'demo:regen'], { env: { DEMO_OUTPUT_PATH: stagedOutputPath } });

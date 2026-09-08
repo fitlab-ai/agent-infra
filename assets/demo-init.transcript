@@ -1,10 +1,69 @@
-Project name
-Organization
-Language
-Sandbox engine
-Platform
-Agent Client project integrations
-Template sources
-Skill sources
-initialized
-.agents
+demo$ cd /tmp/my-awesome-project
+demo$ git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git
+demo$ ai init
+
+  ai init
+  ================================
+  Optional template and skill sources can be added now or later in .agents/.airc.json.
+
+  ? Project name [my-awesome-project]:
+  ? Organization / owner (optional) [acme-corp]:
+  ? Language (en / zh) [zh]: en
+  Sandbox engine (linux):
+      1) native (default)
+      2) docker-desktop
+  ? Select [1]:
+  Platform:
+      1) github (default)
+      2) none
+      3) other
+  ? Select [1]:
+  Agent Client project integrations to enable:
+      1) claude-code      (Claude Code)
+      2) codex            (Codex)
+      3) antigravity-cli  (Antigravity CLI)
+      4) opencode         (OpenCode)
+      5) traecli          (TraeCode CLI)
+  ? Enter comma-separated numbers or ids to keep, or "none" to select nothing [default: all]: 1,2,3,4
+  ? Template sources (optional, comma-separated local paths, e.g. ~/my-templates; Enter to skip):
+  ? Skill sources (optional, comma-separated local paths, e.g. ~/my-skills; Enter to skip):
+
+  > Installing update-agent-infra seed command for: my-awesome-project (acme-corp)
+
+  ✓ Installed .agents/skills/update-agent-infra/
+  ✓ Installed .agents/scripts/lib/agent-infra-package.js
+  ✓ Installed .claude/commands/update-agent-infra.md
+  ✓ Installed .opencode/commands/update-agent-infra.md
+  ✓ Generated .agents/.airc.json
+
+  ✓ Project initialized successfully!
+
+  If this init used npx, install agent-infra persistently before ai update or validation:
+    npm install -g @fitlab-ai/agent-infra
+
+  Next step: open this project in any AI TUI and run:
+
+    Claude Code: /update-agent-infra
+    Codex: $update-agent-infra
+    Antigravity CLI: /update-agent-infra
+    OpenCode: /update-agent-infra
+
+  This will render all templates and set up the full
+  AI collaboration infrastructure.
+
+demo$ printf '\033]9;agent-infra-demo-checkpoint\007'
+demo$ tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst && printf '\033]9;agent-infra-demo-tree-checkpoint\007'
+.agents/
+├── scripts
+│   └── lib
+└── skills
+    └── update-agent-infra
+.claude/
+└── commands
+    └── update-agent-infra.md
+.opencode/
+└── commands
+    └── update-agent-infra.md
+
+9 directories, 2 files
+demo$ exit

@@ -68,7 +68,11 @@ function writeJournal(cwd: string, journal: PromotionJournal, io: PromotionFs): 
   const temporary = `${target}.tmp-${process.pid}`;
   io.writeFileSync(temporary, `${JSON.stringify(journal, null, 2)}\n`);
   syncFile(temporary, io);
-  io.renameSync(temporary, target);
+  try { io.renameSync(temporary, target); }
+  catch (error) {
+    try { io.unlinkSync(temporary); } catch { /* preserve primary error */ }
+    throw error;
+  }
 }
 
 function existingRegularFile(filePath: string, io: PromotionFs): boolean {
@@ -206,12 +210,28 @@ function promoteDemoAssets(cwd: string, staging: DemoAssetPaths, generation: str
     verifyTargets(journal.entries, io, 'new');
     journal.phase = 'committed';
     writeJournal(cwd, journal, io);
-    cleanupJournal(journal, cwd, io);
+    try {
+      cleanupJournal(journal, cwd, io);
+    } catch (error) {
+      return {
+        status: 'failed',
+        code: 'DEMO_PROMOTION_CLEANUP_FAILED',
+        message: error instanceof Error ? error.message : String(error)
+      };
+    }
     return { status: 'committed', code: null, message: null };
   } catch (error) {
     try {
       if (io.existsSync(journalPath(cwd))) {
         const persisted = JSON.parse(io.readFileSync(journalPath(cwd), 'utf8')) as PromotionJournal;
+        if (persisted.phase === 'committed') {
+          verifyTargets(persisted.entries, io, 'new');
+          return {
+            status: 'failed',
+            code: 'DEMO_PROMOTION_CLEANUP_FAILED',
+            message: error instanceof Error ? error.message : String(error)
+          };
+        }
         restoreOld(persisted, io);
         cleanupJournal(persisted, cwd, io);
       } else {

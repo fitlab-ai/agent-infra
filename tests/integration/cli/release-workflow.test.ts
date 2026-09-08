@@ -31,6 +31,7 @@ function fixture(version = '0.8.6'): Fixture {
   const fakeZsh = path.join(tools, 'zsh');
   fs.writeFileSync(fakeZsh, `#!/bin/sh
 stty -echo 2>/dev/null || true
+printf '%s' "\${PROMPT:-\${HOSTNAME}%# }"
 printf '%s\\n' 'Project name' 'Organization' 'Language' 'Sandbox engine' 'Platform' 'Agent Client project integrations' 'Template sources' 'Skill sources' 'initialized'
 printf '\\033]9;agent-infra-demo-checkpoint\\007'
 printf '\\033]9;agent-infra-demo-tree-checkpoint\\007'
@@ -44,6 +45,32 @@ done
   execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
   return { root, origin, preload, tools, environment: { PATH: `${tools}${path.delimiter}${process.env.PATH ?? ''}` } };
 }
+
+test('demo collector fixes the shell prompt across hostnames', onPlatforms('linux', 'darwin'), async () => {
+  const input = fixture();
+  const previousPath = process.env.PATH;
+  const previousHostname = process.env.HOSTNAME;
+  try {
+    fs.mkdirSync(path.join(input.root, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(input.root, 'dist', 'bin', 'cli.js'), '');
+    process.env.PATH = input.environment.PATH;
+    process.env.HOSTNAME = 'release-host-one';
+    const first = await collectDemoTranscript(input.root);
+    process.env.HOSTNAME = 'release-host-two';
+    const second = await collectDemoTranscript(input.root);
+    assert.equal(first.status, 'ok', first.status === 'failed' ? first.message : '');
+    assert.equal(second.status, 'ok', second.status === 'failed' ? second.message : '');
+    if (first.status !== 'ok' || second.status !== 'ok') return;
+    assert.equal(second.sha256, first.sha256);
+    assert.match(first.transcript, /demo\$ /);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousHostname === undefined) delete process.env.HOSTNAME;
+    else process.env.HOSTNAME = previousHostname;
+    cleanup(input);
+  }
+});
 
 function runCli(input: Fixture, ...args: string[]) {
   const env: NodeJS.ProcessEnv = { ...gitSafeEnv(), ...input.environment, NODE_OPTIONS: `--import=${pathToFileURL(input.preload).href}` };

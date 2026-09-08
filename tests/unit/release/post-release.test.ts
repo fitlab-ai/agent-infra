@@ -232,6 +232,39 @@ test('changed visible transcript records into one validated asset generation', a
   }
 });
 
+function missingRecordingTool(calls: string[], missing: 'vhs' | 'ffmpeg'): CommandRunner {
+  return (cwd, executable, args, options) => {
+    calls.push([executable, ...args].join(' '));
+    if (executable === missing) return result(1, '', `${missing} is unavailable`);
+    if (executable === 'git' && args[0] === 'check-attr') return result(0, 'assets/demo-init.gif: filter: lfs\n');
+    if (executable === 'npm') {
+      const output = options?.env?.DEMO_OUTPUT_PATH;
+      assert.ok(output);
+      fs.writeFileSync(path.join(cwd, output), Buffer.from('GIF89a'));
+    }
+    return result(0);
+  };
+}
+
+for (const missing of ['vhs', 'ffmpeg'] as const) {
+  test(`changed visible transcript fails closed when ${missing} is unavailable`, async () => {
+    const root = fixture();
+    const calls: string[] = [];
+    try {
+      const demo = await runOptionalDemo(root, missingRecordingTool(calls, missing), collectedTranscript());
+      assert.equal(demo.status, 'failed');
+      assert.equal(demo.reasonCode, missing === 'vhs' ? 'VHS_MISSING' : 'FFMPEG_MISSING');
+      assert.match(demo.message ?? '', new RegExp(missing));
+      assert.equal(calls.includes('npm run demo:regen'), false);
+      assert.equal(calls.some((call) => call.includes('git lfs pointer')), false);
+      assert.equal(fs.existsSync(path.join(root, 'assets', 'demo-init.transcript.sha256')), false);
+      assert.equal(fs.readdirSync(path.join(root, 'assets')).some((name) => name.startsWith('.demo-init.promotion-')), false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test('failed recording does not advance the transcript baseline', async () => {
   const root = fixture();
   const run: CommandRunner = (_cwd, executable) =>
