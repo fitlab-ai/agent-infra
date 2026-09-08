@@ -1261,6 +1261,72 @@ test("sandbox cleanup consumes a completed removal journal through each cleanup 
   }
 });
 
+test("sandbox cleanup recovers an interrupted removal from a fresh CLI process for each entrypoint", onPlatforms("linux", "darwin", "win32"), async () => {
+  for (const entrypoint of ["single", "unbound", "purge"] as const) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-rm-cross-process-${entrypoint}-`));
+    const branch = `feature/cross-process-${entrypoint}`;
+    const taskId = `TASK-20260824-${entrypoint === "single" ? "000009" : entrypoint === "unbound" ? "000010" : "000011"}`;
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    try {
+      process.env.HOME = tmpDir;
+      process.env.USERPROFILE = tmpDir;
+      const fixture = writeSandboxEngineFixture(tmpDir, {
+        project: "demo",
+        dockerStdoutForPs: entrypoint === "unbound"
+          ? `demo-dev-${branch.replaceAll("/", "..")}\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox=true,demo.sandbox.workspace-mode=task-bound,demo.sandbox.task-id=${taskId}`
+          : ""
+      });
+      const config = rmOneConfig(fixture, tmpDir);
+      const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+      const statusPath = path.join(evidence.controlRoot, "public", "status.json");
+      const status = JSON.parse(fs.readFileSync(statusPath, "utf8")) as Record<string, unknown>;
+      status.taskView = {
+        state: "unknown",
+        taskId,
+        observedSource: "unknown",
+        receipt: null,
+        reasonCode: "SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE"
+      };
+      fs.writeFileSync(statusPath, `${JSON.stringify(status)}\n`, "utf8");
+      const preload = writeAuxiliaryCleanupCrashPreload(tmpDir);
+      const args = entrypoint === "single"
+        ? ["rm", taskId]
+        : entrypoint === "unbound"
+          ? ["rm", "--unbound", "--yes"]
+          : ["rm", "--purge"];
+      const input = entrypoint === "purge" ? "n\n" : undefined;
+      const first = spawnSandboxCli(fixture, tmpDir, args, {
+        AGENT_INFRA_TASK_ID: "",
+        DOCKER_INSPECT_NOT_FOUND: entrypoint === "unbound" ? "0" : "1",
+        DOCKER_REMOVAL_UPDATES_INSPECT: entrypoint === "unbound" ? "1" : "0",
+        NODE_OPTIONS: `--require=${preload}`,
+        AGENT_INFRA_TEST_CONTROL_ROOT: evidence.controlRoot
+      }, input);
+      assert.equal(first.status, 91, `${first.stdout}\n${first.stderr}`);
+      assert.equal(fs.existsSync(evidence.intentPath), true);
+      const interruptedJournal = listSandboxRemovalJournals({ branch, project: config.project });
+      assert.equal(interruptedJournal.length, 1);
+      assert.equal(interruptedJournal[0]?.phase, "completed");
+      fs.writeFileSync(path.join(tmpDir, "docker-state.txt"), "", "utf8");
+
+      const second = spawnSandboxCli(fixture, tmpDir, args, {
+        AGENT_INFRA_TASK_ID: "",
+        DOCKER_INSPECT_NOT_FOUND: "0"
+      }, input);
+      assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
+      assert.equal(fs.existsSync(evidence.intentPath), false);
+      assert.equal(listSandboxRemovalJournals({ branch, project: config.project }).length, 0);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("sandbox purge preserves a rich removal journal for its real recovery path", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-rich-journal-"));
