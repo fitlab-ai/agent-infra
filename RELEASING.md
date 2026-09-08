@@ -138,14 +138,17 @@ publish 是独立人工授权点。core 逐 ref 普通 push 并用远端事实�
 - Codex CLI：`$post-release`
 
 The canonical demo is tracked by Git LFS. Release environments must install
-Git LFS and fetch LFS objects before running post-release. The workflow records
-the demo only when its explicit canonical inputs change, validates GIF magic
-and the 4 MiB limit, and advances the input digest in the same commit. Diagnose
-missing objects with `git lfs ls-files`, `git lfs pull`, and `git lfs fsck`.
+Git LFS and fetch LFS objects before running post-release. The workflow first
+captures the complete visible transcript of the fixed PTY scenario; it records
+the demo only when that transcript changes, validates GIF magic, the 4 MiB
+limit, and the Git LFS pointer, then promotes the GIF, transcript, and SHA
+baseline through a recoverable same-directory journal. Diagnose missing objects
+with `git lfs ls-files`, `git lfs pull`, and `git lfs fsck`.
 
 规范演示通过 Git LFS 跟踪。发布环境必须先安装 Git LFS 并拉取 LFS 对象。
-post-release 仅在显式 canonical inputs 变化时重录，并校验 GIF 格式和 4 MiB
-上限；输入摘要与 GIF 在同一提交中推进。对象缺失时使用 `git lfs ls-files`、
+post-release 先采集固定 PTY 场景的完整可见 transcript，仅在 transcript 变化时
+重录，并校验 GIF 格式、4 MiB 上限和 Git LFS pointer；GIF、transcript 与 SHA
+基线经同目录可恢复 journal 一起提升。对象缺失时使用 `git lfs ls-files`、
 `git lfs pull` 和 `git lfs fsck` 排查。
 
 该技能负责：
@@ -157,7 +160,9 @@ post-release 仅在显式 canonical inputs 变化时重录，并校验 GIF 格�
 - 创建发布后处理提交
 - 用 Git workflow intent 推送发布后提交并复核远端 SHA
 
-发布流程不维护本地 journal。prepare、publish、post 每次都从可观察事实恢复，因此可在进程中断或部分 push 后安全重跑。
+渠道发布状态仍从可观察事实恢复；demo 资产提升使用短生命周期本地 journal。
+如果进程在提升期间中断，下一次 post-release 会先按 journal 恢复旧资产或确认
+已完整的新代次，再检查干净工作树，因此不会在混合资产上继续发布。
 
 ## 回滚流程
 

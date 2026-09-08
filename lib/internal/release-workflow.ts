@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import semver from 'semver';
 
@@ -9,75 +8,34 @@ import { inspectPlatformRelease, reconcileReleaseMilestones } from '../platform/
 import { inspectHomebrewChannel, inspectNpmChannel } from '../release/channels.ts';
 import { releaseSnapshot } from '../release/workflow.ts';
 import type { PostReleaseFacts, ReleaseFacts } from '../release/workflow.ts';
+import { collectDemoTranscript } from './demo-transcript.ts';
+import { createDemoPromotion, promoteDemoAssets, recoverDemoPromotion } from './demo-promotion.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-function command(cwd: string, executable: string, args: string[]) {
-  return spawnSync(executable, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+type CommandOptions = { env?: NodeJS.ProcessEnv };
+
+function command(cwd: string, executable: string, args: string[], options: CommandOptions = {}) {
+  return spawnSync(executable, args, {
+    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...options.env }
+  });
 }
 
 type CommandResult = ReturnType<typeof command>;
-type CommandRunner = (cwd: string, executable: string, args: string[]) => CommandResult;
+type CommandRunner = (cwd: string, executable: string, args: string[], options?: CommandOptions) => CommandResult;
 type DemoResult = {
   status: 'recorded' | 'skipped' | 'failed';
-  reasonCode: 'DEMO_INPUTS_UNCHANGED' | 'GIT_LFS_MISSING' | 'VHS_MISSING' | 'FFMPEG_MISSING'
+  reasonCode: 'DEMO_TRANSCRIPT_UNCHANGED' | 'DEMO_TRANSCRIPT_UNAVAILABLE' | 'DEMO_TRANSCRIPT_FAILED'
+    | 'DEMO_PROMOTION_FAILED' | 'DEMO_PROMOTION_RECOVERY_REQUIRED' | 'DEMO_PROMOTION_CLEANUP_FAILED'
+    | 'GIT_LFS_MISSING' | 'VHS_MISSING' | 'FFMPEG_MISSING'
     | 'DEMO_COMMAND_FAILED' | 'DEMO_OUTPUT_MISSING' | 'DEMO_OUTPUT_INVALID'
-    | 'DEMO_OUTPUT_TOO_LARGE' | 'DEMO_DIGEST_FAILED' | null;
+    | 'DEMO_OUTPUT_TOO_LARGE' | null;
   message: string | null;
   outputPath: string | null;
 };
 
-// The tape is the canonical init interaction contract. Do not hash all of
-// lib/init.ts: non-visual config serialization changes must not re-record it.
-const DEMO_INPUT_PATHS = [
-  'assets/demo-init.tape',
-  'scripts/demo-regen.sh',
-  'scripts/normalize-gif-duration.py',
-  'bin/cli.ts',
-  'lib/log.ts',
-  'lib/prompt.ts',
-  'lib/paths.ts',
-  'lib/render.ts',
-  'lib/sandbox/engines/'
-] as const;
-const DEMO_DIGEST_PATH = 'assets/demo-init.inputs.sha256';
+const DEMO_DIGEST_PATH = 'assets/demo-init.transcript.sha256';
 const DEMO_OUTPUT_PATH = 'assets/demo-init.gif';
 const DEMO_MAX_BYTES = 4 * 1024 * 1024;
-
-function demoInputFiles(cwd: string): string[] {
-  const files = new Set<string>();
-  for (const input of DEMO_INPUT_PATHS) {
-    if (input.endsWith('/')) {
-      const listed = command(cwd, 'git', ['ls-files', '--', input]);
-      if (listed.status !== 0) throw new Error(String(listed.stderr || `Unable to list ${input}`));
-      const directoryFiles = String(listed.stdout).split('\n').filter(Boolean);
-      if (!directoryFiles.length) throw new Error(`Canonical demo input directory is empty: ${input}`);
-      for (const file of directoryFiles) files.add(file.replaceAll('\\', '/'));
-    } else {
-      files.add(input);
-    }
-  }
-  const sorted = [...files].sort((left, right) => Buffer.from(left).compare(Buffer.from(right)));
-  if (!sorted.length) throw new Error('Canonical demo input set is empty');
-  for (const file of sorted) {
-    const absolute = path.join(cwd, file);
-    if (!fs.statSync(absolute).isFile()) throw new Error(`Canonical demo input is not a file: ${file}`);
-  }
-  return sorted;
-}
-
-function computeDemoInputDigest(cwd: string): string {
-  const hash = crypto.createHash('sha256');
-  for (const file of demoInputFiles(cwd)) {
-    const bytes = fs.readFileSync(path.join(cwd, file));
-    hash.update(file);
-    hash.update('\0');
-    hash.update(String(bytes.byteLength));
-    hash.update('\0');
-    hash.update(bytes);
-    hash.update('\0');
-  }
-  return hash.digest('hex');
-}
 
 function validGif(filePath: string): boolean {
   if (!fs.existsSync(filePath)) return false;
@@ -85,39 +43,50 @@ function validGif(filePath: string): boolean {
   return header === 'GIF87a' || header === 'GIF89a';
 }
 
-function writeDigestAtomically(cwd: string, digest: string): void {
-  const target = path.join(cwd, DEMO_DIGEST_PATH);
-  const temporary = `${target}.tmp-${process.pid}`;
-  fs.writeFileSync(temporary, `${digest}\n`);
-  fs.renameSync(temporary, target);
-}
-
-function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult {
-  let digest: string;
-  try {
-    digest = computeDemoInputDigest(cwd);
-  } catch (error) {
-    return { status: 'failed', reasonCode: 'DEMO_DIGEST_FAILED', message: String(error), outputPath: null };
+async function runOptionalDemo(
+  cwd: string,
+  run: CommandRunner = command,
+  collect = collectDemoTranscript
+): Promise<DemoResult> {
+  const recovery = recoverDemoPromotion(cwd);
+  if (recovery?.status === 'failed') {
+    return { status: 'failed', reasonCode: recovery.code === 'DEMO_PROMOTION_CLEANUP_FAILED' ? recovery.code : 'DEMO_PROMOTION_RECOVERY_REQUIRED', message: recovery.message, outputPath: null };
+  }
+  const transcript = await collect(cwd);
+  if (transcript.status === 'failed') {
+    return { status: 'failed', reasonCode: transcript.reasonCode, message: transcript.message, outputPath: null };
   }
   const digestPath = path.join(cwd, DEMO_DIGEST_PATH);
   const priorDigest = fs.existsSync(digestPath) ? fs.readFileSync(digestPath, 'utf8').trim() : '';
-  if (/^[0-9a-f]{64}$/.test(priorDigest) && priorDigest === digest) {
-    return { status: 'skipped', reasonCode: 'DEMO_INPUTS_UNCHANGED', message: null, outputPath: null };
+  if (/^[0-9a-f]{64}$/.test(priorDigest) && priorDigest === transcript.sha256) {
+    return { status: 'skipped', reasonCode: 'DEMO_TRANSCRIPT_UNCHANGED', message: null, outputPath: null };
   }
+  const promotion = createDemoPromotion(cwd, transcript.transcript);
+  const discardPromotion = () => fs.rmSync(promotion.directory, { recursive: true, force: true });
   const lfs = run(cwd, 'git', ['lfs', 'version']);
   if (lfs.status !== 0) {
+    discardPromotion();
     return { status: 'failed', reasonCode: 'GIT_LFS_MISSING', message: String(lfs.stderr || lfs.stdout), outputPath: null };
   }
   const lfsAttribute = run(cwd, 'git', ['check-attr', 'filter', '--', DEMO_OUTPUT_PATH]);
   if (lfsAttribute.status !== 0 || !String(lfsAttribute.stdout).trim().endsWith(': lfs')) {
+    discardPromotion();
     return { status: 'failed', reasonCode: 'GIT_LFS_MISSING', message: `${DEMO_OUTPUT_PATH} is not tracked by Git LFS`, outputPath: null };
   }
   const vhs = run(cwd, 'vhs', ['--version']);
-  if (vhs.status !== 0) return { status: 'skipped', reasonCode: 'VHS_MISSING', message: null, outputPath: null };
+  if (vhs.status !== 0) {
+    discardPromotion();
+    return { status: 'skipped', reasonCode: 'VHS_MISSING', message: null, outputPath: null };
+  }
   const ffmpeg = run(cwd, 'ffmpeg', ['-version']);
-  if (ffmpeg.status !== 0) return { status: 'skipped', reasonCode: 'FFMPEG_MISSING', message: null, outputPath: null };
-  const demo = run(cwd, 'npm', ['run', 'demo:regen']);
+  if (ffmpeg.status !== 0) {
+    discardPromotion();
+    return { status: 'skipped', reasonCode: 'FFMPEG_MISSING', message: null, outputPath: null };
+  }
+  const stagedOutputPath = path.relative(cwd, promotion.staging.gif).replaceAll(path.sep, '/');
+  const demo = run(cwd, 'npm', ['run', 'demo:regen'], { env: { DEMO_OUTPUT_PATH: stagedOutputPath } });
   if (demo.status !== 0) {
+    discardPromotion();
     return {
       status: 'failed',
       reasonCode: 'DEMO_COMMAND_FAILED',
@@ -126,7 +95,8 @@ function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult 
     };
   }
   const outputPath = DEMO_OUTPUT_PATH;
-  if (!fs.existsSync(path.join(cwd, outputPath))) {
+  if (!fs.existsSync(promotion.staging.gif)) {
+    discardPromotion();
     return {
       status: 'failed',
       reasonCode: 'DEMO_OUTPUT_MISSING',
@@ -134,18 +104,24 @@ function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult 
       outputPath: null
     };
   }
-  const absoluteOutput = path.join(cwd, outputPath);
+  const absoluteOutput = promotion.staging.gif;
   if (!validGif(absoluteOutput)) {
+    discardPromotion();
     return { status: 'failed', reasonCode: 'DEMO_OUTPUT_INVALID', message: `${outputPath} is not a GIF`, outputPath: null };
   }
   if (fs.statSync(absoluteOutput).size > DEMO_MAX_BYTES) {
+    discardPromotion();
     return { status: 'failed', reasonCode: 'DEMO_OUTPUT_TOO_LARGE', message: `${outputPath} exceeds 4 MiB`, outputPath: null };
   }
-  const pointer = run(cwd, 'git', ['lfs', 'pointer', `--file=${outputPath}`]);
+  const pointer = run(cwd, 'git', ['lfs', 'pointer', `--file=${stagedOutputPath}`]);
   if (pointer.status !== 0 || !String(pointer.stdout).includes(`size ${fs.statSync(absoluteOutput).size}`)) {
+    discardPromotion();
     return { status: 'failed', reasonCode: 'DEMO_OUTPUT_INVALID', message: 'Git LFS could not produce a matching pointer', outputPath: null };
   }
-  writeDigestAtomically(cwd, digest);
+  const promoted = promoteDemoAssets(cwd, promotion.staging, `${process.pid}-${Date.now()}`);
+  if (promoted.status === 'failed') {
+    return { status: 'failed', reasonCode: promoted.code ?? 'DEMO_PROMOTION_FAILED', message: promoted.message, outputPath: null };
+  }
   return { status: 'recorded', reasonCode: null, message: null, outputPath };
 }
 
@@ -207,7 +183,7 @@ function inspectPostReleaseFacts(
     remoteHead,
     newVersion,
     changedPaths,
-    demoInputSha256: digest && /^[0-9a-f]{64}$/.test(digest) ? digest : null,
+    demoTranscriptSha256: digest && /^[0-9a-f]{64}$/.test(digest) ? digest : null,
     worktree: snapshot?.worktree ?? [],
     staged: snapshot?.staged ?? []
   };
@@ -420,6 +396,11 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   if (!['published', 'post-pending'].includes(before.phase) || !channelsComplete || before.facts.smoke !== 'success') {
     process.stdout.write(`${JSON.stringify({ status: before.facts.smoke === 'failed' ? 'failed' : 'blocked', changed: false, snapshot: before, error: { code: 'RELEASE_CHANNELS_PENDING', message: 'Release channels or smoke workflow are not complete' } })}\n`); process.exitCode = before.facts.smoke === 'failed' ? 1 : 2; return;
   }
+  const recovery = recoverDemoPromotion(cwd);
+  if (recovery?.status === 'failed') {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, error: { code: recovery.code, message: recovery.message } })}\n`);
+    process.exitCode = 1; return;
+  }
   const worktreeError = inspectPostWorktree(cwd);
   if (worktreeError) {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: worktreeError })}\n`);
@@ -430,7 +411,7 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, error: { code: 'RELEASE_POST_COMMAND_FAILED', message: String(built.stderr || built.stdout) } })}\n`);
     process.exitCode = 1; return;
   }
-  const demo = runOptionalDemo(cwd);
+  const demo = await runOptionalDemo(cwd);
   if (demo.status === 'failed') {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, demo, error: { code: 'RELEASE_POST_DEMO_FAILED', message: demo.message } })}\n`);
     process.exitCode = 1; return;
@@ -449,5 +430,5 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   process.stdout.write(`${JSON.stringify({ status: 'applied', changed: true, demo, snapshot, error: null })}\n`);
 }
 
-export { changedPaths, computeDemoInputDigest, inspectFacts, inspectLocalReleaseFacts, inspectPostReleaseFacts, inspectPostWorktree, releaseSmokeStatus, releaseWorkflow, runOptionalDemo };
+export { changedPaths, inspectFacts, inspectLocalReleaseFacts, inspectPostReleaseFacts, inspectPostWorktree, releaseSmokeStatus, releaseWorkflow, runOptionalDemo };
 export type { CommandRunner, DemoResult };

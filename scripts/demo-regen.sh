@@ -11,8 +11,8 @@
 set -e
 
 tape="assets/demo-init.tape"
-gif="assets/demo-init.gif"
-webm="assets/demo-init.webm"
+gif="${DEMO_OUTPUT_PATH:-assets/demo-init.gif}"
+webm="${gif%.*}.webm"
 target_duration=25  # seconds — fixed across all machines
 max_bytes=4194304
 repo_root=$(pwd)
@@ -22,7 +22,7 @@ tmp=$(mktemp).tape
 shim_dir=$(mktemp -d)
 palette_base=$(mktemp "${TMPDIR:-/tmp}/demo-palette.XXXXXX")
 palette="${palette_base}.png"
-gif_tmp_base=$(mktemp "assets/demo-init.XXXXXX")
+gif_tmp_base=$(mktemp "${gif%.*}.XXXXXX")
 gif_tmp="${gif_tmp_base}.gif"
 trap 'rm -rf "$tmp" "$webm" "$palette_base" "$palette" "$gif_tmp_base" "$gif_tmp" "$shim_dir"' EXIT
 
@@ -45,7 +45,7 @@ done
 export PATH="$shim_dir:$PATH"
 
 # ── Use only canonical settings and switch output to WebM ──
-sed 's|Output assets/demo-init\.gif|Output assets/demo-init.webm|' "$tape" > "$tmp"
+sed "s|Output assets/demo-init\\.gif|Output $webm|" "$tape" > "$tmp"
 
 # ── Record via VHS (lossless WebM) ──
 vhs "$tmp"

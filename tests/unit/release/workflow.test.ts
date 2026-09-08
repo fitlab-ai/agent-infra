@@ -12,7 +12,7 @@ const postFacts = (overrides: Partial<PostReleaseFacts> = {}): PostReleaseFacts 
   remoteHead: null,
   newVersion: null,
   changedPaths: [],
-  demoInputSha256: null,
+  demoTranscriptSha256: null,
   worktree: [],
   staged: [],
   ...overrides
@@ -51,7 +51,7 @@ test('post confirmation is deterministic and only available for a clean post HEA
     remoteHead: 'b'.repeat(40),
     newVersion: '1.2.4-alpha.0',
     changedPaths: ['z.txt', 'a.txt'],
-    demoInputSha256: 'c'.repeat(64)
+    demoTranscriptSha256: 'c'.repeat(64)
   });
 
   const first = createPostConfirmation('1.2.3', post);
@@ -72,7 +72,7 @@ test('post confirmation digest changes when any authorized fact changes', () => 
     remoteHead: 'b'.repeat(40),
     newVersion: '1.2.4-alpha.0',
     changedPaths: ['package.json'],
-    demoInputSha256: 'c'.repeat(64)
+    demoTranscriptSha256: 'c'.repeat(64)
   });
   const baseline = createPostConfirmation('1.2.3', post)?.sha256;
   assert.ok(baseline);
@@ -84,7 +84,7 @@ test('post confirmation digest changes when any authorized fact changes', () => 
     { ...post, remoteHead: 'e'.repeat(40) },
     { ...post, newVersion: '1.2.5-alpha.0' },
     { ...post, changedPaths: ['package-lock.json'] },
-    { ...post, demoInputSha256: 'f'.repeat(64) }
+    { ...post, demoTranscriptSha256: 'f'.repeat(64) }
   ];
   for (const variant of variants) assert.notEqual(createPostConfirmation('1.2.3', variant)?.sha256, baseline);
   assert.notEqual(createPostConfirmation('1.2.4', post)?.sha256, baseline);

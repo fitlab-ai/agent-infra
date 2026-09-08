@@ -38,7 +38,6 @@ import {
   write,
   writeJson
 } from "./validate-artifact-helpers.ts";
-
 const taskId = "TASK-20260328-000001";
 const summaryComment = "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good.";
 const summaryCommentWithSha = (sha: string) => (
@@ -137,6 +136,11 @@ test("requirements sync converges before the complete-task platform gate", async
       GH_FAKE_COMMENTS_PATH: commentsPath,
       GH_FAKE_ISSUE_NUMBER: "65"
     });
+    for (const key of [
+      "AGENT_INFRA_TASK_ID", "AGENT_INFRA_CONTROL_TOKEN", "AGENT_INFRA_CONTROL_GENERATION",
+      "AGENT_INFRA_CONTROL_DIR", "AGENT_INFRA_CONTROL_STATUS_DIR", "AGENT_INFRA_RUNTIME_DIR",
+      "AGENT_INFRA_EXECUTOR_MANIFEST", "AGENT_INFRA_CONTROL_CONTROLLER_BINDING"
+    ]) delete env[key];
     const runInternal = (args: string[]) => spawnSync(process.execPath, [INTERNAL_CLI_PATH, ...args], {
       cwd: tempRoot,
       env,

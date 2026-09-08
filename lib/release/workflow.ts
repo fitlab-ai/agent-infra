@@ -10,7 +10,7 @@ type PostReleaseFacts = {
   remoteHead: string | null;
   newVersion: string | null;
   changedPaths: string[];
-  demoInputSha256: string | null;
+  demoTranscriptSha256: string | null;
   worktree: string[];
   staged: string[];
 };
@@ -34,7 +34,7 @@ type PostConfirmation = {
   remoteHead: string | null;
   newVersion: string | null;
   changedPaths: string[];
-  demoInputSha256: string | null;
+  demoTranscriptSha256: string | null;
   worktree: string[];
   staged: string[];
   sha256: string;
@@ -63,7 +63,7 @@ function createPostConfirmation(version: string, post: PostReleaseFacts): PostCo
     remoteHead: post.remoteHead,
     newVersion: post.newVersion,
     changedPaths: byteSort(post.changedPaths),
-    demoInputSha256: post.demoInputSha256,
+    demoTranscriptSha256: post.demoTranscriptSha256,
     worktree: byteSort(post.worktree),
     staged: byteSort(post.staged)
   };

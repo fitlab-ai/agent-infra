@@ -11,7 +11,12 @@ import { planInLabelUpdate, validateInLabelMapping } from "./in-label-sync.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
-import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument } from "./comment-safety.ts";
+import {
+  CONTROL_MARKER_PATTERN,
+  canonicalizeCommentBody,
+  renderSafeCodeFence,
+  sanitizeMarkdownDocument
+} from "./comment-safety.ts";
 
 const CHECK_TYPE = "platform-sync";
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
@@ -539,16 +544,31 @@ function checkCommentContent(context: any, remoteData: any): any {
   }
 
   const comment = findCommentByMarker(remoteData.comments, context.marker);
-  const rawLocalContent = fs.readFileSync(context.artifactPath, "utf8");
-  const sanitizedLocalContent = sanitizeCommentContent(rawLocalContent);
-  if (sanitizedLocalContent === null) {
+  let localContent: string;
+  let commentContent: string;
+  try {
+    const localCanonical = canonicalizeCommentBody(fs.readFileSync(context.artifactPath, "utf8"));
+    const commentCanonical = canonicalizeCommentBody(extractCommentBody(comment?.body || ""));
+    if (!localCanonical.ok) {
+      return failResult(CHECK_TYPE,
+        `Comment content cannot be canonicalized for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${localCanonical.error.message}`,
+        "check_failed"
+      );
+    }
+    if (!commentCanonical.ok) {
+      return failResult(CHECK_TYPE,
+        `Comment content cannot be canonicalized for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${commentCanonical.error.message}`,
+        "check_failed"
+      );
+    }
+    localContent = normalizeContent(localCanonical.value);
+    commentContent = normalizeContent(commentCanonical.value);
+  } catch (error) {
     return failResult(CHECK_TYPE,
-      `Artifact content cannot be rendered safely for comment verification: ${context.artifactFile || "(missing artifactFile)"}`,
+      `Comment content cannot be read for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${error instanceof Error ? error.message : String(error)}`,
       "check_failed"
     );
   }
-  const localContent = normalizeContent(sanitizedLocalContent);
-  const commentContent = normalizeContent(extractCommentBody(comment?.body || ""));
 
   if (localContent === commentContent) {
     return null;
