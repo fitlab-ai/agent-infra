@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  cleanupIntermediateFiles,
+  removeIntermediateCleanupCandidates,
   scanIntermediateCleanup
 } from '../../../lib/sandbox/intermediate-cleanup.ts';
 import { createSandboxControlBindingVerifier } from '../../../lib/sandbox/control/lifecycle.ts';
@@ -23,6 +23,24 @@ import {
 } from '../../../lib/task/local-artifact-finalization.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { onPlatforms } from '../../helpers.ts';
+
+function cleanupIntermediateFiles(
+  repoRoot: string,
+  options: Parameters<typeof scanIntermediateCleanup>[1] = {}
+) {
+  const first = removeIntermediateCleanupCandidates(scanIntermediateCleanup(repoRoot, options).items);
+  const known = new Set(first.items.map((item) => `${item.kind}\0${item.path}`));
+  const emptyParents = scanIntermediateCleanup(repoRoot, options).items.filter((item) =>
+    item.kind === 'EMPTY-AUX-PARENT' && item.disposition === 'planned' && !known.has(`${item.kind}\0${item.path}`)
+  );
+  const second = removeIntermediateCleanupCandidates(emptyParents);
+  const items = [...first.items, ...second.items];
+  return {
+    status: items.some((item) => item.disposition === 'failed') ? 'partial' as const : 'completed' as const,
+    items,
+    remaining: items.filter((item) => item.disposition !== 'deleted' && item.disposition !== 'skipped')
+  };
+}
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -270,14 +288,14 @@ test('intermediate cleanup verifies synced commit identity and removes empty aux
   }
 });
 
-test('intermediate cleanup fails closed while another task operation holds the lock', () => {
+test('intermediate cleanup deletion runs inside the caller-owned task lock', () => {
   const fixture = taskFixture();
   try {
     const target = writeConsumedIntent(fixture.root, fixture.taskDir);
     withTaskExecutionLock(fixture.root, TASK_ID, 'test-holder', () => {
       const result = cleanupIntermediateFiles(fixture.root);
-      assert.equal(fs.existsSync(target), true);
-      assert.equal(result.items.some((item) => item.reason === 'TASK_LOCK_BUSY'), true);
+      assert.equal(fs.existsSync(target), false);
+      assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
     });
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });

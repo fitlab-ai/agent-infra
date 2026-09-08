@@ -266,7 +266,7 @@ test("sandbox rm --purge prunes project-scoped dangling images before managed-en
   const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
 
   const rmPurgeMatch = commandSource.match(
-    /async function rmPurge\b[\s\S]*?(?=\n(?:async function|export async function|export function)\b|$)/
+    /async function rmPurgeCore\b[\s\S]*?(?=\n(?:async function|export async function|export function)\b|$)/
   );
   assert.ok(rmPurgeMatch, "expected to locate rmPurge function body in rm.js");
   const rmPurgeBody = rmPurgeMatch[0];

@@ -19,7 +19,6 @@ import {
 } from '../task/local-artifact-finalization.ts';
 import { parseArtifactName } from '../task/artifact-lifecycle.ts';
 import { enumerateAllTaskDirs, type TaskWorkspaceState } from '../task/resolve-ref.ts';
-import { withRepositoryMutationLock, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { type SandboxControlBindingVerifier } from './control/lifecycle.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
@@ -374,63 +373,14 @@ function removeCandidate(candidate: IntermediateCleanupItem): IntermediateCleanu
   }
 }
 
-function cleanupIntermediateFiles(
-  repoRootInput: string,
-  options: IntermediateCleanupOptions = {}
+function removeIntermediateCleanupCandidate(candidate: IntermediateCleanupItem): IntermediateCleanupItem {
+  return candidate.disposition === 'planned' ? removeCandidate(candidate) : candidate;
+}
+
+function removeIntermediateCleanupCandidates(
+  candidates: readonly IntermediateCleanupItem[]
 ): IntermediateCleanupReport {
-  const repoRoot = path.resolve(repoRootInput);
-  const initial = scanInternal(repoRoot, options);
-  if (options.dryRun) return buildReport(initial.map(({ item: candidate }) => candidate), true);
-  try {
-    return withRepositoryMutationLock(repoRoot, () => {
-      const current = scanInternal(repoRoot, options);
-      const items = current.map(({ item: candidate }) => candidate);
-      const byTask = new Map<string, number[]>();
-      for (const [index, candidate] of current.entries()) {
-        if (!candidate.taskId || candidate.item.disposition !== 'planned') continue;
-        const indexes = byTask.get(candidate.taskId) ?? [];
-        indexes.push(index);
-        byTask.set(candidate.taskId, indexes);
-      }
-      for (const taskId of [...byTask.keys()].sort()) {
-        try {
-          withTaskExecutionLock(repoRoot, taskId, 'sandbox-intermediate-cleanup', () => {
-            const refreshed = scanInternal(repoRoot, { ...options, taskIds: [taskId] });
-            for (const index of byTask.get(taskId) ?? []) {
-              const candidate = items[index]!;
-              if (candidate.disposition !== 'planned') continue;
-              const current = refreshed.find(({ item: refreshedItem }) =>
-                refreshedItem.kind === candidate.kind && refreshedItem.path === candidate.path
-              )?.item;
-              items[index] = current
-                ? current.disposition === 'planned' ? removeCandidate(current) : current
-                : removeCandidate(candidate);
-            }
-          });
-        } catch {
-          for (const index of byTask.get(taskId) ?? []) {
-            const candidate = items[index]!;
-            if (candidate.disposition === 'planned') items[index] = { ...candidate, disposition: 'protected', reason: 'TASK_LOCK_BUSY' };
-          }
-        }
-      }
-      for (const [index, candidate] of current.entries()) {
-        if (candidate.taskId || candidate.item.disposition !== 'planned') continue;
-        items[index] = removeCandidate(items[index]!);
-      }
-      const knownPaths = new Set(items.map((candidate) => candidate.path));
-      for (const { item: candidate } of scanInternal(repoRoot, options)) {
-        if (candidate.kind !== 'EMPTY-AUX-PARENT' || candidate.disposition !== 'planned'
-          || knownPaths.has(candidate.path)) continue;
-        items.push(removeCandidate(candidate));
-      }
-      return buildReport(items, false);
-    });
-  } catch {
-    return buildReport(initial.map(({ item: candidate }) => (
-      candidate.disposition === 'planned' ? { ...candidate, disposition: 'protected', reason: 'REPOSITORY_LOCK_BUSY' } : candidate
-    )), false);
-  }
+  return buildReport(candidates.map(removeIntermediateCleanupCandidate), false);
 }
 
 function formatIntermediateCleanupReport(report: IntermediateCleanupReport): string[] {
@@ -444,8 +394,9 @@ function formatIntermediateCleanupReport(report: IntermediateCleanupReport): str
 }
 
 export {
-  cleanupIntermediateFiles,
   formatIntermediateCleanupReport,
+  removeIntermediateCleanupCandidate,
+  removeIntermediateCleanupCandidates,
   scanIntermediateCleanup
 };
 export type {
