@@ -7,6 +7,7 @@ import {
   DEMO_COLUMNS,
   DEMO_VISIBLE_COMMANDS,
   DEMO_ROWS,
+  buildDemoPrepareCommand,
   normalizeVisibleTranscript,
   sha256Transcript
 } from '../../../lib/internal/demo-transcript.ts';
@@ -47,6 +48,22 @@ test('normalization preserves visible prompt changes', () => {
     normalizeVisibleTranscript('release-host-one$ visible\n'),
     normalizeVisibleTranscript('release-host-two$ visible\n')
   );
+});
+
+test('demo prepare command quotes a temporary project path', () => {
+  const project = '/tmp/demo collector;safe';
+
+  assert.equal(
+    buildDemoPrepareCommand(project),
+    "rm -rf '/tmp/demo collector;safe' && mkdir -p '/tmp/demo collector;safe' && cd '/tmp/demo collector;safe'"
+  );
+});
+
+test('normalization canonicalizes quoted temporary paths with shell metacharacters', () => {
+  const project = '/tmp/demo collector;safe/agent-infra-demo-project-123';
+  const command = `demo$ rm -rf '${project}' && mkdir -p '${project}' && cd '${project}'\n`;
+
+  assert.equal(normalizeVisibleTranscript(command), `demo$ ${DEMO_VISIBLE_COMMANDS.prepare}\n`);
 });
 
 test('canonical tape and transcript collector share the visible command sequence', () => {

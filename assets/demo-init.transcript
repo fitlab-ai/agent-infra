@@ -1,4 +1,4 @@
-demo$ rm -rf /tmp/my-awesome-project && mkdir -p /tmp/my-awesome-project && cd /tmp/my-awesome-project
+demo$ rm -rf '/tmp/my-awesome-project' && mkdir -p '/tmp/my-awesome-project' && cd '/tmp/my-awesome-project'
 demo$ git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git
 demo$ ai init
 

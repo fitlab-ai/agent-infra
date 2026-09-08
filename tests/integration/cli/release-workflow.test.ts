@@ -96,6 +96,32 @@ test('demo collector preserves an existing canonical project directory', onPlatf
   }
 });
 
+test('demo collector handles a temporary root with spaces and shell metacharacters', onPlatforms('linux', 'darwin'), async () => {
+  const input = fixture();
+  const previousPath = process.env.PATH;
+  const previousTmpdir = process.env.TMPDIR;
+  const tmpRoot = path.join(os.tmpdir(), `demo collector tmp ${process.pid}-${Date.now()};safe`);
+  const sentinel = path.join(tmpRoot, 'outside-project.txt');
+  try {
+    fs.mkdirSync(tmpRoot, { recursive: true });
+    fs.writeFileSync(sentinel, 'preserve');
+    fs.mkdirSync(path.join(input.root, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(input.root, 'dist', 'bin', 'cli.js'), '');
+    process.env.PATH = input.environment.PATH;
+    process.env.TMPDIR = tmpRoot;
+    const collected = await collectDemoTranscript(input.root);
+    assert.equal(collected.status, 'ok', collected.status === 'failed' ? collected.message : '');
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'preserve');
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmpdir;
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    cleanup(input);
+  }
+});
+
 function runCli(input: Fixture, ...args: string[]) {
   const env: NodeJS.ProcessEnv = { ...gitSafeEnv(), ...input.environment, NODE_OPTIONS: `--import=${pathToFileURL(input.preload).href}` };
   for (const key of [

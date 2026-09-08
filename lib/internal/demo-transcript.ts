@@ -11,10 +11,11 @@ const DEMO_TIMEOUT_MS = 30_000;
 const CHECKPOINT = '\u001b]9;agent-infra-demo-checkpoint\u0007';
 const TREE_CHECKPOINT = '\u001b]9;agent-infra-demo-tree-checkpoint\u0007';
 const TEMP_PROJECT_PATTERN = /(^|[\s"'`=])((?:[A-Za-z]:[\\/]|[\\/])(?:[^\\/\s"'`]+[\\/])*agent-infra-demo-project-[^\s"'`]+)/g;
+const QUOTED_TEMP_PROJECT_PATTERN = /(^|[\s"'`=])('(?:[^']|'\\'')*\/agent-infra-demo-project-(?:[^']|'\\'')*')(?=[\s"'`=]|$)/g;
 
 const DEMO_PROJECT_PATH = '/tmp/my-awesome-project';
 const DEMO_VISIBLE_COMMANDS = Object.freeze({
-  prepare: `rm -rf ${DEMO_PROJECT_PATH} && mkdir -p ${DEMO_PROJECT_PATH} && cd ${DEMO_PROJECT_PATH}`,
+  prepare: `rm -rf ${shellQuote(DEMO_PROJECT_PATH)} && mkdir -p ${shellQuote(DEMO_PROJECT_PATH)} && cd ${shellQuote(DEMO_PROJECT_PATH)}`,
   git: 'git init -q && git remote add origin git@github.com:acme-corp/my-awesome-project.git',
   init: 'ai init',
   language: 'en',
@@ -278,7 +279,9 @@ class TerminalDisplay {
 }
 
 function normalizeDemoPaths(value: string): string {
-  return value.replace(TEMP_PROJECT_PATTERN, '$1/tmp/my-awesome-project');
+  return value
+    .replace(QUOTED_TEMP_PROJECT_PATTERN, "$1'/tmp/my-awesome-project'")
+    .replace(TEMP_PROJECT_PATTERN, '$1/tmp/my-awesome-project');
 }
 
 function normalizeVisibleTranscript(value: string): string {
@@ -305,6 +308,10 @@ function waitFor(output: () => string, pattern: RegExp, timeoutMs: number): Prom
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function buildDemoPrepareCommand(project: string): string {
+  return DEMO_VISIBLE_COMMANDS.prepare.replaceAll(shellQuote(DEMO_PROJECT_PATH), shellQuote(project));
 }
 
 async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
@@ -369,7 +376,7 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
       else await new Promise((resolve) => setTimeout(resolve, 150));
     };
 
-    await send(DEMO_VISIBLE_COMMANDS.prepare.replaceAll(DEMO_PROJECT_PATH, project));
+    await send(buildDemoPrepareCommand(project));
     await send(DEMO_VISIBLE_COMMANDS.git);
     await send(DEMO_VISIBLE_COMMANDS.init, /Project name/);
     await send('', /Organization/);
@@ -403,5 +410,5 @@ async function collectDemoTranscript(cwd: string): Promise<TranscriptResult> {
   }
 }
 
-export { DEMO_COLUMNS, DEMO_PROJECT_PATH, DEMO_ROWS, DEMO_VISIBLE_COMMANDS, collectDemoTranscript, normalizeVisibleTranscript, sha256Transcript };
+export { buildDemoPrepareCommand, DEMO_COLUMNS, DEMO_PROJECT_PATH, DEMO_ROWS, DEMO_VISIBLE_COMMANDS, collectDemoTranscript, normalizeVisibleTranscript, sha256Transcript };
 export type { TranscriptCollector, TranscriptFailure, TranscriptResult, TranscriptSuccess };
