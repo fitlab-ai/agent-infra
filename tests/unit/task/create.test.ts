@@ -12,6 +12,7 @@ import {
   validateTaskCreateCandidate,
   type TaskCreateCandidateV1
 } from '../../../lib/task/create.ts';
+import { parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
 import {
   createTask,
   parseTaskCreateResult,
@@ -39,6 +40,16 @@ const candidate: TaskCreateCandidateV1 = {
     alternatives: [],
     acceptanceCriteria: ['The task is visible on the host.'],
     openQuestions: []
+  }
+};
+
+const qualificationCandidate: TaskCreateCandidateV1 = {
+  ...candidate,
+  title: 'Persist qualified sandbox-created tasks',
+  taskInput: {
+    ...candidate.taskInput,
+    constraints: ['Keep lifecycle routing deterministic.'],
+    alternatives: ['Use the canonical task renderer.', 'Add a second qualification writer.']
   }
 };
 
@@ -151,6 +162,79 @@ test('local task creation is idempotent and rejects key reuse with changed conte
       () => createLocalTask({ ...candidate, title: 'Changed title' }, options),
       /TASK_CREATE_IDEMPOTENCY_CONFLICT/
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('local task creation keeps constraint and candidate qualification tables separate', () => {
+  const root = fixture();
+  try {
+    const result = createLocalTask(qualificationCandidate, {
+      repoRoot: root,
+      now: () => new Date(2026, 7, 13, 1, 2, 3),
+      agentInfraVersion: 'v0.9.5'
+    });
+    const content = fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', result.task.id, 'task.md'), 'utf8');
+    const parsed = parseTaskQualification(content);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    assert.equal(parsed.qualification.present, true);
+    assert.deepEqual(parsed.qualification.constraints.map((row) => [row.constraintId, row.statement]), [
+      ['C-1', 'Keep lifecycle routing deterministic.']
+    ]);
+    assert.deepEqual(parsed.qualification.candidates.map((row) => [row.candidateId, row.statement]), [
+      ['A', 'Use the canonical task renderer.'],
+      ['B', 'Add a second qualification writer.']
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('local task creation supports 50 qualification candidates with unique parser-safe ids', () => {
+  const root = fixture();
+  const wideCandidate: TaskCreateCandidateV1 = {
+    ...qualificationCandidate,
+    taskInput: {
+      ...qualificationCandidate.taskInput,
+      alternatives: Array.from({ length: 50 }, (_, index) => `Candidate alternative ${index + 1}`)
+    }
+  };
+  try {
+    const result = createLocalTask(wideCandidate, { repoRoot: root, agentInfraVersion: 'v0.9.5' });
+    const content = fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', result.task.id, 'task.md'), 'utf8');
+    const parsed = parseTaskQualification(content);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    const ids = parsed.qualification.candidates.map((row) => row.candidateId);
+    assert.equal(ids.length, 50);
+    assert.equal(ids[0], 'A');
+    assert.equal(ids[25], 'Z');
+    assert.equal(ids[26], 'AA');
+    assert.equal(ids[49], 'AX');
+    assert.equal(new Set(ids).size, 50);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('local task creation rejects an invalid qualification template before publishing state', () => {
+  const root = fixture();
+  try {
+    const templatePath = path.join(root, '.agents', 'templates', 'task.md');
+    const template = fs.readFileSync(templatePath, 'utf8');
+    fs.writeFileSync(templatePath, template.replace(
+      '| candidate_id | statement | status | constraint_ids | impact | evidence |',
+      '| candidate_id | statement | status | constraint_ids | impact |'
+    ));
+    assert.throws(
+      () => createLocalTask(qualificationCandidate, { repoRoot: root, agentInfraVersion: 'v0.9.5' }),
+      /TASK_CREATE_QUALIFICATION_INVALID/
+    );
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json')), false);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-create')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

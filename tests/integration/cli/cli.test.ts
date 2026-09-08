@@ -217,6 +217,11 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.ok(!config.source, "consumer projects should not have source: self");
     assert.match(output, /npm install -g @fitlab-ai\/agent-infra/);
     assert.ok(fs.existsSync(path.join(tmpDir, ".agents/scripts/lib/agent-infra-package.js")));
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/scripts/package.json"), "utf8")).type,
+      "module",
+      ".agents/scripts should be an ESM package boundary"
+    );
     assert.deepEqual(config.sandbox, {
       engine: DEFAULT_SANDBOX_ENGINE ? { [CURRENT_PLATFORM]: DEFAULT_SANDBOX_ENGINE } : null,
       runtimes: ["node22"],
@@ -559,6 +564,34 @@ test("installed sync-templates.js executes inside a type=module project", () => 
   }
 });
 
+test("installed package helper executes inside a CommonJS project", () => {
+  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-cjs-helper-")));
+
+  try {
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: "cjsproj\ncjsorg\n\n" + ENGINE_NL + "\n\n\n",
+      stdio: "pipe"
+    });
+
+    const helper = path.join(tmpDir, ".agents", "scripts", "lib", "agent-infra-package.js");
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        "import { formatAgentInfraPackageError } from " + JSON.stringify(pathToFileURL(helper).href) + "; console.log(typeof formatAgentInfraPackageError);"
+      ],
+      { cwd: tmpDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), "function");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("GitHub init full sync installs lifecycle workflows in the downstream project", async () => {
   const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-github-lifecycle-init-")));
 
@@ -732,6 +765,11 @@ test("agent-infra sync refreshes seed files and syncs file registry", async () =
     assert.doesNotMatch(skill, /\{\{org\}\}/);
     assert.ok(
       fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.js"))
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents", "scripts", "package.json"), "utf8")).type,
+      "module",
+      ".agents/scripts should be refreshed as an ESM package boundary"
     );
     assert.ok(
       fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.cjs"))

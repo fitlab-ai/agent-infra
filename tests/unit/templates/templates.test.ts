@@ -95,6 +95,7 @@ test("required template files were migrated into templates/", () => {
     "templates/.agents/skills/init-milestones/SKILL.en.md",
     "templates/.agents/skills/init-milestones/SKILL.zh-CN.md",
     "templates/.agents/skills/update-agent-infra/SKILL.en.md",
+    "templates/.agents/scripts/package.json",
     "templates/.agents/skills/update-agent-infra/scripts/package.json",
     "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js",
     "templates/.git-hooks/check-large-files.cjs",

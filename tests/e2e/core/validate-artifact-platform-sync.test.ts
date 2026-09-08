@@ -163,6 +163,60 @@ test("requirements sync converges before the complete-task platform gate", async
   });
 });
 
+test("platform-sync compares artifact comments after the same sanitization used by comment sync", async () => {
+  await withTempRoot("agent-infra-platform-sync-sanitized-artifact-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const taskContent = buildTaskContent({ issue_number: "65" });
+    const artifactContent = [
+      "<!-- artifact-context:TASK-20260328-000001:code:1 -->",
+      "# 实现报告",
+      "",
+      "## 结果",
+      "<!-- artifact-section:code:result -->",
+      "通过"
+    ].join("\n");
+    write(path.join(ctx.taskDir, "task.md"), taskContent);
+    write(path.join(ctx.taskDir, "code.md"), artifactContent);
+    writeJson(ctx.issuePath, buildIssuePayload());
+    writeJson(ctx.commentsPath, [
+      { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+      { body: buildTaskComment(taskId, taskContent) }
+    ]);
+
+    const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"], ctx, {
+      GH_FAKE_ISSUE_PATH: ctx.issuePath,
+      GH_FAKE_COMMENTS_PATH: ctx.commentsPath
+    });
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+  });
+});
+
+test("platform-sync compares task comments after the same sanitization used by comment sync", async () => {
+  await withTempRoot("agent-infra-platform-sync-sanitized-task-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const taskContent = `${buildTaskContent({ issue_number: "65" })}\n\n<!-- sync-pr:TASK-20260328-000001:summary -->`;
+    write(path.join(ctx.taskDir, "task.md"), taskContent);
+    write(path.join(ctx.taskDir, "code.md"), "# 实现报告\n\n通过");
+    writeJson(ctx.issuePath, buildIssuePayload());
+    writeJson(ctx.commentsPath, [
+      { body: buildArtifactComment(taskId, "code.md", "实现报告", "# 实现报告\n\n通过") },
+      { body: buildTaskComment(taskId, taskContent) }
+    ]);
+
+    const result = await runValidatorWithFakeGh(
+      ["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"],
+      ctx,
+      {
+        GH_FAKE_ISSUE_PATH: ctx.issuePath,
+        GH_FAKE_COMMENTS_PATH: ctx.commentsPath
+      }
+    );
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+  });
+});
+
 const implementSyncCases = [
   {
     name: "validate-artifact gate passes when synced artifact and task comments match local files",
