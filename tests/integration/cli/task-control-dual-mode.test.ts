@@ -6,7 +6,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { CLI_PATH, INTERNAL_CLI_PATH, filePath, sandboxControlSafeEnv } from '../../helpers.ts';
+import { CLI_PATH, INTERNAL_CLI_PATH, filePath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import {
   createDirectHostExecutionContext,
   createSandboxExecutorExecutionContext,
@@ -32,6 +32,25 @@ function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 function run(command: string, args: string[], env: NodeJS.ProcessEnv): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, command, ...args], {
     cwd: os.tmpdir(),
+    env,
+    encoding: 'utf8'
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout?.toString() ?? '',
+    stderr: result.stderr?.toString() ?? ''
+  };
+}
+
+function runDirectNode(
+  command: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  nodeArgs: readonly string[] = [],
+  cwd = os.tmpdir()
+): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(process.execPath, [...nodeArgs, INTERNAL_CLI_PATH, command, ...args], {
+    cwd,
     env,
     encoding: 'utf8'
   });
@@ -99,22 +118,102 @@ function fixedStatusMountPresent(): boolean {
   } catch { return false; }
 }
 
-test('task control without sandbox markers uses the direct-host entry in the isolated host harness', () => {
-  const result = run('task-lifecycle', ['--help'], cleanEnv());
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Usage: agent-infra-internal task-lifecycle/);
+test('task control without launcher proof fails closed before reaching direct-host authority', () => {
+  const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
+  const result = runDirectNode('task-lifecycle', ['--help'], cleanEnv({
+    NODE_OPTIONS: `--require=${preload}`
+  }));
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_LAUNCHER_REQUIRED');
 });
 
-test('the trusted launcher blocks preload bypass before the Node control router starts', (t) => {
+test('the trusted launcher blocks preload bypass before the Node control router starts', onPlatforms('linux', 'darwin'), (t) => {
   if (!fixedStatusMountPresent()) {
     t.skip('fixed status mount is unavailable in this host test environment');
     return;
   }
   const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
-  for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
-    const result = runLauncher(command, ['--help'], cleanEnv({ NODE_OPTIONS: `--require=${preload}` }));
-    assert.equal(result.status, 1, `${command}: ${result.stderr}`);
-    assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_IDENTITY_MISSING', command);
+  const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-launcher-home-'));
+  try {
+    for (const forgedAuthority of [false, true]) {
+      if (forgedAuthority) {
+        const authorityDir = path.join(isolatedHome, '.agent-infra');
+        fs.mkdirSync(authorityDir, { recursive: true, mode: 0o700 });
+        fs.writeFileSync(path.join(authorityDir, 'launcher-authority'), `${'a'.repeat(64)}\n`, { mode: 0o600 });
+      }
+      for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
+        const result = runLauncher(command, ['--help'], cleanEnv({
+          HOME: isolatedHome,
+          NODE_OPTIONS: `--require=${preload}`
+        }));
+        assert.equal(result.status, 1, `${command} / forged=${forgedAuthority}: ${result.stderr}`);
+        assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_IDENTITY_MISSING', `${command} / forged=${forgedAuthority}`);
+      }
+    }
+  } finally {
+    fs.rmSync(isolatedHome, { recursive: true, force: true });
+  }
+});
+
+test('direct Node injection matrix cannot reach any task-control local handler', () => {
+  const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
+  const loader = pathToFileURL(path.resolve('scripts/test-status-mount-isolation-loader.mjs')).href;
+  const cases: Array<{ name: string; env?: NodeJS.ProcessEnv; nodeArgs?: string[] }> = [
+    { name: 'NODE_OPTIONS require', env: cleanEnv({ NODE_OPTIONS: `--require=${preload}` }) },
+    { name: 'argv require', env: cleanEnv(), nodeArgs: ['--require', preload] },
+    { name: 'argv import', env: cleanEnv(), nodeArgs: ['--import', pathToFileURL(preload).href] },
+    { name: 'argv loader', env: cleanEnv(), nodeArgs: ['--loader', loader] },
+    {
+      name: 'forged launcher descriptor marker',
+      env: cleanEnv({ AGENT_INFRA_TRUSTED_LAUNCHER_FD: '9' })
+    }
+  ];
+  for (const command of ['task-lifecycle', 'task-orchestration', 'task-finalization']) {
+    for (const injection of cases) {
+      const result = runDirectNode(command, ['--help'], injection.env ?? cleanEnv(), injection.nodeArgs);
+      assert.equal(result.status, 1, `${command} / ${injection.name}: ${result.stderr}`);
+      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_LAUNCHER_REQUIRED', `${command} / ${injection.name}`);
+    }
+  }
+});
+
+function snapshotTree(root: string): string[] {
+  const entries: string[] = [];
+  function visit(directory: string): void {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const absolute = path.join(directory, entry.name);
+      const relative = path.relative(root, absolute);
+      if (entry.isDirectory()) {
+        visit(absolute);
+      } else if (entry.isSymbolicLink()) {
+        entries.push(`${relative}\0link:${fs.readlinkSync(absolute)}`);
+      } else {
+        entries.push(`${relative}\0file:${fs.readFileSync(absolute, 'utf8')}`);
+      }
+    }
+  }
+  visit(root);
+  return entries;
+}
+
+test('direct Node task-control bypass leaves task and workspace state unchanged', () => {
+  const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
+  for (const [command, args] of [
+    ['task-lifecycle', [TASK_ID, 'block', '--agent', 'codex']],
+    ['task-orchestration', [TASK_ID, 'route']],
+    ['task-finalization', [TASK_ID, 'complete', '--agent', 'codex']]
+  ] as const) {
+    const fixture = taskFixture(true, true);
+    try {
+      const workspace = path.join(fixture.root, '.agents', 'workspace');
+      const before = snapshotTree(workspace);
+      const result = runDirectNode(command, args, cleanEnv({ NODE_OPTIONS: `--require=${preload}` }), [], fixture.root);
+      assert.equal(result.status, 1, `${command}: ${result.stderr}`);
+      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_LAUNCHER_REQUIRED', command);
+      assert.deepEqual(snapshotTree(workspace), before, command);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
   }
 });
 

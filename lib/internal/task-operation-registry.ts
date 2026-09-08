@@ -15,6 +15,7 @@ import {
   internalRouteSelector
 } from './cli-route-inventory.ts';
 import { readSandboxControlIdentitySentinel } from '../sandbox/control/identity-sentinel.ts';
+import { hasTrustedLauncherProof } from './trusted-launcher.ts';
 
 export type TaskOperationDispatcher = 'public' | 'internal';
 export type TaskOperationScope = 'task-bound' | 'non-task' | 'conditional';
@@ -335,13 +336,14 @@ export function resolveSandboxControlTransport(
   const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
   const fixedStatusDir = options.statusMountPath
     ?? SANDBOX_CONTROL_STATUS_MOUNT;
-  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && nativeDirectoryExists(configuredStatusDir)
-    ? configuredStatusDir
-    : path.isAbsolute(fixedStatusDir) && nativeDirectoryExists(fixedStatusDir) ? fixedStatusDir : null;
-  const statusMounted = statusDir !== null;
   const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
     || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
     || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
+  const trustedHostDirect = !hasAnyMarker && hasTrustedLauncherProof(env);
+  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && nativeDirectoryExists(configuredStatusDir)
+    ? configuredStatusDir
+    : !trustedHostDirect && path.isAbsolute(fixedStatusDir) && nativeDirectoryExists(fixedStatusDir) ? fixedStatusDir : null;
+  const statusMounted = statusDir !== null;
   const hasCompleteConfig = TASK_CONTROL_CONFIG_KEYS.every((key) => Boolean(env[key]));
   const taskBound = Boolean(env.AGENT_INFRA_TASK_ID);
   const runtime = Boolean(env.AGENT_INFRA_RUNTIME_DIR);

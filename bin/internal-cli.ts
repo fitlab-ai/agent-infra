@@ -8,6 +8,7 @@ import {
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
 import { INTERNAL_HANDLER_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
+import { hasTrustedLauncherProof } from '../lib/internal/trusted-launcher.ts';
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
 if (major < 22 || (major === 22 && minor < 9)) {
   process.stderr.write(
@@ -36,10 +37,10 @@ try {
   }
 }
 
-function taskControlTransportFailure(message: string): never {
+function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANSPORT_INVALID'): never {
   process.stdout.write(`${JSON.stringify({
     status: 'failed', changed: false,
-    error: { code: 'TASK_CONTROL_TRANSPORT_INVALID', message }
+    error: { code, message }
   })}\n`);
   process.exit(1);
 }
@@ -47,7 +48,11 @@ function taskControlTransportFailure(message: string): never {
 if (taskControlCommand) {
   const transport = resolveSandboxControlTransport(process.env);
   if (transport.kind === 'fail-closed') {
-    taskControlTransportFailure(transport.reasonCode ?? 'sandbox control configuration is invalid');
+    const reasonCode = transport.reasonCode ?? 'TASK_CONTROL_TRANSPORT_INVALID';
+    taskControlTransportFailure(reasonCode, reasonCode.startsWith('SANDBOX_CONTROL_IDENTITY_') ? reasonCode : undefined);
+  }
+  if (transport.kind === 'direct-host' && !hasTrustedLauncherProof()) {
+    taskControlTransportFailure('task-control commands must start through the trusted launcher', 'SANDBOX_CONTROL_LAUNCHER_REQUIRED');
   }
 }
 

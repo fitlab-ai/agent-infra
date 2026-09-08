@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { filePath, INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
@@ -767,7 +767,7 @@ test('completed event validates orchestration provenance before writing task sta
   spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: f.root });
 
   const orchestrate = (args: string[]) => spawnSync(
-    'node', [INTERNAL_CLI_PATH, 'task-orchestration', f.id, ...args],
+    filePath('scripts/test-trusted-host-launcher.sh'), ['task-orchestration', f.id, ...args],
     { cwd: f.root, encoding: 'utf8', env: sandboxControlSafeEnv() }
   );
   assert.equal(orchestrate([

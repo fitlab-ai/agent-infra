@@ -36,6 +36,17 @@ info "Installing $NPM_PACKAGE via npm ..."
 npm install -g "$NPM_PACKAGE"
 ok "agent-infra installed successfully!"
 
+# The internal task-control launcher uses this host-only secret to distinguish
+# an inherited host launch proof from a value supplied by a sandbox process.
+launcher_auth_dir=${HOME}/.agent-infra
+launcher_auth_path=$launcher_auth_dir/launcher-authority
+if [ ! -f "$launcher_auth_path" ]; then
+  umask 077
+  mkdir -p "$launcher_auth_dir"
+  od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]' > "$launcher_auth_path"
+  chmod 600 "$launcher_auth_path"
+fi
+
 if [ "$(uname -s)" = "Linux" ] && ! command -v docker >/dev/null 2>&1; then
   warn "Note: 'ai sandbox' requires Docker Engine. See README 'Platform Support → Linux'."
 fi

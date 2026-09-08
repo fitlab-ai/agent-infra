@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, gitSafeEnv, sandboxControlSafeEnv } from '../../helpers.ts';
+import { filePath, gitSafeEnv, sandboxControlSafeEnv } from '../../helpers.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -35,7 +35,7 @@ function fixture() {
 }
 
 function run(root: string, args: string[]) {
-  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, ...args], {
+  return spawnSync(filePath('scripts/test-trusted-host-launcher.sh'), args, {
     cwd: root,
     encoding: 'utf8',
     env: sandboxControlSafeEnv()
@@ -74,8 +74,8 @@ test('compiled preflight does not require a checks snapshot for a bound historic
       '|----|-------|-------|----------|--------|----------|', ''
     ].join('\n'));
 
-    const result = spawnSync(process.execPath, [
-      INTERNAL_CLI_PATH, 'task-verify', TASK_ID, 'complete-task.preflight', '--format', 'json'
+    const result = spawnSync(filePath('scripts/test-trusted-host-launcher.sh'), [
+      'task-verify', TASK_ID, 'complete-task.preflight', '--format', 'json'
     ], {
       cwd: f.root,
       encoding: 'utf8',
