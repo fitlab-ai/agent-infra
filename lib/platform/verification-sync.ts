@@ -11,6 +11,7 @@ import { planInLabelUpdate, validateInLabelMapping } from "./in-label-sync.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
+import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument } from "./comment-safety.ts";
 
 const CHECK_TYPE = "platform-sync";
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
@@ -92,6 +93,11 @@ function blockedResult(...args: any[]): any {
 
 function safeStat(...args: any[]): any {
   return getShared().safeStat(...args);
+}
+
+function sanitizeCommentContent(content: string): string | null {
+  const result = sanitizeMarkdownDocument(content, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  return result.ok ? result.value : null;
 }
 
 export async function check({ taskDir, config, artifactFile }: any, shared: any): Promise<any> {
@@ -533,7 +539,15 @@ function checkCommentContent(context: any, remoteData: any): any {
   }
 
   const comment = findCommentByMarker(remoteData.comments, context.marker);
-  const localContent = normalizeContent(fs.readFileSync(context.artifactPath, "utf8"));
+  const rawLocalContent = fs.readFileSync(context.artifactPath, "utf8");
+  const sanitizedLocalContent = sanitizeCommentContent(rawLocalContent);
+  if (sanitizedLocalContent === null) {
+    return failResult(CHECK_TYPE,
+      `Artifact content cannot be rendered safely for comment verification: ${context.artifactFile || "(missing artifactFile)"}`,
+      "check_failed"
+    );
+  }
+  const localContent = normalizeContent(sanitizedLocalContent);
   const commentContent = normalizeContent(extractCommentBody(comment?.body || ""));
 
   if (localContent === commentContent) {
@@ -565,7 +579,14 @@ function checkTaskCommentContent(context: any, remoteData: any): any {
     );
   }
 
-  const expectedBody = normalizeContent(buildExpectedTaskBody(context.task.content));
+  const expectedTaskBody = buildExpectedTaskBody(context.task.content);
+  if (expectedTaskBody === null) {
+    return failResult(CHECK_TYPE,
+      "Task content cannot be rendered safely for comment verification",
+      "check_failed"
+    );
+  }
+  const expectedBody = normalizeContent(expectedTaskBody);
   const commentBody = normalizeContent(extractCommentBody(comment.body || ""));
 
   if (expectedBody === commentBody) {
@@ -866,16 +887,17 @@ function extractCommentBody(commentBody: any): any {
 function buildExpectedTaskBody(taskContent: any): any {
   const frontmatterMatch = taskContent.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!frontmatterMatch) {
-    return taskContent.trim();
+    return sanitizeCommentContent(taskContent.trim());
   }
 
-  const body = taskContent.slice(frontmatterMatch[0].length).trim();
+  const body = sanitizeCommentContent(taskContent.slice(frontmatterMatch[0].length).trim());
+  if (body === null) {
+    return null;
+  }
   return [
     buildTaskFrontmatterSummary(),
     "",
-    "```yaml",
-    frontmatterMatch[0].trim(),
-    "```",
+    renderSafeCodeFence(frontmatterMatch[0].trim(), "yaml"),
     "",
     "</details>",
     "",

@@ -7,7 +7,7 @@ import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
-import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS } from './qualification-audit.ts';
+import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS, parseTaskQualification } from './qualification-audit.ts';
 
 const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const;
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
@@ -191,11 +191,53 @@ function renderTable(columns: readonly string[], rows: readonly (readonly string
   ].join('\n');
 }
 
-function appendCanonicalRows(content: string, columns: readonly string[], rows: readonly (readonly string[])[]): string {
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function appendCanonicalRows(content: string, heading: string, columns: readonly string[], rows: readonly (readonly string[])[]): string {
   if (rows.length === 0) return content;
   const table = renderTable(columns, rows);
-  const separator = `| ${columns.map(() => '---').join(' | ')} |`;
-  return content.replace(separator, `${separator}\n${table.split('\n').slice(2).join('\n')}`);
+  const [header, separator, ...rowLines] = table.split('\n');
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content.split(/\r?\n/);
+  const headingPattern = new RegExp(`^###\\s+${escapeRegExp(heading)}\\s*$`);
+  const sectionStart = lines.findIndex((line) => headingPattern.test(line));
+  if (sectionStart < 0) throw new Error(`TASK_CREATE_QUALIFICATION_INVALID: section '${heading}' is missing`);
+  let sectionEnd = lines.length;
+  for (let index = sectionStart + 1; index < lines.length; index += 1) {
+    if (/^#{2,3}\s+/.test(lines[index]!)) {
+      sectionEnd = index;
+      break;
+    }
+  }
+  const matches: number[] = [];
+  for (let index = sectionStart + 1; index + 1 < sectionEnd; index += 1) {
+    if (lines[index]!.trim() === header && lines[index + 1]!.trim() === separator) matches.push(index);
+  }
+  if (matches.length !== 1) {
+    throw new Error(`TASK_CREATE_QUALIFICATION_INVALID: section '${heading}' must contain exactly one canonical qualification table`);
+  }
+  lines.splice(matches[0]! + 2, 0, ...rowLines);
+  return lines.join(eol);
+}
+
+function validateRenderedQualification(content: string, candidate: TaskCreateCandidateV1): void {
+  const parsed = parseTaskQualification(content);
+  if (!parsed.ok) {
+    throw new Error(`TASK_CREATE_QUALIFICATION_INVALID: ${parsed.code}: ${parsed.message}`);
+  }
+  if (!parsed.qualification.present) {
+    throw new Error('TASK_CREATE_QUALIFICATION_INVALID: rendered task qualification contract is missing');
+  }
+  const expectedConstraintIds = candidate.taskInput.constraints.map((_, index) => `C-${index + 1}`);
+  const expectedCandidateIds = candidate.taskInput.alternatives.map((_, index) => String.fromCharCode(65 + index));
+  const actualConstraintIds = parsed.qualification.constraints.map((row) => row.constraintId);
+  const actualCandidateIds = parsed.qualification.candidates.map((row) => row.candidateId);
+  if (JSON.stringify(actualConstraintIds) !== JSON.stringify(expectedConstraintIds)
+    || JSON.stringify(actualCandidateIds) !== JSON.stringify(expectedCandidateIds)) {
+    throw new Error('TASK_CREATE_QUALIFICATION_INVALID: rendered task qualification rows do not match task input');
+  }
 }
 
 function replaceEmptySubsection(content: string, heading: string, items: readonly string[]): string {
@@ -252,10 +294,10 @@ function renderTask(params: Readonly<{
   ];
   for (const [heading, key] of sections) content = replaceEmptySubsection(content, heading, candidate.taskInput[key]);
   const constraintIds = candidate.taskInput.constraints.map((_, index) => `C-${index + 1}`);
-  content = appendCanonicalRows(content, CONSTRAINT_COLUMNS, candidate.taskInput.constraints.map((statement, index) => [
+  content = appendCanonicalRows(content, '约束', CONSTRAINT_COLUMNS, candidate.taskInput.constraints.map((statement, index) => [
     constraintIds[index]!, statement, 'assumption', 'create-task', 'taskInput', 'create-task input', '', ''
   ]));
-  content = appendCanonicalRows(content, CANDIDATE_COLUMNS, candidate.taskInput.alternatives.map((statement, index) => [
+  content = appendCanonicalRows(content, '候选与否决方案', CANDIDATE_COLUMNS, candidate.taskInput.alternatives.map((statement, index) => [
     String.fromCharCode(65 + index), statement, 'pending', constraintIds.join(','), 'requires qualification', 'create-task input'
   ]));
   content = content.replace('- **关联 Issue**：#XXX', '- **关联 Issue**：N/A');
@@ -365,7 +407,6 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
 
   return withCreateLock(repoRoot, workspaceRoot, () => {
     if (fs.existsSync(receipts)) assertRealDirectory(receipts, 'TASK_CREATE_RECEIPT_INVALID');
-    else fs.mkdirSync(receipts, { mode: 0o700 });
     const receiptPath = path.join(receipts, `${keyDigest}.json`);
     if (fs.existsSync(receiptPath)) {
       const stat = fs.lstatSync(receiptPath);
@@ -380,6 +421,7 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
 
     const recovered = recoverPublishedTask(activeRoot, repoRoot, keyDigest, candidateDigest);
     if (recovered) {
+      ensureRealDirectory(receipts, 'TASK_CREATE_RECEIPT_INVALID');
       writeReceipt(receiptPath, {
         version: 1, candidateDigest, taskId: recovered.taskId, shortId: recovered.shortId, status: 'recovered'
       });
@@ -401,6 +443,8 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
       template: fs.readFileSync(templatePath, 'utf8'), candidate, taskId, project: projectConfig.project, delivery: projectConfig.delivery, timestamp,
       agentInfraVersion, keyDigest, candidateDigest
     });
+    validateRenderedQualification(rendered, candidate);
+    ensureRealDirectory(receipts, 'TASK_CREATE_RECEIPT_INVALID');
     const temporary = path.join(workspaceRoot, `.task-create.tmp.${process.pid}.${randomUUID()}`);
     fs.mkdirSync(temporary, { mode: 0o700 });
     fs.writeFileSync(path.join(temporary, 'task.md'), rendered, { flag: 'wx', mode: 0o600 });

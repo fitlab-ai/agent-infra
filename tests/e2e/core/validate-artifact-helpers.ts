@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { buildBoundFact, buildSkippedFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 import { parseTypedTaskFrontmatter } from "../../../lib/task/frontmatter.ts";
+import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument } from "../../../lib/platform/comment-safety.ts";
 
 import {
   filePath,
@@ -273,10 +274,12 @@ function buildArtifactMarker(taskId: string, artifactFile: string) {
 }
 
 function buildArtifactComment(taskId: string, artifactFile: string, title: string, body: string) {
+  const sanitized = sanitizeMarkdownDocument(body.trim(), { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  if (!sanitized.ok) throw new Error(sanitized.error.message);
   return loadFixture("artifact-comment.md", {
     MARKER: buildArtifactMarker(taskId, artifactFile),
     TITLE: title,
-    BODY: body.trim(),
+    BODY: sanitized.value,
     TASK_ID: taskId,
     AGENT: "codex"
   });
@@ -290,16 +293,16 @@ function buildTaskComment(taskId: string, taskContent: string, options: TaskComm
     ? [
         `<details><summary>${summaryText}</summary>`,
         "",
-        "```yaml",
-        match[0].trim(),
-        "```",
+        renderSafeCodeFence(match[0].trim(), "yaml"),
         "",
         "</details>"
       ].join("\n")
     : "";
+  const sanitizedBody = sanitizeMarkdownDocument(body, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  if (!sanitizedBody.ok) throw new Error(sanitizedBody.error.message);
   const renderedBody = options.rawBody
     ? taskContent.trim()
-    : [detailsBlock, body].filter(Boolean).join("\n\n");
+    : [detailsBlock, sanitizedBody.value].filter(Boolean).join("\n\n");
 
   return loadFixture("task-comment.md", {
     TASK_ID: taskId,

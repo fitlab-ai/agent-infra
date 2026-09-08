@@ -7,6 +7,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { canonicalTaskCreateCandidate, validateTaskCreateCandidate } from '../../../lib/task/create.ts';
+import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
+import { parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
 
 const internalCli = path.resolve('bin/internal-cli.ts');
 const hostEnvironment = Object.fromEntries(
@@ -41,6 +43,18 @@ function candidate() {
     taskInput: {
       sources: ['Integration test'], facts: [], constraints: [], decisions: [], alternatives: [],
       acceptanceCriteria: ['A task is persisted.'], openQuestions: []
+    }
+  };
+}
+
+function qualificationCandidate() {
+  return {
+    ...candidate(),
+    title: 'Create a qualification-aware task through internal CLI',
+    taskInput: {
+      ...candidate().taskInput,
+      constraints: ['Keep lifecycle routing deterministic.'],
+      alternatives: ['Use the canonical task renderer.', 'Add a second qualification writer.']
     }
   };
 }
@@ -146,6 +160,55 @@ test('task-create internal CLI persists a task and replays as no-op', () => {
     const replayed = JSON.parse(second.stdout);
     assert.equal(replayed.status, 'no-op');
     assert.equal(replayed.task.id, applied.task.id);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create internal CLI keeps qualification tables separate and routes lifecycle facts', () => {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  fs.writeFileSync(input, JSON.stringify(qualificationCandidate()));
+  try {
+    const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+      cwd: root, encoding: 'utf8', env: hostEnvironment
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const taskId = JSON.parse(result.stdout).task.id as string;
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    const content = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    const qualification = parseTaskQualification(content);
+    assert.equal(qualification.ok, true);
+    if (!qualification.ok) return;
+    assert.deepEqual(qualification.qualification.constraints.map((row) => row.constraintId), ['C-1']);
+    assert.deepEqual(qualification.qualification.candidates.map((row) => row.candidateId), ['A', 'B']);
+    const facts = buildLifecycleFacts(taskDir, content);
+    assert.equal(facts.ok, true);
+    if (facts.ok) assert.equal(recommendNext(facts.facts).action, 'analysis');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-create internal CLI rejects an invalid qualification template before active publication', () => {
+  const root = fixture();
+  const input = path.join(root, 'candidate.json');
+  fs.writeFileSync(input, JSON.stringify(qualificationCandidate()));
+  const templatePath = path.join(root, '.agents', 'templates', 'task.md');
+  const template = fs.readFileSync(templatePath, 'utf8');
+  fs.writeFileSync(templatePath, template.replace(
+    '| candidate_id | statement | status | constraint_ids | impact | evidence |',
+    '| candidate_id | statement | status | constraint_ids | impact |'
+  ));
+  try {
+    const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
+      cwd: root, encoding: 'utf8', env: hostEnvironment
+    });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CREATE_QUALIFICATION_INVALID');
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json')), false);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-create')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
