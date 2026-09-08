@@ -767,7 +767,7 @@ test('completed event validates orchestration provenance before writing task sta
   spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: f.root });
 
   const orchestrate = (args: string[]) => spawnSync(
-    filePath('scripts/test-trusted-host-launcher.sh'), ['task-orchestration', f.id, ...args],
+    filePath('bin/internal-cli.sh'), ['task-orchestration', f.id, ...args],
     { cwd: f.root, encoding: 'utf8', env: sandboxControlSafeEnv() }
   );
   assert.equal(orchestrate([

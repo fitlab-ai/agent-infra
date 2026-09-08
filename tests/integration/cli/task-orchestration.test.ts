@@ -25,7 +25,7 @@ function fixture() {
 }
 
 function run(root: string, args: string[], env?: NodeJS.ProcessEnv) {
-  return spawnSync(filePath('scripts/test-trusted-host-launcher.sh'), ['task-orchestration', ...args], {
+  return spawnSync(filePath('bin/internal-cli.sh'), ['task-orchestration', ...args], {
     cwd: root,
     encoding: 'utf8',
     env: sandboxControlSafeEnv(gitSafeEnv(env))

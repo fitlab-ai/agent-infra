@@ -26,6 +26,7 @@ import {
   parseTaskControlOperation,
   type TaskControlOperation
 } from '../../task/control-authority.ts';
+import { landProjectionArtifact, workflowArguments, workflowCommandForOperation, type TaskProjectionManifest } from './task-workflow.ts';
 import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type BrokerOwner } from './lifecycle.ts';
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
@@ -132,6 +133,62 @@ function resultAuditFields(result: SandboxControlExecutionResult): Record<string
     stdoutSha256: createHash('sha256').update(result.stdout, 'utf8').digest('hex'),
     stderrSha256: createHash('sha256').update(result.stderr, 'utf8').digest('hex')
   };
+}
+
+async function executeTaskWorkflowRequest(
+  manifest: SandboxControlManifest,
+  request: Extract<SandboxControlRequest, { family: 'task-workflow' }>
+): Promise<SandboxControlExecutionResult> {
+  const command = request.workflow.operation;
+  const args = workflowArguments(request.workflow);
+  if ((command === 'artifact-finalize-local' || command === 'review-finalize-summary')
+    && (!manifest.taskProjectionDir || !manifest.taskProjectionTopology)) {
+    return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'TASK_PROJECTION_TOPOLOGY_UNVERIFIED', message: 'task projection topology is not recorded in the broker manifest' } })}\n`, stderr: '' };
+  }
+  if (command === 'artifact-finalize-local' || command === 'review-finalize-summary') {
+    const artifact = request.workflow.artifact;
+    if (!artifact || !manifest.taskProjectionDir || !manifest.taskProjectionTopology) {
+      return { exitCode: 1, stdout: `${JSON.stringify({ status: 'failed', changed: false, error: { code: 'TASK_WORKFLOW_REQUEST_INVALID', message: 'artifact landing requires a canonical artifact' } })}\n`, stderr: '' };
+    }
+    const landing = await landProjectionArtifact({
+      version: 1,
+      taskId: request.workflow.taskId,
+      generation: request.workflow.generation,
+      projectionRoot: manifest.taskProjectionDir,
+      authoritativeTaskDir: path.join(manifest.repoRoot, '.agents', 'workspace', 'active', request.workflow.taskId),
+      topology: { verified: true, ancestors: manifest.taskProjectionTopology }
+    } satisfies TaskProjectionManifest, {
+      artifact,
+      ...(request.workflow.expectedSha256 === undefined ? {} : { expectedSha256: request.workflow.expectedSha256 })
+    });
+    appendExecutorAudit(manifest, 'task-workflow-artifact-landed', {
+      requestId: request.workflow.id,
+      sandboxTaskId: request.workflow.taskId,
+      workflowOperation: request.workflow.operation,
+      artifact,
+      bytes: landing.bytes,
+      sha256: landing.sha256,
+      semanticDigest: landing.semanticDigest
+    });
+  }
+  const childEnv = safeEnv(process.env);
+  for (const key of ['AGENT_INFRA_TASK_ID', 'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_EXECUTOR_MANIFEST']) delete childEnv[key];
+  const child = spawn(process.execPath, nodeEntryArgs(process.argv[1]!, [workflowCommandForOperation(command), ...args]), {
+    cwd: manifest.repoRoot,
+    env: childEnv,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+  child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code) => resolve(code ?? 1));
+  });
+  return { exitCode, stdout, stderr };
 }
 
 export function nodeEntryArgs(entry: string, args: string[]): string[] {
@@ -403,6 +460,7 @@ async function executeRequestInner(
       return controllerFailure(error);
     }
   }
+  if (request.family === 'task-workflow') return executeTaskWorkflowRequest(manifest, request);
   if (request.family === 'task-finalization') {
     const operation = parseTaskControlOperation(
       'task-finalization', [manifest.taskId!, 'complete', '--agent', request.agent]

@@ -83,13 +83,14 @@ import { inspectSandboxControlContainer } from '../control/container-identity.ts
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
 import {
-  assertSandboxTaskSource,
   finalizeSandboxControlManifest,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
+  prepareSandboxTaskProjection,
   prepareSandboxWorkspaceMountTargets,
   sandboxControlPaths,
 } from '../workspace-view.ts';
+import { captureProjectionTopology } from '../control/task-workflow.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import {
@@ -1408,6 +1409,13 @@ export async function create(args: string[]): Promise<void> {
               container,
               identity: target.workspace
             });
+            const taskProjection = target.workspace.mode === 'task-bound'
+              ? prepareSandboxTaskProjection(
+                effectiveConfig.repoRoot,
+                target.workspace.taskId,
+                workspaceView.taskMountPath!
+              )
+              : null;
             prepareSandboxWorkspaceMountTargets(worktree);
             if (previousCutoverSnapshot) {
               assertSandboxControlCutoverSnapshot(previousCutoverSnapshot);
@@ -1430,7 +1438,11 @@ export async function create(args: string[]): Promise<void> {
               branch,
               identity: target.workspace,
               engine,
-              replacementLease
+              replacementLease,
+              ...(taskProjection === null ? {} : {
+                taskProjectionDir: taskProjection,
+                taskProjectionTopology: captureProjectionTopology(taskProjection)
+              })
             });
             hostShellConfig = prepareHostShellConfig({
               home: effectiveConfig.home,
@@ -1447,10 +1459,7 @@ export async function create(args: string[]): Promise<void> {
               ...(target.workspace.mode === 'task-bound' ? { runtimeDir: control.runtimeDir } : {}),
               ...(target.workspace.mode === 'task-bound'
                 ? {
-                  taskSources: [assertSandboxTaskSource(
-                    effectiveConfig.repoRoot,
-                    target.workspace.taskId
-                  )],
+                  taskSources: [taskProjection!],
                   taskId: target.workspace.taskId
                 }
                 : {})

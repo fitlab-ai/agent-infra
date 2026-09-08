@@ -26,6 +26,8 @@ import { toEnginePath } from './engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from './mounts.ts';
 import {
   assertSandboxTaskSource,
+  prepareSandboxTaskProjection,
+  refreshSandboxTaskProjection,
   sandboxControlPaths,
   sandboxWorkspaceViewPaths
 } from './workspace-view.ts';
@@ -763,6 +765,7 @@ function expectedMounts(params: {
   const taskSources = params.workspace.mode === 'task-bound'
     ? recoveryTaskSources(config.repoRoot, params.workspace.taskId)
     : null;
+  const taskProjection = params.workspace.mode === 'task-bound' ? view.taskMountPath : null;
   const taskId = params.workspace.mode === 'task-bound' ? params.workspace.taskId : null;
   const core = sandboxCoreBindMounts(config, branch, {
     workspaceViewRoot: view.root,
@@ -772,7 +775,7 @@ function expectedMounts(params: {
       ? {}
       : {
         runtimeDir: control.runtimeDir,
-        taskSources: taskSources.mountPaths,
+        taskSources: [taskProjection!],
         taskId: taskId!
       })
   }).map((mount) => ({
@@ -781,7 +784,7 @@ function expectedMounts(params: {
     hostPaths: mount.hostPaths,
     ...(taskSources !== null && taskId !== null
       && mount.containerPath === `/workspace/.agents/workspace/active/${taskId}`
-      ? { sourceAccessiblePaths: taskSources.accessiblePaths }
+      ? { sourceAccessiblePaths: taskProjection && fs.existsSync(taskProjection) ? [taskProjection] : [] }
       : {}),
     expectedRW: !mount.readOnly
   }));
@@ -1261,6 +1264,26 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   const warnings: string[] = [];
   let failure: Error | null = null;
   try {
+    if (params.workspace?.mode === 'task-bound') {
+      const view = sandboxWorkspaceViewPaths({
+        base: params.config.workspaceViewBase ?? path.join(params.config.home, '.agent-infra', 'workspace-views'),
+        project: params.config.project,
+        container: params.row.name,
+        identity: params.workspace
+      });
+      const activeSource = path.join(params.config.repoRoot, '.agents', 'workspace', 'active', params.workspace.taskId);
+      try {
+        const sourceStat = fs.lstatSync(activeSource);
+        if (sourceStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+        let projectionExists = false;
+        try { projectionExists = fs.lstatSync(view.taskMountPath!).isDirectory(); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        if (projectionExists) refreshSandboxTaskProjection(params.config.repoRoot, params.workspace.taskId, view.taskMountPath!);
+        else prepareSandboxTaskProjection(params.config.repoRoot, params.workspace.taskId, view.taskMountPath!);
+      } catch (error) {
+        if (error instanceof Error && (error.message.startsWith('SANDBOX_TASK_SOURCE_INVALID') || error.message.startsWith('SANDBOX_TASK_PROJECTION'))) throw error;
+      }
+    }
     if (deps?.ensureControlBroker) {
       await deps.ensureControlBroker();
     } else {

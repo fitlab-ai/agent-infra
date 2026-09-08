@@ -3,6 +3,7 @@ import {
   requestSandboxControl,
   requestSandboxTaskFinalization,
   requestSandboxTaskControl,
+  requestSandboxTaskWorkflow,
   SandboxControlClientError
 } from '../sandbox/control/client.ts';
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
@@ -14,6 +15,7 @@ import {
 } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 import { parseTaskCreateResult, taskCreateExitCode } from '../task/create-service.ts';
+import { createTaskWorkflowRequest } from '../sandbox/control/task-workflow.ts';
 
 function isCanonicalCodexPrepare(args: readonly string[]): boolean {
   if (args[1] !== 'prepare') return false;
@@ -149,6 +151,35 @@ async function sandboxControl(args: string[]): Promise<void> {
     const [family = '', ...commandArgs] = rest;
     if (family === 'task-finalization') {
       sandboxFinalizationClient(commandArgs);
+      return;
+    }
+    if (family === 'task-workflow') {
+      const command = commandArgs[0] as Parameters<typeof createTaskWorkflowRequest>[0] | undefined;
+      const taskId = process.env.AGENT_INFRA_TASK_ID;
+      const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
+      if (!command || !taskId || !generation) {
+        process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'SANDBOX_CONTROL_REQUEST_INVALID', message: 'task-workflow requires a bound task and generation' } })}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      let workflow;
+      try { workflow = createTaskWorkflowRequest(command, commandArgs.slice(1), taskId, generation); }
+      catch (error) {
+        process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'SANDBOX_CONTROL_REQUEST_INVALID', message: error instanceof Error ? error.message : String(error) } })}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      let response;
+      try { response = requestSandboxTaskWorkflow({ workflow }); }
+      catch (error) {
+        if (!(error instanceof SandboxControlClientError)) throw error;
+        writeClientError(error);
+        process.exitCode = error.detail.retryable ? 75 : 1;
+        return;
+      }
+      process.stdout.write(response.stdout);
+      process.stderr.write(response.stderr);
+      process.exitCode = response.phase === 'rejected' ? response.error?.retryable ? 75 : 1 : response.exitCode ?? 1;
       return;
     }
     let response;

@@ -18,9 +18,12 @@ import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts'
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/internal/task-operation-registry.ts';
 
+const UNAVAILABLE_HOST_CONTROL_ENDPOINT = path.join(os.tmpdir(), 'agent-infra-test-host-control-unavailable.sock');
+
 function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     ...sandboxControlSafeEnv(),
+    AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT,
     AGENT_INFRA_TASK_ID: undefined,
     AGENT_INFRA_RUNTIME_DIR: undefined,
     AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
@@ -135,16 +138,17 @@ function fixedStatusMountPresent(): boolean {
   } catch { return false; }
 }
 
-test('task control without launcher proof fails closed before reaching direct-host authority', () => {
+test('task control without host-control authority fails closed before reaching direct-host authority', () => {
   const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
   const result = runDirectNode('task-lifecycle', ['--help'], cleanEnv({
+    AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT,
     NODE_OPTIONS: `--require=${preload}`
   }));
   assert.equal(result.status, 1, result.stderr);
-  assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_LAUNCHER_REQUIRED');
+  assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE');
 });
 
-test('the trusted launcher blocks preload bypass before the Node control router starts', onPlatforms('linux', 'darwin'), (t) => {
+test('the launcher wrapper blocks preload bypass before the Node control router starts', onPlatforms('linux', 'darwin'), (t) => {
   if (!fixedStatusMountPresent()) {
     t.skip('fixed status mount is unavailable in this host test environment');
     return;
@@ -152,20 +156,14 @@ test('the trusted launcher blocks preload bypass before the Node control router 
   const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
   const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-control-launcher-home-'));
   try {
-    for (const forgedAuthority of [false, true]) {
-      if (forgedAuthority) {
-        const authorityDir = path.join(isolatedHome, '.agent-infra');
-        fs.mkdirSync(authorityDir, { recursive: true, mode: 0o700 });
-        fs.writeFileSync(path.join(authorityDir, 'launcher-authority'), `${'a'.repeat(64)}\n`, { mode: 0o600 });
-      }
-      for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
-        const result = runLauncher(command, ['--help'], cleanEnv({
-          HOME: isolatedHome,
-          NODE_OPTIONS: `--require=${preload}`
-        }));
-        assert.equal(result.status, 1, `${command} / forged=${forgedAuthority}: ${result.stderr}`);
-        assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_IDENTITY_MISSING', `${command} / forged=${forgedAuthority}`);
-      }
+    for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
+      const result = runLauncher(command, ['--help'], cleanEnv({
+        HOME: isolatedHome,
+        AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: undefined,
+        NODE_OPTIONS: `--require=${preload}`
+      }));
+      assert.equal(result.status, 1, `${command}: ${result.stderr}`);
+      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_IDENTITY_MISSING', command);
     }
   } finally {
     fs.rmSync(isolatedHome, { recursive: true, force: true });
@@ -181,15 +179,15 @@ test('direct Node injection matrix cannot reach any task-control local handler',
     { name: 'argv import', env: cleanEnv(), nodeArgs: ['--import', pathToFileURL(preload).href] },
     { name: 'argv loader', env: cleanEnv(), nodeArgs: ['--loader', loader] },
     {
-      name: 'forged launcher descriptor marker',
-      env: cleanEnv({ AGENT_INFRA_TRUSTED_LAUNCHER_FD: '9' })
+      name: 'forged host-control socket marker',
+      env: cleanEnv({ AGENT_INFRA_HOST_CONTROL_SOCKET: '/tmp/forged-host-control.sock', AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT })
     }
   ];
   for (const command of ['task-lifecycle', 'task-orchestration', 'task-finalization']) {
     for (const injection of cases) {
-      const result = runDirectNode(command, ['--help'], injection.env ?? cleanEnv(), injection.nodeArgs);
+      const result = runDirectNode(command, ['--help'], injection.env ?? cleanEnv({ AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT }), injection.nodeArgs);
       assert.equal(result.status, 1, `${command} / ${injection.name}: ${result.stderr}`);
-      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_LAUNCHER_REQUIRED', `${command} / ${injection.name}`);
+      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', `${command} / ${injection.name}`);
     }
   }
 });
@@ -224,9 +222,9 @@ test('direct Node task-control bypass leaves task and workspace state unchanged'
     try {
       const workspace = path.join(fixture.root, '.agents', 'workspace');
       const before = snapshotTree(workspace);
-      const result = runDirectNode(command, args, cleanEnv({ NODE_OPTIONS: `--require=${preload}` }), [], fixture.root);
+      const result = runDirectNode(command, args, cleanEnv({ AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT, NODE_OPTIONS: `--require=${preload}` }), [], fixture.root);
       assert.equal(result.status, 1, `${command}: ${result.stderr}`);
-      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_LAUNCHER_REQUIRED', command);
+      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', command);
       assert.deepEqual(snapshotTree(workspace), before, command);
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });

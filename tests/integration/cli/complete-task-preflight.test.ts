@@ -35,7 +35,7 @@ function fixture() {
 }
 
 function run(root: string, args: string[]) {
-  return spawnSync(filePath('scripts/test-trusted-host-launcher.sh'), args, {
+  return spawnSync(filePath('bin/internal-cli.sh'), args, {
     cwd: root,
     encoding: 'utf8',
     env: sandboxControlSafeEnv()
@@ -74,7 +74,7 @@ test('compiled preflight does not require a checks snapshot for a bound historic
       '|----|-------|-------|----------|--------|----------|', ''
     ].join('\n'));
 
-    const result = spawnSync(filePath('scripts/test-trusted-host-launcher.sh'), [
+    const result = spawnSync(filePath('bin/internal-cli.sh'), [
       'task-verify', TASK_ID, 'complete-task.preflight', '--format', 'json'
     ], {
       cwd: f.root,

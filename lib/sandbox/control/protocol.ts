@@ -5,6 +5,8 @@ import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
+import { TASK_WORKFLOW_OPERATIONS, validateTaskWorkflowRequest, type TaskWorkflowRequest, type TaskWorkflowOperation } from './task-workflow.ts';
+import type { ProjectionAncestorIdentity } from './task-workflow.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
 export const SANDBOX_CONTROL_MAX_LOGICAL_RECORDS = 1024;
@@ -15,7 +17,7 @@ export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
-export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-finalization', 'task-create', 'codex-controller'] as const;
+export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-finalization', 'task-create', 'codex-controller', 'task-workflow'] as const;
 export type SandboxControlTimingPolicy = Readonly<{
   controlTickMs: number;
   parkedBindingInitialMs: number;
@@ -42,6 +44,8 @@ export type SandboxControlManifestBase = Readonly<{
   authorityEvidence: SandboxAuthorityEvidenceV1;
   branch: string; mode: 'task-bound' | 'branch-only'; taskId: string | null; token: string;
   generation: string; controlRootId: string; channelDir: string; publicStatusDir: string; processingDir: string;
+  taskProjectionDir?: string;
+  taskProjectionTopology?: readonly ProjectionAncestorIdentity[];
 }>;
 export type SandboxControlManifest = SandboxControlManifestBase & Readonly<{ runtimeDir: string }>;
 export type SandboxControlBrokerOwner = ProcessIdentity & Readonly<{
@@ -69,7 +73,12 @@ export type SandboxCodexControllerRequest = RequestBase & Readonly<{
   command: 'open' | 'close' | 'verify';
   args: [];
 }>;
-export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
+export type SandboxTaskWorkflowRequest = RequestBase & Readonly<{
+  family: 'task-workflow';
+  args: [];
+  workflow: TaskWorkflowRequest;
+}>;
+export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest | SandboxTaskWorkflowRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
 export type SandboxControlResultEvidence = Readonly<{
   version: 1;
@@ -286,6 +295,20 @@ export function validateSandboxControlRequest(
     }
     return request as SandboxTaskFinalizationRequest;
   }
+  if (request.family === 'task-workflow') {
+    const expected = ['args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version', 'workflow'];
+    if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
+      || !Array.isArray(request.args) || request.args.length !== 0
+      || request.controllerProcess !== null || request.controllerProof !== null) {
+      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-workflow request schema is invalid');
+    }
+    if (manifest.mode !== 'task-bound' || !manifest.taskId) fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot use task-workflow');
+    const workflow = validateTaskWorkflowRequest(request.workflow);
+    if (workflow.taskId !== manifest.taskId || workflow.generation !== manifest.generation || workflow.id !== request.id) {
+      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-workflow binding does not match the sandbox manifest');
+    }
+    return { ...request, workflow } as SandboxTaskWorkflowRequest;
+  }
   const expected = ['args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
@@ -312,7 +335,7 @@ export function validateSandboxControlRequest(
 }
 
 export function bindSandboxControlTask(request: SandboxControlRequest, taskId: string): string[] {
-  if (request.family === 'task-create' || request.family === 'codex-controller' || request.family === 'task-finalization') {
+  if (request.family === 'task-create' || request.family === 'codex-controller' || request.family === 'task-finalization' || request.family === 'task-workflow') {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', `${request.family} requests do not bind a current task`);
   }
   if (request.args.length === 0) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'command arguments are required');

@@ -111,6 +111,7 @@ function operationKey(request: SandboxControlRequest, output?: string): string |
   if (request.family === 'task-finalization') return request.operation;
   if (request.family === 'task-create') return 'create';
   if (request.family === 'codex-controller') return request.command;
+  if (request.family === 'task-workflow') return request.workflow.operation;
   if (request.family !== 'task-lifecycle' && request.family !== 'task-orchestration') return null;
   if (request.family === 'task-orchestration' && request.args[1] === 'route') {
     if (!output) return 'route';
@@ -539,7 +540,7 @@ function readRecoveryDomain(
   payloadOutput: string | null
 ): RecoveryDomainEvidence {
   if (!operation) return { domain: null, journal: emptyRecoveryJournal() };
-  const taskRef = request.family === 'task-finalization'
+  const taskRef = request.family === 'task-finalization' || request.family === 'task-workflow'
     ? manifest.taskId
     : 'args' in request ? request.args[0] ?? null : manifest.taskId;
   const output = parseRecoveryOutput(payloadOutput);
@@ -625,6 +626,12 @@ function readRecoveryDomain(
   }
   if (operation.family === 'codex-controller') {
     return { domain: controllerDomainEvidence(manifest, manifestPath, request, output), journal: emptyRecoveryJournal() };
+  }
+  if (operation.family === 'task-workflow') {
+    return {
+      domain: { consistent: output?.status === terminalResult.status && output.changed === terminalResult.changed, snapshotValid: true },
+      journal: emptyRecoveryJournal()
+    };
   }
   return { domain: null, journal: emptyRecoveryJournal() };
 }

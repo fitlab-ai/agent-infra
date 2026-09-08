@@ -36,15 +36,46 @@ info "Installing $NPM_PACKAGE via npm ..."
 npm install -g "$NPM_PACKAGE"
 ok "agent-infra installed successfully!"
 
-# The internal task-control launcher uses this host-only secret to distinguish
-# an inherited host launch proof from a value supplied by a sandbox process.
-launcher_auth_dir=${HOME}/.agent-infra
-launcher_auth_path=$launcher_auth_dir/launcher-authority
-if [ ! -f "$launcher_auth_path" ]; then
-  umask 077
-  mkdir -p "$launcher_auth_dir"
-  od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]' > "$launcher_auth_path"
-  chmod 600 "$launcher_auth_path"
+# ---------- host-control service ----------
+# The service is user-scoped and owns the fixed host-control endpoint used by
+# task-control commands. If the platform service manager is unavailable, keep
+# the installation usable for read-only commands while task-control fails
+# closed until the service is started manually.
+if command -v agent-infra-internal >/dev/null 2>&1; then
+  case "$(uname -s)" in
+    Linux)
+      if command -v systemctl >/dev/null 2>&1 && systemctl --user list-unit-files >/dev/null 2>&1; then
+        agent-infra-internal host-control install >/dev/null
+        systemctl --user daemon-reload
+        if systemctl --user enable --now agent-infra-host-control.service >/dev/null 2>&1; then
+          ok "host-control service enabled"
+        else
+          warn "host-control service was installed but could not be started; run: systemctl --user enable --now agent-infra-host-control.service"
+        fi
+      else
+        warn "systemd user services are unavailable; task-control will fail closed until host-control is started manually."
+      fi
+      ;;
+    Darwin)
+      if command -v launchctl >/dev/null 2>&1; then
+        agent-infra-internal host-control install >/dev/null
+        launch_agent="$HOME/Library/LaunchAgents/com.fitlab-ai.agent-infra.host-control.plist"
+        launch_domain="gui/$(id -u)"
+        launchctl bootout "$launch_domain/com.fitlab-ai.agent-infra.host-control" >/dev/null 2>&1 || true
+        if launchctl bootstrap "$launch_domain" "$launch_agent" >/dev/null 2>&1 \
+          && launchctl kickstart -k "$launch_domain/com.fitlab-ai.agent-infra.host-control" >/dev/null 2>&1; then
+          ok "host-control service enabled"
+        else
+          warn "host-control service was installed but could not be started; run: launchctl bootstrap $launch_domain $launch_agent"
+        fi
+      else
+        warn "launchd is unavailable; task-control will fail closed until host-control is started manually."
+      fi
+      ;;
+    *)
+      warn "host-control service is unsupported on this platform; task-control will fail closed."
+      ;;
+  esac
 fi
 
 if [ "$(uname -s)" = "Linux" ] && ! command -v docker >/dev/null 2>&1; then

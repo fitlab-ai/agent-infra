@@ -15,7 +15,6 @@ import {
   internalRouteSelector
 } from './cli-route-inventory.ts';
 import { readSandboxControlIdentitySentinel } from '../sandbox/control/identity-sentinel.ts';
-import { hasTrustedLauncherProof } from './trusted-launcher.ts';
 
 export type TaskOperationDispatcher = 'public' | 'internal';
 export type TaskOperationScope = 'task-bound' | 'non-task' | 'conditional';
@@ -57,6 +56,10 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'sandbox-control', 'execute', 'non-task', 'progress', 'none'),
     descriptor('internal', 'sandbox-control', 'recover', 'conditional', 'recovery', 'delegated'),
     descriptor('internal', 'sandbox-control', 'client', 'conditional', 'progress', 'delegated'),
+    descriptor('internal', 'host-control', 'serve', 'non-task', 'progress', 'none'),
+    descriptor('internal', 'host-control', 'status', 'non-task', 'diagnostic', 'none'),
+    descriptor('internal', 'host-control', 'install', 'non-task', 'progress', 'none'),
+    descriptor('internal', 'host-control', 'uninstall', 'non-task', 'progress', 'none'),
     descriptor('internal', 'agent-client', 'next-steps', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'agent-client', 'model-selection', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'codex-lifecycle', 'preflight', 'non-task', 'diagnostic', 'none'),
@@ -215,7 +218,7 @@ export const TASK_OPERATION_DESCRIPTORS = Object.freeze([
 ]);
 
 export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
-  'task-create', 'task-qualification', 'sandbox-control', 'agent-client', 'codex-lifecycle', 'codex-sandbox-controller',
+  'task-create', 'task-qualification', 'sandbox-control', 'host-control', 'agent-client', 'codex-lifecycle', 'codex-sandbox-controller',
   'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-security', 'platform-metadata', 'platform-context',
   'platform-comment', 'platform-issue', 'platform-pr', 'platform-pr-review', 'pr-review-grade',
   'platform-checks', 'task-context', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',
@@ -339,10 +342,12 @@ export function resolveSandboxControlTransport(
   const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
     || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
     || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
-  const trustedHostDirect = !hasAnyMarker && hasTrustedLauncherProof(env);
+  const fixedStatusMounted = !env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT
+    && path.isAbsolute(fixedStatusDir) && nativeDirectoryExists(fixedStatusDir);
+  const trustedHostDirect = !hasAnyMarker && !fixedStatusMounted;
   const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && nativeDirectoryExists(configuredStatusDir)
     ? configuredStatusDir
-    : !trustedHostDirect && path.isAbsolute(fixedStatusDir) && nativeDirectoryExists(fixedStatusDir) ? fixedStatusDir : null;
+    : fixedStatusMounted ? fixedStatusDir : null;
   const statusMounted = statusDir !== null;
   const hasCompleteConfig = TASK_CONTROL_CONFIG_KEYS.every((key) => Boolean(env[key]));
   const taskBound = Boolean(env.AGENT_INFRA_TASK_ID);

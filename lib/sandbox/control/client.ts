@@ -12,7 +12,8 @@ import {
   type SandboxTaskCreateRequest,
   type SandboxTaskCommandRequest,
   type SandboxTaskFinalizationRequest,
-  type SandboxCodexControllerRequest
+  type SandboxCodexControllerRequest,
+  type SandboxTaskWorkflowRequest
 } from './protocol.ts';
 import type {
   CodexControllerLeaseProofV1,
@@ -24,6 +25,7 @@ import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts'
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
 import { readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
+import type { TaskWorkflowRequest } from './task-workflow.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
 
@@ -183,6 +185,7 @@ function preflight(
 function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAccessEffect | null {
   if (request.family === 'task-lifecycle' || request.family === 'task-finalization') return 'progress';
   if (request.family === 'task-orchestration') return request.args[1] === 'status' ? 'diagnostic' : 'progress';
+  if (request.family === 'task-workflow') return request.workflow.operation === 'artifact-inspect' || request.workflow.operation === 'decision-next-id' ? 'diagnostic' : 'progress';
   return null;
 }
 
@@ -240,13 +243,13 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   const identityPath = path.join(statusDir, 'identity.json');
   if (fs.existsSync(statusDir)) {
     const identity = readSandboxControlIdentitySentinel(statusDir);
-    const requestTaskId = 'args' in request ? request.args[0] ?? null : null;
+    const requestTaskId = request.family === 'task-workflow' ? request.workflow.taskId : 'args' in request ? request.args[0] ?? null : null;
     if (identity.mode === 'task-bound'
       && ((process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_TASK_ID !== identity.taskId)
         || (requestTaskId && requestTaskId !== identity.taskId))) {
       clientError('SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH', 'request task does not match the sandbox identity', false);
     }
-    if (identity.mode === 'branch-only' && request.family === 'task-finalization') {
+    if (identity.mode === 'branch-only' && (request.family === 'task-finalization' || request.family === 'task-workflow')) {
       clientError('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot finalize tasks', false);
     }
   }
@@ -407,7 +410,7 @@ export function requestSandboxControl(params: Readonly<{
   token?: string; generation?: string; timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isSandboxControlFamily(params.family)) clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' is not allowed`, false);
-  if (params.family === 'task-create' || params.family === 'codex-controller' || params.family === 'task-finalization') {
+  if (params.family === 'task-create' || params.family === 'codex-controller' || params.family === 'task-finalization' || params.family === 'task-workflow') {
     clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' requires a typed request`, false);
   }
   const auth = authority(params);
@@ -472,6 +475,31 @@ export function requestSandboxTaskFinalization(params: Readonly<{
     args: [],
     controllerProcess: null,
     controllerProof: null
+  };
+  return exchangeSandboxControl(request, params);
+}
+
+export function requestSandboxTaskWorkflow(params: Readonly<{
+  workflow: TaskWorkflowRequest;
+  channelDir?: string;
+  statusDir?: string;
+  token?: string;
+  generation?: string;
+  timeoutMs?: number;
+}>): SandboxControlResponse {
+  const auth = authority(params);
+  const issuedAt = Date.now();
+  const request: SandboxTaskWorkflowRequest = {
+    version: 3,
+    id: params.workflow.id,
+    ...auth,
+    issuedAt,
+    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
+    family: 'task-workflow',
+    args: [],
+    controllerProcess: null,
+    controllerProof: null,
+    workflow: params.workflow
   };
   return exchangeSandboxControl(request, params);
 }

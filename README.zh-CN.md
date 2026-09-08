@@ -92,6 +92,14 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 - **AI 辅助升级**：模板升级时可合并变更，同时尽量保留项目侧定制
 - **可审计的过程数据归档**：把本地任务与 GitHub 证据保存为只追加、可校验的快照
 
+### 沙箱控制边界
+
+任务沙箱的生命周期和工作流写操作由宿主专用控制服务执行。Linux 固定端点为 `/run/user/<uid>/agent-infra/host-control.sock`；macOS 固定端点为 `/Users/<login>/Library/Application Support/agent-infra/run/host-control.sock`，路径根据账户身份解析，不读取 `HOME` 或 `TMPDIR`。服务目录权限为 `0700`，socket 权限为 `0600`。端点或沙箱身份不可用时，task-control 命令会失败关闭。
+
+Shell 安装脚本会在 Linux 通过 systemd 用户单元、在 macOS 通过 launchd 用户代理创建并启动该服务。手动 npm 安装后，可运行 `agent-infra-internal host-control install` 创建服务配置，再启用对应的用户服务；`agent-infra-internal host-control status` 可检查端点健康状态。整个服务不需要 root 或 setuid。
+
+任务沙箱内的 task 目录是可写投影。产物命令只接受类型化 workflow 操作和规范的产物 basename。宿主使用 `O_NOFOLLOW` 打开候选文件，通过同一个文件描述符读取并计算摘要，检查可观察的元数据变化，再把已校验字节原子落入权威 task 目录。投影的受保护拓扑发生变化时会失败关闭，投影修改不会变成任务状态。
+
 ## 快速开始
 
 ### 1. 安装 agent-infra
