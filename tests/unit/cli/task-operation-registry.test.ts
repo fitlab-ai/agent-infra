@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
@@ -302,6 +303,36 @@ test('fixed status mount fails closed after all control environment variables ar
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('tampered native status probe fails closed instead of selecting direct-host', () => {
+  const script = [
+    "const realBinding = process.binding;",
+    "process.binding = (name) => name === 'fs' ? { internalModuleStat: () => -2 } : realBinding(name);",
+    "const { resolveSandboxControlTransport } = await import('./lib/internal/task-operation-registry.ts');",
+    "console.log(JSON.stringify(resolveSandboxControlTransport({}, { statusMountPath: '/run/agent-infra/control-status' })));"
+  ].join(' ');
+  const result = spawnSync(process.execPath, ['--experimental-strip-types', '--eval', script], {
+    cwd: path.resolve('.'),
+    env: {
+      ...process.env,
+      AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: undefined,
+      AGENT_INFRA_TASK_ID: undefined,
+      AGENT_INFRA_CONTROL_TOKEN: undefined,
+      AGENT_INFRA_CONTROL_GENERATION: undefined,
+      AGENT_INFRA_CONTROL_ROOT_ID: undefined,
+      AGENT_INFRA_CONTROL_DIR: undefined,
+      AGENT_INFRA_CONTROL_STATUS_DIR: undefined,
+      AGENT_INFRA_RUNTIME_DIR: undefined,
+      AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
+      AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined
+    },
+    encoding: 'utf8'
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_UNAVAILABLE'
+  });
 });
 
 test('ordinary environment variables cannot select the production status mount', () => {

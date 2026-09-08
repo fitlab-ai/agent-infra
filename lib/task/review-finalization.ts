@@ -533,6 +533,10 @@ function prepareReviewSummaryCandidate(
       stage,
       artifact: request.artifact,
       stageStatus,
+      artifactSha256: sha256Content(transformed.content),
+      semanticDigest: canonicalSemanticDigest(transformed.content),
+      repairable: false,
+      operation: null,
       operations,
       error: null
     },

@@ -304,7 +304,9 @@ const TASK_CONTROL_CONFIG_KEYS = [
 ] as const;
 export const SANDBOX_CONTROL_STATUS_MOUNT = '/run/agent-infra/control-status';
 
-function nativeDirectoryExists(candidate: string): boolean {
+type NativeDirectoryProbe = 'present' | 'absent' | 'unknown';
+
+function nativeDirectoryProbe(candidate: string): NativeDirectoryProbe {
   try {
     // The fixed mount is a trust anchor. Do not use a mutable node:fs export:
     // a preload must not turn a mounted sandbox into the direct-host path by
@@ -312,9 +314,13 @@ function nativeDirectoryExists(candidate: string): boolean {
     const binding = (process as unknown as {
       binding(name: string): { internalModuleStat(filePath: string): number }
     }).binding('fs');
-    return binding.internalModuleStat(candidate) === 1;
+    if (!Function.prototype.toString.call(binding.internalModuleStat).includes('[native code]')) return 'unknown';
+    const result = binding.internalModuleStat(candidate);
+    if (result === 1) return 'present';
+    if (result === -2) return 'absent';
+    return 'unknown';
   } catch {
-    return false;
+    return 'unknown';
   }
 }
 
@@ -342,10 +348,18 @@ export function resolveSandboxControlTransport(
   const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
     || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
     || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
-  const fixedStatusMounted = !env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT
-    && path.isAbsolute(fixedStatusDir) && nativeDirectoryExists(fixedStatusDir);
-  const trustedHostDirect = !hasAnyMarker && !fixedStatusMounted;
-  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && nativeDirectoryExists(configuredStatusDir)
+  const fixedStatusProbe = !env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT && path.isAbsolute(fixedStatusDir)
+    ? nativeDirectoryProbe(fixedStatusDir) : 'absent';
+  if (fixedStatusProbe === 'unknown') {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_UNAVAILABLE' };
+  }
+  const fixedStatusMounted = fixedStatusProbe === 'present';
+  const configuredStatusProbe = configuredStatusDir && path.isAbsolute(configuredStatusDir)
+    ? nativeDirectoryProbe(configuredStatusDir) : 'absent';
+  if (configuredStatusProbe === 'unknown') {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_UNAVAILABLE' };
+  }
+  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && configuredStatusProbe === 'present'
     ? configuredStatusDir
     : fixedStatusMounted ? fixedStatusDir : null;
   const statusMounted = statusDir !== null;

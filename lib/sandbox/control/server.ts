@@ -698,9 +698,10 @@ function terminalMatchesEvidence(
   evidence: ReturnType<typeof readSandboxControlResultEvidence>,
   payload: ReturnType<typeof readSandboxControlPayload> | null,
   payloadInvalid: boolean,
-  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult> | null
 ): { valid: boolean; payloadReferenced: boolean } {
   if (request.family === 'task-finalization' && evidence.exitCode === 0) {
+    if (!terminalResult) return { valid: false, payloadReferenced: false };
     const expected = recoveryResponse(manifest, manifestPath, request, evidence, payload, terminalResult);
     return {
       valid: expected !== null && JSON.stringify(response) === JSON.stringify(expected),
@@ -896,6 +897,7 @@ function recoverProcessing(manifest: SandboxControlManifest, manifestPath: strin
       let payloadInvalid = false;
       let request: SandboxControlRequest | null = null;
       let existingTerminalResponse: SandboxControlResponse | null = null;
+      let terminalReconciled = false;
       try {
         const rawRequest = JSON.parse(fs.readFileSync(path.join(processingDirectory, 'request.json'), 'utf8')) as Record<string, unknown>;
         request = validateSandboxControlRequest(rawRequest, manifest, {
@@ -981,26 +983,43 @@ function recoverProcessing(manifest: SandboxControlManifest, manifestPath: strin
         }
       }
       if (terminal && (!request || !resultEvidence)) continue;
-      if (!terminalResult) {
-        if (terminal) continue;
-        if (!brokerOwns()) return false;
-        if (!resultEvidence || !request || payloadInvalid) continue;
-        writeSandboxControlResponse(manifest, unknown(entry.name));
-        continue;
-      }
       if (terminal && request && resultEvidence) {
-        const reconciliation = terminalMatchesEvidence(manifest, manifestPath, request, existingTerminalResponse!, resultEvidence, payload, payloadInvalid, terminalResult);
+        if (!terminalResult && request.family !== 'task-create') continue;
+        const reconciliation = terminalMatchesEvidence(
+          manifest,
+          manifestPath,
+          request,
+          existingTerminalResponse!,
+          resultEvidence,
+          payload,
+          payloadInvalid,
+          terminalResult
+        );
         if (!reconciliation.valid) continue;
+        terminalReconciled = true;
         payloadReferenced = reconciliation.payloadReferenced;
         if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
           const view = publishFinalizationTaskView(manifest, broker, request.id, 'starting', null, null);
           if (view.state === 'unknown') continue;
         }
       }
+      if (!terminalResult && !terminalReconciled) {
+        if (terminal) continue;
+        if (!brokerOwns()) return false;
+        if (!resultEvidence || !request || payloadInvalid) continue;
+        if (request.family === 'task-create' && resultEvidence.exitCode === 0 && payload === null) {
+          writeSandboxControlResponse(manifest, genericRecoveryResponse(request, resultEvidence.exitCode, null));
+          terminalReconciled = true;
+          terminal = true;
+        } else {
+          writeSandboxControlResponse(manifest, unknown(entry.name));
+          continue;
+        }
+      }
       if (!terminal) {
         if (!brokerOwns()) return false;
         if (!resultEvidence || !request || payloadInvalid) continue;
-        const recovered = recoveryResponse(manifest, manifestPath, request, resultEvidence, payload, terminalResult);
+        const recovered = recoveryResponse(manifest, manifestPath, request, resultEvidence, payload, terminalResult!);
         if (!recovered) continue;
         if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
           const view = publishFinalizationTaskView(manifest, broker, request.id, 'starting', null, null);

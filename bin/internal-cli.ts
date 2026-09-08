@@ -8,7 +8,6 @@ import {
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
 import { INTERNAL_HANDLER_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
-import { hasTrustedLauncherProof } from '../lib/internal/trusted-launcher.ts';
 import {
   hostControlRequestForCommand,
   requestHostControl,
@@ -113,12 +112,22 @@ if (taskControlCommand && !hostWorker) {
     taskControlTransportFailure(reasonCode, reasonCode.startsWith('SANDBOX_CONTROL_IDENTITY_') ? reasonCode : undefined);
   }
   if (transport.kind === 'direct-host') {
-    if (!hasTrustedLauncherProof()) {
-      taskControlTransportFailure('task-control commands must start through the trusted launcher', 'SANDBOX_CONTROL_LAUNCHER_REQUIRED');
-    }
     await runHostControlCommand(command as HostControlCommand, process.argv.slice(3));
     hostControlRouted = true;
   }
+}
+
+let taskWorkflowBrokerClient = false;
+if (taskWorkflowCommand && !hostWorker) {
+  const transport = resolveSandboxControlTransport(process.env);
+  if (transport.kind === 'fail-closed') {
+    taskControlTransportFailure(transport.reasonCode ?? 'SANDBOX_CONTROL_TRANSPORT_INVALID');
+  }
+  if (transport.kind === 'direct-host') {
+    await runHostControlCommand(command as HostControlCommand, process.argv.slice(3));
+    hostControlRouted = true;
+  }
+  taskWorkflowBrokerClient = transport.kind === 'broker-client';
 }
 
 if (!hostControlRouted && !taskViewGuardFailed && taskControlCommand) {

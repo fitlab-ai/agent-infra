@@ -9,6 +9,7 @@ import test from 'node:test';
 import { canonicalTaskCreateCandidate, validateTaskCreateCandidate } from '../../../lib/task/create.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 
 const internalCli = path.resolve('bin/internal-cli.ts');
 const hostEnvironment = Object.fromEntries(
@@ -87,6 +88,7 @@ async function runControlledTaskCreate(
   const responsesDir = path.join(channelDir, 'responses');
   const statusDir = path.join(root, 'status');
   const generation = 'task-create-test-generation';
+  const controlRootId = 'a'.repeat(96);
   fs.writeFileSync(input, JSON.stringify(candidate()));
   fs.mkdirSync(requestsDir, { recursive: true });
   fs.mkdirSync(responsesDir);
@@ -101,6 +103,13 @@ async function runControlledTaskCreate(
     updatedAt: Date.now(),
     taskView: { state: 'not-applicable', taskId: null, observedSource: null, receipt: null, reasonCode: null }
   })}\n`);
+  writeSandboxControlIdentitySentinel(statusDir, {
+    version: 1,
+    mode: 'branch-only',
+    taskId: null,
+    generation,
+    controlRootId
+  });
   const child = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
     cwd: root,
     env: {

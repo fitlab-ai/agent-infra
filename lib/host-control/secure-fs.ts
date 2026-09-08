@@ -45,7 +45,7 @@ function assertNoSymlinkAncestors(candidate: string): void {
 
 export async function readStableFile(
   candidate: string,
-  options: Readonly<{ maxBytes: number; expectedSha256?: string }> 
+  options: Readonly<{ maxBytes: number; expectedSha256?: string }>
 ): Promise<StableFile> {
   if (!path.isAbsolute(candidate)) {
     conflict('candidate path must be absolute and terminal');

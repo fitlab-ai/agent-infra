@@ -199,10 +199,10 @@ function hostPreflightFailure(response: HostControlResponse): Readonly<{ code: s
   }
   const result = response.result;
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return null;
+    return { code: 'SANDBOX_CONTROL_HOST_AUTHORITY_FAILED', message: 'host-control worker result is missing or malformed' };
   }
   const worker = result as { exitCode?: unknown; stdout?: unknown };
-  if (worker.exitCode !== undefined && worker.exitCode !== 0) {
+  if (worker.exitCode !== 0 || typeof worker.stdout !== 'string') {
     let domain: Record<string, unknown> | null = null;
     if (typeof worker.stdout === 'string') {
       try {
