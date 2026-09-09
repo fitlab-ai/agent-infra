@@ -511,6 +511,30 @@ test("sandbox rm --unbound protects task-bound rows with missing task records wh
   }
 });
 
+test("sandbox rm --unbound rejects legacy path overlap with a protected orphan task-bound row", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-orphan-path-collision-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-orphan", "feature/orphan", "demo", "task-bound", "TASK-20260101-000099"),
+        sandboxRow("sb-branch-only", "feature-orphan")
+      ].join("\n")
+    });
+    const legacyShellConfig = path.join(tmpDir, ".agent-infra", "config", "demo", "feature-orphan");
+    fs.mkdirSync(legacyShellConfig, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED/);
+    assert.equal(fs.existsSync(legacyShellConfig), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound fails closed when a discovered task-bound container has a noncanonical name", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-noncanonical-task-container-"));
   const taskId = "TASK-20260101-000002";

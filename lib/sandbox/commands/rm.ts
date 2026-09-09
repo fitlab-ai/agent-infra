@@ -1236,20 +1236,34 @@ function preflightRmTarget(
   }
 }
 
-function assertCleanupGroupPathsDoNotOverlap(groups: readonly CleanupGroup[]): void {
+type CleanupPathOwner = Readonly<{
+  branch: string;
+  managedPathCandidates: readonly string[];
+}>;
+
+function assertCleanupGroupPathsDoNotOverlap(
+  groups: readonly CleanupGroup[],
+  protectedTargets: readonly CleanupPathOwner[] = []
+): void {
   const owners = new Map<string, string>();
-  for (const group of groups) {
-    for (const candidate of group.target.managedPathCandidates ?? []) {
+  const addOwner = (branch: string, candidates: readonly string[]): void => {
+    for (const candidate of candidates) {
       const key = sandboxManagedPathKey(candidate);
       const existingBranch = owners.get(key);
-      if (existingBranch && existingBranch !== group.cleanupTarget.branch) {
+      if (existingBranch && existingBranch !== branch) {
         throw new Error(
           `SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED: managed path '${candidate}' is shared by branches `
-          + `${JSON.stringify(existingBranch)} and ${JSON.stringify(group.cleanupTarget.branch)}`
+          + `${JSON.stringify(existingBranch)} and ${JSON.stringify(branch)}`
         );
       }
-      owners.set(key, group.cleanupTarget.branch);
+      owners.set(key, branch);
     }
+  };
+  for (const group of groups) {
+    addOwner(group.cleanupTarget.branch, group.target.managedPathCandidates ?? []);
+  }
+  for (const target of protectedTargets) {
+    addOwner(target.branch, target.managedPathCandidates);
   }
 }
 
@@ -2249,7 +2263,16 @@ async function rmUnboundCore(
     preflightRmTarget(config, target);
     return { candidates: groupCandidates, cleanupTarget, target };
   });
-  assertCleanupGroupPathsDoNotOverlap(groups);
+  const protectedTargets = protectedCandidates.map(({ row, branch }) => {
+    const target = resolveRmTarget(config, tools, {
+      requestedRef: branch,
+      branch,
+      workspace: { mode: 'task-bound', taskId: row.taskId! },
+      taskState: 'completed'
+    }, { discoveredContainers: [row.name] });
+    return { branch, managedPathCandidates: target.managedPathCandidates ?? [] };
+  });
+  assertCleanupGroupPathsDoNotOverlap(groups, protectedTargets);
 
   const removableGroups = groups.filter(({ cleanupTarget }) =>
     cleanupTarget.taskState === 'completed' || cleanupTarget.taskState === 'branch-only'
