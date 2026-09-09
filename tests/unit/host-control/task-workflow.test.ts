@@ -13,6 +13,7 @@ import {
   workflowArguments,
   type TaskProjectionManifest
 } from '../../../lib/sandbox/control/task-workflow.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 function testRoot(prefix: string): string {
   return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -76,7 +77,7 @@ test('artifact landing refuses an unverified projection topology before reading'
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('artifact landing verifies, hashes, and atomically copies the same projection bytes', async () => {
+test('artifact landing verifies, hashes, and atomically copies the same projection bytes', onPlatforms('linux', 'darwin'), async () => {
   const root = testRoot('task-workflow-landing-');
   const projection = path.join(root, 'projection');
   const authoritative = path.join(root, 'authoritative');

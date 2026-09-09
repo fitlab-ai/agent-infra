@@ -11,6 +11,7 @@ import {
   readSandboxControlTransition,
   writeSandboxControlTransition
 } from '../../../lib/sandbox/control/audit.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 function fixture(): { root: string; manifest: SandboxControlManifest } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-audit-'));
@@ -27,7 +28,7 @@ function fixture(): { root: string; manifest: SandboxControlManifest } {
   return { root, manifest };
 }
 
-test('audit context filters sensitive fields and transitions are immutable', () => {
+test('audit context filters sensitive fields and transitions are immutable', onPlatforms('linux', 'darwin'), () => {
   const { root, manifest } = fixture();
   const requestId = 'a'.repeat(32);
   try {
@@ -54,7 +55,7 @@ test('audit context filters sensitive fields and transitions are immutable', () 
   }
 });
 
-test('audit rotation is deferred while a request has no terminal transition', () => {
+test('audit rotation is deferred while a request has no terminal transition', onPlatforms('linux', 'darwin'), () => {
   const { root, manifest } = fixture();
   const requestId = 'b'.repeat(32);
   try {

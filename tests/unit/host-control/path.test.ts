@@ -15,6 +15,7 @@ import {
   removeHostControlWorkerToken,
   resolveHostControlEndpoint
 } from '../../../lib/host-control/path.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 test('host control paths are derived from the platform identity, never HOME or TMPDIR', () => {
   assert.equal(
@@ -45,7 +46,7 @@ test('host control permissions are explicit constants', () => {
   assert.equal(HOST_CONTROL_WORKER_TOKEN_MODE, 0o600);
 });
 
-test('host control worker token is owner-only, stable while running, and removed on close', () => {
+test('host control worker token is owner-only, stable while running, and removed on close', onPlatforms('linux', 'darwin'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-control-token-'));
   const endpoint = path.join(root, 'run', 'host-control.sock');
   fs.mkdirSync(path.dirname(endpoint), { recursive: true, mode: 0o700 });

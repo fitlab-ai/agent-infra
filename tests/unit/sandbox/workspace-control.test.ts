@@ -63,6 +63,7 @@ import {
   readCodexControllerRegistration,
   resolveCodexControllerBinding
 } from '../../../lib/sandbox/control/controller-registration.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 function testRoot(prefix: string): string {
   return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -640,7 +641,7 @@ test('task workflow skips authoritative landing when host-control preflight is u
   }
 });
 
-test('task workflow treats a completed host transport with a nonzero domain result as a failure before landing', async () => {
+test('task workflow treats a completed host transport with a nonzero domain result as a failure before landing', onPlatforms('linux', 'darwin'), async () => {
   const root = testRoot('sandbox-workflow-domain-failure-');
   const taskId = 'TASK-20260101-000001';
   const projectionRoot = path.join(root, 'projection');
@@ -711,7 +712,7 @@ test('task workflow treats a completed host transport with a nonzero domain resu
   }
 });
 
-test('task workflow rejects a completed host transport without a worker result before landing', async () => {
+test('task workflow rejects a completed host transport without a worker result before landing', onPlatforms('linux', 'darwin'), async () => {
   const root = testRoot('sandbox-workflow-malformed-preflight-');
   const taskId = 'TASK-20260101-000001';
   const projectionRoot = path.join(root, 'projection');
@@ -774,7 +775,7 @@ test('task workflow rejects a completed host transport without a worker result b
   }
 });
 
-test('review workflow preflight inspects the review artifact family', async () => {
+test('review workflow preflight inspects the review artifact family', onPlatforms('linux', 'darwin'), async () => {
   const root = testRoot('sandbox-review-workflow-preflight-');
   const taskId = 'TASK-20260101-000001';
   const projectionRoot = path.join(root, 'projection');
@@ -1221,7 +1222,7 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
   }
 });
 
-test('control broker ownership is acquired exclusively', async () => {
+test('control broker ownership is acquired exclusively', onPlatforms('linux', 'darwin'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-'));
   fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
   const git = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();

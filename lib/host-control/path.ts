@@ -39,7 +39,7 @@ function validUsername(username: string | undefined): string {
 export function resolveHostControlEndpoint(options: HostControlEndpointOptions = {}): string {
   const platform = options.platform ?? currentPlatform();
   if (platform === 'linux') return `/run/user/${validUid(options.uid)}/agent-infra/host-control.sock`;
-  if (platform === 'darwin') return path.join(
+  if (platform === 'darwin') return path.posix.join(
     '/Users',
     validUsername(options.username),
     'Library',

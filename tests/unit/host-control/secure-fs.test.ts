@@ -9,6 +9,7 @@ import {
   readStableFile,
   writeAtomicFile
 } from '../../../lib/host-control/secure-fs.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 function testRoot(prefix: string): string {
   return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -25,7 +26,7 @@ test('readStableFile binds digest and validation to one descriptor buffer', asyn
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('readStableFile rejects a symlink terminal', async () => {
+test('readStableFile rejects a symlink terminal', onPlatforms('linux', 'darwin'), async () => {
   const root = testRoot('host-control-secure-fs-link-');
   const target = path.join(root, 'target.md');
   const candidate = path.join(root, 'code.md');
@@ -37,7 +38,7 @@ test('readStableFile rejects a symlink terminal', async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('writeAtomicFile uses an exclusive temporary file and preserves exact bytes', async () => {
+test('writeAtomicFile uses an exclusive temporary file and preserves exact bytes', onPlatforms('linux', 'darwin'), async () => {
   const root = testRoot('host-control-secure-fs-write-');
   const target = path.join(root, 'artifact.md');
   await writeAtomicFile(target, Buffer.from('safe\n'));

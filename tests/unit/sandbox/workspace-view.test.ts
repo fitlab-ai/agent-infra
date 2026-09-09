@@ -13,7 +13,7 @@ import {
   sandboxWorkspaceViewStatePaths
 } from '../../../lib/sandbox/workspace-view.ts';
 import { acquireSandboxControlReplacement } from '../../../lib/sandbox/control/lifecycle.ts';
-import { assertModeBits } from '../../helpers.ts';
+import { assertModeBits, onPlatforms } from '../../helpers.ts';
 
 test('workspace view state paths use the isolated runtime state allowlist', () => {
   assert.deepEqual(sandboxWorkspaceViewStatePaths('/views/current'), [
@@ -127,7 +127,7 @@ test('task-bound writable source is a host-owned projection copy', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('control materialization rotates token and generation and creates isolated status paths', () => {
+test('control materialization rotates token and generation and creates isolated status paths', onPlatforms('linux', 'darwin'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-view-'));
   const repoRoot = path.join(root, 'repo');
   fs.mkdirSync(repoRoot);

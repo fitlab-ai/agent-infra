@@ -25,6 +25,7 @@ import {
 } from '../../../lib/internal/cli-route-inventory.ts';
 import type { SandboxTaskView } from '../../../lib/sandbox/control/task-view.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 const staleView: SandboxTaskView = {
   state: 'finalized-stale',
@@ -264,7 +265,7 @@ test('host-direct routes remain unchanged without task-bound markers', () => {
   assert.doesNotThrow(() => guardTaskOperation('public', 'decide', ['--task', '11'], { env: {} }));
 });
 
-test('mounted sandbox control requires a matching identity sentinel', () => {
+test('mounted sandbox control requires a matching identity sentinel', onPlatforms('linux', 'darwin'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-identity-'));
   const statusDir = path.join(root, 'status');
   const generation = 'registry-generation';
