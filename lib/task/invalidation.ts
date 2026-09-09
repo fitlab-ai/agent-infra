@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { findSectionRange, parseTable } from './sections.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 
 const INVALIDATION_HEADINGS = ['产物失效记录', 'Artifact Invalidation'] as const;
 const OPERATION_COLUMNS = [
@@ -84,58 +86,14 @@ function createInvalidationOperation(
   };
 }
 
-function lineCells(line: string): string[] | null {
-  const first = line.indexOf('|');
-  const last = line.lastIndexOf('|');
-  if (first < 0 || first === last || line.slice(0, first).trim() || line.slice(last + 1).trim()) return null;
-  const inner = line.slice(first + 1, last);
-  const cells: string[] = [];
-  let start = 0;
-  let escaped = false;
-  for (let index = 0; index < inner.length; index += 1) {
-    const char = inner[index]!;
-    if (char === '|' && !escaped) {
-      cells.push(inner.slice(start, index));
-      start = index + 1;
-    }
-    escaped = char === '\\' && !escaped;
-    if (char !== '\\') escaped = false;
+function parseInvalidationTable(body: string, heading: string, columns: readonly string[]) {
+  const section = findSectionRange(body, [heading], 3);
+  const lines = scanVisibleMarkdown(body).lines.filter((line) => line.text.trim());
+  const table = parseTable(lines.map((line) => line.text).join('\n'), { sectionAliases: [heading], columns });
+  if (!section || !table || lines.filter((line) => line.start >= section.bodyStart && line.start < section.end).length !== table.rows.length + 2) {
+    throw new Error(`invalidation ${heading} section must contain only its canonical table`);
   }
-  cells.push(inner.slice(start));
-  return cells.map((cell) => cell.replace(/\\([\\|])/g, '$1').trim());
-}
-
-function isSeparator(cells: readonly string[], count: number): boolean {
-  return cells.length === count && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
-}
-
-function sectionBody(content: string): string | null {
-  const heading = INVALIDATION_HEADINGS.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const match = new RegExp(`^##\\s+(${heading})\\s*$`, 'm').exec(content);
-  if (!match) return null;
-  const start = (match.index ?? 0) + match[0].length;
-  const rest = content.slice(start);
-  const end = rest.search(/^##\s+/m);
-  return rest.slice(0, end < 0 ? rest.length : end);
-}
-
-function parseTable(body: string, heading: string, columns: readonly string[]): Record<string, string>[] | null | false {
-  const marker = new RegExp(`^###\\s+${heading}\\s*$`, 'm').exec(body);
-  if (!marker) return null;
-  const start = (marker.index ?? 0) + marker[0].length;
-  const rest = body.slice(start);
-  const end = rest.search(/^###\s+/m);
-  const lines = rest.slice(0, end < 0 ? rest.length : end).split(/\r?\n/).filter((line) => line.trim());
-  const header = lines.length > 0 ? lineCells(lines[0]!) : null;
-  const separator = lines.length > 1 ? lineCells(lines[1]!) : null;
-  if (!header || !separator || header.length !== columns.length || !header.every((value, index) => value === columns[index]) || !isSeparator(separator, columns.length)) return false;
-  const rows: Record<string, string>[] = [];
-  for (const line of lines.slice(2)) {
-    const cells = lineCells(line);
-    if (!cells || cells.length !== columns.length) return false;
-    rows.push(Object.fromEntries(columns.map((column, index) => [column, cells[index]!])));
-  }
-  return rows;
+  return table.rows;
 }
 
 function required(value: string, field: string): string {
@@ -155,15 +113,13 @@ function numberValue(value: string, field: string, allowZero = true): number {
 }
 
 function parseInvalidationDocument(content: string): InvalidationParseResult {
-  const body = sectionBody(content);
-  if (body === null) return { ok: true, present: false, document: { operations: [], targets: [] } };
+  const section = findSectionRange(content, INVALIDATION_HEADINGS);
+  if (section === null) return { ok: true, present: false, document: { operations: [], targets: [] } };
   try {
-    const operationRows = parseTable(body, 'Operations', OPERATION_COLUMNS);
-    const targetRows = parseTable(body, 'Targets', TARGET_COLUMNS);
-    if (operationRows === null || targetRows === null || operationRows === false || targetRows === false) {
-      return invalid('invalidation section must contain Operations and Targets tables');
-    }
-    const operations = operationRows.map((row) => ({
+    const body = content.slice(section.bodyStart, section.end);
+    const operationRows = parseInvalidationTable(body, 'Operations', OPERATION_COLUMNS);
+    const targetRows = parseInvalidationTable(body, 'Targets', TARGET_COLUMNS);
+    const operations = operationRows.map(({ values: row }) => ({
       operationId: required(row.operation_id!, 'operation_id'), sourceFamily: required(row.source_family!, 'source_family'),
       sourceArtifact: required(row.source_artifact!, 'source_artifact'), sourceRound: numberValue(row.source_round!, 'source_round', false),
       sourceSha256: required(row.source_sha256!, 'source_sha256'), status: status(row.status!, 'operation status'),
@@ -171,7 +127,7 @@ function parseInvalidationDocument(content: string): InvalidationParseResult {
       createdAt: required(row.created_at!, 'created_at'), updatedAt: required(row.updated_at!, 'updated_at'),
       completedAt: row.completed_at ?? '', error: row.error ?? ''
     } satisfies InvalidationOperation));
-    const targets = targetRows.map((row) => ({
+    const targets = targetRows.map(({ values: row }) => ({
       targetId: required(row.target_id!, 'target_id'), operationId: required(row.operation_id!, 'operation_id'),
       targetKind: row.target_kind as InvalidationTargetKind, targetFamily: required(row.target_family!, 'target_family'),
       targetArtifact: required(row.target_artifact!, 'target_artifact'), targetRound: numberValue(row.target_round!, 'target_round', false),
@@ -297,11 +253,11 @@ function isArtifactInvalidated(document: InvalidationDocument, family: string, a
 }
 
 function invalidationMutation(content: string, document: InvalidationDocument) {
-  const existing = sectionBody(content) !== null;
+  const existing = findSectionRange(content, INVALIDATION_HEADINGS);
   return {
     kind: 'section' as const,
     aliases: INVALIDATION_HEADINGS,
-    heading: existing && /^##\s+Artifact Invalidation\s*$/m.test(content) ? INVALIDATION_HEADINGS[1] : INVALIDATION_HEADINGS[0],
+    heading: existing?.heading ?? INVALIDATION_HEADINGS[0],
     body: renderInvalidation(document)
   };
 }

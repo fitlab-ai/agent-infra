@@ -1,5 +1,4 @@
-const HEADING_RE = /^##\s+(活动日志|Activity Log)\s*$/;
-const NEXT_H2_RE = /^##\s/;
+import { scanVisibleMarkdown } from './markdown.ts';
 const ENTRY_RE = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) — \*\*(.+?)\*\* by (.+?) — (.*)$/;
 const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 const ABORTED_SUFFIX_RE = /\s*\[aborted\]\s*$/;
@@ -17,24 +16,32 @@ function parseActivityLog(content: string): { sectionFound: boolean; entries: Lo
   return section ? { sectionFound: true, entries: section.entries } : { sectionFound: false, entries: [] };
 }
 
+/** Returns source-order entries and malformed bullets without applying display or gate policy. */
+function inspectActivityLog(content: string): { section: ActivityLogSection | null; invalidEntries: string[] } {
+  const scanned = scanVisibleMarkdown(content);
+  const headings = scanned.headings.filter((heading) => heading.level === 2);
+  const matches = headings.filter((heading) => heading.text === '活动日志' || heading.text === 'Activity Log');
+  if (matches.length !== 1) return { section: null, invalidEntries: [] };
+  const heading = matches[0]!;
+  const end = headings.find((candidate) => candidate.start > heading.start)?.start ?? content.length;
+  const entries: LogEntry[] = [];
+  const invalidEntries: string[] = [];
+  for (const line of scanned.lines) {
+    if (line.start <= heading.end || line.start >= end) continue;
+    const text = line.text.trimStart();
+    const match = ENTRY_RE.exec(text);
+    if (match) entries.push({ time: match[1]!, step: match[2]!, agent: match[3]!, note: match[4]! });
+    else if (text.startsWith('- ')) invalidEntries.push(text);
+  }
+  const body = content.slice(heading.end + 1, end).replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, '');
+  return { section: { heading: heading.text, body, entries }, invalidEntries };
+}
+
 function locateActivityLog(content: string): ActivityLogSection | null {
-  const lines = content.split('\n');
-  const headings = lines.map((line, index) => HEADING_RE.test(line) ? index : -1).filter((index) => index >= 0);
-  if (headings.length !== 1) return null;
-  const i = headings[0]!;
-  let end = lines.length;
-  for (let j = i + 1; j < lines.length; j += 1) {
-    if (NEXT_H2_RE.test(lines[j]!)) { end = j; break; }
-  }
-  const bodyLines = lines.slice(i + 1, end);
-  const parsed: { entry: LogEntry; epoch: number; order: number }[] = [];
-  for (const line of bodyLines) {
-    const m = ENTRY_RE.exec(line);
-    if (!m) continue;
-    parsed.push({ entry: { time: m[1]!, step: m[2]!, agent: m[3]!, note: m[4]! }, epoch: Date.parse(m[1]!.replace(' ', 'T')), order: parsed.length });
-  }
-  parsed.sort((a, b) => a.epoch - b.epoch || a.order - b.order);
-  return { heading: HEADING_RE.exec(lines[i]!)![1]!, body: bodyLines.join('\n').replace(/^\n+|\n+$/g, ''), entries: parsed.map((item) => item.entry) };
+  const { section } = inspectActivityLog(content);
+  if (!section) return null;
+  section.entries.sort((left, right) => Date.parse(left.time.replace(' ', 'T')) - Date.parse(right.time.replace(' ', 'T')));
+  return section;
 }
 
 function appendActivityEntry(section: ActivityLogSection, entry: LogEntry): string {
@@ -105,6 +112,7 @@ export {
   appendActivityEntry,
   hasOpenLifecycleExecution,
   commitAttemptStartedNote,
+  inspectActivityLog,
   locateActivityLog,
   pairEntries,
   parseActivityLog,

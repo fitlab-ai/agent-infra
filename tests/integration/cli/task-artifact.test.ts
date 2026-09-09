@@ -81,7 +81,7 @@ test('task-artifact init rejects an existing historical artifact before no-op', 
 test('task-artifact repair requires the finalizer baseline and changes one heading only', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
-  let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact }).replaceAll('<!-- artifact-slot:empty -->', 'content');
+  let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: path.basename(artifact) }).replaceAll('<!-- artifact-slot:empty -->', 'content');
   content = content.replace('## 状态核对\n<!-- artifact-section:plan:state-check -->\ncontent', '## 状态核对\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');
   fs.writeFileSync(artifact, content.replace('## 问题理解\n', '## 问题理解：\n'));
   const finalizer = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);

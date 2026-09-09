@@ -13,6 +13,21 @@ import {
 
 const emptyTask = `# Task\n\n## Activity Log\n`;
 
+test('invalidation reads visible parent and child tables without borrowing from other sections', () => {
+  const document = { operations: [], targets: [] };
+  const body = renderInvalidation(document);
+  const real = '## Artifact Invalidation\n\n' + body + '\n';
+  for (const eol of ['\n', '\r\n']) {
+    const content = ('~~~md\n' + real + '~~~\n\n' + real).replaceAll('\n', eol);
+    assert.deepEqual(parseInvalidationDocument(content), { ok: true, present: true, document });
+    assert.deepEqual(parseInvalidationDocument(('~~~md\n' + real + '~~~\n').replaceAll('\n', eol)), { ok: true, present: false, document });
+  }
+  assert.deepEqual(parseInvalidationDocument('## Artifact Invalidation\n\n```md\n' + body + '\n```\n' + body), { ok: true, present: true, document });
+  assert.equal(parseInvalidationDocument(real.replace('### Targets', '## Other\n### Targets')).ok, false);
+  assert.equal(parseInvalidationDocument(real + '\n### Targets\n' + body.split('### Targets')[1]).ok, false);
+  assert.equal(parseInvalidationDocument(real + '\nnot a table row\n').ok, false);
+});
+
 test('invalidation schema round-trips operations and targets', () => {
   const source = {
     sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
@@ -28,13 +43,14 @@ test('invalidation schema round-trips operations and targets', () => {
     targetId: targetIdFor(operationId, targetShape), operationId, ...targetShape, status: 'pending', reasonCode: 'upstream-replaced',
     updatedAt: '2026-01-01 00:00:00+00:00'
   };
-  const operation = createInvalidationOperation(source, [target]);
+  const operation = { ...createInvalidationOperation(source, [target]), error: 'retry | path \\ detail' };
   const content = renderInvalidation({ operations: [operation], targets: [target] });
   const parsed = parseInvalidationDocument(`${emptyTask}\n## ${INVALIDATION_HEADINGS[0]}\n\n${content}\n`);
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   assert.deepEqual(parsed.document.operations, [operation]);
   assert.deepEqual(parsed.document.targets, [target]);
+  assert.deepEqual(parseInvalidationDocument(`## Artifact Invalidation\n\n${content.replaceAll('\n|', '\n\n|')}\n`), parsed);
 });
 
 test('reconcile is idempotent and completes each target before the operation', () => {

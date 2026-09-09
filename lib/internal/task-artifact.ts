@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { resolveArtifactContext } from '../task/artifact-lifecycle.ts';
-import { parseArtifactName } from '../task/artifact-lifecycle.ts';
+import { parseArtifactName } from '../task/artifact-name.ts';
 import { locateActivityLog, pairEntries, startedBackedRows } from '../task/activity-log.ts';
 import { finalizeLocalArtifact } from '../task/local-artifact-finalization.ts';
 import type { LocalArtifactFamily } from '../task/local-artifact-finalization.ts';

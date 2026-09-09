@@ -8,6 +8,7 @@ import {
   VERIFICATION_CATALOG,
   verifyTaskEvent
 } from '../../../lib/task/verification.ts';
+import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import {
   activateDelegation,
   completeDelegationStage,
@@ -275,58 +276,43 @@ test('run-task verification accepts complete current evidence and rejects invali
   );
   assert.equal(codexVerification.status, 'pass', JSON.stringify(codexVerification));
 
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    ...codexRun,
-    receipts: [{
-      ...codexReceipt,
-      activatedAt: null,
-      sealedAt: null,
-      consumedAt: null
-    }]
-  }, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-    'fail'
-  );
-
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    ...codexRun,
-    receipts: [{ ...codexReceipt, parentId: 'different-parent' }]
-  }, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-    'fail'
-  );
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    ...codexRun,
-    receipts: [{ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, kind: 'codex-lifecycle-v1' } }]
-  }, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-    'fail'
-  );
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    ...codexRun,
-    receipts: [{ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, spawnToolUseId: undefined } }]
-  }, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-    'fail'
-  );
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    ...codexRun,
-    receipts: [{
-      ...codexReceipt,
-      hostEvidence: {
-        ...codexHostEvidence,
-        consumer: 'other'
-      }
-    }]
-  }, null, 2)}\n`);
-  assert.equal(
-    (await verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root })).status,
-    'fail'
-  );
+  const invalidReceipts = [
+    { ...codexReceipt, activatedAt: null, sealedAt: null, consumedAt: null },
+    { ...codexReceipt, parentId: 'different-parent' },
+    { ...codexReceipt, childId: codexReceipt.parentId },
+    { ...codexReceipt, lifecycleProvenance: null },
+    ...[
+      { kind: 'codex-lifecycle-v1' },
+      { protocolVersion: 99 },
+      { hookDefinitionHash: 'different' },
+      { hookSource: 'managed' },
+      { hookSourcePathDigest: 'different' },
+      { hookSourceHash: 'different' },
+      { capabilitySessionId: 'different' },
+      { capabilityTurnId: 'different' },
+      { controllerInstanceDigest: 'different' },
+      { controlGeneration: 'different' },
+      { spawnToolUseId: undefined },
+      { spawnToolUseId: codexLifecycleProvenance.capabilityToolUseId },
+      { spawnObservedAt: 'invalid' },
+      { spawnObservedAt: '2025-01-01T00:00:00.000Z' },
+      { spawnObservedAt: '2099-01-01T00:00:00.000Z' },
+      { startRevision: 0 },
+      { stopRevision: codexHostEvidence.startRevision },
+      { consumer: 'other' },
+      { consumedAt: null }
+    ].map((host) => ({ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, ...host } }))
+  ];
+  for (const receipt of invalidReceipts) {
+    fs.writeFileSync(runPath, JSON.stringify({ ...codexRun, receipts: [receipt] }));
+    for (const check of ['orchestration-state', 'orchestration-evidence']) {
+      const rejected = await verifyInProcess({
+        mode: 'checks', skillName: 'run-task', taskDir: f.taskDir,
+        checks: [check], repositoryRoot: f.root
+      });
+      assert.equal(rejected.status, 'fail', JSON.stringify({ check, receipt }));
+    }
+  }
 
   fs.writeFileSync(runPath, `${JSON.stringify({
     ...run,
@@ -367,6 +353,10 @@ test('run-task verification accepts only internally consistent clean completion 
 
   for (const invalid of [
     { ...run, completionEvidence: { ...evidence, prHead: 'c'.repeat(40) } },
+    { ...run, completionEvidence: { ...evidence, head: 'c'.repeat(40) } },
+    { ...run, completionEvidence: { ...evidence, worktreeTree: 'c'.repeat(40) } },
+    { ...run, completionEvidence: { ...evidence, headTree: 'not-a-sha' } },
+    { ...run, completionEvidence: { ...evidence, prNumber: -1 } },
     { ...run, commitAuthorization: { issuedAt: '2026-01-01T00:00:04.000Z', consumedAt: null } },
     { ...run, status: 'paused' },
     { ...run, completionEvidence: { ...evidence, observedAt: 'invalid' } }
@@ -460,7 +450,10 @@ test('run-task verification accepts only current recovery provenance and rejects
   );
 
   for (const invalid of [
+    { ...run, recoveryHistory: [{ ...recovery, guards: { ...recovery.guards, baselineEmpty: false } }] },
     { ...run, recoveryHistory: [{ ...recovery, previousSchemaVersion: 3 }] },
+    { ...run, modelPolicySource: { ...run.modelPolicySource, client: 'unknown-client' } },
+    { ...run, modelPolicy: { ...run.modelPolicy, executor: { model: ' ', reasoningEffort: 'high' } } },
     { ...run, recoveryHistory: [{ ...recovery, code: 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION' }] },
     { ...run, schemaVersion: 3 },
     { ...run, modelPolicy: { executor: 'executor-model', reviewer: 'reviewer-model' } }

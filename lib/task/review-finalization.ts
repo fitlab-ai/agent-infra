@@ -3,7 +3,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
-import { parseArtifactName, validateCompletedArtifact } from './artifact-lifecycle.ts';
+import { validateCompletedArtifact } from './artifact-lifecycle.ts';
+import { parseArtifactName } from './artifact-name.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';

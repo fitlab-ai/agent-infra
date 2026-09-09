@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { ARTIFACT_FAMILY_CATALOG, artifactName, parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import type { ResolveTaskRefErrorCode, TaskWorkspaceState } from './resolve-ref.ts';
 import { locateActivityLog } from './activity-log.ts';
@@ -11,8 +12,7 @@ import { receiptForOutput, sha256File } from './artifact-receipts.ts';
 import { isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
 import type { InvalidationDocument } from './invalidation.ts';
 import { validateQualificationAudit } from './qualification-audit.ts';
-import { ARTIFACT_FAMILY_CATALOG } from './artifact-schema.ts';
-import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-schema.ts';
+import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-name.ts';
 
 const artifactFamilyCatalog = ARTIFACT_FAMILY_CATALOG;
 type ArtifactIdentity = {
@@ -75,7 +75,6 @@ type ArtifactContextResult = Omit<ArtifactInventoryResult, 'status'> & {
 };
 type InspectOptions = { repoRoot?: string };
 
-const FAMILY_SET = new Set<string>(artifactFamilyCatalog.map((item) => item.family));
 const BLOCKING_DIAGNOSTICS = new Set<ArtifactDiagnosticCode>([
   'NONCANONICAL_NAME', 'ROUND_OUT_OF_RANGE', 'MISSING_BASE', 'ROUND_GAP',
   'DUPLICATE_LOGICAL_ROUND', 'NON_REGULAR_FILE', 'SYMBOLIC_LINK',
@@ -84,27 +83,6 @@ const BLOCKING_DIAGNOSTICS = new Set<ArtifactDiagnosticCode>([
 
 function familySpec(family: string): ArtifactFamilySpec | null {
   return artifactFamilyCatalog.find((item) => item.family === family) ?? null;
-}
-
-function artifactName(family: ArtifactFamily, round: number): string {
-  if (!FAMILY_SET.has(family)) throw new Error(`unknown artifact family '${family}'`);
-  if (!Number.isSafeInteger(round) || round < 1) throw new Error('artifact round must be a safe positive integer');
-  return round === 1 ? `${family}.md` : `${family}-r${round}.md`;
-}
-
-function parseArtifactName(name: string): { family: ArtifactFamily; round: number; name: string } | null {
-  if (path.basename(name) !== name) return null;
-  const matches: Array<{ family: ArtifactFamily; round: number; name: string }> = [];
-  for (const spec of artifactFamilyCatalog) {
-    if (name === `${spec.family}.md`) matches.push({ family: spec.family, round: 1, name });
-    const match = new RegExp(`^${escapeRegExp(spec.family)}-r([1-9]\\d*)\\.md$`).exec(name);
-    if (!match) continue;
-    const round = Number(match[1]);
-    if (Number.isSafeInteger(round) && round >= 2 && String(round) === match[1]) {
-      matches.push({ family: spec.family, round, name });
-    }
-  }
-  return matches.length === 1 ? matches[0]! : null;
 }
 
 function escapeRegExp(value: string): string {
@@ -550,7 +528,7 @@ function buildArtifactLinkSection(content: string, artifact: ArtifactIdentity): 
 }
 
 export {
-  artifactFamilyCatalog, artifactName, parseArtifactName, familySpec,
+  artifactFamilyCatalog, familySpec,
   inspectTaskArtifacts, inspectArtifactDirectory, resolveArtifactContext,
   parseReviewedInputReference, parseCodePlanInputReference, resolveCodePlanInput, reviewEventName,
   assertWritableInventory, validateCompletedArtifact, buildArtifactLinkSection

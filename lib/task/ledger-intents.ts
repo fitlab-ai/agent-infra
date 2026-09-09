@@ -8,6 +8,7 @@ import {
   parseImplementationInputs,
   renderImplementationInputs
 } from './implementation-inputs.ts';
+import { parseArtifactName } from './artifact-name.ts';
 import { LEDGER_COLUMNS, LEDGER_HEADINGS, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, nextHdId, parseLedgerDocument, validateLedgerRows } from './ledger.ts';
 import type { LedgerRow, ReviewStage } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
@@ -44,16 +45,6 @@ type LedgerIntentResult = {
 const PREFIX: Record<ReviewStage, string> = { analysis: 'AN', plan: 'PL', code: 'CD' };
 const RESPONSE = new Set<ExecutorResponse>(['accepted', 'adjusted', 'refuted', 'cannot-judge']);
 const DISPOSITION = new Set<ReviewDisposition>(['confirmed', 'closed', 'open', 'needs-human-decision']);
-const REVIEW_ARTIFACT: Record<ReviewStage, RegExp> = {
-  analysis: /^review-analysis(?:-r(?:[2-9]|[1-9]\d+))?\.md$/,
-  plan: /^review-plan(?:-r(?:[2-9]|[1-9]\d+))?\.md$/,
-  code: /^review-code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/
-};
-const ARTIFACT: Record<ReviewStage, RegExp> = {
-  analysis: /^analysis(?:-r(?:[2-9]|[1-9]\d+))?\.md$/,
-  plan: /^plan(?:-r(?:[2-9]|[1-9]\d+))?\.md$/,
-  code: /^code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/
-};
 
 function failed(intent: LedgerIntent, code: string, message: string, taskId: string | null = null, entityId: string | null = null): LedgerIntentResult {
   return { status: 'failed', changed: false, intent: intent.kind, taskId, entityId, before: null, after: null, operations: [], error: { code, message } };
@@ -87,21 +78,12 @@ function nextFindingId(rows: readonly LedgerRow[], stage: ReviewStage): string {
   return `${prefix}-${max + 1}`;
 }
 
-function reviewArtifactRound(reviewArtifact: string): number {
-  const match = /-r([1-9]\d*)\.md$/.exec(reviewArtifact);
-  return match ? Number(match[1]) : 1;
-}
-
 function rowMutation(row: LedgerRow): TaskMutation {
   return {
     kind: 'table-row', action: 'upsert', sectionAliases: LEDGER_HEADINGS,
     columns: LEDGER_COLUMNS, keyColumn: 'id', key: row.id,
     values: { stage: row.stage, round: row.round, severity: row.severity, status: row.status, evidence: row.evidence }
   };
-}
-
-function ledgerSectionMutation(content: string): TaskMutation[] {
-  return [];
 }
 
 function implementationInputMutation(content: string, rows: Parameters<typeof renderImplementationInputs>[0]): TaskMutation {
@@ -147,7 +129,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
     const finding = rows.find((row) => row.id === intent.findingId);
     if (!finding || finding.severity === 'decision') return failed(intent, 'LEDGER_NOT_FOUND', `finding '${intent.findingId}' was not found`, resolved.taskId, intent.findingId);
     const sourceFromEvidence = finding.evidence.split('#')[0];
-    if (sourceFromEvidence !== intent.sourceArtifact || !REVIEW_ARTIFACT[finding.stage as ReviewStage]?.test(intent.sourceArtifact)) {
+    if (sourceFromEvidence !== intent.sourceArtifact || parseArtifactName(intent.sourceArtifact)?.family !== `review-${finding.stage}`) {
       return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rework intent source artifact does not match finding evidence', resolved.taskId, intent.intentId);
     }
     try {
@@ -173,7 +155,8 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
   let before: LedgerRow | null = null;
   let after: LedgerRow;
   if (intent.kind === 'finding-upsert') {
-    if (!REVIEW_ARTIFACT[intent.stage]?.test(intent.reviewArtifact) || !Number.isInteger(intent.ordinal) || intent.ordinal < 1 || !['blocker', 'major', 'minor'].includes(intent.severity)) {
+    const identity = parseArtifactName(intent.reviewArtifact);
+    if (identity?.family !== `review-${intent.stage}` || !Number.isInteger(intent.ordinal) || intent.ordinal < 1 || !['blocker', 'major', 'minor'].includes(intent.severity)) {
       return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'finding identity, stage, ordinal, or severity is invalid', resolved.taskId);
     }
     const evidence = normalizedEvidence(intent.evidence);
@@ -191,12 +174,12 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
     } else {
       const id = nextFindingId(rows, intent.stage);
       after = {
-        id, stage: intent.stage, round: String(reviewArtifactRound(intent.reviewArtifact)),
+        id, stage: intent.stage, round: String(identity.round),
         severity: intent.severity, status: 'open', evidence, sourceLine: -1
       };
     }
   } else if (intent.kind === 'decision-upsert') {
-    if (!/^HD-[1-9]\d*$/.test(intent.id) || !ARTIFACT[intent.stage]?.test(intent.artifact)) {
+    if (!/^HD-[1-9]\d*$/.test(intent.id) || !['analysis', 'plan', 'code'].includes(intent.stage) || parseArtifactName(intent.artifact)?.family !== intent.stage) {
       return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'decision id, stage, or artifact is invalid', resolved.taskId, intent.id);
     }
     const evidence = `${intent.artifact}#${intent.id}`;
@@ -266,7 +249,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
 
   const result = writeTask({
     taskRef: intent.taskRef, expectedState: stateOverride ? resolved.state : 'active',
-    mutations: [...ledgerSectionMutation(content), rowMutation(after), ...(implementationMutation ? [implementationMutation] : [])],
+    mutations: [rowMutation(after), ...(implementationMutation ? [implementationMutation] : [])],
     dryRun: 'dryRun' in intent ? intent.dryRun : false
   }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });
   return mapWrite(intent, after.id, before, after, result);

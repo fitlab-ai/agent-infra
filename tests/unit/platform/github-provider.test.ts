@@ -4,6 +4,29 @@ import assert from 'node:assert/strict';
 import { createGitHubProvider } from '../../../lib/platform/github-provider.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 
+test('GitHub checks normalize raw fields directly to the provider snapshot contract', async () => {
+  const client = {
+    json() {
+      return { ok: true, value: [
+        { name: 'build', bucket: 'fail', state: 'SUCCESS', link: 'https://github.com/o/r/check/1', workflow: 'CI' },
+        { name: 'test', state: 'SUCCESS' },
+        { context: 'queued', state: 'QUEUED' }
+      ] };
+    }
+  } as unknown as GitHubClient;
+  const provider = createGitHubProvider({
+    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+  }, client);
+  assert.deepEqual(await provider.checks!.inspectRequired({
+    context: { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'o/r' },
+    changeRequest: { kind: 'number', value: 5 }, headSha: 'a'.repeat(40)
+  }), { ok: true, value: [
+    { name: 'build', status: 'fail', conclusion: 'SUCCESS', detailsUrl: 'https://github.com/o/r/check/1' },
+    { name: 'test', status: 'pass', conclusion: 'SUCCESS', detailsUrl: null },
+    { name: 'queued', status: 'pending', conclusion: 'QUEUED', detailsUrl: null }
+  ] });
+});
+
 test('GitHub Issue creation converts milestone titles to numeric REST IDs', async () => {
   const calls: Array<{ args: string[]; input?: string }> = [];
   const client: GitHubClient = {

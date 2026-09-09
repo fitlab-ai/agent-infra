@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseActivityLog, pairEntries, startedBackedRows } from '../../../lib/task/activity-log.ts';
+import { inspectActivityLog, parseActivityLog, pairEntries, startedBackedRows } from '../../../lib/task/activity-log.ts';
 import { isHumanAgent } from '../../../lib/task/commands/log.ts';
 
 // Separator in real entries is an em-dash (U+2014), not an ASCII hyphen.
@@ -11,6 +11,16 @@ const EN = '## Activity Log';
 function md(heading: string, body: string): string {
   return `---\nid: TASK-20260101-000001\n---\n# 任务\n\n${heading}\n\n${body}\n`;
 }
+
+test('activity inspection preserves source order, body and malformed-entry diagnostics', () => {
+  const later = '- 2026-09-09 17:00:00+00:00 — **Later** by codex — done';
+  const earlier = '- 2026-09-09 16:00:00+00:00 — **Earlier** by codex — done';
+  const body = [later, '```', '- example', '```', '- malformed', earlier].join('\n');
+  const inspected = inspectActivityLog(md(EN, body));
+  assert.equal(inspected.section?.body, body);
+  assert.deepEqual(inspected.section?.entries.map((entry) => entry.step), ['Later', 'Earlier']);
+  assert.deepEqual(inspected.invalidEntries, ['- malformed']);
+});
 
 test('parses a Chinese activity log section with multiple entries', () => {
   const content = md(

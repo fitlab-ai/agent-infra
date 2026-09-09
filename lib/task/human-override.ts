@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
+import { parseArtifactName } from './artifact-name.ts';
 import { locateActivityLog } from './activity-log.ts';
 import { applyPrReviewActivityIntent } from './activity-intent.ts';
 import { applyHumanDecision } from './decision-intents.ts';
@@ -814,14 +815,8 @@ async function probeVerificationFailure(taskRef: string, policy: FailurePolicy, 
 function latestArtifact(taskDir: string, family: string): string | undefined {
   let names: string[];
   try { names = fs.readdirSync(taskDir); } catch { return undefined; }
-  const candidates = names.filter((name) => (
-    name === `${family}.md` || new RegExp(`^${family}-r\\d+\\.md$`).test(name)
-  ));
-  candidates.sort((a, b) => {
-    const round = (name: string) => Number(/-r(\d+)\.md$/.exec(name)?.[1] ?? 1);
-      return round(b) - round(a);
-    });
-  return candidates[0];
+  return names.map(parseArtifactName).filter((identity) => identity !== null)
+    .filter((identity) => identity.family === family).sort((left, right) => right.round - left.round)[0]?.name;
 }
 
 async function probeVerificationEngineFailure(policy: FailurePolicy, resolved: ProbeTask): Promise<ProducerFailure | OverrideError> {

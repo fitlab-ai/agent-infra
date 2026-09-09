@@ -3,7 +3,7 @@ import path from 'node:path';
 // checks are provided by typed domain modules without a stdout protocol.
 import { verifyInProcess } from './verification-engine.ts';
 
-import { parseArtifactName } from './artifact-lifecycle.ts';
+import { parseArtifactName } from './artifact-name.ts';
 import type { ArtifactFamily } from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import type { TaskWorkspaceState } from './resolve-ref.ts';

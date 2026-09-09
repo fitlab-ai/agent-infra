@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
+import { artifactName, maxArtifactRound } from './artifact-name.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
 import { parseReviewSummary } from './review-artifacts.ts';
@@ -604,25 +605,13 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
   return { status: 'running', changed: true, taskId: resolved.taskId, run, next: null, error: null };
 }
 
-function highestRound(taskDir: string, family: string): number {
-  const pattern = new RegExp(`^${family}(?:-r(\\d+))?\\.md$`);
-  return fs.readdirSync(taskDir).reduce((max, name) => {
-    const match = pattern.exec(name);
-    return match ? Math.max(max, match[1] ? Number(match[1]) : 1) : max;
-  }, 0);
-}
-
-function artifactName(family: string, round: number): string {
-  return round === 1 ? `${family}.md` : `${family}-r${round}.md`;
-}
-
 function validateSavedCurrentDiffBase(
   repoRoot: string,
   metadata: ReturnType<typeof parseTypedTaskFrontmatter>,
   taskDir: string,
   reviewedHead: string
 ): Readonly<{ code: string; message: string }> | null {
-  const reviewRound = highestRound(taskDir, 'review-code');
+  const reviewRound = maxArtifactRound(fs.readdirSync(taskDir), 'review-code');
   const reviewContent = fs.readFileSync(path.join(taskDir, artifactName('review-code', reviewRound)), 'utf8');
   const savedTargetHead = extractReviewTargetHead(reviewContent);
   const savedDiffBase = extractReviewDiffBase(reviewContent);
@@ -660,10 +649,9 @@ function routeFromFacts(facts: LifecycleFacts): Omit<OrchestrationNext, 'request
   const action = recommendation.action;
   if (action === 'manual-validation' || action === 'validation-run') return null;
   const family = action === 'analysis' ? 'analysis' : action;
-  const round = Math.max(0, ...[...(facts.artifacts[family] ?? []), ...(facts.staleArtifacts?.[family] ?? [])].map((name) => {
-    const match = /-r(\d+)\.md$/.exec(name);
-    return match ? Number(match[1]) : 1;
-  })) + 1;
+  const round = maxArtifactRound([
+    ...(facts.artifacts[family] ?? []), ...(facts.staleArtifacts?.[family] ?? [])
+  ], family) + 1;
   const command = action === 'analysis' ? 'analyze-task' : action === 'plan' ? 'plan-task' : action === 'code' ? 'code-task' : action;
   const role = action.startsWith('review-') ? 'reviewer' : 'executor';
   return { action: command, role, stage: action, round, artifact: artifactName(family, round) };
@@ -719,7 +707,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   const routed = routeFromFacts(facts.facts);
   if (!routed) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
   if ('completion' in routed) {
-    const reviewRound = highestRound(resolved.taskDir, 'review-code');
+    const reviewRound = maxArtifactRound(fs.readdirSync(resolved.taskDir), 'review-code');
     const review = parseReviewSummary(fs.readFileSync(
       path.join(resolved.taskDir, artifactName('review-code', reviewRound)),
       'utf8'

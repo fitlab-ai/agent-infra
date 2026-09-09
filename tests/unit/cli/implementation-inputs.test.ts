@@ -87,6 +87,20 @@ test('parser validates schema, ids, stage, and state combinations', () => {
   ])), /duplicate/i);
 });
 
+test('implementation input consumption requires a canonical code identity', () => {
+  const rows = parseImplementationInputs(taskWithRows([
+    '| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:00:00+08:00 | pending | |'
+  ])).rows;
+  for (const artifact of ['code-r9007199254740992.md', 'code-r01.md', 'plan.md']) {
+    assert.throws(() => consumeImplementationInput(rows, 'II-1', artifact));
+    assert.throws(() => parseImplementationInputs(taskWithRows([
+      `| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:00:00+08:00 | consumed | ${artifact} |`
+    ])));
+  }
+  assert.equal(consumeImplementationInput(rows, 'II-1', 'code-r2.md')[0]?.consumedBy, 'code-r2.md');
+  assert.equal(rows[0]?.status, 'pending');
+});
+
 test('pending selection is stable regardless of the latest review time', () => {
   const rows = parseImplementationInputs(taskWithRows([
     '| II-2 | CD-2 | task.md#HDR-2 | code | true | 2026-07-18 10:02:00+08:00 | pending | |',

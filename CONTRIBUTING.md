@@ -93,7 +93,7 @@ Pack smoke installs with `--ignore-scripts` and exercises real lock contention o
 The templates in this repository must distinguish between the platform-agnostic baseline and platform-specific implementations. Platform-specific content may only live in the following locations:
 
 - `.agents/rules/*.{platform}.md`
-- `lib/platform/adapters.ts` registrations and their typed provider modules
+- Platform-specific provider and data-access modules under `lib/platform/`
 - Scripts or workflow directories that explicitly belong to platform integration
 
 Apart from the locations above, baseline files such as `SKILL.md`, `reference/*.md`, command palettes, QUICKSTART, and README must remain platform-agnostic. Baseline files should reference the abstract entry points in `.agents/rules/*.md` or `.agents/scripts/` rather than embedding platform commands, paths, or schemas directly.
@@ -129,7 +129,7 @@ Examples:
 Adopted architectural decisions:
 
 - `verify.json` should prefer referencing the platform adapter's default values via `expected_*_key` rather than copying marker or status label strings.
-- `lib/platform/adapters.ts` is the registry for typed platform providers; provider-owned modules are the single source of truth for platform operations and defaults.
+- `lib/platform/provider-loader.ts` loads providers through `provider-contract.ts`; provider-owned modules are the single source of truth for platform operations and defaults. Internal snapshot types live in `snapshots.ts`.
 - This key-based abstraction is a design reserved for multi-platform expansion: it collapses the configuration cost of N skills × M platforms into N key references + M adapter defaults.
 
 ### Build Architecture

@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import { parseArtifactName } from './artifact-name.ts';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-import { scanVisibleMarkdown } from './decision-details.ts';
+import { scanVisibleMarkdown, type VisibleMarkdown, type VisibleHeading } from './markdown.ts';
 import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import { readArtifactRepairIntent } from './artifact-repair-intent.ts';
 import {
@@ -89,35 +90,6 @@ function sha256Content(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
-function sourceLines(content: string): Array<{ start: number; end: number; text: string }> {
-  const lines: Array<{ start: number; end: number; text: string }> = [];
-  let start = 0;
-  while (start < content.length) {
-    const newline = content.indexOf('\n', start);
-    const end = newline === -1 ? content.length : newline;
-    lines.push({ start, end, text: content.slice(start, end).replace(/\r$/, '') });
-    start = newline === -1 ? content.length : newline + 1;
-  }
-  if (content.length === 0) lines.push({ start: 0, end: 0, text: '' });
-  return lines;
-}
-
-function hasUnclosedFence(content: string): boolean {
-  let fence: { character: '`' | '~'; length: number } | null = null;
-  for (const line of sourceLines(content)) {
-    if (fence) {
-      const close = line.text.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
-      if (close && close[1]![0] === fence.character && close[1]!.length >= fence.length) fence = null;
-      continue;
-    }
-    const open = line.text.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (open && !(open[1]![0] === '`' && open[2]!.includes('`'))) {
-      fence = { character: open[1]![0] as '`' | '~', length: open[1]!.length };
-    }
-  }
-  return fence !== null;
-}
-
 function lineNumber(content: string, offset: number): number {
   return content.slice(0, offset).split('\n').length;
 }
@@ -130,9 +102,9 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function markerEntries(content: string): Array<{ marker: string; start: number; end: number; line: number; standalone: boolean }> {
+function markerEntries(content: string, scanned: VisibleMarkdown): Array<{ marker: string; start: number; end: number; line: number; standalone: boolean }> {
   const entries: Array<{ marker: string; start: number; end: number; line: number; standalone: boolean }> = [];
-  for (const line of scanVisibleMarkdown(content).lines) {
+  for (const line of scanned.lines) {
     const match = line.text.match(/<!--\s*(artifact-section:[^\s>]+)\s*-->/g);
     if (!match) continue;
     for (const raw of match) {
@@ -150,12 +122,9 @@ function markerEntries(content: string): Array<{ marker: string; start: number; 
   return entries;
 }
 
-function sectionBodyBounds(content: string, heading: { start: number }): { start: number; end: number } {
-  const next = scanVisibleMarkdown(content).headings.find((candidate) => (
-    candidate.start > heading.start && candidate.level <= 2
-  ));
-  const headingEnd = scanVisibleMarkdown(content).headings.find((candidate) => candidate.start === heading.start)?.end ?? heading.start;
-  return { start: headingEnd, end: next?.start ?? content.length };
+function sectionBodyBounds(content: string, heading: VisibleHeading, scanned: VisibleMarkdown): { start: number; end: number } {
+  const next = scanned.headings.find((candidate) => candidate.start > heading.start && candidate.level <= 2);
+  return { start: heading.end, end: next?.start ?? content.length };
 }
 
 function stripHtmlComments(content: string): string {
@@ -260,7 +229,7 @@ function inspectArtifactStructure(
   const scanned = scanVisibleMarkdown(content);
   const repairCandidates: ArtifactRepairOperation[] = [];
   if (!content.trim()) diagnostics.push(diagnostic('ARTIFACT_EMPTY', 'artifact is empty', null, null));
-  if (hasUnclosedFence(content)) diagnostics.push(diagnostic('ARTIFACT_UNCLOSED_FENCE', 'artifact contains an unclosed Markdown fence', null, null));
+  if (scanned.hasUnclosedFence) diagnostics.push(diagnostic('ARTIFACT_UNCLOSED_FENCE', 'artifact contains an unclosed Markdown fence', null, null));
 
   const headingsBySection = new Map<string, typeof scanned.headings>();
   for (const section of schema.sections) {
@@ -283,7 +252,7 @@ function inspectArtifactStructure(
     }
   }
 
-  const markers = markerEntries(content);
+  const markers = markerEntries(content, scanned);
   const englishHeadings = scanned.headings.filter((heading) => heading.level === 2 && schema.sections.some((section) => section.headings.en === heading.text)).length;
   const chineseHeadings = scanned.headings.filter((heading) => heading.level === 2 && schema.sections.some((section) => section.headings.zh === heading.text)).length;
   const locale = englishHeadings > chineseHeadings ? 'en' : 'zh-CN';
@@ -300,7 +269,7 @@ function inspectArtifactStructure(
       diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' must occupy its own visible line`, section.id, marker.line));
     }
     if (marker && heading) {
-      const bounds = sectionBodyBounds(content, heading);
+      const bounds = sectionBodyBounds(content, heading, scanned);
       if (marker.start < bounds.start || marker.start >= bounds.end) {
         diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `section marker '${section.marker}' is outside its section`, section.id, marker.line));
       }
@@ -478,11 +447,8 @@ function validateRepairContext(request: ArtifactRepairRequest, content: string):
 }
 
 function artifactRound(family: ArtifactSchemaFamily, artifact: string): number | null {
-  if (artifact === `${family}.md`) return 1;
-  const match = artifact.match(new RegExp(`^${escapeRegExp(family)}-r([2-9]|[1-9]\\d+)\\.md$`));
-  if (!match) return null;
-  const round = Number(match[1]);
-  return Number.isSafeInteger(round) ? round : null;
+  const identity = parseArtifactName(artifact);
+  return identity?.family === family ? identity.round : null;
 }
 
 function validateTarget(taskDir: string, family: ArtifactSchemaFamily, artifact: string): { path: string } | ArtifactFileResult {

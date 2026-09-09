@@ -5,6 +5,11 @@ export default async function createPlatformProvider(input) {
     type: input.providerType,
     contractVersion: input.contractVersion,
     identity: { issue: 'number', 'pull-request': 'number' },
+    ...(input.config.checks ? { checks: {
+      async inspectRequired() { return { ok: true, value: input.config.checks }; },
+      async resolveRun() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; },
+      async fetchLogs() { return { ok: false, error: { code: 'UNUSED', message: 'unused', retryable: false } }; }
+    } } : {}),
     context: {
       async resolve() {
         return {

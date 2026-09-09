@@ -1,3 +1,4 @@
+import { parseArtifactName } from './artifact-name.ts';
 import { parseTable } from './sections.ts';
 
 const SECTION_ALIASES = ['实现输入', 'Implementation Inputs'] as const;
@@ -6,7 +7,6 @@ const COLUMNS = [
   'decided_at', 'status', 'consumed_by'
 ] as const;
 const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
-const ARTIFACT_RE = /^code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/;
 
 type ImplementationInputStatus = 'declared' | 'pending' | 'not-required' | 'consumed';
 type ImplementationInput = {
@@ -36,7 +36,7 @@ function validateInput(row: ImplementationInput): void {
     (row.status === 'declared' && row.decidedAt === '' && row.consumedBy === '') ||
     (hasValidTimestamp && row.needsImplementation && row.status === 'pending' && row.consumedBy === '') ||
     (hasValidTimestamp && !row.needsImplementation && row.status === 'not-required' && row.consumedBy === '') ||
-    (hasValidTimestamp && row.needsImplementation && row.status === 'consumed' && ARTIFACT_RE.test(row.consumedBy));
+    (hasValidTimestamp && row.needsImplementation && row.status === 'consumed' && parseArtifactName(row.consumedBy)?.family === 'code');
   if (!valid) throw new Error(`implementation input ${row.id} has an invalid state combination`);
 }
 
@@ -143,7 +143,7 @@ function selectPendingImplementationInput(
 function consumeImplementationInput(
   rows: readonly ImplementationInput[], id: string, artifact: string
 ): ImplementationInput[] {
-  if (!ARTIFACT_RE.test(artifact)) throw new Error(`implementation input artifact '${artifact}' is invalid`);
+  if (parseArtifactName(artifact)?.family !== 'code') throw new Error(`implementation input artifact '${artifact}' is invalid`);
   let found = false;
   const next = rows.map((row) => {
     if (row.id !== id) return row;

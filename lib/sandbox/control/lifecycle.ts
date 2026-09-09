@@ -85,6 +85,7 @@ export type SandboxRemovalTargetCommit = Readonly<{
     }>;
   }>[];
 }>;
+
 export type SandboxRemovalJournal = Readonly<{
   version: 2;
   operation: 'sandbox-rm';
@@ -348,7 +349,7 @@ type RemovalJournalCursor = Readonly<{
   write(phase: SandboxRemovalJournalPhase): SandboxRemovalJournal;
 }>;
 
-function defaultRemovalTarget(manifest: SandboxControlManifest): SandboxRemovalTargetCommit {
+function defaultRemovalTarget(manifest: Pick<SandboxControlManifest, 'project' | 'branch' | 'container' | 'channelDir'>): SandboxRemovalTargetCommit {
   const targetDigest = createHash('sha256')
     .update(`${manifest.project}\0${manifest.branch}\0${manifest.container}\0${manifest.channelDir}`)
     .digest('hex');
@@ -368,6 +369,18 @@ function defaultRemovalTarget(manifest: SandboxControlManifest): SandboxRemovalT
     sharePath: path.join(path.dirname(manifest.channelDir), 'share'),
     permits: []
   };
+}
+
+export function isDefaultSandboxRemovalJournal(journal: SandboxRemovalJournal): boolean {
+  if (journal.phase !== 'carrier-removed' && journal.phase !== 'completed') return false;
+  const { target } = journal;
+  const expected = defaultRemovalTarget({
+    project: target.project, branch: target.branch,
+    container: path.basename(path.dirname(target.controlRoot)),
+    channelDir: path.join(target.controlRoot, 'channel')
+  });
+  return Object.entries(expected).every(([key, value]) =>
+    JSON.stringify(target[key as keyof SandboxRemovalTargetCommit]) === JSON.stringify(value));
 }
 
 function sameRemovalTarget(left: SandboxRemovalTargetCommit, right: SandboxRemovalTargetCommit): boolean {
@@ -558,6 +571,21 @@ export function advanceSandboxRemovalJournalPhase(
   } finally {
     ownedLock?.release();
   }
+}
+
+export function advanceSandboxRemovalJournalToPhase(
+  journal: SandboxRemovalJournal,
+  phase: SandboxRemovalJournalPhase,
+  resourceLock: SandboxResourceLock
+): SandboxRemovalJournal {
+  let current = journal;
+  while (phaseIndex(current.phase) < phaseIndex(phase)) {
+    const next = current.phase === 'target-committed' && phase === 'container-absent'
+      ? phase : SANDBOX_REMOVAL_JOURNAL_PHASES[phaseIndex(current.phase) + 1];
+    if (!next) throw new Error('SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID');
+    current = advanceSandboxRemovalJournalPhase(current, next, { resourceLock });
+  }
+  return current;
 }
 
 async function awaitWithDeadline<T>(
@@ -1378,6 +1406,18 @@ export type RemoveSandboxControlOptions = Readonly<{
 }>;
 
 export async function removeSandboxControlRoot(
+  root: string,
+  options: RemoveSandboxControlOptions
+): Promise<void> {
+  try {
+    await removeSandboxControlRootAttempt(root, options);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'SANDBOX_CONTROL_OWNER_UNAVAILABLE') throw error;
+    await removeSandboxControlRootAttempt(root, options);
+  }
+}
+
+async function removeSandboxControlRootAttempt(
   root: string,
   options: RemoveSandboxControlOptions
 ): Promise<void> {

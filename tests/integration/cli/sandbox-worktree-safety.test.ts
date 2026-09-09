@@ -11,8 +11,13 @@ import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
 import {
   clearSandboxRemovalJournalRecord,
-  listSandboxRemovalJournals
+  listSandboxRemovalJournals,
+  removeSandboxControlRoot
 } from "../../../lib/sandbox/control/lifecycle.ts";
+import {
+  semanticDigest,
+  sha256Content
+} from "../../../lib/task/local-artifact-finalization.ts";
 import {
   cliArgs,
   envWithPrependedPath,
@@ -24,7 +29,7 @@ import {
 
 type SafetyModule = typeof import("../../../lib/sandbox/worktree-safety.ts");
 type ManagedFsModule = typeof import("../../../lib/sandbox/managed-fs.ts");
-type RmModule = typeof import("../../../lib/sandbox/commands/rm.ts");
+type RmModule = typeof import("../../../lib/sandbox/removal.ts");
 type PruneModule = typeof import("../../../lib/sandbox/commands/prune.ts");
 
 const FIXTURE_CONTAINER_ID = "f".repeat(64);
@@ -149,20 +154,55 @@ async function withFixtureDocker<T>(
 function spawnSandboxCli(
   fixture: ReturnType<typeof writeSandboxEngineFixture>,
   tmpDir: string,
-  args: string[]
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv = {},
+  input?: string
 ) {
+  const env: NodeJS.ProcessEnv = {
+    ...envWithPrependedPath(gitSafeEnv(), fixture.binDir),
+    HOME: tmpDir,
+    USERPROFILE: tmpDir,
+    DOCKER_LOG_PATH: fixture.logPath,
+    ...extraEnv
+  };
+  if (extraEnv.AGENT_INFRA_TASK_ID === "") {
+    for (const key of [
+      "AGENT_INFRA_CONTROL_DIR",
+      "AGENT_INFRA_CONTROL_GENERATION",
+      "AGENT_INFRA_CONTROL_STATUS_DIR",
+      "AGENT_INFRA_CONTROL_TOKEN",
+      "AGENT_INFRA_RUNTIME_DIR",
+      "AGENT_INFRA_TASK_ID"
+    ]) delete env[key];
+  }
   return spawnSync(process.execPath, cliArgs("sandbox", ...args), {
     cwd: fixture.repoDir,
-    env: {
-      ...envWithPrependedPath(gitSafeEnv(), fixture.binDir),
-      HOME: tmpDir,
-      USERPROFILE: tmpDir,
-      DOCKER_LOG_PATH: fixture.logPath
-    },
+    env,
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
+    input,
     timeout: 15_000
   });
+}
+
+function writeAuxiliaryCleanupCrashPreload(tmpDir: string): string {
+  const preload = path.join(tmpDir, "crash-before-auxiliary-cleanup.cjs");
+  fs.writeFileSync(preload, `
+const fs = require("node:fs");
+const controlRoot = process.env.AGENT_INFRA_TEST_CONTROL_ROOT;
+const auxiliaryRoot = ".local-artifact-finalization-intents";
+const originalUnlinkSync = fs.unlinkSync;
+let injected = false;
+fs.unlinkSync = function unlinkSync(target, options) {
+  if (!injected && controlRoot && !fs.existsSync(controlRoot)
+    && String(target).includes(auxiliaryRoot)) {
+    injected = true;
+    process.exit(91);
+  }
+  return originalUnlinkSync.call(this, target, options);
+};
+`, "utf8");
+  return preload;
 }
 
 function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpDir: string): SandboxConfig {
@@ -194,6 +234,157 @@ function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpD
     refreshIntervalDays: 7,
     dockerfile: null,
     vm: { cpu: null, memory: null, disk: null }
+  };
+}
+
+function writeTaskBoundCleanupEvidence(
+  config: SandboxConfig,
+  taskId: string,
+  branch: string
+): { controlRoot: string; intentPath: string; target: {
+  branch: string;
+  effectiveBranch: string;
+  engine: "docker-desktop";
+  matchedContainers: never[];
+  existingWorktrees: never[];
+  toolCandidates: never[];
+  workspace: { mode: "task-bound"; taskId: string };
+  controlRoots: string[];
+  workspaceViewRoots: never[];
+} } {
+  const taskDir = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(taskDir, "task.md"),
+    `---\nid: ${taskId}\nstatus: completed\nbranch: ${branch}\n---\n`,
+    "utf8"
+  );
+  const finalizationDir = path.join(config.repoRoot, ".agents", "workspace", ".task-finalization");
+  fs.mkdirSync(finalizationDir, { recursive: true });
+  const generation = "task-bound-generation";
+  const requestId = "a".repeat(16);
+  fs.writeFileSync(
+    path.join(finalizationDir, `${taskId}.json`),
+    `${JSON.stringify({
+      version: 2,
+      taskId,
+      intent: "complete",
+      receiptId: "receipt-1",
+      revision: 1,
+      lifecycle: "done",
+      taskComment: "done",
+      verification: "done",
+      warningProjection: "done",
+      warnings: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      lastError: null,
+      controlBinding: { generation, requestId }
+    })}\n`,
+    "utf8"
+  );
+
+  const artifact = "plan.md";
+  const content = "# Plan\n";
+  fs.writeFileSync(path.join(taskDir, artifact), content, "utf8");
+  const intentDir = path.join(config.repoRoot, ".agents", "workspace", ".local-artifact-finalization-intents");
+  fs.mkdirSync(intentDir, { recursive: true });
+  const intentPath = path.join(intentDir, `${taskId}-plan-${artifact}.json`);
+  fs.writeFileSync(intentPath, `${JSON.stringify({
+    version: 1,
+    taskId,
+    family: "plan",
+    artifact,
+    state: "consumed",
+    baselineSemanticDigest: null,
+    artifactSha256: sha256Content(content),
+    semanticDigest: semanticDigest(content)
+  })}\n`, "utf8");
+
+  const container = `${config.containerPrefix}-${branch.replaceAll("/", "..")}`;
+  const controlRoot = sandboxControlPaths({
+    base: config.controlBase,
+    project: config.project,
+    container,
+    identity: { mode: "task-bound", taskId }
+  }).root;
+  const channelDir = path.join(controlRoot, "channel");
+  const publicStatusDir = path.join(controlRoot, "public");
+  const processingDir = path.join(controlRoot, "processing");
+  fs.mkdirSync(path.join(channelDir, "responses"), { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
+  fs.mkdirSync(path.join(controlRoot, "runtime"), { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+    engine: "docker-desktop",
+    repoRoot: config.repoRoot,
+    worktreeRoot: config.repoRoot,
+    project: config.project,
+    container,
+    containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} },
+    authorityEvidence: fixtureAuthorityEvidence(),
+    branch,
+    mode: "task-bound",
+    taskId,
+    token: "task-bound-token",
+    generation,
+    channelDir,
+    publicStatusDir,
+    processingDir,
+    runtimeDir: path.join(controlRoot, "runtime")
+  })}\n`, "utf8");
+  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+    version: 3,
+    generation,
+    broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+    state: "healthy",
+    reasonCode: null,
+    activeRequestId: null,
+    updatedAt: Date.now(),
+    taskView: {
+      state: "current",
+      taskId,
+      observedSource: "completed",
+      receipt: { receiptId: "receipt-1", revision: 1, generation, requestId },
+      reasonCode: null
+    }
+  })}\n`, "utf8");
+  const result = {
+    status: "completed",
+    changed: false,
+    taskId,
+    lifecycle: { status: "no-op", changed: false, error: null },
+    taskComment: { status: "no-op", changed: false, error: null },
+    verification: { status: "no-op", changed: false, error: null },
+    completedSteps: ["lifecycle", "task-comment", "verification"],
+    pendingSteps: [],
+    result: "completed",
+    warnings: [],
+    error: null
+  };
+  fs.writeFileSync(path.join(channelDir, "responses", `${requestId}.json`), `${JSON.stringify({
+    version: 2,
+    id: requestId,
+    phase: "completed",
+    exitCode: 0,
+    stdout: `${JSON.stringify({ version: 1, status: "completed", changed: false, accepted: true, result, error: null })}\n`,
+    stderr: "",
+    error: null
+  })}\n`, "utf8");
+
+  return {
+    controlRoot,
+    intentPath,
+    target: {
+      branch,
+      effectiveBranch: branch,
+      engine: "docker-desktop",
+      matchedContainers: [],
+      existingWorktrees: [],
+      toolCandidates: [],
+      workspace: { mode: "task-bound", taskId },
+      controlRoots: [controlRoot],
+      workspaceViewRoots: []
+    }
   };
 }
 
@@ -264,7 +455,7 @@ test("sandbox rm retries control and workspace cleanup after the container is al
       updatedAt: Date.now(),
       taskView: statusTaskView(null)
     })}\n`);
-    const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+    const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
 
     const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
     const previousPath = process.env.PATH;
@@ -344,7 +535,7 @@ test("sandbox rm removes an empty control container parent after control cleanup
     process.env.DOCKER_LOG_PATH = fixture.logPath;
     process.env.DOCKER_INSPECT_NOT_FOUND = "1";
     try {
-      const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+      const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
       await rm.rmOne(config, [], branch, {
         assumeYes: true,
         target: {
@@ -586,7 +777,7 @@ test("explicit discard permits later content changes but rejects another branch"
 });
 
 test("interactive single-worktree authorization uses a separate default-no discard confirmation", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const fixture = createLinkedWorktree();
   try {
     fs.writeFileSync(path.join(fixture.worktree, "tracked.txt"), "explicitly discarded\n", "utf8");
@@ -720,7 +911,7 @@ test("managed worktree removal only uses the registered-path fallback when expli
 });
 
 test("sandbox rm clean path uses injectable default-yes confirmations and removes selected state", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-clean-confirm-"));
   const branch = "feature/clean-confirm";
@@ -745,7 +936,7 @@ test("sandbox rm clean path uses injectable default-yes confirmations and remove
 });
 
 test("sandbox rm recovers and removes a clean worktree with missing metadata", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const fixture = writeSandboxEngineFixture(fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-clean-")), { project: "demo" });
   const tmpDir = path.dirname(fixture.repoDir);
   const branch = "feature/recovered-clean";
@@ -818,7 +1009,7 @@ test("sandbox rm refuses a container whose branch label conflicts with the reque
 });
 
 test("sandbox rm rejects a control manifest whose container does not match its control-root path", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-control-manifest-mismatch-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/control-manifest-mismatch";
@@ -905,7 +1096,7 @@ test("sandbox rm rejects a control manifest whose container does not match its c
 });
 
 test("sandbox rm cleans a completed task-bound sandbox only with matching control evidence", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-completed-task-control-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/completed-task-control";
@@ -995,8 +1186,384 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
   }
 });
 
+test("sandbox rm rejects malformed auxiliary evidence before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-single-"));
+  const branch = "feature/auxiliary-preflight-single";
+  const taskId = "TASK-20260824-000012";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    fs.writeFileSync(evidence.intentPath, "{\"version\":1}\n", "utf8");
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        cleanupTarget: {
+          requestedRef: taskId,
+          branch,
+          workspace: { mode: "task-bound", taskId },
+          taskState: "completed"
+        },
+        target: evidence.target
+      })),
+      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
+    );
+
+    assert.equal(fs.existsSync(evidence.controlRoot), true);
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox purge rejects malformed auxiliary evidence before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-purge-"));
+  const branch = "feature/auxiliary-preflight-purge";
+  const taskId = "TASK-20260824-000013";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    fs.writeFileSync(evidence.intentPath, "{\"version\":1}\n", "utf8");
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+        confirm: async () => true,
+        isCancel: (value): value is symbol => false
+      })),
+      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
+    );
+
+    assert.equal(fs.existsSync(evidence.controlRoot), true);
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+for (const level of ["project", "container"] as const) {
+  for (const code of ["EACCES", "EIO"] as const) {
+    test(`sandbox purge preserves control evidence when ${level} enumeration fails with ${code}`, onPlatforms("linux", "darwin", "win32"), async (t) => {
+      const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-enumeration-"));
+      try {
+        const container = "demo-dev-feature..enumeration";
+        const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: container });
+        const config = rmOneConfig(fixture, tmpDir);
+        const projectRoot = path.join(config.controlBase, config.project);
+        const containerRoot = path.join(projectRoot, container);
+        const controlRoot = path.join(containerRoot, "branch-only");
+        fs.mkdirSync(controlRoot, { recursive: true });
+        const evidencePath = path.join(controlRoot, "unverified-evidence.txt");
+        fs.writeFileSync(evidencePath, "preserve for recovery\n");
+        const targetRoot = level === "project" ? projectRoot : containerRoot;
+        const failure = Object.assign(new Error(`Cannot enumerate ${level}`), { code });
+        const original = fs.readdirSync;
+        const mocked = t.mock.method(fs, "readdirSync", (target: fs.PathLike, ...args: unknown[]) => {
+          if (String(target) === targetRoot) throw failure;
+          return Reflect.apply(original, fs, [target, ...args]);
+        });
+        try {
+          await assert.rejects(
+            () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+              confirm: async () => false,
+              isCancel: (value): value is symbol => false
+            })),
+            (error) => error === failure
+          );
+          assert.equal(fs.readFileSync(evidencePath, "utf8"), "preserve for recovery\n");
+          assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), []);
+        } finally {
+          mocked.mock.restore();
+        }
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+test("sandbox purge removes a discovered container when no control root exists", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-no-control-"));
+  try {
+    const container = "demo-dev-feature..no-control";
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: container });
+    await withFixtureDocker(fixture, () => rm.rmPurge(rmOneConfig(fixture, tmpDir), [], {
+      confirm: async () => false,
+      isCancel: (value): value is symbol => false
+    }));
+    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), [
+      ["stop", container], ["rm", container]
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox cleanup consumes a completed removal journal through each cleanup entrypoint", onPlatforms("linux", "darwin", "win32"), async () => {
+  for (const entrypoint of ["single", "unbound", "purge"] as const) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-rm-journal-${entrypoint}-`));
+    const branch = `feature/journal-${entrypoint}`;
+    const taskId = `TASK-20260824-${entrypoint === "single" ? "000004" : entrypoint === "unbound" ? "000005" : "000006"}`;
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+    try {
+      process.env.HOME = tmpDir;
+      process.env.USERPROFILE = tmpDir;
+      process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+      const row = entrypoint === "unbound"
+        ? `demo-dev-${branch.replaceAll("/", "..")}`
+          + `\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox=true,`
+          + `demo.sandbox.workspace-mode=task-bound,demo.sandbox.task-id=${taskId}`
+        : "";
+      const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: row });
+      const config = rmOneConfig(fixture, tmpDir);
+      const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+      const statusPath = path.join(evidence.controlRoot, "public", "status.json");
+      const status = JSON.parse(fs.readFileSync(statusPath, "utf8")) as Record<string, unknown>;
+      status.taskView = {
+        state: "unknown",
+        taskId,
+        observedSource: "unknown",
+        receipt: null,
+        reasonCode: "SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE"
+      };
+      fs.writeFileSync(statusPath, `${JSON.stringify(status)}\n`, "utf8");
+      const preload = writeAuxiliaryCleanupCrashPreload(tmpDir);
+      const args = entrypoint === "single"
+        ? ["rm", taskId]
+        : entrypoint === "unbound"
+          ? ["rm", "--unbound", "--yes"]
+          : ["rm", "--purge"];
+      const input = entrypoint === "purge" ? "n\n" : undefined;
+      const first = spawnSandboxCli(fixture, tmpDir, args, {
+        AGENT_INFRA_TASK_ID: "",
+        DOCKER_INSPECT_NOT_FOUND: entrypoint === "unbound" ? "0" : "1",
+        DOCKER_REMOVAL_UPDATES_INSPECT: entrypoint === "unbound" ? "1" : "0",
+        NODE_OPTIONS: `--require=${preload}`,
+        AGENT_INFRA_TEST_CONTROL_ROOT: evidence.controlRoot
+      }, input);
+      assert.equal(first.status, 91, `${first.stdout}\n${first.stderr}`);
+
+      assert.equal(fs.existsSync(evidence.controlRoot), false);
+      assert.equal(fs.existsSync(evidence.intentPath), true);
+      const journal = listSandboxRemovalJournals({ branch, project: config.project })
+        .find((candidate) => candidate.target.controlRoot === path.resolve(evidence.controlRoot));
+      assert.ok(journal);
+      assert.equal(journal.phase, "completed");
+      assert.notEqual(journal.owner.pid, process.pid);
+      fs.writeFileSync(path.join(tmpDir, "docker-state.txt"), "", "utf8");
+
+      const second = spawnSandboxCli(fixture, tmpDir, args, {
+        AGENT_INFRA_TASK_ID: "",
+        DOCKER_INSPECT_NOT_FOUND: "0"
+      }, input);
+      assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
+
+      assert.equal(fs.existsSync(evidence.intentPath), false);
+      assert.equal(listSandboxRemovalJournals({ branch, project: config.project }).length, 0);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+      else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("sandbox cleanup recovers an interrupted removal from a fresh CLI process for each entrypoint", onPlatforms("linux", "darwin", "win32"), async () => {
+  for (const entrypoint of ["single", "unbound", "purge"] as const) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-rm-cross-process-${entrypoint}-`));
+    const branch = `feature/cross-process-${entrypoint}`;
+    const taskId = `TASK-20260824-${entrypoint === "single" ? "000009" : entrypoint === "unbound" ? "000010" : "000011"}`;
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    try {
+      process.env.HOME = tmpDir;
+      process.env.USERPROFILE = tmpDir;
+      const fixture = writeSandboxEngineFixture(tmpDir, {
+        project: "demo",
+        dockerStdoutForPs: entrypoint === "unbound"
+          ? `demo-dev-${branch.replaceAll("/", "..")}\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox=true,demo.sandbox.workspace-mode=task-bound,demo.sandbox.task-id=${taskId}`
+          : ""
+      });
+      const config = rmOneConfig(fixture, tmpDir);
+      const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+      const statusPath = path.join(evidence.controlRoot, "public", "status.json");
+      const status = JSON.parse(fs.readFileSync(statusPath, "utf8")) as Record<string, unknown>;
+      status.taskView = {
+        state: "unknown",
+        taskId,
+        observedSource: "unknown",
+        receipt: null,
+        reasonCode: "SANDBOX_TASK_VIEW_EVIDENCE_UNAVAILABLE"
+      };
+      fs.writeFileSync(statusPath, `${JSON.stringify(status)}\n`, "utf8");
+      const preload = writeAuxiliaryCleanupCrashPreload(tmpDir);
+      const args = entrypoint === "single"
+        ? ["rm", taskId]
+        : entrypoint === "unbound"
+          ? ["rm", "--unbound", "--yes"]
+          : ["rm", "--purge"];
+      const input = entrypoint === "purge" ? "n\n" : undefined;
+      const first = spawnSandboxCli(fixture, tmpDir, args, {
+        AGENT_INFRA_TASK_ID: "",
+        DOCKER_INSPECT_NOT_FOUND: entrypoint === "unbound" ? "0" : "1",
+        DOCKER_REMOVAL_UPDATES_INSPECT: entrypoint === "unbound" ? "1" : "0",
+        NODE_OPTIONS: `--require=${preload}`,
+        AGENT_INFRA_TEST_CONTROL_ROOT: evidence.controlRoot
+      }, input);
+      assert.equal(first.status, 91, `${first.stdout}\n${first.stderr}`);
+      assert.equal(fs.existsSync(evidence.intentPath), true);
+      const interruptedJournal = listSandboxRemovalJournals({ branch, project: config.project });
+      assert.equal(interruptedJournal.length, 1);
+      assert.equal(interruptedJournal[0]?.phase, "completed");
+      fs.writeFileSync(path.join(tmpDir, "docker-state.txt"), "", "utf8");
+
+      const second = spawnSandboxCli(fixture, tmpDir, args, {
+        AGENT_INFRA_TASK_ID: "",
+        DOCKER_INSPECT_NOT_FOUND: "0"
+      }, input);
+      assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
+      assert.equal(fs.existsSync(evidence.intentPath), false);
+      assert.equal(listSandboxRemovalJournals({ branch, project: config.project }).length, 0);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("sandbox purge preserves a rich removal journal for its real recovery path", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-rich-journal-"));
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  const branch = "feature/rich-purge-journal";
+  try {
+    process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, "TASK-20260824-000007", branch);
+    const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
+    fs.mkdirSync(share, { recursive: true });
+    const richTarget = {
+      branch,
+      project: config.project,
+      controlRoot: path.resolve(evidence.controlRoot),
+      targetDigest: "b".repeat(64),
+      permitDigest: "c".repeat(64),
+      removeWorktree: false,
+      removeBranch: false,
+      removeShare: true,
+      worktreePaths: [],
+      workspaceViewPaths: [],
+      toolPaths: [],
+      shellPaths: [],
+      sharePath: share,
+      permits: []
+    } as const;
+
+    await withFixtureDocker(fixture, () => removeSandboxControlRoot(evidence.controlRoot, {
+      inspectContainer: async () => ({ state: "absent", id: FIXTURE_CONTAINER_ID }),
+      removeContainer: async () => {},
+      retainRemovalJournal: true,
+      removalTarget: richTarget
+    }));
+    const before = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(before);
+    assert.equal(before.phase, "carrier-removed");
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+        confirm: async () => false,
+        isCancel: (value): value is symbol => false
+      })),
+      /SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING/
+    );
+
+    const after = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(after);
+    assert.equal(after.phase, "carrier-removed");
+    assert.equal(fs.existsSync(share), true);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox purge preserves a default early-phase removal journal for recovery", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-early-journal-"));
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  const branch = "feature/early-purge-journal";
+  try {
+    process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, "TASK-20260824-000008", branch);
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => removeSandboxControlRoot(evidence.controlRoot, {
+        inspectContainer: async () => ({
+          state: "found",
+          id: FIXTURE_CONTAINER_ID,
+          running: false,
+          labels: {}
+        }),
+        removeContainer: async () => { throw new Error("fixture container removal failed"); },
+        retainRemovalJournal: true
+      })),
+      /fixture container removal failed/
+    );
+
+    const before = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(before);
+    assert.equal(before.phase, "container-removal");
+    fs.rmSync(evidence.controlRoot, { recursive: true, force: true });
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+        confirm: async () => false,
+        isCancel: (value): value is symbol => false
+      })),
+      /SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING/
+    );
+
+    const after = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(after);
+    assert.equal(after.phase, "container-removal");
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm preserves a replacement after a share cleanup phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/share-phase-retry";
@@ -1100,7 +1667,7 @@ test("sandbox rm preserves a replacement after a share cleanup phase crash", onP
 });
 
 test("sandbox rm preserves a same-head branch replacement after a branch phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-branch-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1196,7 +1763,7 @@ test("sandbox rm preserves a same-head branch replacement after a branch phase c
 });
 
 test("sandbox rm preserves a replacement worktree after a workspace phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-worktree-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1290,7 +1857,7 @@ test("sandbox rm preserves a replacement worktree after a workspace phase crash"
 });
 
 test("sandbox rm recovers a worktree after a prune-phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-worktree-prune-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1383,7 +1950,7 @@ test("sandbox rm recovers a worktree after a prune-phase crash", onPlatforms("li
 });
 
 test("sandbox rm preserves an unowned tombstone when the source is absent", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unowned-tombstone-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/unowned-tombstone";
@@ -1450,7 +2017,7 @@ test("sandbox rm preserves an unowned tombstone when the source is absent", onPl
 });
 
 test("sandbox rm retains an unexpected moved share payload for diagnosis", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-replacement-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/share-replacement";
@@ -1539,7 +2106,7 @@ test("sandbox rm retains an unexpected moved share payload for diagnosis", onPla
 });
 
 test("sandbox rm preserves foreign tombstone payload on interrupted retry", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-crash-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/share-replacement-crash";
@@ -1634,7 +2201,7 @@ test("sandbox rm preserves foreign tombstone payload on interrupted retry", onPl
 });
 
 test("sandbox rm preserves untouched targets after a partial workspace phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-multi-target-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/multi-target-phase-retry";
@@ -1722,7 +2289,7 @@ test("sandbox rm preserves untouched targets after a partial workspace phase cra
 });
 
 test("sandbox rm allows explicit discard of a stable recovered dirty snapshot", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-dirty-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/recovered-dirty";
@@ -1753,7 +2320,7 @@ test("sandbox rm allows explicit discard of a stable recovered dirty snapshot", 
 });
 
 test("sandbox rm accepts a task-bound resolver identity when container and control roots are gone", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-task-bound-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "agent-infra-feature-recovered-task";
@@ -1774,7 +2341,7 @@ test("sandbox rm accepts a task-bound resolver identity when container and contr
 });
 
 test("sandbox rm keeps malformed recovery metadata fail-closed", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-invalid-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/recovered-invalid";
@@ -1797,7 +2364,7 @@ test("sandbox rm keeps malformed recovery metadata fail-closed", onPlatforms("li
 });
 
 test("sandbox rm negative confirmations preserve clean worktree, branch, and share", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-clean-negative-"));
   const branch = "feature/clean-negative";
@@ -1816,7 +2383,7 @@ test("sandbox rm negative confirmations preserve clean worktree, branch, and sha
 });
 
 test("sandbox rm cancellation at the worktree confirmation stops before every cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-clean-cancel-"));
   const branch = "feature/clean-cancel";
@@ -1856,7 +2423,7 @@ test("sandbox rm --unbound --yes removes a real clean linked worktree and branch
 });
 
 test("sandbox purge removes real clean linked worktrees after confirmation", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-clean-"));
   const branch = "feature/clean-purge-success";
   try {
@@ -2015,7 +2582,7 @@ test("sandbox rm --unbound does not use recovered worktree deletion", onPlatform
 });
 
 test("sandbox rm refuses a recovered worktree whose path does not match the requested branch", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-path-conflict-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const actualBranch = "feature/recovered-actual";

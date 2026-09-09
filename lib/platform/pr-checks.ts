@@ -2,7 +2,8 @@ import fs from 'node:fs';
 
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import type { PlatformCheckSnapshot } from './adapters.ts';
+import type { PlatformCheckSnapshot } from './snapshots.ts';
+import { checkStatusBucket } from './check-status.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { inspectPlatformPullRequest } from './pull-requests.ts';
@@ -33,7 +34,6 @@ type ChecksResult = PlatformResult & {
   resolution?: { status: 'resolved' | 'missing' | 'ambiguous'; runId: number | null; jobId: number | null };
   logs?: { runId: number; jobId?: number; text: string };
 };
-type GitHubClient = PlatformClient;
 type InspectionOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
 type SharedOptions = { cwd?: string; client?: PlatformClient };
 
@@ -56,18 +56,6 @@ function classifyPullRequestReadiness(input: {
   return { state: 'ready', headSha: input.headSha };
 }
 
-function parseRunJobIdentity(detailsUrl: string): { runId: number; jobId: number | null } | null {
-  try {
-    const url = new URL(detailsUrl);
-    if (url.hostname !== 'github.com') return null;
-    const match = url.pathname.match(/\/actions\/runs\/(\d+)(?:\/job\/(\d+))?/);
-    if (!match) return null;
-    return { runId: Number(match[1]), jobId: match[2] ? Number(match[2]) : null };
-  } catch {
-    return null;
-  }
-}
-
 function resolveRunCandidate(candidates: RunCandidate[], headSha: string, checkName: string):
   | { status: 'resolved'; runId: number; jobId: number | null }
   | { status: 'missing' | 'ambiguous'; runId: null; jobId: null } {
@@ -83,41 +71,6 @@ function checksResult(status: PlatformResult['status'], overrides: Partial<Check
     checks: { state: 'pending', required: [] },
     ...overrides
   };
-}
-
-function normalizeBucket(value: { bucket?: string; status?: string; state?: string; conclusion?: string }): CheckBucket {
-  const raw = String(value.bucket || value.status || value.conclusion || value.state || '').toLowerCase();
-  if (['pass', 'success', 'successful', 'neutral'].includes(raw)) return 'pass';
-  if (['fail', 'failure', 'failed', 'error', 'timed_out', 'action_required'].includes(raw)) return 'fail';
-  if (['cancel', 'cancelled', 'canceled', 'skipped', 'stale'].includes(raw)) return 'cancel';
-  return 'pending';
-}
-
-function normalizeChecks(value: unknown): CheckSnapshot[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((raw) => {
-    const item = raw as Record<string, unknown>;
-    const name = String(item.name || item.context || '');
-    return name ? [{
-      name,
-      bucket: normalizeBucket(item as { bucket?: string; state?: string; conclusion?: string }),
-      workflow: item.workflow ? String(item.workflow) : null,
-      conclusion: item.conclusion ? String(item.conclusion) : item.state ? String(item.state) : null,
-      detailsUrl: item.link ? String(item.link) : item.detailsUrl ? String(item.detailsUrl) : null,
-      startedAt: item.startedAt ? String(item.startedAt) : null,
-      completedAt: item.completedAt ? String(item.completedAt) : null
-    }] : [];
-  });
-}
-
-function inspectGitHubRequiredChecks(client: GitHubClient, repository: string, number: number, cwd: string) {
-  const inspected = client.json<unknown>([
-    'pr', 'checks', String(number), '--repo', repository,
-    '--json', 'name,state,bucket,link,workflow,startedAt,completedAt'
-  ], { cwd });
-  return inspected.ok
-    ? { ok: true as const, value: normalizeChecks(inspected.value) }
-    : { ok: false as const, error: inspected.error };
 }
 
 async function resolvedTask(taskRef: string, options: InspectionOptions) {
@@ -141,14 +94,12 @@ async function resolvedTask(taskRef: string, options: InspectionOptions) {
 async function inspectRequiredChecks(taskRef: string, options: InspectionOptions = {}): Promise<ChecksResult> {
   const base = await resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
-  return inspectChecksForResolvedTask(base, options);
+  return inspectChecksForResolvedTask(base);
 }
 
 async function inspectChecksForResolvedTask(
-  base: Extract<Awaited<ReturnType<typeof resolvedTask>>, { ok: true }>,
-  options: InspectionOptions
+  base: Extract<Awaited<ReturnType<typeof resolvedTask>>, { ok: true }>
 ): Promise<ChecksResult> {
-  const repository = base.context.platform.repository!;
   {
     const inspected = base.provider.checks?.inspectRequired
       ? await base.provider.checks.inspectRequired({
@@ -164,7 +115,13 @@ async function inspectChecksForResolvedTask(
       pullRequest: base.pullRequest,
       error: providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED')
     });
-    const required = normalizeChecks(inspected.value);
+    const required = inspected.value.map((check): CheckSnapshot => ({
+      name: check.name,
+      bucket: checkStatusBucket(check.status),
+      conclusion: check.conclusion || null,
+      detailsUrl: check.detailsUrl || null,
+      workflow: null, startedAt: null, completedAt: null
+    }));
     const classified = classifyRequiredChecks(required);
     const status = classified.state === 'passed' || classified.state === 'no-required'
       ? 'no-op'
@@ -184,7 +141,7 @@ async function inspectChecksForResolvedTask(
 async function inspectPullRequestReadiness(taskRef: string, options: InspectionOptions = {}): Promise<ChecksResult> {
   const base = await resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
-  const checked = await inspectChecksForResolvedTask(base, options);
+  const checked = await inspectChecksForResolvedTask(base);
   const classifiedCodes = new Set(['REQUIRED_CHECKS_PENDING', 'REQUIRED_CHECKS_FAILED', 'REQUIRED_CHECKS_CANCELLED']);
   if (checked.error && !classifiedCodes.has(checked.error.code)) return checked;
   const readiness = classifyPullRequestReadiness({
@@ -271,15 +228,6 @@ async function resolvePlatformCheckRun(taskRef: string, options: SharedOptions &
   }
 }
 
-function fetchCheckLogText(client: GitHubClient, args: string[], cwd: string) {
-  if (!client.text) return { ok: false as const, error: { code: 'PLATFORM_CLIENT_TEXT_UNAVAILABLE', message: 'Platform client does not support text responses', retryable: false } };
-  const fetched = client.text(args, { cwd });
-  if (fetched.ok || args[0] !== 'api' || !/response contains terminal escape sequences/i.test(fetched.error.message)) {
-    return fetched;
-  }
-  return client.text([...args, '--allow-escape-sequences'], { cwd });
-}
-
 async function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & { run: number; job?: number }): Promise<ChecksResult> {
   const base = await resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
@@ -308,17 +256,5 @@ async function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & 
   }
 }
 
-export {
-  classifyPullRequestReadiness,
-  classifyRequiredChecks,
-  fetchCheckLogText,
-  fetchPlatformCheckLogs,
-  inspectGitHubRequiredChecks,
-  inspectRequiredChecks,
-  inspectPullRequestReadiness,
-  parseRunJobIdentity,
-  resolvePlatformCheckRun,
-  resolveRunCandidate,
-  watchPullRequestReadiness
-};
+export { classifyPullRequestReadiness, classifyRequiredChecks, fetchPlatformCheckLogs, inspectRequiredChecks, inspectPullRequestReadiness, resolvePlatformCheckRun, resolveRunCandidate, watchPullRequestReadiness };
 export type { CheckBucket, CheckSnapshot, ChecksResult, ChecksSnapshot, CheckState, ReadinessSnapshot, ReadinessState, RunCandidate };

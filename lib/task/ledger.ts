@@ -51,9 +51,7 @@ function isReviewStage(stage: string): stage is ReviewStage {
   return stage === 'analysis' || stage === 'plan' || stage === 'code';
 }
 
-// Parse all rows of the disagreement ledger table. Skips the heading, the
-// header row (`| id | ... |`) and the `|---|` separator; ignores non-`|` lines.
-// Rows with fewer than 6 columns are skipped (mirrors the JS gate parser).
+// Parse ledger rows using the shared strict table structure contract.
 function parseLedgerDocument(content: string): LedgerDocument {
   const table = parseTable(content, { sectionAliases: LEDGER_HEADINGS, columns: LEDGER_COLUMNS });
   if (!table) return { present: false, rows: [] };

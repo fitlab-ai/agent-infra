@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { artifactName, maxRound } from "./review-artifacts.ts";
+import { artifactName, maxArtifactRound } from "./artifact-name.ts";
 import { invalidationBlocks, isArtifactInvalidated, parseInvalidationDocument } from "./invalidation.ts";
 
 type ReviewedGitTree = string & { readonly __reviewedGitTree: unique symbol };
@@ -45,7 +45,7 @@ export function resolvePostReviewGlobs(
 
 export function findAuthoritativeReviewCodeArtifact(taskDir: string) {
   const entries = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
-  const round = maxRound(entries, "review-code");
+  const round = maxArtifactRound(entries, "review-code");
   if (round === 0) {
     return { ok: false, round: 0, fileName: null, path: null, error: null };
   }

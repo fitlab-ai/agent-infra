@@ -182,6 +182,10 @@ tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/
 
 这两条路径硬编码，不暴露 `.airc.json` 配置项。首次 `create` 时会自动创建宿主目录；执行 `ai sandbox rm <branch>` 删除时会附带询问是否清理（默认 yes）。`ai sandbox rm --unbound` 批量删除所有**未绑定 active 任务**的沙箱（即 `ai sandbox ls` 中短号为 `-` 的行）；可加 `--dry-run` 预览，或 `--yes` 跳过普通确认（非交互 shell 中必须显式传 `--yes`）。`ai sandbox rm --purge` 则拆除项目的**全部**沙箱（容器、worktree、镜像、VM）。**破坏性变更**：`--all` 已移除；旧调用会返回迁移错误，必须改用 `--unbound`。
 
+`ai sandbox rm`、`--unbound` 和 `--purge` 还会扫描仓库中的规范任务辅助目录。只有在任务已终态、完成回执、artifact 或 Git identity 以及路径所有权检查全部匹配时，才会删除已消费的本地 artifact finalization intent 或已同步的 commit intent；规范辅助目录只有在真实为空时才会逐层删除。任务文档、artifact、完成回执、orchestration evidence、run 元数据和输出、生命周期记录、process-data、control 状态以及用户数据继续受保护。
+
+`--unbound` 即使 Docker 没有返回沙箱行也会执行这次扫描，因此沙箱先消失后仍可重试 cleanup-only 工作。`--dry-run` 会显示 planned、protected、skipped、deleted、failed 和 remaining 项及原因码，但不会停止容器或删除文件。损坏记录、active 或 blocked 任务、未知名称、符号链接、身份变化、开放恢复告警和不完整 Git 证据都会保留，等待后续诊断。
+
 所有删除路径都会在破坏性清理前检查全部目标 worktree。存在 staged、unstaged、冲突或非 ignored untracked 修改时，批量删除、purge、prune、`--yes` 和其他非交互删除都会 fail closed。只有交互式 `ai sandbox rm <branch>` 可以在展示 dirty snapshot 后，通过一次默认否定的独立确认丢弃该 worktree。丢弃授权包含同一 worktree、同一分支内随后产生的修改；仅允许清理干净 worktree 的授权仍会在 snapshot 变化时失效。
 
 正常任务沙箱清理发生在 `complete-task` 成功、短号释放、任务移入 completed 目录之后。删除时使用完整 `TASK-id`，因为已释放的短号可能已指向另一任务。异常清理表示操作者明确决定丢弃选定沙箱并重建，允许终止其中运行。两种路径都保留精确容器 authority/身份、受管路径和归属检查，并在宿主清理前停止执行；不承诺抵御其他宿主程序在清理期间并发替换选定目录的源实例原子移动保证。不需要特权宿主服务。引擎不可达或删除结果未知仍保留可重试状态，不能报告成功。

@@ -1,3 +1,5 @@
+import type { PlatformIssueSnapshot as IssueSnapshot } from './snapshots.ts';
+import type { IssueFieldSchema } from './github-data.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -38,26 +40,7 @@ import {
 import { resourceIdentityEquals, resourceIdentityNumber, resourceIdentityString, serializeResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
-
-type GitHubClient = PlatformClient;
 import type { IssueSnapshot as ProviderIssueSnapshot, RepositoryMetadataSnapshot } from './provider-contract.ts';
-
-type IssueSnapshot = {
-  repository: string;
-  number: number;
-  identity?: ResourceIdentity;
-  databaseId: number | null;
-  nodeId: string;
-  url: string;
-  state: 'open' | 'closed';
-  title: string;
-  body: string;
-  labels: string[];
-  assignees: string[];
-  milestone: string | null;
-  issueType: string | null;
-  fields: Record<string, string | number | null>;
-};
 type IssueResult = PlatformResult & {
   task: { id: string | null; issueNumber: number | null };
   issue: IssueSnapshot | null;
@@ -79,33 +62,6 @@ type SyncOptions = SharedOptions & {
   closeReason?: 'completed' | 'not_planned';
   dryRun?: boolean;
 };
-
-type RemoteIssue = {
-  number?: number;
-  id?: number;
-  node_id?: string;
-  html_url?: string;
-  state?: string;
-  title?: string;
-  body?: string | null;
-  labels?: Array<string | { name?: string }>;
-  assignees?: Array<{ login?: string }>;
-  milestone?: { title?: string } | null;
-  type?: { name?: string } | null;
-  pull_request?: unknown;
-};
-
-type IssueFieldSchema = {
-  id: string;
-  name: string;
-  kind: 'single-select' | 'date' | 'text' | 'number';
-  options: Array<{ id: string; name: string }>;
-};
-type IssueTypeSchema = { id: string; name: string; fields: IssueFieldSchema[] };
-type CurrentField = { id: string; name: string; kind: IssueFieldSchema['kind']; value: string | number | null };
-
-const ISSUE_TYPES_QUERY = `query($owner:String!){organization(login:$owner){issueTypes(first:20){nodes{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}}}}}`;
-const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id issueType{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{id name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{id name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{id name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{id name}}}}}}}}`;
 
 function result(
   status: PlatformResult['status'],
@@ -233,118 +189,6 @@ async function inspectExternalIssue(
     issue,
     error: null
   });
-}
-
-function normalizeIssue(remote: RemoteIssue, repository: string, fallbackNumber?: number): IssueSnapshot | null {
-  const number = Number.isInteger(remote.number) && Number(remote.number) > 0
-    ? Number(remote.number)
-    : fallbackNumber;
-  if (!number || !Number.isSafeInteger(number) || remote.pull_request) return null;
-  return {
-    repository,
-    number,
-    databaseId: Number.isInteger(remote.id) ? Number(remote.id) : null,
-    nodeId: remote.node_id || `issue-${number}`,
-    url: remote.html_url || `https://github.com/${repository}/issues/${number}`,
-    state: String(remote.state || '').toLowerCase() === 'closed' ? 'closed' : 'open',
-    title: remote.title || '',
-    body: remote.body || '',
-    labels: (remote.labels || []).map((label) => typeof label === 'string' ? label : label.name || '').filter(Boolean).sort(),
-    assignees: (remote.assignees || []).map((assignee) => assignee.login || '').filter(Boolean).sort(),
-    milestone: remote.milestone?.title || null,
-    issueType: remote.type?.name || null,
-    fields: {}
-  };
-}
-
-function fieldKind(value: { __typename?: string }): IssueFieldSchema['kind'] | null {
-  if (value.__typename === 'IssueFieldSingleSelect' || value.__typename === 'IssueFieldSingleSelectValue') return 'single-select';
-  if (value.__typename === 'IssueFieldDate' || value.__typename === 'IssueFieldDateValue') return 'date';
-  if (value.__typename === 'IssueFieldText' || value.__typename === 'IssueFieldTextValue') return 'text';
-  if (value.__typename === 'IssueFieldNumber' || value.__typename === 'IssueFieldNumberValue') return 'number';
-  return null;
-}
-
-function normalizeFieldSchemas(value: unknown): IssueFieldSchema[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((raw) => {
-    const item = raw as { id?: string; name?: string; __typename?: string; options?: Array<{ id?: string; name?: string }> };
-    const kind = fieldKind(item);
-    return item.id && item.name && kind ? [{
-      id: item.id,
-      name: item.name,
-      kind,
-      options: (item.options || []).flatMap((option) => option.id && option.name ? [{ id: option.id, name: option.name }] : [])
-    }] : [];
-  });
-}
-
-function normalizeIssueTypes(value: unknown): IssueTypeSchema[] {
-  const nodes = (value as { data?: { organization?: { issueTypes?: { nodes?: unknown[] } } } })?.data?.organization?.issueTypes?.nodes;
-  return (nodes || []).flatMap((raw) => {
-    const item = raw as { id?: string; name?: string; pinnedFields?: unknown[] };
-    return item.id && item.name ? [{ id: item.id, name: item.name, fields: normalizeFieldSchemas(item.pinnedFields) }] : [];
-  });
-}
-
-function normalizeCurrentFields(value: unknown): { issueId: string | null; type: IssueTypeSchema | null; values: CurrentField[] } {
-  const issue = (value as { data?: { repository?: { issue?: {
-    id?: string;
-    issueType?: { id?: string; name?: string; pinnedFields?: unknown[] } | null;
-    issueFieldValues?: { nodes?: unknown[] };
-  } } } })?.data?.repository?.issue;
-  const type = issue?.issueType?.name ? {
-    id: issue.issueType.id || issue.issueType.name,
-    name: issue.issueType.name,
-    fields: normalizeFieldSchemas(issue.issueType.pinnedFields)
-  } : null;
-  const values = (issue?.issueFieldValues?.nodes || []).flatMap((raw) => {
-    const item = raw as { __typename?: string; name?: string; value?: string | number; field?: { id?: string; name?: string } };
-    const kind = fieldKind(item);
-    const value = kind === 'single-select' ? item.name : item.value;
-    return item.field?.name && kind && value !== undefined
-      ? [{ id: item.field.id || item.field.name, name: item.field.name, kind, value: value ?? null }]
-      : [];
-  });
-  return { issueId: issue?.id || null, type, values };
-}
-
-function graphState(client: GitHubClient, repository: string, issue: number, cwd: string) {
-  const [owner, name] = repository.split('/');
-  if (!owner || !name) return null;
-  const current = client.json<unknown>([
-    'api', 'graphql', '-f', `query=${ISSUE_FIELDS_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${issue}`
-  ], { cwd });
-  if (!current.ok) return null;
-  return normalizeCurrentFields(current.value);
-}
-
-function fetchIssue(client: GitHubClient, repository: string, issue: number, cwd: string) {
-  return client.json<RemoteIssue>(['api', `repos/${repository}/issues/${issue}`], { cwd });
-}
-
-function inspectGitHubIssue(client: GitHubClient, repository: string, issue: number, cwd: string) {
-  const fetched = fetchIssue(client, repository, issue, cwd);
-  if (!fetched.ok) return fetched;
-  const snapshot = normalizeIssue(fetched.value, repository, issue);
-  return snapshot
-    ? { ok: true as const, value: snapshot }
-    : { ok: false as const, error: { code: 'ISSUE_IDENTITY_INVALID', message: 'Remote resource is not a valid Issue', retryable: false } };
-}
-
-function inspectGitHubIssueMetadata(client: GitHubClient, repository: string, issue: number, cwd: string) {
-  const fetched = fetchIssue(client, repository, issue, cwd);
-  if (!fetched.ok) return fetched;
-  const remote = fetched.value;
-  return {
-    ok: true as const,
-    value: {
-      state: String(remote.state || '').toLowerCase() === 'closed' ? 'closed' as const : 'open' as const,
-      labels: (remote.labels || []).map((label: string | { name?: string }) => typeof label === 'string' ? label : label.name || '').filter(Boolean).sort(),
-      body: remote.body || '',
-      milestone: remote.milestone?.title || null
-    }
-  };
 }
 
 async function inspectPlatformIssue(taskRef: string, options: SharedOptions = {}): Promise<IssueResult> {
@@ -543,14 +387,6 @@ function requirementsFromTask(content: string): Requirement[] {
   }));
 }
 
-function flattenPages(value: unknown): unknown[] {
-  return Array.isArray(value) ? value.flatMap((item) => Array.isArray(item) ? item : [item]) : [];
-}
-
-function listNames(value: unknown): string[] {
-  return flattenPages(value).map((item) => typeof item === 'string' ? item : String((item as { name?: string }).name || '')).filter(Boolean);
-}
-
 function milestoneBasis(repoRoot: string, current: string | null): string | null {
   if (!current || !/^\d+\.\d+\.x$/.test(current)) return current;
   try {
@@ -640,73 +476,6 @@ function desiredFieldValues(frontmatter: Record<string, string>, fields: IssueFi
     desired.push({ fieldId: field.id, name, kind: field.kind, value, input: { fieldId: field.id, [keyName]: value } });
   }
   return desired;
-}
-
-function planGraphMetadata(
-  client: GitHubClient,
-  repository: string,
-  issue: number,
-  cwd: string,
-  frontmatter: Record<string, string>,
-  options: Pick<SyncOptions, 'issueType' | 'fields'>,
-  capabilities: PlatformResult['capabilities']
-): { operations: PlannedOperation[]; issueId: string | null } {
-  if (!options.issueType && !options.fields) return { operations: [], issueId: null };
-  if (!capabilities.push) return {
-    operations: [
-      ...(options.issueType ? [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'PUSH_REQUIRED' }] : []),
-      ...(options.fields ? [{ name: 'fields', status: 'skipped' as const, reasonCode: 'PUSH_REQUIRED' }] : [])
-    ], issueId: null
-  };
-  const [owner] = repository.split('/');
-  const typesResult = client.json<unknown>(['api', 'graphql', '-f', `query=${ISSUE_TYPES_QUERY}`, '-F', `owner=${owner}`], { cwd });
-  if (!typesResult.ok) return { operations: [{ name: 'issue-schema', status: 'failed', reasonCode: typesResult.error.code }], issueId: null };
-  const types = normalizeIssueTypes(typesResult.value);
-  if (types.length === 0) return {
-    operations: [
-      ...(options.issueType ? [{ name: 'issue-type', status: 'skipped' as const, reasonCode: 'ISSUE_TYPES_UNSUPPORTED' }] : []),
-      ...(options.fields ? [{ name: 'fields', status: 'skipped' as const, reasonCode: 'ISSUE_TYPES_UNSUPPORTED' }] : [])
-    ], issueId: null
-  };
-  const current = graphState(client, repository, issue, cwd);
-  if (!current?.issueId) return { operations: [{ name: 'issue-schema', status: 'failed', reasonCode: 'ISSUE_GRAPH_IDENTITY_INVALID' }], issueId: null };
-  const target = types.find((type) => type.name === desiredIssueType(frontmatter.type || ''));
-  if (!target) return { operations: [{ name: 'issue-type', status: 'failed', reasonCode: 'ISSUE_TYPE_NOT_FOUND' }], issueId: current.issueId };
-  const operations: PlannedOperation[] = [];
-  if (options.issueType) operations.push(current.type?.id === target.id
-    ? { name: 'issue-type', status: 'no-op', reasonCode: null }
-    : { name: 'issue-type', status: 'planned', reasonCode: null, value: { issueTypeId: target.id } });
-  if (options.fields) {
-    const desired = desiredFieldValues(frontmatter, target.fields);
-    const inputs = desired.filter((field) => current.values.find((value) => value.name === field.name)?.value !== field.value).map((field) => field.input);
-    if (current.type?.id !== target.id) {
-      const targetNames = new Set(target.fields.map((field) => field.name));
-      for (const old of current.values) if (!targetNames.has(old.name)) inputs.push({ fieldId: old.id, delete: true });
-    }
-    operations.push(inputs.length === 0
-      ? { name: 'fields', status: 'no-op', reasonCode: null }
-      : { name: 'fields', status: 'planned', reasonCode: null, value: inputs });
-  }
-  return { operations, issueId: current.issueId };
-}
-
-function executeGraphOperation(
-  client: GitHubClient,
-  cwd: string,
-  issueId: string,
-  operation: PlannedOperation
-) {
-  if (operation.name === 'issue-type') {
-    const query = 'mutation($issueId:ID!,$issueTypeId:ID){updateIssueIssueType(input:{issueId:$issueId,issueTypeId:$issueTypeId}){issue{id}}}';
-    const typeId = (operation.value as { issueTypeId: string }).issueTypeId;
-    return client.json(['api', 'graphql', '--input', '-'], {
-      cwd, method: 'POST', input: JSON.stringify({ query, variables: { issueId, issueTypeId: typeId } })
-    });
-  }
-  const query = 'mutation($issueId:ID!,$issueFields:[IssueFieldCreateOrUpdateInput!]!){setIssueFieldValue(input:{issueId:$issueId,issueFields:$issueFields}){issue{id}}}';
-  return client.json(['api', 'graphql', '--input', '-'], {
-    cwd, method: 'POST', input: JSON.stringify({ query, variables: { issueId, issueFields: operation.value } })
-  });
 }
 
 async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
@@ -849,15 +618,5 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
   });
 }
 
-export {
-  bindPlatformIssue,
-  createPlatformIssue,
-  graphState,
-  inspectGitHubIssue,
-  inspectGitHubIssueMetadata,
-  inspectPlatformIssue,
-  normalizeIssue,
-  requirementSectionAnchors,
-  syncPlatformIssue
-};
-export type { BindOptions, CreateOptions, IssueResult, IssueSnapshot, SyncOptions };
+export { bindPlatformIssue, createPlatformIssue, inspectPlatformIssue, requirementSectionAnchors, syncPlatformIssue };
+export type { BindOptions, CreateOptions, IssueResult, SyncOptions };

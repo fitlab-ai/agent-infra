@@ -586,7 +586,7 @@ test("installed package helper executes inside a CommonJS project", () => {
   try {
     execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
-      input: "cjsproj\ncjsorg\n\n" + ENGINE_NL + "\n\n\n",
+      input: `cjsproj\ncjsorg\n\n${ENGINE_NL}\n\n\n`,
       stdio: "pipe"
     });
 
@@ -594,9 +594,9 @@ test("installed package helper executes inside a CommonJS project", () => {
     const result = spawnSync(
       process.execPath,
       [
-        "--input-type=module",
-        "--eval",
-        "import { formatAgentInfraPackageError } from " + JSON.stringify(pathToFileURL(helper).href) + "; console.log(typeof formatAgentInfraPackageError);"
+          "--input-type=module",
+          "--eval",
+        `import { formatAgentInfraPackageError } from ${JSON.stringify(pathToFileURL(helper).href)}; console.log(typeof formatAgentInfraPackageError);`
       ],
       { cwd: tmpDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
     );

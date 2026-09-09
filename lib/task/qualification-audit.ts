@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 
+import { parseArtifactName } from './artifact-name.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
-import { parseTable } from './sections.ts';
+import { findSectionRange, parseTable } from './sections.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 
 const TASK_CONSTRAINT_HEADINGS = ['约束', 'Constraints'] as const;
 const TASK_CANDIDATE_HEADINGS = ['候选与否决方案', 'Candidate and Rejected Options', 'Candidates and Rejected Options', 'Candidates and Rejected Alternatives'] as const;
@@ -170,21 +172,9 @@ function taskInputDigest(qualification: Pick<TaskQualification, 'constraints' | 
   return digest(canonicalTaskInput(qualification));
 }
 
-function sectionBody(content: string, aliases: readonly string[], level = 2): string | null {
-  const heading = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const marker = '#'.repeat(level);
-  const match = new RegExp(`^${marker}\\s+(${heading})\\s*$`, 'm').exec(content);
-  if (!match) return null;
-  const rest = content.slice((match.index ?? 0) + match[0].length);
-  const end = rest.search(new RegExp(`^#{2,${level}}\\s+`, 'm'));
-  return rest.slice(0, end < 0 ? rest.length : end);
-}
-
-function stripSection(content: string, aliases: readonly string[]): string {
-  const body = sectionBody(content, aliases);
-  if (body === null) return normalizeText(content);
-  const heading = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  return normalizeText(content.replace(new RegExp(`^##\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^##\\s+|(?![\\s\\S]))`, 'm'), ''));
+function sectionBody(content: string, aliases: readonly string[], level: 2 | 3 = 2): string | null {
+  const section = findSectionRange(content, aliases, level);
+  return section ? content.slice(section.bodyStart, section.end) : null;
 }
 
 function stripFrontmatter(content: string): string {
@@ -218,7 +208,7 @@ function nonConstraintInputDigest(content: string): string {
     ['返工意图', 'Rework Intents'],
     CONFIRMATION_HEADINGS,
     ['完成检查清单', 'Completion Checklist']
-  ].reduce((value, aliases) => stripSection(value, aliases), projection);
+  ].reduce((value, aliases) => stripSectionAtLevel(value, aliases, 2), projection);
   return digest(projection);
 }
 
@@ -231,12 +221,9 @@ function stripTaskInputSection(content: string, aliases: readonly string[]): str
   return stripSectionAtLevel(result, aliases, 2);
 }
 
-function stripSectionAtLevel(content: string, aliases: readonly string[], level: number): string {
-  const body = sectionBody(content, aliases, level);
-  if (body === null) return normalizeText(content);
-  const heading = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const marker = '#'.repeat(level);
-  return normalizeText(content.replace(new RegExp(`^${marker}\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^#{2,${level}}\\s+|(?![\\s\\S]))`, 'm'), ''));
+function stripSectionAtLevel(content: string, aliases: readonly string[], level: 2 | 3): string {
+  const section = findSectionRange(content, aliases, level);
+  return normalizeText(section ? content.slice(0, section.start) + content.slice(section.end) : content);
 }
 
 function parseTaskQualification(content: string): { ok: true; qualification: TaskQualification } | { ok: false; code: string; message: string } {
@@ -246,12 +233,14 @@ function parseTaskQualification(content: string): { ok: true; qualification: Tas
   const hasCandidateHeading = candidateBody !== null;
   if ((!hasConstraintHeading && !hasCandidateHeading)
     || (hasConstraintHeading && hasCandidateHeading
-      && !/^\s*\|/m.test(constraintBody!) && !/^\s*\|/m.test(candidateBody!))) {
+      && !scanVisibleMarkdown(constraintBody!).lines.some((line) => line.text.trim().startsWith('|'))
+      && !scanVisibleMarkdown(candidateBody!).lines.some((line) => line.text.trim().startsWith('|')))) {
     return { ok: true, qualification: { present: false, constraints: [], candidates: [], constraintDigest: digest([]), taskInputDigest: digest({ constraints: [], candidates: [] }), nonConstraintInputDigest: nonConstraintInputDigest(content) } };
   }
   if (!hasConstraintHeading || !hasCandidateHeading) {
-    const hasCanonicalTable = new RegExp(`\\|\\s*${CONSTRAINT_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(content)
-      || new RegExp(`\\|\\s*${CANDIDATE_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(content);
+    const visible = scanVisibleMarkdown(content).lines.map((line) => line.text).join('\n');
+    const hasCanonicalTable = new RegExp(`\\|\\s*${CONSTRAINT_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(visible)
+      || new RegExp(`\\|\\s*${CANDIDATE_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(visible);
     if (hasCanonicalTable) return { ok: false, code: 'QUALIFICATION_TASK_CONTRACT_INVALID', message: 'task qualification requires both constraints and candidates sections' };
     return { ok: true, qualification: { present: false, constraints: [], candidates: [], constraintDigest: digest([]), taskInputDigest: digest({ constraints: [], candidates: [] }), nonConstraintInputDigest: nonConstraintInputDigest(content) } };
   }
@@ -315,10 +304,10 @@ function parseAuditTable(content: string, heading: (typeof AUDIT_SUBSECTIONS)[nu
   return table?.rows.map((row) => ({ ...row.values })) ?? null;
 }
 
-function parseArtifactName(value: string): { family: ArtifactFamily; round: number } | null {
-  const match = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]|[1-9]\d+))?\.md$/.exec(value);
-  if (!match) return null;
-  return { family: match[1] as ArtifactFamily, round: match[2] ? Number(match[2]) : 1 };
+function parseAuditArtifactName(value: string): { family: ArtifactFamily; round: number } | null {
+  const identity = parseArtifactName(value);
+  return identity && ARTIFACT_FAMILIES.includes(identity.family as ArtifactFamily)
+    ? { family: identity.family as ArtifactFamily, round: identity.round } : null;
 }
 
 function upstreamArtifactDigest(rows: readonly UpstreamRelation[]): string {
@@ -327,7 +316,7 @@ function upstreamArtifactDigest(rows: readonly UpstreamRelation[]): string {
 }
 
 function validateUpstreamRelation(row: UpstreamRelation): void {
-  const identity = parseArtifactName(row.upstreamArtifact);
+  const identity = parseAuditArtifactName(row.upstreamArtifact);
   if (!ARTIFACT_FAMILIES.includes(row.upstreamFamily) || !identity || identity.family !== row.upstreamFamily
     || identity.round !== row.upstreamRound || !Number.isSafeInteger(row.upstreamRound)
     || !/^[a-f0-9]{64}$/i.test(row.upstreamSha256) || !RELATIONS.includes(row.relation)) {
@@ -368,7 +357,7 @@ function expectedQualificationRelations(
   const inputName = family === 'code' ? frontmatter.code_input_artifact : family.startsWith('review-') ? frontmatter.review_input_artifact : '';
   const inputSha256 = family === 'code' ? frontmatter.code_input_sha256 : family.startsWith('review-') ? frontmatter.review_input_sha256 : '';
   if (typeof inputName !== 'string' || !inputName || typeof inputSha256 !== 'string' || !inputSha256) return { ok: true, relations: undefined };
-  const identity = parseArtifactName(inputName);
+  const identity = parseAuditArtifactName(inputName);
   if (!identity) return { ok: false, code: 'QUALIFICATION_STARTED_INPUT_INVALID', message: `started input '${inputName}' is not canonical` };
   const relation: UpstreamRelation = {
     upstreamFamily: identity.family, upstreamArtifact: inputName, upstreamRound: identity.round,
@@ -507,7 +496,7 @@ function validateQualificationAudit(
     || upstreamArtifactDigest(options.expectedUpstreamRelations) !== upstreamArtifactDigest(audit.audit.upstreamRelations)
   )) return { ok: false, code: 'QUALIFICATION_UPSTREAM_RELATION_MISMATCH', message: 'qualification audit upstream relations do not match the started artifact inputs' };
   if (options.family && options.artifact) {
-    const identity = parseArtifactName(options.artifact);
+    const identity = parseAuditArtifactName(options.artifact);
     if (!identity || identity.family !== options.family) return { ok: false, code: 'QUALIFICATION_ARTIFACT_IDENTITY_INVALID', message: `artifact '${options.artifact}' is not canonical for '${options.family}'` };
   }
   return { ok: true, qualification: task.qualification, audit: audit.audit };

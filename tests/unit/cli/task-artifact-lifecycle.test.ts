@@ -7,13 +7,12 @@ import { spawnSync } from 'node:child_process';
 
 import {
   artifactFamilyCatalog,
-  artifactName,
   buildArtifactLinkSection,
   inspectTaskArtifacts,
-  parseArtifactName,
   resolveArtifactContext,
   validateCompletedArtifact
 } from '../../../lib/task/artifact-lifecycle.ts';
+import { artifactName, parseArtifactName } from '../../../lib/task/artifact-name.ts';
 import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { createInvalidationOperation, invalidationMutation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';

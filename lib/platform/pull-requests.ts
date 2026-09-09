@@ -1,3 +1,4 @@
+import { normalizePullRequest, type RemotePullRequest } from './github-data.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -6,7 +7,7 @@ import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { extractSection } from '../task/sections.ts';
 import { captureTaskWriteMetadata, writeTask } from '../task/write.ts';
-import type { PlatformChangeRequestSnapshot } from './adapters.ts';
+import type { PlatformChangeRequestSnapshot } from './snapshots.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { inspectPlatformIssue } from './issues.ts';
@@ -61,7 +62,6 @@ type PullRequestResult = PlatformResult & {
     effect: 'no-op' | 'applied' | 'unknown';
   }>;
 };
-type GitHubClient = PlatformClient;
 type InspectionOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
 type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
 type CreateOptions = SharedOptions & {
@@ -92,54 +92,6 @@ type ExternalPullRequestResult = PullRequestResult & {
 };
 
 type CreatePhase = 'before-post' | 'post-dispatched' | 'post-accepted';
-
-type RemotePullRequest = {
-  number?: number;
-  node_id?: string;
-  html_url?: string;
-  state?: string;
-  title?: string;
-  body?: string | null;
-  draft?: boolean;
-  pull_request?: unknown;
-  head?: { ref?: string; sha?: string; repo?: { full_name?: string } | null };
-  base?: { ref?: string; sha?: string; repo?: { full_name?: string } | null };
-  merged_at?: string | null;
-  merge_commit_sha?: string | null;
-  labels?: Array<string | { name?: string }>;
-  assignees?: Array<{ login?: string }>;
-  milestone?: { title?: string } | null;
-  mergeable?: boolean | null;
-  mergeable_state?: string | null;
-};
-
-type ClosingPullRequestNode = {
-  number?: number;
-  id?: string;
-  url?: string;
-  state?: string;
-  title?: string;
-  body?: string | null;
-  isDraft?: boolean;
-  headRefName?: string;
-  headRefOid?: string;
-  headRepository?: { nameWithOwner?: string } | null;
-  baseRefName?: string;
-  baseRefOid?: string;
-  baseRepository?: { nameWithOwner?: string } | null;
-  mergedAt?: string | null;
-  mergeCommit?: { oid?: string } | null;
-  labels?: { nodes?: Array<{ name?: string }> };
-  assignees?: { nodes?: Array<{ login?: string }> };
-  milestone?: { title?: string } | null;
-};
-
-type ClosingPullRequestPage = {
-  data?: { repository?: { issue?: { closedByPullRequestsReferences?: {
-    nodes?: ClosingPullRequestNode[];
-    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-  } } } };
-};
 
 function warningResultForPrimary(primaryResult: PullRequestPrimaryResult): NonNullable<PullRequestResult['result']> {
   if (primaryResult === 'pr_created') return 'pr_created_with_warnings';
@@ -188,57 +140,6 @@ function withCreation(output: PullRequestResult, creation: CreationOutcome): Pul
 const PRECONDITION_NOT_CREATED: CreationOutcome = {
   kind: 'not-created', reason: 'precondition-failed', createdByCurrentOperation: false
 };
-
-function normalizePullRequest(remote: RemotePullRequest, repository: string): PullRequestSnapshot | null {
-  const number = Number(remote.number);
-  const headRepository = remote.head?.repo?.full_name;
-  const baseRepository = remote.base?.repo?.full_name;
-  if (!Number.isInteger(number) || number <= 0 || !remote.node_id || !remote.html_url ||
-      !remote.head?.ref || !remote.head.sha || !headRepository || !remote.base?.ref || !baseRepository) return null;
-  const mergeabilityDetail = remote.mergeable_state?.trim().toLowerCase() || null;
-  const mergeability = remote.mergeable === false
-    ? { state: 'conflicting' as const, detail: mergeabilityDetail }
-    : remote.mergeable === true && mergeabilityDetail !== 'dirty'
-      ? { state: 'mergeable' as const, detail: mergeabilityDetail }
-      : { state: 'unknown' as const, detail: mergeabilityDetail };
-  return {
-    repository,
-    number,
-    nodeId: remote.node_id,
-    url: remote.html_url,
-    state: remote.state === 'closed' ? 'closed' : 'open',
-    title: remote.title || '',
-    body: remote.body || '',
-    draft: Boolean(remote.draft),
-    head: { repository: headRepository, ref: remote.head.ref, sha: remote.head.sha },
-    base: { repository: baseRepository, ref: remote.base.ref, sha: remote.base.sha || '' },
-    mergedAt: remote.merged_at || null,
-    mergeCommitSha: remote.merge_commit_sha || null,
-    labels: (remote.labels || []).map((label) => typeof label === 'string' ? label : label.name || '').filter(Boolean).sort(),
-    assignees: (remote.assignees || []).map((assignee) => assignee.login || '').filter(Boolean).sort(),
-    milestone: remote.milestone?.title || null,
-    mergeability
-  };
-}
-
-function normalizeClosingPullRequest(node: ClosingPullRequestNode, repository: string): PullRequestSnapshot | null {
-  return normalizePullRequest({
-    number: node.number,
-    node_id: node.id,
-    html_url: node.url,
-    state: node.state === 'OPEN' ? 'open' : 'closed',
-    title: node.title,
-    body: node.body,
-    draft: node.isDraft,
-    head: { ref: node.headRefName, sha: node.headRefOid, repo: node.headRepository ? { full_name: node.headRepository.nameWithOwner } : null },
-    base: { ref: node.baseRefName, sha: node.baseRefOid, repo: node.baseRepository ? { full_name: node.baseRepository.nameWithOwner } : null },
-    merged_at: node.mergedAt,
-    merge_commit_sha: node.mergeCommit?.oid,
-    labels: node.labels?.nodes,
-    assignees: node.assignees?.nodes,
-    milestone: node.milestone
-  }, repository);
-}
 
 function repositoryKey(repository: string): string {
   return repository.trim().toLowerCase();
@@ -327,51 +228,6 @@ function selectExternalPullRequest(
     message: 'Multiple eligible merged closing pull requests were found', candidates, eligible
   };
   return { status: 'selected', source: 'unique', selected: eligible[0]!, candidates, eligible };
-}
-
-const CLOSING_PULL_REQUESTS_QUERY = `query($owner:String!,$name:String!,$issue:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$issue){closedByPullRequestsReferences(first:100,after:$cursor){nodes{number id url state title body isDraft headRefName headRefOid headRepository{nameWithOwner} baseRefName baseRefOid baseRepository{nameWithOwner} mergedAt mergeCommit{oid} labels(first:100){nodes{name}} assignees(first:100){nodes{login}} milestone{title}} pageInfo{hasNextPage endCursor}}}}}`;
-
-function inspectGitHubIssueClosingChangeRequests(
-  client: GitHubClient,
-  repository: string,
-  issueNumber: number,
-  cwd: string
-) {
-  const [owner, name] = repository.split('/');
-  if (!owner || !name || !Number.isInteger(issueNumber) || issueNumber <= 0) return {
-    ok: false as const,
-    error: { code: 'PR_IDENTITY_INVALID', message: 'Repository or Issue identity is invalid', retryable: false }
-  };
-  const candidates: PullRequestSnapshot[] = [];
-  let cursor: string | null = null;
-  for (;;) {
-    const args = [
-      'api', 'graphql', '-f', `query=${CLOSING_PULL_REQUESTS_QUERY}`,
-      '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `issue=${issueNumber}`
-    ];
-    if (cursor) args.push('-F', `cursor=${cursor}`);
-    const response = client.json<ClosingPullRequestPage>(args, { cwd });
-    if (!response.ok) return response;
-    const connection = response.value?.data?.repository?.issue?.closedByPullRequestsReferences;
-    if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) return {
-      ok: false as const,
-      error: { code: 'PR_IDENTITY_INVALID', message: 'Closing pull request response is incomplete', retryable: false }
-    };
-    for (const node of connection.nodes) {
-      const normalized = normalizeClosingPullRequest(node, repository);
-      if (!normalized) return {
-        ok: false as const,
-        error: { code: 'PR_IDENTITY_INVALID', message: 'Closing pull request identity is incomplete', retryable: false }
-      };
-      candidates.push(normalized);
-    }
-    if (!connection.pageInfo.hasNextPage) return { ok: true as const, value: candidates };
-    if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === cursor) return {
-      ok: false as const,
-      error: { code: 'PR_IDENTITY_INVALID', message: 'Closing pull request pagination cursor is invalid', retryable: false }
-    };
-    cursor = connection.pageInfo.endCursor;
-  }
 }
 
 function expectedHead(repository: string, head: string): { repository: string; ref: string } {
@@ -604,15 +460,6 @@ async function inspectExternalPullRequest(
     pullRequest,
     error: null
   });
-}
-
-function inspectGitHubPullRequest(client: GitHubClient, repository: string, number: number, cwd: string) {
-  const fetched = client.json<RemotePullRequest>(['api', `repos/${repository}/pulls/${number}`], { cwd });
-  if (!fetched.ok) return fetched;
-  const pullRequest = normalizePullRequest(fetched.value, repository);
-  return pullRequest
-    ? { ok: true as const, value: pullRequest }
-    : { ok: false as const, error: { code: 'PR_IDENTITY_INVALID', message: 'Remote resource is not a valid pull request', retryable: false } };
 }
 
 async function inspectPlatformPullRequest(taskRef: string, options: InspectionOptions = {}): Promise<PullRequestResult> {
@@ -1656,20 +1503,6 @@ async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOpt
   }
 }
 
-export {
-  bindPlatformPullRequest,
-  createPlatformPullRequest,
-  inspectGitHubPullRequest,
-  inspectGitHubIssueClosingChangeRequests,
-  inspectPlatformPullRequest,
-  inspectPlatformPullRequestByNumber,
-  normalizePullRequest,
-  resolveExternalPullRequest,
-  skipPlatformPullRequestFact,
-  selectExternalPullRequest,
-  selectPullRequest,
-  syncPlatformPullRequest,
-  syncPlatformPullRequestInLabels
-};
+export { bindPlatformPullRequest, createPlatformPullRequest, inspectPlatformPullRequest, inspectPlatformPullRequestByNumber, resolveExternalPullRequest, skipPlatformPullRequestFact, selectExternalPullRequest, selectPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels };
 export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, PullRequestPrimaryResult, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SkipFactOptions, SyncOptions };
 export { warningResultForPrimary };

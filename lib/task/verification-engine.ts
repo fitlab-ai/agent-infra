@@ -24,20 +24,26 @@ import { resolveMaterializedReviewedHeadRelation } from "../platform/change-requ
 import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
 import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
-import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
+import { LEDGER_TERMINAL, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
 import type { LedgerRow } from "./ledger.ts";
 import { isValidAgentInfraVersion } from "../version.ts";
 import { equalCounts, parseReviewSummary } from "./review-artifacts.ts";
 import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
+import { parseImplementationInputs, type ImplementationInput } from "./implementation-inputs.ts";
+import { scanVisibleMarkdown } from "./markdown.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
+import { inspectActivityLog } from "./activity-log.ts";
+import { parseWorkflowWarnings } from "./workflow-warnings.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
+import type { OrchestrationRun } from "./orchestration.ts";
 import { resolveDeliveryTarget } from "./delivery-target.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
 import { validateQualificationAudit } from "./qualification-audit.ts";
 import { getArtifactSchema } from "./artifact-schema.ts";
 import { inspectArtifactContract } from "./artifact-operations.ts";
+import type { VerificationShared } from "./verification-types.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -58,7 +64,6 @@ const DEFAULT_REQUIRED_FIELDS = [
 ];
 
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
-const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
 // Start markers (action suffixed with ` [started]`) are excluded from the
 // "latest action" / freshness computation so a step's in-flight marker never
 // satisfies a skill's expected_action_pattern; the matching done entry does.
@@ -67,28 +72,12 @@ const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Review disagreement ledger (see .agents/rules/review-handshake.md).
 const LEDGER_SECTION_NAMES = ["审查分歧账本", "Review Disagreement Ledger"];
-const LEDGER_STATUSES = new Set([
-  "open",
-  "accepted",
-  "adjusted",
-  "refuted",
-  "cannot-judge",
-  "confirmed",
-  "needs-human-decision",
-  "closed",
-  "human-decided"
-]);
-const LEDGER_TERMINAL_OK = new Set(["confirmed", "closed", "human-decided"]);
 const DEFAULT_MAX_HANDSHAKE_ROUNDS = 3;
 const POST_REVIEW_COMMIT_STAGE = "post-review-commit";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
-const WORKFLOW_WARNING_SECTION_NAMES = ["工作流告警", "Workflow Warnings"];
-const WORKFLOW_WARNING_STATUSES = new Set(["open", "resolved", "ignored"]);
-const WORKFLOW_WARNING_SEVERITIES = new Set(["IMPORTANT", "ACTION_REQUIRED"]);
-const WORKFLOW_WARNING_ID_PATTERN = /^WW-\d+$/;
 
 const scriptPath = fileURLToPath(import.meta.url);
-let repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
+const defaultRepoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
 
 const PLATFORM_ADAPTERS: Record<string, (context: any, shared: any) => any> = {
   "platform-sync": checkPlatformSync,
@@ -160,7 +149,7 @@ function checkOrchestrationState({ taskDir }: any): any {
   const file = path.join(taskDir, 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-state', 'orchestration.json is missing');
-  let run: any;
+  let run: OrchestrationRun | null;
   try {
     run = readRun(taskDir);
   } catch (error) {
@@ -192,18 +181,16 @@ function exactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value;
 }
 
-function validateCleanCompletionEvidence(run: any): string | null {
+function validateCleanCompletionEvidence(run: OrchestrationRun): string | null {
   const evidence = run.completionEvidence;
   const shaPattern = /^[0-9a-f]{40}$/i;
   if (
-    evidence?.kind !== 'reviewed-head-clean'
-    || !exactText(evidence.observedAt)
+    !evidence
     || Number.isNaN(Date.parse(evidence.observedAt))
     || !shaPattern.test(evidence.head)
     || !shaPattern.test(evidence.headTree)
     || !shaPattern.test(evidence.worktreeTree)
     || !shaPattern.test(evidence.lastReviewedCommit)
-    || !(evidence.prNumber === null || (Number.isInteger(evidence.prNumber) && evidence.prNumber > 0))
     || !(evidence.prHead === null || shaPattern.test(evidence.prHead))
   ) {
     return 'Clean completion evidence has an invalid structure';
@@ -220,8 +207,7 @@ function validateCleanCompletionEvidence(run: any): string | null {
     || run.pendingDelegation !== null
     || run.commitAuthorization?.issuedAt !== null
     || run.commitAuthorization?.consumedAt !== null
-    || !Array.isArray(run.receipts)
-    || run.receipts.some((receipt: any) => receipt.stage === 'commit')
+    || run.receipts.some((receipt) => receipt.stage === 'commit')
   ) {
     return 'Clean completion evidence conflicts with commit delegation state';
   }
@@ -232,54 +218,16 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   const file = path.join(taskDir, 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-evidence', 'orchestration.json is missing');
-  let run: any;
+  let run: OrchestrationRun | null;
   try {
     run = readRun(taskDir);
   } catch (error) {
     const message = error instanceof OrchestrationStateError ? error.message : String(error);
     return failResult('orchestration-evidence', `Invalid orchestration.json: ${message}`);
   }
+  if (!run) return failResult('orchestration-evidence', 'orchestration.json is missing');
+  // readRun validates the persisted schema, receipt identities and client provenance.
   const policy = run.modelPolicy;
-  if (
-    !policy
-    || !exactText(policy.executor?.model)
-    || !exactText(policy.executor?.reasoningEffort)
-    || !exactText(policy.reviewer?.model)
-    || !exactText(policy.reviewer?.reasoningEffort)
-  ) {
-    return failResult('orchestration-evidence', 'Run model policy requires exact executor and reviewer model and effort');
-  }
-  if (
-    !run.modelPolicySource
-    || !['explicit', 'project-config'].includes(run.modelPolicySource.kind)
-    || !exactText(run.modelPolicySource.client)
-    || !exactText(run.modelPolicySource.resolvedAt)
-    || !Array.isArray(run.recoveryHistory)
-  ) {
-    return failResult('orchestration-evidence', 'Run model policy source or recovery history is invalid');
-  }
-  for (const recovery of run.recoveryHistory) {
-    const guards = recovery.guards;
-    const validClaudeCodeRecovery = recovery.code === 'CLIENT_CAPABILITY_ENABLED'
-      && recovery.previousStatus === 'paused'
-      && recovery.previousPause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
-      && recovery.client === 'claude-code'
-      && recovery.resultingStatus === 'running'
-      && exactText(recovery.recoveredAt)
-      && guards?.stepCount === 0
-      && guards?.nextStage === null
-      && guards?.baselineEmpty === true
-      && guards?.receiptCount === 0
-      && guards?.pendingDelegation === false
-      && guards?.commitAuthorizationUnused === true
-      && guards?.completionEvidenceAbsent === true;
-    if (!validClaudeCodeRecovery) {
-      return failResult('orchestration-evidence', 'Run recovery history contains invalid provenance');
-    }
-  }
-  if (!Array.isArray(run.receipts)) {
-    return failResult('orchestration-evidence', 'Run receipts must be an array');
-  }
   if (run.completionEvidence != null) {
     const evidenceError = validateCleanCompletionEvidence(run);
     if (evidenceError) return failResult('orchestration-evidence', evidenceError);
@@ -309,10 +257,6 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
           return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual reasoning effort`);
         }
       }
-      // parentId/childId 校验对所有 client 保持统一（不新增分支）；spawnMode 检查按 client 判断
-      if (!exactText(receipt.parentId) || !exactText(receipt.childId) || receipt.parentId === receipt.childId) {
-        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid delegation identity`);
-      }
       if (!isClaudeCode && receipt.spawnMode !== 'fresh') {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid fresh delegation identity`);
       }
@@ -338,50 +282,9 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
       ) {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated reasoning-effort fallback reason`);
       }
-      if (receipt.client === 'codex') {
-        const activatedCodex = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
-        const host = receipt.hostEvidence;
-        const provenance = receipt.lifecycleProvenance;
-        if (
-          !provenance
-          || (activatedCodex && (
-            host?.kind !== 'codex-lifecycle-v2'
-            || host.protocolVersion !== provenance.protocolVersion
-            || host.hookDefinitionHash !== provenance.hookDefinitionHash
-            || host.hookSource !== provenance.hookSource
-            || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
-            || host.hookSourceHash !== provenance.hookSourceHash
-            || host.capabilitySessionId !== provenance.capabilitySessionId
-            || receipt.parentId !== provenance.capabilitySessionId
-            || host.capabilityTurnId !== provenance.capabilityTurnId
-            || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
-            || host.controlGeneration !== provenance.controlGeneration
-            || host.spawnToolUseId === provenance.capabilityToolUseId
-            || !exactText(host.spawnToolUseId)
-            || !Number.isFinite(Date.parse(host.spawnObservedAt ?? ''))
-            || !Number.isFinite(Date.parse(receipt.spawnDispatchedAt ?? ''))
-            || !Number.isFinite(Date.parse(receipt.activationDeadlineAt ?? ''))
-            || Date.parse(host.spawnObservedAt ?? '') < Date.parse(receipt.spawnDispatchedAt ?? '')
-            || Date.parse(host.spawnObservedAt ?? '') > Date.parse(receipt.activationDeadlineAt ?? '')
-            || !exactText(host.hookDefinitionHash)
-            || !Number.isSafeInteger(host.startRevision)
-            || host.startRevision < 1
-          ))
-        ) {
-          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid Codex start evidence`);
-        }
-        if (['sealed', 'consumed'].includes(receipt.status) && (
-          !Number.isSafeInteger(host.stopRevision)
-          || host.stopRevision <= host.startRevision
-          || host.consumer !== receipt.id
-          || !exactText(host.consumedAt)
-        )) {
-          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid Codex consumed stop evidence`);
-        }
-      }
     }
   }
-  if (run.receipts.some((receipt: any) => receipt.status !== 'consumed')) {
+  if (run.receipts.some((receipt) => receipt.status !== 'consumed')) {
     return failResult('orchestration-evidence', 'Historical receipts must be consumed');
   }
   return passResult('orchestration-evidence', 'Persisted orchestration model and delegation evidence is internally consistent');
@@ -389,7 +292,7 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
 
 // === Check Functions ===
 
-function checkTaskMeta({ taskDir, config }: any): any {
+function checkTaskMeta({ taskDir, config, repositoryRoot }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("task-meta", task.message);
@@ -427,14 +330,15 @@ function checkTaskMeta({ taskDir, config }: any): any {
     }
   }
 
-  const branchValidationError = validateTaskBranch(metadata);
+  const branchValidationError = validateTaskBranch(metadata, repositoryRoot);
   if (branchValidationError) {
     return failResult("task-meta", branchValidationError);
   }
 
-  const warningValidationErrors = validateWorkflowWarnings(task.content);
-  if (warningValidationErrors.length > 0) {
-    return failResult("task-meta", `Invalid Workflow Warnings: ${warningValidationErrors.join("; ")}`);
+  try {
+    parseWorkflowWarnings(task.content);
+  } catch (error) {
+    return failResult("task-meta", `Invalid Workflow Warnings: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const expectedStep = config.expected_step;
@@ -552,12 +456,12 @@ async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): 
   return passResult('required-pr-delivery', `Pull request delivery policy satisfied (${status})`);
 }
 
-function validateTaskBranch(metadata: any): any {
+function validateTaskBranch(metadata: any, repoRoot: string): any {
   if (isBlank(metadata.branch)) {
     return null;
   }
 
-  const projectName = loadProjectName();
+  const projectName = loadProjectName(repoRoot);
   const expectedPrefix = projectName ? `${projectName}-${metadata.type}-` : "";
 
   if (expectedPrefix && !String(metadata.branch).startsWith(expectedPrefix)) {
@@ -572,7 +476,7 @@ function validateTaskBranch(metadata: any): any {
   return null;
 }
 
-function loadProjectName(): any {
+function loadProjectName(repoRoot: string): any {
   const configPath = path.join(repoRoot, ".agents", ".airc.json");
   if (!fs.existsSync(configPath)) {
     return "";
@@ -743,31 +647,15 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const artifactPath = path.join(taskDir, artifactFile);
   if (!safeStat(artifactPath)?.isFile()) return failResult("implementation-input", `Artifact not found: ${artifactFile}`);
 
-  const inputSection = getSectionContent(task.content, ["实现输入", "Implementation Inputs"]);
-  const rows = [];
-  if (inputSection) {
-    const table = inputSection.split(/\r?\n/).filter((line: any) => line.trim().startsWith("|"));
-    const cells = (line: any) => line.split("|").slice(1, -1).map((cell: any) => cell.trim());
-    const expected = ["id", "ledger_id", "decision_evidence", "stage", "needs_implementation", "decided_at", "status", "consumed_by"];
-    if (table.length < 2 || JSON.stringify(cells(table[0])) !== JSON.stringify(expected)) {
-      return failResult("implementation-input", "Implementation Inputs table schema is invalid");
-    }
-    const seen = new Set();
-    for (const line of table.slice(2)) {
-      const row = cells(line);
-      if (row.length !== 8 || !/^II-[1-9]\d*$/.test(row[0]) || seen.has(row[0])) {
-        return failResult("implementation-input", "Implementation Inputs table contains an invalid or duplicate id");
-      }
-      seen.add(row[0]);
-      rows.push({ id: row[0], ledgerId: row[1], evidence: row[2], stage: row[3], needs: row[4], status: row[6], consumedBy: row[7] });
-    }
+  let rows: ImplementationInput[];
+  try {
+    rows = parseImplementationInputs(task.content).rows;
+  } catch (error) {
+    return failResult("implementation-input", `Invalid Implementation Inputs: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const logSection = getSectionContent(task.content, ["活动日志", "Activity Log"]);
-  const doneActions = logSection.split(/\r?\n/).flatMap((line: any) => {
-    const match = line.trim().match(ACTIVITY_LOG_PATTERN);
-    return match && !ACTIVITY_LOG_STARTED_RE.test(match[2]) ? [match[2]] : [];
-  });
+  const doneActions = (inspectActivityLog(task.content).section?.entries ?? [])
+    .filter((entry) => !ACTIVITY_LOG_STARTED_RE.test(entry.step)).map((entry) => entry.step);
   const latestAction = doneActions.at(-1) || "";
   const actionDecision = /(?:Code Task|Code) \(Round \d+, decision (II-[1-9]\d*)\)/.exec(latestAction)?.[1] || null;
   const report = fs.readFileSync(artifactPath, "utf8");
@@ -794,10 +682,10 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const matches = rows.filter((row) => row.id === actionDecision);
   if (matches.length !== 1) return failResult("implementation-input", `${actionDecision} is missing or duplicated in task table`);
   const row = matches[0]!;
-  if (row.stage !== "code" || row.needs !== "true" || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.evidence) {
+  if (row.stage !== "code" || !row.needsImplementation || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.decisionEvidence) {
     return failResult("implementation-input", `${actionDecision} is not a consumed input for ${artifactFile}`);
   }
-  if (reportLedger !== row.ledgerId || reportEvidence !== row.evidence) {
+  if (reportLedger !== row.ledgerId || reportEvidence !== row.decisionEvidence) {
     return failResult("implementation-input", `${actionDecision} report identity does not match task table evidence`);
   }
   return passResult("implementation-input", `${actionDecision} matches Activity Log, report, and task table`);
@@ -809,19 +697,11 @@ function checkActivityLog({ taskDir, config }: any): any {
     return failResult("activity-log", task.message);
   }
 
-  const logSection = getSectionContent(task.content, ["活动日志", "Activity Log"]);
-  if (!logSection) {
-    return failResult("activity-log", "Activity Log section not found");
-  }
-
-  const entries = logSection
-    .split(/\r?\n/)
-    .map((line: any) => line.trim())
-    .filter((line: any) => line.startsWith("- "));
-
-  if (entries.length === 0) {
-    return failResult("activity-log", "Activity Log has no entries");
-  }
+  const { section, invalidEntries } = inspectActivityLog(task.content);
+  if (!section) return failResult("activity-log", "Activity Log section not found or ambiguous");
+  if (invalidEntries.length) return failResult("activity-log", `Invalid Activity Log entry format: ${invalidEntries[0]}`);
+  const entries = section.entries;
+  if (entries.length === 0) return failResult("activity-log", "Activity Log has no entries");
 
   let previousTimestamp = "";
   let latestAction = "";
@@ -829,12 +709,8 @@ function checkActivityLog({ taskDir, config }: any): any {
   const doneActions: string[] = [];
 
   for (const entry of entries) {
-    const match = entry.match(ACTIVITY_LOG_PATTERN);
-    if (!match) {
-      return failResult("activity-log", `Invalid Activity Log entry format: ${entry}`);
-    }
-
-    const [, timestamp, action] = match;
+    if (!entry.note.trim()) return failResult("activity-log", "Activity Log entry note is required");
+    const { time: timestamp, step: action } = entry;
     if (previousTimestamp && timestamp < previousTimestamp) {
       return failResult("activity-log", "Activity Log timestamps are not in ascending order");
     }
@@ -906,118 +782,7 @@ function checkCompletionChecklist({ taskDir, config }: any): any {
   return passResult("completion-checklist", `Completion Checklist valid (${items.length} items checked)`);
 }
 
-function splitMarkdownTableRow(line: any): any {
-  let value = String(line || "").trim();
-  if (!value.startsWith("|")) {
-    return [];
-  }
-  value = value.replace(/^\|/, "").replace(/\|$/, "");
-
-  const cells = [];
-  let cell = "";
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    if (char === "|" && !isEscapedAt(value, index)) {
-      cells.push(unescapeMarkdownTableCell(cell.trim()));
-      cell = "";
-      continue;
-    }
-    cell += char;
-  }
-  cells.push(unescapeMarkdownTableCell(cell.trim()));
-  return cells;
-}
-
-function unescapeMarkdownTableCell(value: any): any {
-  let output = "";
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    const next = value[index + 1];
-    if (char === "\\" && (next === "\\" || next === "|")) {
-      output += next;
-      index += 1;
-      continue;
-    }
-    output += char;
-  }
-  return output;
-}
-
-function isEscapedAt(value: any, index: any): any {
-  let backslashes = 0;
-  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) {
-    backslashes += 1;
-  }
-  return backslashes % 2 === 1;
-}
-
-function parseWorkflowWarningRows(section: any): any {
-  const rows = [];
-  for (const rawLine of String(section || "").split(/\r?\n/)) {
-    const cells = splitMarkdownTableRow(rawLine);
-    if (cells.length === 0) {
-      continue;
-    }
-    if ((cells[0] || "").toLowerCase() === "id") {
-      continue;
-    }
-    if (cells.every((cell: any) => /^:?-{3,}:?$/.test(cell))) {
-      continue;
-    }
-    rows.push(cells);
-  }
-  return rows;
-}
-
-function validateWorkflowWarnings(content: any): any {
-  const section = getSectionContent(content, WORKFLOW_WARNING_SECTION_NAMES);
-  if (!section.trim()) {
-    return [];
-  }
-
-  const rows = parseWorkflowWarningRows(section);
-  const errors = [];
-  for (const cells of rows) {
-    if (cells.length < 11) {
-      errors.push(`malformed row (expected 11 columns): ${cells.join(" | ")}`);
-      continue;
-    }
-    const [id, time, step, severity, code, status, target, message, action, resolvedAt, resolution] = cells;
-    if (!WORKFLOW_WARNING_ID_PATTERN.test(id)) {
-      errors.push(`${id || "(empty id)"}: invalid id`);
-    }
-    if (!DATE_TIME_PATTERN.test(time)) {
-      errors.push(`${id}: invalid time '${time}'`);
-    }
-    if (isBlank(step)) {
-      errors.push(`${id}: step is required`);
-    }
-    if (!WORKFLOW_WARNING_SEVERITIES.has(severity)) {
-      errors.push(`${id}: illegal severity '${severity}'`);
-    }
-    if (isBlank(code)) {
-      errors.push(`${id}: code is required`);
-    }
-    if (!WORKFLOW_WARNING_STATUSES.has(status)) {
-      errors.push(`${id}: illegal status '${status}'`);
-    }
-    if (isBlank(target)) {
-      errors.push(`${id}: target is required`);
-    }
-    if (isBlank(message)) {
-      errors.push(`${id}: message is required`);
-    }
-    if (status === "open" && isBlank(action)) {
-      errors.push(`${id}: open warning requires action`);
-    }
-    if ((status === "resolved" || status === "ignored") && (isBlank(resolvedAt) || isBlank(resolution))) {
-      errors.push(`${id}: ${status} warning requires resolved_at and resolution`);
-    }
-  }
-  return errors;
-}
-
-function resolveReviewSetting(config: any, key: any, fallback: any): any {
+function resolveReviewSetting(config: any, key: any, fallback: any, repoRoot: string): any {
   if (config && config[key] !== undefined && config[key] !== null) {
     return config[key];
   }
@@ -1028,7 +793,7 @@ function resolveReviewSetting(config: any, key: any, fallback: any): any {
   return fallback;
 }
 
-function checkReviewLedger({ taskDir, config }: any): any {
+function checkReviewLedger({ taskDir, config, repositoryRoot }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("review-ledger", task.message);
@@ -1038,9 +803,7 @@ function checkReviewLedger({ taskDir, config }: any): any {
   try {
     const ledger = parseLedgerDocument(task.content);
     if (!ledger.present) return failResult("review-ledger", `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`);
-    rows = ledger.rows.map((row) => [
-      row.id, row.stage, row.round, row.severity, row.status, row.evidence
-    ]);
+    rows = ledger.rows;
   } catch (error) {
     return failResult("review-ledger", `Invalid disagreement ledger: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -1049,17 +812,12 @@ function checkReviewLedger({ taskDir, config }: any): any {
   }
 
   const stageScope = Array.isArray(config.stage_scope) ? config.stage_scope : null;
-  const maxRounds = Number(resolveReviewSetting(config, "maxHandshakeRounds", DEFAULT_MAX_HANDSHAKE_ROUNDS));
+  const maxRounds = Number(resolveReviewSetting(config, "maxHandshakeRounds", DEFAULT_MAX_HANDSHAKE_ROUNDS, repositoryRoot));
   const problems = [];
   let inScopeCount = 0;
 
-  for (const cells of rows) {
-    if (cells.length < 6) {
-      problems.push(`malformed row (expected 6 columns): ${cells.join(" | ")}`);
-      continue;
-    }
-
-    const [id, stage, roundRaw, , status, evidence] = cells;
+  for (const row of rows) {
+    const { id, stage, round: roundRaw, status, evidence } = row;
     const stageScoped = stageScope ? stageScope.includes(stage) : true;
     // post-review-commit exemption rows are consumed by the post-review-commit
     // check, not enforced here.
@@ -1071,8 +829,9 @@ function checkReviewLedger({ taskDir, config }: any): any {
     }
     inScopeCount += 1;
 
-    if (!LEDGER_STATUSES.has(status!)) {
-      problems.push(`${id}: illegal status '${status}'`);
+    const invalid = validateLedgerRows([row]);
+    if (invalid) {
+      problems.push(`${invalid.code}: ${invalid.message}`);
       continue;
     }
     if (status !== "open" && evidence === "") {
@@ -1082,12 +841,12 @@ function checkReviewLedger({ taskDir, config }: any): any {
     if (
       Number.isFinite(round) &&
       round >= maxRounds &&
-      !LEDGER_TERMINAL_OK.has(status!) &&
+      !LEDGER_TERMINAL.has(status!) &&
       status !== "needs-human-decision"
     ) {
       problems.push(`${id}: round ${round} reached limit ${maxRounds} without convergence; escalate to needs-human-decision`);
     }
-    if (!LEDGER_TERMINAL_OK.has(status!)) {
+    if (!LEDGER_TERMINAL.has(status!)) {
       problems.push(`${id}: unresolved (status '${status}')`);
     }
   }
@@ -1170,7 +929,7 @@ function checkManualValidation({ taskDir }: any): any {
   return passResult("manual-validation", `Manual validation completed → ${artifactName}`);
 }
 
-async function checkPostReviewCommit({ taskDir, config }: any): Promise<any> {
+async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): Promise<any> {
   const reviewArtifact = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!reviewArtifact.ok) {
     if (reviewArtifact.error) return failResult("post-review-commit", `Review-code artifact is unavailable: ${reviewArtifact.error}`);
@@ -1190,7 +949,7 @@ async function checkPostReviewCommit({ taskDir, config }: any): Promise<any> {
   if (factRead.status === 'invalid') return failResult("post-review-commit", factRead.error.message);
   const fact = factRead.status === 'valid' ? factRead.fact : null;
   const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
-  const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repoRoot));
+  const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repositoryRoot));
   const hasPullRequest = fact?.state === 'bound';
   let inspected: Awaited<ReturnType<typeof inspectPlatformPullRequest>> | null = null;
   if (hasPullRequest) {
@@ -1364,7 +1123,7 @@ function resolvePostReviewExemption(content: string):
   }
 }
 
-function checkReviewFact({ taskDir, artifactFile }: any): any {
+function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
   const resolvedArtifact = resolveArtifactPath(
     taskDir,
     "review-code.md|review-code-r{N}.md",
@@ -1448,7 +1207,7 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
       mode: "worktree",
       baseline,
       diffBase,
-      globs: resolvePostReviewGlobs({}, loadPostReviewConfig(repoRoot))
+      globs: resolvePostReviewGlobs({}, loadPostReviewConfig(repositoryRoot))
     });
   } catch {
     return blockedResult(
@@ -1575,46 +1334,13 @@ function resolveArtifactPath(taskDir: any, filePattern: any, artifactFile: any):
   return { ok: true, path: path.join(taskDir, matches[0]!.fileName) };
 }
 
-function getSectionContent(content: any, names: any): any {
-  const lines = content.split(/\r?\n/);
-
-  function visibleHeadings(): any {
-    const headings = [];
-    let fence = null;
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      if (fence) {
-        const closer = line.match(/^ {0,3}(`+|~+)\s*$/);
-        if (closer && closer[1][0] === fence.character && closer[1].length >= fence.length) {
-          fence = null;
-        }
-        continue;
-      }
-      const opener = line.match(/^ {0,3}(`{3,}|~{3,})(?:[^`~].*)?$/);
-      if (opener) {
-        fence = { character: opener[1][0], length: opener[1].length };
-        continue;
-      }
-      if (line.startsWith("## ")) {
-        headings.push({ index, text: line.trim() });
-      }
-    }
-    return headings;
-  }
-
-  const headings = visibleHeadings();
-
+function getSectionContent(content: string, names: readonly string[]): string {
+  const headings = scanVisibleMarkdown(content).headings.filter((heading) => heading.level === 2);
   for (const name of names) {
-    const heading = `## ${name}`;
-    const position = headings.findIndex((item: any) => item.text === heading);
-    if (position === -1) {
-      continue;
-    }
-    const startIndex = headings[position]!.index;
-    const endIndex = headings[position + 1]?.index ?? lines.length;
-    return lines.slice(startIndex + 1, endIndex).join("\n").trim();
+    const position = headings.findIndex((heading) => heading.text === name);
+    if (position === -1) continue;
+    return content.slice(headings[position]!.end + 1, headings[position + 1]?.start ?? content.length).replace(/\r\n/g, "\n").trim();
   }
-
   return "";
 }
 
@@ -1742,14 +1468,14 @@ function isBlank(value: any): any {
 }
 
 async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot }: any): Promise<any> {
-  if (repositoryRoot) repoRoot = path.resolve(repositoryRoot);
-  else {
+  let repoRoot = repositoryRoot ? path.resolve(repositoryRoot) : defaultRepoRoot;
+  if (!repositoryRoot) {
     let cursor = path.resolve(taskDir);
     while (path.dirname(cursor) !== cursor && !fs.existsSync(path.join(cursor, ".agents"))) cursor = path.dirname(cursor);
     if (fs.existsSync(path.join(cursor, ".agents"))) repoRoot = cursor;
   }
   const verifyConfig = loadVerificationConfig(repoRoot, skillName);
-  const shared = { ...sharedUtils, repoRoot };
+  const shared: VerificationShared = { ...sharedUtils, repoRoot };
   if (mode === "gate") {
     const checks = [];
     for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
