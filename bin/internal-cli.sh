@@ -3,6 +3,12 @@ set -eu
 
 script_path=$0
 case "$script_path" in
+  [A-Za-z]:*)
+    drive=${script_path%"${script_path#?}"}
+    drive=$(printf '%s' "$drive" | tr '[:upper:]' '[:lower:]')
+    script_path="/${drive}${script_path#?:}"
+    script_path=$(printf '%s' "$script_path" | tr '\\' '/')
+    ;;
   /*) ;;
   *) script_path=$PWD/$script_path ;;
 esac
