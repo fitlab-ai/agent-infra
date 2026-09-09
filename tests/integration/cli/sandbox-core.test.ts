@@ -484,6 +484,33 @@ test("sandbox rm --unbound --dry-run lists unbound sandboxes and removes nothing
   }
 });
 
+test("sandbox rm --unbound protects task-bound rows with missing task records while cleaning independent rows", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-missing-task-"));
+  const branchOnly = "branch-only-after-orphan";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-orphan", "orphan-task-branch", "demo", "task-bound", "TASK-20260101-000099"),
+        sandboxRow("sb-branch-only", branchOnly)
+      ].join("\n")
+    });
+    const shellConfig = path.join(tmpDir, ".agent-infra", "config", "demo", branchOnly);
+    fs.mkdirSync(shellConfig, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /Skipped protected sandbox sb-orphan \(TASK_NOT_FOUND\)/);
+    assert.equal(fs.existsSync(shellConfig), false);
+    const calls = fixture.readDockerCalls();
+    assert.equal(calls.some((call) => call[0] === "rm" && call[1] === "sb-branch-only"), true);
+    assert.equal(calls.some((call) => call[0] === "rm" && call[1] === "sb-orphan"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound fails closed when a discovered task-bound container has a noncanonical name", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-noncanonical-task-container-"));
   const taskId = "TASK-20260101-000002";

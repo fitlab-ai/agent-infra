@@ -181,6 +181,11 @@ function controlRootIsAbsent(root: string): boolean {
   }
 }
 
+function canonicalPath(input: string): string {
+  try { return fs.realpathSync.native(input); }
+  catch { return path.resolve(input); }
+}
+
 function taskFinalizationReceiptComplete(
   receipt: TaskFinalizationReceipt,
   taskId: string,
@@ -228,7 +233,7 @@ function terminalControlBindingEvidence(
   taskId: string,
   binding: SandboxControlBinding
 ): boolean {
-  const repoRoot = path.resolve(repoRootInput);
+  const repoRoot = canonicalPath(repoRootInput);
   const controlRoot = path.resolve(controlRootInput);
   if (!TASK_ID_RE.test(taskId) || !controlRootIdentity(controlRoot)) return false;
   const manifestPath = path.join(controlRoot, 'manifest.json');
@@ -238,7 +243,7 @@ function terminalControlBindingEvidence(
   try { manifest = readSandboxControlManifest(manifestPath); }
   catch { return false; }
   if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId
-    || path.resolve(manifest.repoRoot) !== repoRoot || manifest.generation !== binding.generation
+    || canonicalPath(manifest.repoRoot) !== repoRoot || manifest.generation !== binding.generation
     || path.resolve(manifest.channelDir) !== path.join(controlRoot, 'channel')
     || path.resolve(manifest.publicStatusDir) !== path.join(controlRoot, 'public')
     || path.resolve(manifest.processingDir) !== path.join(controlRoot, 'processing')
@@ -281,7 +286,7 @@ function removedControlBindingEvidence(
   taskId: string,
   binding: SandboxControlBinding
 ): boolean {
-  const repoRoot = path.resolve(repoRootInput);
+  const repoRoot = canonicalPath(repoRootInput);
   if (!REMOVAL_PROOF_PHASES.has(journal.phase)
     || journal.generation !== binding.generation
     || !path.isAbsolute(journal.target.controlRoot)) return false;
@@ -306,6 +311,7 @@ export function createSandboxControlBindingVerifier(
   controlRoots: readonly string[],
   removalJournals: readonly SandboxRemovalJournalEvidence[] = []
 ): SandboxControlBindingVerifier {
+  const canonicalRepoRoot = canonicalPath(repoRoot);
   const roots = [...new Set(controlRoots.map((candidate) => path.resolve(candidate)))];
   const captured = roots.flatMap((controlRoot) => {
     let manifest;
@@ -317,7 +323,7 @@ export function createSandboxControlBindingVerifier(
       try { return readSandboxControlStatus(manifest.publicStatusDir).taskView.receipt; }
       catch { return null; }
     })();
-    if (!receipt || !terminalControlBindingEvidence(repoRoot, controlRoot, manifest.taskId ?? '', receipt)) return [];
+    if (!receipt || !terminalControlBindingEvidence(canonicalRepoRoot, controlRoot, manifest.taskId ?? '', receipt)) return [];
     return [{
       controlRoot,
       taskId: manifest.taskId!,
@@ -329,8 +335,8 @@ export function createSandboxControlBindingVerifier(
     if (candidate.taskId !== taskId || candidate.key !== controlBindingKey(taskId, binding)) return false;
     const state = controlRootState(candidate.controlRoot, candidate.rootIdentity);
     return state === 'missing'
-      || state === 'same' && terminalControlBindingEvidence(repoRoot, candidate.controlRoot, taskId, binding);
-  }) || removalJournals.some((journal) => removedControlBindingEvidence(repoRoot, journal, taskId, binding));
+      || state === 'same' && terminalControlBindingEvidence(canonicalRepoRoot, candidate.controlRoot, taskId, binding);
+  }) || removalJournals.some((journal) => removedControlBindingEvidence(canonicalRepoRoot, journal, taskId, binding));
 }
 export type SandboxRemovalJournal = Readonly<{
   version: 2;

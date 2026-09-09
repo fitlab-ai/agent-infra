@@ -88,6 +88,15 @@ function isMissingPathError(error: unknown): boolean {
     && (error as { code?: unknown }).code === 'ENOENT');
 }
 
+function canonicalPath(input: string): string {
+  try { return fs.realpathSync.native(input); }
+  catch { return path.resolve(input); }
+}
+
+function isMissingTaskRecordError(error: unknown): boolean {
+  return error instanceof Error && /^Task not found: TASK-\d{8}-\d{6}$/.test(error.message);
+}
+
 function digestCleanupValue(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -775,6 +784,13 @@ type CleanupCandidate = Readonly<{
   cleanupTarget: SandboxCleanupTarget;
 }>;
 
+type ProtectedCleanupCandidate = Readonly<{
+  row: SandboxRow;
+  branch: string;
+  identity: string;
+  reason: string;
+}>;
+
 type CleanupGroup = Readonly<{
   candidates: readonly CleanupCandidate[];
   cleanupTarget: SandboxCleanupTarget;
@@ -836,7 +852,7 @@ function pendingCurrentControlBindingEvidence(
       if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) continue;
       const manifest = readSandboxControlManifest(path.join(root, 'manifest.json'));
       if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId
-        || path.resolve(manifest.repoRoot) !== path.resolve(config.repoRoot)
+        || canonicalPath(manifest.repoRoot) !== canonicalPath(config.repoRoot)
         || manifest.generation !== binding.generation
         || path.resolve(manifest.channelDir) !== path.join(root, 'channel')
         || path.resolve(manifest.publicStatusDir) !== path.join(root, 'public')
@@ -2159,7 +2175,9 @@ async function rmUnboundCore(
   p.intro(pc.cyan(`Removing sandboxes not bound to an active task for ${config.project}`));
   const intermediatePreview = scanIntermediateCleanup(config.repoRoot, { controlBindingVerifier });
 
-  const candidates: CleanupCandidate[] = rows.map((row) => {
+  const candidates: CleanupCandidate[] = [];
+  const protectedCandidates: ProtectedCleanupCandidate[] = [];
+  for (const row of rows) {
     if (!row.branch || !row.workspaceMode || row.workspaceMode === 'legacy-invalid') {
       throw new Error(`SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED: container '${row.name}' has incomplete workspace identity`);
     }
@@ -2167,15 +2185,26 @@ async function rmUnboundCore(
       if (!row.taskId) {
         throw new Error(`SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED: container '${row.name}' has no task id`);
       }
-      const cleanupTarget = resolveSandboxCleanupTarget(row.taskId, config.repoRoot, { allowProtected: true });
-      if (cleanupTarget.branch !== row.branch
-        || cleanupTarget.workspace.mode !== 'task-bound'
-        || cleanupTarget.workspace.taskId !== row.taskId) {
-        throw new Error(`SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED: container '${row.name}' task identity conflicts with task.md`);
+      try {
+        const cleanupTarget = resolveSandboxCleanupTarget(row.taskId, config.repoRoot, { allowProtected: true });
+        if (cleanupTarget.branch !== row.branch
+          || cleanupTarget.workspace.mode !== 'task-bound'
+          || cleanupTarget.workspace.taskId !== row.taskId) {
+          throw new Error(`SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED: container '${row.name}' task identity conflicts with task.md`);
+        }
+        candidates.push({ row, cleanupTarget });
+      } catch (error) {
+        if (!isMissingTaskRecordError(error)) throw error;
+        protectedCandidates.push({
+          row,
+          branch: row.branch,
+          identity: `task-bound:${row.taskId}`,
+          reason: 'TASK_NOT_FOUND'
+        });
       }
-      return { row, cleanupTarget };
+      continue;
     }
-    return {
+    candidates.push({
       row,
       cleanupTarget: {
         requestedRef: row.branch,
@@ -2183,10 +2212,19 @@ async function rmUnboundCore(
         workspace: { mode: 'branch-only' },
         taskState: 'branch-only'
       } satisfies SandboxCleanupTarget
-    };
-  });
+    });
+  }
   const branchIdentities = new Map<string, string>();
   const groupedCandidates = new Map<string, CleanupCandidate[]>();
+  for (const candidate of protectedCandidates) {
+    const existingIdentity = branchIdentities.get(candidate.branch);
+    if (existingIdentity && existingIdentity !== candidate.identity) {
+      throw new Error(
+        `SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED: branch '${candidate.branch}' has conflicting workspace identities`
+      );
+    }
+    branchIdentities.set(candidate.branch, candidate.identity);
+  }
   for (const candidate of candidates) {
     const identity = candidate.cleanupTarget.workspace.mode === 'task-bound'
       ? `task-bound:${candidate.cleanupTarget.workspace.taskId}`
@@ -2229,6 +2267,9 @@ async function rmUnboundCore(
     for (const { row } of groupCandidates) {
       p.log.message(`Skipped protected sandbox ${row.name} (${cleanupTarget.taskState})`);
     }
+  }
+  for (const { row, reason } of protectedCandidates) {
+    p.log.message(`Skipped protected sandbox ${row.name} (${reason})`);
   }
 
   for (const line of formatIntermediateCleanupReport(intermediatePreview)) p.log.message(line);
