@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 import {
   buildQualificationAudit,
@@ -30,6 +31,61 @@ function taskContent(): string {
 | B | Add a second writer | rejected | C-1 | Larger change | plan.md#B |
 `;
 }
+
+test('qualification selects visible inputs and retains H3 precedence with either EOL', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const example = '````md\n' + taskContent().replaceAll('C-1', 'C-99') + '\n```\n## 约束\nstill fenced\n````\n';
+    const visible = taskContent().replaceAll('## ', '### ');
+    const content = (example + visible + taskContent().replaceAll('C-1', 'C-98')).replaceAll('\n', eol);
+    const parsed = parseTaskQualification(content);
+    assert.ok(parsed.ok);
+    assert.deepEqual(parsed.qualification.constraints.map(row => row.constraintId), ['C-1', 'C-2']);
+    const baseline = parseTaskQualification(taskContent());
+    assert.ok(baseline.ok);
+    assert.equal(parsed.qualification.taskInputDigest, baseline.qualification.taskInputDigest);
+  }
+});
+
+test('qualification treats fenced-only inputs and tables as examples', () => {
+  for (const content of [
+    '```md\n' + taskContent() + '\n```\n',
+    taskContent().replace(/(\| constraint_id[\s\S]*?)\n\n##/, '~~~md\n$1\n~~~\n\n##').replace(/(\| candidate_id[\s\S]*)$/, '~~~md\n$1\n~~~\n'),
+    '## 约束\nprose\n```md\n' + taskContent() + '\n```\n'
+  ]) {
+    const parsed = parseTaskQualification(content);
+    assert.ok(parsed.ok);
+    assert.equal(parsed.qualification.present, false);
+  }
+});
+
+test('qualification selects real H2 constraints after a fenced example', () => {
+  const example = '```md\n' + taskContent().replaceAll('C-1', 'C-99') + '\n```\n';
+  const parsed = parseTaskQualification(example + taskContent());
+  assert.ok(parsed.ok);
+  assert.deepEqual(parsed.qualification.constraints.map(row => row.constraintId), ['C-1', 'C-2']);
+});
+
+test('qualification projection preserves ordinary digests and fenced input bytes', () => {
+  const expected = createHash('sha256').update(JSON.stringify('# Task')).digest('hex');
+  assert.equal(nonConstraintInputDigest(taskContent()), expected);
+  assert.equal(nonConstraintInputDigest(taskContent().replaceAll('\n', '\r\n')), expected);
+  const example = '```md\n## Activity Log\nexample input\n```\n\n';
+  const content = example + taskContent();
+  assert.equal(nonConstraintInputDigest(content), createHash('sha256').update(JSON.stringify(example + '# Task')).digest('hex'));
+  assert.notEqual(nonConstraintInputDigest(content), nonConstraintInputDigest(content.replace('example input', 'changed input')));
+});
+
+test('qualification audits ignore fenced siblings and reject changed real input', () => {
+  const built = buildQualificationAudit(taskContent());
+  assert.ok(built.ok);
+  const real = '## Qualification Audit\n\n' + renderQualificationAudit(built.audit);
+  const content = '~~~md\n' + real.replaceAll('C-1', 'C-99') + '\n~~~\n\n' + real;
+  assert.deepEqual(parseQualificationAudit(content), parseQualificationAudit(real));
+  assert.equal(validateQualificationAudit(taskContent(), content, { require: true }).ok, true);
+  assert.equal(validateQualificationAudit(taskContent().replace('public command stable', 'new command stable'), content, { require: true }).ok, false);
+  const outside = real.replace('### 约束依赖', '## Outside\n### 约束依赖');
+  assert.equal(parseQualificationAudit(outside).ok, false);
+});
 
 test('qualification projection is canonical and binds confirmed evidence', () => {
   const parsed = parseTaskQualification(taskContent());

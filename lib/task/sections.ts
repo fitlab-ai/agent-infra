@@ -183,9 +183,15 @@ function matchingSections(content: string, aliases: readonly string[]) {
       if (!allowed.has(heading.text)) return null;
       const next = headings.slice(index + 1).find((candidate) => candidate.level <= heading.level);
       const line = lines.get(heading.start)!;
-      return { heading: heading.text, line, bodyStart: line.end, end: next?.start ?? content.length };
+      return { heading: heading.text, level: heading.level, line, bodyStart: line.end, end: next?.start ?? content.length };
     })
     .filter((match): match is NonNullable<typeof match> => match !== null);
+}
+
+// Select the first visible section at the requested level, in document order.
+function findSectionRange(content: string, aliases: readonly string[], level: 2 | 3 = 2) {
+  const section = matchingSections(content, aliases).find((candidate) => candidate.level === level);
+  return section ? { start: section.line.start, bodyStart: section.bodyStart, end: section.end, heading: section.heading } : null;
 }
 
 function validateAliases(aliases: readonly string[], name: string): void {
@@ -511,6 +517,7 @@ function extractSubSection(content: string, headingPrefix: string): string {
 }
 
 export {
+  findSectionRange,
   extractSection,
   findSectionHeading,
   extractSubSection,

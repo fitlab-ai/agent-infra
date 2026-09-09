@@ -14,6 +14,7 @@ type VisibleAnchor = SourceLine & {
 };
 
 type VisibleMarkdown = {
+  hasUnclosedFence: boolean;
   lines: SourceLine[];
   headings: VisibleHeading[];
   anchors: VisibleAnchor[];
@@ -62,7 +63,7 @@ function scanVisibleMarkdown(content: string): VisibleMarkdown {
     const anchor = line.text.match(ANCHOR);
     if (anchor) anchors.push({ ...line, id: anchor[2]! });
   }
-  return { lines: visible, headings, anchors };
+  return { lines: visible, headings, anchors, hasUnclosedFence: fence !== null };
 }
 
 export { scanVisibleMarkdown };

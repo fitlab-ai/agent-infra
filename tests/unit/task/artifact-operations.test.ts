@@ -15,6 +15,26 @@ import {
 } from '../../../lib/task/artifact-operations.ts';
 import { writeArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
 
+test('structure inspection retains fence diagnostics and ignores fenced repair candidates', () => {
+  const schema = getArtifactSchema('plan')!;
+  const filled = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family: 'plan', artifact: 'plan.md' })
+    .replaceAll('<!-- artifact-slot:empty -->', 'body');
+  for (const eol of ['\n', '\r\n']) {
+    for (const [example, expected] of [
+      ['~~~~md`\n## 问题理解：\n~~~\n## 问题理解\n~~~~', []],
+      ['````md\n## 问题理解：\n```\n## 问题理解\n`````', []],
+      ['```md\n## 问题理解：\n~~~', ['ARTIFACT_UNCLOSED_FENCE']],
+      ['~~~~\n## 问题理解：\n~~~', ['ARTIFACT_UNCLOSED_FENCE']]
+    ] as const) {
+      const content = (filled + '\n' + example + '\n').replaceAll('\n', eol);
+      const result = inspectArtifactStructure(content, schema);
+      assert.deepEqual(result.diagnostics.map(item => item.code), expected);
+      assert.equal(result.repair, null);
+      assert.equal(result.semanticDigest, canonicalSemanticDigest(content));
+    }
+  }
+});
+
 function taskFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-operations-'));
   const id = 'TASK-20260101-000001';

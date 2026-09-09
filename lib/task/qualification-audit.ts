@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { parseArtifactName } from './artifact-name.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
-import { parseTable } from './sections.ts';
+import { findSectionRange, parseTable } from './sections.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 
 const TASK_CONSTRAINT_HEADINGS = ['约束', 'Constraints'] as const;
 const TASK_CANDIDATE_HEADINGS = ['候选与否决方案', 'Candidate and Rejected Options', 'Candidates and Rejected Options', 'Candidates and Rejected Alternatives'] as const;
@@ -171,21 +172,9 @@ function taskInputDigest(qualification: Pick<TaskQualification, 'constraints' | 
   return digest(canonicalTaskInput(qualification));
 }
 
-function sectionBody(content: string, aliases: readonly string[], level = 2): string | null {
-  const heading = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const marker = '#'.repeat(level);
-  const match = new RegExp(`^${marker}\\s+(${heading})\\s*$`, 'm').exec(content);
-  if (!match) return null;
-  const rest = content.slice((match.index ?? 0) + match[0].length);
-  const end = rest.search(new RegExp(`^#{2,${level}}\\s+`, 'm'));
-  return rest.slice(0, end < 0 ? rest.length : end);
-}
-
-function stripSection(content: string, aliases: readonly string[]): string {
-  const body = sectionBody(content, aliases);
-  if (body === null) return normalizeText(content);
-  const heading = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  return normalizeText(content.replace(new RegExp(`^##\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^##\\s+|(?![\\s\\S]))`, 'm'), ''));
+function sectionBody(content: string, aliases: readonly string[], level: 2 | 3 = 2): string | null {
+  const section = findSectionRange(content, aliases, level);
+  return section ? content.slice(section.bodyStart, section.end) : null;
 }
 
 function stripFrontmatter(content: string): string {
@@ -219,7 +208,7 @@ function nonConstraintInputDigest(content: string): string {
     ['返工意图', 'Rework Intents'],
     CONFIRMATION_HEADINGS,
     ['完成检查清单', 'Completion Checklist']
-  ].reduce((value, aliases) => stripSection(value, aliases), projection);
+  ].reduce((value, aliases) => stripSectionAtLevel(value, aliases, 2), projection);
   return digest(projection);
 }
 
@@ -232,12 +221,9 @@ function stripTaskInputSection(content: string, aliases: readonly string[]): str
   return stripSectionAtLevel(result, aliases, 2);
 }
 
-function stripSectionAtLevel(content: string, aliases: readonly string[], level: number): string {
-  const body = sectionBody(content, aliases, level);
-  if (body === null) return normalizeText(content);
-  const heading = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const marker = '#'.repeat(level);
-  return normalizeText(content.replace(new RegExp(`^${marker}\\s+(?:${heading})\\s*$[\\s\\S]*?(?=^#{2,${level}}\\s+|(?![\\s\\S]))`, 'm'), ''));
+function stripSectionAtLevel(content: string, aliases: readonly string[], level: 2 | 3): string {
+  const section = findSectionRange(content, aliases, level);
+  return normalizeText(section ? content.slice(0, section.start) + content.slice(section.end) : content);
 }
 
 function parseTaskQualification(content: string): { ok: true; qualification: TaskQualification } | { ok: false; code: string; message: string } {
@@ -247,12 +233,14 @@ function parseTaskQualification(content: string): { ok: true; qualification: Tas
   const hasCandidateHeading = candidateBody !== null;
   if ((!hasConstraintHeading && !hasCandidateHeading)
     || (hasConstraintHeading && hasCandidateHeading
-      && !/^\s*\|/m.test(constraintBody!) && !/^\s*\|/m.test(candidateBody!))) {
+      && !scanVisibleMarkdown(constraintBody!).lines.some((line) => line.text.trim().startsWith('|'))
+      && !scanVisibleMarkdown(candidateBody!).lines.some((line) => line.text.trim().startsWith('|')))) {
     return { ok: true, qualification: { present: false, constraints: [], candidates: [], constraintDigest: digest([]), taskInputDigest: digest({ constraints: [], candidates: [] }), nonConstraintInputDigest: nonConstraintInputDigest(content) } };
   }
   if (!hasConstraintHeading || !hasCandidateHeading) {
-    const hasCanonicalTable = new RegExp(`\\|\\s*${CONSTRAINT_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(content)
-      || new RegExp(`\\|\\s*${CANDIDATE_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(content);
+    const visible = scanVisibleMarkdown(content).lines.map((line) => line.text).join('\n');
+    const hasCanonicalTable = new RegExp(`\\|\\s*${CONSTRAINT_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(visible)
+      || new RegExp(`\\|\\s*${CANDIDATE_COLUMNS.join('\\s*\\|\\s*')}\\s*\\|`).test(visible);
     if (hasCanonicalTable) return { ok: false, code: 'QUALIFICATION_TASK_CONTRACT_INVALID', message: 'task qualification requires both constraints and candidates sections' };
     return { ok: true, qualification: { present: false, constraints: [], candidates: [], constraintDigest: digest([]), taskInputDigest: digest({ constraints: [], candidates: [] }), nonConstraintInputDigest: nonConstraintInputDigest(content) } };
   }
