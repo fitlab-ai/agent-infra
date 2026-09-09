@@ -98,6 +98,8 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 
 Shell 安装脚本会在 Linux 通过 systemd 用户单元、在 macOS 通过 launchd 用户代理创建并启动该服务。手动 npm 安装后，可运行 `agent-infra-internal host-control install` 创建服务配置，再启用对应的用户服务；`agent-infra-internal host-control status` 可检查端点健康状态。整个服务不需要 root 或 setuid。
 
+macOS 重载期间，安装脚本会重试服务注册；若最终仍无法注册或启动，则以错误退出并提供恢复命令。
+
 任务沙箱内的 task 目录是可写投影。产物命令只接受类型化 workflow 操作和规范的产物 basename。宿主使用 `O_NOFOLLOW` 打开候选文件，通过同一个文件描述符读取并计算摘要，检查可观察的元数据变化，再把已校验字节原子落入权威 task 目录。投影的受保护拓扑发生变化时会失败关闭，投影修改不会变成任务状态。
 
 ## 快速开始

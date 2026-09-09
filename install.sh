@@ -63,11 +63,21 @@ if command -v agent-infra-internal >/dev/null 2>&1; then
         launch_agent="$HOME/Library/LaunchAgents/com.fitlab-ai.agent-infra.host-control.plist"
         launch_domain="gui/$(id -u)"
         launchctl bootout "$launch_domain/com.fitlab-ai.agent-infra.host-control" >/dev/null 2>&1 || true
-        if launchctl bootstrap "$launch_domain" "$launch_agent" >/dev/null 2>&1 \
-          && launchctl kickstart -k "$launch_domain/com.fitlab-ai.agent-infra.host-control" >/dev/null 2>&1; then
+        # bootout can return before launchd releases the previous registration.
+        launch_attempt=0
+        until launchctl bootstrap "$launch_domain" "$launch_agent" >/dev/null 2>&1; do
+          launch_attempt=$((launch_attempt + 1))
+          if [ "$launch_attempt" -ge 30 ]; then
+            err "host-control service could not be loaded; run: launchctl bootstrap $launch_domain $launch_agent"
+            exit 1
+          fi
+          sleep 1
+        done
+        if launchctl kickstart -k "$launch_domain/com.fitlab-ai.agent-infra.host-control" >/dev/null 2>&1; then
           ok "host-control service enabled"
         else
-          warn "host-control service was installed but could not be started; run: launchctl bootstrap $launch_domain $launch_agent"
+          err "host-control service could not be started; run: launchctl kickstart -k $launch_domain/com.fitlab-ai.agent-infra.host-control"
+          exit 1
         fi
       else
         warn "launchd is unavailable; task-control will fail closed until host-control is started manually."

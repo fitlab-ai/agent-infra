@@ -65,3 +65,71 @@ for (const scenario of ['first-install', 'upgrade', 'enable-failure', 'restart-f
     }
   });
 }
+
+for (const scenario of ['first-install', 'upgrade', 'bootstrap-busy', 'bootstrap-failure', 'kickstart-failure'] as const) {
+  test(`macOS installer applies the user service: ${scenario}`, onPlatforms('linux', 'darwin'), (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'installer-launchd-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    const statePath = path.join(root, 'state.json');
+    fs.writeFileSync(statePath, JSON.stringify({
+      installed: 1, loaded: scenario === 'first-install' ? null : 1,
+      running: scenario === 'first-install' ? null : 1,
+      bootstrapAttempts: 0, sleeps: 0
+    }));
+    const stub = path.join(root, 'command.cjs');
+    fs.writeFileSync(stub, `
+      const fs = require('node:fs');
+      const statePath = ${JSON.stringify(statePath)};
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      const [command, ...args] = process.argv.slice(2);
+      const scenario = ${JSON.stringify(scenario)};
+      let exitCode = 0;
+      if (command === 'uname') console.log('Darwin');
+      if (command === 'id') console.log('501');
+      if (command === 'sleep') state.sleeps++;
+      if (command === 'agent-infra-internal') state.installed = 2;
+      if (command === 'launchctl') {
+        const operation = args[0];
+        if (operation === 'bootout') {
+          if (state.loaded === null) exitCode = 3;
+          state.loaded = null;
+          state.running = null;
+        }
+        if (operation === 'bootstrap') {
+          state.bootstrapAttempts++;
+          if (scenario === 'bootstrap-failure'
+              || (scenario === 'bootstrap-busy' && state.bootstrapAttempts < 3)) exitCode = 5;
+          else state.loaded = state.installed;
+        }
+        if (operation === 'kickstart') {
+          if (scenario === 'kickstart-failure') exitCode = 5;
+          else state.running = state.loaded;
+        }
+      }
+      fs.writeFileSync(statePath, JSON.stringify(state));
+      process.exit(exitCode);
+    `);
+    for (const name of ['node', 'npm', 'uname', 'id', 'sleep', 'agent-infra-internal', 'launchctl']) {
+      const entry = path.join(root, `${name}.cjs`);
+      fs.writeFileSync(entry, `process.argv.splice(2, 0, ${JSON.stringify(name)}); require(${JSON.stringify(stub)});`);
+      writeNodeCommandShim(path.join(bin, name), entry);
+    }
+    const result = spawnSync('/bin/sh', [filePath('install.sh')], {
+      cwd: root, env: { PATH: bin }, encoding: 'utf8', timeout: 60_000
+    });
+    assert.equal(result.signal, null, result.stderr);
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    assert.equal(state.installed, 2);
+    if (scenario.endsWith('failure')) {
+      assert.equal(result.status, 1, result.stdout);
+      assert.equal(state.running, null);
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(state.loaded, 2);
+      assert.equal(state.running, 2);
+    }
+    if (scenario === 'bootstrap-busy') assert.ok(state.sleeps > 0);
+  });
+}
