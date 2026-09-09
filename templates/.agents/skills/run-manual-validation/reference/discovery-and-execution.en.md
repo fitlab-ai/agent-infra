@@ -10,8 +10,11 @@ Read this file before parsing input, discovering manual-validation items, or con
 | A literal `--` is present but the target or command is empty | Invalid input; stop before `validation-run.started` |
 | No `--` and only a task ref | Automatic mode |
 | No `--` and additional positional arguments | Invalid or partial input; do not ignore arguments or guess a command |
+| `--branch <ref>` is passed | Branch-only fallback; must also be explicit mode, so a missing command after `--` is invalid input |
 
 Explicit mode still reads available sources to map coverage, but it must not synthesize another command for the same target. Only automatic mode constructs actions for discovered items.
+
+Branch-only has no task ref, so both discovery sources are unreadable and are recorded as `unavailable`; this round's items are listed under the `explicit` source and must not trigger the automatic-mode source stop conditions.
 
 ## Work Gate Matrix
 
@@ -58,7 +61,7 @@ Only `executable` items may run. Commands must not expose credentials, environme
 1. Invoke each executable item separately:
 
    ```bash
-   agent-infra-internal task-validate {task-ref} --scope snapshot --format json -- {command...}
+   agent-infra-internal task-validate {task-ref|branch-ref} --scope snapshot --format json -- {command...}
    ```
 
 2. Only when the item or first-run evidence proves a dependency on uncommitted content, original mounts, or in-place permissions, explicitly invoke that item a second time with `--scope inplace` and record the reason.

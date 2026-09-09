@@ -71,7 +71,7 @@ const commandSpecs: Record<string, CommandSpec> = {
     zh: "完成人工验证：$ARGUMENTS"
   },
   "run-manual-validation": {
-    usage: "[--task <ref> | -t <ref>] [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command...>",
+    usage: "[--task <ref> | -t <ref> | --branch <ref>] [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command...>",
     en: "Run manual validation: $ARGUMENTS",
     zh: "运行人工校验：$ARGUMENTS"
   },

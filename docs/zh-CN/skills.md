@@ -25,7 +25,7 @@ agent-infra 提供 **丰富的内置 AI skills**。它们按使用场景分组�
 | `plan-task` | 编写技术实施方案，并设置审查检查点。 | `task-id` | 分析获批后定义具体实现路径。 |
 | `review-plan` | 审查技术方案，并按严重程度分类问题。 | `task-id` | 在编码前确认方案可执行。 |
 | `code-task` | 按批准方案或已裁决的实现输入实施、创建本地 checkpoint，并生成实现报告。 | `task-id` | 在方案获批后编写代码、测试和文档，或处理已批准的实现输入。 |
-| `run-manual-validation` | 通过 snapshot 或 inplace 隔离运行宿主侧校验，并记录去敏证据。 | `task-id`、校验命令 | 校验真实容器、凭证或工作树行为，但不直接标记 PR 人工校验完成。 |
+| `run-manual-validation` | 通过 snapshot 或 inplace 隔离运行宿主侧校验，并记录去敏证据。 | `task-id` 或 `--branch <ref>`、校验命令 | 校验真实容器、凭证或工作树行为，但不直接标记 PR 人工校验完成；任务工作区在另一台宿主时用 `--branch` 做跨环境校验。 |
 | `review-code` | 审查实现结果，并按严重程度分类问题。 | `task-id` | 合入前执行结构化代码审查。 |
 | `complete-task` | 在所有关卡通过后标记任务完成并归档。 | `task-id` | 审查、交付、合并和最终验证完成后收尾。 |
 

@@ -3,6 +3,7 @@
 ## 输入模式
 
 - 模式：`{explicit|automatic}`
+- 上下文：`{task-bound|branch-only}`（branch-only 另记 `recoverable: false`）
 - 输入判定：{sanitized-input-decision}
 - PR 来源状态：`{success|no-op|failed|blocked}` / `{stable-code-or-none}`
 
@@ -13,6 +14,7 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 {command-summary-and-key-result}
 ```
 > 按 `.agents/rules/evidence-reporting.md` 记录命令名称、目标范围、退出状态、sanitized result 和覆盖缺口；不得粘贴完整 argv 或敏感 transcript。
+> branch-only 无 `{task-id}`，本段记 `not-applicable (branch-only)`。
 
 ## 验证目标
 
