@@ -26,6 +26,9 @@ import {
 import type { SandboxTaskView } from '../../../lib/sandbox/control/task-view.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { onPlatforms } from '../../helpers.ts';
+import { TASK_WORKFLOW_COMMANDS } from '../../../lib/task/workflow-command.ts';
+import { parseArtifactCommand } from '../../../lib/task/artifact-command.ts';
+import { parseReviewCommand } from '../../../lib/task/review-command.ts';
 
 const staleView: SandboxTaskView = {
   state: 'finalized-stale',
@@ -54,6 +57,18 @@ function routeKeysFromHandlerBranches(): Set<string> {
     if (name === 'cli-route-inventory.ts') continue;
     const source = fs.readFileSync(path.join(internalDir, name), 'utf8');
     for (const match of source.matchAll(marker)) keys.add(routeKey(match[1]!, match[2]!));
+  }
+  // Shared domain commands have no CLI-local branch marker: exercise their parsers.
+  for (const [command, selector] of Object.values(TASK_WORKFLOW_COMMANDS)) {
+    if (command === 'task-artifact') {
+      const args = ['TASK-20260101-000001', selector, '--family', 'plan'];
+      if (selector !== 'inspect') args.push('--artifact', 'plan.md');
+      if (selector === 'repair') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
+      keys.add(routeKey(command, parseArtifactCommand(args).operation));
+    } else if (command === 'task-review') {
+      parseReviewCommand(['TASK-20260101-000001', selector, '--stage', 'analysis', '--artifact', 'review-analysis.md']);
+      keys.add(routeKey(command, selector));
+    }
   }
   return keys;
 }

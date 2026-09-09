@@ -364,6 +364,9 @@ export function resolveSandboxControlTransport(
     : fixedStatusMounted ? fixedStatusDir : null;
   const statusMounted = statusDir !== null;
   const hasCompleteConfig = TASK_CONTROL_CONFIG_KEYS.every((key) => Boolean(env[key]));
+  if (env.AGENT_INFRA_EXECUTOR_MANIFEST || env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING) {
+    return { kind: 'fail-closed', reasonCode: 'TASK_CONTROL_TRANSPORT_INVALID' };
+  }
   const taskBound = Boolean(env.AGENT_INFRA_TASK_ID);
   const runtime = Boolean(env.AGENT_INFRA_RUNTIME_DIR);
 

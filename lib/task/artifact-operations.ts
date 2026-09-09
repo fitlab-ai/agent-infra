@@ -4,8 +4,9 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { scanVisibleMarkdown, type VisibleMarkdown, type VisibleHeading } from './markdown.ts';
-import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
+import { hasOpenArtifactRound } from './artifact-lifecycle.ts';
 import { readArtifactRepairIntent } from './artifact-repair-intent.ts';
+import { resolveTaskRef } from './resolve-ref.ts';
 import {
   getArtifactSchema,
   renderArtifactSkeleton
@@ -413,25 +414,11 @@ function validateRepairContext(request: ArtifactRepairRequest, content: string):
     return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'artifact context marker does not match the requested task, family, and round' };
   }
   let taskContent: string;
-  try { taskContent = fs.readFileSync(path.join(request.taskDir, 'task.md'), 'utf8'); }
+  const resolved = resolveTaskRef(request.taskId, { repoRoot: request.repoRoot });
+  if (!resolved.ok) return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: resolved.message };
+  try { taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
   catch (error) { return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: `cannot read task lifecycle context: ${String(error)}` }; }
-  const activity = locateActivityLog(taskContent);
-  if (!activity) return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'task has no unique Activity Log section' };
-  const label: Record<ArtifactSchemaFamily, string> = {
-    analysis: 'Analyze Task',
-    'review-analysis': 'Review Analysis',
-    plan: 'Plan Task',
-    'review-plan': 'Review Plan',
-    code: 'Code Task',
-    'review-code': 'Review Code'
-  };
-  const escaped = escapeRegExp(label[request.family]);
-  const qualifier = request.family === 'code'
-    ? '(?:, (?:fix for review-code(?:-r(?:[2-9]|[1-9]\\d+))?\\.md|decision II-[1-9]\\d+))?'
-    : '';
-  const expected = new RegExp(`^${escaped} \\(Round ${round}${qualifier}\\)$`);
-  const open = startedBackedRows(pairEntries(activity.entries)).filter((row) => expected.test(row.step) && !row.done);
-  if (open.length !== 1) {
+  if (!hasOpenArtifactRound(taskContent, request.family, round)) {
     return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: `artifact '${request.artifact}' does not have exactly one matching open started lifecycle event` };
   }
   let intent;

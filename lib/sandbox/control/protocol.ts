@@ -5,7 +5,7 @@ import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
-import { TASK_WORKFLOW_OPERATIONS, validateTaskWorkflowRequest, type TaskWorkflowRequest, type TaskWorkflowOperation } from './task-workflow.ts';
+import { validateTaskWorkflowRequest, type TaskWorkflowRequest } from './task-workflow.ts';
 import type { ProjectionAncestorIdentity } from './task-workflow.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;

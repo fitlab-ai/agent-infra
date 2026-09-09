@@ -1,8 +1,9 @@
+import { parseReviewCommand } from '../task/review-command.ts';
 import { finalizeReviewSummary } from '../task/review-finalization.ts';
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
-import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
+import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-review <task-ref> finalize-summary --stage <analysis|plan|code> --artifact <review-*.md> [--orchestrated] [--dry-run] [--override-ticket <ticket> --override-target <target> --override-scope <scope>]\n';
 
@@ -23,56 +24,10 @@ async function taskReview(args: string[] = []): Promise<void> {
     process.stdout.write(USAGE);
     return;
   }
-  if (args.length < 2) {
-    failUsage('task ref and intent are required');
-    return;
-  }
-  if (!internalHandlerRoute('task-review', 'finalize-summary', args[1] ?? '')) {
-    failUsage(`unknown intent '${args[1]}'`);
-    return;
-  }
-  let stage = '';
-  let artifact = '';
-  let dryRun = false;
-  let orchestrated = false;
-  let overrideTicket = '';
-  let overrideTarget = '';
-  let overrideScope = '';
-  const seen = new Set<string>();
-  for (let index = 2; index < args.length; index += 1) {
-    const flag = args[index]!;
-    if (!['--stage', '--artifact', '--orchestrated', '--dry-run', '--override-ticket', '--override-target', '--override-scope'].includes(flag)) {
-      failUsage(`unknown option '${flag}'`);
-      return;
-    }
-    if (seen.has(flag)) {
-      failUsage(`duplicate option '${flag}'`);
-      return;
-    }
-    seen.add(flag);
-    if (flag === '--dry-run') {
-      dryRun = true;
-      continue;
-    }
-    if (flag === '--orchestrated') {
-      orchestrated = true;
-      continue;
-    }
-    const value = args[++index];
-    if (!value || value.startsWith('--')) {
-      failUsage(`option '${flag}' requires a value`);
-      return;
-    }
-    if (flag === '--stage') stage = value;
-    else if (flag === '--artifact') artifact = value;
-    else if (flag === '--override-ticket') overrideTicket = value;
-    else if (flag === '--override-target') overrideTarget = value;
-    else if (flag === '--override-scope') overrideScope = value;
-  }
-  if (!stage || !artifact) {
-    failUsage("options '--stage' and '--artifact' are required");
-    return;
-  }
+  let request;
+  try { request = parseReviewCommand(args); }
+  catch (error) { failUsage(error instanceof Error ? error.message : String(error)); return; }
+  const { stage, artifact, dryRun, orchestrated, overrideTicket, overrideTarget, overrideScope } = request;
   const dryRunConflict = overrideDryRunConflict({ dryRun, overrideTicket, overrideTarget, overrideScope });
   if (dryRunConflict) { failUsage(dryRunConflict.message); return; }
   const resolved = resolveTaskRef(args[0]!);

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { TASK_WORKFLOW_OPERATIONS } from './workflow-command.ts';
 
 export type ControlRecoveryOutcome = 'not-executed' | 'in-progress' | 'success' | 'failure' | 'unknown' | 'rejected';
 
@@ -47,11 +48,6 @@ const ORCHESTRATION_INTENTS = [
   'begin-or-resume', 'route.read', 'route.clean-completion', 'status', 'prepare', 'dispatch',
   'await-activation', 'recover-prepared', 'hook-start', 'hook-stop', 'advance', 'pause'
 ] as const;
-const WORKFLOW_INTENTS = [
-  'artifact-inspect', 'artifact-finalize-local', 'review-finalize-summary', 'event',
-  'ledger-finding-response', 'ledger-finding-review', 'ledger-finding-upsert',
-  'decision-next-id', 'decision-upsert', 'invalidation-reconcile', 'warning-add'
-] as const;
 
 export const SANDBOX_CONTROL_RECOVERY_OPERATIONS: readonly ControlRecoveryOperation[] = Object.freeze([
   ...LIFECYCLE_INTENTS.map((intent) => ({ family: 'task-lifecycle' as const, intent, class: 'lifecycle-mutation', mutatesDomain: true })),
@@ -63,7 +59,7 @@ export const SANDBOX_CONTROL_RECOVERY_OPERATIONS: readonly ControlRecoveryOperat
     mutatesDomain: !['route.read', 'status'].includes(intent)
   })),
   { family: 'task-create', intent: 'create', class: 'task-create', mutatesDomain: true },
-  ...WORKFLOW_INTENTS.map((intent) => ({ family: 'task-workflow' as const, intent, class: intent === 'artifact-inspect' || intent === 'decision-next-id' ? 'read-only' : 'workflow', mutatesDomain: !['artifact-inspect', 'decision-next-id'].includes(intent) })),
+  ...TASK_WORKFLOW_OPERATIONS.map((intent) => ({ family: 'task-workflow' as const, intent, class: intent === 'artifact-inspect' || intent === 'decision-next-id' ? 'read-only' : 'workflow', mutatesDomain: !['artifact-inspect', 'decision-next-id'].includes(intent) })),
   ...(['open', 'close', 'verify'] as const).map((intent) => ({ family: 'codex-controller' as const, intent, class: 'codex-controller', mutatesDomain: intent !== 'verify' }))
 ]);
 

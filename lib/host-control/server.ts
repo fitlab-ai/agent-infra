@@ -19,7 +19,7 @@ import {
 } from './client.ts';
 import { appendHostControlAudit } from './audit.ts';
 
-export type HostControlDispatch = (request: HostControlRequest) => unknown | Promise<unknown>;
+export type HostControlDispatch = (request: HostControlRequest) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 export type HostControlAudit = Readonly<{
   requestId: string;
@@ -53,8 +53,8 @@ function auditFor(request: HostControlRequest, phase: HostControlAudit['phase'],
   };
 }
 
-function response(request: HostControlRequest, status: HostControlResponse['status'], result: unknown, error: { code: string; message: string } | null): HostControlResponse {
-  return { version: 1, id: request.id, status, exitCode: status === 'completed' ? 0 : 1, result, error };
+function rejected(id: string, code: string, message: string): HostControlResponse {
+  return { version: 1, id, status: 'rejected', exitCode: 1, stdout: '', stderr: '', error: { code, message } };
 }
 
 async function handleConnection(socket: net.Socket, options: HostControlServerOptions): Promise<void> {
@@ -71,7 +71,7 @@ async function handleConnection(socket: net.Socket, options: HostControlServerOp
     if (completed || processing) return;
     input += chunk;
     if (Buffer.byteLength(input, 'utf8') > HOST_CONTROL_MAX_REQUEST_BYTES) {
-      finish({ version: 1, id: 'invalid', status: 'rejected', exitCode: 1, result: null, error: { code: 'HOST_CONTROL_REQUEST_TOO_LARGE', message: 'request exceeds the control limit' } });
+      finish(rejected('invalid', 'HOST_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit'));
       return;
     }
     const newline = input.indexOf('\n');
@@ -80,20 +80,20 @@ async function handleConnection(socket: net.Socket, options: HostControlServerOp
     let request: HostControlRequest;
     try { request = validateHostControlRequest(JSON.parse(raw)); }
     catch (error) {
-      finish({ version: 1, id: 'invalid', status: 'rejected', exitCode: 1, result: null, error: { code: 'HOST_CONTROL_REQUEST_INVALID', message: error instanceof Error ? error.message : String(error) } });
+      finish(rejected('invalid', 'HOST_CONTROL_REQUEST_INVALID', error instanceof Error ? error.message : String(error)));
       return;
     }
     processing = true;
     options.audit?.(auditFor(request, 'accepted', 'in-progress'));
     try {
       const result = await options.dispatch(request);
-      options.audit?.(auditFor(request, 'completed', 'success'));
-      finish(response(request, 'completed', result, null));
+      options.audit?.(auditFor(request, 'completed', result.exitCode === 0 ? 'success' : 'failure'));
+      finish({ version: 1, id: request.id, status: 'completed', ...result, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const code = /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'HOST_CONTROL_DISPATCH_FAILED';
       options.audit?.(auditFor(request, 'rejected', 'failure'));
-      finish(response(request, 'rejected', null, { code, message }));
+      finish(rejected(request.id, code, message));
     }
   });
 }

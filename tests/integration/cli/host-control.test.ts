@@ -4,76 +4,54 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createHostControlRequest, hostControlRequestForTaskWorkflow, requestHostControl, HostControlClientError } from '../../../lib/host-control/client.ts';
+import { hostControlRequestForCommand, requestHostControl, HostControlClientError } from '../../../lib/host-control/client.ts';
+import { dispatchHostControlCommand } from '../../../lib/host-control/command.ts';
 import { hostControlAuditPath } from '../../../lib/host-control/audit.ts';
 import { startHostControlServer } from '../../../lib/host-control/server.ts';
+import { onPlatforms } from '../../helpers.ts';
 
-function hostControlTestRoot(prefix: string): string {
+test('host-control propagates real command results and audits domain failure', onPlatforms('linux', 'darwin'), async () => {
   const base = process.platform === 'darwin' ? fs.realpathSync.native(os.homedir()) : os.tmpdir();
-  return fs.mkdtempSync(path.join(base, prefix));
-}
-
-test('host-control client and service exchange typed requests without peer credential fields', async () => {
-  const root = hostControlTestRoot('host-control-service-');
+  const root = fs.mkdtempSync(path.join(base, 'host-control-service-'));
   const endpoint = path.join(root, 'run', 'host-control.sock');
-  const audit: Array<Record<string, unknown>> = [];
-  const server = await startHostControlServer({
-    endpoint,
-    dispatch: (request) => ({ operation: request.operation, taskId: request.taskId }),
-    audit: (entry) => audit.push(entry)
-  });
+  const previous = process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
+  process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = endpoint;
+  const server = await startHostControlServer({ endpoint, dispatch: dispatchHostControlCommand });
   try {
-    const result = await requestHostControl({
-      endpoint,
-      request: hostControlRequestForTaskWorkflow({
-        version: 1,
-        id: 'a1234567890123456',
-        taskId: 'TASK-20260904-002407',
-        generation: 'generation-1',
-        operation: 'artifact-inspect',
-        fields: { taskRef: 'TASK-20260904-002407', family: 'code' }
-      })
+    const help = await requestHostControl({
+      endpoint, request: hostControlRequestForCommand('task-artifact', ['--help'], root)
     });
-    assert.equal(result.status, 'completed');
-    assert.deepEqual(result.result, { operation: 'artifact-inspect', taskId: 'TASK-20260904-002407' });
-    assert.equal('peerDigest' in audit[0]!, false);
-    assert.equal(audit.at(-1)?.authorityKind, 'host-broker');
+    assert.equal(help.status, 'completed');
+    assert.equal(help.exitCode, 0);
+    assert.match(help.stdout, /Usage:/u);
+
+    const invalid = await requestHostControl({
+      endpoint, request: hostControlRequestForCommand('task-artifact', ['TASK-20260904-002407', 'inspect', '--family', 'invalid'], root)
+    });
+    assert.equal(invalid.status, 'completed');
+    assert.notEqual(invalid.exitCode, 0);
+    assert.equal(JSON.parse(invalid.stdout).status, 'failed');
+    const entries = fs.readFileSync(hostControlAuditPath(endpoint), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    assert.deepEqual(entries.map((entry) => [entry.phase, entry.outcome]), [
+      ['accepted', 'in-progress'], ['completed', 'success'],
+      ['accepted', 'in-progress'], ['completed', 'failure']
+    ]);
   } finally {
     await server.close();
+    if (previous === undefined) delete process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
+    else process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = previous;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('host-control client fails closed when the fixed endpoint is absent', async () => {
-  const root = hostControlTestRoot('host-control-missing-');
-  await assert.rejects(
-    requestHostControl({
-      endpoint: path.join(root, 'missing.sock'),
-      request: createHostControlRequest({ taskId: null, generation: null, operation: 'status', scope: 'host' })
-    }),
-    (error: unknown) => error instanceof HostControlClientError && error.retryable && error.code === 'HOST_CONTROL_ENDPOINT_MISSING'
-  );
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('host-control service persists request audit when no sink is supplied', async () => {
-  const root = hostControlTestRoot('host-control-default-audit-');
-  const endpoint = path.join(root, 'run', 'host-control.sock');
-  const server = await startHostControlServer({
-    endpoint,
-    dispatch: (request) => ({ operation: request.operation, taskId: request.taskId })
-  });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-control-missing-'));
   try {
-    const result = await requestHostControl({
-      endpoint,
-      request: createHostControlRequest({ taskId: 'TASK-20260904-002407', generation: 'generation-1', operation: 'task-artifact', scope: 'host-command', payload: { args: ['TASK-20260904-002407', 'inspect', '--family', 'code'], workingDirectory: root } })
-    });
-    assert.equal(result.status, 'completed');
-    const entries = fs.readFileSync(hostControlAuditPath(endpoint), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
-    assert.deepEqual(entries.map((entry) => [entry.phase, entry.outcome]), [['accepted', 'in-progress'], ['completed', 'success']]);
-    assert.equal(entries.every((entry) => !('token' in entry) && !('peerDigest' in entry)), true);
+    await assert.rejects(requestHostControl({
+      endpoint: path.join(root, 'missing.sock'),
+      request: hostControlRequestForCommand('task-artifact', ['--help'], root)
+    }), (error: unknown) => error instanceof HostControlClientError && error.retryable && error.code === 'HOST_CONTROL_ENDPOINT_MISSING');
   } finally {
-    await server.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

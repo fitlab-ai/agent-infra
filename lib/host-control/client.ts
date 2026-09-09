@@ -5,7 +5,6 @@ import {
   inspectHostControlEndpoint,
   resolveHostControlEndpoint
 } from './path.ts';
-import { validateTaskWorkflowRequest } from '../sandbox/control/task-workflow.ts';
 
 export const HOST_CONTROL_MAX_REQUEST_BYTES = 64 * 1024;
 
@@ -33,7 +32,7 @@ export type HostControlRequest = Readonly<{
   generation: string | null;
   operation: string;
   scope: string;
-  payload?: Readonly<Record<string, unknown>>;
+  payload: HostControlCommandPayload;
 }>;
 
 export type HostControlResponse = Readonly<{
@@ -41,7 +40,8 @@ export type HostControlResponse = Readonly<{
   id: string;
   status: 'completed' | 'rejected';
   exitCode: number;
-  result: unknown;
+  stdout: string;
+  stderr: string;
   error: Readonly<{ code: string; message: string }> | null;
 }>;
 
@@ -62,62 +62,26 @@ function reject(message: string): never {
 
 export function validateHostControlRequest(value: unknown): HostControlRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) reject('request must be an object');
-  const request = value as Record<string, unknown>;
-  const keys = Object.keys(request).sort().join(',');
-  if (!['generation,id,operation,payload,scope,taskId,version', 'generation,id,operation,scope,taskId,version'].includes(keys)
+  const request = value as HostControlRequest;
+  if (Object.keys(request).sort().join(',') !== 'generation,id,operation,payload,scope,taskId,version'
     || request.version !== 1 || typeof request.id !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(request.id)
     || (request.taskId !== null && (typeof request.taskId !== 'string' || !/^TASK-\d{8}-\d{6}$/u.test(request.taskId)))
     || (request.generation !== null && (typeof request.generation !== 'string' || !request.generation))
-    || typeof request.operation !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(request.operation)
-    || typeof request.scope !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(request.scope)) reject('request schema is invalid');
-  if (request.payload !== undefined) {
-    if (!request.payload || typeof request.payload !== 'object' || Array.isArray(request.payload)) reject('request payload is invalid');
-    const forbidden = ['repoRoot', 'taskDir', 'workspaceRoot', 'runtimeDir', 'path', 'socket', 'handler', 'command'];
-    if (Object.keys(request.payload as object).some((key) => forbidden.includes(key))) reject('request payload contains a forbidden field');
-    if (request.scope === 'task-workflow') {
-      const workflow = validateTaskWorkflowRequest(request.payload);
-      if (workflow.id !== request.id || workflow.taskId !== request.taskId || workflow.generation !== request.generation
-        || workflow.operation !== request.operation) reject('task-workflow binding is invalid');
+    || request.scope !== 'host-command' || !HOST_CONTROL_COMMANDS.includes(request.operation as HostControlCommand)) reject('request schema is invalid');
+  const payload = request.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+    || !['args,environment,workingDirectory', 'args,workingDirectory'].includes(Object.keys(payload).sort().join(','))
+    || !Array.isArray(payload.args) || payload.args.length > 128
+    || !payload.args.every((arg) => typeof arg === 'string' && !/[\r\n]/u.test(arg))
+    || typeof payload.workingDirectory !== 'string' || !payload.workingDirectory.startsWith('/')) reject('host-command payload is invalid');
+  if (payload.environment !== undefined) {
+    if (!payload.environment || typeof payload.environment !== 'object' || Array.isArray(payload.environment)) reject('host-command environment is invalid');
+    for (const [key, value] of Object.entries(payload.environment)) {
+      if (!HOST_CONTROL_TEST_ENVIRONMENT_KEYS.includes(key as typeof HOST_CONTROL_TEST_ENVIRONMENT_KEYS[number])
+        || typeof value !== 'string' || /[\r\n]/u.test(value)) reject('host-command environment is invalid');
     }
-    if (request.scope === 'host-command') {
-      const payload = request.payload as Record<string, unknown>;
-      if (!['args,environment,workingDirectory', 'args,workingDirectory'].includes(Object.keys(payload).sort().join(','))
-        || !Array.isArray(payload.args)
-        || !payload.args.every((arg) => typeof arg === 'string' && !/[\r\n]/u.test(arg))
-        || payload.args.length > 128
-        || typeof payload.workingDirectory !== 'string'
-        || !payload.workingDirectory.startsWith('/')
-        || !HOST_CONTROL_COMMANDS.includes(request.operation as HostControlCommand)) {
-        reject('host-command payload is invalid');
-      }
-      if (payload.environment !== undefined) {
-        if (!payload.environment || typeof payload.environment !== 'object' || Array.isArray(payload.environment)) reject('host-command environment is invalid');
-        for (const [key, value] of Object.entries(payload.environment as Record<string, unknown>)) {
-          if (!HOST_CONTROL_TEST_ENVIRONMENT_KEYS.includes(key as typeof HOST_CONTROL_TEST_ENVIRONMENT_KEYS[number])
-            || typeof value !== 'string' || /[\r\n]/u.test(value)) reject('host-command environment is invalid');
-        }
-      }
-    }
-  } else if (request.scope === 'task-workflow') {
-    reject('task-workflow payload is required');
   }
-  return request as HostControlRequest;
-}
-
-export function hostControlRequestForTaskWorkflow(
-  request: Parameters<typeof validateTaskWorkflowRequest>[0],
-  scope = 'task-workflow'
-): HostControlRequest {
-  const workflow = validateTaskWorkflowRequest(request);
-  return {
-    version: 1,
-    id: workflow.id,
-    taskId: workflow.taskId,
-    generation: workflow.generation,
-    operation: workflow.operation,
-    scope,
-    payload: workflow
-  };
+  return request;
 }
 
 export function hostControlRequestForCommand(
@@ -147,10 +111,11 @@ export function hostControlRequestForCommand(
 function parseResponse(value: unknown, id: string): HostControlResponse {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HostControlClientError('HOST_CONTROL_RESPONSE_INVALID', 'response must be an object');
   const response = value as Record<string, unknown>;
-  if (Object.keys(response).sort().join(',') !== 'error,exitCode,id,result,status,version'
+  if (Object.keys(response).sort().join(',') !== 'error,exitCode,id,status,stderr,stdout,version'
     || response.version !== 1 || response.id !== id
     || !['completed', 'rejected'].includes(response.status as string)
     || !Number.isSafeInteger(response.exitCode)
+    || typeof response.stdout !== 'string' || typeof response.stderr !== 'string'
     || (response.error !== null && (!response.error || typeof response.error !== 'object'))) {
     throw new HostControlClientError('HOST_CONTROL_RESPONSE_INVALID', 'response schema is invalid');
   }
@@ -199,8 +164,4 @@ export async function requestHostControl(params: Readonly<{
       if (!settled) finish(new HostControlClientError('HOST_CONTROL_RESPONSE_INVALID', 'host-control closed without a response'));
     });
   });
-}
-
-export function createHostControlRequest(input: Omit<HostControlRequest, 'version' | 'id'> & Partial<Pick<HostControlRequest, 'id'>>): HostControlRequest {
-  return validateHostControlRequest({ version: 1, id: input.id ?? randomUUID(), ...input });
 }

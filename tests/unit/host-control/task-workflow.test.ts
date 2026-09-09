@@ -5,27 +5,19 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
-  TASK_WORKFLOW_OPERATIONS,
   captureProjectionTopology,
   createTaskWorkflowRequest,
   landProjectionArtifact,
   validateTaskWorkflowRequest,
-  workflowArguments,
+  readProjectionArtifact,
   type TaskProjectionManifest
 } from '../../../lib/sandbox/control/task-workflow.ts';
+import { parseArtifactCommand } from '../../../lib/task/artifact-command.ts';
 import { onPlatforms } from '../../helpers.ts';
 
 function testRoot(prefix: string): string {
   return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 }
-
-test('task-workflow exposes a closed typed operation catalog', () => {
-  assert.deepEqual([...TASK_WORKFLOW_OPERATIONS], [
-    'artifact-inspect', 'artifact-finalize-local', 'review-finalize-summary', 'event',
-    'ledger-finding-response', 'ledger-finding-review', 'ledger-finding-upsert',
-    'decision-next-id', 'decision-upsert', 'invalidation-reconcile', 'warning-add'
-  ]);
-});
 
 test('task-workflow rejects client paths and unknown fields', () => {
   assert.throws(() => validateTaskWorkflowRequest({
@@ -39,19 +31,19 @@ test('task-workflow rejects client paths and unknown fields', () => {
   }), /TASK_WORKFLOW_REQUEST_INVALID/);
 });
 
-test('task-workflow converts a CLI artifact command into a bound typed request', () => {
-  const request = createTaskWorkflowRequest('task-artifact', [
-    'TASK-20260904-002407', 'finalize-local', '--family', 'plan', '--artifact', 'plan-r8.md'
-  ], 'TASK-20260904-002407', 'generation-1');
-  assert.equal(request.operation, 'artifact-finalize-local');
-  assert.deepEqual(request.fields, {
-    taskRef: 'TASK-20260904-002407',
-    family: 'plan',
-    artifact: 'plan-r8.md'
-  });
-  assert.deepEqual(workflowArguments(request), [
-    'TASK-20260904-002407', 'finalize-local', '--family', 'plan', '--artifact', 'plan-r8.md'
-  ]);
+test('task-workflow preserves arguments for the shared domain parser', () => {
+  const args = ['TASK-20260904-002407', 'finalize-local', '--family', 'plan', '--family', 'code', '--artifact', 'plan.md'];
+  const request = createTaskWorkflowRequest('task-artifact', args, args[0]!, 'generation-1');
+  assert.deepEqual(request.args, args);
+  assert.throws(() => parseArtifactCommand(request.args), /duplicate option/u);
+});
+
+test('task-workflow routes candidate initialization and repair with task binding', () => {
+  for (const operation of ['init', 'repair']) {
+    const args = ['TASK-20260904-002407', operation, '--family', 'plan', '--artifact', 'plan.md'];
+    assert.equal(createTaskWorkflowRequest('task-artifact', args, args[0]!, 'g1').operation, `artifact-${operation}`);
+    assert.throws(() => createTaskWorkflowRequest('task-artifact', args, 'TASK-20260904-002408', 'g1'), /TASK_WORKFLOW_REQUEST_INVALID/u);
+  }
 });
 
 test('artifact landing refuses an unverified projection topology before reading', async () => {
@@ -70,7 +62,7 @@ test('artifact landing refuses an unverified projection topology before reading'
     topology: { verified: false, ancestors: [] }
   };
   await assert.rejects(
-    landProjectionArtifact(manifest, { artifact: 'plan.md' }),
+    readProjectionArtifact(manifest, { artifact: 'plan.md' }),
     /TASK_PROJECTION_TOPOLOGY_UNVERIFIED/
   );
   assert.equal(fs.readdirSync(authoritative).length, 0);
@@ -92,8 +84,10 @@ test('artifact landing verifies, hashes, and atomically copies the same projecti
     authoritativeTaskDir: authoritative,
     topology: { verified: true, ancestors: captureProjectionTopology(projection) }
   };
-  const result = await landProjectionArtifact(manifest, { artifact: 'plan.md' });
-  assert.equal(result.bytes, Buffer.byteLength('candidate\n'));
+  const candidate = await readProjectionArtifact(manifest, { artifact: 'plan.md' });
+  fs.writeFileSync(path.join(projection, 'plan.md'), 'changed after validation\n');
+  await landProjectionArtifact(manifest, candidate);
+  assert.equal(candidate.bytes.length, Buffer.byteLength('candidate\n'));
   assert.equal(fs.readFileSync(path.join(authoritative, 'plan.md'), 'utf8'), 'candidate\n');
   fs.rmSync(root, { recursive: true, force: true });
 });

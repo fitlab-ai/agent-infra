@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { SandboxControlManifest, SandboxControlFamily } from './protocol.ts';
+import type { SandboxControlManifest, SandboxControlFamily, SandboxControlRequest } from './protocol.ts';
 import { identityDigest as digestIdentity } from './identity-sentinel.ts';
 import { acquireSandboxResourceLock } from './native-file-lock.ts';
 
@@ -37,6 +37,22 @@ export type SandboxControlTransition = Readonly<{
 const REQUEST_ID = /^[a-f0-9-]{16,64}$/u;
 const SAFE_OPERATION = /^[a-z][a-z0-9.-]{0,96}$/u;
 const AUDIT_MAX_BYTES = 1024 * 1024;
+
+export function requestAuditFields(manifest: SandboxControlManifest, request: SandboxControlRequest) {
+  return {
+    requestId: request.id, requestFamily: request.family, sandboxTaskId: manifest.taskId,
+    requestGeneration: request.generation, requestIssuedAt: request.issuedAt, requestExpiresAt: request.expiresAt
+  };
+}
+
+export function resultAuditFields(result: Readonly<{ exitCode: number; stdout: string; stderr: string }>) {
+  return {
+    exitCode: result.exitCode,
+    outputBytes: Buffer.byteLength(result.stdout, 'utf8'), errorBytes: Buffer.byteLength(result.stderr, 'utf8'),
+    outputDigest: createHash('sha256').update(result.stdout, 'utf8').digest('hex'),
+    errorDigest: createHash('sha256').update(result.stderr, 'utf8').digest('hex')
+  };
+}
 
 function auditRoot(manifest: SandboxControlManifest): string {
   return path.dirname(path.resolve(manifest.publicStatusDir));

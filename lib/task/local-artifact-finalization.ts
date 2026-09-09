@@ -2,8 +2,12 @@ import fs from 'node:fs';
 
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
-import { validateCompletedArtifact } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
+import {
+  hasOpenArtifactRound,
+  validateArtifactPublication,
+  validateCompletedArtifact
+} from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
@@ -352,55 +356,27 @@ function finalizeLocalArtifactContent(
       'the artifact changed after its finalization provenance was recorded'
     );
   }
-  if (intent?.state === 'consumed') {
-    return {
-      status: 'passed',
-      changed: false,
-      taskId: resolved.taskId,
-      taskDir: resolved.taskDir,
-      family: request.family,
-      artifact: request.artifact,
-      artifactSha256,
-      semanticDigest: result.semanticDigest,
-      repairable: false,
-      diagnostics: result.diagnostics,
-      error: null
-    };
-  }
-  if (options.persistIntent === false) {
-    return {
-      status: 'passed',
-      changed: false,
-      taskId: resolved.taskId,
-      taskDir: resolved.taskDir,
-      family: request.family,
-      artifact: request.artifact,
-      artifactSha256,
-      semanticDigest: result.semanticDigest,
-      repairable: false,
-      diagnostics: result.diagnostics,
-      error: null
-    };
-  }
-  try {
-    writeLocalArtifactFinalizationIntent(resolved.repoRoot, {
-      version: 1,
-      taskId: resolved.taskId,
-      family: request.family,
-      artifact: request.artifact,
-      state: 'passed',
-      baselineSemanticDigest: intent?.baselineSemanticDigest ?? null,
-      artifactSha256,
-      semanticDigest: result.semanticDigest
-    });
-  } catch (error) {
-    return failedFinalization(request, {
-      code: 'LOCAL_FINALIZATION_INTENT_WRITE_FAILED',
-      message: error instanceof Error ? error.message : String(error)
-    }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest: result.semanticDigest });
+  if (intent?.state !== 'consumed' && options.persistIntent !== false) {
+    try {
+      writeLocalArtifactFinalizationIntent(resolved.repoRoot, {
+        version: 1,
+        taskId: resolved.taskId,
+        family: request.family,
+        artifact: request.artifact,
+        state: 'passed',
+        baselineSemanticDigest: intent?.baselineSemanticDigest ?? null,
+        artifactSha256,
+        semanticDigest: result.semanticDigest
+      });
+    } catch (error) {
+      return failedFinalization(request, {
+        code: 'LOCAL_FINALIZATION_INTENT_WRITE_FAILED',
+        message: error instanceof Error ? error.message : String(error)
+      }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest: result.semanticDigest });
+    }
   }
   return {
-    status: result.ok ? 'passed' : 'failed',
+    status: 'passed',
     changed: false,
     taskId: resolved.taskId,
     taskDir: resolved.taskDir,
@@ -408,16 +384,16 @@ function finalizeLocalArtifactContent(
     artifact: request.artifact,
     artifactSha256,
     semanticDigest: result.semanticDigest,
-    repairable: result.repairable,
+    repairable: false,
     diagnostics: result.diagnostics,
-    error: result.ok ? null : {
-      code: 'LOCAL_ARTIFACT_INVALID',
-      message: result.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
-    }
+    error: null
   };
 }
 
-function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): LocalArtifactFinalizationResult {
+function finalizeLocalArtifact(
+  request: LocalArtifactFinalizationRequest,
+  options: Readonly<{ content?: string; persistIntent?: boolean }> = {}
+): LocalArtifactFinalizationResult {
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: request.repoRoot });
   if (!resolved.ok) return failedFinalization(request, { code: resolved.code, message: resolved.message });
   const parsed = parseArtifactName(request.artifact);
@@ -426,6 +402,14 @@ function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): Local
       code: 'ARTIFACT_IDENTITY_INVALID',
       message: `artifact '${request.artifact}' does not match ${request.family}`
     }, { taskId: resolved.taskId, taskDir: resolved.taskDir });
+  }
+  if (options.content !== undefined) {
+    const error = validateArtifactPublication(resolved.taskDir, request.family, request.artifact);
+    if (error) return failedFinalization(request, error);
+    if (resolved.state !== 'active' || !hasOpenArtifactRound(fs.readFileSync(resolved.taskMdPath, 'utf8'), request.family, parsed.round)) {
+      return failedFinalization(request, { code: 'ARTIFACT_IDENTITY_INVALID', message: 'candidate must match one open started round in an active task' });
+    }
+    return finalizeLocalArtifactContent(request, resolved, options.content, options);
   }
   const validated = validateCompletedArtifact(resolved.taskDir, request.family, request.artifact, parsed.round);
   if (!validated.ok) {
