@@ -148,6 +148,14 @@ test('task control without host-control authority fails closed before reaching d
   assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE');
 });
 
+test('task-control help remains available without a host-control probe', () => {
+  const result = runDirectNode('task-orchestration', ['--help'], cleanEnv({
+    AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: undefined
+  }));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage: agent-infra-internal task-orchestration/u);
+});
+
 test('the launcher wrapper blocks preload bypass before the Node control router starts', onPlatforms('linux', 'darwin'), (t) => {
   if (!fixedStatusMountPresent()) {
     t.skip('fixed status mount is unavailable in this host test environment');

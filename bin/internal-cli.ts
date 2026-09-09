@@ -108,7 +108,7 @@ if (hostWorkerRequested && !hostWorker && (taskControlCommand || taskWorkflowCom
 }
 let hostControlRouted = false;
 
-if (taskControlCommand && !hostWorker) {
+if (taskControlCommand && !hostWorker && !localTaskControlHelp) {
   const transport = resolveSandboxControlTransport(process.env);
   if (transport.kind === 'fail-closed') {
     const reasonCode = transport.reasonCode ?? 'TASK_CONTROL_TRANSPORT_INVALID';
