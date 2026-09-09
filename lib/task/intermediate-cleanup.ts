@@ -1,28 +1,28 @@
 import { inspectOwnedPath } from '../owned-path.ts';
-import { taskFinalizationReceiptState } from '../task/finalization-state.ts';
-import { withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { taskFinalizationReceiptState } from './finalization-state.ts';
+import { withTaskExecutionLock } from './task-execution-lock.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { checkpointCommitMatches } from '../task/commit-identity.ts';
+import { checkpointCommitMatches } from './commit-identity.ts';
 import {
   readCheckpointIntent,
   type CheckpointIntent
-} from '../task/commit-intent.ts';
-import { parseTaskFrontmatter } from '../task/frontmatter.ts';
+} from './commit-intent.ts';
+import { parseTaskFrontmatter } from './frontmatter.ts';
 import {
   readTaskFinalizationReceipt,
   type TaskFinalizationReceipt
-} from '../task/finalization.ts';
+} from './finalization.ts';
 import {
   readLocalArtifactFinalizationIntent,
   semanticDigest,
   sha256Content,
   type LocalArtifactFinalizationIntent
-} from '../task/local-artifact-finalization.ts';
-import { parseArtifactName } from '../task/artifact-lifecycle.ts';
-import { enumerateAllTaskDirs, type TaskWorkspaceState } from '../task/resolve-ref.ts';
-import { type SandboxControlBindingVerifier } from './control/lifecycle.ts';
+} from './local-artifact-finalization.ts';
+import { parseArtifactName } from './artifact-lifecycle.ts';
+import { enumerateAllTaskDirs, type TaskWorkspaceState } from './resolve-ref.ts';
+import type { TaskControlBindingEvidence } from './finalization-state.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const LOCAL_INTENT_RE = /^(TASK-\d{8}-\d{6})-(analysis|plan|code)-(.+\.md)\.json$/;
@@ -54,8 +54,10 @@ type IntermediateCleanupReport = Readonly<{
 type IntermediateCleanupOptions = Readonly<{
   dryRun?: boolean;
   taskIds?: readonly string[];
-  controlBindingVerifier?: SandboxControlBindingVerifier;
+  controlBindingEvidence?: TaskControlBindingEvidence;
 }>;
+
+type ScanOptions = IntermediateCleanupOptions & Readonly<{ preflight?: boolean }>;
 
 type TaskRecord = Readonly<{
   taskId: string;
@@ -142,7 +144,7 @@ function taskGate(task: TaskRecord | undefined): string | null {
 function receiptGate(
   repoRoot: string,
   task: TaskRecord,
-  options: IntermediateCleanupOptions
+  options: ScanOptions
 ): string | null {
   let receipt: TaskFinalizationReceipt | null;
   try { receipt = readTaskFinalizationReceipt(repoRoot, task.taskId); }
@@ -152,8 +154,8 @@ function receiptGate(
   if (state === 'pending') return 'FINALIZATION_RECEIPT_PENDING';
   if (state === 'unresolved') return 'LFAI_RETRY_OR_WARNING_OPEN';
   if (receipt.controlBinding) {
-    const verifier = options.controlBindingVerifier;
-    if (!verifier || !verifier(task.taskId, receipt.controlBinding)) return 'CONTROL_BINDING_MISMATCH';
+    const evidence = options.controlBindingEvidence?.(task.taskId, receipt.controlBinding);
+    if (evidence !== 'terminal' && !(options.preflight && evidence === 'pending')) return 'CONTROL_BINDING_MISMATCH';
   }
   return null;
 }
@@ -170,7 +172,7 @@ function localIntentCandidate(
   family: 'analysis' | 'plan' | 'code',
   artifact: string,
   identity: FileIdentity,
-  options: IntermediateCleanupOptions
+  options: ScanOptions
 ): Candidate {
   const protectedReason = taskGate(task);
   if (protectedReason) return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', protectedReason, identity) };
@@ -205,7 +207,7 @@ function commitIntentCandidate(
   filePath: string,
   taskId: string,
   identity: FileIdentity,
-  options: IntermediateCleanupOptions
+  options: ScanOptions
 ): Candidate {
   const protectedReason = taskGate(task);
   if (protectedReason) return { taskId, item: item('COMMIT-SYNCED', taskId, filePath, 'protected', protectedReason, identity) };
@@ -226,7 +228,7 @@ function commitIntentCandidate(
 function readAuxiliaryCandidates(
   repoRoot: string,
   tasks: Map<string, TaskRecord>,
-  options: IntermediateCleanupOptions
+  options: ScanOptions
 ): Candidate[] {
   const candidates: Candidate[] = [];
   const selected = options.taskIds ? new Set(options.taskIds) : null;
@@ -297,7 +299,7 @@ function buildIntermediateCleanupReport(items: readonly IntermediateCleanupItem[
   };
 }
 
-function scanInternal(repoRootInput: string, options: IntermediateCleanupOptions): Candidate[] {
+function scanInternal(repoRootInput: string, options: ScanOptions): Candidate[] {
   const repoRoot = path.resolve(repoRootInput);
   if (safeLstat(path.dirname(repoRoot), repoRoot, 'directory') === null) {
     throw new Error('INTERMEDIATE_CLEANUP_REPOSITORY_INVALID');
@@ -307,7 +309,7 @@ function scanInternal(repoRootInput: string, options: IntermediateCleanupOptions
   return readAuxiliaryCandidates(repoRoot, tasks, options);
 }
 
-function scanIntermediateCleanup(repoRoot: string, options: IntermediateCleanupOptions = {}): IntermediateCleanupReport {
+function scanIntermediateCleanup(repoRoot: string, options: ScanOptions = {}): IntermediateCleanupReport {
   const candidates = scanInternal(repoRoot, options);
   return buildIntermediateCleanupReport(candidates.map(({ item: candidate }) => candidate), true);
 }
@@ -349,7 +351,7 @@ function removeIntermediateCleanupCandidate(candidate: IntermediateCleanupItem):
 
 type IntermediateCleanupCoordinatorOptions = Pick<
   IntermediateCleanupOptions,
-  'dryRun' | 'taskIds' | 'controlBindingVerifier'
+  'dryRun' | 'taskIds' | 'controlBindingEvidence'
 > & Readonly<{
   lockedTaskIds?: ReadonlySet<string>;
 }>;
@@ -365,7 +367,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
   const scanOptions: IntermediateCleanupOptions = {
     ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
     ...(options.taskIds === undefined ? {} : { taskIds: options.taskIds }),
-    ...(options.controlBindingVerifier === undefined ? {} : { controlBindingVerifier: options.controlBindingVerifier })
+    ...(options.controlBindingEvidence === undefined ? {} : { controlBindingEvidence: options.controlBindingEvidence })
   };
   const initial = scanIntermediateCleanup(repoRoot, scanOptions);
   if (options.dryRun) return initial;

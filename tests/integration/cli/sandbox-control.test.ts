@@ -15,8 +15,8 @@ import {
 import {
   cleanupIntermediateUnderRemovalCoordinator as cleanupIntermediateFiles,
   scanIntermediateCleanup
-} from '../../../lib/sandbox/intermediate-cleanup.ts';
-import { createSandboxControlBindingVerifier } from '../../../lib/sandbox/control/lifecycle.ts';
+} from '../../../lib/task/intermediate-cleanup.ts';
+import { createSandboxControlBindingEvidence } from '../../../lib/sandbox/task-cleanup.ts';
 import {
   advanceSandboxRemovalJournalPhase,
   claimSandboxRemovalJournal,
@@ -1662,8 +1662,8 @@ test('intermediate cleanup accepts the persistent terminal after broker processi
       'status: completed\n', 'status: completed\nbranch: feature/finalization\n'
     ));
     const target = writeConsumedLocalIntent(root, taskId);
-    const verifier = createSandboxControlBindingVerifier(root, [path.dirname(manifestPath)]);
-    const report = cleanupIntermediateFiles(root, { taskIds: [taskId], controlBindingVerifier: verifier });
+    const verifier = createSandboxControlBindingEvidence(root, [path.dirname(manifestPath)]);
+    const report = cleanupIntermediateFiles(root, { taskIds: [taskId], controlBindingEvidence: verifier });
     assert.equal(report.items.some((item) => item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
   } finally {

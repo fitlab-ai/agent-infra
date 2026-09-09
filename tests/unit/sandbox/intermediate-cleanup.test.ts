@@ -9,9 +9,9 @@ import path from 'node:path';
 import {
   cleanupIntermediateUnderRemovalCoordinator as cleanupIntermediateFiles,
   scanIntermediateCleanup
-} from '../../../lib/sandbox/intermediate-cleanup.ts';
-import { cleanupIntermediateUnderRemovalCoordinator } from '../../../lib/sandbox/intermediate-cleanup.ts';
-import { createSandboxControlBindingVerifier } from '../../../lib/sandbox/control/lifecycle.ts';
+} from '../../../lib/task/intermediate-cleanup.ts';
+import { cleanupIntermediateUnderRemovalCoordinator } from '../../../lib/task/intermediate-cleanup.ts';
+import { createSandboxControlBindingEvidence } from '../../../lib/sandbox/task-cleanup.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import {
   checkpointIntentDigest,
@@ -312,9 +312,28 @@ test('intermediate cleanup requires an explicit verifier for bound finalization 
     fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`);
     const protectedReport = scanIntermediateCleanup(fixture.root);
     assert.equal(protectedReport.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
-    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: () => true });
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingEvidence: () => 'terminal' });
     assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('pending control evidence permits preflight but never auxiliary deletion', () => {
+  const fixture = taskFixture();
+  try {
+    const target = writeConsumedIntent(fixture.root, fixture.taskDir);
+    const controlRoot = writeBoundControlEvidence(fixture.root);
+    fs.unlinkSync(path.join(controlRoot, 'channel', 'responses', `${'a'.repeat(16)}.json`));
+    const controlBindingEvidence = createSandboxControlBindingEvidence(fixture.root, [controlRoot]);
+    const binding = { generation: 'generation-1', requestId: 'a'.repeat(16) };
+    assert.equal(controlBindingEvidence(TASK_ID, binding), 'pending');
+    const preview = scanIntermediateCleanup(fixture.root, { controlBindingEvidence, preflight: true });
+    assert.equal(preview.items.find((item) => item.path === target)?.disposition, 'planned');
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingEvidence });
+    assert.equal(result.items.find((item) => item.path === target)?.reason, 'CONTROL_BINDING_MISMATCH');
+    assert.equal(fs.existsSync(target), true);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -325,8 +344,8 @@ test('intermediate cleanup accepts only terminal control evidence for bound rece
   try {
     const target = writeConsumedIntent(fixture.root, fixture.taskDir);
     const controlRoot = writeBoundControlEvidence(fixture.root);
-    const verifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
-    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: verifier });
+    const verifier = createSandboxControlBindingEvidence(fixture.root, [controlRoot]);
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingEvidence: verifier });
     assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
   } finally {
@@ -339,9 +358,9 @@ test('intermediate cleanup reuses captured terminal evidence after the control r
   try {
     const target = writeConsumedIntent(fixture.root, fixture.taskDir);
     const controlRoot = writeBoundControlEvidence(fixture.root);
-    const verifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
+    const verifier = createSandboxControlBindingEvidence(fixture.root, [controlRoot]);
     fs.rmSync(controlRoot, { recursive: true, force: true });
-    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: verifier });
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingEvidence: verifier });
     assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
   } finally {
@@ -354,39 +373,39 @@ test('intermediate cleanup reconstructs terminal evidence from a removal journal
   try {
     const target = writeConsumedIntent(fixture.root, fixture.taskDir);
     const controlRoot = writeBoundControlEvidence(fixture.root);
-    const firstVerifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
-    assert.equal(firstVerifier(TASK_ID, { generation: 'generation-1', requestId: 'a'.repeat(16) }), true);
+    const firstVerifier = createSandboxControlBindingEvidence(fixture.root, [controlRoot]);
+    assert.equal(firstVerifier(TASK_ID, { generation: 'generation-1', requestId: 'a'.repeat(16) }), 'terminal');
     fs.rmSync(controlRoot, { recursive: true, force: true });
 
-    const conflictingVerifier = createSandboxControlBindingVerifier(fixture.root, [], [{
+    const conflictingVerifier = createSandboxControlBindingEvidence(fixture.root, [], [{
       phase: 'carrier-removed',
       generation: 'generation-1',
       target: { branch: 'feature/other', controlRoot }
     }]);
     const protectedReport = cleanupIntermediateFiles(fixture.root, {
-      controlBindingVerifier: conflictingVerifier
+      controlBindingEvidence: conflictingVerifier
     });
     assert.equal(protectedReport.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
     assert.equal(fs.existsSync(target), true);
 
-    const incompleteVerifier = createSandboxControlBindingVerifier(fixture.root, [], [{
+    const incompleteVerifier = createSandboxControlBindingEvidence(fixture.root, [], [{
       phase: 'carrier-removed',
       generation: 'generation-1',
       target: { branch: 'feature/cleanup', controlRoot }
     }]);
     const incompleteReport = cleanupIntermediateFiles(fixture.root, {
-      controlBindingVerifier: incompleteVerifier
+      controlBindingEvidence: incompleteVerifier
     });
     assert.equal(incompleteReport.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
     assert.equal(fs.existsSync(target), true);
 
-    const secondVerifier = createSandboxControlBindingVerifier(fixture.root, [], [{
+    const secondVerifier = createSandboxControlBindingEvidence(fixture.root, [], [{
       phase: 'completed',
       generation: 'generation-1',
       target: { branch: 'feature/cleanup', controlRoot }
     }]);
     const result = cleanupIntermediateFiles(fixture.root, {
-      controlBindingVerifier: secondVerifier
+      controlBindingEvidence: secondVerifier
     });
 
     assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
@@ -401,10 +420,10 @@ test('intermediate cleanup protects a bound receipt when the captured control ro
   try {
     const target = writeConsumedIntent(fixture.root, fixture.taskDir);
     const controlRoot = writeBoundControlEvidence(fixture.root);
-    const verifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
+    const verifier = createSandboxControlBindingEvidence(fixture.root, [controlRoot]);
     fs.rmSync(controlRoot, { recursive: true, force: true });
     fs.writeFileSync(controlRoot, 'replacement\n');
-    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: verifier });
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingEvidence: verifier });
     assert.equal(fs.existsSync(target), true);
     assert.equal(result.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
   } finally {
@@ -418,10 +437,10 @@ test('intermediate cleanup protects a bound receipt when the captured control ro
   try {
     const target = writeConsumedIntent(fixture.root, fixture.taskDir);
     const controlRoot = writeBoundControlEvidence(fixture.root);
-    const verifier = createSandboxControlBindingVerifier(fixture.root, [controlRoot]);
+    const verifier = createSandboxControlBindingEvidence(fixture.root, [controlRoot]);
     fs.rmSync(controlRoot, { recursive: true, force: true });
     fs.symlinkSync(replacement, controlRoot, 'junction');
-    const result = cleanupIntermediateFiles(fixture.root, { controlBindingVerifier: verifier });
+    const result = cleanupIntermediateFiles(fixture.root, { controlBindingEvidence: verifier });
     assert.equal(fs.existsSync(target), true);
     assert.equal(result.items.some((item) => item.reason === 'CONTROL_BINDING_MISMATCH'), true);
   } finally {

@@ -30,11 +30,10 @@ import {
 } from '../workspace-identity.ts';
 import { sandboxControlPaths, sandboxWorkspaceViewPaths } from '../workspace-view.ts';
 import {
-  SANDBOX_REMOVAL_JOURNAL_PHASES,
+  advanceSandboxRemovalJournalToPhase,
   advanceSandboxRemovalJournalPhase,
   claimSandboxRemovalJournal,
   clearSandboxRemovalJournalRecord,
-  createSandboxControlBindingVerifier,
   isDefaultSandboxRemovalJournal,
   listSandboxRemovalJournals,
   removeSandboxControlRoot,
@@ -58,7 +57,8 @@ import {
   mergeIntermediateCleanupReports,
   type IntermediateCleanupReport,
   scanIntermediateCleanup
-} from '../intermediate-cleanup.ts';
+} from '../../task/intermediate-cleanup.ts';
+import { createSandboxControlBindingEvidence } from '../task-cleanup.ts';
 import { withRepositoryMutationLock, withTaskExecutionLock } from '../../task/task-execution-lock.ts';
 import {
   createCleanPermit,
@@ -176,27 +176,11 @@ function advanceRemovalJournals(
   phase: SandboxRemovalJournal['phase'],
   resourceLocks: ReadonlyMap<string, SandboxResourceLock>
 ): SandboxRemovalJournal[] {
-  const targetIndex = sandboxRemovalPhaseIndex(phase);
-  return listSandboxRemovalJournals({
-    branch: target.effectiveBranch,
-    project,
-    targetDigest
-  }).map((journal) => {
-    let current = journal;
-    while (sandboxRemovalPhaseIndex(current.phase) < targetIndex) {
-      if (current.phase === 'target-committed' && phase === 'container-absent') {
-        const lock = resourceLocks.get(current.target.controlRoot);
-        if (!lock) throw new Error('SANDBOX_CONTROL_REMOVAL_LOCK_MISMATCH');
-        current = advanceSandboxRemovalJournalPhase(current, phase, { resourceLock: lock });
-        continue;
-      }
-      const next = SANDBOX_REMOVAL_JOURNAL_PHASES[sandboxRemovalPhaseIndex(current.phase) + 1];
-      if (!next) throw new Error('SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID');
-      const lock = resourceLocks.get(current.target.controlRoot);
-      if (!lock) throw new Error('SANDBOX_CONTROL_REMOVAL_LOCK_MISMATCH');
-      current = advanceSandboxRemovalJournalPhase(current, next, { resourceLock: lock });
-    }
-    return current;
+  return listSandboxRemovalJournals({ branch: target.effectiveBranch, project, targetDigest }).map((journal) => {
+    if (sandboxRemovalPhaseIndex(journal.phase) >= sandboxRemovalPhaseIndex(phase)) return journal;
+    const lock = resourceLocks.get(journal.target.controlRoot);
+    if (!lock) throw new Error('SANDBOX_CONTROL_REMOVAL_LOCK_MISMATCH');
+    return advanceSandboxRemovalJournalToPhase(journal, phase, lock);
   });
 }
 
@@ -832,67 +816,12 @@ function projectSandboxControlRoots(config: SandboxConfig): string[] {
     });
 }
 
-function projectSandboxControlBindingVerifier(
+function projectSandboxControlBindingEvidence(
   config: SandboxConfig,
   controlRoots: readonly string[] = projectSandboxControlRoots(config),
   removalJournals: readonly SandboxRemovalJournal[] = listSandboxRemovalJournals({ project: config.project })
-): ReturnType<typeof createSandboxControlBindingVerifier> {
-  return createSandboxControlBindingVerifier(config.repoRoot, controlRoots, removalJournals);
-}
-
-function pendingCurrentControlBindingEvidence(
-  config: SandboxConfig,
-  controlRoots: readonly string[],
-  taskId: string,
-  binding: Parameters<ReturnType<typeof createSandboxControlBindingVerifier>>[1]
-): boolean {
-  for (const controlRoot of controlRoots) {
-    try {
-      const root = path.resolve(controlRoot);
-      const rootStat = fs.lstatSync(root);
-      if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) continue;
-      const manifest = readSandboxControlManifest(path.join(root, 'manifest.json'));
-      if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId
-        || canonicalPath(manifest.repoRoot) !== canonicalPath(config.repoRoot)
-        || manifest.generation !== binding.generation
-        || path.resolve(manifest.channelDir) !== path.join(root, 'channel')
-        || path.resolve(manifest.publicStatusDir) !== path.join(root, 'public')
-        || path.resolve(manifest.processingDir) !== path.join(root, 'processing')
-        || path.resolve(manifest.runtimeDir) !== path.join(root, 'runtime')) continue;
-      return true;
-    } catch {
-      // A malformed or replaced control root is not pending evidence.
-    }
-  }
-  return false;
-}
-
-function pendingRemovalJournalEvidence(
-  config: SandboxConfig,
-  removalJournals: readonly SandboxRemovalJournal[],
-  taskId: string,
-  binding: Parameters<ReturnType<typeof createSandboxControlBindingVerifier>>[1]
-): boolean {
-  let branch: string;
-  try {
-    branch = resolveSandboxCleanupTarget(taskId, config.repoRoot, { allowProtected: true }).branch;
-  } catch {
-    return false;
-  }
-  return removalJournals.some((journal) => journal.phase !== 'completed'
-    && journal.generation === binding.generation
-    && journal.target.branch === branch);
-}
-
-function projectSandboxControlBindingPreflightVerifier(
-  config: SandboxConfig,
-  controlRoots: readonly string[] = projectSandboxControlRoots(config),
-  removalJournals: readonly SandboxRemovalJournal[] = listSandboxRemovalJournals({ project: config.project })
-): ReturnType<typeof createSandboxControlBindingVerifier> {
-  const terminalVerifier = projectSandboxControlBindingVerifier(config, controlRoots, removalJournals);
-  return (taskId, binding) => terminalVerifier(taskId, binding)
-    || pendingCurrentControlBindingEvidence(config, controlRoots, taskId, binding)
-    || pendingRemovalJournalEvidence(config, removalJournals, taskId, binding);
+): ReturnType<typeof createSandboxControlBindingEvidence> {
+  return createSandboxControlBindingEvidence(config.repoRoot, controlRoots, removalJournals);
 }
 
 function assertIntermediateCleanupPreflight(report: IntermediateCleanupReport): void {
@@ -1303,11 +1232,7 @@ function completePurgeRemovalJournals(config: SandboxConfig): void {
       if (!ownedByCurrentProcess) {
         current = claimSandboxRemovalJournal(current, { resourceLock });
       }
-      while (sandboxRemovalPhaseIndex(current.phase) < sandboxRemovalPhaseIndex('completed')) {
-        const next = SANDBOX_REMOVAL_JOURNAL_PHASES[sandboxRemovalPhaseIndex(current.phase) + 1];
-        if (!next) throw new Error('SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID');
-        current = advanceSandboxRemovalJournalPhase(current, next, { resourceLock });
-      }
+      advanceSandboxRemovalJournalToPhase(current, 'completed', resourceLock);
     } finally {
       resourceLock.release();
     }
@@ -1418,8 +1343,9 @@ async function rmOneCore(
       targetDigest: removalTargetDigest(config, target)
     });
     assertIntermediateCleanupPreflight(scanIntermediateCleanup(config.repoRoot, {
+      preflight: true,
       taskIds: [auxiliaryTaskId],
-      controlBindingVerifier: projectSandboxControlBindingPreflightVerifier(
+      controlBindingEvidence: projectSandboxControlBindingEvidence(
         config,
         controlRoots,
         targetJournals
@@ -1722,110 +1648,47 @@ async function rmOneCore(
   advanceRemovalJournals(config.project, target, targetDigest, 'branch-removed', resourceLocks);
   cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
 
-  const runToolCleanup = prepareRemovalAction(
-    config.project, target, targetDigest, 'tool-finalizing', 'tool-removed', resourceLocks
-  );
-  if (runToolCleanup.run) {
-    for (const { tool, candidates } of toolCandidates) {
-      for (const dir of candidates.filter((candidate) => shouldStageManagedRemoval(
-        candidate,
-        removalTombstonePath(targetDigest, 'tool', candidate),
-        runToolCleanup.recovering
-      ))) {
-        stageManagedRemoval(
-          tool.sandboxBase,
-          dir,
-          removalTombstonePath(targetDigest, 'tool', dir),
-          runToolCleanup.recovering,
-          {
-            version: 1,
-            targetDigest,
-            permitDigest: committedTarget.permitDigest,
-            kind: 'tool',
-            source: dir
-          }
-        );
-        p.log.success(`${tool.name} state removed: ${dir}`);
+  const directoryStages = [
+    { kind: 'tool', entries: toolCandidates.flatMap(({ tool, candidates }) =>
+      candidates.map((dir) => ({ dir, base: tool.sandboxBase, label: tool.name + ' state' }))) },
+    { kind: 'shell', entries: shellConfigDirCandidates(config, effectiveBranch)
+      .map((dir) => ({ dir, base: config.shellConfigBase, label: 'Shell config' })) },
+    { kind: 'share', entries: shouldRemoveShare
+      ? [{ dir: sharePath, base: config.shareBase, label: 'Share dir' }] : [] }
+  ] as const;
+  for (const { kind, entries } of directoryStages) {
+    const completedPhase = `${kind}-removed` as const;
+    const action = prepareRemovalAction(
+      config.project, target, targetDigest, `${kind}-finalizing`, completedPhase, resourceLocks
+    );
+    if (action.run) {
+      for (const { dir, base, label } of entries) {
+        const tombstone = removalTombstonePath(targetDigest, kind, dir);
+        if (!shouldStageManagedRemoval(dir, tombstone, action.recovering)) continue;
+        stageManagedRemoval(base, dir, tombstone, action.recovering, {
+          version: 1, targetDigest, permitDigest: committedTarget.permitDigest, kind, source: dir
+        });
+        p.log.success(`${label} removed: ${dir}`);
       }
+    } else if (kind !== 'share' || shouldRemoveShare) {
+      assertRemovalPathsAbsent(removalActionPaths(target, config, completedPhase));
     }
-  } else {
-    assertRemovalPathsAbsent(removalActionPaths(target, config, 'tool-removed'));
+    advanceRemovalJournals(config.project, target, targetDigest, completedPhase, resourceLocks);
+    cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
   }
-  advanceRemovalJournals(config.project, target, targetDigest, 'tool-removed', resourceLocks);
-  cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
-
-  const runShellCleanup = prepareRemovalAction(
-    config.project, target, targetDigest, 'shell-finalizing', 'shell-removed', resourceLocks
-  );
-  if (runShellCleanup.run) {
-    for (const dir of shellConfigDirCandidates(config, effectiveBranch).filter((candidate) => shouldStageManagedRemoval(
-      candidate,
-      removalTombstonePath(targetDigest, 'shell', candidate),
-      runShellCleanup.recovering
-    ))) {
-      stageManagedRemoval(
-        config.shellConfigBase,
-        dir,
-        removalTombstonePath(targetDigest, 'shell', dir),
-        runShellCleanup.recovering,
-        {
-          version: 1,
-          targetDigest,
-          permitDigest: committedTarget.permitDigest,
-          kind: 'shell',
-          source: dir
-        }
-      );
-      p.log.success(`Shell config removed: ${dir}`);
-    }
-  } else {
-    assertRemovalPathsAbsent(removalActionPaths(target, config, 'shell-removed'));
-  }
-  advanceRemovalJournals(config.project, target, targetDigest, 'shell-removed', resourceLocks);
-  cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
-
-  const runShareCleanup = prepareRemovalAction(
-    config.project, target, targetDigest, 'share-finalizing', 'share-removed', resourceLocks
-  );
-  if (runShareCleanup.run) {
-    if (shouldRemoveShare && shouldStageManagedRemoval(
-      sharePath,
-      removalTombstonePath(targetDigest, 'share', sharePath),
-      runShareCleanup.recovering
-    )) {
-      stageManagedRemoval(
-        config.shareBase,
-        sharePath,
-        removalTombstonePath(targetDigest, 'share', sharePath),
-        runShareCleanup.recovering,
-        {
-          version: 1,
-          targetDigest,
-          permitDigest: committedTarget.permitDigest,
-          kind: 'share',
-          source: sharePath
-        }
-      );
-      p.log.success(`Share dir removed: ${sharePath}`);
-    }
-  } else if (shouldRemoveShare) {
-    assertRemovalPathsAbsent(removalActionPaths(target, config, 'share-removed'));
-  }
-  advanceRemovalJournals(config.project, target, targetDigest, 'share-removed', resourceLocks);
-  cleanupCompletedRemovalArtifacts(config, target, committedTarget, targetDigest);
 
   advanceRemovalJournals(config.project, target, targetDigest, 'completed', resourceLocks);
 
   let auxiliaryReport: IntermediateCleanupReport | null = null;
   if (auxiliaryTaskId) {
-    const finalControlBindingVerifier = projectSandboxControlBindingVerifier(
+    const finalControlBindingEvidence = projectSandboxControlBindingEvidence(
       config,
       controlRoots,
       listSandboxRemovalJournals({ branch: effectiveBranch, project: config.project, targetDigest })
     );
     const report = cleanupIntermediateUnderRemovalCoordinator(config.repoRoot, {
       taskIds: [auxiliaryTaskId],
-      controlBindingVerifier: finalControlBindingVerifier,
+      controlBindingEvidence: finalControlBindingEvidence,
       lockedTaskIds: new Set([auxiliaryTaskId])
     });
     auxiliaryReport = report;
@@ -1887,7 +1750,8 @@ async function rmPurgeCore(
   const permits = cleanPermits(inspections);
 
   assertIntermediateCleanupPreflight(scanIntermediateCleanup(config.repoRoot, {
-    controlBindingVerifier: projectSandboxControlBindingPreflightVerifier(config)
+    preflight: true,
+    controlBindingEvidence: projectSandboxControlBindingEvidence(config)
   }));
 
   const coordinatedContainers = await removeProjectControlRoots(config, engine, {
@@ -2003,7 +1867,7 @@ async function rmPurgeCore(
 
   const cleanupPurgeAuxiliary = (): void => {
     const report = cleanupIntermediateUnderRemovalCoordinator(config.repoRoot, {
-      controlBindingVerifier: projectSandboxControlBindingVerifier(config)
+      controlBindingEvidence: projectSandboxControlBindingEvidence(config)
     });
     for (const line of formatIntermediateCleanupReport(report)) p.log.message(line);
     if (!report.remaining.some((item) => item.taskId !== null)) {
@@ -2052,7 +1916,7 @@ async function rmUnboundCore(
   options: { dryRun: boolean; assumeYes: boolean }
 ): Promise<void> {
   const engine = detectEngine(config);
-  const controlBindingVerifier = projectSandboxControlBindingVerifier(config);
+  const controlBindingEvidence = projectSandboxControlBindingEvidence(config);
   const { running, nonRunning } = fetchSandboxRows(
     engine,
     sandboxLabel(config),
@@ -2062,7 +1926,7 @@ async function rmUnboundCore(
   const rows = [...running, ...nonRunning];
 
   p.intro(pc.cyan(`Removing sandboxes not bound to an active task for ${config.project}`));
-  const intermediatePreview = scanIntermediateCleanup(config.repoRoot, { controlBindingVerifier });
+  const intermediatePreview = scanIntermediateCleanup(config.repoRoot, { controlBindingEvidence });
 
   const candidates: CleanupCandidate[] = [];
   const protectedCandidates: ProtectedCleanupCandidate[] = [];
@@ -2227,7 +2091,7 @@ async function rmUnboundCore(
         const failedReport = cleanupIntermediateUnderRemovalCoordinator(config.repoRoot, {
           dryRun: true,
           taskIds: [taskId],
-          controlBindingVerifier
+          controlBindingEvidence
         });
         actualReports.push(protectIntermediateCleanupReport(failedReport, 'SANDBOX_ROW_REMOVAL_FAILED'));
       }
@@ -2235,10 +2099,10 @@ async function rmUnboundCore(
   }
 
   const auxiliaryTaskIds = [...cleanupOnlyTaskIds].sort();
-  const finalControlBindingVerifier = projectSandboxControlBindingVerifier(config);
+  const finalControlBindingEvidence = projectSandboxControlBindingEvidence(config);
   const cleanupOnlyReport = cleanupIntermediateUnderRemovalCoordinator(config.repoRoot, {
     taskIds: auxiliaryTaskIds,
-    controlBindingVerifier: finalControlBindingVerifier
+    controlBindingEvidence: finalControlBindingEvidence
   });
   actualReports.push(cleanupOnlyReport);
   const intermediateReport = mergeIntermediateCleanupReports(actualReports);
