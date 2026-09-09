@@ -10,6 +10,7 @@ import {
   requestCodexControllerVerify,
   recoverSandboxControl,
   requestSandboxControl,
+  SandboxControlClientError,
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
 import {
@@ -1917,7 +1918,8 @@ test('task-finalization graceful shutdown retains recovery identity when executo
   }
 });
 
-test('sandbox control client and broker exchange a task-bound response', async () => {
+for (const shortIdLength of [2, 3]) {
+test(`sandbox control client and broker exchange a task-bound response with short-id width ${shortIdLength}`, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
   const channelDir = path.join(root, 'channel');
   const manifestPath = path.join(root, 'manifest.json');
@@ -1936,6 +1938,15 @@ test('sandbox control client and broker exchange a task-bound response', async (
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
   fs.writeFileSync(runPath, '{"schemaVersion":3}\n');
   const invalidRunBytes = fs.readFileSync(runPath, 'utf8');
+  const shortId = '8'.padStart(shortIdLength, '0');
+  const otherTaskId = 'TASK-20260809-010204';
+  const otherTaskDir = path.join(root, '.agents', 'workspace', 'active', otherTaskId);
+  fs.mkdirSync(otherTaskDir);
+  fs.writeFileSync(path.join(otherTaskDir, 'task.md'), `---\nid: ${otherTaskId}\n---\n`);
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength } }));
+  fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), JSON.stringify({
+    version: 1, ids: { [shortId]: taskId, ['9'.padStart(shortIdLength, '0')]: otherTaskId }
+  }));
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     engine: 'docker',
     repoRoot: root,
@@ -2007,6 +2018,33 @@ test('sandbox control client and broker exchange a task-bound response', async (
     assert.equal(stateFailure?.file, runPath);
     assert.equal(stateFailure?.reasonCodes, 'top-level-keys');
 
+    // Resolve from a nested directory, as ordinary task-bound CLI commands do.
+    const previousCwd = process.cwd();
+    process.chdir(taskDir);
+    try {
+      for (const ref of ['8', shortId, taskId, '9', otherTaskId, '7', '0', '9999']) {
+        waitForHealthyStatus(statusDir, 5_000);
+        const request = () => withSandboxControlEnvironment({
+          AGENT_INFRA_TASK_ID: taskId,
+          AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+          AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+        }, () => requestSandboxControl({
+          family: 'task-orchestration', args: [ref, 'status'], channelDir, statusDir,
+          token, generation, timeoutMs: 5_000
+        }));
+        if (['8', shortId, taskId].includes(ref)) {
+          const result = request();
+          assert.equal(result.phase, 'completed', ref);
+          assert.equal(JSON.parse(result.stdout).error.code, 'ORCHESTRATION_STATE_INVALID', ref);
+          assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
+        } else {
+          assert.throws(request, (error: unknown) => error instanceof SandboxControlClientError
+            && error.detail.code === 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH'
+            && !error.accepted, ref);
+        }
+      }
+    } finally { process.chdir(previousCwd); }
+
     const response = withSandboxControlEnvironment({
       AGENT_INFRA_TASK_ID: taskId,
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
@@ -2031,6 +2069,8 @@ test('sandbox control client and broker exchange a task-bound response', async (
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+}
 
 test('sandbox broker opens and closes a host-only Codex controller registration across processes', onPlatforms('linux'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-roundtrip-'));

@@ -1227,7 +1227,13 @@ test("sandbox rm proceeds when auxiliary intents are preserved for a still-activ
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-active-"));
   const branch = "feature/auxiliary-preflight-active";
   const taskId = "TASK-20260824-000014";
+  const previousRemovalUpdates = process.env.DOCKER_REMOVAL_UPDATES_INSPECT;
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
   try {
+    process.env.DOCKER_REMOVAL_UPDATES_INSPECT = "1";
+    process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
     const config = rmOneConfig(fixture, tmpDir);
     const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
@@ -1241,28 +1247,29 @@ test("sandbox rm proceeds when auxiliary intents are preserved for a still-activ
       "utf8"
     );
 
-    let failure: unknown = null;
-    try {
-      await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
-        assumeYes: true,
-        cleanupTarget: {
-          requestedRef: taskId,
-          branch,
-          workspace: { mode: "task-bound", taskId },
-          taskState: "active"
-        },
-        target: evidence.target
-      }));
-    } catch (error) {
-      failure = error;
-    }
-
-    assert.doesNotMatch(
-      failure instanceof Error ? failure.message : "",
-      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
-    );
-    assert.equal(fs.existsSync(evidence.intentPath), true);
+    const intentBytes = fs.readFileSync(evidence.intentPath);
+    const taskBytes = fs.readFileSync(path.join(activeDir, "task.md"));
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      assumeYes: true,
+      cleanupTarget: {
+        requestedRef: taskId,
+        branch,
+        workspace: { mode: "task-bound", taskId },
+        taskState: "active"
+      },
+      target: evidence.target
+    }));
+    assert.equal(fs.existsSync(evidence.controlRoot), false);
+    assert.deepEqual(fs.readFileSync(evidence.intentPath), intentBytes);
+    assert.deepEqual(fs.readFileSync(path.join(activeDir, "task.md")), taskBytes);
+    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "rm"), [["rm", FIXTURE_CONTAINER_ID]]);
   } finally {
+    if (previousRemovalUpdates === undefined) delete process.env.DOCKER_REMOVAL_UPDATES_INSPECT;
+    else process.env.DOCKER_REMOVAL_UPDATES_INSPECT = previousRemovalUpdates;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
