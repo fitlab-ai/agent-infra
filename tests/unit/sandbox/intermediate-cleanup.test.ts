@@ -120,6 +120,7 @@ function writeBoundControlEvidence(root: string): string {
     taskId: TASK_ID,
     token: 'token',
     generation,
+    controlRootId: 'a'.repeat(96),
     channelDir,
     publicStatusDir,
     processingDir,

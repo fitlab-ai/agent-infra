@@ -327,6 +327,7 @@ function writeTaskBoundCleanupEvidence(
     taskId,
     token: "task-bound-token",
     generation,
+    controlRootId: "a".repeat(96),
     channelDir,
     publicStatusDir,
     processingDir,
