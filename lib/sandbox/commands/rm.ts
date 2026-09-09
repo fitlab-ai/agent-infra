@@ -823,6 +823,73 @@ function projectSandboxControlBindingVerifier(
   return createSandboxControlBindingVerifier(config.repoRoot, controlRoots, removalJournals);
 }
 
+function pendingCurrentControlBindingEvidence(
+  config: SandboxConfig,
+  controlRoots: readonly string[],
+  taskId: string,
+  binding: Parameters<ReturnType<typeof createSandboxControlBindingVerifier>>[1]
+): boolean {
+  for (const controlRoot of controlRoots) {
+    try {
+      const root = path.resolve(controlRoot);
+      const rootStat = fs.lstatSync(root);
+      if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) continue;
+      const manifest = readSandboxControlManifest(path.join(root, 'manifest.json'));
+      if (manifest.mode !== 'task-bound' || manifest.taskId !== taskId
+        || path.resolve(manifest.repoRoot) !== path.resolve(config.repoRoot)
+        || manifest.generation !== binding.generation
+        || path.resolve(manifest.channelDir) !== path.join(root, 'channel')
+        || path.resolve(manifest.publicStatusDir) !== path.join(root, 'public')
+        || path.resolve(manifest.processingDir) !== path.join(root, 'processing')
+        || path.resolve(manifest.runtimeDir) !== path.join(root, 'runtime')) continue;
+      return true;
+    } catch {
+      // A malformed or replaced control root is not pending evidence.
+    }
+  }
+  return false;
+}
+
+function pendingRemovalJournalEvidence(
+  config: SandboxConfig,
+  removalJournals: readonly SandboxRemovalJournal[],
+  taskId: string,
+  binding: Parameters<ReturnType<typeof createSandboxControlBindingVerifier>>[1]
+): boolean {
+  let branch: string;
+  try {
+    branch = resolveSandboxCleanupTarget(taskId, config.repoRoot, { allowProtected: true }).branch;
+  } catch {
+    return false;
+  }
+  return removalJournals.some((journal) => journal.phase !== 'completed'
+    && journal.generation === binding.generation
+    && journal.target.branch === branch);
+}
+
+function projectSandboxControlBindingPreflightVerifier(
+  config: SandboxConfig,
+  controlRoots: readonly string[] = projectSandboxControlRoots(config),
+  removalJournals: readonly SandboxRemovalJournal[] = listSandboxRemovalJournals({ project: config.project })
+): ReturnType<typeof createSandboxControlBindingVerifier> {
+  const terminalVerifier = projectSandboxControlBindingVerifier(config, controlRoots, removalJournals);
+  return (taskId, binding) => terminalVerifier(taskId, binding)
+    || pendingCurrentControlBindingEvidence(config, controlRoots, taskId, binding)
+    || pendingRemovalJournalEvidence(config, removalJournals, taskId, binding);
+}
+
+function assertIntermediateCleanupPreflight(report: IntermediateCleanupReport): void {
+  const blockers = report.items.filter((candidate) => candidate.disposition === 'protected'
+    || candidate.disposition === 'failed');
+  if (blockers.length === 0) return;
+  throw new Error([
+    'SANDBOX_AUXILIARY_PREFLIGHT_FAILED:',
+    ...blockers.map((candidate) => (
+      `${candidate.kind} ${candidate.path} (${candidate.taskId ?? 'unbound'}; ${candidate.reason})`
+    ))
+  ].join('\n'));
+}
+
 type IntermediateCleanupCoordinatorOptions = Pick<
   IntermediateCleanupOptions,
   'dryRun' | 'taskIds' | 'controlBindingVerifier'
@@ -1439,6 +1506,21 @@ async function rmOneCore(
   const { workspace, controlRoots, workspaceViewRoots } = target;
   preflightRmTarget(config, target);
   const auxiliaryTaskId = workspace.mode === 'task-bound' ? workspace.taskId : null;
+  if (auxiliaryTaskId) {
+    const targetJournals = listSandboxRemovalJournals({
+      branch: effectiveBranch,
+      project: config.project,
+      targetDigest: removalTargetDigest(config, target)
+    });
+    assertIntermediateCleanupPreflight(scanIntermediateCleanup(config.repoRoot, {
+      taskIds: [auxiliaryTaskId],
+      controlBindingVerifier: projectSandboxControlBindingPreflightVerifier(
+        config,
+        controlRoots,
+        targetJournals
+      )
+    }));
+  }
   const confirm = options.prompt?.confirm ?? p.confirm;
   const isCancel = options.prompt?.isCancel ?? p.isCancel;
 
@@ -1898,6 +1980,10 @@ async function rmPurgeCore(
     throw new Error(`Refusing to purge because worktree preflight found blocker(s):\n${blockerMessage(blockers)}`);
   }
   const permits = cleanPermits(inspections);
+
+  assertIntermediateCleanupPreflight(scanIntermediateCleanup(config.repoRoot, {
+    controlBindingVerifier: projectSandboxControlBindingPreflightVerifier(config)
+  }));
 
   const coordinatedContainers = await removeProjectControlRoots(config, engine, {
     retainRemovalJournal: true

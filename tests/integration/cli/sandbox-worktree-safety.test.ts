@@ -1186,6 +1186,66 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
   }
 });
 
+test("sandbox rm rejects malformed auxiliary evidence before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-single-"));
+  const branch = "feature/auxiliary-preflight-single";
+  const taskId = "TASK-20260824-000012";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    fs.writeFileSync(evidence.intentPath, "{\"version\":1}\n", "utf8");
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        cleanupTarget: {
+          requestedRef: taskId,
+          branch,
+          workspace: { mode: "task-bound", taskId },
+          taskState: "completed"
+        },
+        target: evidence.target
+      })),
+      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
+    );
+
+    assert.equal(fs.existsSync(evidence.controlRoot), true);
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox purge rejects malformed auxiliary evidence before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-purge-"));
+  const branch = "feature/auxiliary-preflight-purge";
+  const taskId = "TASK-20260824-000013";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    fs.writeFileSync(evidence.intentPath, "{\"version\":1}\n", "utf8");
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+        confirm: async () => true,
+        isCancel: (value): value is symbol => false
+      })),
+      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
+    );
+
+    assert.equal(fs.existsSync(evidence.controlRoot), true);
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox cleanup consumes a completed removal journal through each cleanup entrypoint", onPlatforms("linux", "darwin", "win32"), async () => {
   for (const entrypoint of ["single", "unbound", "purge"] as const) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-rm-journal-${entrypoint}-`));
