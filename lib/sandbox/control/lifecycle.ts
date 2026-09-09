@@ -1634,6 +1634,18 @@ export async function removeSandboxControlRoot(
   root: string,
   options: RemoveSandboxControlOptions
 ): Promise<void> {
+  try {
+    await removeSandboxControlRootAttempt(root, options);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'SANDBOX_CONTROL_OWNER_UNAVAILABLE') throw error;
+    await removeSandboxControlRootAttempt(root, options);
+  }
+}
+
+async function removeSandboxControlRootAttempt(
+  root: string,
+  options: RemoveSandboxControlOptions
+): Promise<void> {
   const resolvedRoot = path.resolve(root);
   if (!fs.existsSync(resolvedRoot)) return;
   const stat = fs.lstatSync(resolvedRoot);

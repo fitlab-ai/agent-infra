@@ -574,6 +574,49 @@ test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, 
   }
 });
 
+test('sandbox control removal retries a transient unknown owner through its journal', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-owner-retry-'));
+  let probes = 0;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, 'remove-owner-retry-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
+      version: 3,
+      generation: manifest.generation,
+      broker: {
+        version: 3,
+        pid: 999_999,
+        startTime: 1,
+        brokerId: 'stale-broker',
+        token: manifest.token,
+        generation: manifest.generation
+      },
+      state: 'parked',
+      reasonCode: 'SANDBOX_WORKTREE_BINDING_LOST',
+      activeRequestId: null,
+      updatedAt: Date.now(),
+      taskView: statusTaskView(null)
+    })}
+`);
+
+    await removeSandboxControlRoot(root, {
+      timeoutMs: 200,
+      identityProbe: () => {
+        probes += 1;
+        return probes === 1 ? 'unknown' : 'dead';
+      },
+      inspectContainer: async () => ({ state: 'absent', id: 'container-id' }),
+      removeContainer: async () => { throw new Error('unexpected container removal'); }
+    });
+
+    assert.equal(probes >= 2, true);
+    assert.equal(fs.existsSync(root), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('sandbox control removal checks an absent startup transition after the pre-force budget expires', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-startup-budget-'));
   let removeCalled = false;
