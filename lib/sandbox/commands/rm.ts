@@ -35,6 +35,7 @@ import {
   claimSandboxRemovalJournal,
   clearSandboxRemovalJournalRecord,
   createSandboxControlBindingVerifier,
+  isDefaultSandboxRemovalJournal,
   listSandboxRemovalJournals,
   removeSandboxControlRoot,
   readSandboxControlManifest,
@@ -52,9 +53,9 @@ import { getProcessStartTime } from '../../server/process-state.ts';
 import { fetchSandboxRows, type SandboxRow } from './list-running.ts';
 import {
   formatIntermediateCleanupReport,
-  removeIntermediateCleanupCandidate,
-  type IntermediateCleanupItem,
-  type IntermediateCleanupOptions,
+  cleanupIntermediateUnderRemovalCoordinator,
+  protectIntermediateCleanupReport,
+  mergeIntermediateCleanupReports,
   type IntermediateCleanupReport,
   scanIntermediateCleanup
 } from '../intermediate-cleanup.ts';
@@ -906,113 +907,6 @@ function assertIntermediateCleanupPreflight(report: IntermediateCleanupReport): 
   ].join('\n'));
 }
 
-type IntermediateCleanupCoordinatorOptions = Pick<
-  IntermediateCleanupOptions,
-  'dryRun' | 'taskIds' | 'controlBindingVerifier'
-> & Readonly<{
-  lockedTaskIds?: ReadonlySet<string>;
-}>;
-
-function intermediateCleanupKey(item: IntermediateCleanupItem): string {
-  return `${item.kind}\0${item.path}`;
-}
-
-function cleanupIntermediateUnderRemovalCoordinator(
-  repoRoot: string,
-  options: IntermediateCleanupCoordinatorOptions = {}
-): IntermediateCleanupReport {
-  const scanOptions: IntermediateCleanupOptions = {
-    ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
-    ...(options.taskIds === undefined ? {} : { taskIds: options.taskIds }),
-    ...(options.controlBindingVerifier === undefined ? {} : { controlBindingVerifier: options.controlBindingVerifier })
-  };
-  const initial = scanIntermediateCleanup(repoRoot, scanOptions);
-  if (options.dryRun) return initial;
-
-  const items = [...initial.items];
-  const lockedTaskIds = options.lockedTaskIds ?? new Set<string>();
-  const byTask = new Map<string, number[]>();
-  for (const [index, candidate] of items.entries()) {
-    if (!candidate.taskId || candidate.disposition !== 'planned') continue;
-    const indexes = byTask.get(candidate.taskId) ?? [];
-    indexes.push(index);
-    byTask.set(candidate.taskId, indexes);
-  }
-
-  for (const taskId of [...byTask.keys()].sort()) {
-    const execute = (): void => {
-      const refreshed = scanIntermediateCleanup(repoRoot, {
-        ...scanOptions,
-        taskIds: [taskId]
-      });
-      const refreshedByKey = new Map(refreshed.items.map((candidate) => [intermediateCleanupKey(candidate), candidate]));
-      for (const index of byTask.get(taskId) ?? []) {
-        const initialCandidate = items[index]!;
-        if (initialCandidate.disposition !== 'planned') continue;
-        const current = refreshedByKey.get(intermediateCleanupKey(initialCandidate));
-        items[index] = current
-          ? removeIntermediateCleanupCandidate(current)
-          : { ...initialCandidate, disposition: 'protected', reason: 'CANDIDATE_NO_LONGER_ELIGIBLE' };
-      }
-    };
-    try {
-      if (lockedTaskIds.has(taskId)) execute();
-      else withTaskExecutionLock(repoRoot, taskId, 'sandbox-removal', execute);
-    } catch {
-      for (const index of byTask.get(taskId) ?? []) {
-        const candidate = items[index]!;
-        if (candidate.disposition === 'planned') items[index] = { ...candidate, disposition: 'protected', reason: 'TASK_LOCK_BUSY' };
-      }
-    }
-  }
-
-  for (const [index, candidate] of items.entries()) {
-    if (candidate.taskId || candidate.disposition !== 'planned') continue;
-    items[index] = removeIntermediateCleanupCandidate(candidate);
-  }
-
-  const knownPaths = new Set(items.map((candidate) => intermediateCleanupKey(candidate)));
-  for (const candidate of scanIntermediateCleanup(repoRoot, scanOptions).items) {
-    if (candidate.kind !== 'EMPTY-AUX-PARENT' || candidate.disposition !== 'planned'
-      || knownPaths.has(intermediateCleanupKey(candidate))) continue;
-    items.push(removeIntermediateCleanupCandidate(candidate));
-  }
-
-  const remaining = items.filter((candidate) => candidate.disposition !== 'deleted' && candidate.disposition !== 'skipped');
-  return {
-    status: remaining.some((candidate) => candidate.disposition === 'failed') ? 'partial' : 'completed',
-    items,
-    remaining
-  };
-}
-
-function protectIntermediateCleanupReport(
-  report: IntermediateCleanupReport,
-  reason: string
-): IntermediateCleanupReport {
-  const items = report.items.map((item) => item.disposition === 'planned'
-    ? { ...item, disposition: 'protected' as const, reason }
-    : item
-  );
-  return {
-    status: 'partial',
-    items,
-    remaining: items.filter((item) => item.disposition !== 'deleted' && item.disposition !== 'skipped')
-  };
-}
-
-function mergeIntermediateCleanupReports(
-  reports: readonly IntermediateCleanupReport[]
-): IntermediateCleanupReport {
-  const items = reports.flatMap((report) => report.items);
-  return {
-    status: reports.some((report) => report.status === 'partial') || items.some((item) => item.disposition === 'failed')
-      ? 'partial'
-      : 'completed',
-    items,
-    remaining: items.filter((item) => item.disposition !== 'deleted' && item.disposition !== 'skipped')
-  };
-}
 
 function recoveryContexts(
   config: SandboxConfig,
@@ -1385,25 +1279,6 @@ async function removeProjectControlRoots(
   return containers;
 }
 
-function isDefaultPurgeRemovalJournal(journal: SandboxRemovalJournal): boolean {
-  if (journal.phase !== 'carrier-removed' && journal.phase !== 'completed') return false;
-  const { target } = journal;
-  const container = path.basename(path.dirname(target.controlRoot));
-  const expectedTargetDigest = createHash('sha256')
-    .update(`${target.project}\0${target.branch}\0${container}\0${path.join(target.controlRoot, 'channel')}`)
-    .digest('hex');
-  return target.targetDigest === expectedTargetDigest
-    && target.permitDigest === createHash('sha256').update('none').digest('hex')
-    && !target.removeWorktree
-    && !target.removeBranch
-    && !target.removeShare
-    && target.worktreePaths.length === 0
-    && target.workspaceViewPaths.length === 0
-    && target.toolPaths.length === 0
-    && target.shellPaths.length === 0
-    && target.permits.length === 0
-    && target.sharePath === path.join(target.controlRoot, 'share');
-}
 
 function completePurgeRemovalJournals(config: SandboxConfig): void {
   const projectRoot = path.resolve(config.controlBase, config.project);
@@ -1412,7 +1287,7 @@ function completePurgeRemovalJournals(config: SandboxConfig): void {
     return relativeRoot !== '' && relativeRoot !== '..'
       && !relativeRoot.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeRoot);
   });
-  if (projectJournals.some((journal) => !isDefaultPurgeRemovalJournal(journal))) {
+  if (projectJournals.some((journal) => !isDefaultSandboxRemovalJournal(journal))) {
     throw new Error('SANDBOX_CONTROL_REMOVE_RECOVERY_PENDING');
   }
   for (const journal of projectJournals) {
@@ -2455,4 +2330,4 @@ export async function rm(args: string[]): Promise<void> {
   await rmOne(config, tools, cleanupTarget.branch, { cleanupTarget });
 }
 
-export { authorizeWorktrees, cleanupIntermediateUnderRemovalCoordinator, rmOne, rmPurge };
+export { authorizeWorktrees, rmOne, rmPurge };

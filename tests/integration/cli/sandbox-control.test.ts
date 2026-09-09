@@ -13,7 +13,7 @@ import {
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
 import {
-  removeIntermediateCleanupCandidates,
+  cleanupIntermediateUnderRemovalCoordinator as cleanupIntermediateFiles,
   scanIntermediateCleanup
 } from '../../../lib/sandbox/intermediate-cleanup.ts';
 import { createSandboxControlBindingVerifier } from '../../../lib/sandbox/control/lifecycle.ts';
@@ -44,12 +44,6 @@ import { taskCreateOutputUnavailableResult } from '../../../lib/task/create-serv
 import { semanticDigest, sha256Content } from '../../../lib/task/local-artifact-finalization.ts';
 import { onPlatforms } from '../../helpers.ts';
 
-function cleanupIntermediateFiles(
-  repoRoot: string,
-  options: Parameters<typeof scanIntermediateCleanup>[1] = {}
-) {
-  return removeIntermediateCleanupCandidates(scanIntermediateCleanup(repoRoot, options).items);
-}
 
 function waitForFile(filePath: string, timeoutMs: number): void {
   const deadline = Date.now() + timeoutMs;

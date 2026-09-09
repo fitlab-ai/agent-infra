@@ -7,10 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  removeIntermediateCleanupCandidates,
+  cleanupIntermediateUnderRemovalCoordinator as cleanupIntermediateFiles,
   scanIntermediateCleanup
 } from '../../../lib/sandbox/intermediate-cleanup.ts';
-import { cleanupIntermediateUnderRemovalCoordinator } from '../../../lib/sandbox/commands/rm.ts';
+import { cleanupIntermediateUnderRemovalCoordinator } from '../../../lib/sandbox/intermediate-cleanup.ts';
 import { createSandboxControlBindingVerifier } from '../../../lib/sandbox/control/lifecycle.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import {
@@ -25,23 +25,6 @@ import {
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { onPlatforms } from '../../helpers.ts';
 
-function cleanupIntermediateFiles(
-  repoRoot: string,
-  options: Parameters<typeof scanIntermediateCleanup>[1] = {}
-) {
-  const first = removeIntermediateCleanupCandidates(scanIntermediateCleanup(repoRoot, options).items);
-  const known = new Set(first.items.map((item) => `${item.kind}\0${item.path}`));
-  const emptyParents = scanIntermediateCleanup(repoRoot, options).items.filter((item) =>
-    item.kind === 'EMPTY-AUX-PARENT' && item.disposition === 'planned' && !known.has(`${item.kind}\0${item.path}`)
-  );
-  const second = removeIntermediateCleanupCandidates(emptyParents);
-  const items = [...first.items, ...second.items];
-  return {
-    status: items.some((item) => item.disposition === 'failed') ? 'partial' as const : 'completed' as const,
-    items,
-    remaining: items.filter((item) => item.disposition !== 'deleted' && item.disposition !== 'skipped')
-  };
-}
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -294,7 +277,7 @@ test('intermediate cleanup deletion runs inside the caller-owned task lock', () 
   try {
     const target = writeConsumedIntent(fixture.root, fixture.taskDir);
     withTaskExecutionLock(fixture.root, TASK_ID, 'test-holder', () => {
-      const result = cleanupIntermediateFiles(fixture.root);
+      const result = cleanupIntermediateFiles(fixture.root, { lockedTaskIds: new Set([TASK_ID]) });
       assert.equal(fs.existsSync(target), false);
       assert.equal(result.items.some((item) => item.disposition === 'deleted'), true);
     });

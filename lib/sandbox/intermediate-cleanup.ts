@@ -1,3 +1,6 @@
+import { inspectOwnedPath } from '../owned-path.ts';
+import { taskFinalizationReceiptState } from '../task/finalization-state.ts';
+import { withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -94,39 +97,9 @@ function errorCode(error: unknown): string | null {
   return typeof code === 'string' ? code : null;
 }
 
-function within(root: string, target: string): boolean {
-  const relative = path.relative(path.resolve(root), path.resolve(target));
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
 function safeLstat(root: string, target: string, expect: 'file' | 'directory'): FileIdentity | null {
-  const resolvedRoot = path.resolve(root);
-  const resolvedTarget = path.resolve(target);
-  if (!within(resolvedRoot, resolvedTarget)) return null;
-  const owner = (stat: fs.Stats): boolean => process.platform === 'win32'
-    || typeof process.getuid !== 'function'
-    || stat.uid === process.getuid();
-  let rootStat: fs.Stats;
-  try { rootStat = fs.lstatSync(resolvedRoot); }
-  catch { return null; }
-  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return null;
-  let current = resolvedRoot;
-  const relative = path.relative(resolvedRoot, resolvedTarget);
-  for (const segment of relative.split(path.sep).filter(Boolean)) {
-    current = path.join(current, segment);
-    let stat: fs.Stats;
-    try { stat = fs.lstatSync(current); }
-    catch { return null; }
-    if (stat.isSymbolicLink()) return null;
-    if (!owner(stat)) return null;
-    if (current !== resolvedTarget && !stat.isDirectory()) return null;
-    if (current === resolvedTarget) {
-      if (expect === 'file' && !stat.isFile()) return null;
-      if (expect === 'directory' && !stat.isDirectory()) return null;
-      return fileIdentity(stat);
-    }
-  }
-  return null;
+  const stat = inspectOwnedPath(root, target, expect);
+  return stat ? fileIdentity(stat) : null;
 }
 
 function inspectTaskRecords(repoRoot: string, taskIds?: ReadonlySet<string>): Map<string, TaskRecord> {
@@ -175,13 +148,9 @@ function receiptGate(
   try { receipt = readTaskFinalizationReceipt(repoRoot, task.taskId); }
   catch { return 'FINALIZATION_RECEIPT_INVALID'; }
   if (!receipt) return 'FINALIZATION_RECEIPT_MISSING';
-  if (receipt.lifecycle !== 'done' || receipt.taskComment === 'pending'
-    || receipt.verification === 'pending' || receipt.warningProjection !== 'done') {
-    return 'FINALIZATION_RECEIPT_PENDING';
-  }
-  if (receipt.lastError !== null || receipt.warnings.some((warning) => warning.status === 'open')) {
-    return 'LFAI_RETRY_OR_WARNING_OPEN';
-  }
+  const state = taskFinalizationReceiptState(receipt);
+  if (state === 'pending') return 'FINALIZATION_RECEIPT_PENDING';
+  if (state === 'unresolved') return 'LFAI_RETRY_OR_WARNING_OPEN';
   if (receipt.controlBinding) {
     const verifier = options.controlBindingVerifier;
     if (!verifier || !verifier(task.taskId, receipt.controlBinding)) return 'CONTROL_BINDING_MISMATCH';
@@ -319,10 +288,10 @@ function readAuxiliaryCandidates(
   return candidates;
 }
 
-function buildReport(items: readonly IntermediateCleanupItem[], dryRun: boolean): IntermediateCleanupReport {
+function buildIntermediateCleanupReport(items: readonly IntermediateCleanupItem[], dryRun = false, partial = false): IntermediateCleanupReport {
   const remaining = items.filter((candidate) => candidate.disposition !== 'deleted' && candidate.disposition !== 'skipped');
   return {
-    status: dryRun ? 'dry-run' : remaining.some((candidate) => candidate.disposition === 'failed') ? 'partial' : 'completed',
+    status: dryRun ? 'dry-run' : partial || remaining.some((candidate) => candidate.disposition === 'failed') ? 'partial' : 'completed',
     items,
     remaining
   };
@@ -340,7 +309,7 @@ function scanInternal(repoRootInput: string, options: IntermediateCleanupOptions
 
 function scanIntermediateCleanup(repoRoot: string, options: IntermediateCleanupOptions = {}): IntermediateCleanupReport {
   const candidates = scanInternal(repoRoot, options);
-  return buildReport(candidates.map(({ item: candidate }) => candidate), true);
+  return buildIntermediateCleanupReport(candidates.map(({ item: candidate }) => candidate), true);
 }
 
 function removeCandidate(candidate: IntermediateCleanupItem): IntermediateCleanupItem {
@@ -377,10 +346,98 @@ function removeIntermediateCleanupCandidate(candidate: IntermediateCleanupItem):
   return candidate.disposition === 'planned' ? removeCandidate(candidate) : candidate;
 }
 
-function removeIntermediateCleanupCandidates(
-  candidates: readonly IntermediateCleanupItem[]
+
+type IntermediateCleanupCoordinatorOptions = Pick<
+  IntermediateCleanupOptions,
+  'dryRun' | 'taskIds' | 'controlBindingVerifier'
+> & Readonly<{
+  lockedTaskIds?: ReadonlySet<string>;
+}>;
+
+function intermediateCleanupKey(item: IntermediateCleanupItem): string {
+  return `${item.kind}\0${item.path}`;
+}
+
+function cleanupIntermediateUnderRemovalCoordinator(
+  repoRoot: string,
+  options: IntermediateCleanupCoordinatorOptions = {}
 ): IntermediateCleanupReport {
-  return buildReport(candidates.map(removeIntermediateCleanupCandidate), false);
+  const scanOptions: IntermediateCleanupOptions = {
+    ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
+    ...(options.taskIds === undefined ? {} : { taskIds: options.taskIds }),
+    ...(options.controlBindingVerifier === undefined ? {} : { controlBindingVerifier: options.controlBindingVerifier })
+  };
+  const initial = scanIntermediateCleanup(repoRoot, scanOptions);
+  if (options.dryRun) return initial;
+
+  const items = [...initial.items];
+  const lockedTaskIds = options.lockedTaskIds ?? new Set<string>();
+  const byTask = new Map<string, number[]>();
+  for (const [index, candidate] of items.entries()) {
+    if (!candidate.taskId || candidate.disposition !== 'planned') continue;
+    const indexes = byTask.get(candidate.taskId) ?? [];
+    indexes.push(index);
+    byTask.set(candidate.taskId, indexes);
+  }
+
+  for (const taskId of [...byTask.keys()].sort()) {
+    const execute = (): void => {
+      const refreshed = scanIntermediateCleanup(repoRoot, {
+        ...scanOptions,
+        taskIds: [taskId]
+      });
+      const refreshedByKey = new Map(refreshed.items.map((candidate) => [intermediateCleanupKey(candidate), candidate]));
+      for (const index of byTask.get(taskId) ?? []) {
+        const initialCandidate = items[index]!;
+        if (initialCandidate.disposition !== 'planned') continue;
+        const current = refreshedByKey.get(intermediateCleanupKey(initialCandidate));
+        items[index] = current
+          ? removeIntermediateCleanupCandidate(current)
+          : { ...initialCandidate, disposition: 'protected', reason: 'CANDIDATE_NO_LONGER_ELIGIBLE' };
+      }
+    };
+    try {
+      if (lockedTaskIds.has(taskId)) execute();
+      else withTaskExecutionLock(repoRoot, taskId, 'sandbox-removal', execute);
+    } catch {
+      for (const index of byTask.get(taskId) ?? []) {
+        const candidate = items[index]!;
+        if (candidate.disposition === 'planned') items[index] = { ...candidate, disposition: 'protected', reason: 'TASK_LOCK_BUSY' };
+      }
+    }
+  }
+
+  for (const [index, candidate] of items.entries()) {
+    if (candidate.taskId || candidate.disposition !== 'planned') continue;
+    items[index] = removeIntermediateCleanupCandidate(candidate);
+  }
+
+  const knownPaths = new Set(items.map((candidate) => intermediateCleanupKey(candidate)));
+  for (const candidate of scanIntermediateCleanup(repoRoot, scanOptions).items) {
+    if (candidate.kind !== 'EMPTY-AUX-PARENT' || candidate.disposition !== 'planned'
+      || knownPaths.has(intermediateCleanupKey(candidate))) continue;
+    items.push(removeIntermediateCleanupCandidate(candidate));
+  }
+
+  return buildIntermediateCleanupReport(items);
+}
+
+function protectIntermediateCleanupReport(
+  report: IntermediateCleanupReport,
+  reason: string
+): IntermediateCleanupReport {
+  const items = report.items.map((item) => item.disposition === 'planned'
+    ? { ...item, disposition: 'protected' as const, reason }
+    : item
+  );
+  return buildIntermediateCleanupReport(items, false, true);
+}
+
+function mergeIntermediateCleanupReports(
+  reports: readonly IntermediateCleanupReport[]
+): IntermediateCleanupReport {
+  const items = reports.flatMap((report) => report.items);
+  return buildIntermediateCleanupReport(items, false, reports.some((report) => report.status === 'partial'));
 }
 
 function formatIntermediateCleanupReport(report: IntermediateCleanupReport): string[] {
@@ -396,7 +453,9 @@ function formatIntermediateCleanupReport(report: IntermediateCleanupReport): str
 export {
   formatIntermediateCleanupReport,
   removeIntermediateCleanupCandidate,
-  removeIntermediateCleanupCandidates,
+  cleanupIntermediateUnderRemovalCoordinator,
+  protectIntermediateCleanupReport,
+  mergeIntermediateCleanupReports,
   scanIntermediateCleanup
 };
 export type {

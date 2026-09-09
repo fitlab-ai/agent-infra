@@ -1,3 +1,6 @@
+import { inspectOwnedPath } from '../../owned-path.ts';
+import { taskFinalizationReceiptState } from '../../task/finalization-state.ts';
+import { finalizationTerminalResponse } from './finalization-response.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -123,32 +126,9 @@ function controlBindingKey(taskId: string, binding: SandboxControlBinding): stri
   return `${taskId}\0${binding.generation}\0${binding.requestId}`;
 }
 
-function controlFileIdentity(rootInput: string, targetInput: string): { dev: string; ino: string } | null {
-  const root = path.resolve(rootInput);
-  const target = path.resolve(targetInput);
-  const relative = path.relative(root, target);
-  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return null;
-  const owner = (stat: fs.Stats): boolean => process.platform === 'win32'
-    || typeof process.getuid !== 'function'
-    || stat.uid === process.getuid();
-  try {
-    const rootStat = fs.lstatSync(root);
-    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return null;
-    let current = root;
-    for (const segment of relative.split(path.sep).filter(Boolean)) {
-      current = path.join(current, segment);
-      const stat = fs.lstatSync(current);
-      if (stat.isSymbolicLink() || !owner(stat)) return null;
-      if (current !== target && !stat.isDirectory()) return null;
-      if (current === target) {
-        if (!stat.isFile()) return null;
-        return { dev: String(stat.dev), ino: String(stat.ino) };
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
+function controlFileIdentity(root: string, target: string): DirectoryIdentity | null {
+  const stat = inspectOwnedPath(root, target, 'file');
+  return stat ? { dev: String(stat.dev), ino: String(stat.ino) } : null;
 }
 
 function controlRootIdentity(root: string): DirectoryIdentity | null {
@@ -192,39 +172,9 @@ function taskFinalizationReceiptComplete(
   binding: SandboxControlBinding
 ): boolean {
   return receipt.taskId === taskId
-    && receipt.lifecycle === 'done'
-    && receipt.taskComment !== 'pending'
-    && receipt.verification !== 'pending'
-    && receipt.warningProjection === 'done'
-    && receipt.lastError === null
-    && receipt.warnings.every((warning) => warning.status !== 'open')
+    && taskFinalizationReceiptState(receipt) === 'complete'
     && receipt.controlBinding?.generation === binding.generation
     && receipt.controlBinding.requestId === binding.requestId;
-}
-
-function expectedFinalizationTerminalResponse(
-  taskId: string,
-  requestId: string,
-  receipt: TaskFinalizationReceipt
-): Record<string, unknown> {
-  const pendingSteps = [
-    receipt.taskComment === 'pending' ? 'task-comment' : null,
-    receipt.verification === 'pending' ? 'verification' : null
-  ].filter((step): step is string => step !== null);
-  const completedSteps = ['lifecycle', receipt.taskComment === 'pending' ? null : 'task-comment', receipt.verification === 'pending' ? null : 'verification']
-    .filter((step): step is string => step !== null);
-  const result = {
-    status: 'completed', changed: false, taskId,
-    lifecycle: { status: 'no-op', changed: false, error: null },
-    taskComment: receipt.taskComment === 'pending' ? null : { status: 'no-op', changed: false, error: null },
-    verification: receipt.verification === 'pending' ? null : { status: 'no-op', changed: false, error: null },
-    completedSteps, pendingSteps, result: 'completed', warnings: [], error: null
-  };
-  return {
-    version: 2, id: requestId, phase: 'completed', exitCode: 0,
-    stdout: `${JSON.stringify({ version: 1, status: 'completed', changed: false, accepted: true, result, error: null })}\n`,
-    stderr: '', error: null
-  };
 }
 
 function terminalControlBindingEvidence(
@@ -273,7 +223,7 @@ function terminalControlBindingEvidence(
     const responsePath = path.join(manifest.channelDir, 'responses', `${binding.requestId}.json`);
     if (!controlFileIdentity(path.join(controlRoot, 'channel'), responsePath)) return false;
     const actual = readJsonFile(responsePath);
-    const expected = expectedFinalizationTerminalResponse(taskId, binding.requestId, receipt);
+    const expected = finalizationTerminalResponse(taskId, binding.requestId, receipt);
     return JSON.stringify(actual) === JSON.stringify(expected);
   } catch {
     return false;
@@ -601,7 +551,7 @@ type RemovalJournalCursor = Readonly<{
   write(phase: SandboxRemovalJournalPhase): SandboxRemovalJournal;
 }>;
 
-function defaultRemovalTarget(manifest: SandboxControlManifest): SandboxRemovalTargetCommit {
+function defaultRemovalTarget(manifest: Pick<SandboxControlManifest, 'project' | 'branch' | 'container' | 'channelDir'>): SandboxRemovalTargetCommit {
   const targetDigest = createHash('sha256')
     .update(`${manifest.project}\0${manifest.branch}\0${manifest.container}\0${manifest.channelDir}`)
     .digest('hex');
@@ -621,6 +571,18 @@ function defaultRemovalTarget(manifest: SandboxControlManifest): SandboxRemovalT
     sharePath: path.join(path.dirname(manifest.channelDir), 'share'),
     permits: []
   };
+}
+
+export function isDefaultSandboxRemovalJournal(journal: SandboxRemovalJournal): boolean {
+  if (journal.phase !== 'carrier-removed' && journal.phase !== 'completed') return false;
+  const { target } = journal;
+  const expected = defaultRemovalTarget({
+    project: target.project, branch: target.branch,
+    container: path.basename(path.dirname(target.controlRoot)),
+    channelDir: path.join(target.controlRoot, 'channel')
+  });
+  return Object.entries(expected).every(([key, value]) =>
+    JSON.stringify(target[key as keyof SandboxRemovalTargetCommit]) === JSON.stringify(value));
 }
 
 function sameRemovalTarget(left: SandboxRemovalTargetCommit, right: SandboxRemovalTargetCommit): boolean {
