@@ -174,7 +174,7 @@ type CanonicalRequestTask =
   | Readonly<{ kind: 'unresolved' }>;
 
 // Use the current short-id contract for the first visible active registry.
-function resolveVisibleActiveShortId(ref: string): string | null {
+export function resolveVisibleActiveShortId(ref: string): string | null {
   let dir = process.cwd();
   for (let depth = 0; depth < 64; depth += 1) {
     const registryPath = path.join(dir, '.agents', 'workspace', 'active', '.short-ids.json');

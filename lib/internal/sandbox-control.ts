@@ -4,6 +4,7 @@ import {
   requestSandboxTaskFinalization,
   requestSandboxTaskControl,
   requestSandboxTaskWorkflow,
+  resolveVisibleActiveShortId,
   SandboxControlClientError
 } from '../sandbox/control/client.ts';
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
@@ -163,7 +164,15 @@ async function sandboxControl(args: string[]): Promise<void> {
         return;
       }
       let workflow;
-      try { workflow = createTaskWorkflowRequest(command, commandArgs.slice(1), taskId, generation); }
+      try {
+        const args = commandArgs.slice(1);
+        if (/^\d+$/.test(args[0] ?? '')) {
+          const resolved = resolveVisibleActiveShortId(args[0]!);
+          if (resolved !== taskId) throw new Error('SANDBOX_TASK_REF_MISMATCH');
+          args[0] = resolved;
+        }
+        workflow = createTaskWorkflowRequest(command, args, taskId, generation);
+      }
       catch (error) {
         process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'SANDBOX_CONTROL_REQUEST_INVALID', message: error instanceof Error ? error.message : String(error) } })}\n`);
         process.exitCode = 1;

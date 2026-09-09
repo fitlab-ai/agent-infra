@@ -1920,6 +1920,7 @@ test('task-finalization graceful shutdown retains recovery identity when executo
 
 for (const shortIdLength of [2, 3]) {
 test(`sandbox control client and broker exchange a task-bound response with short-id width ${shortIdLength}`, async () => {
+  const internalCliPath = path.resolve('bin/internal-cli.ts');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
   const channelDir = path.join(root, 'channel');
   const manifestPath = path.join(root, 'manifest.json');
@@ -1971,7 +1972,13 @@ test(`sandbox control client and broker exchange a task-bound response with shor
   });
   const child = spawn(
     process.execPath,
-    ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
+    ['--experimental-strip-types', '--no-warnings', '--input-type=module', '--eval', `
+      import { serveSandboxControl } from ${JSON.stringify(new URL('../../../lib/sandbox/control/server.ts', import.meta.url).href)};
+      await serveSandboxControl(${JSON.stringify(manifestPath)}, undefined, {
+        internalCliPath: ${JSON.stringify(internalCliPath)},
+        inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} })
+      });
+    `],
     { cwd: path.resolve('.'), stdio: 'ignore' }
   );
   try {
@@ -2042,6 +2049,37 @@ test(`sandbox control client and broker exchange a task-bound response with shor
             && error.detail.code === 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH'
             && !error.accepted, ref);
         }
+      }
+      for (const ref of ['8', shortId, taskId, '9', otherTaskId, '7', '0', '9999', 'not-a-task']) {
+        waitForHealthyStatus(statusDir, 5_000);
+        const result = withSandboxControlEnvironment({
+          AGENT_INFRA_TASK_ID: taskId,
+          AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+          AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
+          AGENT_INFRA_CONTROL_DIR: channelDir,
+          AGENT_INFRA_CONTROL_TOKEN: token,
+          AGENT_INFRA_CONTROL_GENERATION: generation,
+          AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
+        }, () => spawnSync(process.execPath, [
+          '--experimental-strip-types', '--no-warnings', internalCliPath,
+          'task-artifact', ref, 'inspect', '--family', 'analysis'
+        ], { cwd: taskDir, env: process.env, encoding: 'utf8', timeout: 10_000 }));
+        assert.equal(result.error, undefined);
+        if (['8', shortId, taskId].includes(ref)) {
+          assert.equal(result.status, 0, `${ref}: ${result.stderr}${result.stdout}`);
+          const output = JSON.parse(result.stdout);
+          assert.equal(output.status, 'ready', ref);
+          assert.equal(output.taskId, taskId, ref);
+          assert.equal(output.next.name, 'analysis.md', ref);
+        } else {
+          assert.equal(result.status, 1, ref);
+          if (ref === 'not-a-task') {
+            assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_REQUEST_INVALID');
+          } else {
+            assert.match(result.stderr, /SANDBOX_TASK_REF_MISMATCH/, ref);
+          }
+        }
+        assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
       }
     } finally { process.chdir(previousCwd); }
 
