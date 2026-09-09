@@ -1,3 +1,4 @@
+import { ISSUE_FIELDS_QUERY, graphState, inspectGitHubIssue, inspectGitHubPullRequest, inspectGitHubIssueClosingChangeRequests, inspectGitHubRequiredChecks, parseRunJobIdentity, fetchCheckLogText } from './github-data.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -41,7 +42,6 @@ import { extractPullRequestFileNames, syncLabelDelta } from './in-label-sync.ts'
 
 const CURRENT_USER_QUERY = 'query { viewer { login } }';
 const ISSUE_TYPES_QUERY = `query($owner:String!){organization(login:$owner){issueTypes(first:20){nodes{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}}}}}`;
-const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id issueType{id name pinnedFields{__typename ... on IssueFieldSingleSelect{id name options{id name}} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{id name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{id name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{id name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{id name}}}}}}}}`;
 const CLOSING_ISSUES_QUERY = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number} pageInfo{hasNextPage endCursor}}}}}';
 
 function parseGitHubRemote(remote: string): string | null {
@@ -465,10 +465,9 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async inspect({ context, target }) {
       const number = resourceIdentityNumber(target);
       if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
-      const module = await import('./issues.ts');
-      const fetched = module.inspectGitHubIssue(client, repository(context), number, context.workingDirectory);
+      const fetched = inspectGitHubIssue(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
-      const graph = module.graphState(client, repository(context), number, context.workingDirectory);
+      const graph = graphState(client, repository(context), number, context.workingDirectory);
       return { ok: true, value: issueSnapshot(fetched.value, graph || undefined) };
     },
     async create({ context, desired }) {
@@ -648,8 +647,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async inspect({ context, target }) {
       const number = resourceIdentityNumber(target);
       if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const module = await import('./pull-requests.ts');
-      const fetched = module.inspectGitHubPullRequest(client, repository(context), number, context.workingDirectory);
+      const fetched = inspectGitHubPullRequest(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
       return { ok: true, value: changeRequestSnapshot(fetched.value) };
     },
@@ -708,8 +706,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async listClosing({ context, issue }) {
       const number = resourceIdentityNumber(issue);
       if (!number) return invalid('ISSUE_NUMBER_INVALID', 'Issue number must be positive');
-      const module = await import('./pull-requests.ts');
-      const fetched = module.inspectGitHubIssueClosingChangeRequests(client, repository(context), number, context.workingDirectory);
+      const fetched = inspectGitHubIssueClosingChangeRequests(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
       return { ok: true, value: fetched.value.map(changeRequestSnapshot) };
     },
@@ -780,8 +777,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async resolveGitEvidence({ context, target, expected }) {
       const number = resourceIdentityNumber(target);
       if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const module = await import('./github-provider.ts');
-      return module.resolveGitHubChangeRequestGitEvidence({
+      return resolveGitHubChangeRequestGitEvidence({
         cwd: context.workingDirectory,
         repository: repository(context),
         number,
@@ -795,16 +791,14 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async inspectRequired({ context, changeRequest }) {
       const number = resourceIdentityNumber(changeRequest);
       if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const module = await import('./pr-checks.ts');
-      const fetched = module.inspectGitHubRequiredChecks(client, repository(context), number, context.workingDirectory);
+      const fetched = inspectGitHubRequiredChecks(client, repository(context), number, context.workingDirectory);
       if (!fetched.ok) return fetched;
       return { ok: true, value: fetched.value.map((check: any): RequiredCheckSnapshot => ({ name: check.name, status: check.bucket, conclusion: check.conclusion, detailsUrl: check.detailsUrl })) };
     },
     async resolveRun({ context, changeRequest, checkName, detailsUrl }) {
       const number = resourceIdentityNumber(changeRequest);
       if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const module = await import('./pr-checks.ts');
-      const direct = detailsUrl ? module.parseRunJobIdentity(detailsUrl) : null;
+      const direct = detailsUrl ? parseRunJobIdentity(detailsUrl) : null;
       if (direct) {
         const run = client.json<any>(['api', `repos/${repository(context)}/actions/runs/${direct.runId}`], { cwd: context.workingDirectory });
         if (!run.ok) return run;
@@ -818,11 +812,10 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
         : invalid('CHECK_RUN_NOT_FOUND', 'Check run was not found');
     },
     async fetchLogs({ context, runId, jobId }) {
-      const module = await import('./pr-checks.ts');
       const args = jobId
         ? ['api', `repos/${repository(context)}/actions/jobs/${jobId}/logs`]
         : ['run', 'view', runId, '--repo', repository(context), '--log-failed'];
-      const fetched = module.fetchCheckLogText(client, args, context.workingDirectory);
+      const fetched = fetchCheckLogText(client, args, context.workingDirectory);
       if (!fetched.ok) return fetched;
       return { ok: true, value: { runId, jobId, text: fetched.value || '' } } as ProviderResult<CheckLogSnapshot>;
     }

@@ -5,14 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import {
-  classifyPullRequestReadiness,
-  classifyRequiredChecks,
-  fetchCheckLogText,
-  parseRunJobIdentity,
-  resolveRunCandidate,
-  watchPullRequestReadiness
-} from '../../../lib/platform/pr-checks.ts';
+import { classifyPullRequestReadiness, classifyRequiredChecks, resolveRunCandidate, watchPullRequestReadiness } from '../../../lib/platform/pr-checks.ts';
+import { fetchCheckLogText, parseRunJobIdentity } from '../../../lib/platform/github-data.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 

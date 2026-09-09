@@ -1,6 +1,23 @@
 import type { PlatformError, PlatformResult } from './types.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 
+export type PlatformIssueSnapshot = {
+  repository: string;
+  number: number;
+  identity?: ResourceIdentity;
+  databaseId: number | null;
+  nodeId: string;
+  url: string;
+  state: 'open' | 'closed';
+  title: string;
+  body: string;
+  labels: string[];
+  assignees: string[];
+  milestone: string | null;
+  issueType: string | null;
+  fields: Record<string, string | number | null>;
+};
+
 type PlatformAdapterContext = {
   cwd: string;
   gitRemote?: (cwd: string) => string | null;
