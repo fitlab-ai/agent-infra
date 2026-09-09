@@ -21,7 +21,7 @@ test("canonical demo is configured for Git LFS and satisfies the asset contract"
   );
   assert.ok(gif.subarray(0, 6).equals(Buffer.from("GIF87a")) || gif.subarray(0, 6).equals(Buffer.from("GIF89a")));
   assert.ok(gif.byteLength <= 4 * 1024 * 1024);
-  assert.equal(fs.readFileSync(filePath("assets/demo-init.inputs.sha256"), "utf8").trim().length, 64);
+  assert.equal(fs.readFileSync(filePath("assets/demo-init.transcript.sha256"), "utf8").trim().length, 64);
   for (const readme of ["README.md", "README.zh-CN.md"]) {
     const content = fs.readFileSync(filePath(readme), "utf8");
     assert.equal(content.includes('src="./assets/demo-init.gif"'), true);

@@ -17,11 +17,10 @@ import {
 import { resourceIdentityNumber } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 import {
-  CONTROL_MARKER_PATTERN,
+  canonicalizeCommentBody,
   escapeHtmlText,
   fenceRanges,
-  renderSafeCodeFence,
-  sanitizeMarkdownDocument
+  renderSafeCodeFence
 } from './comment-safety.ts';
 import type { FenceRange } from './comment-safety.ts';
 
@@ -75,7 +74,7 @@ function splitFrontmatter(content: string): { frontmatter: string | null; body: 
 }
 
 function sanitizeCommentBody(value: string, label: string): string {
-  const result = sanitizeMarkdownDocument(value, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  const result = canonicalizeCommentBody(value);
   if (!result.ok) throw new Error(`${result.error.code}: ${label}: ${result.error.message} at offset ${result.error.offset}`);
   return result.value;
 }

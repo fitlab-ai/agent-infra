@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 import { INTERNAL_CLI_PATH, gitSafeEnv, onPlatforms } from '../../helpers.ts';
-import { computeDemoInputDigest } from '../../../lib/internal/release-workflow.ts';
+import { collectDemoTranscript, DEMO_PROJECT_PATH, sha256Transcript } from '../../../lib/internal/demo-transcript.ts';
 
 type Fixture = { root: string; origin: string; preload: string; tools: string; environment: NodeJS.ProcessEnv };
 
@@ -28,16 +28,148 @@ function fixture(version = '0.8.6'): Fixture {
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'widgets', org: 'acme', platform: { type: 'none' } }));
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'initial\n');
   fs.writeFileSync(preload, 'globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}), text: async () => "" });\n');
+  const fakeZsh = path.join(tools, 'zsh');
+  fs.writeFileSync(fakeZsh, `#!/bin/sh
+stty -echo 2>/dev/null || true
+printf '%s' "\${PROMPT:-\${HOSTNAME}%# }"
+printf '%s\\n' 'Project name' 'Organization' 'Language' 'Sandbox engine' 'Platform' 'Agent Client project integrations' 'Template sources' 'Skill sources' 'initialized'
+printf '\\033]9;agent-infra-demo-checkpoint\\007'
+printf '\\033]9;agent-infra-demo-tree-checkpoint\\007'
+printf '%s\\n' '.agents'
+while IFS= read -r line; do
+  [ "$line" = "exit" ] && break
+done
+exit 0
+`);
+  fs.chmodSync(fakeZsh, 0o755);
   execFileSync('git', ['add', '.'], { cwd: root });
   execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
-  return { root, origin, preload, tools, environment: {} };
+  return { root, origin, preload, tools, environment: { PATH: `${tools}${path.delimiter}${process.env.PATH ?? ''}` } };
 }
 
+test('demo collector fixes the shell prompt across hostnames', onPlatforms('linux', 'darwin'), async () => {
+  const input = fixture();
+  const previousPath = process.env.PATH;
+  const previousHostname = process.env.HOSTNAME;
+  try {
+    fs.mkdirSync(path.join(input.root, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(input.root, 'dist', 'bin', 'cli.js'), '');
+    process.env.PATH = input.environment.PATH;
+    process.env.HOSTNAME = 'release-host-one';
+    const first = await collectDemoTranscript(input.root);
+    process.env.HOSTNAME = 'release-host-two';
+    const second = await collectDemoTranscript(input.root);
+    assert.equal(first.status, 'ok', first.status === 'failed' ? first.message : '');
+    assert.equal(second.status, 'ok', second.status === 'failed' ? second.message : '');
+    if (first.status !== 'ok' || second.status !== 'ok') return;
+    assert.equal(second.sha256, first.sha256);
+    assert.match(first.transcript, /demo\$ /);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousHostname === undefined) delete process.env.HOSTNAME;
+    else process.env.HOSTNAME = previousHostname;
+    cleanup(input);
+  }
+});
+
+test('demo collector preserves an existing canonical project directory', onPlatforms('linux', 'darwin'), async () => {
+  const input = fixture();
+  const canonicalExisted = fs.existsSync(DEMO_PROJECT_PATH);
+  const sentinel = path.join(DEMO_PROJECT_PATH, `.demo-collector-sentinel-${process.pid}-${Date.now()}`);
+  const previousPath = process.env.PATH;
+  try {
+    fs.mkdirSync(DEMO_PROJECT_PATH, { recursive: true });
+    fs.writeFileSync(sentinel, 'preserve');
+    fs.mkdirSync(path.join(input.root, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(input.root, 'dist', 'bin', 'cli.js'), '');
+    process.env.PATH = input.environment.PATH;
+    const collected = await collectDemoTranscript(input.root);
+    assert.equal(collected.status, 'ok', collected.status === 'failed' ? collected.message : '');
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'preserve');
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    fs.rmSync(sentinel, { force: true });
+    if (!canonicalExisted && fs.existsSync(DEMO_PROJECT_PATH) && fs.readdirSync(DEMO_PROJECT_PATH).length === 0) fs.rmdirSync(DEMO_PROJECT_PATH);
+    cleanup(input);
+  }
+});
+
+test('demo collector handles a temporary root with spaces and shell metacharacters', onPlatforms('linux', 'darwin'), async () => {
+  const input = fixture();
+  const previousPath = process.env.PATH;
+  const previousTmpdir = process.env.TMPDIR;
+  const tmpRoot = path.join(os.tmpdir(), `demo collector tmp ${process.pid}-${Date.now()};safe`);
+  const sentinel = path.join(tmpRoot, 'outside-project.txt');
+  try {
+    fs.mkdirSync(tmpRoot, { recursive: true });
+    fs.writeFileSync(sentinel, 'preserve');
+    fs.mkdirSync(path.join(input.root, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(input.root, 'dist', 'bin', 'cli.js'), '');
+    process.env.PATH = input.environment.PATH;
+    process.env.TMPDIR = tmpRoot;
+    const collected = await collectDemoTranscript(input.root);
+    assert.equal(collected.status, 'ok', collected.status === 'failed' ? collected.message : '');
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'preserve');
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmpdir;
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    cleanup(input);
+  }
+});
+
+test('demo collector does not evaluate shell syntax in the local CLI path', onPlatforms('linux', 'darwin'), async () => {
+  const input = fixture();
+  const markerName = `demo-transcript-shell-${process.pid}-${Date.now()}`;
+  const marker = path.join(os.tmpdir(), markerName);
+  const unsafeRoot = path.join(os.tmpdir(), `demo$(touch ${markerName})`);
+  const previousPath = process.env.PATH;
+  try {
+    fs.mkdirSync(path.join(unsafeRoot, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(unsafeRoot, 'dist', 'bin', 'cli.js'), '');
+    fs.writeFileSync(path.join(input.tools, 'zsh'), [
+      '#!/bin/sh',
+      "printf '%s' 'demo$ '",
+      'ai >/dev/null 2>&1 || true',
+      "printf '%s\\n' 'Project name' 'Organization' 'Language' 'Sandbox engine' 'Platform' 'Agent Client project integrations' 'Template sources' 'Skill sources' 'initialized'",
+      "printf '\\033]9;agent-infra-demo-checkpoint\\007'",
+      "printf '\\033]9;agent-infra-demo-tree-checkpoint\\007'",
+      "printf '%s\\n' '.agents'",
+      'while IFS= read -r line; do',
+      '  [ "$line" = "exit" ] && break',
+      'done',
+      'exit 0',
+      ''
+    ].join('\n'));
+    fs.chmodSync(path.join(input.tools, 'zsh'), 0o755);
+    process.env.PATH = input.environment.PATH;
+    const collected = await collectDemoTranscript(unsafeRoot);
+    assert.equal(collected.status, 'ok', collected.status === 'failed' ? collected.message : '');
+    assert.equal(fs.existsSync(marker), false);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    fs.rmSync(marker, { force: true });
+    fs.rmSync(unsafeRoot, { recursive: true, force: true });
+    cleanup(input);
+  }
+});
+
 function runCli(input: Fixture, ...args: string[]) {
+  const env: NodeJS.ProcessEnv = { ...gitSafeEnv(), ...input.environment, NODE_OPTIONS: `--import=${pathToFileURL(input.preload).href}` };
+  for (const key of [
+    'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
+    'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
+    'AGENT_INFRA_EXECUTOR_MANIFEST', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING'
+  ]) delete env[key];
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'release-workflow', ...args, '--cwd', input.root], {
     cwd: input.root,
     encoding: 'utf8',
-    env: { ...gitSafeEnv(), ...input.environment, NODE_OPTIONS: `--import=${pathToFileURL(input.preload).href}` }
+    env
   });
 }
 
@@ -78,7 +210,7 @@ else process.exitCode = 1;
   };
 }
 
-function addPostPrepareInputs(input: Fixture) {
+async function addPostPrepareInputs(input: Fixture) {
   const files = [
     'assets/demo-init.tape', 'scripts/demo-regen.sh', 'scripts/normalize-gif-duration.py',
     'bin/cli.ts', 'lib/init.ts', 'lib/log.ts', 'lib/prompt.ts', 'lib/paths.ts',
@@ -90,10 +222,28 @@ function addPostPrepareInputs(input: Fixture) {
     fs.writeFileSync(path.join(input.root, file), file === 'scripts/build-inline.js' ? '' : `${file}\n`);
   }
   fs.writeFileSync(path.join(input.root, 'package.json'), JSON.stringify({
-    name: '@acme/widgets', version: '0.8.6', scripts: { build: 'node -e ""' }
+    name: '@acme/widgets', version: '0.8.6', scripts: {
+      build: 'node -e "require(\'fs\').mkdirSync(\'dist/bin\',{recursive:true});require(\'fs\').writeFileSync(\'dist/bin/cli.js\',\'\')"'
+    }
   }));
-  execFileSync('git', ['add', '.'], { cwd: input.root });
-  fs.writeFileSync(path.join(input.root, 'assets', 'demo-init.inputs.sha256'), `${computeDemoInputDigest(input.root)}\n`);
+  fs.mkdirSync(path.join(input.root, 'dist', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(input.root, 'dist', 'bin', 'cli.js'), '');
+  fs.writeFileSync(path.join(input.root, '.gitignore'), 'dist/\n');
+  const previousPath = process.env.PATH;
+  process.env.PATH = input.environment.PATH;
+  const collected = await collectDemoTranscript(input.root);
+  if (previousPath === undefined) delete process.env.PATH;
+  else process.env.PATH = previousPath;
+  if (collected.status === 'failed') throw new Error(collected.message);
+  process.env.PATH = input.environment.PATH;
+  const repeated = await collectDemoTranscript(input.root);
+  if (previousPath === undefined) delete process.env.PATH;
+  else process.env.PATH = previousPath;
+  if (repeated.status === 'failed') throw new Error(repeated.message);
+  assert.equal(repeated.sha256, collected.sha256, `${JSON.stringify(collected.transcript)} != ${JSON.stringify(repeated.transcript)}`);
+  const transcript = collected.transcript;
+  fs.writeFileSync(path.join(input.root, 'assets', 'demo-init.transcript'), transcript);
+  fs.writeFileSync(path.join(input.root, 'assets', 'demo-init.transcript.sha256'), `${sha256Transcript(transcript)}\n`);
   execFileSync('git', ['add', '.'], { cwd: input.root });
   execFileSync('git', ['commit', '-qm', 'release inputs'], { cwd: input.root });
 }
@@ -196,10 +346,10 @@ test('post publish rejects a stale confirmation without changing the remote', ()
   }
 });
 
-test('post prepare creates a confirmable commit without changing the remote', onPlatforms('linux', 'darwin'), () => {
+test('post prepare creates a confirmable commit without changing the remote', onPlatforms('linux', 'darwin'), async () => {
   const input = fixture();
   try {
-    addPostPrepareInputs(input);
+    await addPostPrepareInputs(input);
     let tagSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: input.root, encoding: 'utf8' }).trim();
     enableGitHubChannels(input, '0.8.6', tagSha);
     execFileSync('git', ['add', '.'], { cwd: input.root });
@@ -211,7 +361,7 @@ test('post prepare creates a confirmable commit without changing the remote', on
     const baseline = remoteSha(input, 'refs/heads/main');
 
     const prepared = runCli(input, 'post-prepare', '0.8.6');
-    assert.equal(prepared.status, 0, prepared.stderr);
+    assert.equal(prepared.status, 0, `${prepared.stderr}\n${prepared.stdout}`);
     const snapshot = JSON.parse(prepared.stdout).snapshot;
     assert.equal(snapshot.phase, 'post-prepared');
     assert.match(snapshot.postConfirmation.sha256, /^sha256:[0-9a-f]{64}$/);
@@ -257,7 +407,8 @@ test('legacy post action fails closed without changing the remote', () => {
   try {
     const result = runCli(input, 'post', '0.8.6');
     assert.equal(result.status, 1);
-    assert.equal(JSON.parse(result.stdout).error.code, 'RELEASE_INPUT_INVALID');
+    assert.ok(result.stdout, `${result.stderr}\n${result.stdout}`);
+    assert.equal(JSON.parse(result.stdout).error.code, 'RELEASE_INPUT_INVALID', `${result.stderr}\n${result.stdout}`);
     assert.equal(remoteSha(input, 'refs/heads/main'), null);
   } finally {
     cleanup(input);
