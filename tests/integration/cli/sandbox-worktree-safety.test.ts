@@ -1222,6 +1222,51 @@ test("sandbox rm rejects malformed auxiliary evidence before destructive cleanup
   }
 });
 
+test("sandbox rm proceeds when auxiliary intents are preserved for a still-active task", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-active-"));
+  const branch = "feature/auxiliary-preflight-active";
+  const taskId = "TASK-20260824-000014";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    const completedDir = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+    const activeDir = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+    fs.mkdirSync(path.dirname(activeDir), { recursive: true });
+    fs.renameSync(completedDir, activeDir);
+    fs.writeFileSync(
+      path.join(activeDir, "task.md"),
+      `---\nid: ${taskId}\nstatus: active\nbranch: ${branch}\n---\n`,
+      "utf8"
+    );
+
+    let failure: unknown = null;
+    try {
+      await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        cleanupTarget: {
+          requestedRef: taskId,
+          branch,
+          workspace: { mode: "task-bound", taskId },
+          taskState: "active"
+        },
+        target: evidence.target
+      }));
+    } catch (error) {
+      failure = error;
+    }
+
+    assert.doesNotMatch(
+      failure instanceof Error ? failure.message : "",
+      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
+    );
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox purge rejects malformed auxiliary evidence before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-purge-"));

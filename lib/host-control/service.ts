@@ -55,7 +55,10 @@ export function installHostControlService(platform: HostControlServicePlatform =
   const paths = servicePaths(platform);
   const entry = serviceEntryPoint();
   if (paths.unit) {
+    // mkdir only applies mode to directories it creates, and this one usually
+    // already exists, so restate the intended mode explicitly.
     fs.mkdirSync(path.dirname(paths.unit), { recursive: true, mode: 0o700 });
+    fs.chmodSync(path.dirname(paths.unit), 0o700);
     fs.writeFileSync(paths.unit, [
       '[Unit]',
       'Description=agent-infra host-control service',
@@ -77,6 +80,7 @@ export function installHostControlService(platform: HostControlServicePlatform =
   }
   const plist = paths.plist!;
   fs.mkdirSync(path.dirname(plist), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.dirname(plist), 0o700);
   const argumentsXml = [process.execPath, entry, 'host-control', 'serve']
     .map((argument) => `    <string>${xml(argument)}</string>`)
     .join('\n');

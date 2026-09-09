@@ -164,6 +164,52 @@ function cancelPendingRequest(requestPath: string): boolean {
   }
 }
 
+const CONTROL_TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
+const CONTROL_SHORT_ID_RE = /^\d+$/;
+
+type CanonicalRequestTask =
+  | Readonly<{ kind: 'none' }>
+  | Readonly<{ kind: 'task'; taskId: string }>
+  | Readonly<{ kind: 'unresolved' }>;
+
+// The sandbox's own active registry is the only short-id source visible to a
+// task-bound container, so it can never name a task outside the bound view.
+function visibleActiveShortIds(): Record<string, string> {
+  let dir = process.cwd();
+  for (let depth = 0; depth < 64; depth += 1) {
+    const registryPath = path.join(dir, '.agents', 'workspace', 'active', '.short-ids.json');
+    if (fs.existsSync(registryPath)) {
+      try {
+        const value = JSON.parse(fs.readFileSync(registryPath, 'utf8')) as unknown;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+        const ids = 'ids' in value && value.ids && typeof value.ids === 'object' && !Array.isArray(value.ids)
+          ? value.ids as Record<string, unknown>
+          : value as Record<string, unknown>;
+        return Object.fromEntries(Object.entries(ids).filter((entry): entry is [string, string] =>
+          CONTROL_SHORT_ID_RE.test(entry[0]) && typeof entry[1] === 'string' && CONTROL_TASK_ID_RE.test(entry[1])));
+      } catch { return {}; }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return {};
+}
+
+// A request's leading argument is only a task reference for some families and
+// may be a documented short id. Compare canonical ids so a bound sandbox keeps
+// refusing other tasks without rejecting its own task's short id.
+function canonicalRequestTask(request: SandboxControlRequest): CanonicalRequestTask {
+  const ref = request.family === 'task-workflow'
+    ? request.workflow.taskId
+    : 'args' in request ? request.args[0] ?? null : null;
+  if (!ref) return { kind: 'none' };
+  if (CONTROL_TASK_ID_RE.test(ref)) return { kind: 'task', taskId: ref };
+  if (!CONTROL_SHORT_ID_RE.test(ref)) return { kind: 'none' };
+  const resolved = visibleActiveShortIds()[ref];
+  return resolved ? { kind: 'task', taskId: resolved } : { kind: 'unresolved' };
+}
+
 function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly<{
   channelDir?: string;
   statusDir?: string;
@@ -176,10 +222,11 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   const identityPath = path.join(statusDir, 'identity.json');
   if (fs.existsSync(statusDir)) {
     const identity = readSandboxControlIdentitySentinel(statusDir);
-    const requestTaskId = request.family === 'task-workflow' ? request.workflow.taskId : 'args' in request ? request.args[0] ?? null : null;
+    const requestTask = canonicalRequestTask(request);
     if (identity.mode === 'task-bound'
       && ((process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_TASK_ID !== identity.taskId)
-        || (requestTaskId && requestTaskId !== identity.taskId))) {
+        || requestTask.kind === 'unresolved'
+        || (requestTask.kind === 'task' && requestTask.taskId !== identity.taskId))) {
       clientError('SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH', 'request task does not match the sandbox identity', false);
     }
     if (identity.mode === 'branch-only' && (request.family === 'task-finalization' || request.family === 'task-workflow')) {

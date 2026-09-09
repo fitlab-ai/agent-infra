@@ -65,3 +65,24 @@ test('macOS service retains XML ProgramArguments encoding', (t) => {
     '  </array>'
   ].join('\n')));
 });
+
+test('service installation hardens the unit directory that already exists', (t) => {
+  for (const platform of ['linux', 'darwin'] as const) {
+    const original = process.execPath;
+    process.execPath = '/opt/agent/bin/node';
+    t.after(() => { process.execPath = original; });
+    t.mock.method(fs, 'existsSync', () => true);
+    t.mock.method(fs.realpathSync, 'native', () => '/opt/agent/bin/internal-cli.js');
+    t.mock.method(fs, 'mkdirSync', () => undefined);
+    t.mock.method(fs, 'writeFileSync', () => undefined);
+    const chmod = t.mock.method(fs, 'chmodSync', () => undefined);
+    const target = installHostControlService(platform);
+    const directory = target.slice(0, target.lastIndexOf('/'));
+    const modes = chmod.mock.calls.map((call) => call.arguments);
+    assert.ok(modes.some(([file, mode]) => file === directory && mode === 0o700),
+      `${platform} should restate 0700 on the service directory`);
+    assert.ok(modes.some(([file, mode]) => file === target && mode === 0o600),
+      `${platform} should keep the unit file at 0600`);
+    t.mock.restoreAll();
+  }
+});
