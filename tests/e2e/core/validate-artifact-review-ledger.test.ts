@@ -103,7 +103,7 @@ test("review-ledger fails on an illegal status value", async () => {
 
     const { payload } = await runLedger("complete-task", taskDir);
     assert.equal(payload.status, "fail");
-    assert.match(payload.message, /illegal status/);
+    assert.match(payload.message, /LEDGER_STATUS_INVALID/);
   });
 });
 

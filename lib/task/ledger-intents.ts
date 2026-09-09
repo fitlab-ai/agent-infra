@@ -86,10 +86,6 @@ function rowMutation(row: LedgerRow): TaskMutation {
   };
 }
 
-function ledgerSectionMutation(content: string): TaskMutation[] {
-  return [];
-}
-
 function implementationInputMutation(content: string, rows: Parameters<typeof renderImplementationInputs>[0]): TaskMutation {
   const english = /^##\s+Activity Log\s*$/m.test(content);
   return {
@@ -253,7 +249,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
 
   const result = writeTask({
     taskRef: intent.taskRef, expectedState: stateOverride ? resolved.state : 'active',
-    mutations: [...ledgerSectionMutation(content), rowMutation(after), ...(implementationMutation ? [implementationMutation] : [])],
+    mutations: [rowMutation(after), ...(implementationMutation ? [implementationMutation] : [])],
     dryRun: 'dryRun' in intent ? intent.dryRun : false
   }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });
   return mapWrite(intent, after.id, before, after, result);
