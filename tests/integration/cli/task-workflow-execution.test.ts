@@ -12,6 +12,7 @@ import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-execu
 import { captureProjectionTopology, createTaskWorkflowRequest } from '../../../lib/sandbox/control/task-workflow.ts';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
 import { onPlatforms } from '../../helpers.ts';
+import { startHostControlServer } from '../../../lib/host-control/server.ts';
 
 const taskId = 'TASK-20260101-000001';
 
@@ -49,8 +50,32 @@ current_step: requirement-analysis-review
     const result = await executeTaskWorkflow(manifest, createTaskWorkflowRequest(command, [taskId, ...args], taskId, manifest.generation));
     return { ...result, body: JSON.parse(result.stdout) };
   };
-  return { root, taskDir, projection, run };
+  return { root, taskDir, projection, manifest, run };
 }
+
+test('authorized workflow executor owns the command worker without redispatching to the service', onPlatforms('linux', 'darwin'), async () => {
+  const f = fixture();
+  let dispatched = false;
+  const server = await startHostControlServer({
+    endpoint: path.join(f.root, 'service', 'control.sock'),
+    dispatch: async () => { dispatched = true; throw new Error('UNEXPECTED_REDISPATCH'); }
+  });
+  const previous = process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
+  process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = server.endpoint;
+  try {
+    const result = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
+      'task-ledger', [taskId, 'decision-next-id'], taskId, f.manifest.generation
+    ));
+    assert.equal(result.exitCode, 0, result.stdout);
+    assert.equal(dispatched, false);
+    assert.equal(JSON.parse(result.stdout).entityId, 'HD-1');
+  } finally {
+    if (previous === undefined) delete process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
+    else process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = previous;
+    await server.close();
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
 
 function content(family: 'plan' | 'review-analysis'): string {
   let result = renderArtifactSkeleton({ taskId, family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');

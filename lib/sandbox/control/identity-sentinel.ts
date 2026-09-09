@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeDurableFile } from '../../fs/durable-write.ts';
 
 export const SANDBOX_CONTROL_IDENTITY_FILE = 'identity.json';
 
@@ -29,15 +30,6 @@ function canonicalIdentity(value: SandboxControlIdentitySentinel): string {
     generation: value.generation,
     controlRootId: value.controlRootId
   });
-}
-
-function fsyncDirectory(directory: string): void {
-  const descriptor = fs.openSync(directory, 'r');
-  try {
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
 }
 
 export function identitySentinelPath(publicStatusDir: string): string {
@@ -93,22 +85,7 @@ export function writeSandboxControlIdentitySentinel(
   const sentinel = parseSandboxControlIdentitySentinel(value);
   fs.mkdirSync(publicStatusDir, { recursive: true, mode: 0o700 });
   const target = identitySentinelPath(publicStatusDir);
-  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
-  const encoded = `${canonicalIdentity(sentinel)}\n`;
-  const descriptor = fs.openSync(temporary, 'wx', 0o400);
-  try {
-    fs.writeFileSync(descriptor, encoded, { encoding: 'utf8' });
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  try {
-    fs.renameSync(temporary, target);
-    fs.chmodSync(target, 0o400);
-    fsyncDirectory(publicStatusDir);
-  } finally {
-    fs.rmSync(temporary, { force: true });
-  }
+  writeDurableFile(target, `${canonicalIdentity(sentinel)}\n`, { mode: 0o400, replace: true });
   return sentinel;
 }
 

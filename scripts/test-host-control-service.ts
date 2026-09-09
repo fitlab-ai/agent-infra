@@ -16,10 +16,7 @@ const running = await startHostControlService({
   ...(process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT
     ? { endpoint: process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT }
     : {}),
-  dispatch: async (request) => {
-    if (request.scope !== 'host-command') throw new Error('HOST_CONTROL_SCOPE_UNSUPPORTED');
-    return dispatchHostControlCommand(request);
-  }
+  dispatch: dispatchHostControlCommand
 });
 
 fs.writeFileSync(readyPath, `${fileURLToPath(import.meta.url)}\n`, { mode: 0o600 });

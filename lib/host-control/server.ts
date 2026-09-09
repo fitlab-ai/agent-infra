@@ -17,6 +17,7 @@ import {
   type HostControlRequest,
   type HostControlResponse
 } from './client.ts';
+import { acquireFileLock } from '../fs/file-lock.ts';
 import { appendHostControlAudit } from './audit.ts';
 
 export type HostControlDispatch = (request: HostControlRequest) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
@@ -60,47 +61,55 @@ function failedResponse(id: string, status: 'rejected' | 'unknown', code: string
 }
 
 async function handleConnection(socket: net.Socket, options: HostControlServerOptions): Promise<void> {
-  let input = '';
-  let completed = false;
-  let processing = false;
-  socket.setEncoding('utf8');
-  const finish = (value: HostControlResponse): void => {
-    if (completed) return;
-    completed = true;
-    socket.end(`${JSON.stringify(value)}\n`);
-  };
-  socket.on('data', async (chunk: string) => {
-    if (completed || processing) return;
-    input += chunk;
-    if (Buffer.byteLength(input, 'utf8') > HOST_CONTROL_MAX_REQUEST_BYTES) {
-      finish(failedResponse('invalid', 'rejected', 'HOST_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit'));
-      return;
-    }
-    const newline = input.indexOf('\n');
-    if (newline < 0) return;
-    const raw = input.slice(0, newline);
-    let request: HostControlRequest;
-    try { request = validateHostControlRequest(JSON.parse(raw)); }
-    catch (error) {
-      finish(failedResponse('invalid', 'rejected', 'HOST_CONTROL_REQUEST_INVALID', error instanceof Error ? error.message : String(error)));
-      return;
-    }
-    processing = true;
-    let started = false;
-    try {
-      options.audit?.(auditFor(request, 'accepted', 'in-progress'));
-      started = true;
-      const result = await options.dispatch(request);
-      options.audit?.(auditFor(request, 'completed', result.exitCode === 0 ? 'success' : 'failure'));
-      finish({ version: 1, id: request.id, status: 'completed', ...result, error: null });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const code = /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'HOST_CONTROL_DISPATCH_FAILED';
-      const status = started ? 'unknown' : 'rejected';
-      try { options.audit?.(auditFor(request, started ? 'completed' : 'rejected', status)); }
-      catch { /* Return the uncertainty even when the audit sink is unavailable. */ }
-      finish(failedResponse(request.id, status, code, message));
-    }
+  await new Promise<void>((resolve) => {
+    let input = '';
+    let completed = false;
+    let processing = false;
+    socket.setEncoding('utf8');
+    // A disconnected caller does not cancel an already dispatched domain operation.
+    socket.on('error', () => socket.destroy());
+    socket.on('close', () => { if (!processing) resolve(); });
+    socket.on('end', () => { if (!processing) socket.end(); });
+    const finish = (value: HostControlResponse): void => {
+      if (completed || socket.destroyed) return;
+      completed = true;
+      socket.end(`${JSON.stringify(value)}\n`);
+    };
+    socket.on('data', async (chunk: string) => {
+      if (completed || processing) return;
+      input += chunk;
+      if (Buffer.byteLength(input, 'utf8') > HOST_CONTROL_MAX_REQUEST_BYTES) {
+        finish(failedResponse('invalid', 'rejected', 'HOST_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit'));
+        return;
+      }
+      const newline = input.indexOf('\n');
+      if (newline < 0) return;
+      const raw = input.slice(0, newline);
+      let request: HostControlRequest;
+      try { request = validateHostControlRequest(JSON.parse(raw)); }
+      catch (error) {
+        finish(failedResponse('invalid', 'rejected', 'HOST_CONTROL_REQUEST_INVALID', error instanceof Error ? error.message : String(error)));
+        return;
+      }
+      processing = true;
+      let started = false;
+      try {
+        options.audit?.(auditFor(request, 'accepted', 'in-progress'));
+        started = true;
+        const result = await options.dispatch(request);
+        options.audit?.(auditFor(request, 'completed', result.exitCode === 0 ? 'success' : 'failure'));
+        finish({ version: 1, id: request.id, status: 'completed', ...result, error: null });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const code = /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'HOST_CONTROL_DISPATCH_FAILED';
+        const status = started ? 'unknown' : 'rejected';
+        try { options.audit?.(auditFor(request, started ? 'completed' : 'rejected', status)); }
+        catch { /* Return the uncertainty even when the audit sink is unavailable. */ }
+        finish(failedResponse(request.id, status, code, message));
+      } finally {
+        resolve();
+      }
+    });
   });
 }
 
@@ -114,37 +123,53 @@ export async function startHostControlServer(options: HostControlServerOptions):
   const endpoint = options.endpoint ?? resolveHostControlEndpoint();
   const audit = options.audit ?? ((entry: HostControlAudit) => appendHostControlAudit(endpoint, entry));
   prepareHostControlDirectory(endpoint);
-  ensureHostControlWorkerToken(endpoint);
+  const lock = acquireFileLock(`${endpoint}.lock`);
+  let server: net.Server | undefined;
   try {
-    const existing = fs.lstatSync(endpoint);
-    if (existing.isSymbolicLink() || !existing.isSocket()) throw new Error('HOST_CONTROL_ENDPOINT_INVALID');
-    fs.unlinkSync(endpoint);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
-    void handleConnection(socket, { ...options, audit });
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(endpoint, () => { server.off('error', reject); resolve(); });
-  });
-  fs.chmodSync(endpoint, HOST_CONTROL_SOCKET_MODE);
-  const inspection = inspectHostControlEndpoint(endpoint, { uid: process.getuid?.() });
-  if (!inspection.ok) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    removeHostControlWorkerToken(endpoint);
-    throw new Error(inspection.code ?? 'HOST_CONTROL_ENDPOINT_INVALID');
-  }
-  return {
-    endpoint,
-    server,
-    close: async () => {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await fs.promises.rm(endpoint, { force: true });
-      removeHostControlWorkerToken(endpoint);
+    ensureHostControlWorkerToken(endpoint);
+    try {
+      const existing = fs.lstatSync(endpoint);
+      if (existing.isSymbolicLink() || !existing.isSocket()) throw new Error('HOST_CONTROL_ENDPOINT_INVALID');
+      fs.unlinkSync(endpoint);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-  };
+    const connections = new Set<Promise<void>>();
+    server = net.createServer({ allowHalfOpen: true }, (socket) => {
+      const connection = handleConnection(socket, { ...options, audit });
+      connections.add(connection);
+      void connection.finally(() => connections.delete(connection));
+    });
+    const listeningServer = server;
+    await new Promise<void>((resolve, reject) => {
+      listeningServer.once('error', reject);
+      listeningServer.listen(endpoint, () => { listeningServer.off('error', reject); resolve(); });
+    });
+    fs.chmodSync(endpoint, HOST_CONTROL_SOCKET_MODE);
+    const inspection = inspectHostControlEndpoint(endpoint, { uid: process.getuid?.() });
+    if (!inspection.ok) {
+      await new Promise<void>((resolve) => listeningServer.close(() => resolve()));
+      removeHostControlWorkerToken(endpoint);
+      throw new Error(inspection.code ?? 'HOST_CONTROL_ENDPOINT_INVALID');
+    }
+    let closing: Promise<void> | undefined;
+    return {
+      endpoint,
+      server,
+      close: () => closing ??= (async () => {
+        try {
+          await new Promise<void>((resolve) => listeningServer.close(() => resolve()));
+          await Promise.all(connections);
+          await fs.promises.rm(endpoint, { force: true });
+          removeHostControlWorkerToken(endpoint);
+        } finally { lock.release(); }
+      })()
+    };
+  } catch (error) {
+    if (server?.listening) await new Promise<void>((resolve) => server!.close(() => resolve()));
+    lock.release();
+    throw error;
+  }
 }
 
 export async function serveHostControl(options: HostControlServerOptions, signal?: AbortSignal): Promise<void> {

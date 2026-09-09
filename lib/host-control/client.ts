@@ -30,8 +30,8 @@ export type HostControlRequest = Readonly<{
   id: string;
   taskId: string | null;
   generation: string | null;
-  operation: string;
-  scope: string;
+  operation: HostControlCommand;
+  scope: 'host-command';
   payload: HostControlCommandPayload;
 }>;
 
@@ -48,11 +48,13 @@ export type HostControlResponse = Readonly<{
 export class HostControlClientError extends Error {
   readonly code: string;
   readonly retryable: boolean;
-  constructor(code: string, message: string, retryable = false) {
+  readonly changed: false | null;
+  constructor(code: string, message: string, retryable = false, submitted = false) {
     super(`${code}: ${message}`);
     this.name = 'HostControlClientError';
     this.code = code;
-    this.retryable = retryable;
+    this.retryable = retryable && !submitted;
+    this.changed = submitted ? null : false;
   }
 }
 
@@ -138,6 +140,9 @@ export async function requestHostControl(params: Readonly<{
     const socket = net.createConnection(endpoint);
     let output = '';
     let settled = false;
+    let submitted = false;
+    const failure = (code: string, message: string, retryable = false) =>
+      new HostControlClientError(code, message, retryable, submitted);
     const finish = (error?: Error, response?: HostControlResponse): void => {
       if (settled) return;
       settled = true;
@@ -145,23 +150,23 @@ export async function requestHostControl(params: Readonly<{
       socket.destroy();
       if (error) rejectPromise(error); else resolve(response!);
     };
-    const timer = setTimeout(() => finish(new HostControlClientError('HOST_CONTROL_TIMEOUT', 'host-control did not respond', true)), timeoutMs);
+    const timer = setTimeout(() => finish(failure('HOST_CONTROL_TIMEOUT', 'host-control did not respond; inspect task state before retrying', true)), timeoutMs);
     socket.setEncoding('utf8');
-    socket.on('connect', () => socket.end(encoded));
+    socket.on('connect', () => { submitted = true; socket.end(encoded); });
     socket.on('data', (chunk: string) => {
       output += chunk;
       if (Buffer.byteLength(output, 'utf8') > HOST_CONTROL_MAX_REQUEST_BYTES) {
-        finish(new HostControlClientError('HOST_CONTROL_RESPONSE_TOO_LARGE', 'host-control response exceeds the control limit'));
+        finish(failure('HOST_CONTROL_RESPONSE_TOO_LARGE', 'host-control response exceeds the control limit'));
         return;
       }
       const newline = output.indexOf('\n');
       if (newline < 0) return;
       try { finish(undefined, parseResponse(JSON.parse(output.slice(0, newline)), request.id)); }
-      catch (error) { finish(error instanceof Error ? error : new HostControlClientError('HOST_CONTROL_RESPONSE_INVALID', String(error))); }
+      catch (error) { finish(failure('HOST_CONTROL_RESPONSE_INVALID', String(error))); }
     });
-    socket.on('error', (error) => finish(new HostControlClientError('HOST_CONTROL_UNAVAILABLE', error.message, true)));
+    socket.on('error', (error) => finish(failure('HOST_CONTROL_UNAVAILABLE', error.message, true)));
     socket.on('close', () => {
-      if (!settled) finish(new HostControlClientError('HOST_CONTROL_RESPONSE_INVALID', 'host-control closed without a response'));
+      if (!settled) finish(failure('HOST_CONTROL_RESPONSE_INVALID', 'host-control closed without a response'));
     });
   });
 }

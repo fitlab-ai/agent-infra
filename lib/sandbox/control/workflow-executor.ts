@@ -7,8 +7,7 @@ import { parseReviewCommand } from '../../task/review-command.ts';
 import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../task/local-artifact-finalization.ts';
 import { prepareReviewSummaryCandidate, commitReviewSummaryProvenance } from '../../task/review-finalization.ts';
 import { withTaskExecutionLock } from '../../task/task-execution-lock.ts';
-import { hostControlRequestForCommand, requestHostControl } from '../../host-control/client.ts';
-import { resolveHostControlEndpoint } from '../../host-control/path.ts';
+import { dispatchHostControlCommand } from '../../host-control/command.ts';
 import { appendDiagnosticAudit } from './audit.ts';
 import {
   readProjectionArtifact, landProjectionArtifact, verifyProjectionTopology,
@@ -31,11 +30,10 @@ export async function executeTaskWorkflow(
     const [command] = TASK_WORKFLOW_COMMANDS[request.operation];
     if (command !== 'task-artifact' && command !== 'task-review') {
       publicationStarted = true;
-      const response = await requestHostControl({
-        endpoint: process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint(),
-        request: { ...hostControlRequestForCommand(command, request.args, manifest.repoRoot), id: request.id, generation: request.generation }
+      // Inherit this executor's process group so its existing recovery owns the worker too.
+      return await dispatchHostControlCommand({
+        operation: command, payload: { workingDirectory: manifest.repoRoot, args: request.args }
       });
-      return response;
     }
     const input = command === 'task-artifact' ? parseArtifactCommand(request.args) : parseReviewCommand(request.args);
     if (command === 'task-artifact' && 'operation' in input && input.operation === 'inspect') {

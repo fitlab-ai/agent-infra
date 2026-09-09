@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SandboxControlManifest, SandboxControlFamily, SandboxControlRequest } from './protocol.ts';
 import { identityDigest as digestIdentity } from './identity-sentinel.ts';
 import { acquireSandboxResourceLock } from './native-file-lock.ts';
+import { fsyncDirectory, writeDurableFile } from '../../fs/durable-write.ts';
 
 export const SANDBOX_CONTROL_AUDIT_PHASES = Object.freeze([
   'validated', 'gated', 'reserved', 'prepared', 'accepted-authorized', 'accepted-committed',
@@ -60,15 +61,6 @@ function auditRoot(manifest: SandboxControlManifest): string {
 
 function auditPath(manifest: SandboxControlManifest): string {
   return path.join(auditRoot(manifest), 'audit.ndjson');
-}
-
-function fsyncDirectory(directory: string): void {
-  const descriptor = fs.openSync(directory, 'r');
-  try {
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
 }
 
 function manifestIdentityDigest(manifest: SandboxControlManifest): string {
@@ -231,24 +223,12 @@ export function writeSandboxControlTransition(
   };
   const target = transitionPath(manifest, params.requestId, params.phase);
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
-  const encoded = `${JSON.stringify(transition)}\n`;
-  const descriptor = fs.openSync(temporary, 'wx', 0o600);
   try {
-    fs.writeFileSync(descriptor, encoded, { encoding: 'utf8' });
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  try {
-    fs.linkSync(temporary, target);
-    fsyncDirectory(path.dirname(target));
+    writeDurableFile(target, `${JSON.stringify(transition)}\n`, { mode: 0o600, replace: false });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     const existing = readSandboxControlTransition(manifest, params.requestId, params.phase);
     if (JSON.stringify(existing) !== JSON.stringify(transition)) throw new Error('SANDBOX_CONTROL_TRANSITION_CONFLICT');
-  } finally {
-    fs.rmSync(temporary, { force: true });
   }
   return transition;
 }

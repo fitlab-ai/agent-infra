@@ -52,9 +52,9 @@ try {
   }
 }
 
-function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANSPORT_INVALID'): never {
+function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANSPORT_INVALID', changed: false | null = false): never {
   process.stdout.write(`${JSON.stringify({
-    status: 'failed', changed: false,
+    status: 'failed', changed,
     error: { code, message }
   })}\n`);
   process.exit(1);
@@ -73,7 +73,8 @@ async function runHostControlCommand(commandName: HostControlCommand, args: stri
     });
   } catch (error) {
     if (error instanceof HostControlClientError) {
-      taskControlTransportFailure('host-control service is unavailable', 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE');
+      taskControlTransportFailure(error.message, error.changed === false
+        ? 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE' : error.code, error.changed);
     }
     throw error;
   }

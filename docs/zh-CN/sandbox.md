@@ -154,7 +154,7 @@ v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑�
 
 host-control service 是 direct-host 执行 task-control 和 workflow 写操作的唯一宿主 authority。Linux 固定端点为 `/run/user/<uid>/agent-infra/host-control.sock`；macOS 固定端点为 `/Users/<login>/Library/Application Support/agent-infra/run/host-control.sock`。端点根据宿主账户身份解析，绝不读取 `HOME`、`TMPDIR`、普通环境变量或命令参数。服务目录和 socket 必须属于宿主用户，权限分别为 `0700` 和 `0600`。安装脚本会管理 systemd 用户单元或 launchd 用户代理；`agent-infra-internal host-control status` 可检查端点。服务 authority 缺失或无效时返回 `SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE`，CLI 不会回退到进程内 task handler。
 
-task-bound workspace 挂载由宿主创建的可写 task projection，权威 task 目录保持在容器可写视图之外。workflow 传输层绑定 task、generation 和封闭操作目录，原样传递参数，由 CLI 共用的领域解析器解释。已授权 executor 直接调用共享产物操作；其他 workflow 命令直接请求 host-control service，由隔离的 command worker 承载 CLI 进程状态。响应直接携带业务退出码，失败审计也使用该退出码。服务区分执行前拒绝和执行或完成审计失败后的结果未知；调用方直接转发该结果，不再推断为未发生修改。
+task-bound workspace 挂载由宿主创建的可写 task projection，权威 task 目录保持在容器可写视图之外。workflow 传输层绑定 task、generation 和封闭操作目录，原样传递参数，由 CLI 共用的领域解析器解释。已授权 executor 直接调用共享产物操作，其他 workflow 命令复用隔离的 CLI worker。worker 继承 executor 的进程组，因此现有恢复流程也能终止实际命令，沙箱执行不再转交服务。direct-host worker 仍由服务持有。响应直接携带业务退出码，失败审计也使用该退出码。执行前拒绝表示未执行；执行失败或请求发出后的传输失败表示结果未知，不得自动重试。服务在端点整个生命周期持有原生文件锁，即使调用方断连，也会等已派发工作结束后再释放资源。重复关闭旧实例不会删除后续实例的资源。
 
 产物初始化和修复只修改候选文件。最终化读取权威任务元数据和产物目录，通过共享领域逻辑一次性准备已验证内容和待写凭据，发布缓冲区后提交凭据，不重复运行校验。宿主校验记录的 projection 拓扑，使用 `O_NOFOLLOW` 打开顶层规范候选文件，通过同一文件描述符读取并计算摘要，检查可观察的身份与元数据变化。发布时不重新打开候选文件；projection 中的编辑不会把 `task.md` 或任意文件复制回权威目录。恢复逻辑复用生命周期日志解析器和完整的编排完成证据契约，保留其中的 PR 字段。单个产物替换是原子的，但替换与 provenance 并非跨文件事务：发布后失败时，可能需要先检查领域状态再决定能否重试。
 

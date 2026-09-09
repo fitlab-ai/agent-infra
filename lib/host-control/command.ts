@@ -1,9 +1,8 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { HostControlCommandPayload, HostControlRequest } from './client.ts';
+import type { HostControlRequest } from './client.ts';
 import { readHostControlWorkerToken, resolveHostControlEndpoint } from './path.ts';
 
 type HostCommandResult = Readonly<{
@@ -12,15 +11,10 @@ type HostCommandResult = Readonly<{
   exitCode: number;
 }>;
 
-function payloadFor(request: HostControlRequest): HostControlCommandPayload {
-  if (request.scope !== 'host-command' || !request.payload) {
-    throw new Error('HOST_CONTROL_REQUEST_INVALID');
-  }
-  return request.payload as HostControlCommandPayload;
-}
-
-export async function dispatchHostControlCommand(request: HostControlRequest): Promise<HostCommandResult> {
-  const payload = payloadFor(request);
+export async function dispatchHostControlCommand(
+  request: Pick<HostControlRequest, 'operation' | 'payload'>
+): Promise<HostCommandResult> {
+  const { payload } = request;
   const compiledEntry = fileURLToPath(new URL('../../bin/internal-cli.js', import.meta.url));
   const sourceEntry = fileURLToPath(new URL('../../bin/internal-cli.ts', import.meta.url));
   const entry = fs.existsSync(compiledEntry) ? compiledEntry : sourceEntry;
