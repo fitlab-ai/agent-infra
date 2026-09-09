@@ -52,7 +52,6 @@ type IntermediateCleanupReport = Readonly<{
 }>;
 
 type IntermediateCleanupOptions = Readonly<{
-  dryRun?: boolean;
   taskIds?: readonly string[];
   controlBindingEvidence?: TaskControlBindingEvidence;
 }>;
@@ -62,14 +61,8 @@ type ScanOptions = IntermediateCleanupOptions & Readonly<{ preflight?: boolean }
 type TaskRecord = Readonly<{
   taskId: string;
   taskDir: string;
-  taskMdPath: string;
   state: TaskWorkspaceState;
   frontmatter: Record<string, string>;
-}>;
-
-type Candidate = Readonly<{
-  item: IntermediateCleanupItem;
-  taskId: string | null;
 }>;
 
 function auxiliaryRoot(repoRoot: string, name: typeof AUXILIARY_ROOTS[number]): string {
@@ -114,7 +107,6 @@ function inspectTaskRecords(repoRoot: string, taskIds?: ReadonlySet<string>): Ma
     records.set(entry.taskId, {
       taskId: entry.taskId,
       taskDir: entry.taskDir,
-      taskMdPath,
       state: entry.state,
       frontmatter: parseTaskFrontmatter(content)
     });
@@ -173,32 +165,32 @@ function localIntentCandidate(
   artifact: string,
   identity: FileIdentity,
   options: ScanOptions
-): Candidate {
+): IntermediateCleanupItem {
   const protectedReason = taskGate(task);
-  if (protectedReason) return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', protectedReason, identity) };
+  if (protectedReason) return item('LFAI-CONSUMED', taskId, filePath, 'protected', protectedReason, identity);
   if (path.basename(filePath) !== canonicalLocalIntentPath(taskId, family, artifact)
     || !parseArtifactName(artifact)?.family || parseArtifactName(artifact)!.family !== family) {
-    return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity) };
+    return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity);
   }
   let intent: LocalArtifactFinalizationIntent | null;
   try { intent = readLocalArtifactFinalizationIntent(repoRoot, taskId, family, artifact); }
-  catch { return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', 'LFAI_SCHEMA_INVALID', identity) }; }
+  catch { return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'LFAI_SCHEMA_INVALID', identity); }
   if (!intent || intent.state !== 'consumed') {
-    return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', 'LFAI_STATE_PROTECTED', identity) };
+    return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'LFAI_STATE_PROTECTED', identity);
   }
   const artifactPath = path.join(task!.taskDir, artifact);
   if (safeLstat(task!.taskDir, artifactPath, 'file') === null) {
-    return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_IDENTITY_MISMATCH', identity) };
+    return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_IDENTITY_MISMATCH', identity);
   }
   let content: string;
   try { content = fs.readFileSync(artifactPath, 'utf8'); }
-  catch { return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_UNREADABLE', identity) }; }
+  catch { return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_UNREADABLE', identity); }
   if (intent.artifactSha256 !== sha256Content(content) || intent.semanticDigest !== semanticDigest(content)) {
-    return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_DIGEST_MISMATCH', identity) };
+    return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_DIGEST_MISMATCH', identity);
   }
   const receiptReason = receiptGate(repoRoot, task!, options);
-  if (receiptReason) return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'protected', receiptReason, identity) };
-  return { taskId, item: item('LFAI-CONSUMED', taskId, filePath, 'planned', 'LFAI_CONSUMED_AND_VERIFIED', identity) };
+  if (receiptReason) return item('LFAI-CONSUMED', taskId, filePath, 'protected', receiptReason, identity);
+  return item('LFAI-CONSUMED', taskId, filePath, 'planned', 'LFAI_CONSUMED_AND_VERIFIED', identity);
 }
 
 function commitIntentCandidate(
@@ -208,29 +200,29 @@ function commitIntentCandidate(
   taskId: string,
   identity: FileIdentity,
   options: ScanOptions
-): Candidate {
+): IntermediateCleanupItem {
   const protectedReason = taskGate(task);
-  if (protectedReason) return { taskId, item: item('COMMIT-SYNCED', taskId, filePath, 'protected', protectedReason, identity) };
+  if (protectedReason) return item('COMMIT-SYNCED', taskId, filePath, 'protected', protectedReason, identity);
   let intent: CheckpointIntent | null;
   try { intent = readCheckpointIntent(repoRoot, taskId); }
-  catch { return { taskId, item: item('COMMIT-SYNCED', taskId, filePath, 'protected', 'COMMIT_INTENT_INVALID', identity) }; }
+  catch { return item('COMMIT-SYNCED', taskId, filePath, 'protected', 'COMMIT_INTENT_INVALID', identity); }
   if (!intent || intent.state !== 'synced' || intent.taskId !== taskId
     || intent.branch !== task!.frontmatter.branch || !intent.committedHead
     || task!.frontmatter.checkpoint_commit !== intent.committedHead
     || !checkpointCommitMatches(repoRoot, intent, intent.committedHead)) {
-    return { taskId, item: item('COMMIT-SYNCED', taskId, filePath, 'protected', 'COMMIT_EVIDENCE_MISMATCH', identity) };
+    return item('COMMIT-SYNCED', taskId, filePath, 'protected', 'COMMIT_EVIDENCE_MISMATCH', identity);
   }
   const receiptReason = receiptGate(repoRoot, task!, options);
-  if (receiptReason) return { taskId, item: item('COMMIT-SYNCED', taskId, filePath, 'protected', receiptReason, identity) };
-  return { taskId, item: item('COMMIT-SYNCED', taskId, filePath, 'planned', 'COMMIT_SYNCED_AND_VERIFIED', identity) };
+  if (receiptReason) return item('COMMIT-SYNCED', taskId, filePath, 'protected', receiptReason, identity);
+  return item('COMMIT-SYNCED', taskId, filePath, 'planned', 'COMMIT_SYNCED_AND_VERIFIED', identity);
 }
 
 function readAuxiliaryCandidates(
   repoRoot: string,
   tasks: Map<string, TaskRecord>,
   options: ScanOptions
-): Candidate[] {
-  const candidates: Candidate[] = [];
+): IntermediateCleanupItem[] {
+  const candidates: IntermediateCleanupItem[] = [];
   const selected = options.taskIds ? new Set(options.taskIds) : null;
   for (const rootName of AUXILIARY_ROOTS) {
     const root = auxiliaryRoot(repoRoot, rootName);
@@ -240,35 +232,35 @@ function readAuxiliaryCandidates(
     if (rootIdentity === null) {
       let stat: fs.Stats | null = null;
       try { stat = fs.lstatSync(root); } catch { stat = null; }
-      if (stat?.isSymbolicLink()) candidates.push({ taskId: null, item: item('AUXILIARY-UNKNOWN', null, root, 'protected', 'PATH_SYMLINK') });
-      else if (stat) candidates.push({ taskId: null, item: item('AUXILIARY-UNKNOWN', null, root, 'protected', 'PATH_IDENTITY_MISMATCH') });
+      if (stat?.isSymbolicLink()) candidates.push(item('AUXILIARY-UNKNOWN', null, root, 'protected', 'PATH_SYMLINK'));
+      else if (stat) candidates.push(item('AUXILIARY-UNKNOWN', null, root, 'protected', 'PATH_IDENTITY_MISMATCH'));
       continue;
     }
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(root, { withFileTypes: true }); }
     catch {
-      candidates.push({ taskId: null, item: item('AUXILIARY-UNKNOWN', null, root, 'protected', 'AUXILIARY_ROOT_UNREADABLE', rootIdentity) });
+      candidates.push(item('AUXILIARY-UNKNOWN', null, root, 'protected', 'AUXILIARY_ROOT_UNREADABLE', rootIdentity));
       continue;
     }
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       const filePath = path.join(root, entry.name);
       if (entry.isSymbolicLink()) {
-        candidates.push({ taskId: null, item: item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_SYMLINK') });
+        candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_SYMLINK'));
         continue;
       }
       if (!entry.isFile()) {
-        candidates.push({ taskId: null, item: item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH') });
+        candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH'));
         continue;
       }
       const identity = safeLstat(root, filePath, 'file');
       if (!identity) {
-        candidates.push({ taskId: null, item: item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH') });
+        candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH'));
         continue;
       }
       if (rootName === '.local-artifact-finalization-intents') {
         const match = LOCAL_INTENT_RE.exec(entry.name);
         if (!match || (selected && !selected.has(match[1]!))) {
-          if (!selected || !match) candidates.push({ taskId: null, item: item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity) });
+          if (!selected || !match) candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity));
           continue;
         }
         candidates.push(localIntentCandidate(
@@ -277,14 +269,14 @@ function readAuxiliaryCandidates(
       } else {
         const match = COMMIT_INTENT_RE.exec(entry.name);
         if (!match || (selected && !selected.has(match[1]!))) {
-          if (!selected || !match) candidates.push({ taskId: null, item: item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity) });
+          if (!selected || !match) candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity));
           continue;
         }
         candidates.push(commitIntentCandidate(repoRoot, tasks.get(match[1]!), filePath, match[1]!, identity, options));
       }
     }
     if (entries.length === 0) {
-      candidates.push({ taskId: null, item: item('EMPTY-AUX-PARENT', null, root, 'planned', 'EMPTY_CANONICAL_AUXILIARY_ROOT', rootIdentity) });
+      candidates.push(item('EMPTY-AUX-PARENT', null, root, 'planned', 'EMPTY_CANONICAL_AUXILIARY_ROOT', rootIdentity));
     }
   }
   return candidates;
@@ -299,7 +291,7 @@ function buildIntermediateCleanupReport(items: readonly IntermediateCleanupItem[
   };
 }
 
-function scanInternal(repoRootInput: string, options: ScanOptions): Candidate[] {
+function scanInternal(repoRootInput: string, options: ScanOptions): IntermediateCleanupItem[] {
   const repoRoot = path.resolve(repoRootInput);
   if (safeLstat(path.dirname(repoRoot), repoRoot, 'directory') === null) {
     throw new Error('INTERMEDIATE_CLEANUP_REPOSITORY_INVALID');
@@ -311,10 +303,11 @@ function scanInternal(repoRootInput: string, options: ScanOptions): Candidate[] 
 
 function scanIntermediateCleanup(repoRoot: string, options: ScanOptions = {}): IntermediateCleanupReport {
   const candidates = scanInternal(repoRoot, options);
-  return buildIntermediateCleanupReport(candidates.map(({ item: candidate }) => candidate), true);
+  return buildIntermediateCleanupReport(candidates, true);
 }
 
 function removeCandidate(candidate: IntermediateCleanupItem): IntermediateCleanupItem {
+  if (candidate.disposition !== 'planned') return candidate;
   const root = candidate.kind === 'EMPTY-AUX-PARENT'
     ? path.dirname(path.dirname(candidate.path))
     : path.dirname(candidate.path);
@@ -344,15 +337,9 @@ function removeCandidate(candidate: IntermediateCleanupItem): IntermediateCleanu
   }
 }
 
-function removeIntermediateCleanupCandidate(candidate: IntermediateCleanupItem): IntermediateCleanupItem {
-  return candidate.disposition === 'planned' ? removeCandidate(candidate) : candidate;
-}
 
-
-type IntermediateCleanupCoordinatorOptions = Pick<
-  IntermediateCleanupOptions,
-  'dryRun' | 'taskIds' | 'controlBindingEvidence'
-> & Readonly<{
+type IntermediateCleanupCoordinatorOptions = IntermediateCleanupOptions & Readonly<{
+  dryRun?: boolean;
   lockedTaskIds?: ReadonlySet<string>;
 }>;
 
@@ -365,7 +352,6 @@ function cleanupIntermediateUnderRemovalCoordinator(
   options: IntermediateCleanupCoordinatorOptions = {}
 ): IntermediateCleanupReport {
   const scanOptions: IntermediateCleanupOptions = {
-    ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
     ...(options.taskIds === undefined ? {} : { taskIds: options.taskIds }),
     ...(options.controlBindingEvidence === undefined ? {} : { controlBindingEvidence: options.controlBindingEvidence })
   };
@@ -394,7 +380,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
         if (initialCandidate.disposition !== 'planned') continue;
         const current = refreshedByKey.get(intermediateCleanupKey(initialCandidate));
         items[index] = current
-          ? removeIntermediateCleanupCandidate(current)
+          ? removeCandidate(current)
           : { ...initialCandidate, disposition: 'protected', reason: 'CANDIDATE_NO_LONGER_ELIGIBLE' };
       }
     };
@@ -411,14 +397,14 @@ function cleanupIntermediateUnderRemovalCoordinator(
 
   for (const [index, candidate] of items.entries()) {
     if (candidate.taskId || candidate.disposition !== 'planned') continue;
-    items[index] = removeIntermediateCleanupCandidate(candidate);
+    items[index] = removeCandidate(candidate);
   }
 
   const knownPaths = new Set(items.map((candidate) => intermediateCleanupKey(candidate)));
   for (const candidate of scanIntermediateCleanup(repoRoot, scanOptions).items) {
     if (candidate.kind !== 'EMPTY-AUX-PARENT' || candidate.disposition !== 'planned'
       || knownPaths.has(intermediateCleanupKey(candidate))) continue;
-    items.push(removeIntermediateCleanupCandidate(candidate));
+    items.push(removeCandidate(candidate));
   }
 
   return buildIntermediateCleanupReport(items);
@@ -454,7 +440,6 @@ function formatIntermediateCleanupReport(report: IntermediateCleanupReport): str
 
 export {
   formatIntermediateCleanupReport,
-  removeIntermediateCleanupCandidate,
   cleanupIntermediateUnderRemovalCoordinator,
   protectIntermediateCleanupReport,
   mergeIntermediateCleanupReports,

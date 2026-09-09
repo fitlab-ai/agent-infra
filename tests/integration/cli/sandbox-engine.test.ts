@@ -303,7 +303,7 @@ test("sandbox command modules route docker calls through engine-aware helpers", 
     "lib/sandbox/commands/create.js",
     "lib/sandbox/commands/enter.js",
     "lib/sandbox/commands/ls.js",
-    "lib/sandbox/commands/rm.js",
+    "lib/sandbox/removal.js",
     "lib/sandbox/commands/rebuild.js"
   ]) {
     const content = fs.readFileSync(filePath(relativePath), "utf8");
@@ -598,7 +598,7 @@ test("sandbox refresh helpers parse timestamps and skip controls", async () => {
 });
 
 test("assertManagedPath rejects paths outside the sandbox root", async () => {
-  const sandboxRm = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/rm.ts")>("lib/sandbox/commands/rm.js");
+  const sandboxRm = await loadFreshEsm<typeof import("../../../lib/sandbox/managed-fs.ts")>("lib/sandbox/managed-fs.js");
   const root = path.join(os.tmpdir(), "agent-infra-worktrees");
 
   assert.doesNotThrow(() => sandboxRm.assertManagedPath(root, path.join(root, "feature..demo")));

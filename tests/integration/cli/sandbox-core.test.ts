@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { semanticDigest, sha256Content } from "../../../lib/task/local-artifact-finalization.ts";
 import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycle.ts";
-import { sandboxManagedPathKey } from "../../../lib/sandbox/commands/rm.ts";
+import { sandboxManagedPathKey } from "../../../lib/sandbox/removal.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
@@ -263,7 +263,7 @@ test("sandbox rm cleans per-branch shell config dir", () => {
 });
 
 test("sandbox rm --purge prunes project-scoped dangling images before managed-engine branch", () => {
-  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
+  const commandSource = fs.readFileSync(filePath("lib/sandbox/removal.js"), "utf8");
 
   const rmPurgeMatch = commandSource.match(
     /async function rmPurgeCore\b[\s\S]*?(?=\n(?:async function|export async function|export function)\b|$)/

@@ -29,7 +29,7 @@ import {
 
 type SafetyModule = typeof import("../../../lib/sandbox/worktree-safety.ts");
 type ManagedFsModule = typeof import("../../../lib/sandbox/managed-fs.ts");
-type RmModule = typeof import("../../../lib/sandbox/commands/rm.ts");
+type RmModule = typeof import("../../../lib/sandbox/removal.ts");
 type PruneModule = typeof import("../../../lib/sandbox/commands/prune.ts");
 
 const FIXTURE_CONTAINER_ID = "f".repeat(64);
@@ -455,7 +455,7 @@ test("sandbox rm retries control and workspace cleanup after the container is al
       updatedAt: Date.now(),
       taskView: statusTaskView(null)
     })}\n`);
-    const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+    const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
 
     const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
     const previousPath = process.env.PATH;
@@ -535,7 +535,7 @@ test("sandbox rm removes an empty control container parent after control cleanup
     process.env.DOCKER_LOG_PATH = fixture.logPath;
     process.env.DOCKER_INSPECT_NOT_FOUND = "1";
     try {
-      const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+      const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
       await rm.rmOne(config, [], branch, {
         assumeYes: true,
         target: {
@@ -777,7 +777,7 @@ test("explicit discard permits later content changes but rejects another branch"
 });
 
 test("interactive single-worktree authorization uses a separate default-no discard confirmation", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const fixture = createLinkedWorktree();
   try {
     fs.writeFileSync(path.join(fixture.worktree, "tracked.txt"), "explicitly discarded\n", "utf8");
@@ -911,7 +911,7 @@ test("managed worktree removal only uses the registered-path fallback when expli
 });
 
 test("sandbox rm clean path uses injectable default-yes confirmations and removes selected state", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-clean-confirm-"));
   const branch = "feature/clean-confirm";
@@ -936,7 +936,7 @@ test("sandbox rm clean path uses injectable default-yes confirmations and remove
 });
 
 test("sandbox rm recovers and removes a clean worktree with missing metadata", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const fixture = writeSandboxEngineFixture(fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-clean-")), { project: "demo" });
   const tmpDir = path.dirname(fixture.repoDir);
   const branch = "feature/recovered-clean";
@@ -1009,7 +1009,7 @@ test("sandbox rm refuses a container whose branch label conflicts with the reque
 });
 
 test("sandbox rm rejects a control manifest whose container does not match its control-root path", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-control-manifest-mismatch-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/control-manifest-mismatch";
@@ -1096,7 +1096,7 @@ test("sandbox rm rejects a control manifest whose container does not match its c
 });
 
 test("sandbox rm cleans a completed task-bound sandbox only with matching control evidence", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-completed-task-control-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/completed-task-control";
@@ -1187,7 +1187,7 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
 });
 
 test("sandbox rm rejects malformed auxiliary evidence before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-single-"));
   const branch = "feature/auxiliary-preflight-single";
   const taskId = "TASK-20260824-000012";
@@ -1220,7 +1220,7 @@ test("sandbox rm rejects malformed auxiliary evidence before destructive cleanup
 });
 
 test("sandbox purge rejects malformed auxiliary evidence before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-purge-"));
   const branch = "feature/auxiliary-preflight-purge";
   const taskId = "TASK-20260824-000013";
@@ -1388,7 +1388,7 @@ test("sandbox cleanup recovers an interrupted removal from a fresh CLI process f
 });
 
 test("sandbox purge preserves a rich removal journal for its real recovery path", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-rich-journal-"));
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
@@ -1450,7 +1450,7 @@ test("sandbox purge preserves a rich removal journal for its real recovery path"
 });
 
 test("sandbox purge preserves a default early-phase removal journal for recovery", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-early-journal-"));
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
@@ -1503,7 +1503,7 @@ test("sandbox purge preserves a default early-phase removal journal for recovery
 });
 
 test("sandbox rm preserves a replacement after a share cleanup phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/share-phase-retry";
@@ -1607,7 +1607,7 @@ test("sandbox rm preserves a replacement after a share cleanup phase crash", onP
 });
 
 test("sandbox rm preserves a same-head branch replacement after a branch phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-branch-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1703,7 +1703,7 @@ test("sandbox rm preserves a same-head branch replacement after a branch phase c
 });
 
 test("sandbox rm preserves a replacement worktree after a workspace phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-worktree-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1797,7 +1797,7 @@ test("sandbox rm preserves a replacement worktree after a workspace phase crash"
 });
 
 test("sandbox rm recovers a worktree after a prune-phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-worktree-prune-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -1890,7 +1890,7 @@ test("sandbox rm recovers a worktree after a prune-phase crash", onPlatforms("li
 });
 
 test("sandbox rm preserves an unowned tombstone when the source is absent", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unowned-tombstone-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/unowned-tombstone";
@@ -1957,7 +1957,7 @@ test("sandbox rm preserves an unowned tombstone when the source is absent", onPl
 });
 
 test("sandbox rm retains an unexpected moved share payload for diagnosis", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-replacement-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/share-replacement";
@@ -2046,7 +2046,7 @@ test("sandbox rm retains an unexpected moved share payload for diagnosis", onPla
 });
 
 test("sandbox rm preserves foreign tombstone payload on interrupted retry", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-share-crash-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/share-replacement-crash";
@@ -2141,7 +2141,7 @@ test("sandbox rm preserves foreign tombstone payload on interrupted retry", onPl
 });
 
 test("sandbox rm preserves untouched targets after a partial workspace phase crash", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-multi-target-phase-retry-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/multi-target-phase-retry";
@@ -2229,7 +2229,7 @@ test("sandbox rm preserves untouched targets after a partial workspace phase cra
 });
 
 test("sandbox rm allows explicit discard of a stable recovered dirty snapshot", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-dirty-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/recovered-dirty";
@@ -2260,7 +2260,7 @@ test("sandbox rm allows explicit discard of a stable recovered dirty snapshot", 
 });
 
 test("sandbox rm accepts a task-bound resolver identity when container and control roots are gone", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-task-bound-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "agent-infra-feature-recovered-task";
@@ -2281,7 +2281,7 @@ test("sandbox rm accepts a task-bound resolver identity when container and contr
 });
 
 test("sandbox rm keeps malformed recovery metadata fail-closed", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-invalid-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const branch = "feature/recovered-invalid";
@@ -2304,7 +2304,7 @@ test("sandbox rm keeps malformed recovery metadata fail-closed", onPlatforms("li
 });
 
 test("sandbox rm negative confirmations preserve clean worktree, branch, and share", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-clean-negative-"));
   const branch = "feature/clean-negative";
@@ -2323,7 +2323,7 @@ test("sandbox rm negative confirmations preserve clean worktree, branch, and sha
 });
 
 test("sandbox rm cancellation at the worktree confirmation stops before every cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-clean-cancel-"));
   const branch = "feature/clean-cancel";
@@ -2363,7 +2363,7 @@ test("sandbox rm --unbound --yes removes a real clean linked worktree and branch
 });
 
 test("sandbox purge removes real clean linked worktrees after confirmation", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-clean-"));
   const branch = "feature/clean-purge-success";
   try {
@@ -2522,7 +2522,7 @@ test("sandbox rm --unbound does not use recovered worktree deletion", onPlatform
 });
 
 test("sandbox rm refuses a recovered worktree whose path does not match the requested branch", onPlatforms("linux", "darwin", "win32"), async () => {
-  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-path-conflict-"));
   const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
   const actualBranch = "feature/recovered-actual";
