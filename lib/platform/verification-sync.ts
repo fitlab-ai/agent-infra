@@ -1,3 +1,4 @@
+import type { VerificationShared } from "../task/verification-types.ts";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -33,9 +34,6 @@ const OPTION_LOCALIZATION: Record<string, string> = {
   "低": "Low"
 };
 
-let activeShared: any = null;
-let repoRoot = "";
-
 export function getDefaults(): any {
   return {
     statusLabels: {
@@ -56,64 +54,18 @@ export function getDefaults(): any {
   };
 }
 
-function getShared(): any {
-  if (!activeShared) {
-    throw new Error("platform-sync adapter shared utilities are unavailable");
-  }
-
-  return activeShared;
-}
-
-function loadTask(...args: any[]): any {
-  return getShared().loadTask(...args);
-}
-
-function getCheckedRequirements(...args: any[]): any {
-  return getShared().getCheckedRequirements(...args);
-}
-
-function normalizeContent(...args: any[]): any {
-  return getShared().normalizeContent(...args);
-}
-
-function isBlank(...args: any[]): any {
-  return getShared().isBlank(...args);
-}
-
-function escapeRegExp(...args: any[]): any {
-  return getShared().escapeRegExp(...args);
-}
-
-function passResult(...args: any[]): any {
-  return getShared().passResult(...args);
-}
-
-function failResult(...args: any[]): any {
-  return getShared().failResult(...args);
-}
-
-function blockedResult(...args: any[]): any {
-  return getShared().blockedResult(...args);
-}
-
-function safeStat(...args: any[]): any {
-  return getShared().safeStat(...args);
-}
-
 function sanitizeCommentContent(content: string): string | null {
   const result = sanitizeMarkdownDocument(content, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
   return result.ok ? result.value : null;
 }
 
-export async function check({ taskDir, config, artifactFile }: any, shared: any): Promise<any> {
-  activeShared = shared;
-  repoRoot = shared.repoRoot;
-  const context = await buildSyncContext({ taskDir, config, artifactFile });
+export async function check({ taskDir, config, artifactFile }: any, shared: VerificationShared): Promise<any> {
+  const context = await buildSyncContext({ taskDir, config, artifactFile }, shared);
   if (context.earlyReturn) {
     return context.earlyReturn;
   }
 
-  const remoteData = await fetchRemoteData(context);
+  const remoteData = await fetchRemoteData(context, shared);
   if (remoteData.earlyReturn) {
     return remoteData.earlyReturn;
   }
@@ -138,57 +90,57 @@ export async function check({ taskDir, config, artifactFile }: any, shared: any)
   ];
 
   for (const subCheck of subChecks) {
-    const result = subCheck(context, remoteData);
+    const result = subCheck(context, remoteData, shared);
     if (result) {
       return result;
     }
   }
 
-  return passResult(CHECK_TYPE, `Platform sync checks passed for Issue ${context.issueNumber || "identity"}`);
+  return shared.passResult(CHECK_TYPE, `Platform sync checks passed for Issue ${context.issueNumber || "identity"}`);
 }
 
-async function buildSyncContext({ taskDir, config, artifactFile }: any): Promise<any> {
-  const task = loadTask(taskDir);
+async function buildSyncContext({ taskDir, config, artifactFile }: any, shared: VerificationShared): Promise<any> {
+  const task = shared.loadTask(taskDir);
   if (!task.ok) {
-    return { earlyReturn: failResult(CHECK_TYPE, task.message) };
+    return { earlyReturn: shared.failResult(CHECK_TYPE, task.message) };
   }
 
   const issueIdentity = taskIssueIdentity(task.metadata);
   const issueNumber = resourceIdentityNumber(issueIdentity);
   const fact = readPrDeliveryFact(task.metadata);
   if (fact.status === "invalid") {
-    return { earlyReturn: failResult(CHECK_TYPE, fact.error.message, "check_failed") };
+    return { earlyReturn: shared.failResult(CHECK_TYPE, fact.error.message, "check_failed") };
   }
   const prIdentity = fact.status === "valid" && fact.fact.state === "bound" ? fact.fact.identity.resource : null;
   const prNumber = resourceIdentityNumber(prIdentity);
   if (config.when === "issue_number_exists" && !issueIdentity) {
-    return { earlyReturn: passResult(CHECK_TYPE, "Skipped: task has no issue_number") };
+    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no issue_number") };
   }
   if (config.when === "pr_fact_bound" && !prIdentity) {
-    return { earlyReturn: passResult(CHECK_TYPE, "Skipped: task has no verified bound pull request") };
+    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no verified bound pull request") };
   }
 
   if (!issueIdentity) {
-    return { earlyReturn: passResult(CHECK_TYPE, "Skipped: platform-sync not required for this task") };
+    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: platform-sync not required for this task") };
   }
 
-  const loaded = await resolvePlatformProviderContext({ cwd: repoRoot });
+  const loaded = await resolvePlatformProviderContext({ cwd: shared.repoRoot });
   const platformContext = loaded.ok ? loaded.value.context : loaded.context;
   if (platformContext.status === "failed") {
-    return { earlyReturn: failResult(CHECK_TYPE, platformContext.error?.message || "Platform context failed", "check_failed") };
+    return { earlyReturn: shared.failResult(CHECK_TYPE, platformContext.error?.message || "Platform context failed", "check_failed") };
   }
   if (platformContext.status === "blocked") {
-    return { earlyReturn: blockedResult(CHECK_TYPE, platformContext.error?.message || "Platform context blocked", "network_error") };
+    return { earlyReturn: shared.blockedResult(CHECK_TYPE, platformContext.error?.message || "Platform context blocked", "network_error") };
   }
   if (!platformContext.platform.repository) {
     if (platformContext.error?.code === "REMOTE_MISSING" || platformContext.error?.code === "REMOTE_INVALID") {
-      return { earlyReturn: blockedResult(CHECK_TYPE, platformContext.error.message, "network_error") };
+      return { earlyReturn: shared.blockedResult(CHECK_TYPE, platformContext.error.message, "network_error") };
     }
-    return { earlyReturn: passResult(CHECK_TYPE, `Skipped: ${platformContext.error?.message || "platform unavailable"}`) };
+    return { earlyReturn: shared.passResult(CHECK_TYPE, `Skipped: ${platformContext.error?.message || "platform unavailable"}`) };
   }
   const expectedValues = resolveExpectedValues(config);
   if (!expectedValues.ok) {
-    return { earlyReturn: failResult(CHECK_TYPE, expectedValues.message, "check_failed") };
+    return { earlyReturn: shared.failResult(CHECK_TYPE, expectedValues.message, "check_failed") };
   }
 
   const marker = expectedValues.commentMarker
@@ -274,7 +226,7 @@ function resolveDefaultValue({ collection, key, value, configKey }: any): any {
   return { ok: true, value: resolvedValue };
 }
 
-async function fetchRemoteData(context: any): Promise<any> {
+async function fetchRemoteData(context: any, shared: VerificationShared): Promise<any> {
   const provider = context.provider;
   const operationContext = providerOperationContext(context.loadedContext, context.taskDir);
   const facts = provider?.verification?.fetchRemoteFacts
@@ -290,8 +242,8 @@ async function fetchRemoteData(context: any): Promise<any> {
   if (!facts.ok) {
     return {
       earlyReturn: facts.error.retryable
-        ? blockedResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "network_error")
-        : failResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "check_failed")
+        ? shared.blockedResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "network_error")
+        : shared.failResult(CHECK_TYPE, providerError(facts.error, "PLATFORM_PROVIDER_OPERATION_FAILED").message, "check_failed")
     };
   }
   const issueSnapshot = facts.value.issue;
@@ -316,8 +268,8 @@ async function fetchRemoteData(context: any): Promise<any> {
     const listed = await provider.comments.list({ context: operationContext, parent: context.prIdentity });
     if (!listed.ok) return {
       earlyReturn: listed.error.retryable
-        ? blockedResult(CHECK_TYPE, listed.error.message, "network_error")
-        : failResult(CHECK_TYPE, listed.error.message, "check_failed")
+        ? shared.blockedResult(CHECK_TYPE, listed.error.message, "network_error")
+        : shared.failResult(CHECK_TYPE, listed.error.message, "check_failed")
     };
     prComments = listed.value.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body }));
   }
@@ -325,8 +277,8 @@ async function fetchRemoteData(context: any): Promise<any> {
   let inLabelMapping: Record<string, string[]> = {};
   let repositoryLabels: string[] = [];
   if (context.config.verify_in_labels_computed && context.hasTriage) {
-    const mapping = loadInLabelMapping();
-    if (!mapping.ok) return { earlyReturn: failResult(CHECK_TYPE, mapping.message, "check_failed") };
+    const mapping = loadInLabelMapping(shared);
+    if (!mapping.ok) return { earlyReturn: shared.failResult(CHECK_TYPE, mapping.message, "check_failed") };
     inLabelMapping = mapping.value;
     if (Object.keys(inLabelMapping).length > 0) {
       const labels = provider?.issues?.listLabels
@@ -336,8 +288,8 @@ async function fetchRemoteData(context: any): Promise<any> {
         const error = providerError(labels.error, "PLATFORM_PROVIDER_OPERATION_FAILED");
         return {
           earlyReturn: error.retryable
-            ? blockedResult(CHECK_TYPE, `${error.code}: ${error.message}`, "network_error")
-            : failResult(CHECK_TYPE, `${error.code}: ${error.message}`, "check_failed")
+            ? shared.blockedResult(CHECK_TYPE, `${error.code}: ${error.message}`, "network_error")
+            : shared.failResult(CHECK_TYPE, `${error.code}: ${error.message}`, "check_failed")
         };
       }
       repositoryLabels = labels.value;
@@ -378,7 +330,7 @@ function shouldFetchComments(config: any): any {
   );
 }
 
-function checkStatusLabel(context: any, remoteData: any): any {
+function checkStatusLabel(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.expectedStatusLabel || !context.hasTriage) {
     return null;
   }
@@ -392,13 +344,13 @@ function checkStatusLabel(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `Expected label '${context.expectedStatusLabel}' not found on Issue #${context.issueNumber}`,
     "check_failed"
   );
 }
 
-function checkClosedIssueStatusLabels(context: any, remoteData: any): any {
+function checkClosedIssueStatusLabels(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_closed_issue_has_no_status_labels) {
     return null;
   }
@@ -413,13 +365,13 @@ function checkClosedIssueStatusLabels(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `Closed Issue #${context.issueNumber} retains status labels: ${statusLabels.join(", ")}`,
     "check_failed"
   );
 }
 
-function checkCommentMarker(context: any, remoteData: any): any {
+function checkCommentMarker(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.marker) {
     return null;
   }
@@ -429,13 +381,13 @@ function checkCommentMarker(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `Expected comment marker '${context.marker}' not found on Issue #${context.issueNumber}`,
     "check_failed"
   );
 }
 
-function checkPrCommentMarker(context: any, remoteData: any): any {
+function checkPrCommentMarker(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.prMarker) {
     return null;
   }
@@ -445,19 +397,19 @@ function checkPrCommentMarker(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `Expected PR comment marker '${context.prMarker}' not found on PR #${context.prNumber}`,
     "check_failed"
   );
 }
 
-function checkPrCommentLastCommit(context: any, remoteData: any): any {
+function checkPrCommentLastCommit(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_pr_comment_last_commit_matches_head) {
     return null;
   }
 
   if (!context.prMarker) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       "verify_pr_comment_last_commit_matches_head requires expected_pr_comment_marker",
       "check_failed"
     );
@@ -465,7 +417,7 @@ function checkPrCommentLastCommit(context: any, remoteData: any): any {
 
   const comment = findCommentByMarker(remoteData.prComments, context.prMarker);
   if (!comment) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `Expected PR comment marker '${context.prMarker}' not found on PR #${context.prNumber}`,
       "check_failed"
     );
@@ -473,33 +425,33 @@ function checkPrCommentLastCommit(context: any, remoteData: any): any {
 
   const match = String(comment.body || "").match(/<!--\s*last-commit:\s*([0-9a-f]{7,40})\s*-->/i);
   if (!match) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `PR #${context.prNumber} summary comment is missing '<!-- last-commit: <sha> -->' metadata`,
       "check_failed"
     );
   }
 
   const expectedHead = String(remoteData.prHeadSha || "").trim();
-  if (!expectedHead) return blockedResult(CHECK_TYPE, "Unable to resolve the PR head SHA", "network_error");
+  if (!expectedHead) return shared.blockedResult(CHECK_TYPE, "Unable to resolve the PR head SHA", "network_error");
   const actualHead = match[1]!.trim();
   if (expectedHead === actualHead) {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `PR #${context.prNumber} summary comment last-commit metadata mismatch: expected ${expectedHead}, got ${actualHead}`,
     "check_failed"
   );
 }
 
-function checkPrCommentRequiredPatterns(context: any, remoteData: any): any {
+function checkPrCommentRequiredPatterns(context: any, remoteData: any, shared: VerificationShared): any {
   const patterns = context.config.expected_pr_comment_required_patterns || [];
   if (!Array.isArray(patterns) || patterns.length === 0) {
     return null;
   }
 
   if (!context.prMarker) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       "expected_pr_comment_required_patterns requires expected_pr_comment_marker",
       "check_failed"
     );
@@ -507,7 +459,7 @@ function checkPrCommentRequiredPatterns(context: any, remoteData: any): any {
 
   const comment = findCommentByMarker(remoteData.prComments, context.prMarker);
   if (!comment) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `Expected PR comment marker '${context.prMarker}' not found on PR #${context.prNumber}`,
       "check_failed"
     );
@@ -517,7 +469,7 @@ function checkPrCommentRequiredPatterns(context: any, remoteData: any): any {
   for (const pattern of patterns) {
     const regex = new RegExp(pattern, "m");
     if (!regex.test(body)) {
-      return failResult(CHECK_TYPE,
+      return shared.failResult(CHECK_TYPE,
         `PR #${context.prNumber} summary comment is missing required pattern: ${pattern}`,
         "check_failed"
       );
@@ -527,17 +479,17 @@ function checkPrCommentRequiredPatterns(context: any, remoteData: any): any {
   return null;
 }
 
-function checkCommentContent(context: any, remoteData: any): any {
+function checkCommentContent(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_comment_content) {
     return null;
   }
 
   if (!context.marker) {
-    return failResult(CHECK_TYPE, "verify_comment_content requires expected_comment_marker", "check_failed");
+    return shared.failResult(CHECK_TYPE, "verify_comment_content requires expected_comment_marker", "check_failed");
   }
 
-  if (!context.artifactPath || !safeStat(context.artifactPath)) {
-    return failResult(CHECK_TYPE,
+  if (!context.artifactPath || !shared.safeStat(context.artifactPath)) {
+    return shared.failResult(CHECK_TYPE,
       `Artifact not found for comment verification: ${context.artifactFile || "(missing artifactFile)"}`,
       "check_failed"
     );
@@ -550,21 +502,21 @@ function checkCommentContent(context: any, remoteData: any): any {
     const localCanonical = canonicalizeCommentBody(fs.readFileSync(context.artifactPath, "utf8"));
     const commentCanonical = canonicalizeCommentBody(extractCommentBody(comment?.body || ""));
     if (!localCanonical.ok) {
-      return failResult(CHECK_TYPE,
+      return shared.failResult(CHECK_TYPE,
         `Comment content cannot be canonicalized for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${localCanonical.error.message}`,
         "check_failed"
       );
     }
     if (!commentCanonical.ok) {
-      return failResult(CHECK_TYPE,
+      return shared.failResult(CHECK_TYPE,
         `Comment content cannot be canonicalized for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${commentCanonical.error.message}`,
         "check_failed"
       );
     }
-    localContent = normalizeContent(localCanonical.value);
-    commentContent = normalizeContent(commentCanonical.value);
+    localContent = shared.normalizeContent(localCanonical.value);
+    commentContent = shared.normalizeContent(commentCanonical.value);
   } catch (error) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `Comment content cannot be read for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${error instanceof Error ? error.message : String(error)}`,
       "check_failed"
     );
@@ -574,7 +526,7 @@ function checkCommentContent(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     buildCommentContentMismatchMessage(
       path.basename(context.artifactPath, path.extname(context.artifactPath)),
       context.issueNumber,
@@ -585,7 +537,7 @@ function checkCommentContent(context: any, remoteData: any): any {
   );
 }
 
-function checkTaskCommentContent(context: any, remoteData: any): any {
+function checkTaskCommentContent(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_task_comment_content) {
     return null;
   }
@@ -593,33 +545,33 @@ function checkTaskCommentContent(context: any, remoteData: any): any {
   const taskMarker = `<!-- sync-issue:${context.task.metadata.id}:task -->`;
   const comment = findCommentByMarker(remoteData.comments, taskMarker);
   if (!comment) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `Expected comment marker '${taskMarker}' not found on Issue #${context.issueNumber}`,
       "check_failed"
     );
   }
 
-  const expectedTaskBody = buildExpectedTaskBody(context.task.content);
+  const expectedTaskBody = buildExpectedTaskBody(context.task.content, shared);
   if (expectedTaskBody === null) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       "Task content cannot be rendered safely for comment verification",
       "check_failed"
     );
   }
-  const expectedBody = normalizeContent(expectedTaskBody);
-  const commentBody = normalizeContent(extractCommentBody(comment.body || ""));
+  const expectedBody = shared.normalizeContent(expectedTaskBody);
+  const commentBody = shared.normalizeContent(extractCommentBody(comment.body || ""));
 
   if (expectedBody === commentBody) {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     buildCommentContentMismatchMessage("task", context.issueNumber, expectedBody, commentBody),
     "check_failed"
   );
 }
 
-function checkPrTypeLabel(context: any, remoteData: any): any {
+function checkPrTypeLabel(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_pr_type_label || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
     return null;
   }
@@ -633,13 +585,13 @@ function checkPrTypeLabel(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `Expected type label '${expectedLabel}' not found on PR #${context.prNumber}`,
     "check_failed"
   );
 }
 
-function checkInLabelsMatchPr(context: any, remoteData: any): any {
+function checkInLabelsMatchPr(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_in_labels_match_pr || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
     return null;
   }
@@ -655,22 +607,22 @@ function checkInLabelsMatchPr(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `in: labels mismatch — PR #${context.prNumber} has [${formatLabelList(prInLabels)}], Issue #${context.issueNumber} has [${formatLabelList(issueInLabels)}]`,
     "check_failed"
   );
 }
 
-function checkInLabelsComputed(context: any, remoteData: any): any {
+function checkInLabelsComputed(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_in_labels_computed || !context.hasTriage) {
     return null;
   }
 
-  const expectedInLabels = computeExpectedInLabels(context.taskDir, remoteData.repositoryLabels, remoteData.inLabelMapping);
+  const expectedInLabels = computeExpectedInLabels(context.taskDir, remoteData.repositoryLabels, remoteData.inLabelMapping, shared);
   if (!expectedInLabels.ok) {
     return expectedInLabels.type === "check_failed"
-      ? failResult(CHECK_TYPE, expectedInLabels.message, expectedInLabels.type)
-      : blockedResult(CHECK_TYPE, expectedInLabels.message, expectedInLabels.type);
+      ? shared.failResult(CHECK_TYPE, expectedInLabels.message, expectedInLabels.type)
+      : shared.blockedResult(CHECK_TYPE, expectedInLabels.message, expectedInLabels.type);
   }
 
   if (expectedInLabels.mode === "skipped") {
@@ -685,19 +637,19 @@ function checkInLabelsComputed(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(
+  return shared.failResult(
     CHECK_TYPE,
     `Issue #${context.issueNumber} in: labels do not match committed changes: expected [${formatLabelList(expectedInLabels.labels)}], got [${formatLabelList(actualInLabels)}]`,
     "check_failed"
   );
 }
 
-function checkSyncedRequirements(context: any, remoteData: any): any {
+function checkSyncedRequirements(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.sync_checked_requirements || !context.hasTriage) {
     return null;
   }
 
-  const checkedRequirements = getCheckedRequirements(context.task.content);
+  const checkedRequirements = shared.getCheckedRequirements(context.task.content);
   if (checkedRequirements.length === 0) {
     return null;
   }
@@ -705,13 +657,13 @@ function checkSyncedRequirements(context: any, remoteData: any): any {
   const issueBody = remoteData.issue.body || "";
   const resolution = resolveRequirementSection(
     issueBody,
-    requirementSectionAnchors(repoRoot, context.task.metadata.type || "task")
+    requirementSectionAnchors(shared.repoRoot, context.task.metadata.type || "task")
   );
   if (resolution.status === "missing") {
     return null;
   }
   if (resolution.status === "ambiguous") {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `Issue #${context.issueNumber} requirements section is ambiguous`,
       "check_failed"
     );
@@ -724,13 +676,13 @@ function checkSyncedRequirements(context: any, remoteData: any): any {
     return null;
   }
 
-  return failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `Issue body is missing checked requirements: ${missingRequirements.join(", ")}`,
     "check_failed"
   );
 }
 
-function checkIssueType(context: any, remoteData: any): any {
+function checkIssueType(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_issue_type || !context.hasPush) {
     return null;
   }
@@ -744,7 +696,7 @@ function checkIssueType(context: any, remoteData: any): any {
       return null;
     }
 
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `Issue #${context.issueNumber} has no Issue Type set`,
       "check_failed"
     );
@@ -752,7 +704,7 @@ function checkIssueType(context: any, remoteData: any): any {
 
   const expectedType = mapTaskTypeToIssueType(context.task.metadata.type);
   if (expectedType && remoteData.issueType !== expectedType) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `Issue #${context.issueNumber} has type '${remoteData.issueType}', expected '${expectedType}' (from task type '${context.task.metadata.type}')`,
       "check_failed"
     );
@@ -761,7 +713,7 @@ function checkIssueType(context: any, remoteData: any): any {
   return null;
 }
 
-function checkIssueFields(context: any, remoteData: any): any {
+function checkIssueFields(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_issue_fields || !context.hasPush) {
     return null;
   }
@@ -772,7 +724,7 @@ function checkIssueFields(context: any, remoteData: any): any {
 
   for (const [metadataKey, fieldName] of Object.entries(FRONTMATTER_FIELD_MAP)) {
     const expectedRaw = context.task.metadata[metadataKey];
-    if (isBlank(expectedRaw) || !remoteData.issueFields.pinnedNames.has(fieldName)) {
+    if (shared.isBlank(expectedRaw) || !remoteData.issueFields.pinnedNames.has(fieldName)) {
       continue;
     }
 
@@ -783,14 +735,14 @@ function checkIssueFields(context: any, remoteData: any): any {
     }
 
     if (!actual) {
-      return failResult(CHECK_TYPE,
+      return shared.failResult(CHECK_TYPE,
         `Issue #${context.issueNumber} field '${fieldName}' is missing, expected '${expected.value}'`,
         "check_failed"
       );
     }
 
     if (actual.kind !== expected.kind || actual.value !== expected.value) {
-      return failResult(CHECK_TYPE,
+      return shared.failResult(CHECK_TYPE,
         `Issue #${context.issueNumber} field '${fieldName}' is '${actual.value}', expected '${expected.value}'`,
         "check_failed"
       );
@@ -800,13 +752,13 @@ function checkIssueFields(context: any, remoteData: any): any {
   return null;
 }
 
-function checkPrAssignee(context: any, remoteData: any): any {
+function checkPrAssignee(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_pr_assignee || !context.hasPush || !context.prNumber) {
     return null;
   }
 
   if (!remoteData.prAssignees || remoteData.prAssignees.length === 0) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `PR #${context.prNumber} has no assignee`,
       "check_failed"
     );
@@ -815,20 +767,20 @@ function checkPrAssignee(context: any, remoteData: any): any {
   return null;
 }
 
-function checkMilestone(context: any, remoteData: any): any {
+function checkMilestone(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_milestone || !context.hasTriage) {
     return null;
   }
 
   if (!remoteData.issue?.milestone?.title) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `Issue #${context.issueNumber} has no milestone set`,
       "check_failed"
     );
   }
 
   if (context.prNumber && remoteData.prMilestone !== undefined && !remoteData.prMilestone?.title) {
-    return failResult(CHECK_TYPE,
+    return shared.failResult(CHECK_TYPE,
       `PR #${context.prNumber} has no milestone set`,
       "check_failed"
     );
@@ -837,13 +789,13 @@ function checkMilestone(context: any, remoteData: any): any {
   if (context.config.verify_milestone_specific) {
     const issueTitle = remoteData.issue.milestone.title;
     if (VERSION_LINE_REGEX.test(issueTitle)) {
-      return failResult(CHECK_TYPE,
+      return shared.failResult(CHECK_TYPE,
         `Issue #${context.issueNumber} milestone '${issueTitle}' is a release line; narrow to a specific version (e.g. ${issueTitle.replace(/\.x$/, ".N")}) before continuing`,
         "check_failed"
       );
     }
     if (context.prNumber && remoteData.prMilestone?.title && VERSION_LINE_REGEX.test(remoteData.prMilestone.title)) {
-      return failResult(CHECK_TYPE,
+      return shared.failResult(CHECK_TYPE,
         `PR #${context.prNumber} milestone '${remoteData.prMilestone.title}' is a release line; narrow to a specific version before continuing`,
         "check_failed"
       );
@@ -904,7 +856,7 @@ function extractCommentBody(commentBody: any): any {
   return lines.slice(start, end).join("\n");
 }
 
-function buildExpectedTaskBody(taskContent: any): any {
+function buildExpectedTaskBody(taskContent: any, shared: VerificationShared): any {
   const frontmatterMatch = taskContent.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!frontmatterMatch) {
     return sanitizeCommentContent(taskContent.trim());
@@ -915,7 +867,7 @@ function buildExpectedTaskBody(taskContent: any): any {
     return null;
   }
   return [
-    buildTaskFrontmatterSummary(),
+    buildTaskFrontmatterSummary(shared),
     "",
     renderSafeCodeFence(frontmatterMatch[0].trim(), "yaml"),
     "",
@@ -925,8 +877,8 @@ function buildExpectedTaskBody(taskContent: any): any {
   ].join("\n").trim();
 }
 
-function buildTaskFrontmatterSummary(): any {
-  const language = loadProjectLanguage();
+function buildTaskFrontmatterSummary(shared: VerificationShared): any {
+  const language = loadProjectLanguage(shared);
   if (language === "en" || language === "en-US") {
     return "<details><summary>Metadata (frontmatter)</summary>";
   }
@@ -934,13 +886,13 @@ function buildTaskFrontmatterSummary(): any {
   return "<details><summary>元数据 (frontmatter)</summary>";
 }
 
-function loadProjectLanguage(): any {
+function loadProjectLanguage(shared: VerificationShared): any {
   const override = process.env.VALIDATE_ARTIFACT_LANGUAGE;
-  if (!isBlank(override)) {
+  if (!shared.isBlank(override)) {
     return String(override).trim();
   }
 
-  const configPath = path.join(repoRoot, ".agents", ".airc.json");
+  const configPath = path.join(shared.repoRoot, ".agents", ".airc.json");
   if (!fs.existsSync(configPath)) {
     return "";
   }
@@ -1077,8 +1029,8 @@ function formatLabelList(labels: any): any {
   return labels.length > 0 ? labels.join(", ") : "none";
 }
 
-function computeExpectedInLabels(taskDir: any, repositoryLabels: string[] = [], mappingOverride?: Record<string, string[]>): any {
-  const task = loadTask(taskDir);
+function computeExpectedInLabels(taskDir: any, repositoryLabels: string[], mappingOverride: Record<string, string[]> | undefined, shared: VerificationShared): any {
+  const task = shared.loadTask(taskDir);
   if (!task.ok) {
     return task;
   }
@@ -1113,8 +1065,8 @@ function computeExpectedInLabels(taskDir: any, repositoryLabels: string[] = [], 
   return { ok: true, labels: planned.target, mode: "mapped" };
 }
 
-function loadInLabelMapping(): any {
-  const configPath = path.join(repoRoot, ".agents", ".airc.json");
+function loadInLabelMapping(shared: VerificationShared): any {
+  const configPath = path.join(shared.repoRoot, ".agents", ".airc.json");
   if (!fs.existsSync(configPath)) {
     return { ok: true, value: {} };
   }
@@ -1147,13 +1099,13 @@ function gitText(args: any, cwd: any): any {
 }
 
 function resolvePrHeadSha(context: any): any {
-  const fallback = () => withRetry(() => gitText(["rev-parse", "HEAD"], context.taskDir));
+  const fallback = () => gitText(["rev-parse", "HEAD"], context.taskDir);
   const branch = String(context.task?.metadata?.branch || "").trim();
   if (!branch) {
     return fallback();
   }
 
-  const worktreeList = withRetry(() => gitText(["worktree", "list", "--porcelain"], context.taskDir));
+  const worktreeList = gitText(["worktree", "list", "--porcelain"], context.taskDir);
   if (!worktreeList.ok) {
     return fallback();
   }
@@ -1163,7 +1115,7 @@ function resolvePrHeadSha(context: any): any {
     return fallback();
   }
 
-  const headInWorktree = withRetry(() => gitText(["rev-parse", "HEAD"], matchedWorktree));
+  const headInWorktree = gitText(["rev-parse", "HEAD"], matchedWorktree);
   if (!headInWorktree.ok) {
     return fallback();
   }
@@ -1189,10 +1141,6 @@ function findWorktreeForBranch(porcelainOutput: any, branch: any): any {
   }
 
   return null;
-}
-
-function withRetry(operation: any): any {
-  return operation();
 }
 
 function interpolate(template: any, taskDir: any, artifactFile: any): any {

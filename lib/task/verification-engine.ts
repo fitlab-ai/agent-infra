@@ -38,6 +38,7 @@ import { validateLocalArtifact } from "./local-artifact-finalization.ts";
 import { validateQualificationAudit } from "./qualification-audit.ts";
 import { getArtifactSchema } from "./artifact-schema.ts";
 import { inspectArtifactContract } from "./artifact-operations.ts";
+import type { VerificationShared } from "./verification-types.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -88,7 +89,7 @@ const WORKFLOW_WARNING_SEVERITIES = new Set(["IMPORTANT", "ACTION_REQUIRED"]);
 const WORKFLOW_WARNING_ID_PATTERN = /^WW-\d+$/;
 
 const scriptPath = fileURLToPath(import.meta.url);
-let repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
+const defaultRepoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
 
 const PLATFORM_ADAPTERS: Record<string, (context: any, shared: any) => any> = {
   "platform-sync": checkPlatformSync,
@@ -389,7 +390,7 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
 
 // === Check Functions ===
 
-function checkTaskMeta({ taskDir, config }: any): any {
+function checkTaskMeta({ taskDir, config, repositoryRoot }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("task-meta", task.message);
@@ -427,7 +428,7 @@ function checkTaskMeta({ taskDir, config }: any): any {
     }
   }
 
-  const branchValidationError = validateTaskBranch(metadata);
+  const branchValidationError = validateTaskBranch(metadata, repositoryRoot);
   if (branchValidationError) {
     return failResult("task-meta", branchValidationError);
   }
@@ -552,12 +553,12 @@ async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): 
   return passResult('required-pr-delivery', `Pull request delivery policy satisfied (${status})`);
 }
 
-function validateTaskBranch(metadata: any): any {
+function validateTaskBranch(metadata: any, repoRoot: string): any {
   if (isBlank(metadata.branch)) {
     return null;
   }
 
-  const projectName = loadProjectName();
+  const projectName = loadProjectName(repoRoot);
   const expectedPrefix = projectName ? `${projectName}-${metadata.type}-` : "";
 
   if (expectedPrefix && !String(metadata.branch).startsWith(expectedPrefix)) {
@@ -572,7 +573,7 @@ function validateTaskBranch(metadata: any): any {
   return null;
 }
 
-function loadProjectName(): any {
+function loadProjectName(repoRoot: string): any {
   const configPath = path.join(repoRoot, ".agents", ".airc.json");
   if (!fs.existsSync(configPath)) {
     return "";
@@ -1017,7 +1018,7 @@ function validateWorkflowWarnings(content: any): any {
   return errors;
 }
 
-function resolveReviewSetting(config: any, key: any, fallback: any): any {
+function resolveReviewSetting(config: any, key: any, fallback: any, repoRoot: string): any {
   if (config && config[key] !== undefined && config[key] !== null) {
     return config[key];
   }
@@ -1028,7 +1029,7 @@ function resolveReviewSetting(config: any, key: any, fallback: any): any {
   return fallback;
 }
 
-function checkReviewLedger({ taskDir, config }: any): any {
+function checkReviewLedger({ taskDir, config, repositoryRoot }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("review-ledger", task.message);
@@ -1049,7 +1050,7 @@ function checkReviewLedger({ taskDir, config }: any): any {
   }
 
   const stageScope = Array.isArray(config.stage_scope) ? config.stage_scope : null;
-  const maxRounds = Number(resolveReviewSetting(config, "maxHandshakeRounds", DEFAULT_MAX_HANDSHAKE_ROUNDS));
+  const maxRounds = Number(resolveReviewSetting(config, "maxHandshakeRounds", DEFAULT_MAX_HANDSHAKE_ROUNDS, repositoryRoot));
   const problems = [];
   let inScopeCount = 0;
 
@@ -1170,7 +1171,7 @@ function checkManualValidation({ taskDir }: any): any {
   return passResult("manual-validation", `Manual validation completed → ${artifactName}`);
 }
 
-async function checkPostReviewCommit({ taskDir, config }: any): Promise<any> {
+async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): Promise<any> {
   const reviewArtifact = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!reviewArtifact.ok) {
     if (reviewArtifact.error) return failResult("post-review-commit", `Review-code artifact is unavailable: ${reviewArtifact.error}`);
@@ -1190,7 +1191,7 @@ async function checkPostReviewCommit({ taskDir, config }: any): Promise<any> {
   if (factRead.status === 'invalid') return failResult("post-review-commit", factRead.error.message);
   const fact = factRead.status === 'valid' ? factRead.fact : null;
   const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
-  const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repoRoot));
+  const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repositoryRoot));
   const hasPullRequest = fact?.state === 'bound';
   let inspected: Awaited<ReturnType<typeof inspectPlatformPullRequest>> | null = null;
   if (hasPullRequest) {
@@ -1364,7 +1365,7 @@ function resolvePostReviewExemption(content: string):
   }
 }
 
-function checkReviewFact({ taskDir, artifactFile }: any): any {
+function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
   const resolvedArtifact = resolveArtifactPath(
     taskDir,
     "review-code.md|review-code-r{N}.md",
@@ -1448,7 +1449,7 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
       mode: "worktree",
       baseline,
       diffBase,
-      globs: resolvePostReviewGlobs({}, loadPostReviewConfig(repoRoot))
+      globs: resolvePostReviewGlobs({}, loadPostReviewConfig(repositoryRoot))
     });
   } catch {
     return blockedResult(
@@ -1742,14 +1743,14 @@ function isBlank(value: any): any {
 }
 
 async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot }: any): Promise<any> {
-  if (repositoryRoot) repoRoot = path.resolve(repositoryRoot);
-  else {
+  let repoRoot = repositoryRoot ? path.resolve(repositoryRoot) : defaultRepoRoot;
+  if (!repositoryRoot) {
     let cursor = path.resolve(taskDir);
     while (path.dirname(cursor) !== cursor && !fs.existsSync(path.join(cursor, ".agents"))) cursor = path.dirname(cursor);
     if (fs.existsSync(path.join(cursor, ".agents"))) repoRoot = cursor;
   }
   const verifyConfig = loadVerificationConfig(repoRoot, skillName);
-  const shared = { ...sharedUtils, repoRoot };
+  const shared: VerificationShared = { ...sharedUtils, repoRoot };
   if (mode === "gate") {
     const checks = [];
     for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
