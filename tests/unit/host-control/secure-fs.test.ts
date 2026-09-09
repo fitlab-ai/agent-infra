@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   SecureFileError,
   readStableFile,
+  readStableFileSync,
   writeAtomicFile
 } from '../../../lib/host-control/secure-fs.ts';
 import { onPlatforms } from '../../helpers.ts';
@@ -24,6 +25,19 @@ test('readStableFile binds digest and validation to one descriptor buffer', asyn
   assert.equal(result.sha256.length, 64);
   assert.equal(result.stat.isFile(), true);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('bounded readers reject oversized files and mismatched digests', async () => {
+  const root = testRoot('host-control-secure-fs-bounds-');
+  const candidate = path.join(root, 'code.md');
+  fs.writeFileSync(candidate, 'hello\n');
+  try {
+    for (const options of [{ maxBytes: 5 }, { maxBytes: 6, expectedSha256: '0'.repeat(64) }]) {
+      assert.throws(() => readStableFileSync(candidate, options), { code: 'TASK_ARTIFACT_WRITE_CONFLICT' });
+      await assert.rejects(readStableFile(candidate, options), { code: 'TASK_ARTIFACT_WRITE_CONFLICT' });
+    }
+    assert.equal(readStableFileSync(candidate, { maxBytes: 6 }).bytes.toString('utf8'), 'hello\n');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('readStableFile rejects a symlink terminal', onPlatforms('linux', 'darwin'), async () => {

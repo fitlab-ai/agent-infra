@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+import { parseReviewSummary } from '../../../lib/task/review-artifacts.ts';
 import { readArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
 import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../../lib/task/local-artifact-finalization.ts';
 import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-executor.ts';
@@ -26,6 +28,7 @@ function fixture() {
   fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis\n');
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---
 id: ${taskId}
+agent_infra_version: v0.9.15-alpha.0
 current_step: requirement-analysis-review
 ---
 # Task
@@ -40,6 +43,7 @@ current_step: requirement-analysis-review
 - 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started
 - 2026-01-01 00:00:00+00:00 — **Review Analysis (Round 1) [started]** by codex — started
 `);
+  fs.copyFileSync(path.join(taskDir, 'task.md'), path.join(projection, 'task.md'));
   const manifest = {
     repoRoot: root, worktreeRoot: root, mode: 'task-bound', taskId, generation: 'generation-1',
     controlRootId: 'a'.repeat(96), taskProjectionDir: projection,
@@ -69,6 +73,27 @@ test('authorized workflow executor owns the command worker without redispatching
     assert.equal(result.exitCode, 0, result.stdout);
     assert.equal(dispatched, false);
     assert.equal(JSON.parse(result.stdout).entityId, 'HD-1');
+    fs.writeFileSync(path.join(f.projection, 'plan.md'), 'Unpublished draft\n');
+    const mutation = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
+      'task-ledger', [taskId, 'finding-upsert', '--stage', 'analysis', '--review-artifact', 'review-analysis.md',
+        '--ordinal', '1', '--severity', 'major', '--evidence', 'review-analysis.md#finding-1'], taskId, f.manifest.generation
+    ));
+    assert.equal(mutation.exitCode, 0, mutation.stdout);
+    assert.equal(fs.readFileSync(path.join(f.projection, 'task.md'), 'utf8'), fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'));
+    assert.equal(fs.readFileSync(path.join(f.projection, 'plan.md'), 'utf8'), 'Unpublished draft\n');
+    const outside = path.join(f.root, 'outside.md');
+    fs.writeFileSync(outside, 'Unrelated file\n');
+    fs.unlinkSync(path.join(f.projection, 'task.md'));
+    fs.symlinkSync(outside, path.join(f.projection, 'task.md'));
+    const refreshFailure = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
+      'task-ledger', [taskId, 'finding-upsert', '--stage', 'analysis', '--review-artifact', 'review-analysis.md',
+        '--ordinal', '2', '--severity', 'major', '--evidence', 'review-analysis.md#finding-2'], taskId, f.manifest.generation
+    ));
+    assert.equal(refreshFailure.exitCode, 1);
+    assert.equal(JSON.parse(refreshFailure.stdout).changed, null);
+    assert.match(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), /\| AN-2 \|/u);
+    assert.equal(fs.readlinkSync(path.join(f.projection, 'task.md')), outside);
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'Unrelated file\n');
   } finally {
     if (previous === undefined) delete process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
     else process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = previous;
@@ -101,12 +126,45 @@ for (const family of ['plan', 'review-analysis'] as const) {
       assert.equal(result.body.changed, true);
       assert.ok(fs.readFileSync(path.join(f.taskDir, artifact), 'utf8').length > 0);
       assert.match(result.body.artifactSha256, /^[a-f0-9]{64}$/u);
+      const projected = fs.readFileSync(path.join(f.projection, artifact));
+      assert.equal(createHash('sha256').update(projected).digest('hex'), result.body.artifactSha256);
+      assert.deepEqual(projected, fs.readFileSync(path.join(f.taskDir, artifact)));
       if (family === 'plan') assert.equal(readArtifactRepairIntent(f.root, taskId, family, artifact)?.state, 'passed');
       const repeated = await f.run(command, [...args, '--artifact', artifact]);
       assert.equal(repeated.exitCode, 0, repeated.stdout);
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   });
 }
+
+test('summary feedback preserves a concurrent candidate edit and reports the committed publication', onPlatforms('linux', 'darwin'), async (t) => {
+  const f = fixture();
+  const artifact = 'review-analysis.md';
+  const candidate = path.join(f.projection, artifact);
+  const draft = 'New concurrent draft\n';
+  const open = fs.promises.open;
+  let edited = false;
+  t.mock.method(fs.promises, 'open', (...args: Parameters<typeof fs.promises.open>) => {
+    if (!edited && String(args[0]).startsWith(path.join(f.projection, `.${artifact}.`))) {
+      edited = true;
+      fs.writeFileSync(candidate, draft);
+    }
+    return open(...args);
+  });
+  try {
+    fs.writeFileSync(candidate, content('review-analysis'));
+    const result = await f.run('task-review', ['finalize-summary', '--stage', 'analysis', '--artifact', artifact]);
+    assert.equal(edited, true);
+    assert.equal(result.exitCode, 1, result.stdout);
+    assert.equal(result.body.changed, null);
+    assert.equal(result.body.error.code, 'TASK_ARTIFACT_WRITE_CONFLICT');
+    assert.equal(fs.readFileSync(candidate, 'utf8'), draft);
+    const published = fs.readFileSync(path.join(f.taskDir, artifact), 'utf8');
+    const summary = parseReviewSummary(published);
+    assert.equal(summary.ok, true);
+    if (summary.ok) assert.deepEqual(summary.summary.counts, { blocker: 0, major: 0, minor: 0 });
+    assert.deepEqual(fs.readdirSync(f.projection).sort(), [artifact, 'task.md']);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
 
 test('workflow rejects duplicate options and invalid candidates without replacing authoritative artifacts', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
@@ -124,6 +182,38 @@ test('workflow rejects duplicate options and invalid candidates without replacin
     assert.equal(readArtifactRepairIntent(f.root, taskId, 'plan', 'plan.md'), null);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+
+for (const operation of ['finalize-local', 'repair'] as const) {
+  test(`workflow ${operation} rejects a FIFO and releases the lock for a valid request`, onPlatforms('linux', 'darwin'), async () => {
+    const f = fixture();
+    const candidate = path.join(f.projection, 'plan.md');
+    try {
+      assert.equal(spawnSync('mkfifo', [candidate]).status, 0);
+      // A child bounds the regression itself: blocking open must not hang the test runner.
+      const script = `
+        import fs from 'node:fs';
+        import { executeTaskWorkflow } from ${JSON.stringify(new URL('../../../lib/sandbox/control/workflow-executor.ts', import.meta.url).href)};
+        import { createTaskWorkflowRequest } from ${JSON.stringify(new URL('../../../lib/sandbox/control/task-workflow.ts', import.meta.url).href)};
+        const manifest = ${JSON.stringify(f.manifest)};
+        const args = [${JSON.stringify(taskId)}, ${JSON.stringify(operation)}, '--family', 'plan', '--artifact', 'plan.md'];
+        if (${JSON.stringify(operation)} === 'repair') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
+        const rejected = await executeTaskWorkflow(manifest, createTaskWorkflowRequest('task-artifact', args, manifest.taskId, manifest.generation));
+        fs.unlinkSync(${JSON.stringify(candidate)});
+        fs.writeFileSync(${JSON.stringify(candidate)}, ${JSON.stringify(content('plan'))});
+        const valid = await executeTaskWorkflow(manifest, createTaskWorkflowRequest('task-artifact', [manifest.taskId, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md'], manifest.taskId, manifest.generation));
+        console.log(JSON.stringify({ rejected, valid }));
+      `;
+      const result = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', script], { encoding: 'utf8', timeout: 5000 });
+      assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stderr}`);
+      const { rejected, valid } = JSON.parse(result.stdout);
+      assert.equal(rejected.exitCode, 1);
+      assert.equal(JSON.parse(rejected.stdout).changed, false);
+      assert.equal(JSON.parse(rejected.stdout).error.code, operation === 'repair' ? 'ARTIFACT_REPAIR_TARGET_INVALID' : 'TASK_ARTIFACT_WRITE_CONFLICT');
+      assert.equal(valid.exitCode, 0, valid.stdout);
+      assert.equal(fs.readFileSync(path.join(f.taskDir, 'plan.md'), 'utf8'), content('plan'));
+    } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+  });
+}
 
 test('workflow initializes and repairs candidates before authoritative publication', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();

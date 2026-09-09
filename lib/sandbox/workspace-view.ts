@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeDurableFile } from '../fs/durable-write.ts';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
 import {
@@ -185,10 +186,13 @@ export function refreshSandboxTaskProjection(repoRoot: string, taskId: string, p
     const targetPath = path.join(resolvedProjection, name);
     const sourceStat = fs.lstatSync(sourcePath);
     if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_PROJECTION_SOURCE_INVALID');
-    const temporary = path.join(resolvedProjection, `.${name}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`);
-    fs.copyFileSync(sourcePath, temporary, fs.constants.COPYFILE_EXCL);
-    fs.chmodSync(temporary, 0o600);
-    fs.renameSync(temporary, targetPath);
+    try {
+      const targetStat = fs.lstatSync(targetPath);
+      if (!targetStat.isFile() || targetStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_PROJECTION_SOURCE_INVALID');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    writeDurableFile(targetPath, fs.readFileSync(sourcePath, 'utf8'), { mode: 0o600, replace: true });
   }
   return resolvedProjection;
 }

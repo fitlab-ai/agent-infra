@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { readStableFileSync } from '../host-control/secure-fs.ts';
 
 import { resolveArtifactContext, hasOpenArtifactRound } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
@@ -87,7 +88,7 @@ export function executeArtifactCommand(
   }
   if (operation === 'repair') {
     let content: string;
-    try { content = fs.readFileSync(path.join(taskDir, artifact), 'utf8'); }
+    try { content = readStableFileSync(path.join(taskDir, artifact), { maxBytes: 1024 * 1024 }).bytes.toString('utf8'); }
     catch (error) { return fail('ARTIFACT_REPAIR_TARGET_INVALID', String(error)); }
     const inspection = inspectArtifactStructure(content, schema);
     if (!inspection.repair) {

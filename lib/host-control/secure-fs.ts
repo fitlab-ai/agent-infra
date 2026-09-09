@@ -47,24 +47,33 @@ export async function readStableFile(
   candidate: string,
   options: Readonly<{ maxBytes: number; expectedSha256?: string }>
 ): Promise<StableFile> {
+  return readStableFileSync(candidate, options);
+}
+
+/** Shared bounded reader for synchronous domain commands and async workflow callers. */
+export function readStableFileSync(
+  candidate: string,
+  options: Readonly<{ maxBytes: number; expectedSha256?: string }>
+): StableFile {
   if (!path.isAbsolute(candidate)) {
     conflict('candidate path must be absolute and terminal');
   }
   assertNoSymlinkAncestors(candidate);
-  let handle: fs.promises.FileHandle | undefined;
+  let descriptor: number | undefined;
   try {
-    handle = await fs.promises.open(candidate, fs.constants.O_RDONLY | NO_FOLLOW);
-    const before = await handle.stat({ bigint: true }) as unknown as fs.BigIntStats;
+    // O_NONBLOCK lets fstat reject a FIFO even when it has no writer.
+    descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | NO_FOLLOW | (fs.constants.O_NONBLOCK ?? 0));
+    const before = fs.fstatSync(descriptor, { bigint: true });
     if (!before.isFile()) conflict('candidate is not a regular file');
     if (before.size > BigInt(options.maxBytes)) conflict('candidate exceeds the bounded read limit');
     const bytes = Buffer.alloc(Number(before.size));
     let offset = 0;
     while (offset < bytes.length) {
-      const read = await handle.read(bytes, offset, bytes.length - offset, offset);
-      if (read.bytesRead === 0) conflict('candidate reached EOF before the bounded read completed');
-      offset += read.bytesRead;
+      const bytesRead = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) conflict('candidate reached EOF before the bounded read completed');
+      offset += bytesRead;
     }
-    const after = await handle.stat({ bigint: true }) as unknown as fs.BigIntStats;
+    const after = fs.fstatSync(descriptor, { bigint: true });
     if (!sameStat(before, after)) conflict('candidate identity or metadata changed during read');
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     if (options.expectedSha256 !== undefined && sha256 !== options.expectedSha256) {
@@ -79,11 +88,11 @@ export async function readStableFile(
     }
     throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', error instanceof Error ? error.message : String(error));
   } finally {
-    await handle?.close().catch(() => undefined);
+    if (descriptor !== undefined) fs.closeSync(descriptor);
   }
 }
 
-export async function writeAtomicFile(target: string, bytes: Buffer, mode = 0o600): Promise<void> {
+export async function writeAtomicFile(target: string, bytes: Buffer, mode = 0o600, expectedSha256?: string): Promise<void> {
   const parent = path.dirname(target);
   let current = path.resolve(parent);
   while (true) {
@@ -114,7 +123,9 @@ export async function writeAtomicFile(target: string, bytes: Buffer, mode = 0o60
     await handle.chmod(mode);
     await handle.close();
     handle = undefined;
-    await fs.promises.rename(temporary, target);
+    // Check after all asynchronous preparation; keep the final check/rename adjacent.
+    if (expectedSha256 !== undefined) readStableFileSync(target, { maxBytes: 1024 * 1024, expectedSha256 });
+    fs.renameSync(temporary, target);
     const directory = await fs.promises.open(parent, fs.constants.O_RDONLY | DIRECTORY);
     try { await directory.sync(); } finally { await directory.close(); }
   } finally {
