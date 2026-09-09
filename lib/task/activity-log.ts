@@ -1,4 +1,4 @@
-import { scanVisibleMarkdown } from './decision-details.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 const ENTRY_RE = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) — \*\*(.+?)\*\* by (.+?) — (.*)$/;
 const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 const ABORTED_SUFFIX_RE = /\s*\[aborted\]\s*$/;

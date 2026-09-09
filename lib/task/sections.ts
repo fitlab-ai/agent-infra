@@ -1,4 +1,5 @@
 import type { FrontmatterScalar } from './frontmatter.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -93,12 +94,14 @@ function parseTable(
     throw new DocumentMutationError('TASK_DOCUMENT_INVALID', 'table section is ambiguous');
   }
   const section = sections[0]!;
+  const visibleStarts = new Set(scanVisibleMarkdown(content).lines.map((line) => line.start));
   const sectionLines = linesOf(content).filter(
     (line) => line.start >= section.bodyStart && line.start < section.end
   );
   const firstContent = sectionLines.findIndex((line) => line.text.trim() !== '');
   const tables: number[] = [];
   for (let index = 0; index + 1 < sectionLines.length; index += 1) {
+    if (!visibleStarts.has(sectionLines[index]!.start) || !visibleStarts.has(sectionLines[index + 1]!.start)) continue;
     const header = splitTableCells(sectionLines[index]!.text);
     const separator = splitTableCells(sectionLines[index + 1]!.text);
     if (!header || !separator || header.cells.length !== input.columns.length) continue;
@@ -173,20 +176,14 @@ function documentEol(content: string): '\n' | '\r\n' {
 
 function matchingSections(content: string, aliases: readonly string[]) {
   const allowed = new Set(aliases);
-  return linesOf(content)
-    .map((line, index, lines) => {
-      const match = /^(#{2,3})\s+(.+?)\s*$/.exec(line.text);
-      if (!match?.[2] || !allowed.has(match[2])) return null;
-      const level = match[1]!.length;
-      let end = content.length;
-      for (let i = index + 1; i < lines.length; i += 1) {
-        const nextHeading = /^(#{2,3})\s+/.exec(lines[i]!.text);
-        if (nextHeading && nextHeading[1]!.length <= level) {
-          end = lines[i]!.start;
-          break;
-        }
-      }
-      return { heading: match[2]!, line, bodyStart: line.end, end };
+  const lines = new Map(linesOf(content).map((line) => [line.start, line]));
+  const headings = scanVisibleMarkdown(content).headings.filter((heading) => heading.level === 2 || heading.level === 3);
+  return headings
+    .map((heading, index) => {
+      if (!allowed.has(heading.text)) return null;
+      const next = headings.slice(index + 1).find((candidate) => candidate.level <= heading.level);
+      const line = lines.get(heading.start)!;
+      return { heading: heading.text, line, bodyStart: line.end, end: next?.start ?? content.length };
     })
     .filter((match): match is NonNullable<typeof match> => match !== null);
 }
@@ -351,11 +348,13 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
     );
   }
   const section = sections[0]!;
+  const visibleStarts = new Set(scanVisibleMarkdown(content).lines.map((line) => line.start));
   const sectionLines = linesOf(content).filter(
     (line) => line.start >= section.bodyStart && line.start < section.end
   );
   const tables: { headerIndex: number; cells: string[] }[] = [];
   for (let i = 0; i + 1 < sectionLines.length; i += 1) {
+    if (!visibleStarts.has(sectionLines[i]!.start) || !visibleStarts.has(sectionLines[i + 1]!.start)) continue;
     const header = splitTableCells(sectionLines[i]!.text);
     const separator = splitTableCells(sectionLines[i + 1]!.text);
     if (!header || !separator || header.cells.length !== mutation.columns.length) continue;
@@ -477,24 +476,11 @@ function mutateTableRow(content: string, mutation: TableRowMutation): TableMutat
  * lines are trimmed. Returns '' when no alias heading is present.
  */
 function extractSection(content: string, aliases: string[]): string {
-  const lines = content.split('\n');
-  let start = -1;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]!.trim();
-    if (aliases.some((alias) => new RegExp(`^##\\s+${escapeRegExp(alias)}\\s*$`).test(line))) {
-      start = i + 1;
-      break;
-    }
-  }
-  if (start === -1) return '';
-  let end = lines.length;
-  for (let i = start; i < lines.length; i += 1) {
-    if (/^##\s+/.test(lines[i]!)) {
-      end = i;
-      break;
-    }
-  }
-  return lines.slice(start, end).join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+  const headings = scanVisibleMarkdown(content).headings.filter((heading) => heading.level === 2);
+  const index = headings.findIndex((heading) => aliases.includes(heading.text));
+  if (index === -1) return '';
+  return content.slice(headings[index]!.end + 1, headings[index + 1]?.start ?? content.length)
+    .replace(/^(?:\r?\n)+|(?:\r?\n)+$/g, '');
 }
 
 /**
@@ -503,10 +489,8 @@ function extractSection(content: string, aliases: string[]): string {
  * alias when none is present.
  */
 function findSectionHeading(content: string, aliases: string[]): string {
-  for (const alias of aliases) {
-    if (new RegExp(`^##\\s+${escapeRegExp(alias)}\\s*$`, 'm').test(content)) return alias;
-  }
-  return aliases[0]!;
+  const headings = scanVisibleMarkdown(content).headings.filter((heading) => heading.level === 2);
+  return aliases.find((alias) => headings.some((heading) => heading.text === alias)) ?? aliases[0]!;
 }
 
 /**
@@ -518,24 +502,12 @@ function findSectionHeading(content: string, aliases: string[]): string {
  * and trailing blank lines are trimmed. Returns '' when no match is present.
  */
 function extractSubSection(content: string, headingPrefix: string): string {
-  const lines = content.split('\n');
-  const headRe = new RegExp(`^###\\s+${escapeRegExp(headingPrefix)}(?![\\w-])`);
-  let start = -1;
-  for (let i = 0; i < lines.length; i += 1) {
-    if (headRe.test(lines[i]!.trim())) {
-      start = i;
-      break;
-    }
-  }
-  if (start === -1) return '';
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^###?\s+/.test(lines[i]!)) {
-      end = i;
-      break;
-    }
-  }
-  return lines.slice(start, end).join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+  const headings = scanVisibleMarkdown(content).headings.filter((heading) => heading.level === 2 || heading.level === 3);
+  const headRe = new RegExp(`^${escapeRegExp(headingPrefix)}(?![\\w-])`);
+  const index = headings.findIndex((heading) => heading.level === 3 && headRe.test(heading.text));
+  if (index === -1) return '';
+  return content.slice(headings[index]!.start, headings[index + 1]?.start ?? content.length)
+    .replace(/^(?:\r?\n)+|(?:\r?\n)+$/g, '');
 }
 
 export {

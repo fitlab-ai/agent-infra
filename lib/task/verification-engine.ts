@@ -29,6 +29,8 @@ import type { LedgerRow } from "./ledger.ts";
 import { isValidAgentInfraVersion } from "../version.ts";
 import { equalCounts, parseReviewSummary } from "./review-artifacts.ts";
 import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
+import { parseImplementationInputs, type ImplementationInput } from "./implementation-inputs.ts";
+import { scanVisibleMarkdown } from "./markdown.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
 import { inspectActivityLog } from "./activity-log.ts";
@@ -645,24 +647,11 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const artifactPath = path.join(taskDir, artifactFile);
   if (!safeStat(artifactPath)?.isFile()) return failResult("implementation-input", `Artifact not found: ${artifactFile}`);
 
-  const inputSection = getSectionContent(task.content, ["实现输入", "Implementation Inputs"]);
-  const rows = [];
-  if (inputSection) {
-    const table = inputSection.split(/\r?\n/).filter((line: any) => line.trim().startsWith("|"));
-    const cells = (line: any) => line.split("|").slice(1, -1).map((cell: any) => cell.trim());
-    const expected = ["id", "ledger_id", "decision_evidence", "stage", "needs_implementation", "decided_at", "status", "consumed_by"];
-    if (table.length < 2 || JSON.stringify(cells(table[0])) !== JSON.stringify(expected)) {
-      return failResult("implementation-input", "Implementation Inputs table schema is invalid");
-    }
-    const seen = new Set();
-    for (const line of table.slice(2)) {
-      const row = cells(line);
-      if (row.length !== 8 || !/^II-[1-9]\d*$/.test(row[0]) || seen.has(row[0])) {
-        return failResult("implementation-input", "Implementation Inputs table contains an invalid or duplicate id");
-      }
-      seen.add(row[0]);
-      rows.push({ id: row[0], ledgerId: row[1], evidence: row[2], stage: row[3], needs: row[4], status: row[6], consumedBy: row[7] });
-    }
+  let rows: ImplementationInput[];
+  try {
+    rows = parseImplementationInputs(task.content).rows;
+  } catch (error) {
+    return failResult("implementation-input", `Invalid Implementation Inputs: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const doneActions = (inspectActivityLog(task.content).section?.entries ?? [])
@@ -693,10 +682,10 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const matches = rows.filter((row) => row.id === actionDecision);
   if (matches.length !== 1) return failResult("implementation-input", `${actionDecision} is missing or duplicated in task table`);
   const row = matches[0]!;
-  if (row.stage !== "code" || row.needs !== "true" || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.evidence) {
+  if (row.stage !== "code" || !row.needsImplementation || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.decisionEvidence) {
     return failResult("implementation-input", `${actionDecision} is not a consumed input for ${artifactFile}`);
   }
-  if (reportLedger !== row.ledgerId || reportEvidence !== row.evidence) {
+  if (reportLedger !== row.ledgerId || reportEvidence !== row.decisionEvidence) {
     return failResult("implementation-input", `${actionDecision} report identity does not match task table evidence`);
   }
   return passResult("implementation-input", `${actionDecision} matches Activity Log, report, and task table`);
@@ -1345,46 +1334,13 @@ function resolveArtifactPath(taskDir: any, filePattern: any, artifactFile: any):
   return { ok: true, path: path.join(taskDir, matches[0]!.fileName) };
 }
 
-function getSectionContent(content: any, names: any): any {
-  const lines = content.split(/\r?\n/);
-
-  function visibleHeadings(): any {
-    const headings = [];
-    let fence = null;
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      if (fence) {
-        const closer = line.match(/^ {0,3}(`+|~+)\s*$/);
-        if (closer && closer[1][0] === fence.character && closer[1].length >= fence.length) {
-          fence = null;
-        }
-        continue;
-      }
-      const opener = line.match(/^ {0,3}(`{3,}|~{3,})(?:[^`~].*)?$/);
-      if (opener) {
-        fence = { character: opener[1][0], length: opener[1].length };
-        continue;
-      }
-      if (line.startsWith("## ")) {
-        headings.push({ index, text: line.trim() });
-      }
-    }
-    return headings;
-  }
-
-  const headings = visibleHeadings();
-
+function getSectionContent(content: string, names: readonly string[]): string {
+  const headings = scanVisibleMarkdown(content).headings.filter((heading) => heading.level === 2);
   for (const name of names) {
-    const heading = `## ${name}`;
-    const position = headings.findIndex((item: any) => item.text === heading);
-    if (position === -1) {
-      continue;
-    }
-    const startIndex = headings[position]!.index;
-    const endIndex = headings[position + 1]?.index ?? lines.length;
-    return lines.slice(startIndex + 1, endIndex).join("\n").trim();
+    const position = headings.findIndex((heading) => heading.text === name);
+    if (position === -1) continue;
+    return content.slice(headings[position]!.end + 1, headings[position + 1]?.start ?? content.length).replace(/\r\n/g, "\n").trim();
   }
-
   return "";
 }
 

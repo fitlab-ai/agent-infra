@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 
-import { inspectDecisionDetailDuplicates, scanVisibleMarkdown } from './decision-details.ts';
+import { inspectDecisionDetailDuplicates } from './decision-details.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 import { validateCompletedArtifact } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';

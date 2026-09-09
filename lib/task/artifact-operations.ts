@@ -3,7 +3,7 @@ import { parseArtifactName } from './artifact-name.ts';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-import { scanVisibleMarkdown } from './decision-details.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import { readArtifactRepairIntent } from './artifact-repair-intent.ts';
 import {

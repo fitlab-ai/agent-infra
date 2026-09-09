@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { scanVisibleMarkdown } from './decision-details.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 
 type ReviewFindingCounts = {
   blocker: number;
