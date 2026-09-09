@@ -1,5 +1,7 @@
 import type { PlatformClient as GitHubClient } from './context.ts';
-import type { PlatformIssueSnapshot as IssueSnapshot, PlatformChangeRequestSnapshot as PullRequestSnapshot, PlatformCheckSnapshot as CheckSnapshot } from './adapters.ts';
+import type { PlatformIssueSnapshot as IssueSnapshot, PlatformChangeRequestSnapshot as PullRequestSnapshot } from './snapshots.ts';
+import type { RequiredCheckSnapshot } from './provider-contract.ts';
+import { checkStatusBucket } from './check-status.ts';
 
 type RemoteIssue = {
   number?: number;
@@ -271,27 +273,16 @@ function inspectGitHubPullRequest(client: GitHubClient, repository: string, numb
     : { ok: false as const, error: { code: 'PR_IDENTITY_INVALID', message: 'Remote resource is not a valid pull request', retryable: false } };
 }
 
-function normalizeBucket(value: { bucket?: string; status?: string; state?: string; conclusion?: string }): CheckSnapshot['bucket'] {
-  const raw = String(value.bucket || value.status || value.conclusion || value.state || '').toLowerCase();
-  if (['pass', 'success', 'successful', 'neutral'].includes(raw)) return 'pass';
-  if (['fail', 'failure', 'failed', 'error', 'timed_out', 'action_required'].includes(raw)) return 'fail';
-  if (['cancel', 'cancelled', 'canceled', 'skipped', 'stale'].includes(raw)) return 'cancel';
-  return 'pending';
-}
-
-function normalizeChecks(value: unknown): CheckSnapshot[] {
+function normalizeGitHubChecks(value: unknown): RequiredCheckSnapshot[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((raw) => {
     const item = raw as Record<string, unknown>;
     const name = String(item.name || item.context || '');
     return name ? [{
       name,
-      bucket: normalizeBucket(item as { bucket?: string; state?: string; conclusion?: string }),
-      workflow: item.workflow ? String(item.workflow) : null,
+      status: checkStatusBucket(String(item.bucket || item.status || item.conclusion || item.state || '')),
       conclusion: item.conclusion ? String(item.conclusion) : item.state ? String(item.state) : null,
-      detailsUrl: item.link ? String(item.link) : item.detailsUrl ? String(item.detailsUrl) : null,
-      startedAt: item.startedAt ? String(item.startedAt) : null,
-      completedAt: item.completedAt ? String(item.completedAt) : null
+      detailsUrl: item.link ? String(item.link) : item.detailsUrl ? String(item.detailsUrl) : null
     }] : [];
   });
 }
@@ -302,7 +293,7 @@ function inspectGitHubRequiredChecks(client: GitHubClient, repository: string, n
     '--json', 'name,state,bucket,link,workflow,startedAt,completedAt'
   ], { cwd });
   return inspected.ok
-    ? { ok: true as const, value: normalizeChecks(inspected.value) }
+    ? { ok: true as const, value: normalizeGitHubChecks(inspected.value) }
     : { ok: false as const, error: inspected.error };
 }
 
@@ -327,5 +318,5 @@ function fetchCheckLogText(client: GitHubClient, args: string[], cwd: string) {
   return client.text([...args, '--allow-escape-sequences'], { cwd });
 }
 
-export { ISSUE_FIELDS_QUERY, graphState, inspectGitHubIssue, normalizePullRequest, inspectGitHubIssueClosingChangeRequests, inspectGitHubPullRequest, normalizeChecks, inspectGitHubRequiredChecks, parseRunJobIdentity, fetchCheckLogText };
+export { ISSUE_FIELDS_QUERY, graphState, inspectGitHubIssue, normalizePullRequest, inspectGitHubIssueClosingChangeRequests, inspectGitHubPullRequest, inspectGitHubRequiredChecks, parseRunJobIdentity, fetchCheckLogText };
 export type { IssueFieldSchema, RemotePullRequest };

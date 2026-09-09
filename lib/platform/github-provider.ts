@@ -31,7 +31,6 @@ import type {
   RepositoryMetadataSnapshot,
   ReleaseSnapshot,
   RemoteCommentSnapshot,
-  RequiredCheckSnapshot,
   ReviewSnapshot,
   SecurityAlertKind,
   SecurityAlertSnapshot,
@@ -791,9 +790,7 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
     async inspectRequired({ context, changeRequest }) {
       const number = resourceIdentityNumber(changeRequest);
       if (!number) return invalid('PR_NUMBER_INVALID', 'Pull request number must be positive');
-      const fetched = inspectGitHubRequiredChecks(client, repository(context), number, context.workingDirectory);
-      if (!fetched.ok) return fetched;
-      return { ok: true, value: fetched.value.map((check: any): RequiredCheckSnapshot => ({ name: check.name, status: check.bucket, conclusion: check.conclusion, detailsUrl: check.detailsUrl })) };
+      return inspectGitHubRequiredChecks(client, repository(context), number, context.workingDirectory);
     },
     async resolveRun({ context, changeRequest, checkName, detailsUrl }) {
       const number = resourceIdentityNumber(changeRequest);

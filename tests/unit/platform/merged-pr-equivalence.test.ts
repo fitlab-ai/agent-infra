@@ -5,14 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import {
-  inspectPlatformChangeRequest,
-  registerPlatformAdapter
-} from "../../../lib/platform/adapters.ts";
 import { resolveReviewedHeadRelation } from "../../../lib/platform/merged-pr-equivalence.ts";
+import { inspectPlatformPullRequestByNumber } from "../../../lib/platform/pull-requests.ts";
 import type { PullRequestSnapshot } from "../../../lib/platform/pull-requests.ts";
-import { platformResult } from "../../../lib/platform/types.ts";
-import { gitSafeEnv } from "../../helpers.ts";
+import { filePath, gitSafeEnv } from "../../helpers.ts";
 
 function git(root: string, args: string[]): string {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8", env: gitSafeEnv() });
@@ -113,31 +109,29 @@ test("accepts an equivalent squash after the target advances in the same file", 
   }
 });
 
-test("accepts a normalized squash snapshot supplied by a custom platform adapter", () => {
+test("accepts a normalized squash snapshot supplied by a custom platform provider", async () => {
   const f = fixture();
   try {
-    registerPlatformAdapter({
-      type: "custom-merge-test",
-      resolveContext() {
-        return platformResult("no-op", {
-          platform: { type: "custom-merge-test", repository: "o/r", currentUser: "reviewer" }
-        });
-      },
-      inspectChangeRequest() {
-        return { ok: true, value: f.pullRequest };
+    fs.mkdirSync(path.join(f.root, ".agents"));
+    fs.writeFileSync(path.join(f.root, ".agents", ".airc.json"), JSON.stringify({
+      platform: {
+        type: "custom-merge-test",
+        providers: {
+          "custom-merge-test": {
+            source: filePath("tests/fixtures/platform-providers/remote-evidence-provider.mjs"),
+            config: { pullRequests: { "1": f.pullRequest } }
+          }
+        }
       }
-    });
-    const inspected = inspectPlatformChangeRequest("custom-merge-test", {
-      cwd: f.root,
-      repository: "o/r",
-      number: 1
-    });
-    assert.equal(inspected.ok, true);
+    }));
+    const inspected = await inspectPlatformPullRequestByNumber(1, { cwd: f.root });
+    assert.equal(inspected.status, "no-op", JSON.stringify(inspected.error));
+    assert.ok(inspected.pullRequest);
     assert.deepEqual(resolveReviewedHeadRelation({
       gitRoot: f.root,
       comparisonHead: f.merge,
       lastReviewedCommit: f.head,
-      pullRequest: inspected.value!
+      pullRequest: inspected.pullRequest
     }), {
       status: "merged-equivalent",
       reviewedHead: f.head,

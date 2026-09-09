@@ -32,6 +32,7 @@ import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
+import type { OrchestrationRun } from "./orchestration.ts";
 import { resolveDeliveryTarget } from "./delivery-target.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
@@ -161,7 +162,7 @@ function checkOrchestrationState({ taskDir }: any): any {
   const file = path.join(taskDir, 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-state', 'orchestration.json is missing');
-  let run: any;
+  let run: OrchestrationRun | null;
   try {
     run = readRun(taskDir);
   } catch (error) {
@@ -193,18 +194,16 @@ function exactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value;
 }
 
-function validateCleanCompletionEvidence(run: any): string | null {
+function validateCleanCompletionEvidence(run: OrchestrationRun): string | null {
   const evidence = run.completionEvidence;
   const shaPattern = /^[0-9a-f]{40}$/i;
   if (
-    evidence?.kind !== 'reviewed-head-clean'
-    || !exactText(evidence.observedAt)
+    !evidence
     || Number.isNaN(Date.parse(evidence.observedAt))
     || !shaPattern.test(evidence.head)
     || !shaPattern.test(evidence.headTree)
     || !shaPattern.test(evidence.worktreeTree)
     || !shaPattern.test(evidence.lastReviewedCommit)
-    || !(evidence.prNumber === null || (Number.isInteger(evidence.prNumber) && evidence.prNumber > 0))
     || !(evidence.prHead === null || shaPattern.test(evidence.prHead))
   ) {
     return 'Clean completion evidence has an invalid structure';
@@ -221,8 +220,7 @@ function validateCleanCompletionEvidence(run: any): string | null {
     || run.pendingDelegation !== null
     || run.commitAuthorization?.issuedAt !== null
     || run.commitAuthorization?.consumedAt !== null
-    || !Array.isArray(run.receipts)
-    || run.receipts.some((receipt: any) => receipt.stage === 'commit')
+    || run.receipts.some((receipt) => receipt.stage === 'commit')
   ) {
     return 'Clean completion evidence conflicts with commit delegation state';
   }
@@ -233,54 +231,16 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   const file = path.join(taskDir, 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-evidence', 'orchestration.json is missing');
-  let run: any;
+  let run: OrchestrationRun | null;
   try {
     run = readRun(taskDir);
   } catch (error) {
     const message = error instanceof OrchestrationStateError ? error.message : String(error);
     return failResult('orchestration-evidence', `Invalid orchestration.json: ${message}`);
   }
+  if (!run) return failResult('orchestration-evidence', 'orchestration.json is missing');
+  // readRun validates the persisted schema, receipt identities and client provenance.
   const policy = run.modelPolicy;
-  if (
-    !policy
-    || !exactText(policy.executor?.model)
-    || !exactText(policy.executor?.reasoningEffort)
-    || !exactText(policy.reviewer?.model)
-    || !exactText(policy.reviewer?.reasoningEffort)
-  ) {
-    return failResult('orchestration-evidence', 'Run model policy requires exact executor and reviewer model and effort');
-  }
-  if (
-    !run.modelPolicySource
-    || !['explicit', 'project-config'].includes(run.modelPolicySource.kind)
-    || !exactText(run.modelPolicySource.client)
-    || !exactText(run.modelPolicySource.resolvedAt)
-    || !Array.isArray(run.recoveryHistory)
-  ) {
-    return failResult('orchestration-evidence', 'Run model policy source or recovery history is invalid');
-  }
-  for (const recovery of run.recoveryHistory) {
-    const guards = recovery.guards;
-    const validClaudeCodeRecovery = recovery.code === 'CLIENT_CAPABILITY_ENABLED'
-      && recovery.previousStatus === 'paused'
-      && recovery.previousPause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
-      && recovery.client === 'claude-code'
-      && recovery.resultingStatus === 'running'
-      && exactText(recovery.recoveredAt)
-      && guards?.stepCount === 0
-      && guards?.nextStage === null
-      && guards?.baselineEmpty === true
-      && guards?.receiptCount === 0
-      && guards?.pendingDelegation === false
-      && guards?.commitAuthorizationUnused === true
-      && guards?.completionEvidenceAbsent === true;
-    if (!validClaudeCodeRecovery) {
-      return failResult('orchestration-evidence', 'Run recovery history contains invalid provenance');
-    }
-  }
-  if (!Array.isArray(run.receipts)) {
-    return failResult('orchestration-evidence', 'Run receipts must be an array');
-  }
   if (run.completionEvidence != null) {
     const evidenceError = validateCleanCompletionEvidence(run);
     if (evidenceError) return failResult('orchestration-evidence', evidenceError);
@@ -310,10 +270,6 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
           return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual reasoning effort`);
         }
       }
-      // parentId/childId 校验对所有 client 保持统一（不新增分支）；spawnMode 检查按 client 判断
-      if (!exactText(receipt.parentId) || !exactText(receipt.childId) || receipt.parentId === receipt.childId) {
-        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid delegation identity`);
-      }
       if (!isClaudeCode && receipt.spawnMode !== 'fresh') {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid fresh delegation identity`);
       }
@@ -339,50 +295,9 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
       ) {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated reasoning-effort fallback reason`);
       }
-      if (receipt.client === 'codex') {
-        const activatedCodex = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
-        const host = receipt.hostEvidence;
-        const provenance = receipt.lifecycleProvenance;
-        if (
-          !provenance
-          || (activatedCodex && (
-            host?.kind !== 'codex-lifecycle-v2'
-            || host.protocolVersion !== provenance.protocolVersion
-            || host.hookDefinitionHash !== provenance.hookDefinitionHash
-            || host.hookSource !== provenance.hookSource
-            || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
-            || host.hookSourceHash !== provenance.hookSourceHash
-            || host.capabilitySessionId !== provenance.capabilitySessionId
-            || receipt.parentId !== provenance.capabilitySessionId
-            || host.capabilityTurnId !== provenance.capabilityTurnId
-            || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
-            || host.controlGeneration !== provenance.controlGeneration
-            || host.spawnToolUseId === provenance.capabilityToolUseId
-            || !exactText(host.spawnToolUseId)
-            || !Number.isFinite(Date.parse(host.spawnObservedAt ?? ''))
-            || !Number.isFinite(Date.parse(receipt.spawnDispatchedAt ?? ''))
-            || !Number.isFinite(Date.parse(receipt.activationDeadlineAt ?? ''))
-            || Date.parse(host.spawnObservedAt ?? '') < Date.parse(receipt.spawnDispatchedAt ?? '')
-            || Date.parse(host.spawnObservedAt ?? '') > Date.parse(receipt.activationDeadlineAt ?? '')
-            || !exactText(host.hookDefinitionHash)
-            || !Number.isSafeInteger(host.startRevision)
-            || host.startRevision < 1
-          ))
-        ) {
-          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid Codex start evidence`);
-        }
-        if (['sealed', 'consumed'].includes(receipt.status) && (
-          !Number.isSafeInteger(host.stopRevision)
-          || host.stopRevision <= host.startRevision
-          || host.consumer !== receipt.id
-          || !exactText(host.consumedAt)
-        )) {
-          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid Codex consumed stop evidence`);
-        }
-      }
     }
   }
-  if (run.receipts.some((receipt: any) => receipt.status !== 'consumed')) {
+  if (run.receipts.some((receipt) => receipt.status !== 'consumed')) {
     return failResult('orchestration-evidence', 'Historical receipts must be consumed');
   }
   return passResult('orchestration-evidence', 'Persisted orchestration model and delegation evidence is internally consistent');

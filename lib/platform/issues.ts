@@ -1,4 +1,4 @@
-import type { PlatformIssueSnapshot as IssueSnapshot } from './adapters.ts';
+import type { PlatformIssueSnapshot as IssueSnapshot } from './snapshots.ts';
 import type { IssueFieldSchema } from './github-data.ts';
 import fs from 'node:fs';
 import path from 'node:path';

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import type { PlatformChangeRequestSnapshot } from "../../../lib/platform/adapters.ts";
+import type { PlatformChangeRequestSnapshot } from "../../../lib/platform/snapshots.ts";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { gitSafeEnv } from "../../helpers.ts";
 import { buildBoundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";

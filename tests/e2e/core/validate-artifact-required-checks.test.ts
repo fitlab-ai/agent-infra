@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { registerPlatformAdapter } from "../../../lib/platform/adapters.ts";
-import { platformResult } from "../../../lib/platform/types.ts";
+import { resolvePlatformProviderContext } from "../../../lib/platform/context.ts";
+import { filePath } from "../../helpers.ts";
 import { check, evaluateRequiredChecks } from "../../../lib/platform/verification-required.ts";
 import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 
@@ -139,26 +139,24 @@ test("required-checks skips tasks without a PR or with PR flow disabled", () => 
   }).status, "pass");
 });
 
-test("required-checks fails closed when an applicable platform adapter lacks checks inspection", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "required-checks-adapter-"));
+test("required-checks fails closed when a loaded platform provider lacks checks inspection", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "required-checks-provider-"));
   try {
     fs.mkdirSync(path.join(root, ".agents"), { recursive: true });
     fs.writeFileSync(path.join(root, ".agents", ".airc.json"), JSON.stringify({
-      platform: { type: "checks-unsupported-test" },
+      platform: {
+        type: "checks-unsupported-test",
+        providers: {
+          "checks-unsupported-test": {
+            source: filePath("tests/fixtures/platform-providers/valid-provider.mjs")
+          }
+        }
+      },
       prFlow: "required"
     }));
-    registerPlatformAdapter({
-      type: "checks-unsupported-test",
-      resolveContext() {
-        return platformResult("no-op", {
-          platform: {
-            type: "checks-unsupported-test",
-            repository: "acme/widgets",
-            currentUser: "reviewer"
-          }
-        });
-      }
-    });
+    const loaded = await resolvePlatformProviderContext({ cwd: root });
+    assert.equal(loaded.ok, true);
+    assert.equal(loaded.ok && Boolean(loaded.value.provider.checks?.inspectRequired), false);
     const result = await check({ taskDir: root }, {
       ...shared,
       repoRoot: root,
@@ -166,7 +164,12 @@ test("required-checks fails closed when an applicable platform adapter lacks che
         return { ok: true, metadata: { id: "TASK-20260101-000001", pr_delivery_fact: BOUND_FACT } };
       }
     });
-    assert.equal(result.status, "blocked");
+    assert.deepEqual(result, {
+      type: "required-checks",
+      status: "blocked",
+      message: "Platform 'checks-unsupported-test' does not provide required-checks inspection",
+      fail_type: "dependency_error"
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

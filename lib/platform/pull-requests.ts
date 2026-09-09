@@ -7,7 +7,7 @@ import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { extractSection } from '../task/sections.ts';
 import { captureTaskWriteMetadata, writeTask } from '../task/write.ts';
-import type { PlatformChangeRequestSnapshot } from './adapters.ts';
+import type { PlatformChangeRequestSnapshot } from './snapshots.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { inspectPlatformIssue } from './issues.ts';

@@ -16,7 +16,7 @@ import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
 import { providerError, providerOperationContext, providerStatus, providerResourceToken, resourceIdentityNumber, unsupportedProviderOperation } from './provider-bridge.ts';
-import type { PlatformChangeRequestSnapshot } from './adapters.ts';
+import type { PlatformChangeRequestSnapshot } from './snapshots.ts';
 import type { ChangeRequestSnapshot } from './provider-contract.ts';
 import {
   buildPrChangeReport,
