@@ -82,7 +82,7 @@ function finish(result) {
 }
 
 async function startHostControlTestService(projectRoot) {
-  if (!testRunLock?.owned) return;
+  if (!testRunLock?.owned || String(process.platform) === 'win32') return;
   const testRoot = process.platform === 'darwin'
     ? fs.realpathSync.native(os.homedir())
     : os.tmpdir();

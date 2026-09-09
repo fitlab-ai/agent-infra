@@ -33,6 +33,9 @@ const taskWorkflowCommand = command === 'task-artifact'
   || command === 'task-ledger'
   || command === 'task-invalidation'
   || command === 'task-warning';
+const localTaskControlHelp = taskControlCommand
+  && (process.argv[3] === '--help' || process.argv[3] === '-h')
+  && !process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
 
 let taskViewGuardFailed = false;
 try {
@@ -111,7 +114,7 @@ if (taskControlCommand && !hostWorker) {
     const reasonCode = transport.reasonCode ?? 'TASK_CONTROL_TRANSPORT_INVALID';
     taskControlTransportFailure(reasonCode, reasonCode.startsWith('SANDBOX_CONTROL_IDENTITY_') ? reasonCode : undefined);
   }
-  if (transport.kind === 'direct-host') {
+  if (transport.kind === 'direct-host' && !localTaskControlHelp) {
     await runHostControlCommand(command as HostControlCommand, process.argv.slice(3));
     hostControlRouted = true;
   }

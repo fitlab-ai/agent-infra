@@ -10,8 +10,12 @@ import {
   writeAtomicFile
 } from '../../../lib/host-control/secure-fs.ts';
 
+function testRoot(prefix: string): string {
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+}
+
 test('readStableFile binds digest and validation to one descriptor buffer', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-control-secure-fs-'));
+  const root = testRoot('host-control-secure-fs-');
   const candidate = path.join(root, 'code.md');
   fs.writeFileSync(candidate, 'hello\n');
   const result = await readStableFile(candidate, { maxBytes: 1024 });
@@ -22,7 +26,7 @@ test('readStableFile binds digest and validation to one descriptor buffer', asyn
 });
 
 test('readStableFile rejects a symlink terminal', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-control-secure-fs-link-'));
+  const root = testRoot('host-control-secure-fs-link-');
   const target = path.join(root, 'target.md');
   const candidate = path.join(root, 'code.md');
   fs.writeFileSync(target, 'hello\n');
@@ -34,7 +38,7 @@ test('readStableFile rejects a symlink terminal', async () => {
 });
 
 test('writeAtomicFile uses an exclusive temporary file and preserves exact bytes', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-control-secure-fs-write-'));
+  const root = testRoot('host-control-secure-fs-write-');
   const target = path.join(root, 'artifact.md');
   await writeAtomicFile(target, Buffer.from('safe\n'));
   assert.equal(fs.readFileSync(target, 'utf8'), 'safe\n');

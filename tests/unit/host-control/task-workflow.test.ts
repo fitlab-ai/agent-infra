@@ -14,6 +14,10 @@ import {
   type TaskProjectionManifest
 } from '../../../lib/sandbox/control/task-workflow.ts';
 
+function testRoot(prefix: string): string {
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+}
+
 test('task-workflow exposes a closed typed operation catalog', () => {
   assert.deepEqual([...TASK_WORKFLOW_OPERATIONS], [
     'artifact-inspect', 'artifact-finalize-local', 'review-finalize-summary', 'event',
@@ -50,7 +54,7 @@ test('task-workflow converts a CLI artifact command into a bound typed request',
 });
 
 test('artifact landing refuses an unverified projection topology before reading', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-workflow-topology-'));
+  const root = testRoot('task-workflow-topology-');
   const projection = path.join(root, 'projection');
   const authoritative = path.join(root, 'authoritative');
   fs.mkdirSync(projection);
@@ -73,7 +77,7 @@ test('artifact landing refuses an unverified projection topology before reading'
 });
 
 test('artifact landing verifies, hashes, and atomically copies the same projection bytes', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-workflow-landing-'));
+  const root = testRoot('task-workflow-landing-');
   const projection = path.join(root, 'projection');
   const authoritative = path.join(root, 'authoritative');
   fs.mkdirSync(projection);

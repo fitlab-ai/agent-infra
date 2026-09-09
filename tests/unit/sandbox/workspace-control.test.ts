@@ -64,6 +64,10 @@ import {
   resolveCodexControllerBinding
 } from '../../../lib/sandbox/control/controller-registration.ts';
 
+function testRoot(prefix: string): string {
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+}
+
 const manifest: SandboxControlManifest = {
   engine: 'docker',
   repoRoot: '/repo',
@@ -579,7 +583,7 @@ test('controller proof rejection occurs before the domain child and workspace mu
 });
 
 test('task workflow skips authoritative landing when host-control preflight is unavailable', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workflow-preflight-'));
+  const root = testRoot('sandbox-workflow-preflight-');
   const taskId = 'TASK-20260101-000001';
   const projectionRoot = path.join(root, 'projection');
   const authoritativeTaskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -637,7 +641,7 @@ test('task workflow skips authoritative landing when host-control preflight is u
 });
 
 test('task workflow treats a completed host transport with a nonzero domain result as a failure before landing', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workflow-domain-failure-'));
+  const root = testRoot('sandbox-workflow-domain-failure-');
   const taskId = 'TASK-20260101-000001';
   const projectionRoot = path.join(root, 'projection');
   const authoritativeTaskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -708,7 +712,7 @@ test('task workflow treats a completed host transport with a nonzero domain resu
 });
 
 test('task workflow rejects a completed host transport without a worker result before landing', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workflow-malformed-preflight-'));
+  const root = testRoot('sandbox-workflow-malformed-preflight-');
   const taskId = 'TASK-20260101-000001';
   const projectionRoot = path.join(root, 'projection');
   const authoritativeTaskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -771,7 +775,7 @@ test('task workflow rejects a completed host transport without a worker result b
 });
 
 test('review workflow preflight inspects the review artifact family', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-review-workflow-preflight-'));
+  const root = testRoot('sandbox-review-workflow-preflight-');
   const taskId = 'TASK-20260101-000001';
   const projectionRoot = path.join(root, 'projection');
   fs.mkdirSync(projectionRoot, { recursive: true });
