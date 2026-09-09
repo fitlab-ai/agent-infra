@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 
 import { installHostControlService, type HostControlServicePlatform } from '../../../lib/host-control/service.ts';
@@ -77,7 +78,7 @@ test('service installation hardens the unit directory that already exists', (t) 
     t.mock.method(fs, 'writeFileSync', () => undefined);
     const chmod = t.mock.method(fs, 'chmodSync', () => undefined);
     const target = installHostControlService(platform);
-    const directory = target.slice(0, target.lastIndexOf('/'));
+    const directory = path.dirname(target);
     const modes = chmod.mock.calls.map((call) => call.arguments);
     assert.ok(modes.some(([file, mode]) => file === directory && mode === 0o700),
       `${platform} should restate 0700 on the service directory`);
