@@ -12,11 +12,10 @@ import {
   createSandboxExecutorExecutionContext,
   dispatchTaskControlOperation
 } from '../../../lib/task/control-authority.ts';
-import { classifySandboxControlEnvironment } from '../../../lib/sandbox/control/client.ts';
 import { issueHumanOverride } from '../../../lib/task/human-override.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
-import { SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/internal/task-operation-registry.ts';
+import { resolveSandboxControlTransport, SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/internal/task-operation-registry.ts';
 
 const UNAVAILABLE_HOST_CONTROL_ENDPOINT = path.join(os.tmpdir(), 'agent-infra-test-host-control-unavailable.sock');
 
@@ -308,20 +307,21 @@ test('task-bound marker requires its runtime binding before entering the client'
   assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CONTROL_TRANSPORT_INVALID');
 });
 
-test('shared sandbox control environment classification is fail-closed and distinguishes workspace modes', () => {
+test('shared sandbox control transport selection is fail-closed and distinguishes workspace modes', () => {
   const base = {
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
+    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/status'
   };
-  assert.equal(classifySandboxControlEnvironment(cleanEnv()).kind, 'direct');
-  assert.equal(classifySandboxControlEnvironment(cleanEnv(base)).kind, 'controlled');
-  assert.equal(classifySandboxControlEnvironment(cleanEnv({
+  assert.equal(resolveSandboxControlTransport(cleanEnv()).kind, 'direct-host');
+  assert.equal(resolveSandboxControlTransport(cleanEnv(base)).kind, 'broker-client');
+  assert.equal(resolveSandboxControlTransport(cleanEnv({
     ...base,
     AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_RUNTIME_DIR: '/runtime'
-  })).kind, 'controlled');
+  })).kind, 'broker-client');
 
   for (const env of [
     { AGENT_INFRA_CONTROL_TOKEN: 'token' },
@@ -331,7 +331,7 @@ test('shared sandbox control environment classification is fail-closed and disti
     { ...base, AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest' },
     { ...base, AGENT_INFRA_CONTROL_CONTROLLER_BINDING: '{}' }
   ]) {
-    assert.equal(classifySandboxControlEnvironment(cleanEnv(env)).kind, 'invalid');
+    assert.equal(resolveSandboxControlTransport(cleanEnv(env)).kind, 'fail-closed');
   }
 });
 

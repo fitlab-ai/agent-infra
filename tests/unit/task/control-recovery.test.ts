@@ -12,10 +12,10 @@ import {
 const criticalPhases = [...SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES];
 
 test('recovery registry covers lifecycle, finalization, route split, and orchestration intents', () => {
-  assert.equal(findSandboxControlRecoveryOperation('task-lifecycle', 'complete')?.mutatesDomain, true);
+  assert.equal(findSandboxControlRecoveryOperation('task-lifecycle', 'complete')?.class, 'lifecycle-mutation');
   assert.equal(findSandboxControlRecoveryOperation('task-finalization', 'complete')?.class, 'finalization');
-  assert.equal(findSandboxControlRecoveryOperation('task-orchestration', 'route.read')?.mutatesDomain, false);
-  assert.equal(findSandboxControlRecoveryOperation('task-orchestration', 'route.clean-completion')?.mutatesDomain, true);
+  assert.equal(findSandboxControlRecoveryOperation('task-orchestration', 'route.read')?.class, 'read-only');
+  assert.equal(findSandboxControlRecoveryOperation('task-orchestration', 'route.clean-completion')?.class, 'route.clean-completion');
   assert.equal(digestControlRecoveryIntent('task-lifecycle', 'complete').length, 64);
 });
 
@@ -36,7 +36,7 @@ test('route clean-completion requires the completed run and reviewed-head eviden
     consistent: true, status: 'completed', pendingDelegation: null,
     completionEvidence: {
       kind: 'reviewed-head-clean', observedAt: '2026-09-07T00:00:00.000Z', head: 'head', headTree: 'tree',
-      worktreeTree: 'tree', lastReviewedCommit: 'head'
+      worktreeTree: 'tree', lastReviewedCommit: 'head', prNumber: null, prHead: null
     },
     snapshot: { head: 'head', headTree: 'tree', worktreeTree: 'tree' },
     lastReviewedCommit: 'head'
@@ -61,7 +61,7 @@ test('route clean-completion requires the completed run and reviewed-head eviden
 
 test('every registered mutation requires a matching domain contract', () => {
   for (const operation of SANDBOX_CONTROL_RECOVERY_OPERATIONS.filter((candidate) => (
-    candidate.mutatesDomain && candidate.class !== 'route.clean-completion'
+    candidate.class !== 'read-only' && candidate.class !== 'route.clean-completion'
   ))) {
     const binding = operationRecoveryBinding(
       `${operation.family}-${operation.intent}`.padEnd(32, 'x').slice(0, 32),

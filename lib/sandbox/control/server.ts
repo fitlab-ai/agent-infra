@@ -1,4 +1,5 @@
 import { finalizationTerminalResponse } from './finalization-response.ts';
+import { isDeepStrictEqual } from 'node:util';
 import { completedReentryView } from './completed-reentry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -54,6 +55,7 @@ import {
 } from './audit.ts';
 import { parseTaskControlOperation } from '../../task/control-authority.ts';
 import {
+  parseControlOutput,
   classifySandboxControlRecovery,
   findSandboxControlRecoveryOperation,
   operationRecoveryBinding,
@@ -62,7 +64,8 @@ import {
 import { readRun } from '../../task/orchestration.ts';
 import { captureRepositorySnapshot } from '../../task/workspace-snapshot.ts';
 import { parseTypedTaskFrontmatter } from '../../task/frontmatter.ts';
-import { locateHotTaskDirs, resolveTaskRef } from '../../task/resolve-ref.ts';
+import { readLifecycleJournalEvidence } from '../../task/lifecycle.ts';
+import { resolveTaskRef } from '../../task/resolve-ref.ts';
 import { loadShortIdByTaskId } from '../../task/short-id.ts';
 import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
 import {
@@ -93,14 +96,6 @@ type ActiveExecution = {
   settled: boolean;
 };
 
-function safeRealpath(value: string): string | null {
-  try {
-    return fs.realpathSync.native(value);
-  } catch {
-    return null;
-  }
-}
-
 function appendBrokerAudit(
   manifest: SandboxControlManifest,
   event: string,
@@ -117,16 +112,8 @@ function operationKey(request: SandboxControlRequest, output?: string): string |
   if (request.family !== 'task-lifecycle' && request.family !== 'task-orchestration') return null;
   if (request.family === 'task-orchestration' && request.args[1] === 'route') {
     if (!output) return 'route';
-    try {
-      const value = JSON.parse(output) as Record<string, unknown>;
-      if (value.changed === true && value.status === 'completed') return 'route.clean-completion';
-      if (value.result && typeof value.result === 'object' && !Array.isArray(value.result)
-        && (value.result as Record<string, unknown>).changed === true
-          && (value.result as Record<string, unknown>).status === 'completed') return 'route.clean-completion';
-    } catch {
-      // Keep the parsed request operation when the handler output is not JSON.
-    }
-    return 'route.read';
+    const result = parseControlOutput(output);
+    return result?.changed === true && result.status === 'completed' ? 'route.clean-completion' : 'route.read';
   }
   try {
     const operation = parseTaskControlOperation(request.family, request.args);
@@ -143,10 +130,7 @@ function recoveryOperationKey(
 ): string | null {
   const operation = operationKey(request, output);
   if (operation !== 'route') return operation;
-  const routeOperation = output && operationKey(request, output) === 'route.clean-completion'
-    ? 'route.clean-completion' : output ? 'route.read' : null;
-  const digest = terminalResult?.intentDigest
-    ?? (routeOperation ? createHash('sha256').update(`${request.family}\0${routeOperation}`, 'utf8').digest('hex') : null);
+  const digest = terminalResult?.intentDigest;
   for (const candidate of ['route.read', 'route.clean-completion'] as const) {
     const expected = operationRecoveryBinding(request.id, request.generation, null, request.family, candidate).intentDigest;
     if (digest === expected) return candidate;
@@ -352,55 +336,10 @@ function genericRecoveryResponse(
   };
 }
 
-type RecoveryJournalEvidence = Readonly<{
-  exists: boolean;
-  completedSteps: readonly string[];
-  failure: string | null;
-}>;
-
 type RecoveryDomainEvidence = Readonly<{
   domain: Readonly<Record<string, unknown>> | null;
-  journal: RecoveryJournalEvidence;
+  journal?: ReturnType<typeof readLifecycleJournalEvidence>;
 }>;
-
-function parseRecoveryOutput(output: string | null): Record<string, unknown> | null {
-  if (output === null) return null;
-  try {
-    const parsed = JSON.parse(output) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    const record = parsed as Record<string, unknown>;
-    if (record.result && typeof record.result === 'object' && !Array.isArray(record.result)) {
-      return record.result as Record<string, unknown>;
-    }
-    return record;
-  } catch {
-    return null;
-  }
-}
-
-function emptyRecoveryJournal(): RecoveryJournalEvidence {
-  return { exists: false, completedSteps: [], failure: null };
-}
-
-function readLifecycleJournalEvidence(repoRoot: string, taskId: string): RecoveryJournalEvidence {
-  const journalPath = locateHotTaskDirs(repoRoot, taskId)
-    .map((entry) => path.join(entry.taskDir, '.task-lifecycle.json'))
-    .find((candidate) => fs.existsSync(candidate));
-  if (!journalPath) return emptyRecoveryJournal();
-  try {
-    const value = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as Record<string, unknown>;
-    const completedSteps = Array.isArray(value.completedSteps)
-      ? value.completedSteps.filter((step): step is string => typeof step === 'string')
-      : [];
-    const failure = value.failure && typeof value.failure === 'object' && !Array.isArray(value.failure)
-      && typeof (value.failure as Record<string, unknown>).code === 'string'
-      ? (value.failure as Record<string, unknown>).code as string
-      : null;
-    return { exists: true, completedSteps, failure };
-  } catch {
-    return { exists: true, completedSteps: [], failure: 'SANDBOX_CONTROL_LIFECYCLE_JOURNAL_INVALID' };
-  }
-}
 
 function taskCreateDomainEvidence(
   manifest: SandboxControlManifest,
@@ -501,33 +440,17 @@ function readRecoveryDomain(
   terminalResult: ReturnType<typeof readSandboxControlTerminalResult>,
   payloadOutput: string | null
 ): RecoveryDomainEvidence {
-  if (!operation) return { domain: null, journal: emptyRecoveryJournal() };
+  if (!operation) return { domain: null };
   const taskRef = request.family === 'task-finalization' || request.family === 'task-workflow'
     ? manifest.taskId
     : 'args' in request ? request.args[0] ?? null : manifest.taskId;
-  const output = parseRecoveryOutput(payloadOutput);
+  const output = parseControlOutput(payloadOutput);
   if (!taskRef && operation.family !== 'task-create' && operation.family !== 'codex-controller') {
-    return { domain: null, journal: emptyRecoveryJournal() };
-  }
-
-  if (operation.family === 'task-finalization') {
-    const taskId = manifest.taskId;
-    if (!taskId) return { domain: null, journal: emptyRecoveryJournal() };
-    try {
-      const receipt = readTaskFinalizationReceipt(manifest.repoRoot, taskId);
-      const resolved = resolveTaskRef(taskId, { repoRoot: manifest.repoRoot });
-      const consistent = Boolean(receipt && resolved.ok && resolved.state === 'completed'
-        && receipt.controlBinding?.generation === manifest.generation
-        && receipt.controlBinding.requestId === request.id
-        && receipt.lifecycle === 'done');
-      return { domain: { consistent, completedSteps: terminalResult.completedSteps }, journal: emptyRecoveryJournal() };
-    } catch {
-      return { domain: { consistent: false }, journal: emptyRecoveryJournal() };
-    }
+    return { domain: null };
   }
 
   if (operation.family === 'task-lifecycle') {
-    if (!taskRef || !terminalResult.targetState) return { domain: null, journal: emptyRecoveryJournal() };
+    if (!taskRef || !terminalResult.targetState) return { domain: null };
     const journal = readLifecycleJournalEvidence(manifest.repoRoot, taskRef);
     try {
       const resolved = resolveTaskRef(taskRef, { repoRoot: manifest.repoRoot });
@@ -545,19 +468,19 @@ function readRecoveryDomain(
   }
 
   if (operation.family === 'task-orchestration') {
-    if (!taskRef) return { domain: null, journal: emptyRecoveryJournal() };
+    if (!taskRef) return { domain: null };
     try {
       const resolved = resolveTaskRef(taskRef, { repoRoot: manifest.repoRoot });
-      if (!resolved.ok) return { domain: { consistent: false }, journal: emptyRecoveryJournal() };
+      if (!resolved.ok) return { domain: { consistent: false } };
       const run = readRun(resolved.taskDir);
-      if (!run && operation.class !== 'read-only') return { domain: { consistent: false }, journal: emptyRecoveryJournal() };
+      if (!run && operation.class !== 'read-only') return { domain: { consistent: false } };
       if (operation.class === 'route.clean-completion') {
         const snapshot = captureRepositorySnapshot(manifest.repoRoot);
         const metadata = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
         const completion = run?.completionEvidence ?? null;
         const consistent = run !== null && completion !== null
           && terminalResult.completionEvidence !== null
-          && JSON.stringify(completion) === JSON.stringify(terminalResult.completionEvidence);
+          && isDeepStrictEqual(completion, terminalResult.completionEvidence);
         return {
           domain: {
             consistent,
@@ -566,29 +489,27 @@ function readRecoveryDomain(
             completionEvidence: completion,
             snapshot,
             lastReviewedCommit: metadata.last_reviewed_commit
-          },
-          journal: emptyRecoveryJournal()
+          }
         };
       }
-      return { domain: orchestrationDomainEvidence(operation, terminalResult, output, run), journal: emptyRecoveryJournal() };
+      return { domain: orchestrationDomainEvidence(operation, terminalResult, output, run) };
     } catch {
-      return { domain: { consistent: false }, journal: emptyRecoveryJournal() };
+      return { domain: { consistent: false } };
     }
   }
 
   if (operation.family === 'task-create') {
-    return { domain: taskCreateDomainEvidence(manifest, output), journal: emptyRecoveryJournal() };
+    return { domain: taskCreateDomainEvidence(manifest, output) };
   }
   if (operation.family === 'codex-controller') {
-    return { domain: controllerDomainEvidence(manifest, manifestPath, request, output), journal: emptyRecoveryJournal() };
+    return { domain: controllerDomainEvidence(manifest, manifestPath, request, output) };
   }
   if (operation.family === 'task-workflow') {
     return {
-      domain: { consistent: output?.status === terminalResult.status && output.changed === terminalResult.changed, snapshotValid: true },
-      journal: emptyRecoveryJournal()
+      domain: { consistent: output?.status === terminalResult.status && output.changed === terminalResult.changed, snapshotValid: true }
     };
   }
-  return { domain: null, journal: emptyRecoveryJournal() };
+  return { domain: null };
 }
 
 function readCommittedCriticalPhases(manifest: SandboxControlManifest, requestId: string): readonly string[] {
@@ -619,12 +540,11 @@ function recoveryResponse(
     }, payload.stdout);
     if (JSON.stringify(payloadTerminal) !== JSON.stringify(terminalResult)) return unknown(request.id);
   }
-  let finalization: FinalizationRecovery | null = null;
-  if (request.family === 'task-finalization' && evidence.exitCode === 0) {
-    finalization = finalizationRecoveryResponse(manifest, request.id, evidence.exitCode);
-    if (finalization.status === 'deferred') return null;
-  }
-  const recovery = readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);
+  const finalization = request.family === 'task-finalization' ? finalizationRecoveryResponse(manifest, request.id, 0) : null;
+  if (evidence.exitCode === 0 && finalization?.status === 'deferred') return null;
+  const recovery: RecoveryDomainEvidence = finalization
+    ? { domain: { consistent: finalization.status === 'matched' } }
+    : readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);
   const binding = operationRecoveryBinding(request.id, manifest.generation, manifest.taskId, request.family, operationName!);
   const decision = classifySandboxControlRecovery({
     operation,
@@ -1123,20 +1043,7 @@ export async function serveSandboxControl(
     if (!brokerOwns()) return;
     appendBrokerAudit(manifest, 'broker-start', {
       pid: broker.pid,
-      brokerId: broker.brokerId,
-      hostCwd: process.cwd(),
-      manifestPath,
-      manifestPathRealpath: safeRealpath(manifestPath),
-      repoRoot: manifest.repoRoot,
-      repoRootRealpath: safeRealpath(manifest.repoRoot),
-      worktreeRoot: manifest.worktreeRoot,
-      worktreeRootRealpath: safeRealpath(manifest.worktreeRoot),
-      runtimeDir: manifest.runtimeDir,
-      runtimeDirRealpath: safeRealpath(manifest.runtimeDir),
-      channelDir: manifest.channelDir,
-      publicStatusDir: manifest.publicStatusDir,
-      processingDir: manifest.processingDir,
-      internalCliPath: options.internalCliPath ?? process.argv[1] ?? null
+      brokerId: broker.brokerId
     });
     if (!recoverProcessing(manifest, manifestPath, broker, brokerOwns)) return;
     try {

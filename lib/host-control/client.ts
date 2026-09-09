@@ -38,7 +38,7 @@ export type HostControlRequest = Readonly<{
 export type HostControlResponse = Readonly<{
   version: 1;
   id: string;
-  status: 'completed' | 'rejected';
+  status: 'completed' | 'rejected' | 'unknown';
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -113,7 +113,7 @@ function parseResponse(value: unknown, id: string): HostControlResponse {
   const response = value as Record<string, unknown>;
   if (Object.keys(response).sort().join(',') !== 'error,exitCode,id,status,stderr,stdout,version'
     || response.version !== 1 || response.id !== id
-    || !['completed', 'rejected'].includes(response.status as string)
+    || !['completed', 'rejected', 'unknown'].includes(response.status as string)
     || !Number.isSafeInteger(response.exitCode)
     || typeof response.stdout !== 'string' || typeof response.stderr !== 'string'
     || (response.error !== null && (!response.error || typeof response.error !== 'object'))) {

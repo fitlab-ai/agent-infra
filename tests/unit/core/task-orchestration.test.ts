@@ -25,6 +25,9 @@ import { upsertSection } from '../../../lib/task/sections.ts';
 import { reworkIntentMutation } from '../../../lib/task/rework-intent.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
+import { writeSandboxControlTerminalResult } from '../../../lib/sandbox/control/state.ts';
+import { classifySandboxControlRecovery, findSandboxControlRecoveryOperation, operationRecoveryBinding, SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES } from '../../../lib/task/control-recovery.ts';
+import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
 
 const snapshot = () => 'before-tree';
 const modelPolicy = {
@@ -630,6 +633,16 @@ test('route completes a reviewed clean head without preparing a commit', () => {
   });
   assert.deepEqual(routed.run?.commitAuthorization, { issuedAt: null, consumedAt: null });
   assert.equal(routed.run?.receipts.some((receipt) => receipt.stage === 'commit'), false);
+  const manifest = { taskId: routed.taskId, generation: 'g1', processingDir: path.join(f.root, 'processing') } as SandboxControlManifest;
+  const request = { id: 'a'.repeat(32), family: 'task-orchestration', operation: 'route.clean-completion' } as const;
+  const terminal = writeSandboxControlTerminalResult(manifest, request, JSON.stringify(routed));
+  assert.deepEqual(terminal.completionEvidence, routed.run?.completionEvidence);
+  assert.equal(classifySandboxControlRecovery({
+    operation: findSandboxControlRecoveryOperation(request.family, request.operation)!,
+    binding: operationRecoveryBinding(request.id, manifest.generation, manifest.taskId, request.family, request.operation),
+    startedCommitted: true, terminalResult: terminal, criticalPhases: SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES,
+    domain: { consistent: true, ...routed.run, snapshot: { head: f.head, headTree: tree, worktreeTree: tree }, lastReviewedCommit: f.head }
+  }).outcome, 'success');
 });
 
 test('route stops at a dirty reviewed head without preparing a commit', () => {

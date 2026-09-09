@@ -1,3 +1,5 @@
+import { isCompletionEvidence, type CleanCompletionEvidence } from '../../task/orchestration.ts';
+import { parseControlOutput } from '../../task/control-recovery.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -107,19 +109,10 @@ export type SandboxControlTerminalResult = Readonly<{
   generation: string;
   taskId: string | null;
   intentDigest: string;
-  sourceState: string | null;
   targetState: string | null;
   status: string;
   changed: boolean | null;
-  completedSteps: readonly string[];
-  completionEvidence: Readonly<{
-    kind: 'reviewed-head-clean';
-    observedAt: string;
-    head: string;
-    headTree: string;
-    worktreeTree: string;
-    lastReviewedCommit: string;
-  }> | null;
+  completionEvidence: CleanCompletionEvidence | null;
 }>;
 
 export function terminalResultPath(manifest: SandboxControlManifest, requestId: string): string {
@@ -132,50 +125,21 @@ export function createSandboxControlTerminalResult(
   request: Readonly<{ id: string; family: string; operation?: string | null }>,
   output: string
 ): SandboxControlTerminalResult {
-  let parsed: Record<string, unknown> = {};
-  try {
-    const value = JSON.parse(output) as unknown;
-    if (value && typeof value === 'object' && !Array.isArray(value)) parsed = value as Record<string, unknown>;
-  } catch {
-    // A non-JSON command result is still a terminal failure/success receipt.
-  }
-  const nested = parsed.result && typeof parsed.result === 'object' && !Array.isArray(parsed.result)
-    ? parsed.result as Record<string, unknown> : parsed;
+  const nested = parseControlOutput(output) ?? {};
   const run = nested.run && typeof nested.run === 'object' && !Array.isArray(nested.run)
     ? nested.run as Record<string, unknown> : null;
   const rawCompletion = nested.completionEvidence ?? run?.completionEvidence;
-  const completionEvidence = rawCompletion && typeof rawCompletion === 'object' && !Array.isArray(rawCompletion)
-    ? rawCompletion as Record<string, unknown> : null;
-  const operation = request.operation ?? (typeof parsed.intent === 'string' ? parsed.intent : null) ?? '';
+  const operation = request.operation ?? (typeof nested.intent === 'string' ? nested.intent : null) ?? '';
   return {
     version: 1,
     requestId: request.id,
     generation: manifest.generation,
     taskId: manifest.taskId,
     intentDigest: createHash('sha256').update(`${request.family}\0${operation}`, 'utf8').digest('hex'),
-    sourceState: typeof nested.sourceState === 'string' ? nested.sourceState : null,
     targetState: typeof nested.targetState === 'string' ? nested.targetState : null,
     status: typeof nested.status === 'string' ? nested.status : 'completed',
     changed: typeof nested.changed === 'boolean' ? nested.changed : null,
-    completedSteps: Array.isArray(nested.completedSteps)
-      ? nested.completedSteps.filter((step): step is string => typeof step === 'string')
-      : [],
-    completionEvidence: completionEvidence
-      && completionEvidence.kind === 'reviewed-head-clean'
-      && typeof completionEvidence.observedAt === 'string'
-      && typeof completionEvidence.head === 'string'
-      && typeof completionEvidence.headTree === 'string'
-      && typeof completionEvidence.worktreeTree === 'string'
-      && typeof completionEvidence.lastReviewedCommit === 'string'
-      ? {
-          kind: 'reviewed-head-clean',
-          observedAt: completionEvidence.observedAt,
-          head: completionEvidence.head,
-          headTree: completionEvidence.headTree,
-          worktreeTree: completionEvidence.worktreeTree,
-          lastReviewedCommit: completionEvidence.lastReviewedCommit
-        }
-      : null
+    completionEvidence: isCompletionEvidence(rawCompletion) ? rawCompletion : null
   };
 }
 
@@ -201,25 +165,15 @@ export function readSandboxControlTerminalResult(filePath: string): SandboxContr
   if (!value || value.version !== 1 || typeof value.requestId !== 'string'
     || typeof value.generation !== 'string' || (value.taskId !== null && typeof value.taskId !== 'string')
     || typeof value.intentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.intentDigest)
-    || (value.sourceState !== null && typeof value.sourceState !== 'string')
     || (value.targetState !== null && typeof value.targetState !== 'string')
     || typeof value.status !== 'string'
-    || (value.changed !== null && typeof value.changed !== 'boolean')
-    || !Array.isArray(value.completedSteps)
-    || value.completedSteps.some((step) => typeof step !== 'string')) {
+    || (value.changed !== null && typeof value.changed !== 'boolean')) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
-  const completionEvidence = value.completionEvidence as Record<string, unknown> | null | undefined;
-  if (completionEvidence !== null && completionEvidence !== undefined
-    && (completionEvidence.kind !== 'reviewed-head-clean'
-      || typeof completionEvidence.observedAt !== 'string'
-      || typeof completionEvidence.head !== 'string'
-      || typeof completionEvidence.headTree !== 'string'
-      || typeof completionEvidence.worktreeTree !== 'string'
-      || typeof completionEvidence.lastReviewedCommit !== 'string')) {
+  if (value.completionEvidence !== null && !isCompletionEvidence(value.completionEvidence)) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
-  if (value.changed === undefined || value.completionEvidence === undefined) {
+  if (value.changed === undefined) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
   return value as SandboxControlTerminalResult;

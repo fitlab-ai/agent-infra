@@ -271,13 +271,3 @@ export function readSandboxControlTransition(
   }
   return candidate as SandboxControlTransition;
 }
-
-export function listSandboxControlTransitions(manifest: SandboxControlManifest, requestId: string): SandboxControlTransition[] {
-  const directory = path.join(manifest.processingDir, requestId, 'transitions');
-  if (!fs.existsSync(directory)) return [];
-  return fs.readdirSync(directory)
-    .filter((name) => name.endsWith('.json'))
-    .map((name) => name.slice(0, -5))
-    .filter((phase): phase is SandboxControlAuditPhase => SANDBOX_CONTROL_AUDIT_PHASES.includes(phase as SandboxControlAuditPhase))
-    .map((phase) => readSandboxControlTransition(manifest, requestId, phase));
-}

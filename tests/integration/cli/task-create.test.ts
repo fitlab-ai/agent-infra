@@ -116,6 +116,7 @@ async function runControlledTaskCreate(
       ...hostEnvironment,
       AGENT_INFRA_CONTROL_TOKEN: 'task-create-test-token',
       AGENT_INFRA_CONTROL_GENERATION: generation,
+      AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
       AGENT_INFRA_CONTROL_DIR: channelDir,
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
     },
@@ -324,6 +325,7 @@ test('task-create internal CLI returns controlled recovery evidence when the bro
         ...hostEnvironment,
         AGENT_INFRA_CONTROL_TOKEN: 'controlled-token',
         AGENT_INFRA_CONTROL_GENERATION: 'controlled-generation',
+        AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
         AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
         AGENT_INFRA_CONTROL_STATUS_DIR: path.join(root, 'status')
       }

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { hasTaskBoundMarker } from '../../internal/task-operation-registry.ts';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -29,62 +30,6 @@ import type { TaskWorkflowRequest } from './task-workflow.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
 
-type SandboxControlEnvironmentClassification = Readonly<{
-  kind: 'direct' | 'controlled' | 'invalid';
-  mode?: 'task-bound' | 'branch-only';
-  code?: 'TASK_CONTROL_TRANSPORT_INVALID';
-  message?: string;
-}>;
-
-export function classifySandboxControlEnvironment(
-  env: NodeJS.ProcessEnv = process.env
-): SandboxControlEnvironmentClassification {
-  const controlKeys = [
-    'AGENT_INFRA_CONTROL_TOKEN',
-    'AGENT_INFRA_CONTROL_GENERATION',
-    'AGENT_INFRA_CONTROL_DIR',
-    'AGENT_INFRA_CONTROL_STATUS_DIR'
-  ] as const;
-  const hasControlMarker = controlKeys.some((key) => Boolean(env[key]));
-  const hasTaskIdentity = Boolean(env.AGENT_INFRA_TASK_ID);
-  const hasRuntime = Boolean(env.AGENT_INFRA_RUNTIME_DIR);
-  const hasExecutorMarker = Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
-  const hasControllerBinding = Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING);
-  const hasAnyMarker = hasControlMarker || hasTaskIdentity || hasRuntime || hasExecutorMarker || hasControllerBinding;
-  const hasCompleteControl = controlKeys.every((key) => Boolean(env[key]));
-
-  if (!hasAnyMarker) return { kind: 'direct' };
-  if (hasExecutorMarker) {
-    return {
-      kind: 'invalid',
-      code: 'TASK_CONTROL_TRANSPORT_INVALID',
-      message: 'executor context is only valid for sandbox-control execute'
-    };
-  }
-  if (hasControllerBinding) {
-    return {
-      kind: 'invalid',
-      code: 'TASK_CONTROL_TRANSPORT_INVALID',
-      message: 'sandbox client control configuration is incomplete or conflicting'
-    };
-  }
-  if (!hasCompleteControl) {
-    return {
-      kind: 'invalid',
-      code: 'TASK_CONTROL_TRANSPORT_INVALID',
-      message: 'sandbox client control configuration is incomplete or conflicting'
-    };
-  }
-  if (hasTaskIdentity !== hasRuntime) {
-    return {
-      kind: 'invalid',
-      code: 'TASK_CONTROL_TRANSPORT_INVALID',
-      message: 'sandbox task identity and runtime binding must be provided together'
-    };
-  }
-  return { kind: 'controlled', mode: hasTaskIdentity ? 'task-bound' : 'branch-only' };
-}
-
 export class SandboxControlClientError extends Error {
   readonly detail: SandboxControlError;
   readonly accepted: boolean;
@@ -112,12 +57,6 @@ function clientError(
   throw new SandboxControlClientError({ code, message: `${code}: ${message}`, retryable }, accepted, requestId);
 }
 
-function hasTaskBoundMarker(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(env.AGENT_INFRA_TASK_ID)
-    && Boolean(env.AGENT_INFRA_CONTROL_TOKEN || env.AGENT_INFRA_CONTROL_GENERATION
-      || env.AGENT_INFRA_CONTROL_STATUS_DIR || env.AGENT_INFRA_RUNTIME_DIR || env.AGENT_INFRA_CONTROL_DIR);
-}
-
 function preflight(
   statusDir: string,
   generation: string,
@@ -125,14 +64,11 @@ function preflight(
   now = Date.now(),
   env: NodeJS.ProcessEnv = process.env
 ): void {
-  const identityPath = path.join(statusDir, 'identity.json');
   if (fs.existsSync(statusDir)) {
-    const identityRequired = true;
     let identity;
     try {
       identity = readSandboxControlIdentitySentinel(statusDir);
     } catch (error) {
-      if (!identityRequired) return;
       const code = error instanceof Error && error.message.endsWith('MISSING')
         ? 'SANDBOX_CONTROL_IDENTITY_MISSING'
         : 'SANDBOX_CONTROL_IDENTITY_MALFORMED';
@@ -143,9 +79,6 @@ function preflight(
     }
     if (env.AGENT_INFRA_CONTROL_ROOT_ID && identity.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
       clientError('SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH', 'sandbox control identity root does not match the client configuration', false);
-    }
-    if (identityRequired && !fs.existsSync(identityPath)) {
-      clientError('SANDBOX_CONTROL_IDENTITY_MISSING', 'sandbox control identity is missing', false);
     }
   }
   let status;

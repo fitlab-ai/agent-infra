@@ -55,3 +55,33 @@ test('host-control client fails closed when the fixed endpoint is absent', async
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const fault of ['accepted-audit', 'dispatch', 'completed-audit'] as const) {
+  test(`host-control distinguishes execution state after ${fault} failure`, onPlatforms('linux', 'darwin'), async () => {
+    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'host-control-failure-')));
+    const endpoint = path.join(root, 'run', 'host-control.sock');
+    const phases: string[] = [];
+    let executed = false;
+    const server = await startHostControlServer({
+      endpoint,
+      dispatch: async () => {
+        executed = true;
+        if (fault === 'dispatch') throw new Error('WORKER_TERMINATED');
+        return { exitCode: 0, stdout: '{}\n', stderr: '' };
+      },
+      audit: (entry) => {
+        phases.push(entry.phase);
+        if (fault === 'accepted-audit' && entry.phase === 'accepted') throw new Error('AUDIT_UNAVAILABLE');
+        if (fault === 'completed-audit' && entry.phase === 'completed') throw new Error('AUDIT_UNAVAILABLE');
+      }
+    });
+    try {
+      const response = await requestHostControl({ endpoint, request: hostControlRequestForCommand('task-artifact', ['--help'], root) });
+      assert.equal(executed, fault !== 'accepted-audit');
+      assert.equal(response.status, executed ? 'unknown' : 'rejected');
+      assert.equal(JSON.parse(response.stdout).changed, executed ? null : false);
+      assert.notEqual(response.exitCode, 0);
+      assert.equal(phases.includes('rejected'), !executed);
+    } finally { await server.close(); fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}

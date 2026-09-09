@@ -53,8 +53,10 @@ function auditFor(request: HostControlRequest, phase: HostControlAudit['phase'],
   };
 }
 
-function rejected(id: string, code: string, message: string): HostControlResponse {
-  return { version: 1, id, status: 'rejected', exitCode: 1, stdout: '', stderr: '', error: { code, message } };
+function failedResponse(id: string, status: 'rejected' | 'unknown', code: string, message: string): HostControlResponse {
+  const error = { code, message };
+  const stdout = `${JSON.stringify({ status: 'failed', changed: status === 'rejected' ? false : null, error })}\n`;
+  return { version: 1, id, status, exitCode: 1, stdout, stderr: '', error };
 }
 
 async function handleConnection(socket: net.Socket, options: HostControlServerOptions): Promise<void> {
@@ -71,7 +73,7 @@ async function handleConnection(socket: net.Socket, options: HostControlServerOp
     if (completed || processing) return;
     input += chunk;
     if (Buffer.byteLength(input, 'utf8') > HOST_CONTROL_MAX_REQUEST_BYTES) {
-      finish(rejected('invalid', 'HOST_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit'));
+      finish(failedResponse('invalid', 'rejected', 'HOST_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit'));
       return;
     }
     const newline = input.indexOf('\n');
@@ -80,20 +82,24 @@ async function handleConnection(socket: net.Socket, options: HostControlServerOp
     let request: HostControlRequest;
     try { request = validateHostControlRequest(JSON.parse(raw)); }
     catch (error) {
-      finish(rejected('invalid', 'HOST_CONTROL_REQUEST_INVALID', error instanceof Error ? error.message : String(error)));
+      finish(failedResponse('invalid', 'rejected', 'HOST_CONTROL_REQUEST_INVALID', error instanceof Error ? error.message : String(error)));
       return;
     }
     processing = true;
-    options.audit?.(auditFor(request, 'accepted', 'in-progress'));
+    let started = false;
     try {
+      options.audit?.(auditFor(request, 'accepted', 'in-progress'));
+      started = true;
       const result = await options.dispatch(request);
       options.audit?.(auditFor(request, 'completed', result.exitCode === 0 ? 'success' : 'failure'));
       finish({ version: 1, id: request.id, status: 'completed', ...result, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const code = /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'HOST_CONTROL_DISPATCH_FAILED';
-      options.audit?.(auditFor(request, 'rejected', 'failure'));
-      finish(rejected(request.id, code, message));
+      const status = started ? 'unknown' : 'rejected';
+      try { options.audit?.(auditFor(request, started ? 'completed' : 'rejected', status)); }
+      catch { /* Return the uncertainty even when the audit sink is unavailable. */ }
+      finish(failedResponse(request.id, status, code, message));
     }
   });
 }

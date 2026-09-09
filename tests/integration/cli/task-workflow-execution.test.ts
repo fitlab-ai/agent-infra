@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { readArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
+import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../../lib/task/local-artifact-finalization.ts';
 import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-executor.ts';
 import { captureProjectionTopology, createTaskWorkflowRequest } from '../../../lib/sandbox/control/task-workflow.ts';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
@@ -150,4 +151,23 @@ test('workflow returns a failed receipt when the candidate cannot be read', onPl
     assert.equal(result.body.error.code, 'TASK_ARTIFACT_WRITE_CONFLICT');
     assert.equal(readArtifactRepairIntent(f.root, taskId, 'plan', 'plan.md'), null);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('local artifact preparation defers both success and repair provenance until commit', () => {
+  for (const repairable of [false, true]) {
+    const f = fixture();
+    try {
+      const candidate = repairable ? content('plan').replace('## 问题理解\n', '## 问题理解：\n') : content('plan');
+      const prepared = prepareLocalArtifact({ taskRef: taskId, family: 'plan', artifact: 'plan.md', repoRoot: f.root }, candidate);
+      assert.equal(prepared.result.repairable, repairable);
+      assert.equal(prepared.result.status, repairable ? 'failed' : 'passed');
+      assert.equal(prepared.content, candidate);
+      assert.equal(fs.existsSync(path.join(f.taskDir, 'plan.md')), false);
+      assert.equal(readArtifactRepairIntent(f.root, taskId, 'plan', 'plan.md'), null);
+      assert.deepEqual(commitLocalArtifactProvenance(prepared), prepared.result);
+      const intent = readArtifactRepairIntent(f.root, taskId, 'plan', 'plan.md');
+      assert.equal(intent?.state, repairable ? 'awaiting-repair' : 'passed');
+      assert.equal(intent?.artifactSha256, prepared.result.artifactSha256);
+    } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+  }
 });

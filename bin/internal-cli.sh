@@ -39,14 +39,6 @@ if [ "$task_control_command" = true ] && [ "$status_mount_present" = true ] && [
   printf '%s\n' '{"status":"failed","changed":false,"error":{"code":"SANDBOX_CONTROL_IDENTITY_MISSING","message":"sandbox control identity is present but its launch configuration is missing"}}'
   exit 1
 fi
-if [ "$task_control_command" != true ]; then
-  unset NODE_OPTIONS NODE_PATH
-  exec node "$internal_cli" "$@"
-fi
-if [ "$status_mount_present" = true ] && [ -n "$launch_config" ]; then
-  unset NODE_OPTIONS NODE_PATH
-  exec node "$internal_cli" "$@"
-fi
 # The outer launcher owns the Node startup boundary. A task-bound process must
 # not pass preload, import, or loader injection into the control router.
 unset NODE_OPTIONS NODE_PATH

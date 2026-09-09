@@ -1,13 +1,23 @@
 import { createHash } from 'node:crypto';
+import { isCompletionEvidence } from './orchestration.ts';
 import { TASK_WORKFLOW_OPERATIONS } from './workflow-command.ts';
 
 export type ControlRecoveryOutcome = 'not-executed' | 'in-progress' | 'success' | 'failure' | 'unknown' | 'rejected';
+
+/** Normalize the command result once at the control transport boundary. */
+export function parseControlOutput(output: string | null): Record<string, unknown> | null {
+  if (output === null) return null;
+  try {
+    const value = JSON.parse(output);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value.result && typeof value.result === 'object' && !Array.isArray(value.result) ? value.result : value;
+  } catch { return null; }
+}
 
 export type ControlRecoveryOperation = Readonly<{
   family: 'task-lifecycle' | 'task-finalization' | 'task-orchestration' | 'task-create' | 'codex-controller' | 'task-workflow';
   intent: string;
   class: string;
-  mutatesDomain: boolean;
 }>;
 
 export type ControlRecoveryBinding = Readonly<{
@@ -50,17 +60,16 @@ const ORCHESTRATION_INTENTS = [
 ] as const;
 
 export const SANDBOX_CONTROL_RECOVERY_OPERATIONS: readonly ControlRecoveryOperation[] = Object.freeze([
-  ...LIFECYCLE_INTENTS.map((intent) => ({ family: 'task-lifecycle' as const, intent, class: 'lifecycle-mutation', mutatesDomain: true })),
-  { family: 'task-finalization', intent: 'complete', class: 'finalization', mutatesDomain: true },
+  ...LIFECYCLE_INTENTS.map((intent) => ({ family: 'task-lifecycle' as const, intent, class: 'lifecycle-mutation' })),
+  { family: 'task-finalization', intent: 'complete', class: 'finalization' },
   ...ORCHESTRATION_INTENTS.map((intent) => ({
     family: 'task-orchestration' as const,
     intent,
-    class: intent === 'route.clean-completion' ? 'route.clean-completion' : intent === 'route.read' || intent === 'status' ? 'read-only' : 'orchestration',
-    mutatesDomain: !['route.read', 'status'].includes(intent)
+    class: intent === 'route.clean-completion' ? 'route.clean-completion' : intent === 'route.read' || intent === 'status' ? 'read-only' : 'orchestration'
   })),
-  { family: 'task-create', intent: 'create', class: 'task-create', mutatesDomain: true },
-  ...TASK_WORKFLOW_OPERATIONS.map((intent) => ({ family: 'task-workflow' as const, intent, class: intent === 'artifact-inspect' || intent === 'decision-next-id' ? 'read-only' : 'workflow', mutatesDomain: !['artifact-inspect', 'decision-next-id'].includes(intent) })),
-  ...(['open', 'close', 'verify'] as const).map((intent) => ({ family: 'codex-controller' as const, intent, class: 'codex-controller', mutatesDomain: intent !== 'verify' }))
+  { family: 'task-create', intent: 'create', class: 'task-create' },
+  ...TASK_WORKFLOW_OPERATIONS.map((intent) => ({ family: 'task-workflow' as const, intent, class: intent === 'artifact-inspect' || intent === 'decision-next-id' ? 'read-only' : 'workflow' })),
+  ...(['open', 'close', 'verify'] as const).map((intent) => ({ family: 'codex-controller' as const, intent, class: 'codex-controller' }))
 ]);
 
 export function digestControlRecoveryIntent(family: string, intent: string): string {
@@ -92,12 +101,7 @@ function domainEvidenceMatches(
     return result.status === 'completed'
       && domain.status === 'completed'
       && domain.pendingDelegation === null
-      && completion?.kind === 'reviewed-head-clean'
-      && typeof completion.observedAt === 'string'
-      && typeof completion.head === 'string'
-      && typeof completion.headTree === 'string'
-      && typeof completion.worktreeTree === 'string'
-      && typeof completion.lastReviewedCommit === 'string'
+      && isCompletionEvidence(completion)
       && snapshot?.head === completion.head
       && snapshot.headTree === completion.headTree
       && snapshot.worktreeTree === completion.worktreeTree

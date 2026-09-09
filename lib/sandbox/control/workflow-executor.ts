@@ -4,7 +4,7 @@ import { TASK_WORKFLOW_COMMANDS } from '../../task/workflow-command.ts';
 
 import { parseArtifactCommand, executeArtifactCommand } from '../../task/artifact-command.ts';
 import { parseReviewCommand } from '../../task/review-command.ts';
-import { finalizeLocalArtifact } from '../../task/local-artifact-finalization.ts';
+import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../task/local-artifact-finalization.ts';
 import { prepareReviewSummaryCandidate, commitReviewSummaryProvenance } from '../../task/review-finalization.ts';
 import { withTaskExecutionLock } from '../../task/task-execution-lock.ts';
 import { hostControlRequestForCommand, requestHostControl } from '../../host-control/client.ts';
@@ -35,7 +35,6 @@ export async function executeTaskWorkflow(
         endpoint: process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint(),
         request: { ...hostControlRequestForCommand(command, request.args, manifest.repoRoot), id: request.id, generation: request.generation }
       });
-      if (response.status === 'rejected') return executionResult({ status: 'failed', changed: false, error: response.error });
       return response;
     }
     const input = command === 'task-artifact' ? parseArtifactCommand(request.args) : parseReviewCommand(request.args);
@@ -61,11 +60,11 @@ export async function executeTaskWorkflow(
         const { family } = input;
         if (family !== 'analysis' && family !== 'plan' && family !== 'code') throw new Error('ARTIFACT_IDENTITY_INVALID');
         const local = { taskRef: request.taskId, family, artifact: input.artifact, repoRoot: manifest.repoRoot } as const;
-        const prepared = finalizeLocalArtifact(local, { content, persistIntent: false });
-        if (prepared.status === 'failed') return executionResult(prepared.repairable ? finalizeLocalArtifact(local, { content }) : prepared);
+        const prepared = prepareLocalArtifact(local, content);
+        if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared));
         publicationStarted = true;
         await landProjectionArtifact(projection, artifact);
-        result = finalizeLocalArtifact(local, { content });
+        result = commitLocalArtifactProvenance(prepared);
       } else {
         if (input.overrideTicket) throw new Error('TASK_WORKFLOW_OVERRIDE_UNSUPPORTED');
         const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot });

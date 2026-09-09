@@ -77,11 +77,6 @@ async function runHostControlCommand(commandName: HostControlCommand, args: stri
     }
     throw error;
   }
-  if (response.status === 'rejected') {
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: response.error })}\n`);
-    process.exitCode = response.exitCode;
-    return;
-  }
   process.stdout.write(response.stdout);
   process.stderr.write(response.stderr);
   process.exitCode = response.exitCode;

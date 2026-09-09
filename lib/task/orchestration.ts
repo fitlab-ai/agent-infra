@@ -276,7 +276,7 @@ function isRecovery(value: unknown): value is OrchestrationRecovery {
     && value.resultingStatus === 'running';
 }
 
-function isCompletionEvidence(value: unknown): value is CleanCompletionEvidence {
+export function isCompletionEvidence(value: unknown): value is CleanCompletionEvidence {
   return hasExactKeys(value, [
     'kind', 'observedAt', 'head', 'headTree', 'worktreeTree', 'lastReviewedCommit', 'prNumber', 'prHead'
   ])
@@ -1594,6 +1594,7 @@ export {
   statusOrchestration,
 };
 export type {
+  CleanCompletionEvidence,
   OrchestrationCompletionPlanResult,
   OrchestrationModelPolicy,
   OrchestrationNext,

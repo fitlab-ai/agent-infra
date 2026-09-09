@@ -1,8 +1,8 @@
 import fs from 'node:fs';
+import { resolveSandboxControlTransport } from './task-operation-registry.ts';
 import path from 'node:path';
 
 import {
-  classifySandboxControlEnvironment,
   requestSandboxTaskCreate,
   SandboxControlClientError
 } from '../sandbox/control/client.ts';
@@ -83,12 +83,12 @@ async function taskCreate(args: string[]): Promise<void> {
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('TASK_CREATE_INPUT_INVALID: input must be a regular file');
     if (stat.size > SANDBOX_CONTROL_MAX_BYTES) throw new Error('TASK_CREATE_INPUT_TOO_LARGE: input exceeds the control limit');
     const candidate = validateTaskCreateCandidate(JSON.parse(fs.readFileSync(inputPath, 'utf8')));
-    const environment = classifySandboxControlEnvironment();
-    if (environment.kind === 'invalid') {
-      output(failed(environment.code ?? 'TASK_CONTROL_TRANSPORT_INVALID', environment.message ?? 'sandbox client control configuration is invalid'));
+    const environment = resolveSandboxControlTransport();
+    if (environment.kind === 'fail-closed') {
+      output(failed(environment.reasonCode ?? 'TASK_CONTROL_TRANSPORT_INVALID', 'sandbox client control configuration is invalid'));
       return;
     }
-    if (environment.kind === 'controlled') {
+    if (environment.kind === 'broker-client') {
       const response = requestSandboxTaskCreate({ candidate });
       if (response.phase === 'rejected') {
         const accepted = response.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN';

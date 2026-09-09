@@ -154,9 +154,9 @@ v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑�
 
 host-control service 是 direct-host 执行 task-control 和 workflow 写操作的唯一宿主 authority。Linux 固定端点为 `/run/user/<uid>/agent-infra/host-control.sock`；macOS 固定端点为 `/Users/<login>/Library/Application Support/agent-infra/run/host-control.sock`。端点根据宿主账户身份解析，绝不读取 `HOME`、`TMPDIR`、普通环境变量或命令参数。服务目录和 socket 必须属于宿主用户，权限分别为 `0700` 和 `0600`。安装脚本会管理 systemd 用户单元或 launchd 用户代理；`agent-infra-internal host-control status` 可检查端点。服务 authority 缺失或无效时返回 `SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE`，CLI 不会回退到进程内 task handler。
 
-task-bound workspace 挂载由宿主创建的可写 task projection，权威 task 目录保持在容器可写视图之外。workflow 传输层绑定 task、generation 和封闭操作目录，原样传递参数，由 CLI 共用的领域解析器解释。已授权 executor 直接调用共享产物操作；其他 workflow 命令直接请求 host-control service，由隔离的 command worker 承载 CLI 进程状态。响应直接携带业务退出码，失败审计也使用该退出码。
+task-bound workspace 挂载由宿主创建的可写 task projection，权威 task 目录保持在容器可写视图之外。workflow 传输层绑定 task、generation 和封闭操作目录，原样传递参数，由 CLI 共用的领域解析器解释。已授权 executor 直接调用共享产物操作；其他 workflow 命令直接请求 host-control service，由隔离的 command worker 承载 CLI 进程状态。响应直接携带业务退出码，失败审计也使用该退出码。服务区分执行前拒绝和执行或完成审计失败后的结果未知；调用方直接转发该结果，不再推断为未发生修改。
 
-产物初始化和修复只修改候选文件。最终化读取权威任务元数据和产物目录，通过共享领域逻辑校验候选内容，再发布已验证的缓冲区。宿主校验记录的 projection 拓扑，使用 `O_NOFOLLOW` 打开顶层规范候选文件，通过同一文件描述符读取并计算摘要，检查可观察的身份与元数据变化。发布时不重新打开候选文件；projection 中的编辑不会把 `task.md` 或任意文件复制回权威目录。单个产物替换是原子的，但替换与 provenance 并非跨文件事务：发布后失败时，可能需要先检查领域状态再决定能否重试。
+产物初始化和修复只修改候选文件。最终化读取权威任务元数据和产物目录，通过共享领域逻辑一次性准备已验证内容和待写凭据，发布缓冲区后提交凭据，不重复运行校验。宿主校验记录的 projection 拓扑，使用 `O_NOFOLLOW` 打开顶层规范候选文件，通过同一文件描述符读取并计算摘要，检查可观察的身份与元数据变化。发布时不重新打开候选文件；projection 中的编辑不会把 `task.md` 或任意文件复制回权威目录。恢复逻辑复用生命周期日志解析器和完整的编排完成证据契约，保留其中的 PR 字段。单个产物替换是原子的，但替换与 provenance 并非跨文件事务：发布后失败时，可能需要先检查领域状态再决定能否重试。
 
 显式 `ai sandbox rm` 和 `--purge` 使用 manifest 记录的精确容器 ID。创建时会记录脱敏后的 Docker authority 指纹（route、daemon identity 和 API version），清理前必须先复核该 authority 并按同一路由重放。复核使用 `container ls --all --no-trunc --filter id=<full-id>` 及固定的 machine-readable ID 格式；只有命令成功且输出确认为零行时，才证明精确资源 absent。随后先 quiesce broker 与 execution，等待软停止阶段，再删除精确容器，重新确认 exact-ID 得到权威 absent，复核 manifest、owner 与 generation，最后才使用剩余 deadline 做 force cleanup。精确 ID 的 not-found 不会被同名新容器混淆。inspect 未知、删除失败、owner 被替换或 deadline 耗尽时，会保留 control root 与证据，等待下一次受控重试。清理竞争者使用位于 control tree 外的每用户 native 文件锁串行化；锁对象会保留给后续重试使用。
 
@@ -252,7 +252,8 @@ rename、fsync 旧段并轮换。
 
 当前请求还会在 `processing/<request-id>/transitions/` 下写入不可变 transition record，覆盖
 `accepted-committed`、`started-committed` 和 `published-committed` 等边界。`terminal-result.json`
-把持久化结果绑定到 request ID、generation、operation digest、源/目标状态和 completed steps。
+把持久化结果绑定到 request ID、generation 和 operation digest，保留目标状态与完成证据；
+生命周期进度从领域日志读取，不在回执中重复存储。
 broker recovery 只能依据这份绑定以及对应 operation 的领域证据重建 response，区分
 not-executed、in-progress、success、failure 和 unknown。已经 started 但缺少匹配 terminal 或
 领域证据的请求保持 unknown，不会重放。编排 route read 与 `route.clean-completion` 分开；后者
