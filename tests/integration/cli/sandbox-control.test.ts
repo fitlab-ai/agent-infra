@@ -478,29 +478,30 @@ test('ordinary sandbox control GC removes only a verified absent-container root'
   }
 });
 
-test('sandbox control removal gives container operations a bounded pre-force budget', async () => {
+test('sandbox control removal gives container operations a bounded pre-force budget', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-deadline-'));
   let callbackTimeout = 0;
-  let callbackFinished!: () => void;
-  const callbackDone = new Promise<void>((resolve) => { callbackFinished = resolve; });
+  const inspectionTimeouts: number[] = [];
   let manifestPath: string | undefined;
   try {
     manifestPath = writeControlManifest(root, initializeRepository(root), 'remove-deadline-generation');
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
     await assert.rejects(
       () => removeSandboxControlRoot(root, {
         timeoutMs: 200,
-        inspectContainer: async () => ({ state: 'found', id: 'container-id', running: false, labels: {} }),
+        inspectContainer: async (timeoutMs) => {
+          inspectionTimeouts.push(timeoutMs);
+          return { state: 'found', id: 'container-id', running: false, labels: {} };
+        },
         removeContainer: async (timeoutMs) => {
           callbackTimeout = timeoutMs;
-          await new Promise((resolve) => setTimeout(resolve, 150));
-          callbackFinished();
+          t.mock.timers.tick(150);
         }
       }),
       /SANDBOX_CONTROL_CONTAINER_STILL_EXISTS/
     );
-    await callbackDone;
-    assert.equal(callbackTimeout > 0, true);
-    assert.equal(callbackTimeout <= 200, true);
+    assert.equal(callbackTimeout, 200);
+    assert.deepEqual(inspectionTimeouts, [200, 50]);
     assert.equal(fs.existsSync(root), true);
   } finally {
     if (manifestPath && fs.existsSync(root)) clearSandboxRemovalJournal(readSandboxControlManifest(manifestPath));
@@ -508,19 +509,28 @@ test('sandbox control removal gives container operations a bounded pre-force bud
   }
 });
 
-test('sandbox control removal records pending evidence when the exact removal outlives the deadline', async () => {
+test('sandbox control removal records pending evidence when the exact removal outlives the deadline', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-pending-'));
   let manifestPath: string | undefined;
   try {
     manifestPath = writeControlManifest(root, initializeRepository(root), 'remove-pending-generation');
-    await assert.rejects(
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
+    let removalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { removalStarted = resolve; });
+    const rejected = assert.rejects(
       () => removeSandboxControlRoot(root, {
         timeoutMs: 30,
         inspectContainer: async () => ({ state: 'found', id: 'container-id', running: false, labels: {} }),
-        removeContainer: async () => { await new Promise((resolve) => setTimeout(resolve, 100)); }
+        removeContainer: () => {
+          removalStarted();
+          return new Promise<void>(() => {});
+        }
       }),
       /SANDBOX_CONTROL_REMOVE_PENDING/
     );
+    await started;
+    t.mock.timers.tick(30);
+    await rejected;
     const pending = JSON.parse(fs.readFileSync(path.join(root, 'removal-pending.json'), 'utf8')) as Record<string, unknown>;
     assert.equal(pending.phase, 'container-removal');
     assert.equal(fs.existsSync(root), true);

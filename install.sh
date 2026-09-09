@@ -47,10 +47,11 @@ if command -v agent-infra-internal >/dev/null 2>&1; then
       if command -v systemctl >/dev/null 2>&1 && systemctl --user list-unit-files >/dev/null 2>&1; then
         agent-infra-internal host-control install >/dev/null
         systemctl --user daemon-reload
-        if systemctl --user enable --now agent-infra-host-control.service >/dev/null 2>&1; then
+        if systemctl --user enable agent-infra-host-control.service >/dev/null 2>&1 \
+          && systemctl --user restart agent-infra-host-control.service >/dev/null 2>&1; then
           ok "host-control service enabled"
         else
-          warn "host-control service was installed but could not be started; run: systemctl --user enable --now agent-infra-host-control.service"
+          warn "host-control service was installed but could not be started; run: systemctl --user enable agent-infra-host-control.service && systemctl --user restart agent-infra-host-control.service"
         fi
       else
         warn "systemd user services are unavailable; task-control will fail closed until host-control is started manually."
