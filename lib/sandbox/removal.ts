@@ -793,14 +793,15 @@ function projectSandboxControlRoots(config: SandboxConfig): string[] {
   const projectRoot = path.join(config.controlBase, config.project);
   let containers: fs.Dirent[];
   try { containers = fs.readdirSync(projectRoot, { withFileTypes: true }); }
-  catch { return []; }
+  catch (error) {
+    if (isMissingPathError(error)) return [];
+    throw error;
+  }
   return containers
     .filter((container) => container.isDirectory())
     .flatMap((container) => {
       const containerRoot = path.join(projectRoot, container.name);
-      let identities: fs.Dirent[];
-      try { identities = fs.readdirSync(containerRoot, { withFileTypes: true }); }
-      catch { return []; }
+      const identities = fs.readdirSync(containerRoot, { withFileTypes: true });
       return identities
         .filter((identity) => identity.isDirectory())
         .map((identity) => path.join(containerRoot, identity.name));

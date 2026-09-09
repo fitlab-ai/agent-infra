@@ -1246,6 +1246,66 @@ test("sandbox purge rejects malformed auxiliary evidence before destructive clea
   }
 });
 
+for (const level of ["project", "container"] as const) {
+  for (const code of ["EACCES", "EIO"] as const) {
+    test(`sandbox purge preserves control evidence when ${level} enumeration fails with ${code}`, onPlatforms("linux", "darwin", "win32"), async (t) => {
+      const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-enumeration-"));
+      try {
+        const container = "demo-dev-feature..enumeration";
+        const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: container });
+        const config = rmOneConfig(fixture, tmpDir);
+        const projectRoot = path.join(config.controlBase, config.project);
+        const containerRoot = path.join(projectRoot, container);
+        const controlRoot = path.join(containerRoot, "branch-only");
+        fs.mkdirSync(controlRoot, { recursive: true });
+        const evidencePath = path.join(controlRoot, "unverified-evidence.txt");
+        fs.writeFileSync(evidencePath, "preserve for recovery\n");
+        const targetRoot = level === "project" ? projectRoot : containerRoot;
+        const failure = Object.assign(new Error(`Cannot enumerate ${level}`), { code });
+        const original = fs.readdirSync;
+        const mocked = t.mock.method(fs, "readdirSync", (target: fs.PathLike, ...args: unknown[]) => {
+          if (String(target) === targetRoot) throw failure;
+          return Reflect.apply(original, fs, [target, ...args]);
+        });
+        try {
+          await assert.rejects(
+            () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+              confirm: async () => false,
+              isCancel: (value): value is symbol => false
+            })),
+            (error) => error === failure
+          );
+          assert.equal(fs.readFileSync(evidencePath, "utf8"), "preserve for recovery\n");
+          assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), []);
+        } finally {
+          mocked.mock.restore();
+        }
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+test("sandbox purge removes a discovered container when no control root exists", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-no-control-"));
+  try {
+    const container = "demo-dev-feature..no-control";
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: container });
+    await withFixtureDocker(fixture, () => rm.rmPurge(rmOneConfig(fixture, tmpDir), [], {
+      confirm: async () => false,
+      isCancel: (value): value is symbol => false
+    }));
+    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), [
+      ["stop", container], ["rm", container]
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox cleanup consumes a completed removal journal through each cleanup entrypoint", onPlatforms("linux", "darwin", "win32"), async () => {
   for (const entrypoint of ["single", "unbound", "purge"] as const) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-rm-journal-${entrypoint}-`));
