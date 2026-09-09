@@ -20,7 +20,7 @@ const counts = { blocker: 1, major: 2, minor: 3 };
 const TASK_ID = 'TASK-20260101-000001';
 
 function domainFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-finalization-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'review-finalization-')));
   spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
