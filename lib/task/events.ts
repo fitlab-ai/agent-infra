@@ -4,14 +4,13 @@ import path from 'node:path';
 import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import {
   buildArtifactLinkSection,
-  artifactName,
   inspectArtifactDirectory,
   parseReviewedInputReference,
   parseCodePlanInputReference,
-  parseArtifactName,
   resolveArtifactContext,
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
+import { artifactName, parseArtifactName } from './artifact-name.ts';
 import type { ArtifactContextResult, ArtifactErrorCode, ArtifactFamily, ArtifactIdentity } from './artifact-lifecycle.ts';
 import { ArtifactReceiptError, parseArtifactReceipts, sha256File, upsertArtifactReceipt } from './artifact-receipts.ts';
 import type { ArtifactReceipt } from './artifact-receipts.ts';
@@ -146,7 +145,7 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
     const forbidden = fix ? ['filesModified', 'testsPassed'] : ['fixFor', 'blockers', 'major', 'minor', 'manualValidation'];
     if (modeRequired.some((key) => request[key as keyof TaskEventRequest] === undefined) || forbidden.some((key) => request[key as keyof TaskEventRequest] !== undefined)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'code.completed requires either initial or fix completion payload' };
   }
-  if (request.fixFor && !/^review-code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/.test(request.fixFor)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor must reference a canonical review-code artifact' };
+  if (request.fixFor && parseArtifactName(request.fixFor)?.family !== 'review-code') return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor must reference a canonical review-code artifact' };
   if (request.implementationInput && !/^II-[1-9]\d*$/.test(request.implementationInput)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'implementationInput must be a canonical II-N id' };
   if (request.artifactSha256 !== undefined && !/^[0-9a-f]{64}$/i.test(request.artifactSha256)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'artifactSha256 must be a 64-character hexadecimal digest' };
   if (request.semanticDigest !== undefined && !/^[0-9a-f]{64}$/i.test(request.semanticDigest)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'semanticDigest must be a 64-character hexadecimal digest' };

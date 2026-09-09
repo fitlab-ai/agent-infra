@@ -52,17 +52,6 @@ function nextWarningId(rows: readonly WorkflowWarning[]): string {
   return `WW-${max + 1}`;
 }
 
-function validateRows(rows: readonly WorkflowWarning[]): { code: string; message: string } | null {
-  const ids = new Set<string>();
-  for (const row of rows) {
-    if (!/^WW-[1-9]\d*$/.test(row.id)) return { code: 'WARNING_ID_INVALID', message: `warning id '${row.id}' is invalid` };
-    if (ids.has(row.id)) return { code: 'WARNING_DUPLICATE_ID', message: `duplicate warning id '${row.id}'` };
-    ids.add(row.id);
-    if (!WORKFLOW_WARNING_SEVERITIES.has(row.severity) || !WORKFLOW_WARNING_STATUSES.has(row.status)) return { code: 'WARNING_DOCUMENT_INVALID', message: `warning '${row.id}' has invalid severity or status` };
-  }
-  return null;
-}
-
 function sectionMutation(content: string): TaskMutation[] {
   if (/^##\s+(工作流告警|Workflow Warnings)\s*$/m.test(content)) return [];
   const english = /^##\s+Activity Log\s*$/m.test(content);
@@ -98,8 +87,6 @@ function applyWorkflowWarningIntent(intent: WorkflowWarningIntent, options: Task
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'WARNING_DOCUMENT_INVALID';
     return failed(intent, code, error instanceof Error ? error.message : String(error), resolved.taskId);
   }
-  const invalid = validateRows(rows);
-  if (invalid) return failed(intent, invalid.code, invalid.message, resolved.taskId);
   if (intent.kind === 'list') {
     if (intent.status && !WORKFLOW_WARNING_STATUSES.has(intent.status)) return failed(intent, 'WARNING_PAYLOAD_INVALID', 'warning status is invalid', resolved.taskId);
     const warnings = rows.filter((row) => !intent.status || row.status === intent.status);

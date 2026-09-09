@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
-import { artifactFamilyCatalog, inspectArtifactDirectory, parseArtifactName } from './artifact-lifecycle.ts';
+import { artifactFamilyCatalog, inspectArtifactDirectory } from './artifact-lifecycle.ts';
+import { parseArtifactName } from './artifact-name.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { locateHotTaskDirs, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import {

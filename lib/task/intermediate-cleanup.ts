@@ -20,7 +20,7 @@ import {
   sha256Content,
   type LocalArtifactFinalizationIntent
 } from './local-artifact-finalization.ts';
-import { parseArtifactName } from './artifact-lifecycle.ts';
+import { parseArtifactName } from './artifact-name.ts';
 import { enumerateAllTaskDirs, type TaskWorkspaceState } from './resolve-ref.ts';
 import type { TaskControlBindingEvidence } from './finalization-state.ts';
 

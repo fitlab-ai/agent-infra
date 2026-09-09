@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
-import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-lifecycle.ts';
+import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
 import { upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';

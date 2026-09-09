@@ -59,6 +59,27 @@ test('finding upsert derives the ledger round from the canonical review artifact
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
 
+test('ledger intents reject unsafe rounds and preserve stage restrictions without writes', () => {
+  const f = fixture();
+  try {
+    const before = fs.readFileSync(f.taskMd, 'utf8');
+    for (const reviewArtifact of ['review-plan-r9007199254740992.md', 'review-plan-r01.md', 'review-code.md']) {
+      const result = applyLedgerIntent({
+        kind: 'finding-upsert', taskRef: f.taskId, stage: 'plan', reviewArtifact,
+        ordinal: 1, severity: 'major', evidence: `${reviewArtifact}#PL-new`
+      }, { repoRoot: f.repoRoot });
+      assert.equal(result.error?.code, 'LEDGER_PAYLOAD_INVALID');
+    }
+    for (const artifact of ['plan-r9007199254740992.md', 'plan-r01.md', 'code.md']) {
+      const result = applyLedgerIntent({
+        kind: 'decision-upsert', taskRef: f.taskId, stage: 'plan', id: 'HD-1', artifact
+      }, { repoRoot: f.repoRoot });
+      assert.equal(result.error?.code, 'LEDGER_PAYLOAD_INVALID');
+    }
+    assert.equal(fs.readFileSync(f.taskMd, 'utf8'), before);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
 test('finding response and review enforce the handshake matrix and round', () => {
   const f = fixture(['| PL-1 | plan | 1 | major | open | review-plan.md#PL-1 |']);
   try {

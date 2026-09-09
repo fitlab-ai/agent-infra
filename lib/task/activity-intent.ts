@@ -6,9 +6,9 @@ import { locateActivityLog, appendActivityEntry } from './activity-log.ts';
 import {
   assertWritableInventory,
   buildArtifactLinkSection,
-  inspectTaskArtifacts,
-  parseArtifactName
+  inspectTaskArtifacts
 } from './artifact-lifecycle.ts';
+import { parseArtifactName } from './artifact-name.ts';
 import type { ArtifactIdentity } from './artifact-lifecycle.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { TaskExecutionLockOptions } from './task-execution-lock.ts';

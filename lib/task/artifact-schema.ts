@@ -1,13 +1,5 @@
-type ArtifactFamily =
-  | 'analysis'
-  | 'review-analysis'
-  | 'plan'
-  | 'review-plan'
-  | 'code'
-  | 'review-code'
-  | 'manual-validation'
-  | 'validation-run'
-  | 'pr-review';
+import { parseArtifactName } from './artifact-name.ts';
+import type { ArtifactFamily } from './artifact-name.ts';
 
 type ArtifactSchemaFamily = Exclude<ArtifactFamily, 'manual-validation' | 'validation-run' | 'pr-review'>;
 type ArtifactLocale = 'zh-CN' | 'en';
@@ -29,25 +21,6 @@ type ArtifactSkeletonInput = Readonly<{
   artifact: string;
   locale?: ArtifactLocale;
 }>;
-
-type ArtifactFamilySpec = Readonly<{
-  family: ArtifactFamily;
-  sectionAliases: readonly [string, string];
-  heading: string;
-  labels: readonly [string, string];
-}>;
-
-const ARTIFACT_FAMILY_CATALOG = [
-  { family: 'analysis', sectionAliases: ['分析', 'Analysis'], heading: '分析', labels: ['需求分析报告', 'Requirements Analysis'] },
-  { family: 'review-analysis', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['需求分析审查', 'Analysis Review'] },
-  { family: 'plan', sectionAliases: ['设计', 'Design'], heading: '设计', labels: ['技术方案', 'Technical Plan'] },
-  { family: 'review-plan', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['技术方案审查', 'Plan Review'] },
-  { family: 'code', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['实现报告', 'Implementation Report'] },
-  { family: 'review-code', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['代码审查', 'Code Review'] },
-  { family: 'manual-validation', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['人工验证', 'Manual Validation'] },
-  { family: 'validation-run', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['验证运行证据', 'Validation Run Evidence'] },
-  { family: 'pr-review', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['PR 审查报告', 'PR Review Report'] }
-] as const satisfies readonly ArtifactFamilySpec[];
 
 const LOCAL_SECTIONS = {
   analysis: [
@@ -157,8 +130,9 @@ function renderArtifactSkeleton(input: ArtifactSkeletonInput): string {
   const schema = getArtifactSchema(input.family);
   if (!schema) throw new Error(`unknown artifact schema family '${input.family}'`);
   const locale = input.locale ?? 'zh-CN';
-  const roundMatch = input.artifact.match(/-r(\d+)\.md$/);
-  const round = roundMatch ? Number(roundMatch[1]) : 1;
+  const identity = parseArtifactName(input.artifact);
+  if (identity?.family !== input.family) throw new Error(`invalid artifact identity '${input.artifact}' for '${input.family}'`);
+  const round = identity.round;
   const title = schema.title[locale === 'en' ? 'en' : 'zh'];
   const headings = locale === 'en' ? 'en' : 'zh';
   const lines = [
@@ -176,14 +150,11 @@ function renderArtifactSkeleton(input: ArtifactSkeletonInput): string {
 }
 
 export {
-  ARTIFACT_FAMILY_CATALOG,
   ARTIFACT_SCHEMAS,
   getArtifactSchema,
   renderArtifactSkeleton
 };
 export type {
-  ArtifactFamily,
-  ArtifactFamilySpec,
   ArtifactLocale,
   ArtifactSchema,
   ArtifactSchemaFamily,

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { parseArtifactName } from './artifact-name.ts';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -478,11 +479,8 @@ function validateRepairContext(request: ArtifactRepairRequest, content: string):
 }
 
 function artifactRound(family: ArtifactSchemaFamily, artifact: string): number | null {
-  if (artifact === `${family}.md`) return 1;
-  const match = artifact.match(new RegExp(`^${escapeRegExp(family)}-r([2-9]|[1-9]\\d+)\\.md$`));
-  if (!match) return null;
-  const round = Number(match[1]);
-  return Number.isSafeInteger(round) ? round : null;
+  const identity = parseArtifactName(artifact);
+  return identity?.family === family ? identity.round : null;
 }
 
 function validateTarget(taskDir: string, family: ArtifactSchemaFamily, artifact: string): { path: string } | ArtifactFileResult {

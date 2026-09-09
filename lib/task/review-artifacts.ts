@@ -53,23 +53,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function maxRound(entries: string[], stem: string): number {
-  let max = 0;
-  for (const entry of entries) {
-    if (entry === `${stem}.md`) {
-      max = Math.max(max, 1);
-      continue;
-    }
-    const match = entry.match(new RegExp(`^${escapeRegExp(stem)}-r(\\d+)\\.md$`));
-    if (match) max = Math.max(max, Number(match[1]));
-  }
-  return max;
-}
-
-function artifactName(stem: string, round: number): string {
-  return round === 1 ? `${stem}.md` : `${stem}-r${round}.md`;
-}
-
 function normalizeVerdict(raw: unknown): ReviewVerdict | '' {
   const value = String(raw).trim().toLowerCase();
   if (value === '通过' || value === 'approved') return 'Approved';
@@ -260,12 +243,10 @@ function parseVerdict(reviewPath: string): PathVerdictResult {
 }
 
 export {
-  artifactName,
   equalCounts,
   escapeRegExp,
   extractSection,
   finalizeReviewSummaryContent,
-  maxRound,
   normalizeVerdict,
   parseReviewSummary,
   parseVerdict,

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { COMPLETION_BACKFILL_FAMILIES, inspectCompletionArtifacts } from '../task/finalization-artifacts.ts';
-import { parseArtifactName } from '../task/artifact-lifecycle.ts';
+import { parseArtifactName } from '../task/artifact-name.ts';
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { getOpenWorkflowWarnings } from '../task/workflow-warnings.ts';

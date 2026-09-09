@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { parseArtifactName } from './artifact-name.ts';
 import type { InvalidationDocument } from './invalidation.ts';
 import { invalidationBlocks, isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
 import { receiptForOutput } from './artifact-receipts.ts';
@@ -141,13 +142,9 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   return deny('CAPABILITY_ACTION_UNKNOWN');
 }
 
-function artifactRound(name: string): number {
-  const match = /-r(\d+)\.md$/.exec(name);
-  return match ? Number(match[1]) : 1;
-}
-
 function latestArtifact(names: readonly string[]): string | null {
-  return [...names].sort((left, right) => artifactRound(right) - artifactRound(left) || left.localeCompare(right))[0] ?? null;
+  return names.map(parseArtifactName).filter((identity) => identity !== null)
+    .sort((left, right) => right.round - left.round || left.name.localeCompare(right.name))[0]?.name ?? null;
 }
 
 function reviewedInputName(content: string, expectedFamily: 'analysis' | 'plan' | 'code'): string | null {
@@ -242,17 +239,11 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       const stat = fs.lstatSync(path.join(taskDir, name));
       return stat.isFile() && !stat.isSymbolicLink();
     });
-    const artifactFamilies = {
-      analysis: /^analysis(?:-r\d+)?\.md$/,
-      'review-analysis': /^review-analysis(?:-r\d+)?\.md$/,
-      plan: /^plan(?:-r\d+)?\.md$/,
-      'review-plan': /^review-plan(?:-r\d+)?\.md$/,
-      code: /^code(?:-r\d+)?\.md$/,
-      'review-code': /^review-code(?:-r\d+)?\.md$/
-    } as const;
-    const familyFor = (name: string): keyof typeof artifactFamilies | null =>
-      (Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>)
-        .find((family) => artifactFamilies[family].test(name)) ?? null;
+    const artifactFamilies = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
+    const familyFor = (name: string) => {
+      const family = parseArtifactName(name)?.family;
+      return artifactFamilies.find((candidate) => candidate === family) ?? null;
+    };
     const activeFiles = files.filter((name) => {
       const family = familyFor(name);
       return !family || !isArtifactInvalidated(invalidation.document, family, name);
@@ -260,13 +251,13 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
     const artifactHashes: Record<string, string> = {};
     for (const name of activeFiles) artifactHashes[name] = sha256File(path.join(taskDir, name));
     const artifacts: Partial<Record<LifecycleAction, readonly string[]>> = Object.fromEntries(
-      (Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>).map((family) => [
-        family, activeFiles.filter((name) => artifactFamilies[family].test(name))
+      artifactFamilies.map((family) => [
+        family, activeFiles.filter((name) => familyFor(name) === family)
       ])
     ) as Partial<Record<LifecycleAction, readonly string[]>>;
     const staleArtifacts: Partial<Record<LifecycleAction, readonly string[]>> = Object.fromEntries(
-      (Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>).map((family) => [
-        family, files.filter((name) => artifactFamilies[family].test(name) && isArtifactInvalidated(invalidation.document, family, name))
+      artifactFamilies.map((family) => [
+        family, files.filter((name) => familyFor(name) === family && isArtifactInvalidated(invalidation.document, family, name))
       ])
     ) as Partial<Record<LifecycleAction, readonly string[]>>;
     const qualification = parseTaskQualification(content);
@@ -274,7 +265,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
     const qualificationStaleArtifacts: string[] = [];
     if (qualification.qualification.present) {
       const constraints = new Map(qualification.qualification.constraints.map((row) => [row.constraintId, row.digest]));
-      for (const family of Object.keys(artifactFamilies) as Array<keyof typeof artifactFamilies>) {
+      for (const family of artifactFamilies) {
         if (!ARTIFACT_AUDIT_FAMILIES.has(family)) continue;
         const name = latestArtifact(artifacts[family] ?? []);
         if (!name) continue;

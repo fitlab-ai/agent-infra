@@ -49,6 +49,12 @@ test('artifact skeleton contains identity metadata and non-semantic section mark
   assert.ok(structure.diagnostics.some((item) => item.code === 'ARTIFACT_EMPTY_SECTION'));
 });
 
+test('artifact skeleton rejects noncanonical or mismatched identities', () => {
+  for (const artifact of ['plan-r01.md', 'plan-r9007199254740992.md', 'code.md']) {
+    assert.throws(() => renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family: 'plan', artifact }));
+  }
+});
+
 test('all six schema families validate filled skeletons in both locales', () => {
   for (const schema of ARTIFACT_SCHEMAS) {
     for (const locale of ['zh-CN', 'en'] as const) {

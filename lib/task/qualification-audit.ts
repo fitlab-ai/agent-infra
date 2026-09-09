@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { parseArtifactName } from './artifact-name.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseTable } from './sections.ts';
 
@@ -315,10 +316,10 @@ function parseAuditTable(content: string, heading: (typeof AUDIT_SUBSECTIONS)[nu
   return table?.rows.map((row) => ({ ...row.values })) ?? null;
 }
 
-function parseArtifactName(value: string): { family: ArtifactFamily; round: number } | null {
-  const match = /^(analysis|review-analysis|plan|review-plan|code|review-code)(?:-r([2-9]|[1-9]\d+))?\.md$/.exec(value);
-  if (!match) return null;
-  return { family: match[1] as ArtifactFamily, round: match[2] ? Number(match[2]) : 1 };
+function parseAuditArtifactName(value: string): { family: ArtifactFamily; round: number } | null {
+  const identity = parseArtifactName(value);
+  return identity && ARTIFACT_FAMILIES.includes(identity.family as ArtifactFamily)
+    ? { family: identity.family as ArtifactFamily, round: identity.round } : null;
 }
 
 function upstreamArtifactDigest(rows: readonly UpstreamRelation[]): string {
@@ -327,7 +328,7 @@ function upstreamArtifactDigest(rows: readonly UpstreamRelation[]): string {
 }
 
 function validateUpstreamRelation(row: UpstreamRelation): void {
-  const identity = parseArtifactName(row.upstreamArtifact);
+  const identity = parseAuditArtifactName(row.upstreamArtifact);
   if (!ARTIFACT_FAMILIES.includes(row.upstreamFamily) || !identity || identity.family !== row.upstreamFamily
     || identity.round !== row.upstreamRound || !Number.isSafeInteger(row.upstreamRound)
     || !/^[a-f0-9]{64}$/i.test(row.upstreamSha256) || !RELATIONS.includes(row.relation)) {
@@ -368,7 +369,7 @@ function expectedQualificationRelations(
   const inputName = family === 'code' ? frontmatter.code_input_artifact : family.startsWith('review-') ? frontmatter.review_input_artifact : '';
   const inputSha256 = family === 'code' ? frontmatter.code_input_sha256 : family.startsWith('review-') ? frontmatter.review_input_sha256 : '';
   if (typeof inputName !== 'string' || !inputName || typeof inputSha256 !== 'string' || !inputSha256) return { ok: true, relations: undefined };
-  const identity = parseArtifactName(inputName);
+  const identity = parseAuditArtifactName(inputName);
   if (!identity) return { ok: false, code: 'QUALIFICATION_STARTED_INPUT_INVALID', message: `started input '${inputName}' is not canonical` };
   const relation: UpstreamRelation = {
     upstreamFamily: identity.family, upstreamArtifact: inputName, upstreamRound: identity.round,
@@ -507,7 +508,7 @@ function validateQualificationAudit(
     || upstreamArtifactDigest(options.expectedUpstreamRelations) !== upstreamArtifactDigest(audit.audit.upstreamRelations)
   )) return { ok: false, code: 'QUALIFICATION_UPSTREAM_RELATION_MISMATCH', message: 'qualification audit upstream relations do not match the started artifact inputs' };
   if (options.family && options.artifact) {
-    const identity = parseArtifactName(options.artifact);
+    const identity = parseAuditArtifactName(options.artifact);
     if (!identity || identity.family !== options.family) return { ok: false, code: 'QUALIFICATION_ARTIFACT_IDENTITY_INVALID', message: `artifact '${options.artifact}' is not canonical for '${options.family}'` };
   }
   return { ok: true, qualification: task.qualification, audit: audit.audit };

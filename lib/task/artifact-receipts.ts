@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 
+import { parseArtifactName } from './artifact-name.ts';
 import { extractSection, findSectionHeading, parseTable } from './sections.ts';
 
 const RECEIPT_SECTION_ALIASES = ['产物生命周期收据', 'Artifact Lifecycle Receipts'] as const;
@@ -12,7 +13,6 @@ const RECEIPT_EVENTS = new Set([
   'code.completed'
 ]);
 const SHA256_RE = /^[a-f0-9]{64}$/;
-const ARTIFACT_NAME_RE = /^(analysis|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run|pr-review)(?:-r([2-9]|[1-9]\d+))?\.md$/;
 const RECEIPT_SHAPES = {
   'review-analysis.completed': { output: 'review-analysis', input: 'analysis' },
   'review-plan.completed': { output: 'review-plan', input: 'plan' },
@@ -59,20 +59,9 @@ function sha256File(filePath: string): string {
   return sha256Bytes(fs.readFileSync(filePath));
 }
 
-function parseReceiptArtifactName(name: string): { family: string } | null {
-  const match = ARTIFACT_NAME_RE.exec(name);
-  if (!match) return null;
-  const roundText = match[2];
-  if (roundText !== undefined) {
-    const round = Number(roundText);
-    if (!Number.isSafeInteger(round) || String(round) !== roundText) return null;
-  }
-  return { family: match[1]! };
-}
-
 function validateReceiptShape(event: ArtifactReceiptEvent, output: string, input: string): void {
-  const outputIdentity = parseReceiptArtifactName(output);
-  const inputIdentity = parseReceiptArtifactName(input);
+  const outputIdentity = parseArtifactName(output);
+  const inputIdentity = parseArtifactName(input);
   if (!outputIdentity || !inputIdentity) throw new ArtifactReceiptError(`receipt artifact identity is invalid: ${output} -> ${input}`);
   const shape = RECEIPT_SHAPES[event];
   if (outputIdentity.family !== shape.output || inputIdentity.family !== shape.input) {

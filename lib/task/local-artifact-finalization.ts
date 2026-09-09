@@ -1,10 +1,8 @@
 import fs from 'node:fs';
 
 import { inspectDecisionDetailDuplicates, scanVisibleMarkdown } from './decision-details.ts';
-import {
-  parseArtifactName,
-  validateCompletedArtifact
-} from './artifact-lifecycle.ts';
+import { validateCompletedArtifact } from './artifact-lifecycle.ts';
+import { parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
