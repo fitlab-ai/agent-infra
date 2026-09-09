@@ -57,10 +57,20 @@ function journalPath(cwd: string): string {
   return path.join(cwd, JOURNAL_RELATIVE_PATH);
 }
 
+function isUnsupportedFsyncError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EINVAL' || code === 'ENOSYS' || code === 'ENOTSUP' || code === 'EPERM';
+}
+
 function syncFile(filePath: string, io: PromotionFs): void {
   if (!io.openSync || !io.closeSync || !io.fsyncSync) return;
   const descriptor = io.openSync(filePath, 'r');
-  try { io.fsyncSync(descriptor); } finally { io.closeSync(descriptor); }
+  try {
+    try { io.fsyncSync(descriptor); }
+    catch (error) {
+      if (!isUnsupportedFsyncError(error)) throw error;
+    }
+  } finally { io.closeSync(descriptor); }
 }
 
 function writeJournal(cwd: string, journal: PromotionJournal, io: PromotionFs): void {

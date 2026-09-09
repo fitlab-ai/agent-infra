@@ -174,6 +174,27 @@ test('promotion rolls back when a promoted target fails validation', () => {
   }
 });
 
+test('promotion commits when the platform rejects file fsync', () => {
+  const { root, assets, staging } = fixture();
+  const io = {
+    ...fs,
+    fsyncSync() {
+      const error = new Error('operation not permitted, fsync') as NodeJS.ErrnoException;
+      error.code = 'EPERM';
+      throw error;
+    }
+  } as unknown as PromotionFs;
+  try {
+    const result = promoteDemoAssets(root, staging, 'fsync-unsupported', io);
+    assert.equal(result.status, 'committed');
+    assert.equal(result.code, null);
+    assertTargets(root, 'new');
+    assertNoPromotionArtifacts(assets);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('promotion rolls back when the committed journal cannot be written', () => {
   const { root, assets, staging } = fixture();
   try {
