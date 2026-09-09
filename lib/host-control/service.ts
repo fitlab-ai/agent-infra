@@ -38,6 +38,13 @@ function xml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
+function systemdArgument(value: string): string {
+  const escaped = value.replace(/[\\"]/g, '\\$&')
+    .replace(/[\x00-\x1f\x7f]/g, (character) => `\\x${character.charCodeAt(0).toString(16).padStart(2, '0')}`)
+    .replaceAll('%', '%%');
+  return `"${escaped}"`;
+}
+
 function servicePaths(platform: HostControlServicePlatform = servicePlatform()): Readonly<{ unit?: string; plist?: string }> {
   if (platform === 'linux') return { unit: path.join(os.homedir(), '.config', 'systemd', 'user', 'agent-infra-host-control.service') };
   if (platform === 'darwin') return { plist: path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.fitlab-ai.agent-infra.host-control.plist') };
@@ -54,10 +61,12 @@ export function installHostControlService(platform: HostControlServicePlatform =
       'Description=agent-infra host-control service',
       '',
       '[Service]',
-      `ExecStart=${process.execPath} ${entry} host-control serve`,
+      // The ':' executable prefix disables environment expansion for literal paths.
+      `ExecStart=${systemdArgument(`:${process.execPath}`)} ${systemdArgument(entry)} host-control serve`,
       'Restart=on-failure',
       'NoNewPrivileges=true',
-      'PrivateTmp=true',
+      // Workers receive host paths, including working directories and inputs under /tmp.
+      'PrivateTmp=false',
       '',
       '[Install]',
       'WantedBy=default.target',
