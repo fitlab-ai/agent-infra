@@ -167,7 +167,9 @@ export function workflowArguments(request: TaskWorkflowRequest): readonly string
         : request.operation === 'invalidation-reconcile' ? 'reconcile'
             : request.operation === 'warning-add' ? 'add'
               : request.operation === 'ledger-finding-response' ? 'finding-respond'
-                : request.operation.replace('ledger-', '').replace('decision-', 'decision-');
+                : request.operation.startsWith('ledger-')
+                  ? request.operation.slice('ledger-'.length)
+                  : request.operation;
   const args = [request.taskId, operation];
   const excluded = new Set(['taskRef', 'event', 'intent']);
   if (request.operation === 'event') args[1] = String(fields.event ?? '');
