@@ -1,11 +1,15 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
+import {
+  MANUAL_VALIDATION_SHA40 as SHA40,
+  MANUAL_VALIDATION_TASK_ID as TASK_ID,
+  exactKeys,
+  isRecord,
+  validTimestamp
+} from './manual-validation-shared.ts';
 
 const MANUAL_VALIDATION_EVIDENCE_SCHEMA = 'agent-infra/branch-only-validation-evidence';
 const MANUAL_VALIDATION_EVIDENCE_VERSION = 1;
-const SHA256 = /^[a-f0-9]{40}$/u;
-const TASK_ID = /^TASK-\d{8}-\d{6}$/u;
-const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 type ManualValidationMode = 'task-bound' | 'branch-only';
 type ManualValidationScope = 'snapshot' | 'inplace';
@@ -63,22 +67,6 @@ function invalid(message: string): ManualValidationEvidenceResult {
   return { ok: false, error: { code: 'MANUAL_VALIDATION_EVIDENCE_INVALID', message } };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function exactKeys(value: Record<string, unknown>, keys: readonly string[], label: string): string | null {
-  const allowed = new Set(keys);
-  const unknown = Object.keys(value).find((key) => !allowed.has(key));
-  if (unknown) return `${label} contains unknown field '${unknown}'`;
-  const missing = keys.find((key) => !Object.hasOwn(value, key));
-  return missing ? `${label} is missing '${missing}'` : null;
-}
-
-function validTimestamp(value: unknown): value is string {
-  return typeof value === 'string' && ISO_TIMESTAMP.test(value) && Number.isFinite(Date.parse(value));
-}
-
 function validateShape(value: unknown): ManualValidationEvidenceResult {
   if (!isRecord(value)) return invalid('evidence must be a JSON object');
   const topError = exactKeys(value, ['schema', 'version', 'mode', 'taskId', 'branch', 'commit', 'recoverable', 'source', 'result'], 'evidence');
@@ -89,7 +77,7 @@ function validateShape(value: unknown): ManualValidationEvidenceResult {
   if (value.mode !== 'task-bound' && value.mode !== 'branch-only') return invalid('mode must be task-bound or branch-only');
   if (value.taskId !== null && (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId))) return invalid('taskId must be a TASK identifier or null');
   if (typeof value.branch !== 'string' || !value.branch.trim() || /[\r\n]/u.test(value.branch)) return invalid('branch must be a non-empty single line');
-  if (typeof value.commit !== 'string' || !SHA256.test(value.commit)) return invalid('commit must be a 40-character lowercase hexadecimal SHA');
+  if (typeof value.commit !== 'string' || !SHA40.test(value.commit)) return invalid('commit must be a 40-character lowercase hexadecimal SHA');
   if (typeof value.recoverable !== 'boolean') return invalid('recoverable must be boolean');
   if (value.source !== 'run-manual-validation') return invalid('source is unsupported');
   if (value.mode === 'branch-only' && (value.taskId !== null || value.recoverable !== false)) return invalid('branch-only evidence must be non-recoverable and task-free');
@@ -133,6 +121,36 @@ function createManualValidationEvidence(input: ManualValidationEvidenceInput): M
   return checked.value;
 }
 
+type ManualValidationEvidenceSummary = Readonly<{
+  version: 1;
+  taskId: string | null;
+  branch: string;
+  scope: ManualValidationScope;
+  commit: string;
+  command: string;
+  startedAt: string;
+  completedAt: string;
+  exitCode: number;
+  signal: string | null;
+  cleanup: ManualValidationCleanup;
+}>;
+
+function manualValidationEvidenceSummary(evidence: ManualValidationEvidence): ManualValidationEvidenceSummary {
+  return {
+    version: 1,
+    taskId: evidence.taskId,
+    branch: evidence.branch,
+    scope: evidence.result.scope,
+    commit: evidence.commit,
+    command: evidence.result.command,
+    startedAt: evidence.result.startedAt,
+    completedAt: evidence.result.completedAt,
+    exitCode: evidence.result.exitCode,
+    signal: evidence.result.signal,
+    cleanup: evidence.result.cleanup
+  };
+}
+
 function validateManualValidationEvidence(value: unknown, expected?: ManualValidationEvidenceIdentity): ManualValidationEvidenceResult {
   const shape = validateShape(value);
   if (!shape.ok) return shape;
@@ -172,6 +190,7 @@ export {
   MANUAL_VALIDATION_EVIDENCE_SCHEMA,
   MANUAL_VALIDATION_EVIDENCE_VERSION,
   createManualValidationEvidence,
+  manualValidationEvidenceSummary,
   manualValidationEvidenceDigest,
   readManualValidationEvidence,
   validateManualValidationEvidence
@@ -184,6 +203,7 @@ export type {
   ManualValidationEvidenceIdentity,
   ManualValidationEvidenceInput,
   ManualValidationEvidenceResult,
+  ManualValidationEvidenceSummary,
   ManualValidationMode,
   ManualValidationScope
 };

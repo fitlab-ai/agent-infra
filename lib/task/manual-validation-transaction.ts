@@ -3,15 +3,20 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { validateManualValidationReceipt } from './manual-validation-receipt.ts';
+import {
+  MANUAL_VALIDATION_ARTIFACT as ARTIFACT,
+  MANUAL_VALIDATION_SHA40 as SHA40,
+  MANUAL_VALIDATION_SHA64 as SHA64,
+  MANUAL_VALIDATION_TASK_ID as TASK_ID,
+  exactKeys,
+  isRecord,
+  validTimestamp,
+  writeJsonAtomic
+} from './manual-validation-shared.ts';
 
 const MANUAL_VALIDATION_TRANSACTION_SCHEMA = 'agent-infra/manual-validation-transaction';
 const MANUAL_VALIDATION_TRANSACTION_VERSION = 1;
-const TASK_ID = /^TASK-\d{8}-\d{6}$/u;
-const SHA40 = /^[a-f0-9]{40}$/u;
-const SHA64 = /^[a-f0-9]{64}$/u;
-const ARTIFACT = /^manual-validation(?:-r[2-9]|-r[1-9]\d+)?.md$/u;
 const TRANSACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 type ManualValidationTransactionPhase = 'prepared' | 'summary-staged' | 'receipt-committed' | 'final-promotion-in-progress' | 'committed' | 'aborted' | 'recovery-required';
 type ManualValidationSummaryPreimage = Readonly<{ commentId: number | string | null; body: string; digest: string }>;
@@ -53,10 +58,6 @@ type ManualValidationGenerationArchiveOptions = Readonly<{
   afterReceiptMove?: () => void;
 }>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 function invalid(message: string): ManualValidationTransactionResult {
   return { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_INVALID', message } };
 }
@@ -68,9 +69,8 @@ function summaryPreimageDigest(body: string): string {
 function validateManualValidationTransaction(value: unknown, expected?: Partial<Pick<ManualValidationTransaction, 'transactionId' | 'taskId' | 'prNumber' | 'prHeadSha' | 'evidenceDigest' | 'artifact'>>): ManualValidationTransactionResult {
   if (!isRecord(value)) return invalid('transaction must be a JSON object');
   const keys = ['schema', 'version', 'transactionId', 'taskId', 'prNumber', 'prHeadSha', 'evidenceDigest', 'summaryPreimage', 'pendingSummaryDigest', 'finalSummaryDigest', 'artifact', 'phase', 'committedReceipt', 'eventAppended', 'attempt', 'postWriteVerified', 'createdAt', 'updatedAt', 'error'];
-  const unknown = Object.keys(value).find((key) => !keys.includes(key));
-  const missing = keys.find((key) => !Object.hasOwn(value, key));
-  if (unknown || missing) return invalid(unknown ? `transaction contains unknown field '${unknown}'` : `transaction is missing '${missing}'`);
+  const keyError = exactKeys(value, keys, 'transaction');
+  if (keyError) return invalid(keyError);
   if (value.schema !== MANUAL_VALIDATION_TRANSACTION_SCHEMA || value.version !== MANUAL_VALIDATION_TRANSACTION_VERSION) return invalid('transaction schema or version is unsupported');
   if (typeof value.transactionId !== 'string' || !TRANSACTION_ID.test(value.transactionId)) return invalid('transactionId is invalid');
   if (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId)) return invalid('taskId is invalid');
@@ -80,7 +80,8 @@ function validateManualValidationTransaction(value: unknown, expected?: Partial<
   if (typeof value.evidenceDigest !== 'string' || !SHA64.test(value.evidenceDigest)) return invalid('evidenceDigest is invalid');
   if (!isRecord(value.summaryPreimage)) return invalid('summaryPreimage is invalid');
   const preimage = value.summaryPreimage;
-  if (!Object.hasOwn(preimage, 'commentId') || !Object.hasOwn(preimage, 'body') || !Object.hasOwn(preimage, 'digest')) return invalid('summaryPreimage is incomplete');
+  const preimageKeyError = exactKeys(preimage, ['commentId', 'body', 'digest'], 'summaryPreimage');
+  if (preimageKeyError) return invalid(preimageKeyError);
   if (preimage.commentId !== null && typeof preimage.commentId !== 'number' && typeof preimage.commentId !== 'string') return invalid('summaryPreimage.commentId is invalid');
   if (typeof preimage.body !== 'string' || typeof preimage.digest !== 'string' || !SHA64.test(preimage.digest) || summaryPreimageDigest(preimage.body) !== preimage.digest) return invalid('summaryPreimage digest is invalid');
   for (const field of ['pendingSummaryDigest', 'finalSummaryDigest'] as const) if (typeof value[field] !== 'string' || !SHA64.test(value[field])) return invalid(`${field} is invalid`);
@@ -90,7 +91,7 @@ function validateManualValidationTransaction(value: unknown, expected?: Partial<
   if (typeof value.eventAppended !== 'boolean' || typeof value.postWriteVerified !== 'boolean') return invalid('transaction completion flags are invalid');
   const attempt = value.attempt;
   if (!Number.isSafeInteger(attempt) || (attempt as number) < 1) return invalid('attempt is invalid');
-  if (typeof value.createdAt !== 'string' || !TIMESTAMP.test(value.createdAt) || typeof value.updatedAt !== 'string' || !TIMESTAMP.test(value.updatedAt)) return invalid('transaction timestamps are invalid');
+  if (!validTimestamp(value.createdAt) || !validTimestamp(value.updatedAt)) return invalid('transaction timestamps are invalid');
   if (value.error !== null && (typeof value.error !== 'string' || !value.error || /[\r\n]/u.test(value.error))) return invalid('transaction error is invalid');
   if (['receipt-committed', 'final-promotion-in-progress', 'committed'].includes(value.phase as string) && value.committedReceipt === null) return invalid('receipt-backed phases require committedReceipt');
   if (['final-promotion-in-progress', 'committed'].includes(value.phase as string) && !value.eventAppended) return invalid('final promotion requires an appended completion event');
@@ -261,16 +262,7 @@ function writeManualValidationTransactionAtomic(taskDir: string, transaction: Ma
   const checked = validateManualValidationTransaction(transaction);
   if (!checked.ok) throw new Error(`${checked.error.code}: ${checked.error.message}`);
   const target = manualValidationTransactionPath(taskDir);
-  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  try {
-    fs.writeFileSync(temporary, `${JSON.stringify(transaction)}\n`, { mode: 0o600 });
-    fs.renameSync(temporary, target);
-  } catch (error) {
-    try { fs.unlinkSync(temporary); } catch { /* best effort cleanup of our own temp file */ }
-    throw error;
-  }
-  return target;
+  return writeJsonAtomic(target, transaction);
 }
 
 function readManualValidationTransaction(taskDir: string, expected?: Parameters<typeof validateManualValidationTransaction>[1]): ManualValidationTransactionResult {

@@ -1,14 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import {
+  MANUAL_VALIDATION_ARTIFACT as ARTIFACT,
+  MANUAL_VALIDATION_SHA40 as SHA40,
+  MANUAL_VALIDATION_SHA64 as SHA64,
+  MANUAL_VALIDATION_TASK_ID as TASK_ID,
+  exactKeys,
+  isRecord,
+  validTimestamp,
+  writeJsonAtomic
+} from './manual-validation-shared.ts';
 
 const MANUAL_VALIDATION_RECEIPT_SCHEMA = 'agent-infra/manual-validation-receipt';
 const MANUAL_VALIDATION_RECEIPT_VERSION = 1;
-const TASK_ID = /^TASK-\d{8}-\d{6}$/u;
-const SHA40 = /^[a-f0-9]{40}$/u;
-const SHA64 = /^[a-f0-9]{64}$/u;
-const ARTIFACT = /^manual-validation(?:-r[2-9]|-r[1-9]\d+)?.md$/u;
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 type ManualValidationReceipt = Readonly<{
   schema: typeof MANUAL_VALIDATION_RECEIPT_SCHEMA;
@@ -38,10 +43,6 @@ type ManualValidationReceiptIdentity = Partial<Pick<ManualValidationReceipt, 'tr
 
 function invalid(message: string): ManualValidationReceiptResult {
   return { ok: false, error: { code: 'MANUAL_VALIDATION_RECEIPT_INVALID', message } };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function canonicalPayload(receipt: ManualValidationReceipt | ManualValidationReceiptInput): Omit<ManualValidationReceipt, 'receiptDigest'> {
@@ -80,9 +81,8 @@ function manualValidationFinalSummaryProjectionMatches(body: string, receipt: Ma
 function validateManualValidationReceipt(value: unknown, expected?: ManualValidationReceiptIdentity): ManualValidationReceiptResult {
   if (!isRecord(value)) return invalid('receipt must be a JSON object');
   const keys = ['schema', 'version', 'transactionId', 'taskId', 'prNumber', 'prHeadSha', 'evidenceDigest', 'artifact', 'artifactSha256', 'pendingSummaryDigest', 'finalSummaryDigest', 'committedAt', 'receiptDigest'];
-  const unknown = Object.keys(value).find((key) => !keys.includes(key));
-  const missing = keys.find((key) => !Object.hasOwn(value, key));
-  if (unknown || missing) return invalid(unknown ? `receipt contains unknown field '${unknown}'` : `receipt is missing '${missing}'`);
+  const keyError = exactKeys(value, keys, 'receipt');
+  if (keyError) return invalid(keyError);
   if (value.schema !== MANUAL_VALIDATION_RECEIPT_SCHEMA || value.version !== MANUAL_VALIDATION_RECEIPT_VERSION) return invalid('receipt schema or version is unsupported');
   if (typeof value.transactionId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value.transactionId)) return invalid('transactionId is invalid');
   if (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId)) return invalid('taskId is invalid');
@@ -92,7 +92,7 @@ function validateManualValidationReceipt(value: unknown, expected?: ManualValida
     if (typeof value[name] !== 'string' || !pattern.test(value[name])) return invalid(`${name} is invalid`);
   }
   if (typeof value.artifact !== 'string' || !ARTIFACT.test(value.artifact)) return invalid('artifact is not a canonical manual-validation artifact');
-  if (typeof value.committedAt !== 'string' || !TIMESTAMP.test(value.committedAt) || !Number.isFinite(Date.parse(value.committedAt))) return invalid('committedAt is invalid');
+  if (!validTimestamp(value.committedAt)) return invalid('committedAt is invalid');
   const receipt = value as unknown as ManualValidationReceipt;
   if (manualValidationReceiptDigest(receipt) !== receipt.receiptDigest) return invalid('receiptDigest does not match receipt contents');
   if (expected && Object.entries(expected).some(([key, expectedValue]) => expectedValue !== undefined && receipt[key as keyof ManualValidationReceipt] !== expectedValue)) {
@@ -117,16 +117,7 @@ function writeManualValidationReceiptAtomic(taskDir: string, receipt: ManualVali
   const checked = validateManualValidationReceipt(receipt);
   if (!checked.ok) throw new Error(`${checked.error.code}: ${checked.error.message}`);
   const target = manualValidationReceiptPath(taskDir);
-  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  try {
-    fs.writeFileSync(temporary, `${JSON.stringify(receipt)}\n`, { mode: 0o600 });
-    fs.renameSync(temporary, target);
-  } catch (error) {
-    try { fs.unlinkSync(temporary); } catch { /* best effort cleanup of our own temp file */ }
-    throw error;
-  }
-  return target;
+  return writeJsonAtomic(target, receipt);
 }
 
 function readManualValidationReceipt(taskDir: string, expected?: ManualValidationReceiptIdentity): ManualValidationReceiptResult {

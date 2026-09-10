@@ -24,8 +24,9 @@ import {
 } from '../sandbox/control/protocol.ts';
 import { getProcessStartTime } from '../server/process-state.ts';
 import { assertGitWorktreeBinding } from '../git/worktree-identity.ts';
-import { createManualValidationEvidence } from '../task/manual-validation-evidence.ts';
+import { createManualValidationEvidence, manualValidationEvidenceSummary } from '../task/manual-validation-evidence.ts';
 import type { ManualValidationCleanup } from '../task/manual-validation-evidence.ts';
+import { writeJsonAtomic } from '../task/manual-validation-shared.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal task-validate <branch | TASK-id | N> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] [--evidence-file <path>] -- <command> [args...]`;
@@ -81,19 +82,6 @@ export function parseValidateArgs(args: string[]): ValidateOptions {
   }
   if (positionals.length !== 1 || command.length === 0) throw new Error(USAGE);
   return { target: positionals[0]!, scope, timeoutMs, format, evidenceFile, command, help: false };
-}
-
-function writeEvidenceFile(file: string, evidence: ReturnType<typeof createManualValidationEvidence>): void {
-  const target = path.resolve(file);
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  try {
-    fs.writeFileSync(temporary, `${JSON.stringify(evidence)}\n`, { mode: 0o600 });
-    fs.renameSync(temporary, target);
-  } catch (error) {
-    try { fs.unlinkSync(temporary); } catch { /* best effort cleanup of our own temp file */ }
-    throw new Error(`MANUAL_VALIDATION_EVIDENCE_WRITE_FAILED: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }
 
 function runValidationCommand(command: string[], cwd: string, scope: string, timeoutMs: number, json: boolean) {
@@ -330,24 +318,15 @@ function taskValidate(args: string[]): void {
       signal: result.signal,
       cleanup
     });
-    if (options.evidenceFile) writeEvidenceFile(options.evidenceFile, evidence);
-    const legacyEvidence = {
-      version: 1,
-      taskId: target.workspace.mode === 'task-bound' ? target.workspace.taskId : null,
-      branch: target.branch,
-      scope: options.scope,
-      commit,
-      command: path.basename(options.command[0]!),
-      startedAt,
-      completedAt: new Date().toISOString(),
-      exitCode: result.exitCode,
-      signal: result.signal,
-      cleanup
-    };
+    if (options.evidenceFile) {
+      try { writeJsonAtomic(path.resolve(options.evidenceFile), evidence); }
+      catch (error) { throw new Error(`MANUAL_VALIDATION_EVIDENCE_WRITE_FAILED: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    const evidenceSummary = manualValidationEvidenceSummary(evidence);
     if (options.format === 'json') {
-      process.stdout.write(`${JSON.stringify({ status: 'applied', changed: false, evidence: legacyEvidence, evidenceFile: options.evidenceFile, error: null })}\n`);
+      process.stdout.write(`${JSON.stringify({ status: 'applied', changed: false, evidence: evidenceSummary, evidenceFile: options.evidenceFile, error: null })}\n`);
     } else {
-      process.stdout.write(`Validation ${result.exitCode === 0 ? 'passed' : 'failed'} (${options.scope}, ${legacyEvidence.command}, cleanup=${legacyEvidence.cleanup}).\n`);
+      process.stdout.write(`Validation ${result.exitCode === 0 ? 'passed' : 'failed'} (${options.scope}, ${evidenceSummary.command}, cleanup=${evidenceSummary.cleanup}).\n`);
     }
     process.exitCode = result.exitCode;
   } catch (error) {
