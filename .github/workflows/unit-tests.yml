@@ -69,6 +69,8 @@ jobs:
     name: ubuntu-latest / integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      AGENT_INFRA_TEST_CONCURRENCY: '2'
     permissions:
       contents: read
     steps:
@@ -129,6 +131,8 @@ jobs:
     name: ubuntu-latest / Node 22.9.0 minimum baseline
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      AGENT_INFRA_TEST_CONCURRENCY: '2'
     permissions:
       contents: read
     steps:
