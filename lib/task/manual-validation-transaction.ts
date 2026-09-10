@@ -49,6 +49,9 @@ type ManualValidationTransactionError = { code: ManualValidationTransactionError
 type ManualValidationTransactionResult =
   | { ok: true; value: ManualValidationTransaction }
   | { ok: false; error: ManualValidationTransactionError };
+type ManualValidationGenerationArchiveOptions = Readonly<{
+  afterReceiptMove?: () => void;
+}>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -228,7 +231,12 @@ function validateManualValidationGenerationArchive(taskDir: string, transaction:
   }
 }
 
-function archiveManualValidationGeneration(taskDir: string, transaction: ManualValidationTransaction, requireReceipt = false): void {
+function archiveManualValidationGeneration(
+  taskDir: string,
+  transaction: ManualValidationTransaction,
+  requireReceipt = false,
+  options: ManualValidationGenerationArchiveOptions = {}
+): void {
   const historyDir = path.join(taskDir, '.manual-validation', 'history');
   validateManualValidationGenerationArchive(taskDir, transaction, requireReceipt);
   fs.mkdirSync(historyDir, { recursive: true });
@@ -245,6 +253,7 @@ function archiveManualValidationGeneration(taskDir: string, transaction: ManualV
     fs.renameSync(source, target);
   };
   move(receiptPath, receiptHistoryPath, requireReceipt);
+  options.afterReceiptMove?.();
   move(transactionPath, transactionHistoryPath, true);
 }
 
