@@ -65,7 +65,6 @@ import {
 import { validateSandboxControlIdentity } from './control/identity-sentinel.ts';
 import { appendDiagnosticAudit as appendControlDiagnosticAudit } from './control/audit.ts';
 import { inspectSandboxControlContainer } from './control/container-identity.ts';
-import { hasLegacySandboxProjection } from './cutover.ts';
 import {
   SANDBOX_CONTROL_FUTURE_SKEW_MS,
   SANDBOX_CONTROL_STATUS_STALE_MS,
@@ -225,7 +224,6 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
   const extension = path.extname(fileURLToPath(import.meta.url));
   const internalCli = path.resolve(directory, '..', '..', 'bin', `internal-cli${extension}`);
   const manifest = readSandboxControlManifest(manifestPath);
-  if (hasLegacySandboxProjection(manifest)) throw new Error('SANDBOX_CONTROL_RECREATE_REQUIRED');
   const root = path.dirname(manifestPath);
   const identity = validateSandboxControlIdentity({
     publicStatusDir: manifest.publicStatusDir,
@@ -352,7 +350,6 @@ async function ensureSandboxControlBroker(params: {
   });
   if (!fs.existsSync(control.manifestPath)) return;
   const validatedManifest = readSandboxControlManifest(control.manifestPath);
-  if (hasLegacySandboxProjection(validatedManifest)) throw new Error('SANDBOX_CONTROL_RECREATE_REQUIRED');
   const identity = validateSandboxControlIdentity({
     publicStatusDir: validatedManifest.publicStatusDir,
     root: control.root,

@@ -126,8 +126,6 @@ test('control materialization rotates token and generation and creates isolated 
     identity: { mode: 'branch-only' as const }
   };
   const first = materializeSandboxControl(params);
-  assert.equal(Object.hasOwn(first.manifestDraft, 'taskProjectionDir'), false);
-  assert.equal(Object.hasOwn(first.manifestDraft, 'taskProjectionTopology'), false);
   const controlRoot = path.dirname(first.manifestPath);
   fs.writeFileSync(path.join(controlRoot, 'consumed', 'request-id'), '');
   const replacementLease = acquireSandboxControlReplacement(controlRoot);

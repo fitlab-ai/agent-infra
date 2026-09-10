@@ -25,8 +25,6 @@ Commands:
   start [--recreate] <branch | TASK-id | N>
                                Verify or recover an existing sandbox container;
                                optionally replace only the container on failure
-  reconcile --operator <name> <TASK-id | N>
-                               Record an audited host merge for a preserved task cutover
   vm status|start|stop         Manage the sandbox VM (macOS) or check the backend (Windows)
 
 Run 'ai sandbox <command> --help' for details.`;
@@ -100,11 +98,6 @@ export async function runSandbox(args: string[]): Promise<void> {
     case 'start': {
       const { start } = await import('./commands/start.ts');
       await start(rest);
-      break;
-    }
-    case 'reconcile': {
-      const { reconcile } = await import('./commands/reconcile.ts');
-      await reconcile(rest);
       break;
     }
     case 'vm': {

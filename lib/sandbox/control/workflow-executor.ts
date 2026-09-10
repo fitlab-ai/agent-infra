@@ -29,9 +29,6 @@ export async function executeTaskWorkflow(
 ): Promise<SandboxControlExecutionResult> {
   let publicationStarted = false;
   try {
-    if (manifest.taskProjectionDir !== undefined || manifest.taskProjectionTopology !== undefined) {
-      throw new Error('SANDBOX_CONTROL_RECREATE_REQUIRED');
-    }
     const taskDir = assertSandboxTaskSource(manifest.repoRoot, request.taskId);
     const [command] = TASK_WORKFLOW_COMMANDS[request.operation];
     if (request.operation === 'event') {

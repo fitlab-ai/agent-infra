@@ -80,16 +80,6 @@ import {
   readSandboxControlManifest
 } from '../control/lifecycle.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
-import {
-  completeSandboxTaskCutover,
-  hasLegacySandboxProjection,
-  prepareSandboxTaskCutover,
-  readSandboxTaskCutoverJournal,
-  restoreLegacySandboxWorkspaceView,
-  sandboxTaskCutoverRoot,
-  stageLegacySandboxWorkspaceView,
-  type SandboxTaskCutoverJournal
-} from '../cutover.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
 import {
@@ -99,7 +89,6 @@ import {
   materializeSandboxWorkspaceView,
   prepareSandboxWorkspaceMountTargets,
   sandboxControlPaths,
-  sandboxWorkspaceViewPaths,
 } from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
@@ -1097,21 +1086,6 @@ export async function create(args: string[]): Promise<void> {
   const expectedImageSignature = buildImageSignature(preparedDockerfile, tools);
   const engine = detectEngine(effectiveConfig);
   let createdTmpfsSeedPlan: TmpfsSeedPlanEntry[] = [];
-  let legacyTaskCutover: SandboxTaskCutoverJournal | null = null;
-  let legacyViewBackup: string | null = null;
-  const cutoverBase = path.join(effectiveConfig.home, '.agent-infra', 'sandbox-cutover');
-  const restoreFailedLegacyView = (): void => {
-    if (!legacyViewBackup) return;
-    const viewRoot = sandboxWorkspaceViewPaths({
-      base: effectiveConfig.workspaceViewBase,
-      project: effectiveConfig.project,
-      container,
-      identity: target.workspace
-    }).root;
-    removeDirRecursive(viewRoot);
-    restoreLegacySandboxWorkspaceView(viewRoot, legacyViewBackup);
-    legacyViewBackup = null;
-  };
 
   p.intro(pc.cyan('AI Sandbox'));
   p.log.info(
@@ -1358,35 +1332,6 @@ export async function create(args: string[]): Promise<void> {
                 : 'SANDBOX_CONTROL_CONTAINER_STILL_EXISTS');
             }
           }
-          if (target.workspace.mode === 'task-bound') {
-            const existingCutover = readSandboxTaskCutoverJournal({
-              base: cutoverBase,
-              project: effectiveConfig.project,
-              container,
-              taskId: target.workspace.taskId
-            });
-            if (existingCutover?.state === 'verified-equal') legacyTaskCutover = existingCutover;
-            if (existingCutover && existingCutover.state !== 'verified-equal'
-              && (!previousManifest || !hasLegacySandboxProjection(previousManifest))) {
-              throw new Error('SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED');
-            }
-          }
-          if (previousManifest && target.workspace.mode === 'task-bound' && hasLegacySandboxProjection(previousManifest)) {
-            if (previousManifest.mode !== 'task-bound' || previousManifest.taskId !== target.workspace.taskId) {
-              throw new Error('SANDBOX_TASK_CUTOVER_IDENTITY_INVALID');
-            }
-            legacyTaskCutover = await prepareSandboxTaskCutover({
-              base: cutoverBase,
-              project: effectiveConfig.project,
-              container,
-              taskId: target.workspace.taskId,
-              generation: previousManifest.generation,
-              hostTaskDir: assertSandboxTaskSource(effectiveConfig.repoRoot, target.workspace.taskId),
-              projectionDir: previousManifest.taskProjectionDir ?? '',
-              manifestPath: controlPaths.manifestPath
-            });
-          }
-
           const aliasesFile = ensureSandboxAliasesFile(
             effectiveConfig.home,
             capabilityPlan.aliases
@@ -1456,27 +1401,6 @@ export async function create(args: string[]): Promise<void> {
             const tmpfsArgs = effectiveResolvedTools.flatMap(({ tool }) =>
               tool.tmpfs ? buildTmpfsRunArgs(tool.containerMount, tool.tmpfs) : []
             );
-            const workspaceViewPaths = sandboxWorkspaceViewPaths({
-              base: effectiveConfig.workspaceViewBase,
-              project: effectiveConfig.project,
-              container,
-              identity: target.workspace
-            });
-            if (legacyTaskCutover) {
-              const cutoverRoot = sandboxTaskCutoverRoot({
-                base: cutoverBase,
-                project: effectiveConfig.project,
-                container,
-                taskId: legacyTaskCutover.taskId
-              });
-              const existingViewBackup = path.join(cutoverRoot, 'legacy-view');
-              if (fs.existsSync(existingViewBackup)) {
-                removeDirRecursive(workspaceViewPaths.root);
-                legacyViewBackup = existingViewBackup;
-              } else {
-                legacyViewBackup = stageLegacySandboxWorkspaceView(workspaceViewPaths.root, cutoverRoot);
-              }
-            }
             const workspaceView = materializeSandboxWorkspaceView({
               base: effectiveConfig.workspaceViewBase,
               project: effectiveConfig.project,
@@ -1709,9 +1633,7 @@ export async function create(args: string[]): Promise<void> {
                   // Preserve the cutover state for the next explicit recreate to recover.
                 }
               }
-              removeDirRecursive(workspaceViewPaths.root);
-              restoreLegacySandboxWorkspaceView(workspaceViewPaths.root, legacyViewBackup);
-              legacyViewBackup = null;
+              removeDirRecursive(workspaceView.root);
               throw error;
             }
           } finally {
@@ -1810,11 +1732,6 @@ export async function create(args: string[]): Promise<void> {
           replacementLeaseHeld = false;
           return 'Container started';
           } catch (error) {
-            try {
-              restoreFailedLegacyView();
-            } catch {
-              // Preserve the original failure and the cutover journal for replay.
-            }
             if (replacementLeaseHeld) {
               try {
                 replacementLease.release();
@@ -1832,36 +1749,14 @@ export async function create(args: string[]): Promise<void> {
   }
 
   p.log.step('Verifying setup...');
-  try {
-    await assertFreshSandboxReady({
-      config: effectiveConfig,
-      engine,
-      branch,
-      workspace: target.workspace,
-      container,
-      copiedEntries: createdTmpfsSeedPlan
-    });
-    const completedLegacyTaskCutover = (): SandboxTaskCutoverJournal | null => legacyTaskCutover;
-    const cutover = completedLegacyTaskCutover();
-    if (cutover) {
-      await completeSandboxTaskCutover({
-        base: cutoverBase,
-        project: effectiveConfig.project,
-        container,
-        taskId: cutover.taskId,
-        generation: cutover.generation
-      });
-      legacyTaskCutover = null;
-      legacyViewBackup = null;
-    }
-  } catch (error) {
-    try {
-      restoreFailedLegacyView();
-    } catch {
-      // Preserve the original failure and the cutover journal for replay.
-    }
-    throw error;
-  }
+  await assertFreshSandboxReady({
+    config: effectiveConfig,
+    engine,
+    branch,
+    workspace: target.workspace,
+    container,
+    copiedEntries: createdTmpfsSeedPlan
+  });
   const runningContainers = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}']).split('\n');
   const checks = [
     { name: 'Container running', ok: runningContainers.includes(container) },

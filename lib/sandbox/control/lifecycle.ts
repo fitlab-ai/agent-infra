@@ -1080,11 +1080,9 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     'branch', 'channelDir', 'container', 'containerIdentity', 'engine', 'generation',
     'mode', 'processingDir', 'project', 'publicStatusDir', 'repoRoot', 'runtimeDir',
     'taskId', 'token', 'worktreeRoot', 'authorityEvidence', 'controlRootId',
-    'taskProjectionDir', 'taskProjectionTopology'
   ];
   const actualKeys = Object.keys(manifest).sort().join(',');
-  const legacyKeys = expectedKeys.filter((key) => !['taskProjectionDir', 'taskProjectionTopology'].includes(key));
-  if (actualKeys !== expectedKeys.sort().join(',') && actualKeys !== legacyKeys.sort().join(',')) {
+  if (actualKeys !== expectedKeys.sort().join(',')) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
   if (typeof candidate.containerIdentity !== 'object' || candidate.containerIdentity === null
@@ -1109,20 +1107,6 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     || (candidate.mode === 'task-bound' && (typeof candidate.taskId !== 'string' || candidate.taskId.length === 0))
     || (candidate.mode === 'branch-only' && candidate.taskId !== null)
     || !isSandboxAuthorityEvidence(candidate.authorityEvidence)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-  const hasProjection = candidate.taskProjectionDir !== undefined || candidate.taskProjectionTopology !== undefined;
-  if (hasProjection) {
-    if (typeof candidate.taskProjectionDir !== 'string' || !path.isAbsolute(candidate.taskProjectionDir)
-      || !Array.isArray(candidate.taskProjectionTopology) || candidate.taskProjectionTopology.length === 0
-      || candidate.taskProjectionTopology.some((entry) => {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return true;
-        const value = entry as Record<string, unknown>;
-        return Object.keys(value).sort().join(',') !== 'dev,ino,mountIdentity,path,realpath'
-          || typeof value.path !== 'string' || !path.isAbsolute(value.path)
-          || typeof value.realpath !== 'string' || !path.isAbsolute(value.realpath)
-          || !Number.isSafeInteger(value.dev) || !Number.isSafeInteger(value.ino)
-          || typeof value.mountIdentity !== 'string' || value.mountIdentity.length === 0;
-      })) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
-  }
   const root = path.dirname(path.resolve(manifestPath));
   if (path.resolve(candidate.channelDir) !== path.join(root, 'channel')
     || path.resolve(candidate.publicStatusDir) !== path.join(root, 'public')
@@ -1153,10 +1137,6 @@ function readSandboxControlManifestValue(manifestPath: string): SandboxControlMa
     publicStatusDir: candidate.publicStatusDir,
     processingDir: candidate.processingDir,
     runtimeDir: candidate.runtimeDir,
-    ...(hasProjection ? {
-      taskProjectionDir: candidate.taskProjectionDir,
-      taskProjectionTopology: candidate.taskProjectionTopology
-    } : {})
   };
   return normalized;
 }

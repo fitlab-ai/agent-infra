@@ -89,24 +89,6 @@ test('authorized workflow executor owns the command worker without redispatching
   }
 });
 
-test('workflow rejects a legacy projection manifest until explicit recreation', onPlatforms('linux', 'darwin'), async () => {
-  const f = fixture();
-  try {
-    const legacyManifest = {
-      ...f.manifest,
-      taskProjectionDir: path.join(f.root, 'legacy-projection'),
-      taskProjectionTopology: []
-    } as SandboxControlManifest;
-    const result = await executeTaskWorkflow(legacyManifest, createTaskWorkflowRequest(
-      'task-ledger', [taskId, 'decision-next-id'], taskId, legacyManifest.generation
-    ));
-    assert.equal(result.exitCode, 1);
-    assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_RECREATE_REQUIRED');
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
 function content(family: 'plan' | 'review-analysis'): string {
   let result = renderArtifactSkeleton({ taskId, family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   result = result.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
