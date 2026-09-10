@@ -44,6 +44,25 @@ export type SandboxTaskCutoverJournal = Readonly<{
   error?: string;
 }>;
 
+export type SandboxTaskCutoverReconciliation = Readonly<{
+  version: 1;
+  action: 'reconcile-host';
+  operator: string;
+  confirmedAt: string;
+  journalSha256: string;
+  taskId: string;
+  generation: string;
+  hostTaskDir: string;
+  projectionDir: string;
+  manifestPath: string;
+  payloadRoot: string;
+  payloadTreeSha256: string;
+  projectionTreeSha256: string;
+  payloadProjectionTreeSha256: string;
+  manifestSha256: string;
+  hostTreeSha256: string;
+}>;
+
 const CUTOVER_COMPATIBILITY_TODO =
   'TODO(compat): Remove legacy projection manifest fields, parser branch, cutover payload handling, and related fixtures once the managed-root inventory reports zero legacy projection manifests and all pre-direct-mount containers have been recreated or removed.';
 
@@ -146,6 +165,29 @@ function readJournal(root: string): SandboxTaskCutoverJournal | null {
   }
 }
 
+function journalSha256(journal: SandboxTaskCutoverJournal): string {
+  return createHash('sha256').update(`${JSON.stringify(journal)}\n`, 'utf8').digest('hex');
+}
+
+function reconciliationPath(root: string): string {
+  return path.join(root, 'reconciliation.json');
+}
+
+function readReconciliation(root: string): SandboxTaskCutoverReconciliation | null {
+  const file = reconciliationPath(root);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const value = JSON.parse(readStableFileSync(file, { maxBytes: 1024 * 1024 }).bytes.toString('utf8')) as SandboxTaskCutoverReconciliation;
+    if (value.version !== 1 || value.action !== 'reconcile-host' || typeof value.operator !== 'string'
+      || typeof value.confirmedAt !== 'string' || typeof value.journalSha256 !== 'string') {
+      throw new Error('invalid reconciliation');
+    }
+    return value;
+  } catch {
+    throw new Error(`SANDBOX_TASK_CUTOVER_RECONCILIATION_INVALID: ${file}`);
+  }
+}
+
 export function readSandboxTaskCutoverJournal(params: Readonly<{
   base: string;
   project: string;
@@ -178,15 +220,24 @@ function copyTree(source: SandboxTaskTreeSnapshot, target: string): void {
   }
 }
 
-async function replayPreservedSandboxTaskCutover(
-  params: Readonly<{
-    root: string;
-    journal: SandboxTaskCutoverJournal;
-    hostTaskDir: string;
-    projectionDir: string;
-    manifestPath: string;
-  }>
-): Promise<SandboxTaskCutoverJournal> {
+type PreservedSandboxTaskCutoverState = Readonly<{
+  hostTaskDir: string;
+  projectionDir: string;
+  manifestPath: string;
+  payloadRoot: string;
+  host: SandboxTaskTreeSnapshot;
+  projection: SandboxTaskTreeSnapshot;
+  payload: SandboxTaskTreeSnapshot;
+  payloadProjection: SandboxTaskTreeSnapshot;
+}>;
+
+async function readPreservedSandboxTaskCutoverState(params: Readonly<{
+  root: string;
+  journal: SandboxTaskCutoverJournal;
+  hostTaskDir: string;
+  projectionDir: string;
+  manifestPath: string;
+}>): Promise<PreservedSandboxTaskCutoverState> {
   const hostTaskDir = assertRealDirectory(params.hostTaskDir, 'SANDBOX_TASK_CUTOVER_IDENTITY_INVALID');
   const projectionDir = assertRealDirectory(params.projectionDir, 'SANDBOX_TASK_CUTOVER_IDENTITY_INVALID');
   const manifestPath = canonicalTerminalPath(params.manifestPath);
@@ -200,10 +251,12 @@ async function replayPreservedSandboxTaskCutover(
 
   let host: SandboxTaskTreeSnapshot;
   let projection: SandboxTaskTreeSnapshot;
+  let payload: SandboxTaskTreeSnapshot;
   let payloadProjection: SandboxTaskTreeSnapshot;
   try {
     host = snapshotSandboxTaskTree(hostTaskDir);
     projection = snapshotSandboxTaskTree(projectionDir);
+    payload = snapshotSandboxTaskTree(payloadRoot);
     payloadProjection = snapshotSandboxTaskTree(path.join(payloadRoot, 'projection'));
     await readStableFile(manifestPath, {
       maxBytes: 1024 * 1024,
@@ -220,16 +273,100 @@ async function replayPreservedSandboxTaskCutover(
     || payloadProjection.treeSha256 !== params.journal.projectionTreeSha256) {
     throw new Error('SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: preserved projection changed');
   }
-  if (host.treeSha256 !== payloadProjection.treeSha256) {
-    const preserved = { ...params.journal, hostTreeSha256: host.treeSha256, state: 'preserved' as const };
-    await writeJournal(params.root, preserved);
-    throw new Error(`SANDBOX_TASK_CUTOVER_CONFLICT: host=${host.treeSha256} payload=${payloadProjection.treeSha256} journal=${path.join(params.root, 'journal.json')}`);
+  return { hostTaskDir, projectionDir, manifestPath, payloadRoot, host, projection, payload, payloadProjection };
+}
+
+/**
+ * Records the explicit host-side action after a maintainer has reconciled
+ * selected projection content into the host task directory.
+ */
+export async function recordSandboxTaskCutoverReconciliation(params: Readonly<{
+  base: string;
+  project: string;
+  container: string;
+  taskId: string;
+  generation: string;
+  hostTaskDir: string;
+  projectionDir: string;
+  manifestPath: string;
+  operator: string;
+}>): Promise<SandboxTaskCutoverReconciliation> {
+  const operator = params.operator.trim();
+  if (!operator) throw new Error('SANDBOX_TASK_CUTOVER_RECONCILIATION_OPERATOR_REQUIRED');
+  const root = sandboxTaskCutoverRoot(params);
+  const journal = readJournal(root);
+  if (!journal || journal.taskId !== params.taskId || journal.generation !== params.generation || journal.state !== 'preserved') {
+    throw new Error('SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED');
+  }
+  const state = await readPreservedSandboxTaskCutoverState({
+    root,
+    journal,
+    hostTaskDir: params.hostTaskDir,
+    projectionDir: params.projectionDir,
+    manifestPath: params.manifestPath
+  });
+  const reconciliation: SandboxTaskCutoverReconciliation = {
+    version: 1,
+    action: 'reconcile-host',
+    operator,
+    confirmedAt: new Date().toISOString(),
+    journalSha256: journalSha256(journal),
+    taskId: journal.taskId,
+    generation: journal.generation,
+    hostTaskDir: state.hostTaskDir,
+    projectionDir: state.projectionDir,
+    manifestPath: state.manifestPath,
+    payloadRoot: state.payloadRoot,
+    payloadTreeSha256: state.payload.treeSha256,
+    projectionTreeSha256: state.projection.treeSha256,
+    payloadProjectionTreeSha256: state.payloadProjection.treeSha256,
+    manifestSha256: journal.manifestSha256,
+    hostTreeSha256: state.host.treeSha256
+  };
+  await writeAtomicFile(
+    reconciliationPath(root),
+    Buffer.from(`${JSON.stringify(reconciliation)}\n`, 'utf8'),
+    0o600
+  );
+  return reconciliation;
+}
+
+async function replayPreservedSandboxTaskCutover(
+  params: Readonly<{
+    root: string;
+    journal: SandboxTaskCutoverJournal;
+    hostTaskDir: string;
+    projectionDir: string;
+    manifestPath: string;
+  }>
+): Promise<SandboxTaskCutoverJournal> {
+  const state = await readPreservedSandboxTaskCutoverState(params);
+  const reconciliation = readReconciliation(params.root);
+  if (!reconciliation) {
+    throw new Error(`SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: record host reconciliation at ${reconciliationPath(params.root)} after reviewing payload`);
+  }
+  const matches = reconciliation.journalSha256 === journalSha256(params.journal)
+    && reconciliation.taskId === params.journal.taskId
+    && reconciliation.generation === params.journal.generation
+    && reconciliation.hostTaskDir === state.hostTaskDir
+    && reconciliation.projectionDir === state.projectionDir
+    && reconciliation.manifestPath === state.manifestPath
+    && reconciliation.payloadRoot === state.payloadRoot
+    && reconciliation.payloadTreeSha256 === state.payload.treeSha256
+    && reconciliation.projectionTreeSha256 === state.projection.treeSha256
+    && reconciliation.payloadProjectionTreeSha256 === state.payloadProjection.treeSha256
+    && reconciliation.manifestSha256 === params.journal.manifestSha256
+    && reconciliation.hostTreeSha256 === state.host.treeSha256
+    && reconciliation.operator.trim().length > 0
+    && reconciliation.confirmedAt.trim().length > 0;
+  if (!matches) {
+    throw new Error(`SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: stale host reconciliation at ${reconciliationPath(params.root)}`);
   }
   const verifiedEqual = {
     ...params.journal,
     state: 'verified-equal' as const,
-    hostTreeSha256: host.treeSha256,
-    projectionTreeSha256: payloadProjection.treeSha256
+    hostTreeSha256: state.host.treeSha256,
+    projectionTreeSha256: state.payloadProjection.treeSha256
   };
   await writeJournal(params.root, verifiedEqual);
   return verifiedEqual;
