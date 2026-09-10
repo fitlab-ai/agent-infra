@@ -407,14 +407,20 @@ function writeCompletedTaskWithConsumedPlan(repoDir: string, taskId: string, bra
   const intentRoot = path.join(repoDir, ".agents", "workspace", ".local-artifact-finalization-intents");
   fs.mkdirSync(intentRoot, { recursive: true });
   fs.writeFileSync(path.join(intentRoot, `${taskId}-plan-plan.md.json`), `${JSON.stringify({
-    version: 1,
+    version: 2,
     taskId,
     family: "plan",
     artifact: "plan.md",
     state: "consumed",
     baselineSemanticDigest: null,
     artifactSha256: sha256Content(plan),
-    semanticDigest: semanticDigest(plan)
+    semanticDigest: semanticDigest(plan),
+    recoveryOperationId: null,
+    phase: null,
+    authorityDigest: null,
+    requestId: "sandbox-fixture",
+    createdAt: 1,
+    updatedAt: 1
   })}\n`, "utf8");
 
   const receiptRoot = path.join(repoDir, ".agents", "workspace", ".task-finalization");

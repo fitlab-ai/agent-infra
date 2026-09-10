@@ -203,7 +203,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       output({
         status: 'armed',
         changed: true,
-        capabilityToken: armed.token,
+        capabilityRef: armed.capabilityRef,
         marker: armed.marker,
         expiresAt: armed.expiresAt,
         buildIdentity: armed.buildIdentity,
@@ -223,12 +223,12 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       }
       const payload = await readStdin();
       if (phase === 'post-tool') {
-        const capabilityToken = payloadText(payload, 'capabilityToken');
-        if (capabilityToken) {
+        const capabilityRef = payloadText(payload, 'capabilityRef');
+        if (capabilityRef) {
           const capabilityStore = createCodexCapabilityStore();
-          const armed = capabilityStore.inspect(capabilityToken);
-          const capability = createCodexCapabilityStore().attest({
-            token: capabilityToken,
+          const armed = capabilityStore.inspectReference(capabilityRef);
+          const capability = capabilityStore.attestByReference({
+            capabilityRef,
             sessionId: payloadText(payload, 'sessionId'),
             turnId: payloadText(payload, 'turnId'),
             toolUseId: payloadText(payload, 'toolUseId'),

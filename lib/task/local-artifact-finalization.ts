@@ -14,6 +14,12 @@ import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStruct
 import { getArtifactSchema } from './artifact-schema.ts';
 import { readArtifactRepairIntent, writeArtifactRepairIntent } from './artifact-repair-intent.ts';
 import type { ArtifactRepairIntent } from './artifact-repair-intent.ts';
+import {
+  consumeLifecycleRecoveryAttestation,
+  lifecycleRecoveryAttestationDigest,
+  validateLifecycleRecoveryAttestation
+} from './control-authority.ts';
+import type { LifecycleRecoveryAttestationV1 } from './control-authority.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
@@ -85,14 +91,36 @@ type LocalArtifactFinalizationResult = {
 
 type LocalArtifactFinalizationIntent = ArtifactRepairIntent;
 
+function authorityDigest(authority: LifecycleRecoveryAttestationV1): string {
+  return lifecycleRecoveryAttestationDigest(authority);
+}
+
+function validFinalizerAuthority(
+  authority: LifecycleRecoveryAttestationV1 | undefined,
+  request: LocalArtifactFinalizationRequest,
+  taskId: string
+): boolean {
+  if (!authority) return false;
+  try { validateLifecycleRecoveryAttestation(authority); }
+  catch { return false; }
+  return authority.version === 1
+    && authority.phase === 'artifact.finalize-local'
+    && authority.taskId === taskId
+    && authority.family === request.family
+    && authority.artifact === request.artifact
+    && authority.round === (parseArtifactName(request.artifact)?.round ?? 0)
+    && authority.requestId.length > 0
+    && authority.operationId.length > 0;
+}
+
 function consumeLocalArtifactFinalizationIntent(
   repoRoot: string,
   intent: LocalArtifactFinalizationIntent
 ): LocalArtifactFinalizationIntent {
   if (intent.state === 'consumed') return intent;
   if (intent.state !== 'passed') throw new Error('LOCAL_FINALIZATION_INTENT_INVALID: only passed provenance can be consumed');
-  const consumed = { ...intent, state: 'consumed' as const };
-  writeArtifactRepairIntent(repoRoot, consumed);
+  const consumed = { ...intent, state: 'consumed' as const, updatedAt: Date.now() };
+  writeArtifactRepairIntent(repoRoot, consumed, { expected: intent });
   return consumed;
 }
 
@@ -217,12 +245,14 @@ type LocalArtifactPreparation = Readonly<{
   content: string;
   repoRoot?: string;
   provenance?: ArtifactRepairIntent;
+  expectedIntent?: ArtifactRepairIntent | null;
 }>;
 
 /** Read and validate once; callers publish this content before committing provenance. */
 function prepareLocalArtifact(
   request: LocalArtifactFinalizationRequest,
-  candidate?: string
+  candidate?: string,
+  authority?: LifecycleRecoveryAttestationV1
 ): LocalArtifactPreparation {
   const failed = (code: string, message: string): LocalArtifactPreparation => ({
     result: failedFinalization(request, { code, message }), content: candidate ?? ''
@@ -256,7 +286,16 @@ function prepareLocalArtifact(
   const result = failedFinalization(request, {
     code: 'LOCAL_ARTIFACT_INVALID', message: diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
   }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest, repairable, diagnostics });
-  const prepared = { result, content, repoRoot: resolved.repoRoot };
+  const preparedBase = { result, content, repoRoot: resolved.repoRoot };
+  if (authority !== undefined && !validFinalizerAuthority(authority, request, resolved.taskId)) {
+    return {
+      ...preparedBase,
+      result: { ...result, repairable: false, error: {
+        code: 'LOCAL_EXECUTION_AUTHORITY_INVALID',
+        message: 'finalizer authority does not match the artifact tuple'
+      }, diagnostics: [] }
+    };
+  }
   const reject = (code: LocalArtifactDiagnosticCode, message: string): LocalArtifactPreparation => ({
     ...prepared, result: { ...result, repairable: false, error: { code, message },
       diagnostics: [{ code, message, repairable: false, line: null }] }
@@ -264,14 +303,19 @@ function prepareLocalArtifact(
   let intent: ArtifactRepairIntent | null;
   try { intent = readArtifactRepairIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact); }
   catch (error) {
-    return { ...prepared, result: { ...result, repairable: false, diagnostics: [],
+    return { ...preparedBase, result: { ...result, repairable: false, diagnostics: [],
       error: { code: 'LOCAL_FINALIZATION_INTENT_INVALID', message: String(error) } } };
+  }
+  const prepared = { ...preparedBase, expectedIntent: intent };
+  if (intent && intent.recoveryOperationId !== null
+    && (!authority || intent.recoveryOperationId !== authority.operationId)) {
+    return reject('LOCAL_REPAIR_PROVENANCE_CONFLICT', 'local repair provenance is owned by another recovery operation');
   }
   if (repairable) {
     if (intent && (intent.state !== 'awaiting-repair' || intent.baselineSemanticDigest !== semanticDigest)) {
       return reject('LOCAL_REPAIR_PROVENANCE_CONFLICT', 'a different local repair baseline is already recorded for this artifact');
     }
-    if (intent) return prepared;
+    if (intent && !authority) return prepared;
   } else {
     if (!validation.ok) return prepared;
     if (intent?.state === 'awaiting-repair' && intent.baselineSemanticDigest !== semanticDigest) {
@@ -284,17 +328,26 @@ function prepareLocalArtifact(
     prepared.result = { ...result, status: 'passed', error: null };
     if (intent?.state === 'consumed') return prepared;
   }
+  const timestamp = Date.now();
   return { ...prepared, provenance: {
-    version: 1, taskId: resolved.taskId, family: request.family, artifact: request.artifact,
+    version: 2, taskId: resolved.taskId, family: request.family, artifact: request.artifact,
     state: repairable ? 'awaiting-repair' : 'passed',
     baselineSemanticDigest: repairable ? semanticDigest : intent?.baselineSemanticDigest ?? null,
-    artifactSha256, semanticDigest
+    artifactSha256, semanticDigest,
+    recoveryOperationId: authority?.operationId ?? intent?.recoveryOperationId ?? null,
+    phase: authority?.phase ?? intent?.phase ?? null,
+    authorityDigest: authority ? authorityDigest(authority) : intent?.authorityDigest ?? null,
+    requestId: authority?.lifecycleRequestId ?? intent?.requestId ?? `local-finalize:${resolved.taskId}`,
+    createdAt: intent?.createdAt ?? timestamp,
+    updatedAt: timestamp
   } };
 }
 
 function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): LocalArtifactFinalizationResult {
   try {
-    if (prepared.provenance) writeArtifactRepairIntent(prepared.repoRoot!, prepared.provenance);
+    if (prepared.provenance) {
+      writeArtifactRepairIntent(prepared.repoRoot!, prepared.provenance, { expected: prepared.expectedIntent ?? null });
+    }
     return prepared.result;
   } catch (error) {
     return { ...prepared.result, status: 'failed', error: {
@@ -303,8 +356,22 @@ function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): Loca
   }
 }
 
-function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): LocalArtifactFinalizationResult {
-  return commitLocalArtifactProvenance(prepareLocalArtifact(request));
+function finalizeLocalArtifact(
+  request: LocalArtifactFinalizationRequest,
+  authority?: LifecycleRecoveryAttestationV1,
+  options: Readonly<{ deferLifecycleRecoveryConsumption?: boolean }> = {}
+): LocalArtifactFinalizationResult {
+  const result = commitLocalArtifactProvenance(prepareLocalArtifact(request, undefined, authority));
+  if (authority && !options.deferLifecycleRecoveryConsumption && result.status === 'passed') {
+    try { consumeLifecycleRecoveryAttestation(authority); }
+    catch (error) {
+      return { ...result, status: 'failed', error: {
+        code: 'LOCAL_EXECUTION_AUTHORITY_CONSUME_FAILED',
+        message: error instanceof Error ? error.message : String(error)
+      } };
+    }
+  }
+  return result;
 }
 
 export {

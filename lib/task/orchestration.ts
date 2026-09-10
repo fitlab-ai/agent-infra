@@ -40,6 +40,7 @@ import type {
   OrchestrationModelPolicy,
   OrchestrationRolePolicy
 } from '../agent-clients/types.ts';
+import type { LifecycleRecoveryAttestationV1 } from './control-authority.ts';
 import {
   captureRepositorySnapshot,
   captureWorkspaceSnapshot,
@@ -174,6 +175,7 @@ type OrchestrationOptions = {
   supportsLifecycleDelegation?: (client: AgentClientId) => boolean;
   validateLifecycleCapability?: () => Exclude<OrchestrationResult['error'], null> | null;
   consumeLifecycleCapability?: () => Exclude<OrchestrationResult['error'], null> | null;
+  lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
   token?: () => string;
   monotonicNow?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -818,6 +820,7 @@ function prepareOrchestrationDelegationUnlocked(
     requestedModel?: string;
     requestedReasoningEffort?: string;
     lifecycleProvenance?: DelegationLifecycleProvenance;
+    lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
   }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
@@ -853,6 +856,13 @@ function prepareOrchestrationDelegationUnlocked(
   }
   if (input.client === 'codex' && !input.lifecycleProvenance) {
     return failed('ORCHESTRATION_CODEX_PROVENANCE_REQUIRED', 'Codex prepare requires lifecycle provenance', resolved.taskId);
+  }
+  if (input.lifecycleRecoveryAttestation
+    && (input.lifecycleRecoveryAttestation.phase !== 'orchestration.prepare'
+      || input.lifecycleRecoveryAttestation.taskId !== resolved.taskId
+      || input.lifecycleRecoveryAttestation.artifact !== next.artifact
+      || input.lifecycleRecoveryAttestation.round !== next.round)) {
+    return failed('LIFECYCLE_AUTHORITY_TUPLE_MISMATCH', 'orchestration authority does not match the routed stage', resolved.taskId);
   }
   const expectedPolicy = run.modelPolicy[next.role];
   if (input.requestedModel !== expectedPolicy.model) {
@@ -918,6 +928,7 @@ function prepareOrchestrationDelegation(
     requestedModel?: string;
     requestedReasoningEffort?: string;
     lifecycleProvenance?: DelegationLifecycleProvenance;
+    lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
   }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {

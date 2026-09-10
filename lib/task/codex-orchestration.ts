@@ -29,10 +29,18 @@ import {
   OrchestrationStateError,
   pauseMatchingOrchestrationDelegation,
   prepareOrchestrationDelegation,
+  routeOrchestration,
   reconcileMatchingOrchestrationDelegation,
   sealMatchingOrchestrationDelegationWithHostEvidence
 } from './orchestration.ts';
+import { randomUUID, createHash } from 'node:crypto';
 import type { OrchestrationOptions, OrchestrationResult } from './orchestration.ts';
+import {
+  consumeLifecycleRecoveryAttestation,
+  issueLifecycleRecoveryAttestation,
+  validateLifecycleRecoveryAttestation,
+  type LifecycleRecoveryAttestationV1
+} from './control-authority.ts';
 
 type LifecycleStore = ReturnType<typeof createCodexLifecycleStore>;
 type CapabilityStore = ReturnType<typeof createCodexCapabilityStore>;
@@ -46,6 +54,7 @@ type CodexBridgeOptions = Readonly<{
   buildIdentity?: LifecycleBuildIdentity;
   orchestrationOptions?: OrchestrationOptions;
   controllerBinding?: Readonly<{ instanceDigest: string; controlGeneration: string }>;
+  deferLifecycleRecoveryConsumption?: boolean;
 }>;
 
 type CodexSpawnIdentity = Readonly<{
@@ -58,6 +67,10 @@ type CodexSpawnIdentity = Readonly<{
   requestedModel?: string;
   requestedReasoningEffort?: string;
 }>;
+
+function buildIdentityDigest(value: LifecycleBuildIdentity): string {
+  return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
+}
 
 function coreOptions(options: CodexBridgeOptions): OrchestrationOptions {
   return { ...options.orchestrationOptions, repoRoot: options.repoRoot ?? options.orchestrationOptions?.repoRoot };
@@ -126,7 +139,8 @@ async function prepareCodexOrchestrationDelegation(
     client: AgentClientId;
     requestedModel?: string;
     requestedReasoningEffort?: string;
-    capabilityToken?: string;
+    capabilityRef?: string;
+    lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
   }>,
   options: CodexBridgeOptions = {}
 ): Promise<OrchestrationResult> {
@@ -136,10 +150,11 @@ async function prepareCodexOrchestrationDelegation(
     const resolved = resolveTaskRef(taskRef, { repoRoot });
     if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
     const preflight = await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot);
-    if (!input.capabilityToken) {
+    const capabilityRef = input.capabilityRef;
+    if (!capabilityRef) {
       return bridgeFailure(
         'ORCHESTRATION_CODEX_CAPABILITY_REQUIRED',
-        'Codex prepare requires a current-session capability token'
+        'Codex prepare requires a current-session capability reference'
       );
     }
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
@@ -168,7 +183,7 @@ async function prepareCodexOrchestrationDelegation(
       controlGeneration: localController.controlGeneration
     } : null);
     const capabilityStore = options.capabilityStore ?? createCodexCapabilityStore();
-    const attested = capabilityStore.inspect(input.capabilityToken);
+    const attested = capabilityStore.inspectReference(capabilityRef);
     const capabilityIdentity = verifyLifecycleBuildIdentity(attested.buildIdentity, buildIdentity);
     if (!capabilityIdentity.ok) {
       return bridgeFailure(capabilityIdentity.code!, capabilityIdentity.message!);
@@ -193,14 +208,60 @@ async function prepareCodexOrchestrationDelegation(
         controlGeneration: controller.controlGeneration
       } } : {})
     };
+    if (input.lifecycleRecoveryAttestation) {
+      try { validateLifecycleRecoveryAttestation(input.lifecycleRecoveryAttestation); }
+      catch (error) {
+        return bridgeFailure(
+          'LIFECYCLE_AUTHORITY_ATTESTATION_INVALID',
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
+    let lifecycleRecoveryAttestation: LifecycleRecoveryAttestationV1 | null = input.lifecycleRecoveryAttestation ?? null;
+    const routed = input.capabilityRef && !lifecycleRecoveryAttestation
+      ? routeOrchestration(taskRef, coreOptions(options))
+      : null;
+    if (routed && !routed.next) return routed;
+    if (routed?.next && ['analysis', 'plan', 'code'].includes(routed.next.stage)) {
+      const recoveryRequest = {
+        version: 1 as const,
+        requestId: randomUUID(),
+        operationId: randomUUID(),
+        phase: 'orchestration.prepare' as const,
+        taskId: resolved.taskId,
+        family: routed.next.stage === 'analysis' ? 'analysis' as const
+          : routed.next.stage === 'plan' ? 'plan' as const : 'code' as const,
+        artifact: routed.next.artifact,
+        round: routed.next.round,
+        lifecycleRequestId: randomUUID(),
+        authorityRef: capabilityRef,
+        expectedControlGeneration: controller?.controlGeneration ?? '',
+        expectedControllerInstanceDigest: controller?.instanceDigest ?? '0'.repeat(64),
+        expectedBuildIdentityDigest: buildIdentityDigest(buildIdentity),
+        expectedHookDefinitionHash: preflight.hookDefinitionHash
+      };
+      const authority = issueLifecycleRecoveryAttestation(recoveryRequest, {
+        capabilityStore,
+        ...(controller ? { controllerBinding: controller } : {}),
+        buildIdentity
+      });
+      if (authority.status === 'rejected' || !authority.attestation) {
+        return bridgeFailure(
+          authority.error?.code ?? 'LIFECYCLE_AUTHORITY_REJECTED',
+          authority.error?.message ?? 'lifecycle authority was rejected'
+        );
+      }
+      lifecycleRecoveryAttestation = authority.attestation;
+    }
     const prepared = prepareOrchestrationDelegation(taskRef, {
       ...input,
-      lifecycleProvenance
+      lifecycleProvenance,
+      lifecycleRecoveryAttestation
     }, {
       ...coreOptions(options),
       validateLifecycleCapability: () => {
         try {
-          const validated = capabilityStore.validate(input.capabilityToken!, capabilityExpected);
+          const validated = capabilityStore.validateReference(capabilityRef, capabilityExpected);
           if (validated.sessionId !== attested.sessionId
             || validated.turnId !== attested.turnId
             || validated.toolUseId !== attested.toolUseId) {
@@ -214,23 +275,18 @@ async function prepareCodexOrchestrationDelegation(
           return capabilityFailure(error);
         }
       },
-      consumeLifecycleCapability: () => {
-        try {
-          const consumed = capabilityStore.consume(input.capabilityToken!, capabilityExpected);
-          if (consumed.sessionId !== attested.sessionId
-            || consumed.turnId !== attested.turnId
-            || consumed.toolUseId !== attested.toolUseId) {
-            return {
-              code: 'CODEX_CAPABILITY_IDENTITY_CHANGED',
-              message: 'capability identity changed during consumption'
-            };
-          }
-          return null;
-        } catch (error) {
-          return capabilityFailure(error);
-        }
-      }
+      consumeLifecycleCapability: () => null
     });
+    if (lifecycleRecoveryAttestation && !options.deferLifecycleRecoveryConsumption && prepared.status !== 'failed') {
+      try {
+        consumeLifecycleRecoveryAttestation(lifecycleRecoveryAttestation);
+      } catch (error) {
+        return bridgeFailure(
+          error instanceof Error ? error.name : 'LIFECYCLE_AUTHORITY_CONSUME_FAILED',
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
     return identityWarnings.length > 0 && prepared.status !== 'failed'
       ? { ...prepared, warnings: Object.freeze(identityWarnings) }
       : prepared;
@@ -283,7 +339,12 @@ async function activateCodexOrchestrationDelegation(
     const contextVerification = contextPath
       ? verifySandboxControllerWithWarnings(contextPath, { repoRoot })
       : null;
-    const controller = contextVerification?.context ?? null;
+    const controller = options.controllerBinding
+      ?? brokerControllerBinding()
+      ?? (contextVerification?.context ? {
+        instanceDigest: contextVerification.context.controllerInstanceDigest,
+        controlGeneration: contextVerification.context.controlGeneration
+      } : null);
     const activated = activateMatchingOrchestrationDelegation('codex', {
       nativeAgent: evidence.nativeAgent,
       childId: evidence.childThreadId,
@@ -305,7 +366,7 @@ async function activateCodexOrchestrationDelegation(
         capabilityTurnId: evidence.parentTurnId,
         spawnToolUseId: evidence.spawnToolUseId,
         spawnObservedAt: record.spawnObservedAt ?? undefined,
-        controllerInstanceDigest: controller?.controllerInstanceDigest ?? null,
+        controllerInstanceDigest: controller?.instanceDigest ?? null,
         controlGeneration: controller?.controlGeneration ?? null
       }
     }, coreOptions(options));

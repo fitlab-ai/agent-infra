@@ -74,14 +74,20 @@ function writeConsumedIntent(root: string, taskDir: string): string {
   const artifactPath = path.join(taskDir, artifact);
   fs.writeFileSync(artifactPath, content);
   const intent = {
-    version: 1,
+    version: 2,
     taskId: TASK_ID,
     family: 'plan',
     artifact,
     state: 'consumed',
     baselineSemanticDigest: null,
     artifactSha256: sha256Content(content),
-    semanticDigest: semanticDigest(content)
+    semanticDigest: semanticDigest(content),
+    recoveryOperationId: null,
+    phase: null,
+    authorityDigest: null,
+    requestId: 'sandbox-fixture',
+    createdAt: 1,
+    updatedAt: 1
   };
   const intentDir = path.join(root, '.agents', 'workspace', '.local-artifact-finalization-intents');
   fs.mkdirSync(intentDir, { recursive: true });

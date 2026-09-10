@@ -12,6 +12,7 @@ import type { LifecycleBuildIdentity } from './build-identity.ts';
 import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts';
 
 type CapabilityStatus = 'armed' | 'attested' | 'consumed' | 'expired';
+type RecoveryState = 'unreserved' | 'reserved' | 'consumed';
 type CodexControllerBinding = Readonly<{
   instanceDigest: string;
   controlGeneration: string;
@@ -47,11 +48,14 @@ type CodexCapabilityProvenanceDetail = Readonly<{
   }>;
 }>;
 type CodexCapabilityRecord = Readonly<{
-  schemaVersion: 1;
+  schemaVersion: 2;
   revision: number;
-  tokenDigest: string;
+  capabilityRefDigest: string;
   taskId: string;
   status: CapabilityStatus;
+  recoveryOperationId: string | null;
+  recoveryState: RecoveryState;
+  reservedAt: number | null;
   buildIdentity: LifecycleBuildIdentity;
   controller: CodexControllerBinding | null;
   sessionId: string | null;
@@ -67,7 +71,7 @@ type CodexCapabilityRecord = Readonly<{
 type CodexCapabilityStoreOptions = Readonly<{
   root?: string;
   now?: () => number;
-  token?: () => string;
+  reference?: () => string;
   ttlMs?: number;
   tombstoneMs?: number;
   maxRecords?: number;
@@ -302,20 +306,26 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   const root = options.root
     ?? resolveAgentRuntimeStoreRoot({ store: 'capabilities' });
   const now = options.now ?? Date.now;
-  const createToken = options.token ?? (() => crypto.randomBytes(32).toString('base64url'));
+  const createReference = options.reference ?? (() => crypto.randomBytes(32).toString('base64url'));
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   const tombstoneMs = options.tombstoneMs ?? DEFAULT_TOMBSTONE_MS;
   const maxRecords = options.maxRecords ?? DEFAULT_MAX_RECORDS;
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   fs.chmodSync(root, 0o700);
 
-  function fileFor(token: string): string {
-    return path.join(root, `${digest(token)}.json`);
+  function fileFor(capabilityRef: string): string {
+    return path.join(root, `${digest(capabilityRef)}.json`);
   }
 
   function read(file: string): CodexCapabilityRecord {
     const value = JSON.parse(fs.readFileSync(file, 'utf8')) as CodexCapabilityRecord;
-    if (value.schemaVersion !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 1) {
+    const keys = Object.keys(value as unknown as Record<string, unknown>).sort().join(',');
+    if (keys !== 'armedAt,attestedAt,buildIdentity,capabilityRefDigest,consumedAt,controller,expiresAt,hookDefinitionHash,recoveryOperationId,recoveryState,reservedAt,revision,schemaVersion,sessionId,status,taskId,toolUseId,turnId'
+      || value.schemaVersion !== 2 || !Number.isSafeInteger(value.revision) || value.revision < 1
+      || typeof value.capabilityRefDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.capabilityRefDigest)
+      || !['unreserved', 'reserved', 'consumed'].includes(value.recoveryState)
+      || (value.recoveryOperationId !== null && typeof value.recoveryOperationId !== 'string')
+      || (value.reservedAt !== null && !Number.isSafeInteger(value.reservedAt))) {
       throw capabilityError('CODEX_CAPABILITY_STATE_INVALID', 'capability record schema is invalid');
     }
     return value;
@@ -426,18 +436,21 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     taskId: string;
     buildIdentity: LifecycleBuildIdentity;
     controller?: CodexControllerBinding;
-  }>): CodexCapabilityRecord & Readonly<{ token: string; path: string; marker: string }> {
+  }>): CodexCapabilityRecord & Readonly<{ capabilityRef: string; path: string; marker: string }> {
     sweep();
-    const token = createToken();
-    const file = fileFor(token);
+    const capabilityRef = createReference();
+    const file = fileFor(capabilityRef);
     if (fs.existsSync(file)) throw capabilityError('CODEX_CAPABILITY_TOKEN_COLLISION', 'capability token already exists');
     const timestamp = now();
     const record: CodexCapabilityRecord = Object.freeze({
-      schemaVersion: 1,
+      schemaVersion: 2,
       revision: 1,
-      tokenDigest: digest(token),
+      capabilityRefDigest: digest(capabilityRef),
       taskId: input.taskId,
       status: 'armed',
+      recoveryOperationId: null,
+      recoveryState: 'unreserved',
+      reservedAt: null,
       buildIdentity: input.buildIdentity,
       controller: input.controller ?? null,
       sessionId: null,
@@ -450,16 +463,17 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
       consumedAt: null
     });
     write(file, record, 0);
-    return Object.freeze({
+    const result = {
       ...record,
-      token,
+      capabilityRef,
       path: file,
-      marker: `agent-infra-codex-capability:${token}`
-    });
+      marker: `agent-infra-codex-capability:${capabilityRef}`
+    };
+    return Object.freeze(result) as CodexCapabilityRecord & Readonly<{ capabilityRef: string; path: string; marker: string }>;
   }
 
-  function loadActive(token: string): Readonly<{ file: string; record: CodexCapabilityRecord }> {
-    const file = fileFor(token);
+  function loadActive(capabilityRef: string): Readonly<{ file: string; record: CodexCapabilityRecord }> {
+    const file = fileFor(capabilityRef);
     if (!fs.existsSync(file)) {
       throw capabilityError('CODEX_CAPABILITY_MISSING', 'capability token was not found');
     }
@@ -470,8 +484,8 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     return { file, record };
   }
 
-  function attest(input: Readonly<{
-    token: string;
+  function attestByReference(input: Readonly<{
+    capabilityRef: string;
     sessionId: string;
     turnId: string;
     toolUseId: string;
@@ -479,7 +493,7 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     buildIdentity: LifecycleBuildIdentity;
     controller?: CodexControllerBinding;
   }>): CodexCapabilityRecord {
-    const { file, record } = loadActive(input.token);
+    const { file, record } = loadActive(input.capabilityRef);
     if (record.status !== 'armed') {
       throw capabilityError(
         record.status === 'consumed' ? 'CODEX_CAPABILITY_REPLAY' : 'CODEX_CAPABILITY_STATE_INVALID',
@@ -537,46 +551,108 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     return record;
   }
 
-  function validate(token: string, expected: Readonly<{
+  function validateReference(capabilityRef: string, expected: Readonly<{
     taskId: string;
     hookDefinitionHash: string;
     buildIdentity: LifecycleBuildIdentity;
     controller?: CodexControllerBinding;
   }>): CodexCapabilityRecord {
     sweep();
-    const { record } = loadActive(token);
+    const { record } = loadActive(capabilityRef);
     return validateRecord(record, expected);
   }
 
-  function consume(token: string, expected: Readonly<{
+  function consumeReference(capabilityRef: string, operationId: string, expected: Readonly<{
     taskId: string;
     hookDefinitionHash: string;
     buildIdentity: LifecycleBuildIdentity;
     controller?: CodexControllerBinding;
   }>): CodexCapabilityRecord {
     sweep();
-    const { file, record } = loadActive(token);
+    if (!operationId || /[\r\n]/u.test(operationId)) {
+      throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'recovery operation id is invalid');
+    }
+    const { file, record } = loadActive(capabilityRef);
+    if (record.status === 'consumed' && record.recoveryState === 'consumed' && record.recoveryOperationId === operationId) {
+      return record;
+    }
     validateRecord(record, expected);
+    if (record.recoveryState === 'consumed') {
+      if (record.recoveryOperationId === operationId) return record;
+      throw capabilityError('CODEX_CAPABILITY_REPLAY', 'capability recovery operation was already consumed');
+    }
+    if (record.recoveryState !== 'reserved' || record.recoveryOperationId !== operationId) {
+      throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'capability must be reserved by this operation before consumption');
+    }
     const next: CodexCapabilityRecord = Object.freeze({
       ...record,
       revision: record.revision + 1,
       status: 'consumed',
+      recoveryState: 'consumed',
       consumedAt: now()
     });
     write(file, next, record.revision);
     return next;
   }
 
-  function inspect(token: string): CodexCapabilityRecord {
-    return loadActive(token).record;
+  function reserveReference(
+    capabilityRef: string,
+    operationId: string,
+    expected: Readonly<{
+      taskId: string;
+      hookDefinitionHash: string;
+      buildIdentity: LifecycleBuildIdentity;
+      controller?: CodexControllerBinding;
+    }>
+  ): CodexCapabilityRecord {
+    if (!operationId || /[\r\n]/u.test(operationId)) {
+      throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'recovery operation id is invalid');
+    }
+    sweep();
+    const { file, record } = loadActive(capabilityRef);
+    validateRecord(record, expected);
+    if (record.recoveryState === 'reserved') {
+      if (record.recoveryOperationId === operationId) return record;
+      throw capabilityError('CODEX_CAPABILITY_BUSY', 'capability is reserved by another recovery operation');
+    }
+    if (record.recoveryState === 'consumed') {
+      if (record.recoveryOperationId === operationId) return record;
+      throw capabilityError('CODEX_CAPABILITY_REPLAY', 'capability recovery operation was already consumed');
+    }
+    const next: CodexCapabilityRecord = Object.freeze({
+      ...record,
+      revision: record.revision + 1,
+      recoveryOperationId: operationId,
+      recoveryState: 'reserved',
+      reservedAt: now()
+    });
+    write(file, next, record.revision);
+    return next;
   }
 
-  return Object.freeze({ arm, attest, consume, inspect, validate, sweep });
+  function inspectReference(capabilityRef: string): CodexCapabilityRecord {
+    return loadActive(capabilityRef).record;
+  }
+
+  function findByRecoveryOperation(operationId: string): readonly CodexCapabilityRecord[] {
+    if (!operationId || /[\r\n]/u.test(operationId)) {
+      throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'recovery operation id is invalid');
+    }
+    return Object.freeze(files()
+      .map((file) => read(file))
+      .filter((record) => record.recoveryOperationId === operationId));
+  }
+
+  return Object.freeze({
+    arm, attestByReference, reserveReference, consumeReference, inspectReference,
+    findByRecoveryOperation, validateReference, sweep
+  });
 }
 
 export { createCodexCapabilityStore };
 export type {
   CapabilityStatus,
+  RecoveryState,
   CodexCapabilityProjection,
   CodexCapabilityProvenanceDetail,
   CodexCapabilityRecord,

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
@@ -40,6 +41,315 @@ import {
 import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
+import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { findArtifactRepairIntentsByOperation } from './artifact-repair-intent.ts';
+import {
+  computeLifecycleBuildIdentity,
+  type LifecycleBuildIdentity
+} from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+
+export type LifecycleAuthorityPhase =
+  | 'orchestration.prepare'
+  | 'artifact.finalize-local'
+  | 'task-event.completed';
+
+export type LifecycleAuthorityRequestV1 = Readonly<{
+  version: 1;
+  requestId: string;
+  operationId: string;
+  phase: LifecycleAuthorityPhase;
+  taskId: string;
+  family: 'analysis' | 'plan' | 'code';
+  artifact: string;
+  round: number;
+  lifecycleRequestId: string;
+  authorityRef: string;
+  expectedControlGeneration: string;
+  expectedControllerInstanceDigest: string;
+  expectedBuildIdentityDigest: string;
+  expectedHookDefinitionHash: string;
+}>;
+
+export type LifecycleRecoveryAttestationV1 = Readonly<{
+  version: 1;
+  attestationId: string;
+  authorityRefDigest: string;
+  operationId: string;
+  phase: LifecycleAuthorityPhase;
+  requestId: string;
+  lifecycleRequestId: string;
+  taskId: string;
+  family: 'analysis' | 'plan' | 'code';
+  artifact: string;
+  round: number;
+  controlGeneration: string;
+  controllerInstanceDigest: string;
+  sessionId: string;
+  turnId: string;
+  toolUseId: string;
+  buildIdentityDigest: string;
+  hookDefinitionHash: string;
+  issuedAt: number;
+  expiresAt: number;
+}>;
+
+export type LifecycleAuthorityResponseV1 = Readonly<{
+  version: 1;
+  requestId: string;
+  operationId: string;
+  phase: LifecycleAuthorityPhase;
+  status: 'issued' | 'already-completed' | 'rejected';
+  attestation: LifecycleRecoveryAttestationV1 | null;
+  error: { code: string; message: string } | null;
+}>;
+
+type LifecycleAuthorityIssuerOptions = Readonly<{
+  controllerBinding?: TaskControlControllerBinding | null;
+  capabilityStore?: ReturnType<typeof createCodexCapabilityStore>;
+  buildIdentity?: LifecycleBuildIdentity;
+  now?: () => number;
+  operationAttestations?: Map<string, LifecycleRecoveryAttestationV1>;
+}>;
+
+export type LifecycleRecoveryOperationQueryV1 = Readonly<{
+  version: 1;
+  operationId: string;
+  status: 'unknown' | 'in-progress' | 'committed';
+  capabilityState: 'unknown' | 'reserved' | 'consumed';
+  phases: readonly Readonly<{
+    phase: LifecycleAuthorityPhase;
+    requestId: string;
+    attestationId: string | null;
+    state: 'issued' | 'consumed' | 'observed';
+  }>[];
+}>;
+
+const lifecycleAuthorityPhases: readonly LifecycleAuthorityPhase[] = [
+  'orchestration.prepare', 'artifact.finalize-local', 'task-event.completed'
+];
+const lifecycleAuthorityFamilies = ['analysis', 'plan', 'code'] as const;
+const lifecycleAuthorityArtifact = /^(?:analysis|plan|code)(?:-r[1-9]\d*)?\.md$/u;
+const lifecycleAuthorityDigest = (value: string): string => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+const lifecycleAuthorityBuildDigest = (value: LifecycleBuildIdentity): string => lifecycleAuthorityDigest(JSON.stringify(value));
+
+export function lifecycleRecoveryAttestationDigest(value: LifecycleRecoveryAttestationV1): string {
+  return lifecycleAuthorityDigest(JSON.stringify(value));
+}
+
+function authorityExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
+}
+
+export function validateLifecycleAuthorityRequest(value: unknown): LifecycleAuthorityRequestV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('LIFECYCLE_AUTHORITY_REQUEST_INVALID');
+  const request = value as Record<string, unknown>;
+  if (!authorityExactKeys(request, [
+    'artifact', 'authorityRef', 'expectedBuildIdentityDigest', 'expectedControlGeneration',
+    'expectedControllerInstanceDigest', 'expectedHookDefinitionHash', 'family', 'lifecycleRequestId',
+    'operationId', 'phase', 'requestId', 'round', 'taskId', 'version'
+  ])
+    || request.version !== 1
+    || typeof request.requestId !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(request.requestId)
+    || typeof request.operationId !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(request.operationId)
+    || !lifecycleAuthorityPhases.includes(request.phase as LifecycleAuthorityPhase)
+    || typeof request.taskId !== 'string' || !/^TASK-\d{8}-\d{6}$/u.test(request.taskId)
+    || !lifecycleAuthorityFamilies.includes(request.family as typeof lifecycleAuthorityFamilies[number])
+    || typeof request.artifact !== 'string' || !lifecycleAuthorityArtifact.test(request.artifact)
+    || !Number.isSafeInteger(request.round) || (request.round as number) < 1
+    || typeof request.lifecycleRequestId !== 'string' || !request.lifecycleRequestId || /[\r\n]/u.test(request.lifecycleRequestId)
+    || typeof request.authorityRef !== 'string' || !request.authorityRef || /[\r\n]/u.test(request.authorityRef)
+    || typeof request.expectedControlGeneration !== 'string' || !request.expectedControlGeneration
+    || typeof request.expectedControllerInstanceDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(request.expectedControllerInstanceDigest)
+    || typeof request.expectedBuildIdentityDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(request.expectedBuildIdentityDigest)
+    || typeof request.expectedHookDefinitionHash !== 'string' || !/^[a-f0-9]{64}$/u.test(request.expectedHookDefinitionHash)) {
+    throw new Error('LIFECYCLE_AUTHORITY_REQUEST_INVALID');
+  }
+  const expectedArtifactFamily = request.artifact as string;
+  if (!expectedArtifactFamily.startsWith(request.family as string)) throw new Error('LIFECYCLE_AUTHORITY_REQUEST_INVALID');
+  return request as LifecycleAuthorityRequestV1;
+}
+
+export function validateLifecycleRecoveryAttestation(
+  value: unknown,
+  now = Date.now()
+): LifecycleRecoveryAttestationV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('LIFECYCLE_AUTHORITY_ATTESTATION_INVALID');
+  const attestation = value as Record<string, unknown>;
+  if (!authorityExactKeys(attestation, [
+    'artifact', 'attestationId', 'authorityRefDigest', 'buildIdentityDigest', 'controlGeneration',
+    'controllerInstanceDigest', 'expiresAt', 'family', 'hookDefinitionHash', 'issuedAt',
+    'lifecycleRequestId', 'operationId', 'phase', 'requestId', 'round', 'sessionId',
+    'taskId', 'toolUseId', 'turnId', 'version'
+  ])
+    || attestation.version !== 1
+    || typeof attestation.attestationId !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(attestation.attestationId)
+    || typeof attestation.authorityRefDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(attestation.authorityRefDigest)
+    || typeof attestation.operationId !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(attestation.operationId)
+    || !lifecycleAuthorityPhases.includes(attestation.phase as LifecycleAuthorityPhase)
+    || typeof attestation.requestId !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(attestation.requestId)
+    || typeof attestation.lifecycleRequestId !== 'string' || !attestation.lifecycleRequestId
+    || typeof attestation.taskId !== 'string' || !/^TASK-\d{8}-\d{6}$/u.test(attestation.taskId)
+    || !lifecycleAuthorityFamilies.includes(attestation.family as typeof lifecycleAuthorityFamilies[number])
+    || typeof attestation.artifact !== 'string' || !lifecycleAuthorityArtifact.test(attestation.artifact)
+    || !Number.isSafeInteger(attestation.round) || (attestation.round as number) < 1
+    || typeof attestation.controlGeneration !== 'string' || !attestation.controlGeneration
+    || typeof attestation.controllerInstanceDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(attestation.controllerInstanceDigest)
+    || typeof attestation.sessionId !== 'string' || !attestation.sessionId
+    || typeof attestation.turnId !== 'string' || !attestation.turnId
+    || typeof attestation.toolUseId !== 'string' || !attestation.toolUseId
+    || typeof attestation.buildIdentityDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(attestation.buildIdentityDigest)
+    || typeof attestation.hookDefinitionHash !== 'string' || !/^[a-f0-9]{64}$/u.test(attestation.hookDefinitionHash)
+    || !Number.isSafeInteger(attestation.issuedAt) || !Number.isSafeInteger(attestation.expiresAt)
+    || (attestation.expiresAt as number) <= (attestation.issuedAt as number)
+    || (attestation.expiresAt as number) <= now) {
+    throw new Error('LIFECYCLE_AUTHORITY_ATTESTATION_INVALID');
+  }
+  return attestation as LifecycleRecoveryAttestationV1;
+}
+
+const authorityOperationMap = new WeakMap<object, Map<string, LifecycleRecoveryAttestationV1>>();
+const authorityRecords = new Map<string, Readonly<{
+  store: ReturnType<typeof createCodexCapabilityStore>;
+  capabilityRef: string;
+  expected: Readonly<{
+    taskId: string;
+    hookDefinitionHash: string;
+    buildIdentity: LifecycleBuildIdentity;
+    controller: TaskControlControllerBinding;
+  }>;
+}>>();
+const consumedAuthorityPhases = new Set<string>();
+
+export function issueLifecycleRecoveryAttestation(
+  input: LifecycleAuthorityRequestV1,
+  options: LifecycleAuthorityIssuerOptions = {}
+): LifecycleAuthorityResponseV1 {
+  let request: LifecycleAuthorityRequestV1;
+  try { request = validateLifecycleAuthorityRequest(input); }
+  catch (error) {
+    return { version: 1, requestId: String((input as { requestId?: unknown })?.requestId ?? ''), operationId: String((input as { operationId?: unknown })?.operationId ?? ''), phase: (input as { phase?: LifecycleAuthorityPhase })?.phase ?? 'artifact.finalize-local', status: 'rejected', attestation: null, error: { code: 'LIFECYCLE_AUTHORITY_REQUEST_INVALID', message: error instanceof Error ? error.message : String(error) } };
+  }
+  const binding = options.controllerBinding ?? null;
+  if (!binding) return authorityRejected(request, 'LOCAL_EXECUTION_AUTHORITY_UNAVAILABLE', 'current controller authority is unavailable');
+  if (binding.controlGeneration !== request.expectedControlGeneration
+    || binding.instanceDigest !== request.expectedControllerInstanceDigest) {
+    return authorityRejected(request, 'LIFECYCLE_AUTHORITY_CONTROLLER_MISMATCH', 'current controller binding does not match the request');
+  }
+  const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(process.cwd());
+  if (lifecycleAuthorityBuildDigest(buildIdentity) !== request.expectedBuildIdentityDigest) {
+    return authorityRejected(request, 'LIFECYCLE_AUTHORITY_BUILD_MISMATCH', 'current lifecycle build does not match the request');
+  }
+  const store = options.capabilityStore ?? createCodexCapabilityStore();
+  const registry = options.operationAttestations ?? authorityOperationMap.get(store) ?? new Map<string, LifecycleRecoveryAttestationV1>();
+  authorityOperationMap.set(store, registry);
+  const key = `${request.requestId}\0${request.operationId}\0${request.phase}`;
+  const prior = registry.get(key);
+  if (prior) return { version: 1, requestId: request.requestId, operationId: request.operationId, phase: request.phase, status: 'already-completed', attestation: prior, error: null };
+  try {
+    const expected = {
+      taskId: request.taskId,
+      hookDefinitionHash: request.expectedHookDefinitionHash,
+      buildIdentity,
+      controller: binding
+    };
+    const record = store.reserveReference(request.authorityRef, request.operationId, expected);
+    if (!record.sessionId || !record.turnId || !record.toolUseId) throw new Error('CODEX_CAPABILITY_IDENTITY_INVALID: capability hook attestation is incomplete');
+    const now = (options.now ?? Date.now)();
+    const attestation = validateLifecycleRecoveryAttestation({
+      version: 1,
+      attestationId: crypto.randomUUID(),
+      authorityRefDigest: lifecycleAuthorityDigest(request.authorityRef),
+      operationId: request.operationId,
+      phase: request.phase,
+      requestId: request.requestId,
+      lifecycleRequestId: request.lifecycleRequestId,
+      taskId: request.taskId,
+      family: request.family,
+      artifact: request.artifact,
+      round: request.round,
+      controlGeneration: binding.controlGeneration,
+      controllerInstanceDigest: binding.instanceDigest,
+      sessionId: record.sessionId,
+      turnId: record.turnId,
+      toolUseId: record.toolUseId,
+      buildIdentityDigest: lifecycleAuthorityBuildDigest(buildIdentity),
+      hookDefinitionHash: request.expectedHookDefinitionHash,
+      issuedAt: now,
+      expiresAt: Math.min(record.expiresAt, now + 30_000)
+    }, now);
+    registry.set(key, attestation);
+    authorityRecords.set(attestation.attestationId, { store, capabilityRef: request.authorityRef, expected });
+    return { version: 1, requestId: request.requestId, operationId: request.operationId, phase: request.phase, status: 'issued', attestation, error: null };
+  } catch (error) {
+    return authorityRejected(request, error instanceof Error && error.name.startsWith('CODEX_') ? error.name : 'LIFECYCLE_AUTHORITY_REJECTED', error instanceof Error ? error.message : String(error));
+  }
+}
+
+export function consumeLifecycleRecoveryAttestation(
+  value: LifecycleRecoveryAttestationV1,
+  now = Date.now()
+): void {
+  const attestation = validateLifecycleRecoveryAttestation(value, now);
+  if (consumedAuthorityPhases.has(attestation.attestationId)) return;
+  const record = authorityRecords.get(attestation.attestationId);
+  if (!record) throw new Error('LIFECYCLE_AUTHORITY_ATTESTATION_UNKNOWN');
+  if (attestation.phase === 'task-event.completed') {
+    record.store.consumeReference(record.capabilityRef, attestation.operationId, record.expected);
+  }
+  consumedAuthorityPhases.add(attestation.attestationId);
+}
+
+export function queryLifecycleRecoveryOperation(
+  operationId: string,
+  options: Readonly<{
+    repoRoot?: string;
+    capabilityStore?: ReturnType<typeof createCodexCapabilityStore>;
+  }> = {}
+): LifecycleRecoveryOperationQueryV1 {
+  if (!/^[a-f0-9-]{16,64}$/u.test(operationId)) {
+    throw new Error('LIFECYCLE_RECOVERY_OPERATION_INVALID');
+  }
+  const store = options.capabilityStore ?? createCodexCapabilityStore();
+  const registry = authorityOperationMap.get(store);
+  const known = [...(registry?.values() ?? [])].filter((value) => value.operationId === operationId);
+  const intents = options.repoRoot ? findArtifactRepairIntentsByOperation(options.repoRoot, operationId) : [];
+  const capabilities = store.findByRecoveryOperation(operationId);
+  const phaseMap = new Map<string, LifecycleRecoveryOperationQueryV1['phases'][number]>();
+  for (const attestation of known) {
+    phaseMap.set(`${attestation.phase}\0${attestation.requestId}`, {
+      phase: attestation.phase,
+      requestId: attestation.requestId,
+      attestationId: attestation.attestationId,
+      state: consumedAuthorityPhases.has(attestation.attestationId) ? 'consumed' : 'issued'
+    });
+  }
+  for (const intent of intents) {
+    if (!intent.phase) continue;
+    const key = `${intent.phase}\0${intent.requestId}`;
+    if (phaseMap.has(key)) continue;
+    phaseMap.set(key, {
+      phase: intent.phase,
+      requestId: intent.requestId,
+      attestationId: null,
+      state: intent.state === 'consumed' ? 'consumed' : 'observed'
+    });
+  }
+  const capabilityState = capabilities.some((record) => record.recoveryState === 'consumed')
+    ? 'consumed'
+    : capabilities.some((record) => record.recoveryState === 'reserved') ? 'reserved' : 'unknown';
+  const committed = capabilityState === 'consumed' || intents.some((intent) => intent.state === 'consumed');
+  return {
+    version: 1,
+    operationId,
+    status: committed ? 'committed' : known.length > 0 ? 'in-progress' : 'unknown',
+    capabilityState,
+    phases: Object.freeze([...phaseMap.values()])
+  };
+}
+
+function authorityRejected(request: LifecycleAuthorityRequestV1, code: string, message: string): LifecycleAuthorityResponseV1 {
+  return { version: 1, requestId: request.requestId, operationId: request.operationId, phase: request.phase, status: 'rejected', attestation: null, error: { code, message } };
+}
 
 export type TaskControlControllerBinding = Readonly<{
   instanceDigest: string;
@@ -53,6 +363,7 @@ export type TaskControlExecutionContext =
       repoRoot: string;
       runtimeDir?: string;
       controllerBinding?: TaskControlControllerBinding | null;
+      lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
     }>
   | Readonly<{
       source: 'sandbox-executor';
@@ -66,6 +377,7 @@ export type TaskControlExecutionContext =
       requestId: string;
       diagnosticLog?: OrchestrationDiagnosticLogger;
       controllerBinding?: TaskControlControllerBinding | null;
+      lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
     }>;
 
 export type TaskControlOrchestrationIntent =
@@ -129,13 +441,18 @@ export function createDirectHostExecutionContext(params: Readonly<{
   repoRoot: string;
   runtimeDir?: string;
   controllerBinding?: TaskControlControllerBinding | null;
+  lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
 }>): TaskControlExecutionContext {
   return {
     source: 'direct-host',
     mode: 'direct-host',
     repoRoot: absolute('repoRoot', params.repoRoot),
     ...(params.runtimeDir === undefined ? {} : { runtimeDir: absolute('runtimeDir', params.runtimeDir) }),
-    ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) })
+    ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) }),
+    ...(params.lifecycleRecoveryAttestation === undefined ? {} : {
+      lifecycleRecoveryAttestation: params.lifecycleRecoveryAttestation === null
+        ? null : validateLifecycleRecoveryAttestation(params.lifecycleRecoveryAttestation)
+    })
   };
 }
 
@@ -149,6 +466,7 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
   requestId: string;
   diagnosticLog?: OrchestrationDiagnosticLogger;
   controllerBinding?: TaskControlControllerBinding | null;
+  lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
 }>): TaskControlExecutionContext {
   if (!/^TASK-\d{8}-\d{6}$/u.test(params.taskId) || !params.generation || !params.requestId) {
     invalidContext('sandbox binding is incomplete');
@@ -168,7 +486,11 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
     manifestPath: absolute('manifestPath', params.manifestPath),
     requestId: params.requestId,
     ...(params.diagnosticLog === undefined ? {} : { diagnosticLog: params.diagnosticLog }),
-    ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) })
+    ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) }),
+    ...(params.lifecycleRecoveryAttestation === undefined ? {} : {
+      lifecycleRecoveryAttestation: params.lifecycleRecoveryAttestation === null
+        ? null : validateLifecycleRecoveryAttestation(params.lifecycleRecoveryAttestation)
+    })
   };
 }
 
@@ -178,6 +500,7 @@ export function assertTaskControlExecutionContext(context: TaskControlExecutionC
     absolute('repoRoot', context.repoRoot);
     if (context.runtimeDir !== undefined) absolute('runtimeDir', context.runtimeDir);
     binding(context.controllerBinding);
+    if (context.lifecycleRecoveryAttestation) validateLifecycleRecoveryAttestation(context.lifecycleRecoveryAttestation);
     return;
   }
   if (context.mode !== 'task-bound-sandbox' || !/^TASK-\d{8}-\d{6}$/u.test(context.taskId)
@@ -192,6 +515,7 @@ export function assertTaskControlExecutionContext(context: TaskControlExecutionC
     invalidContext('runtimeDir is not bound to the manifest control root');
   }
   binding(context.controllerBinding);
+  if (context.lifecycleRecoveryAttestation) validateLifecycleRecoveryAttestation(context.lifecycleRecoveryAttestation);
 }
 
 function operationTaskId(context: TaskControlExecutionContext, taskRef: string): void {
@@ -292,12 +616,16 @@ function orchestration(
         client: input.client as AgentClientId,
         requestedModel: input.requestedModel as string | undefined,
         requestedReasoningEffort: input.requestedReasoningEffort as string | undefined,
-        ...(input.capabilityToken === undefined ? {} : { capabilityToken: input.capabilityToken as string })
+        ...(input.capabilityRef === undefined ? {} : { capabilityRef: input.capabilityRef as string }),
+        ...(context.lifecycleRecoveryAttestation === undefined
+          ? {}
+          : { lifecycleRecoveryAttestation: context.lifecycleRecoveryAttestation })
       };
       if (prepareInput.client === 'codex') {
         return prepareCodexOrchestrationDelegation(operation.taskRef, prepareInput, {
           repoRoot: context.repoRoot,
           orchestrationOptions: options,
+          deferLifecycleRecoveryConsumption: context.source === 'sandbox-executor',
           ...(context.controllerBinding ? { controllerBinding: context.controllerBinding } : {})
         });
       }
@@ -411,7 +739,7 @@ const FINALIZATION_FLAGS = new Set(['--agent']);
 const ORCHESTRATION_FLAGS = new Set([
   '--agent', '--max-steps', '--executor-model', '--executor-reasoning-effort', '--reviewer-model',
   '--reviewer-reasoning-effort', '--client', '--requested-model', '--requested-reasoning-effort',
-  '--capability-token', '--parent-id', '--before-fingerprint', '--stage', '--round', '--artifact', '--role',
+  '--capability-ref', '--parent-id', '--before-fingerprint', '--stage', '--round', '--artifact', '--role',
   '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--actual-reasoning-effort',
   '--model-fallback-reason', '--reasoning-effort-fallback-reason', '--exit-code', '--after-fingerprint',
   '--changed-paths', '--code', '--message', '--recoverable', '--git-worktree-root'
@@ -527,7 +855,7 @@ export function parseTaskControlOperation(
   if (parsedIntent === 'prepare') {
     input.requestedModel = value(values, '--requested-model');
     input.requestedReasoningEffort = value(values, '--requested-reasoning-effort');
-    input.capabilityToken = value(values, '--capability-token');
+    input.capabilityRef = value(values, '--capability-ref');
   }
   if (parsedIntent === 'await-activation') {
     required(values, ['--stage', '--round', '--artifact', '--role']);
