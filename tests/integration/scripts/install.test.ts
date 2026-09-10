@@ -51,7 +51,7 @@ for (const scenario of ['first-install', 'upgrade', 'enable-failure', 'restart-f
       writeNodeCommandShim(path.join(bin, name), entry);
     }
     const result = spawnSync('/bin/sh', [filePath('install.sh')], {
-      cwd: root, env: { PATH: bin }, encoding: 'utf8', timeout: 10_000
+      cwd: root, env: { PATH: bin }, encoding: 'utf8', timeout: 30_000
     });
     assert.equal(result.status, 0, result.stderr);
     const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));

@@ -182,7 +182,8 @@ test('host-control client fails closed when the fixed endpoint is absent', async
 
 for (const fault of ['accepted-audit', 'dispatch', 'completed-audit'] as const) {
   test(`host-control distinguishes execution state after ${fault} failure`, onPlatforms('linux', 'darwin'), async () => {
-    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'host-control-failure-')));
+    const base = process.platform === 'darwin' ? fs.realpathSync.native(os.homedir()) : os.tmpdir();
+    const root = fs.mkdtempSync(path.join(base, 'host-control-failure-'));
     const endpoint = path.join(root, 'run', 'host-control.sock');
     const phases: string[] = [];
     let executed = false;

@@ -33,10 +33,11 @@ type RmModule = typeof import("../../../lib/sandbox/removal.ts");
 type PruneModule = typeof import("../../../lib/sandbox/commands/prune.ts");
 
 const FIXTURE_CONTAINER_ID = "f".repeat(64);
+const FIXTURE_LOCK_DOMAIN = createHash("sha256").update("sandbox-worktree-safety").digest("hex");
 
 function fixtureAuthorityEvidence() {
   return captureSandboxAuthority("docker-desktop", {
-    lockDomain: "a".repeat(64),
+    lockDomain: FIXTURE_LOCK_DOMAIN,
     probe: (_cmd, args) => ({
       status: 0, signal: null, stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? "fixture-daemon-id" : { ApiVersion: "1.50" }), stderr: "", pid: 1, output: []
     })

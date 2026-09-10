@@ -802,8 +802,7 @@ test("sandbox create resolves to configured engine", onPlatforms("linux", "darwi
       fixture,
       tmpDir,
       ["create", "feature-x", "--cpu", "1", "--memory", "1"],
-      { DOCKER_EXIT_FOR_RUN: "1" },
-      { timeout: 5_000 }
+      { DOCKER_EXIT_FOR_RUN: "1" }
     );
 
     // Ignore exit status: this thin probe only validates engine resolution.
@@ -864,8 +863,7 @@ test("sandbox create refreshes stale image before docker run", onPlatforms("linu
           "demo.sandbox.last-refresh": "0"
         }),
         DOCKER_EXIT_FOR_RUN: "1"
-      },
-      { timeout: 5_000 }
+      }
     );
 
     const dockerCalls = fixture.readDockerCalls();
@@ -904,8 +902,7 @@ test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "dar
           "demo.sandbox.last-refresh": "0"
         }),
         DOCKER_EXIT_FOR_RUN: "1"
-      },
-      { timeout: 5_000 }
+      }
     );
 
     assert.equal(

@@ -69,6 +69,22 @@ test('artifact landing refuses an unverified projection topology before reading'
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('projection topology records canonical ancestors through a directory alias', onPlatforms('linux', 'darwin'), () => {
+  const root = testRoot('task-workflow-alias-');
+  const alias = `${root}-alias`;
+  const projection = path.join(root, 'projection');
+  fs.mkdirSync(projection);
+  fs.symlinkSync(root, alias, 'dir');
+  try {
+    const topology = captureProjectionTopology(path.join(alias, 'projection'));
+    assert.equal(topology[0]?.path, fs.realpathSync.native(projection));
+    assert.equal(topology.some((ancestor) => ancestor.path.startsWith(alias)), false);
+  } finally {
+    fs.rmSync(alias, { force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('artifact landing verifies, hashes, and atomically copies the same projection bytes', onPlatforms('linux', 'darwin'), async () => {
   const root = testRoot('task-workflow-landing-');
   const projection = path.join(root, 'projection');

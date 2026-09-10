@@ -70,7 +70,7 @@ export function canonicalArtifactName(value: string): boolean {
 
 export function captureProjectionTopology(root: string): readonly ProjectionAncestorIdentity[] {
   const ancestors: ProjectionAncestorIdentity[] = [];
-  let current = path.resolve(root);
+  let current = fs.realpathSync.native(path.resolve(root));
   while (true) {
     const stat = fs.lstatSync(current);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED');
