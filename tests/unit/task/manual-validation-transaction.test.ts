@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   createManualValidationTransaction,
+  retryManualValidationTransaction,
   summaryPreimageDigest,
   transitionManualValidationTransaction,
   validateManualValidationTransaction
@@ -43,4 +44,29 @@ test('manual-validation transaction accepts only verified committed final state'
   const committed = transitionManualValidationTransaction(prepared, 'committed', { eventAppended: true, committedReceipt: 'f'.repeat(64), postWriteVerified: true });
   assert.equal(committed.ok, false);
   if (!committed.ok) assert.equal(committed.error.code, 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID');
+});
+
+test('manual-validation retry starts a clean next attempt', () => {
+  const prepared = createManualValidationTransaction(input);
+  const staged = transitionManualValidationTransaction(prepared, 'summary-staged');
+  assert.equal(staged.ok, true);
+  if (!staged.ok) return;
+  const receipt = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: 'f'.repeat(64) });
+  assert.equal(receipt.ok, true);
+  if (!receipt.ok) return;
+  const promoted = transitionManualValidationTransaction(receipt.value, 'final-promotion-in-progress', { eventAppended: true });
+  assert.equal(promoted.ok, true);
+  if (!promoted.ok) return;
+  const failed = transitionManualValidationTransaction(promoted.value, 'recovery-required', { error: 'remote write failed' });
+  assert.equal(failed.ok, true);
+  if (!failed.ok) return;
+  const retried = retryManualValidationTransaction(failed.value, '2026-09-10T00:00:02.000Z');
+  assert.equal(retried.ok, true);
+  if (!retried.ok) return;
+  assert.equal(retried.value.phase, 'prepared');
+  assert.equal(retried.value.attempt, 2);
+  assert.equal(retried.value.committedReceipt, null);
+  assert.equal(retried.value.eventAppended, false);
+  assert.equal(retried.value.postWriteVerified, false);
+  assert.equal(retried.value.error, null);
 });

@@ -32,6 +32,11 @@ test('manual-validation evidence creates the current allowlisted envelope', () =
   assert.equal(evidence.recoverable, false);
   assert.deepEqual(validateManualValidationEvidence(evidence), { ok: true, value: evidence });
   assert.match(manualValidationEvidenceDigest(evidence), /^[a-f0-9]{64}$/);
+  assert.deepEqual(validateManualValidationEvidence(evidence, {
+    taskId: null,
+    branch: evidence.branch,
+    commit: evidence.commit
+  }), { ok: true, value: evidence });
 });
 
 test('manual-validation evidence rejects unknown fields and stale identity', () => {

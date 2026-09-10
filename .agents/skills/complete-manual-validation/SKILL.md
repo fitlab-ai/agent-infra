@@ -69,7 +69,11 @@ complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] --evidence-file 
 
 运行 `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`。仅当结果为 `ready` 时继续；从 `next.round` / `next.name` 取得本轮 round 与 `{manual-validation-artifact}`。不得自行扫描轮次或拼装文件名。事务协调器负责 started 事件，技能只传递同一 evidence 文件。
 
-### 4. 更新 PR 摘要
+### 4. 创建人工验证产物
+
+执行此步骤前，先读取 `reference/report-template.md`。先创建 `{manual-validation-artifact}`，记录状态核对、验证结论、验证范围、验证详情和预期 PR 摘要同步结果；事务协调器将在后续步骤校验并提交这份已存在的 artifact。
+
+### 5. 更新 PR 摘要
 
 执行此步骤前，先读取：
 - `.agents/rules/issue-sync.md`
@@ -87,15 +91,6 @@ agent-infra-internal manual-validation transaction {task-id} \
 ```
 
 coordinator 负责 pending summary、receipt、通过日志、final promotion 和 post-write verification；内部受控调用 `agent-infra-internal task-event {task-id}`，不要分别调用 final `summary-sync` 或 `manual-validation.completed`。
-
-### 5. 创建人工验证产物
-
-执行此步骤前，先读取 `reference/report-template.md`。创建 `{manual-validation-artifact}`，记录：
-- 状态核对
-- 验证结论
-- 验证范围
-- 验证详情
-- PR 摘要同步结果
 
 ### 6. 更新 task.md
 

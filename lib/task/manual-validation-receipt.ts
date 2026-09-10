@@ -65,6 +65,16 @@ function manualValidationReceiptDigest(receipt: ManualValidationReceipt | Manual
   return createHash('sha256').update(JSON.stringify(canonicalPayload(receipt)), 'utf8').digest('hex');
 }
 
+function manualValidationFinalSummaryDigest(body: string): string {
+  const preimage = body.replace(/receipt=(?:[a-f0-9]{64}|<receipt>)/gu, 'receipt=<receipt>');
+  return createHash('sha256').update(preimage, 'utf8').digest('hex');
+}
+
+function manualValidationFinalSummaryProjectionMatches(body: string, receipt: ManualValidationReceipt): boolean {
+  const identity = `transaction=${receipt.transactionId}; receipt=${receipt.receiptDigest}; evidence=${receipt.evidenceDigest}; head=${receipt.prHeadSha}`;
+  return body.includes(identity) && manualValidationFinalSummaryDigest(body) === receipt.finalSummaryDigest;
+}
+
 function validateManualValidationReceipt(value: unknown, expected?: ManualValidationReceiptIdentity): ManualValidationReceiptResult {
   if (!isRecord(value)) return invalid('receipt must be a JSON object');
   const keys = ['schema', 'version', 'transactionId', 'taskId', 'prNumber', 'prHeadSha', 'evidenceDigest', 'artifact', 'artifactSha256', 'pendingSummaryDigest', 'finalSummaryDigest', 'committedAt', 'receiptDigest'];
@@ -131,6 +141,8 @@ export {
   MANUAL_VALIDATION_RECEIPT_SCHEMA,
   MANUAL_VALIDATION_RECEIPT_VERSION,
   createManualValidationReceipt,
+  manualValidationFinalSummaryDigest,
+  manualValidationFinalSummaryProjectionMatches,
   manualValidationReceiptDigest,
   manualValidationReceiptPath,
   readManualValidationReceipt,

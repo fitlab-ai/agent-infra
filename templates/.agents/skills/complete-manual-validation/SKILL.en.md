@@ -69,7 +69,11 @@ Stop if the task is missing, the validation summary is missing, or no valid PR c
 
 Run `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`. Continue only for `ready`; take the round and `{manual-validation-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. The transaction coordinator owns the started event; pass it the same evidence file.
 
-### 4. Update the PR Summary
+### 4. Create the Manual Validation Artifact
+
+Before this step, read `reference/report-template.md`. Create `{manual-validation-artifact}` first and record the state check, validation verdict, validation scope, validation details, and expected PR summary synchronization result; the transaction coordinator validates and commits this existing artifact in the next step.
+
+### 5. Update the PR Summary
 
 Before this step, read:
 - `.agents/rules/issue-sync.md`
@@ -87,15 +91,6 @@ agent-infra-internal manual-validation transaction {task-id} \
 ```
 
 The coordinator owns pending summary, receipt, completion log, final promotion, and post-write verification; it internally uses the controlled `agent-infra-internal task-event {task-id}` route. Do not call final `summary-sync` or `manual-validation.completed` separately.
-
-### 5. Create the Manual Validation Artifact
-
-Before this step, read `reference/report-template.md`. Create `{manual-validation-artifact}` and record:
-- State check
-- Validation verdict
-- Validation scope
-- Validation details
-- PR summary sync result
 
 ### 6. Update task.md
 

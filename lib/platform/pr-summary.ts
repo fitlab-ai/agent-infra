@@ -33,7 +33,9 @@ import type {
   MechanicalChangeReport,
   PrChangeReport
 } from './pr-change-report.ts';
-import { manualValidationEvidenceDigest, readManualValidationEvidence } from '../task/manual-validation-evidence.ts';
+import { manualValidationEvidenceDigest, readManualValidationEvidence, validateManualValidationEvidence } from '../task/manual-validation-evidence.ts';
+import { manualValidationFinalSummaryProjectionMatches, readManualValidationReceipt } from '../task/manual-validation-receipt.ts';
+import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -58,6 +60,7 @@ type ManualValidationSummaryOptions = {
   receiptDigest?: string;
   evidenceDigest?: string;
   prHeadSha?: string;
+  authority?: 'coordinator';
 };
 type ReportWriteResult = PlatformResult & {
   report: { path: string; status: 'written' | 'no-op' | 'planned'; precheckVerdict: 'clear' | 'needs-review'; nextAction: 'watch-pr' | 'review-code' } | null;
@@ -481,7 +484,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
 
 async function syncPullRequestSummary(
   taskRef: string,
-  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions }
+  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; lockAlreadyHeld?: boolean }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
@@ -534,7 +537,7 @@ async function syncPullRequestSummary(
     return preserveFailure(context);
   }
   try {
-    return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, async () => {
+    const execute = async (): Promise<PullRequestSummaryResult> => {
       const { taskContent, boundFact } = readBoundTaskSnapshot(resolved.taskMdPath);
       if (!boundFact) return {
         ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }),
@@ -555,14 +558,37 @@ async function syncPullRequestSummary(
       if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
       if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
       if (manual) {
-        const evidence = readManualValidationEvidence(path.isAbsolute(manual.evidenceFile) ? manual.evidenceFile : path.resolve(resolved.repoRoot, manual.evidenceFile), {
-          taskId: resolved.taskId,
+        const evidence = readManualValidationEvidence(path.isAbsolute(manual.evidenceFile) ? manual.evidenceFile : path.resolve(resolved.repoRoot, manual.evidenceFile));
+        if (!evidence.ok) return fail('failed', context, { code: evidence.error.code, message: evidence.error.message, retryable: false }, prNumber);
+        const evidenceIdentity = validateManualValidationEvidence(evidence.value, {
+          taskId: evidence.value.mode === 'branch-only' ? null : resolved.taskId,
           branch: initial.value.head.ref,
           commit: initial.value.head.sha
         });
-        if (!evidence.ok) return fail('failed', context, { code: evidence.error.code, message: evidence.error.message, retryable: false }, prNumber);
+        if (!evidenceIdentity.ok) return fail('failed', context, { code: evidenceIdentity.error.code, message: evidenceIdentity.error.message, retryable: false }, prNumber);
         if (manual.evidenceDigest && manualValidationEvidenceDigest(evidence.value) !== manual.evidenceDigest) return fail('failed', context, { code: 'MANUAL_VALIDATION_EVIDENCE_STALE', message: 'evidence digest does not match the summary transaction', retryable: false }, prNumber);
         if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
+        if (manual.phase === 'final') {
+          if (manual.authority !== 'coordinator') return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires coordinator authority', retryable: false }, prNumber);
+          const receipt = readManualValidationReceipt(resolved.taskDir, {
+            transactionId: manual.transactionId,
+            taskId: resolved.taskId,
+            prNumber,
+            prHeadSha: initial.value.head.sha,
+            evidenceDigest: manual.evidenceDigest
+          });
+          if (!receipt.ok || receipt.value.receiptDigest !== manual.receiptDigest) return fail('failed', context, { code: receipt.ok ? 'MANUAL_VALIDATION_RECEIPT_IDENTITY_MISMATCH' : receipt.error.code, message: receipt.ok ? 'final summary receipt does not match the canonical receipt' : receipt.error.message, retryable: false }, prNumber);
+          const transaction = readManualValidationTransaction(resolved.taskDir, {
+            transactionId: receipt.value.transactionId,
+            taskId: resolved.taskId,
+            prNumber,
+            prHeadSha: initial.value.head.sha,
+            evidenceDigest: receipt.value.evidenceDigest,
+            artifact: receipt.value.artifact
+          });
+          if (!transaction.ok || transaction.value.phase !== 'final-promotion-in-progress' || !transaction.value.eventAppended || transaction.value.committedReceipt !== receipt.value.receiptDigest) return fail('failed', context, { code: transaction.ok ? 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID' : transaction.error.code, message: transaction.ok ? 'final summary requires a receipt-backed promotion intent' : transaction.error.message, retryable: false }, prNumber);
+          if (!manualValidationFinalSummaryProjectionMatches(options.body, receipt.value)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the canonical receipt projection', retryable: false }, prNumber);
+        }
       }
       const expectedReportPath = taskReportPath(resolved.taskDir);
       const suppliedReportPath = path.resolve(resolved.repoRoot, options.changeReportFile!);
@@ -696,7 +722,10 @@ async function syncPullRequestSummary(
         operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }],
         result: null, warnings: [], ...info
       };
-    });
+    };
+    return await (options.lockAlreadyHeld
+      ? execute()
+      : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, execute));
   } catch (error) {
     const lockError = error instanceof TaskExecutionLockError
       ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }

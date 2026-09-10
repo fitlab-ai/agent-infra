@@ -45,8 +45,10 @@ import { getArtifactSchema } from "./artifact-schema.ts";
 import { inspectArtifactContract } from "./artifact-operations.ts";
 import type { VerificationShared } from "./verification-types.ts";
 import { readManualValidationReceipt } from "./manual-validation-receipt.ts";
+import { manualValidationFinalSummaryProjectionMatches } from "./manual-validation-receipt.ts";
 import { readManualValidationTransaction } from "./manual-validation-transaction.ts";
 import { sha256File } from "./artifact-receipts.ts";
+import { summaryCommentState } from "../platform/pr-summary.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -943,6 +945,9 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
     const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
     if (!inspected.pullRequest) return failResult("manual-validation", inspected.error?.message ?? "canonical pull-request head is unavailable");
     if (inspected.pullRequest.head.sha !== receipt.value.prHeadSha) return failResult("manual-validation", "manual validation receipt is stale for the current pull-request head");
+    const summary = await summaryCommentState(task.metadata.id, { cwd: repositoryRoot });
+    if (!summary.comment) return failResult("manual-validation", "canonical pull-request summary comment is unavailable");
+    if (!manualValidationFinalSummaryProjectionMatches(summary.comment.body, receipt.value)) return failResult("manual-validation", "canonical pull-request summary does not match the committed manual validation projection");
   }
   return passResult("manual-validation", `Manual validation completed → ${artifactName} (committed receipt and post-write verification)`);
 }

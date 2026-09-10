@@ -37,7 +37,7 @@ type ManualValidationTransaction = Readonly<{
 type ManualValidationTransactionInput = Omit<ManualValidationTransaction, 'schema' | 'version' | 'phase' | 'committedReceipt' | 'eventAppended' | 'postWriteVerified' | 'error'> & {
   transactionId?: string;
 };
-type ManualValidationTransactionPatch = Partial<Pick<ManualValidationTransaction, 'committedReceipt' | 'eventAppended' | 'postWriteVerified' | 'error' | 'updatedAt'>>;
+type ManualValidationTransactionPatch = Partial<Pick<ManualValidationTransaction, 'committedReceipt' | 'eventAppended' | 'postWriteVerified' | 'error' | 'updatedAt' | 'attempt'>>;
 type ManualValidationTransactionErrorCode =
   | 'MANUAL_VALIDATION_TRANSACTION_INVALID'
   | 'MANUAL_VALIDATION_TRANSACTION_MISSING'
@@ -144,10 +144,11 @@ function transitionManualValidationTransaction(
   const next: ManualValidationTransaction = {
     ...current,
     phase,
-    committedReceipt: patch.committedReceipt ?? current.committedReceipt,
+    committedReceipt: patch.committedReceipt !== undefined ? patch.committedReceipt : current.committedReceipt,
     eventAppended: patch.eventAppended ?? current.eventAppended,
     postWriteVerified: patch.postWriteVerified ?? current.postWriteVerified,
-    error: patch.error ?? current.error,
+    attempt: patch.attempt ?? current.attempt,
+    error: patch.error !== undefined ? patch.error : current.error,
     updatedAt: patch.updatedAt ?? new Date().toISOString()
   };
   const checked = validateManualValidationTransaction(next);
@@ -157,7 +158,14 @@ function transitionManualValidationTransaction(
 
 function retryManualValidationTransaction(current: ManualValidationTransaction, now = new Date().toISOString()): ManualValidationTransactionResult {
   if (!['aborted', 'recovery-required'].includes(current.phase)) return { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'only aborted or recovery-required transactions can be retried' } };
-  return transitionManualValidationTransaction(current, 'prepared', { updatedAt: now, error: null, postWriteVerified: false });
+  return transitionManualValidationTransaction(current, 'prepared', {
+    updatedAt: now,
+    error: null,
+    committedReceipt: null,
+    eventAppended: false,
+    postWriteVerified: false,
+    attempt: current.attempt + 1
+  });
 }
 
 function manualValidationTransactionPath(taskDir: string): string {

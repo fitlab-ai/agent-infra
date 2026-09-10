@@ -55,7 +55,7 @@ import {
   validateLifecycleRecoveryAttestation,
   type LifecycleRecoveryAttestationV1
 } from './control-authority.ts';
-import { readManualValidationEvidence, manualValidationEvidenceDigest } from './manual-validation-evidence.ts';
+import { readManualValidationEvidence, manualValidationEvidenceDigest, validateManualValidationEvidence } from './manual-validation-evidence.ts';
 import { readManualValidationReceipt } from './manual-validation-receipt.ts';
 import { readManualValidationTransaction } from './manual-validation-transaction.ts';
 
@@ -363,8 +363,10 @@ function validateManualValidationCompletion(
     return { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'manual validation completion requires the receipt-backed transaction phase' };
   }
   const evidenceFile = path.isAbsolute(request.evidenceFile!) ? request.evidenceFile! : path.resolve(repoRoot, request.evidenceFile!);
-  const evidence = readManualValidationEvidence(evidenceFile, { taskId, branch, commit: receipt.value.prHeadSha });
+  const evidence = readManualValidationEvidence(evidenceFile);
   if (!evidence.ok) return evidence.error;
+  const evidenceIdentity = validateManualValidationEvidence(evidence.value, { taskId: evidence.value.mode === 'branch-only' ? null : taskId, branch, commit: receipt.value.prHeadSha });
+  if (!evidenceIdentity.ok) return evidenceIdentity.error;
   if (manualValidationEvidenceDigest(evidence.value) !== receipt.value.evidenceDigest) return { code: 'MANUAL_VALIDATION_EVIDENCE_STALE', message: 'evidence digest does not match the committed receipt' };
   if (sha256File(artifactPath) !== receipt.value.artifactSha256) return { code: 'MANUAL_VALIDATION_RECEIPT_INVALID', message: 'manual-validation artifact digest does not match the receipt' };
   return null;

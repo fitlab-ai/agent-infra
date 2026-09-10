@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   createManualValidationReceipt,
+  manualValidationFinalSummaryDigest,
+  manualValidationFinalSummaryProjectionMatches,
   manualValidationReceiptDigest,
   validateManualValidationReceipt
 } from '../../../lib/task/manual-validation-receipt.ts';
@@ -36,4 +38,15 @@ test('manual-validation receipt rejects tampered digest', () => {
   const result = validateManualValidationReceipt(tampered);
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.error.code, 'MANUAL_VALIDATION_RECEIPT_INVALID');
+});
+
+test('manual-validation final summary digest binds the canonical identity projection', () => {
+  const placeholder = `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${input.transactionId}; receipt=<receipt>; evidence=${input.evidenceDigest}; head=${input.prHeadSha}.\n`;
+  const receipt = createManualValidationReceipt({
+    ...input,
+    finalSummaryDigest: manualValidationFinalSummaryDigest(placeholder)
+  });
+  const body = placeholder.replace('<receipt>', receipt.receiptDigest);
+  assert.equal(manualValidationFinalSummaryProjectionMatches(body, receipt), true);
+  assert.equal(manualValidationFinalSummaryProjectionMatches(body.replace(input.prHeadSha, 'f'.repeat(40)), receipt), false);
 });
