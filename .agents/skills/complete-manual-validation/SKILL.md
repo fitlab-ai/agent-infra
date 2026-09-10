@@ -69,11 +69,23 @@ complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] --evidence-file 
 
 运行 `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`。仅当结果为 `ready` 时继续；从 `next.round` / `next.name` 取得本轮 round 与 `{manual-validation-artifact}`。不得自行扫描轮次或拼装文件名。事务协调器负责 started 事件，技能只传递同一 evidence 文件。
 
-### 4. 创建人工验证产物
+### 4. 登记人工验证开始
 
-执行此步骤前，先读取 `reference/report-template.md`。先创建 `{manual-validation-artifact}`，记录状态核对、验证结论、验证范围、验证详情和预期 PR 摘要同步结果；事务协调器将在后续步骤校验并提交这份已存在的 artifact。
+在创建任何人工验证 artifact 前，先从 `platform-pr summary-context` 取得 canonical 摘要正文并运行 evidence verify，然后调用事务协调器的 prepare 模式：
 
-### 5. 更新 PR 摘要
+```bash
+agent-infra-internal manual-validation transaction {task-id} --prepare \
+  --evidence-file {evidence-file} --artifact {manual-validation-artifact} \
+  --summary-file {summary-body-file} --agent {standard-agent-token}
+```
+
+prepare 必须先幂等登记 `manual-validation.started`，再写入 prepared transaction；失败时停止，不创建 artifact。
+
+### 5. 创建人工验证产物
+
+执行此步骤前，先读取 `reference/report-template.md`。在 started 已登记后创建 `{manual-validation-artifact}`，记录状态核对、验证结论、验证范围、验证详情和预期 PR 摘要同步结果；事务协调器将在后续步骤校验并提交这份 artifact。
+
+### 6. 更新 PR 摘要
 
 执行此步骤前，先读取：
 - `.agents/rules/issue-sync.md`
@@ -92,13 +104,13 @@ agent-infra-internal manual-validation transaction {task-id} \
 
 coordinator 负责 pending summary、receipt、通过日志、final promotion 和 post-write verification；内部受控调用 `agent-infra-internal task-event {task-id}`，不要分别调用 final `summary-sync` 或 `manual-validation.completed`。
 
-### 6. 更新 task.md
+### 7. 更新 task.md
 
 transaction coordinator 成功后，核心已使用同一 transaction/receipt/evidence/head identity 原子登记 `manual-validation.completed`；不要手工补写 Activity Log。
 
 如任务存在有效 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`。
 
-### 7. 完成校验
+### 8. 完成校验
 
 运行完成校验：
 
@@ -111,7 +123,7 @@ agent-infra-internal task-verify {task-id} manual-validation.completed --artifac
 - 退出码 1 -> 修复问题后重新运行
 - 退出码 2 -> 停止并告知需要人工介入
 
-### 8. 告知用户
+### 9. 告知用户
 
 输出：
 - 产物路径

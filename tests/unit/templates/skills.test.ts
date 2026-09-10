@@ -167,9 +167,10 @@ test("complete-manual-validation skill docs retain completion control structures
 
     assert.notEqual(gateIndex, -1, `${relativePath} should include the verification gate command`);
 
-    const artifactHeading = content.indexOf(relativePath.includes('.en.') ? '### 4. Create the Manual Validation Artifact' : '### 4. 创建人工验证产物');
-    const summaryHeading = content.indexOf(relativePath.includes('.en.') ? '### 5. Update the PR Summary' : '### 5. 更新 PR 摘要');
-    assert.ok(artifactHeading >= 0 && artifactHeading < summaryHeading, `${relativePath} should prepare the artifact before transaction coordination`);
+    const prepareHeading = content.indexOf(relativePath.includes('.en.') ? '### 4. Register Manual Validation Start' : '### 4. 登记人工验证开始');
+    const artifactHeading = content.indexOf(relativePath.includes('.en.') ? '### 5. Create the Manual Validation Artifact' : '### 5. 创建人工验证产物');
+    const summaryHeading = content.indexOf(relativePath.includes('.en.') ? '### 6. Update the PR Summary' : '### 6. 更新 PR 摘要');
+    assert.ok(prepareHeading >= 0 && prepareHeading < artifactHeading && artifactHeading < summaryHeading, `${relativePath} should register started before creating the artifact and coordinating the summary`);
 
     const afterGate = content.slice(gateIndex + gateCommand.length);
     const nextStep = afterGate.search(/^### /m);

@@ -172,6 +172,22 @@ function manualValidationTransactionPath(taskDir: string): string {
   return path.join(taskDir, '.manual-validation', 'transaction.json');
 }
 
+function archiveManualValidationGeneration(taskDir: string, transaction: ManualValidationTransaction, requireReceipt = false): void {
+  const historyDir = path.join(taskDir, '.manual-validation', 'history');
+  fs.mkdirSync(historyDir, { recursive: true });
+  const suffix = `${transaction.transactionId}-attempt-${transaction.attempt}`;
+  const move = (source: string, target: string, required: boolean): void => {
+    if (!fs.existsSync(source)) {
+      if (fs.existsSync(target) || !required) return;
+      throw new Error(`manual-validation archive source is missing: ${source}`);
+    }
+    if (fs.existsSync(target)) throw new Error(`manual-validation archive target already exists: ${target}`);
+    fs.renameSync(source, target);
+  };
+  move(path.join(taskDir, '.manual-validation', 'receipt.json'), path.join(historyDir, `receipt-${suffix}.json`), requireReceipt);
+  move(manualValidationTransactionPath(taskDir), path.join(historyDir, `transaction-${suffix}.json`), true);
+}
+
 function writeManualValidationTransactionAtomic(taskDir: string, transaction: ManualValidationTransaction): string {
   const checked = validateManualValidationTransaction(transaction);
   if (!checked.ok) throw new Error(`${checked.error.code}: ${checked.error.message}`);
@@ -201,6 +217,7 @@ function readManualValidationTransaction(taskDir: string, expected?: Parameters<
 export {
   MANUAL_VALIDATION_TRANSACTION_SCHEMA,
   MANUAL_VALIDATION_TRANSACTION_VERSION,
+  archiveManualValidationGeneration,
   createManualValidationTransaction,
   manualValidationTransactionPath,
   readManualValidationTransaction,

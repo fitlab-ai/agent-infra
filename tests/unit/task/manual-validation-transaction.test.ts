@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
+  archiveManualValidationGeneration,
   createManualValidationTransaction,
+  manualValidationTransactionPath,
   retryManualValidationTransaction,
   summaryPreimageDigest,
   transitionManualValidationTransaction,
@@ -64,9 +69,27 @@ test('manual-validation retry starts a clean next attempt', () => {
   assert.equal(retried.ok, true);
   if (!retried.ok) return;
   assert.equal(retried.value.phase, 'prepared');
+  assert.equal(retried.value.transactionId, failed.value.transactionId);
   assert.equal(retried.value.attempt, 2);
   assert.equal(retried.value.committedReceipt, null);
   assert.equal(retried.value.eventAppended, false);
   assert.equal(retried.value.postWriteVerified, false);
   assert.equal(retried.value.error, null);
+});
+
+test('manual-validation generation archive is retryable after an interrupted receipt move', () => {
+  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-validation-generation-'));
+  const stateDir = path.join(taskDir, '.manual-validation');
+  const historyDir = path.join(stateDir, 'history');
+  fs.mkdirSync(historyDir, { recursive: true });
+  const transaction = createManualValidationTransaction(input);
+  fs.writeFileSync(manualValidationTransactionPath(taskDir), JSON.stringify(transaction));
+  const receiptPath = path.join(stateDir, 'receipt.json');
+  fs.writeFileSync(receiptPath, '{"receipt":"old"}');
+  fs.renameSync(receiptPath, path.join(historyDir, `receipt-${transaction.transactionId}-attempt-${transaction.attempt}.json`));
+
+  archiveManualValidationGeneration(taskDir, transaction, true);
+
+  assert.equal(fs.existsSync(manualValidationTransactionPath(taskDir)), false);
+  assert.equal(fs.existsSync(path.join(historyDir, `transaction-${transaction.transactionId}-attempt-${transaction.attempt}.json`)), true);
 });

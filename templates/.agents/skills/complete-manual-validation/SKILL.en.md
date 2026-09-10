@@ -69,11 +69,23 @@ Stop if the task is missing, the validation summary is missing, or no valid PR c
 
 Run `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`. Continue only for `ready`; take the round and `{manual-validation-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. The transaction coordinator owns the started event; pass it the same evidence file.
 
-### 4. Create the Manual Validation Artifact
+### 4. Register Manual Validation Start
 
-Before this step, read `reference/report-template.md`. Create `{manual-validation-artifact}` first and record the state check, validation verdict, validation scope, validation details, and expected PR summary synchronization result; the transaction coordinator validates and commits this existing artifact in the next step.
+Before creating any manual-validation artifact, obtain the canonical summary body from `platform-pr summary-context`, run evidence verification, and call the transaction coordinator in prepare mode:
 
-### 5. Update the PR Summary
+```bash
+agent-infra-internal manual-validation transaction {task-id} --prepare \
+  --evidence-file {evidence-file} --artifact {manual-validation-artifact} \
+  --summary-file {summary-body-file} --agent {standard-agent-token}
+```
+
+Prepare must idempotently record `manual-validation.started` before writing the prepared transaction; on failure, stop without creating the artifact.
+
+### 5. Create the Manual Validation Artifact
+
+Before this step, read `reference/report-template.md`. After `started` is recorded, create `{manual-validation-artifact}` and record the state check, validation verdict, validation scope, validation details, and expected PR summary synchronization result; the transaction coordinator validates and commits this artifact in the next step.
+
+### 6. Update the PR Summary
 
 Before this step, read:
 - `.agents/rules/issue-sync.md`
@@ -92,13 +104,13 @@ agent-infra-internal manual-validation transaction {task-id} \
 
 The coordinator owns pending summary, receipt, completion log, final promotion, and post-write verification; it internally uses the controlled `agent-infra-internal task-event {task-id}` route. Do not call final `summary-sync` or `manual-validation.completed` separately.
 
-### 6. Update task.md
+### 7. Update task.md
 
 After the transaction coordinator succeeds, the core has atomically recorded `manual-validation.completed` with the same transaction/receipt/evidence/head identity. Do not append the Activity Log manually.
 
 If the task has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`.
 
-### 7. Verification Gate
+### 8. Verification Gate
 
 Run:
 
@@ -111,7 +123,7 @@ Handle the result:
 - Exit code 1 -> fix the reported problem and rerun
 - Exit code 2 -> stop and report that manual intervention is required
 
-### 8. Tell the User
+### 9. Tell the User
 
 Report:
 - Artifact path
