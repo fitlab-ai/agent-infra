@@ -93,6 +93,28 @@ async function waitForReceiptLifecycleDoneAsync(receiptPath: string, timeoutMs: 
   throw new Error(`Timed out waiting for completed finalization receipt at ${receiptPath}`);
 }
 
+async function waitForReceiptTerminalAsync(receiptPath: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as {
+        lifecycle?: unknown;
+        taskComment?: unknown;
+        verification?: unknown;
+        warningProjection?: unknown;
+      };
+      if (receipt.lifecycle === 'done'
+        && receipt.taskComment !== 'pending'
+        && receipt.verification !== 'pending'
+        && receipt.warningProjection === 'done') return;
+    } catch {
+      // The receipt may still be between atomic updates.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for terminal finalization receipt at ${receiptPath}`);
+}
+
 function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
   const statusPath = path.join(statusDir, 'status.json');
   const deadline = Date.now() + timeoutMs;
@@ -1827,7 +1849,7 @@ test('task-finalization graceful shutdown recovers a receipt before result evide
       timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
     });
     const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
-    await waitForReceiptLifecycleDoneAsync(receiptPath, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    await waitForReceiptTerminalAsync(receiptPath, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     const processingEntries = fs.readdirSync(manifest.processingDir);
     assert.equal(processingEntries.length, 1);
     assert.equal(fs.existsSync(path.join(manifest.processingDir, processingEntries[0]!, 'result.json')), false);

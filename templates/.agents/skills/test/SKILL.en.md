@@ -23,11 +23,11 @@ Execute the project's full test workflow including compilation checks and unit t
 
 Confirm no compilation errors.
 
-## 2. Run Unit Tests by Layer
+## 2. Run Tests by Layer
 
-This project uses three test layers as an optional optimization; if the test suite is small, all layers may map to the same full test command.
+This project uses test layers as an optional optimization; if the test suite is small, all layers may map to the same full test command.
 
-### fast smoke (target <5s)
+### fast smoke (reference target <10s)
 
 ```bash
 # TODO: Replace with this project's fast smoke subset command
@@ -38,7 +38,16 @@ This project uses three test layers as an optional optimization; if the test sui
 
 Use for code-task inner loops when the project provides a build-free fast path. It should cover the same tests as smoke while skipping redundant compilation or generation.
 
-### smoke (target <5s)
+### platform-smoke (cross-platform boundary)
+
+```bash
+# TODO: Replace with this project's cross-platform integration subset command
+# npm run test:platform-smoke:fast (Node.js)
+```
+
+Use for real CLI, git, shell, or subprocess tests moved out of the unit tier while preserving their original Windows/macOS execution boundary.
+
+### smoke (reference target <10s)
 
 ```bash
 # TODO: Replace with this project's smoke subset command
@@ -52,7 +61,7 @@ Use for:
 - save-and-run / frequent feedback when no fast path exists
 - project structure, configuration, and template contract checks
 
-### core (target <15s)
+### core (reference target <95s)
 
 ```bash
 # TODO: Replace with this project's core subset command
@@ -66,7 +75,7 @@ Use for:
 - final verification before writing code.md / code-r{N}.md
 - local gate before pushing a PR
 
-### full (complete test suite)
+### full (reference target <100s)
 
 ```bash
 # TODO: Replace with this project's full test command
@@ -82,6 +91,8 @@ Use for:
 - final gate before merging to main
 
 If the project is not layered yet, smoke / core / full may all map to the same full test command; layering is a feedback-speed optimization, not a prerequisite for using the collaboration workflow.
+
+Reference targets are feedback budgets, not merge gates. If coverage is collected, document whether it runs only on the main branch and whether it blocks acceptance.
 
 ## 3. Output Results
 

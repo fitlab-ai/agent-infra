@@ -46,16 +46,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Linux is the canonical full-suite runner. macOS and Windows keep the
-      # platform-sensitive unit boundary; package installation is covered by
-      # pack-smoke on all three operating systems.
-      - name: Run full test suite
-        if: matrix.os == 'ubuntu-latest'
-        run: npm test
+      - name: Run unit smoke
+        run: npm run test:smoke:fast
 
-      - name: Run cross-platform unit smoke
+      - name: Run cross-platform platform smoke
         if: matrix.os != 'ubuntu-latest'
-        run: npm run test:smoke
+        run: npm run test:platform-smoke:fast
+        env:
+          AGENT_INFRA_TEST_CONCURRENCY: '1'
 
       - name: Verify canonical demo LFS object
         if: matrix.os == 'ubuntu-latest'
@@ -69,35 +67,74 @@ jobs:
           grep -q 'assets/demo-init.gif' README.md
           grep -q 'assets/demo-init.gif' README.zh-CN.md
 
-      - name: Coverage report (informational)
-        if: matrix.os == 'ubuntu-latest'
-        continue-on-error: true
-        run: |
-          coverage_output=$(npm run test:coverage --silent 2>&1)
-          echo "$coverage_output" | sed -n '/start of coverage report/,/end of coverage report/p' > coverage-block.txt
-          {
-            echo "## Coverage (informational, not a gate)"
-            echo ""
-            echo "> 覆盖率仅作为薄弱区域提示；不作为 merge gate，不追求百分比目标。"
-            echo ""
-            echo '```text'
-            cat coverage-block.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest'
-        continue-on-error: true
-        uses: codecov/codecov-action@v7
+  integration-tests:
+    name: ubuntu-latest / integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AGENT_INFRA_TEST_CONCURRENCY: '2'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.lcov
-          fail_ci_if_error: false
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify inline build output is committed
+        run: node scripts/build-inline.js --check
+
+      - name: Build
+        run: npm run build
+
+      - name: Run integration tests
+        run: node scripts/run-tests.js --skip-build "tests/integration/**/*.test.ts"
+
+  e2e-tests:
+    name: ubuntu-latest / e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify inline build output is committed
+        run: node scripts/build-inline.js --check
+
+      - name: Build
+        run: npm run build
+
+      - name: Run e2e tests
+        run: node scripts/run-tests.js --skip-build "tests/e2e/**/*.test.ts"
 
   minimum-node-baseline:
     name: ubuntu-latest / Node 22.9.0 minimum baseline
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      AGENT_INFRA_TEST_CONCURRENCY: '2'
     permissions:
       contents: read
     steps:
@@ -114,9 +151,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Build
-        run: npm run build
 
       - name: Run tests
         run: npm test
@@ -139,3 +173,60 @@ jobs:
           npm init -y >/dev/null
           npm install "$TARBALL"
           ./node_modules/.bin/agent-infra version
+
+  coverage:
+    name: ubuntu-latest / coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Skip coverage on pull requests
+        if: github.event_name == 'pull_request'
+        run: echo 'Coverage is generated only on pushes to main.'
+
+      - name: Checkout repository
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: npm ci
+
+      - name: Verify inline build output is committed
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node scripts/build-inline.js --check
+
+      - name: Coverage report (informational)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          coverage_output=$(npm run test:coverage --silent 2>&1)
+          echo "$coverage_output" | sed -n '/start of coverage report/,/end of coverage report/p' > coverage-block.txt
+          {
+            echo "## Coverage (informational, not a gate)"
+            echo ""
+            echo "> 覆盖率仅作为薄弱区域提示；不作为 merge gate，不追求百分比目标。"
+            echo ""
+            echo '```text'
+            cat coverage-block.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.lcov
+          fail_ci_if_error: false

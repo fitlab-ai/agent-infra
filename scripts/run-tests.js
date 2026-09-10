@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from './process-tree.js';
 import { acquireTestRunLock, releaseTestRunLock, testRunLockEnv } from './test-run-lock.js';
+import { testConcurrencyFromEnv } from './test-concurrency.js';
 
 const env = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => {
@@ -129,6 +130,7 @@ async function stopHostControlTestService() {
 }
 
 try {
+  const testConcurrency = testConcurrencyFromEnv(env);
   const projectRoot = fileURLToPath(new URL('..', import.meta.url));
   testRunLock = await acquireTestRunLock(projectRoot);
   Object.assign(env, testRunLockEnv(testRunLock));
@@ -140,6 +142,8 @@ try {
       '--experimental-strip-types',
       '--no-warnings',
       '--test',
+      '--test-concurrency',
+      String(testConcurrency),
       ...args
     ]));
   }

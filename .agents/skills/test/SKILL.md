@@ -17,11 +17,11 @@ npm run typecheck
 
 项目测试脚本会先运行 `npm run build`，因此单独执行类型检查后无需在本步骤重复构建。
 
-## 2. 运行单元测试（按层级选择）
+## 2. 运行测试（按层级选择）
 
-三层测试是反馈速度优化；本项目按测试的可观察范围与运行成本选择对应层级。新增测试文件默认归入 **full**，确认足够快且足够核心后，再上调到 core 或 smoke。
+测试层级是反馈速度优化；本项目按测试的可观察范围与运行成本选择对应层级。新增测试文件默认归入 **full**，确认足够快且足够核心后，再上调到 core 或 smoke。
 
-### fast smoke（目标 <5s）
+### fast smoke（参考目标 <10s）
 
 ```bash
 npm run test:smoke:fast
@@ -29,7 +29,17 @@ npm run test:smoke:fast
 
 与 smoke 运行相同的 unit 测试范围，但跳过构建。仅用于代码修改后的内循环；完成一个实施步骤后仍须运行 smoke，以验证最新构建产物。
 
-### smoke（目标 <5s）
+runner 默认使用 `availableParallelism() * 2` 个测试进程；需要固定并发时可设置 `AGENT_INFRA_TEST_CONCURRENCY`，例如 `AGENT_INFRA_TEST_CONCURRENCY=4 npm run test:smoke:fast`。
+
+### platform-smoke（跨平台边界）
+
+```bash
+npm run test:platform-smoke:fast
+```
+
+运行从 unit 迁出的真实 CLI、git、shell 和子进程测试。该层在 Windows/macOS 上保留原有跨平台执行边界；完整 integration 测试仍由 `test:core`、`test:integration` 或 CI integration job 执行。
+
+### smoke（参考目标 <10s）
 
 ```bash
 npm run test:smoke
@@ -39,7 +49,7 @@ npm run test:smoke
 - code-task 的实施步骤完成后
 - 仅断言项目结构、配置、模板契约
 
-### core（目标 <15s）
+### core（参考目标 <95s）
 
 ```bash
 npm run test:core
@@ -50,7 +60,7 @@ npm run test:core
 - 写 code.md / code-r{N}.md 报告前的最终验证
 - 推送 PR 前的本地把关
 
-### full（目标 <60s）
+### full（参考目标 <100s）
 
 ```bash
 npm test
@@ -61,7 +71,9 @@ npm test
 - CI（unit-tests.yml）
 - main 合并前的最终把关
 
-full 层运行全部项目测试。`npm test` 使用通配匹配项目测试文件，**新增的测试文件会自动归入 full**，这是安全网。
+full 层运行全部项目测试。`npm test` 使用通配匹配项目测试文件，**新增的测试文件会自动归入 full**，这是安全网。参考目标是反馈预算，不是 CI gate。
+
+`npm run test:coverage` 只在 main push 的独立 CI job 中运行；覆盖率用于定位薄弱区域，不设置百分比门槛，也不阻塞合并。
 
 ## 3. 输出结果
 

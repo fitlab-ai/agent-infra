@@ -56,6 +56,65 @@ test('fast smoke skips the build without changing the unit-test selection', () =
   assert.match(smoke, /tests\/unit\/\*\*\/\*\.test\.ts/);
 });
 
+test('test runner forwards the configured concurrency to node test', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-concurrency-'));
+  const fixture = path.join(root, 'concurrency.test.mjs');
+  const observed = path.join(root, 'observed.json');
+  fs.writeFileSync(fixture, [
+    "import fs from 'node:fs';",
+    "import test from 'node:test';",
+    "test('concurrency', () => fs.writeFileSync(process.env.AGENT_INFRA_TEST_OBSERVED, JSON.stringify(process.execArgv)));",
+    ''
+  ].join('\n'));
+
+  try {
+    const result = spawnSync(process.execPath, [RUNNER, '--skip-build', fixture], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        AGENT_INFRA_TEST_CONCURRENCY: '7',
+        AGENT_INFRA_TEST_OBSERVED: observed
+      }
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const execArgv = JSON.parse(fs.readFileSync(observed, 'utf8')) as string[];
+    const index = execArgv.indexOf('--test-concurrency');
+    assert.notEqual(index, -1);
+    assert.equal(execArgv[index + 1], '7');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('invalid test concurrency fails before the build starts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-invalid-concurrency-'));
+  const npm = path.join(root, 'npm');
+  const marker = path.join(root, 'build-started');
+  fs.writeFileSync(npm, [
+    '#!/usr/bin/env node',
+    "import fs from 'node:fs';",
+    "fs.writeFileSync(process.env.AGENT_INFRA_TEST_BUILD_MARKER, '');",
+    ''
+  ].join('\n'));
+  fs.chmodSync(npm, 0o755);
+
+  try {
+    const result = spawnSync(process.execPath, [RUNNER, 'unused.test.mjs'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: [root, process.env.PATH].filter(Boolean).join(path.delimiter),
+        AGENT_INFRA_TEST_BUILD_MARKER: marker,
+        AGENT_INFRA_TEST_CONCURRENCY: '0'
+      }
+    });
+    assert.equal(result.status, 1);
+    assert.equal(fs.existsSync(marker), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('test runner lock serializes independent runs and permits inherited reentry', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-lock-'));
   let first: Awaited<ReturnType<typeof acquireTestRunLock>> | undefined;
