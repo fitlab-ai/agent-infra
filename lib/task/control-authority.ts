@@ -277,6 +277,13 @@ export function issueLifecycleRecoveryAttestation(
       issuedAt: now,
       expiresAt: Math.min(record.expiresAt, now + 30_000)
     }, now);
+    store.reserveRecoveryPhase(
+      request.authorityRef,
+      request.operationId,
+      request.phase,
+      request.requestId,
+      expected
+    );
     registry.set(key, attestation);
     authorityRecords.set(attestation.attestationId, { store, capabilityRef: request.authorityRef, expected });
     return { version: 1, requestId: request.requestId, operationId: request.operationId, phase: request.phase, status: 'issued', attestation, error: null };
@@ -293,6 +300,13 @@ export function consumeLifecycleRecoveryAttestation(
   if (consumedAuthorityPhases.has(attestation.attestationId)) return;
   const record = authorityRecords.get(attestation.attestationId);
   if (!record) throw new Error('LIFECYCLE_AUTHORITY_ATTESTATION_UNKNOWN');
+  record.store.consumeRecoveryPhase(
+    record.capabilityRef,
+    attestation.operationId,
+    attestation.phase,
+    attestation.requestId,
+    record.expected
+  );
   if (attestation.phase === 'task-event.completed') {
     record.store.consumeReference(record.capabilityRef, attestation.operationId, record.expected);
   }
@@ -315,12 +329,25 @@ export function queryLifecycleRecoveryOperation(
   const intents = options.repoRoot ? findArtifactRepairIntentsByOperation(options.repoRoot, operationId) : [];
   const capabilities = store.findByRecoveryOperation(operationId);
   const phaseMap = new Map<string, LifecycleRecoveryOperationQueryV1['phases'][number]>();
+  for (const capability of capabilities) {
+    for (const phase of capability.recoveryPhases) {
+      phaseMap.set(`${phase.phase}\0${phase.requestId}`, {
+        phase: phase.phase,
+        requestId: phase.requestId,
+        attestationId: null,
+        state: phase.state === 'consumed' ? 'consumed' : 'observed'
+      });
+    }
+  }
   for (const attestation of known) {
-    phaseMap.set(`${attestation.phase}\0${attestation.requestId}`, {
+    const key = `${attestation.phase}\0${attestation.requestId}`;
+    const durable = phaseMap.get(key);
+    phaseMap.set(key, {
       phase: attestation.phase,
       requestId: attestation.requestId,
       attestationId: attestation.attestationId,
-      state: consumedAuthorityPhases.has(attestation.attestationId) ? 'consumed' : 'issued'
+      state: durable?.state === 'consumed' || consumedAuthorityPhases.has(attestation.attestationId)
+        ? 'consumed' : 'issued'
     });
   }
   for (const intent of intents) {
@@ -341,7 +368,7 @@ export function queryLifecycleRecoveryOperation(
   return {
     version: 1,
     operationId,
-    status: committed ? 'committed' : known.length > 0 ? 'in-progress' : 'unknown',
+    status: committed ? 'committed' : capabilityState === 'reserved' || phaseMap.size > 0 ? 'in-progress' : 'unknown',
     capabilityState,
     phases: Object.freeze([...phaseMap.values()])
   };

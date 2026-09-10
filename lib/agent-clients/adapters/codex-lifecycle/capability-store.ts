@@ -13,6 +13,13 @@ import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts'
 
 type CapabilityStatus = 'armed' | 'attested' | 'consumed' | 'expired';
 type RecoveryState = 'unreserved' | 'reserved' | 'consumed';
+type RecoveryPhase = 'orchestration.prepare' | 'artifact.finalize-local' | 'task-event.completed';
+type RecoveryPhaseState = 'issued' | 'consumed';
+type CodexCapabilityRecoveryPhase = Readonly<{
+  phase: RecoveryPhase;
+  requestId: string;
+  state: RecoveryPhaseState;
+}>;
 type CodexControllerBinding = Readonly<{
   instanceDigest: string;
   controlGeneration: string;
@@ -56,6 +63,7 @@ type CodexCapabilityRecord = Readonly<{
   recoveryOperationId: string | null;
   recoveryState: RecoveryState;
   reservedAt: number | null;
+  recoveryPhases: readonly CodexCapabilityRecoveryPhase[];
   buildIdentity: LifecycleBuildIdentity;
   controller: CodexControllerBinding | null;
   sessionId: string | null;
@@ -216,6 +224,22 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
   return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
+function isRecoveryPhase(value: unknown): value is RecoveryPhase {
+  return value === 'orchestration.prepare'
+    || value === 'artifact.finalize-local'
+    || value === 'task-event.completed';
+}
+
+function isRecoveryPhaseRecord(value: unknown): value is CodexCapabilityRecoveryPhase {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const phase = value as Record<string, unknown>;
+  return exactKeys(phase, ['phase', 'requestId', 'state'])
+    && isRecoveryPhase(phase.phase)
+    && typeof phase.requestId === 'string'
+    && /^[a-f0-9-]{16,64}$/u.test(phase.requestId)
+    && (phase.state === 'issued' || phase.state === 'consumed');
+}
+
 function isCodexControllerBinding(value: unknown): value is CodexControllerBinding {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -320,12 +344,14 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   function read(file: string): CodexCapabilityRecord {
     const value = JSON.parse(fs.readFileSync(file, 'utf8')) as CodexCapabilityRecord;
     const keys = Object.keys(value as unknown as Record<string, unknown>).sort().join(',');
-    if (keys !== 'armedAt,attestedAt,buildIdentity,capabilityRefDigest,consumedAt,controller,expiresAt,hookDefinitionHash,recoveryOperationId,recoveryState,reservedAt,revision,schemaVersion,sessionId,status,taskId,toolUseId,turnId'
+    if (keys !== 'armedAt,attestedAt,buildIdentity,capabilityRefDigest,consumedAt,controller,expiresAt,hookDefinitionHash,recoveryOperationId,recoveryPhases,recoveryState,reservedAt,revision,schemaVersion,sessionId,status,taskId,toolUseId,turnId'
       || value.schemaVersion !== 2 || !Number.isSafeInteger(value.revision) || value.revision < 1
       || typeof value.capabilityRefDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.capabilityRefDigest)
       || !['unreserved', 'reserved', 'consumed'].includes(value.recoveryState)
       || (value.recoveryOperationId !== null && typeof value.recoveryOperationId !== 'string')
-      || (value.reservedAt !== null && !Number.isSafeInteger(value.reservedAt))) {
+      || (value.reservedAt !== null && !Number.isSafeInteger(value.reservedAt))
+      || !Array.isArray(value.recoveryPhases)
+      || !value.recoveryPhases.every((phase) => isRecoveryPhaseRecord(phase))) {
       throw capabilityError('CODEX_CAPABILITY_STATE_INVALID', 'capability record schema is invalid');
     }
     return value;
@@ -451,6 +477,7 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
       recoveryOperationId: null,
       recoveryState: 'unreserved',
       reservedAt: null,
+      recoveryPhases: Object.freeze([]),
       buildIdentity: input.buildIdentity,
       controller: input.controller ?? null,
       sessionId: null,
@@ -595,6 +622,84 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     return next;
   }
 
+  function reserveRecoveryPhase(
+    capabilityRef: string,
+    operationId: string,
+    phase: RecoveryPhase,
+    requestId: string,
+    expected: Readonly<{
+      taskId: string;
+      hookDefinitionHash: string;
+      buildIdentity: LifecycleBuildIdentity;
+      controller?: CodexControllerBinding;
+    }>
+  ): CodexCapabilityRecord {
+    if (!operationId || /[\r\n]/u.test(operationId) || !isRecoveryPhase(phase)
+      || !/^[a-f0-9-]{16,64}$/u.test(requestId)) {
+      throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'recovery phase identity is invalid');
+    }
+    sweep();
+    const { file, record } = loadActive(capabilityRef);
+    validateRecord(record, expected);
+    if (record.recoveryState !== 'reserved' || record.recoveryOperationId !== operationId) {
+      throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'capability must be reserved by this operation before phase reservation');
+    }
+    if (record.recoveryPhases.some((entry) => entry.phase === phase)) {
+      throw capabilityError('CODEX_CAPABILITY_PHASE_REPLAY', 'recovery phase was already reserved');
+    }
+    const next: CodexCapabilityRecord = Object.freeze({
+      ...record,
+      revision: record.revision + 1,
+      recoveryPhases: Object.freeze([
+        ...record.recoveryPhases,
+        Object.freeze({ phase, requestId, state: 'issued' as const })
+      ])
+    });
+    write(file, next, record.revision);
+    return next;
+  }
+
+  function consumeRecoveryPhase(
+    capabilityRef: string,
+    operationId: string,
+    phase: RecoveryPhase,
+    requestId: string,
+    expected: Readonly<{
+      taskId: string;
+      hookDefinitionHash: string;
+      buildIdentity: LifecycleBuildIdentity;
+      controller?: CodexControllerBinding;
+    }>
+  ): CodexCapabilityRecord {
+    if (!operationId || /[\r\n]/u.test(operationId) || !isRecoveryPhase(phase)
+      || !/^[a-f0-9-]{16,64}$/u.test(requestId)) {
+      throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'recovery phase identity is invalid');
+    }
+    sweep();
+    const { file, record } = loadActive(capabilityRef);
+    validateRecord(record, expected);
+    if (record.recoveryState !== 'reserved' && record.recoveryState !== 'consumed') {
+      throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'capability has no reserved recovery operation');
+    }
+    if (record.recoveryOperationId !== operationId) {
+      throw capabilityError('CODEX_CAPABILITY_REPLAY', 'capability recovery operation does not match');
+    }
+    const current = record.recoveryPhases.find((entry) => entry.phase === phase);
+    if (!current || current.requestId !== requestId) {
+      throw capabilityError('CODEX_CAPABILITY_PHASE_REPLAY', 'recovery phase identity does not match');
+    }
+    if (current.state === 'consumed') return record;
+    const next: CodexCapabilityRecord = Object.freeze({
+      ...record,
+      revision: record.revision + 1,
+      recoveryPhases: Object.freeze(record.recoveryPhases.map((entry) =>
+        entry.phase === phase ? Object.freeze({ ...entry, state: 'consumed' as const }) : entry
+      ))
+    });
+    write(file, next, record.revision);
+    return next;
+  }
+
   function reserveReference(
     capabilityRef: string,
     operationId: string,
@@ -644,7 +749,8 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   }
 
   return Object.freeze({
-    arm, attestByReference, reserveReference, consumeReference, inspectReference,
+    arm, attestByReference, reserveReference, reserveRecoveryPhase, consumeRecoveryPhase,
+    consumeReference, inspectReference,
     findByRecoveryOperation, validateReference, sweep
   });
 }
@@ -656,6 +762,7 @@ export type {
   CodexCapabilityProjection,
   CodexCapabilityProvenanceDetail,
   CodexCapabilityRecord,
+  CodexCapabilityRecoveryPhase,
   CodexCapabilityStoreOptions,
   CodexControllerBinding
 };

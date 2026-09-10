@@ -93,3 +93,50 @@ test('lifecycle authority rejects missing controller proof without reserving', (
   assert.equal(store.inspectReference(armed.capabilityRef).recoveryState, 'unreserved');
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('lifecycle authority persists phase replay state across requests and store recreation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-restart-'));
+  const store = createCodexCapabilityStore({ root, reference: () => 'authority-reference', now: () => 1_000 });
+  const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build, controller: binding });
+  store.attestByReference({
+    capabilityRef: armed.capabilityRef,
+    sessionId: 'session-1', turnId: 'turn-1', toolUseId: 'tool-1',
+    hookDefinitionHash: 'd'.repeat(64), buildIdentity: build, controller: binding
+  });
+
+  const firstRequest = request(armed.capabilityRef, {
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  });
+  const first = issueLifecycleRecoveryAttestation(firstRequest, { capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => 1_000 });
+  assert.equal(first.status, 'issued');
+
+  const restartedStore = createCodexCapabilityStore({ root, now: () => 1_000 });
+  const replay = issueLifecycleRecoveryAttestation(request(armed.capabilityRef, {
+    requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  }), { capabilityStore: restartedStore, controllerBinding: binding, buildIdentity: build, now: () => 1_000 });
+  assert.equal(replay.status, 'rejected');
+  assert.equal(replay.error?.code, 'CODEX_CAPABILITY_PHASE_REPLAY');
+
+  const observed = queryLifecycleRecoveryOperation(firstRequest.operationId, { capabilityStore: restartedStore });
+  assert.equal(observed.status, 'in-progress');
+  assert.deepEqual(observed.phases, [{
+    phase: 'artifact.finalize-local',
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    attestationId: null,
+    state: 'observed'
+  }]);
+
+  consumeLifecycleRecoveryAttestation(first.attestation!, 1_000);
+  const consumed = queryLifecycleRecoveryOperation(observed.operationId, { capabilityStore: restartedStore });
+  assert.equal(consumed.phases[0]?.state, 'consumed');
+
+  const completed = issueLifecycleRecoveryAttestation(request(armed.capabilityRef, {
+    requestId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    phase: 'task-event.completed',
+    lifecycleRequestId: 'lifecycle-request-2'
+  }), { capabilityStore: restartedStore, controllerBinding: binding, buildIdentity: build, now: () => 1_000 });
+  assert.equal(completed.status, 'issued');
+  consumeLifecycleRecoveryAttestation(completed.attestation!, 1_000);
+  assert.equal(queryLifecycleRecoveryOperation(observed.operationId, { capabilityStore: restartedStore }).status, 'committed');
+  fs.rmSync(root, { recursive: true, force: true });
+});
