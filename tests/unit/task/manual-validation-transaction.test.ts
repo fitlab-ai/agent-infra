@@ -11,8 +11,10 @@ import {
   retryManualValidationTransaction,
   summaryPreimageDigest,
   transitionManualValidationTransaction,
-  validateManualValidationTransaction
+  validateManualValidationTransaction,
+  writeManualValidationTransactionAtomic
 } from '../../../lib/task/manual-validation-transaction.ts';
+import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
 
 const input = {
   transactionId: 'mv-transaction-1',
@@ -82,14 +84,64 @@ test('manual-validation generation archive is retryable after an interrupted rec
   const stateDir = path.join(taskDir, '.manual-validation');
   const historyDir = path.join(stateDir, 'history');
   fs.mkdirSync(historyDir, { recursive: true });
-  const transaction = createManualValidationTransaction(input);
-  fs.writeFileSync(manualValidationTransactionPath(taskDir), JSON.stringify(transaction));
+  const prepared = createManualValidationTransaction(input);
+  const staged = transitionManualValidationTransaction(prepared, 'summary-staged');
+  assert.equal(staged.ok, true);
+  if (!staged.ok) return;
+  const receipt = createManualValidationReceipt({
+    transactionId: prepared.transactionId,
+    taskId: prepared.taskId,
+    prNumber: prepared.prNumber,
+    prHeadSha: prepared.prHeadSha,
+    evidenceDigest: prepared.evidenceDigest,
+    artifact: prepared.artifact,
+    artifactSha256: 'c'.repeat(64),
+    pendingSummaryDigest: prepared.pendingSummaryDigest,
+    finalSummaryDigest: prepared.finalSummaryDigest,
+    committedAt: '2026-09-10T00:00:00.000Z'
+  });
+  const committed = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  writeManualValidationReceiptAtomic(taskDir, receipt);
+  writeManualValidationTransactionAtomic(taskDir, committed.value);
+  const transaction = committed.value;
   const receiptPath = path.join(stateDir, 'receipt.json');
-  fs.writeFileSync(receiptPath, '{"receipt":"old"}');
+  assert.equal(fs.existsSync(receiptPath), true);
   fs.renameSync(receiptPath, path.join(historyDir, `receipt-${transaction.transactionId}-attempt-${transaction.attempt}.json`));
 
   archiveManualValidationGeneration(taskDir, transaction, true);
 
   assert.equal(fs.existsSync(manualValidationTransactionPath(taskDir)), false);
   assert.equal(fs.existsSync(path.join(historyDir, `transaction-${transaction.transactionId}-attempt-${transaction.attempt}.json`)), true);
+});
+
+test('manual-validation generation archive rejects an invalid history receipt', () => {
+  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-validation-generation-invalid-'));
+  const stateDir = path.join(taskDir, '.manual-validation');
+  const historyDir = path.join(stateDir, 'history');
+  fs.mkdirSync(historyDir, { recursive: true });
+  const prepared = createManualValidationTransaction(input);
+  const staged = transitionManualValidationTransaction(prepared, 'summary-staged');
+  assert.equal(staged.ok, true);
+  if (!staged.ok) return;
+  const receipt = createManualValidationReceipt({
+    transactionId: prepared.transactionId,
+    taskId: prepared.taskId,
+    prNumber: prepared.prNumber,
+    prHeadSha: prepared.prHeadSha,
+    evidenceDigest: prepared.evidenceDigest,
+    artifact: prepared.artifact,
+    artifactSha256: 'c'.repeat(64),
+    pendingSummaryDigest: prepared.pendingSummaryDigest,
+    finalSummaryDigest: prepared.finalSummaryDigest,
+    committedAt: '2026-09-10T00:00:00.000Z'
+  });
+  const committed = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  writeManualValidationTransactionAtomic(taskDir, committed.value);
+  fs.writeFileSync(path.join(historyDir, `receipt-${prepared.transactionId}-attempt-${prepared.attempt}.json`), JSON.stringify({ ...receipt, prHeadSha: 'f'.repeat(40) }));
+  assert.throws(() => archiveManualValidationGeneration(taskDir, committed.value, true), /receipt is invalid|does not match/);
+  assert.equal(fs.existsSync(manualValidationTransactionPath(taskDir)), true);
 });

@@ -131,7 +131,7 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'code.completed': { required: ['artifact', 'artifactSha256', 'semanticDigest'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation', 'orchestrated'] },
   'review-code.started': { optional: ['round'] },
   'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
-  'manual-validation.started': { optional: ['round'] },
+  'manual-validation.started': { optional: ['round', 'transactionId'] },
   'manual-validation.completed': { required: ['artifact', 'summaryResult', 'evidenceFile', 'transactionId', 'receiptDigest', 'evidenceDigest', 'prHeadSha'], optional: ['round'] },
   'validation-run.started': { optional: ['round'] },
   'validation-run.completed': { required: ['artifact'], optional: ['round'] }
@@ -179,6 +179,10 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
       ['evidenceDigest', request.evidenceDigest, /^[a-f0-9]{64}$/u],
       ['prHeadSha', request.prHeadSha, /^[a-f0-9]{40}$/u]
     ] as const) if (!value || !pattern.test(value)) return { code: 'EVENT_PAYLOAD_INVALID', message: `manual-validation.completed requires a valid ${name}` };
+  }
+  if (request.event === 'manual-validation.started' && request.transactionId !== undefined
+    && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(request.transactionId)) {
+    return { code: 'EVENT_PAYLOAD_INVALID', message: 'manual-validation.started requires a valid transactionId' };
   }
   if (request.event !== 'analyze.awaiting-input' && /\.(?:started|completed)$/.test(request.event)) {
     if (!request.initiator || !request.requestId || !request.reasonCode) {
@@ -283,7 +287,7 @@ function identity(request: TaskEventRequest) {
     return {
       family, phase, action: spec.label,
       note: phase === 'started'
-        ? 'started'
+        ? `started${request.transactionId ? `; transaction=${request.transactionId}` : ''}`
         : `Manual validation passed → ${request.artifact}; ${request.summaryResult}; transaction=${request.transactionId}; receipt=${request.receiptDigest}; evidence=${request.evidenceDigest}; head=${request.prHeadSha}`,
       target: null
     } as const;
@@ -695,6 +699,10 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     if (openIdentity && 'conflict' in openIdentity) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'artifact family has more than one open started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     if (openIdentity) {
       if (openIdentity.row.agent !== request.agent) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+      if (initialParts.family === 'manual-validation' && request.transactionId !== undefined) {
+        const existingTransactionId = /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(openIdentity.row.note)?.[1];
+        if (existingTransactionId !== undefined && existingTransactionId !== request.transactionId) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'open manual-validation started event has a different transactionId' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+      }
       if (request.round !== undefined && request.round !== openIdentity.round) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `round ${request.round} conflicts with open round ${openIdentity.round}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       if (request.fixFor !== undefined && request.fixFor !== openIdentity.fixFor) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       if (request.implementationInput !== openIdentity.implementationInput) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
@@ -738,6 +746,12 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   let localFinalizationIntent: LocalArtifactFinalizationIntent | null = null;
   if (eventIdentity.phase === 'started' && row) {
     if (row.agent !== normalized.agent) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+    if (manual && normalized.transactionId !== undefined) {
+      const existingTransactionId = /(?:^|;\s*)transaction=([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?:;|$)/u.exec(row.note)?.[1];
+      if (existingTransactionId !== undefined && existingTransactionId !== normalized.transactionId) {
+        return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'open manual-validation started event has a different transactionId' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+      }
+    }
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, row.started, frontmatter, artifactContext);
   }
   if (eventIdentity.phase === 'started' && !manual && completedRows.length > 0) return failed(normalized, { code: 'EVENT_ALREADY_COMPLETED', message: 'event identity is already completed' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });

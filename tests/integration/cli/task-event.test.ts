@@ -491,6 +491,22 @@ test('task-event blocks other lifecycle starts while either manual validation fa
   }
 });
 
+test('manual-validation started persists its transaction identity for idempotent rollover recovery', () => {
+  const f = fixture('code-review');
+  const args = [f.id, 'manual-validation.started', '--agent', 'codex', '--initiator', 'model', '--request-id', 'mv-generation-1', '--reason-code', 'user-request', '--transaction-id', 'mv-generation-1'];
+  const started = run(f.root, args);
+  assert.equal(started.status, 0, started.stderr);
+  assert.match(fs.readFileSync(f.file, 'utf8'), /Complete Manual Validation \[started\].*started; transaction=mv-generation-1/);
+
+  const replay = run(f.root, args);
+  assert.equal(replay.status, 0, replay.stderr);
+  assert.equal(JSON.parse(replay.stdout).status, 'no-op');
+
+  const conflict = run(f.root, [...args.slice(0, -1), 'mv-generation-2']);
+  assert.equal(conflict.status, 1);
+  assert.equal(JSON.parse(conflict.stdout).error.code, 'EVENT_LOG_CONFLICT');
+});
+
 test('task-event requires an approved code review before either manual validation family starts', () => {
   for (const event of ['manual-validation.started', 'validation-run.started']) {
     const f = fixture('code-review');

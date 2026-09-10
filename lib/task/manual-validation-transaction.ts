@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
+import { validateManualValidationReceipt } from './manual-validation-receipt.ts';
+
 const MANUAL_VALIDATION_TRANSACTION_SCHEMA = 'agent-infra/manual-validation-transaction';
 const MANUAL_VALIDATION_TRANSACTION_VERSION = 1;
 const TASK_ID = /^TASK-\d{8}-\d{6}$/u;
@@ -172,10 +174,68 @@ function manualValidationTransactionPath(taskDir: string): string {
   return path.join(taskDir, '.manual-validation', 'transaction.json');
 }
 
+function manualValidationReceiptHistoryPath(taskDir: string, transaction: ManualValidationTransaction): string {
+  return path.join(taskDir, '.manual-validation', 'history', `receipt-${transaction.transactionId}-attempt-${transaction.attempt}.json`);
+}
+
+function manualValidationTransactionHistoryPath(taskDir: string, transaction: ManualValidationTransaction): string {
+  return path.join(taskDir, '.manual-validation', 'history', `transaction-${transaction.transactionId}-attempt-${transaction.attempt}.json`);
+}
+
+function readReceiptAt(file: string, transaction: ManualValidationTransaction): 'missing' | 'valid' {
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+    throw new Error(`manual-validation receipt is unreadable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const checked = validateManualValidationReceipt(value, {
+    transactionId: transaction.transactionId,
+    taskId: transaction.taskId,
+    prNumber: transaction.prNumber,
+    prHeadSha: transaction.prHeadSha,
+    evidenceDigest: transaction.evidenceDigest,
+    artifact: transaction.artifact
+  });
+  if (!checked.ok) throw new Error(`manual-validation receipt is invalid: ${checked.error.message}`);
+  if (transaction.committedReceipt !== null && checked.value.receiptDigest !== transaction.committedReceipt) {
+    throw new Error('manual-validation receipt does not match the committed transaction');
+  }
+  return 'valid';
+}
+
+function validateManualValidationGenerationArchive(taskDir: string, transaction: ManualValidationTransaction, requireReceipt = false): void {
+  const receiptPath = path.join(taskDir, '.manual-validation', 'receipt.json');
+  const receiptHistoryPath = manualValidationReceiptHistoryPath(taskDir, transaction);
+  const transactionPath = manualValidationTransactionPath(taskDir);
+  const transactionHistoryPath = manualValidationTransactionHistoryPath(taskDir, transaction);
+  const currentTransaction = fs.existsSync(transactionPath);
+  const archivedTransaction = fs.existsSync(transactionHistoryPath);
+  if (currentTransaction && archivedTransaction) throw new Error(`manual-validation archive has conflicting transaction files for ${transaction.transactionId}`);
+  if (!currentTransaction && !archivedTransaction) throw new Error(`manual-validation archive source is missing: ${transactionPath}`);
+  const currentReceipt = requireReceipt
+    ? readReceiptAt(receiptPath, transaction)
+    : (fs.existsSync(receiptPath) ? 'valid' : 'missing');
+  const archivedReceipt = requireReceipt
+    ? readReceiptAt(receiptHistoryPath, transaction)
+    : (fs.existsSync(receiptHistoryPath) ? 'valid' : 'missing');
+  if (requireReceipt && currentReceipt === 'missing' && archivedReceipt === 'missing') {
+    throw new Error(`manual-validation receipt is missing for transaction ${transaction.transactionId}`);
+  }
+  if (currentReceipt === 'valid' && archivedReceipt === 'valid') {
+    throw new Error(`manual-validation archive has conflicting receipt files for ${transaction.transactionId}`);
+  }
+}
+
 function archiveManualValidationGeneration(taskDir: string, transaction: ManualValidationTransaction, requireReceipt = false): void {
   const historyDir = path.join(taskDir, '.manual-validation', 'history');
+  validateManualValidationGenerationArchive(taskDir, transaction, requireReceipt);
   fs.mkdirSync(historyDir, { recursive: true });
-  const suffix = `${transaction.transactionId}-attempt-${transaction.attempt}`;
+  const receiptPath = path.join(taskDir, '.manual-validation', 'receipt.json');
+  const receiptHistoryPath = manualValidationReceiptHistoryPath(taskDir, transaction);
+  const transactionPath = manualValidationTransactionPath(taskDir);
+  const transactionHistoryPath = manualValidationTransactionHistoryPath(taskDir, transaction);
   const move = (source: string, target: string, required: boolean): void => {
     if (!fs.existsSync(source)) {
       if (fs.existsSync(target) || !required) return;
@@ -184,8 +244,8 @@ function archiveManualValidationGeneration(taskDir: string, transaction: ManualV
     if (fs.existsSync(target)) throw new Error(`manual-validation archive target already exists: ${target}`);
     fs.renameSync(source, target);
   };
-  move(path.join(taskDir, '.manual-validation', 'receipt.json'), path.join(historyDir, `receipt-${suffix}.json`), requireReceipt);
-  move(manualValidationTransactionPath(taskDir), path.join(historyDir, `transaction-${suffix}.json`), true);
+  move(receiptPath, receiptHistoryPath, requireReceipt);
+  move(transactionPath, transactionHistoryPath, true);
 }
 
 function writeManualValidationTransactionAtomic(taskDir: string, transaction: ManualValidationTransaction): string {
@@ -220,6 +280,7 @@ export {
   archiveManualValidationGeneration,
   createManualValidationTransaction,
   manualValidationTransactionPath,
+  validateManualValidationGenerationArchive,
   readManualValidationTransaction,
   retryManualValidationTransaction,
   summaryPreimageDigest,
