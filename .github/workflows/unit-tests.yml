@@ -52,6 +52,8 @@ jobs:
       - name: Run cross-platform platform smoke
         if: matrix.os != 'ubuntu-latest'
         run: npm run test:platform-smoke:fast
+        env:
+          AGENT_INFRA_TEST_CONCURRENCY: '1'
 
       - name: Verify canonical demo LFS object
         if: matrix.os == 'ubuntu-latest'

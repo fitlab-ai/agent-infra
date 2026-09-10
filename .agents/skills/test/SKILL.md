@@ -39,7 +39,7 @@ npm run test:platform-smoke:fast
 
 运行从 unit 迁出的真实 CLI、git、shell 和子进程测试。该层在 Windows/macOS 上保留原有跨平台执行边界；完整 integration 测试仍由 `test:core`、`test:integration` 或 CI integration job 执行。
 
-CI 的 Ubuntu integration job 和最低 Node 全量基线将 `AGENT_INFRA_TEST_CONCURRENCY` 固定为 `2`，以避免宿主机进程密集测试在共享 runner 上出现超时；本地运行仍使用默认并发策略。
+CI 的 Ubuntu integration job 和最低 Node 全量基线将 `AGENT_INFRA_TEST_CONCURRENCY` 固定为 `2`，Windows/macOS 的 platform-smoke 固定为 `1`，以避免宿主机进程密集测试在共享 runner 上出现超时；本地运行仍使用默认并发策略。
 
 ### smoke（参考目标 <10s）
 
