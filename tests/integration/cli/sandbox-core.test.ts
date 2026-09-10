@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { semanticDigest, sha256Content } from "../../../lib/task/local-artifact-finalization.ts";
 import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycle.ts";
+import { prepareSandboxTaskCutover, sandboxTaskCutoverRoot } from "../../../lib/sandbox/cutover.ts";
 import { sandboxManagedPathKey } from "../../../lib/sandbox/removal.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
@@ -189,11 +190,63 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
   assert.match(output, /Usage: ai sandbox <command> \[options\]/);
   assert.match(output, /create <branch> \[base\]/);
   assert.match(output, /start \[--recreate\] <branch \| TASK-id \| N>/);
+  assert.match(output, /reconcile --operator <name> <TASK-id \| N>/);
   assert.match(output, /^\s+refresh\s+Sync host Claude Code credentials/m);
   assert.match(output, /^\s+rebuild \[--quiet\] \[--refresh\]\s+Rebuild the sandbox image/m);
   assert.match(output, /prune \[--dry-run\]/);
   assert.match(output, /completed task-bound and branch-only sandboxes/);
   assert.match(output, /active, blocked, and archive tasks are protected/);
+});
+
+test("sandbox reconcile records a host merge through the public CLI entry", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-reconcile-entry-"));
+  const fixture = writeSandboxEngineFixture(tmpDir);
+  const taskId = "TASK-20260910-010101";
+  const branch = "feature/reconcile";
+  const container = "demo-dev-feature..reconcile";
+  const hostTaskDir = path.join(fixture.repoDir, ".agents", "workspace", "active", taskId);
+  const projectionDir = path.join(tmpDir, "legacy-projection");
+  const manifestPath = sandboxControlPaths({
+    base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+    project: "demo",
+    container,
+    identity: { mode: "task-bound", taskId, shortId: "14" }
+  }).manifestPath;
+  const input = {
+    base: path.join(tmpDir, ".agent-infra", "sandbox-cutover"),
+    project: "demo",
+    container,
+    taskId,
+    generation: "generation-1",
+    hostTaskDir,
+    projectionDir,
+    manifestPath
+  };
+
+  try {
+    fs.mkdirSync(hostTaskDir, { recursive: true });
+    fs.mkdirSync(projectionDir, { recursive: true });
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+    fs.writeFileSync(
+      path.join(fixture.repoDir, ".agents", "workspace", "active", ".short-ids.json"),
+      JSON.stringify({ version: 1, ids: { "14": taskId } }) + "\n"
+    );
+    fs.writeFileSync(path.join(hostTaskDir, "task.md"), `branch: ${branch}\nhost-event\n`);
+    fs.writeFileSync(path.join(projectionDir, "task.md"), "sandbox-decision\n");
+    fs.writeFileSync(manifestPath, '{"legacy":true}\n');
+    await assert.rejects(prepareSandboxTaskCutover(input), /SANDBOX_TASK_CUTOVER_CONFLICT/);
+    fs.writeFileSync(path.join(hostTaskDir, "task.md"), `branch: ${branch}\nhost-event\nsandbox-decision\n`);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["reconcile", "--operator", "maintainer", taskId]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Recorded host reconciliation/);
+    assert.match(result.stdout, /ai sandbox start --recreate TASK-20260910-010101/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(sandboxTaskCutoverRoot(input), "reconciliation.json"), "utf8")).operator, "maintainer");
+    const reconciled = await prepareSandboxTaskCutover(input);
+    assert.equal(reconciled.state, "verified-equal");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("sandbox rm help documents task-state and identity boundaries", () => {

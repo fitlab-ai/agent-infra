@@ -186,6 +186,7 @@ function publicTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('public', 'sandbox', 'create', 'conditional', 'recovery'),
     descriptor('public', 'sandbox', 'exec', 'conditional', 'recovery'),
     descriptor('public', 'sandbox', 'start', 'conditional', 'recovery'),
+    descriptor('public', 'sandbox', 'reconcile', 'task-bound', 'recovery'),
     descriptor('public', 'sandbox', 'rm', 'conditional', 'cleanup'),
     descriptor('public', 'sandbox', 'prune', 'non-task', 'cleanup', 'none'),
     descriptor('public', 'sandbox', 'rebuild', 'non-task', 'progress', 'none'),
@@ -426,7 +427,7 @@ function explicitTaskRefForOperation(
     }
     if (command === 'sandbox') {
       const subcommand = first(args);
-      if (!['create', 'exec', 'show', 'rm', 'start'].includes(subcommand)) return null;
+      if (!['create', 'exec', 'show', 'reconcile', 'rm', 'start'].includes(subcommand)) return null;
       const targetIndex = (subcommand === 'exec' || subcommand === 'start') && args[1] === '--recreate' ? 2 : 1;
       return args[targetIndex] ?? null;
     }

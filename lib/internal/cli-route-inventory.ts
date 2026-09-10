@@ -19,7 +19,7 @@ export const PUBLIC_CLI_ROUTE_SELECTORS = Object.freeze({
   init: ['init'],
   merge: ['merge'],
   run: ['create-task', 'task-skill', 'recreate'],
-  sandbox: ['create', 'exec', 'ls', 'show', 'prune', 'rebuild', 'refresh', 'rm', 'start', 'vm'],
+  sandbox: ['create', 'exec', 'ls', 'show', 'prune', 'rebuild', 'refresh', 'reconcile', 'rm', 'start', 'vm'],
   server: ['start', 'stop', 'status', 'logs', '__daemon'],
   task: ['cat', 'decisions', 'files', 'grep', 'issue-body', 'log', 'ls', 'show', 'status'],
   sync: ['sync'],

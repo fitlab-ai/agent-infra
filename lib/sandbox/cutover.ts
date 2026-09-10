@@ -343,7 +343,7 @@ async function replayPreservedSandboxTaskCutover(
   const state = await readPreservedSandboxTaskCutoverState(params);
   const reconciliation = readReconciliation(params.root);
   if (!reconciliation) {
-    throw new Error(`SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: record host reconciliation at ${reconciliationPath(params.root)} after reviewing payload`);
+    throw new Error(`SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: run 'ai sandbox reconcile --operator <name> ${params.journal.taskId}' after reviewing payload`);
   }
   const matches = reconciliation.journalSha256 === journalSha256(params.journal)
     && reconciliation.taskId === params.journal.taskId
@@ -360,7 +360,7 @@ async function replayPreservedSandboxTaskCutover(
     && reconciliation.operator.trim().length > 0
     && reconciliation.confirmedAt.trim().length > 0;
   if (!matches) {
-    throw new Error(`SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: stale host reconciliation at ${reconciliationPath(params.root)}`);
+    throw new Error(`SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: stale host reconciliation; rerun 'ai sandbox reconcile --operator <name> ${params.journal.taskId}'`);
   }
   const verifiedEqual = {
     ...params.journal,
