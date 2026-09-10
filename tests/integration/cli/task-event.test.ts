@@ -912,36 +912,16 @@ test('task-event only accepts --orchestrated for lifecycle completion events', (
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
-test('manual validation keeps code-review and supports multiple fixed-action rounds', () => {
+test('manual validation completion requires coordinator evidence and receipt identity', () => {
   const f = fixture('code-review');
-  for (const [round, name] of [[1, 'manual-validation.md'], [2, 'manual-validation-r2.md']] as const) {
-    const started = run(f.root, [f.id, 'manual-validation.started', '--agent', 'codex']);
-    assert.equal(started.status, 0, started.stderr);
-    assert.equal(JSON.parse(started.stdout).round, round);
-    fs.writeFileSync(path.join(f.dir, name), '# Manual validation\n');
-    const done = run(f.root, [f.id, 'manual-validation.completed', '--agent', 'codex', '--artifact', name, '--summary-result', 'summary updated']);
-    assert.equal(done.status, 0, done.stderr);
-    assert.equal(JSON.parse(done.stdout).toStep, 'code-review');
-  }
-  const content = fs.readFileSync(f.file, 'utf8');
-  assert.equal((content.match(/Complete Manual Validation \[started\]/g) ?? []).length, 2);
-  assert.match(content, /manual-validation-r2\.md/);
-});
-
-test('manual validation keeps commit after PR preparation', () => {
-  const f = fixture('commit');
   const started = run(f.root, [f.id, 'manual-validation.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
-  assert.equal(JSON.parse(started.stdout).toStep, 'commit');
-
   fs.writeFileSync(path.join(f.dir, 'manual-validation.md'), '# Manual validation\n');
-  const done = run(f.root, [
-    f.id, 'manual-validation.completed', '--agent', 'codex',
-    '--artifact', 'manual-validation.md', '--summary-result', 'summary updated'
-  ]);
-  assert.equal(done.status, 0, done.stderr);
-  assert.equal(JSON.parse(done.stdout).toStep, 'commit');
-  assert.match(fs.readFileSync(f.file, 'utf8'), /current_step: commit/);
+  const done = run(f.root, [f.id, 'manual-validation.completed', '--agent', 'codex', '--artifact', 'manual-validation.md', '--summary-result', 'summary updated']);
+  assert.equal(done.status, 1);
+  assert.equal(JSON.parse(done.stdout).error.code, 'EVENT_PAYLOAD_INVALID');
+  const content = fs.readFileSync(f.file, 'utf8');
+  assert.match(content, /Complete Manual Validation \[started\]/);
 });
 
 test('dry-run returns planned without changing task bytes for start and completion', () => {

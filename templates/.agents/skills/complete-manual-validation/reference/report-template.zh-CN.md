@@ -7,6 +7,7 @@
 
 - **验证轮次**：Round {N}
 - **产物文件**：`manual-validation.md`
+- **Evidence 文件**：`{evidence-file}`（只记录 basename）
 
 ## 状态核对
 
@@ -39,6 +40,7 @@ $ tail .agents/workspace/active/{task-id}/task.md
 - 结果：{summary-result}
 - 摘要评论：{comment-id 或 URL}
 - 更新状态：`### ✅ 人工验证已通过`
+- Transaction：`{transaction-id}`；receipt=`{receipt-digest}`；head=`{pr-head-sha}`
 ````
 
 ## 填写规则

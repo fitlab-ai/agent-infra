@@ -1,6 +1,6 @@
 ---
 description: "标记 PR 人工验证已完成并更新摘要评论"
-usage: "/complete-manual-validation [--task <ref> | -t <ref>] [pr-ref] <verification-summary>"
+usage: "/complete-manual-validation [--task <ref> | -t <ref>] [pr-ref] --evidence-file <path> <verification-summary>"
 disable-model-invocation: true
 ---
 

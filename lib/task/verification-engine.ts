@@ -44,6 +44,9 @@ import { validateQualificationAudit } from "./qualification-audit.ts";
 import { getArtifactSchema } from "./artifact-schema.ts";
 import { inspectArtifactContract } from "./artifact-operations.ts";
 import type { VerificationShared } from "./verification-types.ts";
+import { readManualValidationReceipt } from "./manual-validation-receipt.ts";
+import { readManualValidationTransaction } from "./manual-validation-transaction.ts";
+import { sha256File } from "./artifact-receipts.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -859,7 +862,7 @@ function checkReviewLedger({ taskDir, config, repositoryRoot }: any): any {
   return passResult("review-ledger", `Disagreement ledger clean (${inScopeCount} in-scope entries terminal${scopeLabel})`);
 }
 
-function checkManualValidation({ taskDir }: any): any {
+async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<any> {
   // 1. Latest review-code artifact; none -> pass (no review, check not applicable).
   const review = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!review.ok) {
@@ -891,15 +894,28 @@ function checkManualValidation({ taskDir }: any): any {
   const artifactName = path.basename(resolved.path);
   const task = loadTask(taskDir);
   if (!task.ok) return failResult("manual-validation", task.message);
-  const log = getSectionContent(task.content, ["活动日志", "Activity Log"]);
-  const completed = new RegExp(
-    `\\*\\*Complete Manual Validation\\*\\*[\\s\\S]*?Manual validation passed → ${escapeRegExp(artifactName)};`
-  );
-  if (!completed.test(log)) {
-    return failResult(
-      "manual-validation",
-      `Manual validation artifact exists but completion is not recorded for ${artifactName}: re-run /complete-manual-validation`
-    );
+  const receipt = readManualValidationReceipt(taskDir, {
+    taskId: task.metadata.id,
+    artifact: artifactName
+  });
+  if (!receipt.ok) return failResult("manual-validation", `Manual validation receipt is unavailable: ${receipt.error.message}`);
+  const transaction = readManualValidationTransaction(taskDir, {
+    taskId: task.metadata.id,
+    prNumber: receipt.value.prNumber,
+    prHeadSha: receipt.value.prHeadSha,
+    evidenceDigest: receipt.value.evidenceDigest,
+    artifact: receipt.value.artifact,
+    transactionId: receipt.value.transactionId
+  });
+  if (!transaction.ok) return failResult("manual-validation", `Manual validation transaction is unavailable: ${transaction.error.message}`);
+  if (transaction.value.phase !== "committed" || transaction.value.committedReceipt !== receipt.value.receiptDigest || !transaction.value.eventAppended || !transaction.value.postWriteVerified) {
+    return failResult("manual-validation", "Manual validation transaction has not reached the committed post-write-verified state");
+  }
+  if (transaction.value.pendingSummaryDigest !== receipt.value.pendingSummaryDigest || transaction.value.finalSummaryDigest !== receipt.value.finalSummaryDigest) {
+    return failResult("manual-validation", "Manual validation summary digests do not match the committed receipt");
+  }
+  if (sha256File(resolved.path) !== receipt.value.artifactSha256) {
+    return failResult("manual-validation", `Manual validation artifact digest does not match the receipt for ${artifactName}`);
   }
   // 6. Timing correlation (PL-3 fix, PL-4 corrected): the completion entry must
   //    sit AFTER the latest review-code round's completion entry in the
@@ -908,25 +924,27 @@ function checkManualValidation({ taskDir }: any): any {
   //    which indexOf never matches). Not reusing completed.exec().index: exec
   //    anchors to the first '**Complete Manual Validation**' heading, which can
   //    belong to an earlier round's entry and misorder the standard path.
-  const reviewDoneIndex = log.indexOf(`**Review Code (Round ${review.round})** by `);
-  const completedIndex = log.indexOf(`Manual validation passed → ${artifactName};`);
-  if (reviewDoneIndex === -1) {
-    // The latest review-code round's completion entry is missing entirely (abnormal
-    // state, e.g. a restored/historical task without a review-code.completed record).
-    // Re-running complete-manual-validation cannot restore it, so the remediation
-    // targets the review record itself. Fail closed either way.
-    return failResult(
-      "manual-validation",
-      `Latest review-code (round ${review.round}) completion entry is missing from the Activity Log (abnormal state): re-run review-code or restore the completion record`
-    );
+  const inspectedLog = inspectActivityLog(task.content);
+  if (!inspectedLog.section) return failResult("manual-validation", "Activity Log is missing or invalid");
+  const reviewDoneIndex = inspectedLog.section.entries.findIndex((entry) => entry.step === `Review Code (Round ${review.round})`);
+  const completedIndex = inspectedLog.section.entries.findIndex((entry) => entry.step === "Complete Manual Validation"
+    && entry.note.includes(`Manual validation passed → ${artifactName};`)
+    && entry.note.includes(`transaction=${receipt.value.transactionId};`)
+    && entry.note.includes(`receipt=${receipt.value.receiptDigest};`)
+    && entry.note.includes(`evidence=${receipt.value.evidenceDigest};`)
+    && entry.note.includes(`head=${receipt.value.prHeadSha}`));
+  if (reviewDoneIndex === -1) return failResult("manual-validation", `Latest review-code (round ${review.round}) completion entry is missing from the Activity Log`);
+  if (completedIndex === -1) return failResult("manual-validation", `Committed manual validation completion is not recorded for ${artifactName}`);
+  if (completedIndex < reviewDoneIndex) return failResult("manual-validation", `Latest review-code (round ${review.round}) came after the manual validation completion recorded for ${artifactName}`);
+
+  const fact = readPrDeliveryFact(task.metadata);
+  if (fact.status === "invalid") return failResult("manual-validation", fact.error.message);
+  if (fact.status === "valid" && fact.fact.state === "bound") {
+    const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
+    if (!inspected.pullRequest) return failResult("manual-validation", inspected.error?.message ?? "canonical pull-request head is unavailable");
+    if (inspected.pullRequest.head.sha !== receipt.value.prHeadSha) return failResult("manual-validation", "manual validation receipt is stale for the current pull-request head");
   }
-  if (completedIndex < reviewDoneIndex) {
-    return failResult(
-      "manual-validation",
-      `Latest review-code (round ${review.round}) came after the manual validation completion recorded for ${artifactName}: re-run /complete-manual-validation to cover new pending items`
-    );
-  }
-  return passResult("manual-validation", `Manual validation completed → ${artifactName}`);
+  return passResult("manual-validation", `Manual validation completed → ${artifactName} (committed receipt and post-write verification)`);
 }
 
 async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): Promise<any> {

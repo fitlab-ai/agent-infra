@@ -229,9 +229,10 @@ function fixture() {
 test('snapshot validation runs at the task commit and removes its temporary worktree', (t) => {
   const f = fixture();
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const evidenceFile = path.join(f.root, 'task-bound-evidence.json');
   fs.writeFileSync(path.join(f.root, 'tracked.txt'), 'dirty host state\n');
   const command = [
-    f.id, '--scope', 'snapshot', '--format', 'json', '--',
+    f.id, '--scope', 'snapshot', '--format', 'json', '--evidence-file', evidenceFile, '--',
     process.execPath, '-e',
     "const fs=require('node:fs');if(process.env.AGENT_INFRA_VALIDATION_SCOPE!=='snapshot'||fs.readFileSync('tracked.txt','utf8')!=='committed\\n')process.exit(9)"
   ];
@@ -246,8 +247,31 @@ test('snapshot validation runs at the task commit and removes its temporary work
   assert.equal(evidence.scope, 'snapshot');
   assert.equal(evidence.exitCode, 0);
   assert.equal(evidence.cleanup, 'completed');
+  const envelope = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
+  assert.equal(envelope.schema, 'agent-infra/branch-only-validation-evidence');
+  assert.equal(envelope.mode, 'task-bound');
+  assert.equal(envelope.taskId, f.id);
+  assert.equal(envelope.recoverable, true);
+  assert.equal(envelope.result.exitCode, 0);
   const worktrees = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: f.root, encoding: 'utf8', env: gitSafeEnv() });
   assert.equal(worktrees.stdout.match(/^worktree /gm)?.length, 1);
+});
+
+test('explicit branch validation writes a non-recoverable branch-only envelope', (t) => {
+  const f = fixture();
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  fs.rmSync(path.join(f.root, '.agents', 'workspace', 'active', f.id), { recursive: true, force: true });
+  const evidenceFile = path.join(f.root, 'branch-only-evidence.json');
+  const result = spawnTaskValidate(f.root, gitSafeEnv(), [
+    f.branch, '--scope', 'snapshot', '--format', 'json', '--evidence-file', evidenceFile, '--',
+    process.execPath, '-e', 'process.exit(0)'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const envelope = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
+  assert.equal(envelope.mode, 'branch-only');
+  assert.equal(envelope.taskId, null);
+  assert.equal(envelope.recoverable, false);
+  assert.equal(envelope.result.cleanup, 'completed');
 });
 
 test('inplace validation refuses to run when the broker is not idle', (t) => {

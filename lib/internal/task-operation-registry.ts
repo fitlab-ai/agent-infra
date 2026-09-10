@@ -156,7 +156,9 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'task-snapshot', 'snapshot', 'conditional', 'diagnostic'),
     descriptor('internal', 'task-verify', 'event', 'task-bound', 'terminal-verdict'),
     descriptor('internal', 'task-validate', 'snapshot', 'conditional', 'diagnostic'),
-    descriptor('internal', 'task-validate', 'inplace', 'task-bound', 'progress')
+    descriptor('internal', 'task-validate', 'inplace', 'task-bound', 'progress'),
+    descriptor('internal', 'manual-validation', 'verify', 'task-bound', 'diagnostic'),
+    descriptor('internal', 'manual-validation', 'transaction', 'task-bound', 'remote-write')
   ];
 }
 
@@ -223,7 +225,7 @@ export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
   'platform-comment', 'platform-issue', 'platform-pr', 'platform-pr-review', 'pr-review-grade',
   'platform-checks', 'task-context', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',
   'task-orchestration', 'task-review', 'task-event', 'task-invalidation', 'task-lifecycle',
-  'task-finalization', 'task-override', 'task-short-id', 'task-snapshot', 'task-verify', 'task-validate'
+  'task-finalization', 'task-override', 'task-short-id', 'task-snapshot', 'task-verify', 'task-validate', 'manual-validation'
 ]);
 export const PUBLIC_DISPATCHER_ROUTES = Object.freeze([
   'agent-client', 'cp', 'data', 'decide', 'help', 'init', 'merge', 'run', 'sandbox', 'server', 'task', 'sync', 'update', 'version'

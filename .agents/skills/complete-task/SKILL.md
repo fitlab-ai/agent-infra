@@ -103,7 +103,7 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 生命周期前只验证硬门禁：
 - [ ] task 身份、active 状态、并发锁和本地原子生命周期操作可用
 - [ ] `prFlow=required` 时已满足 required-PR delivery
-- [ ] 其余业务证据（工作流、审查、提交、测试、分歧账本、人工校验和平台同步）已记录或可在生命周期后校验
+- [ ] 其余业务证据（工作流、审查、提交、测试、分歧账本、人工校验和平台同步）已记录或可在生命周期后校验；人工验证只能由 committed transaction、receipt、当前 artifact 摘要和带 identity 的通过日志满足
 
 > **⚠️ 前置条件分支判断 — 你必须先判断“继续”还是“停止”：**
 >

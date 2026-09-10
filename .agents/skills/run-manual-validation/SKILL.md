@@ -25,7 +25,7 @@ description: >
 - 本技能负责选择校验模式、调用唯一机械入口并记录证据；不把 PR 人工校验标为完成。
 - `complete-manual-validation` 仍是维护者确认覆盖充分后的最终登记入口。
 - 禁止直接操作临时 worktree、lease 或 container；只调用 `agent-infra-internal task-validate`。
-- 产物不得记录 token、环境变量、完整 argv、绝对用户路径或原始 transcript。
+- 产物不得记录 token、环境变量、完整 argv、绝对用户路径或原始 transcript；每个验证目标必须由核心写入同一 current-only evidence envelope。
 - 生成会同步到 Issue 的验证 artifact Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；Issue 同步保持透明，不解析或改写正文。
 - branch-only 降级路径走 `.agents/workspace/validations/{branch-slug}/`，标记 `recoverable: false`：不写 task.md、不发 lifecycle 事件、不同步 Issue、不跑 `task-verify`；产物须带回宿主机，由维护者登记。
 
@@ -44,7 +44,7 @@ branch-only 无 `{task-id}`，跳过本步，并在产物 `## 状态核对` 记�
 1. 读取 `reference/discovery-and-execution.md`，解析输入模式；非法或半截输入在 started 前停止，不写产物。
 2. 运行 `agent-infra-internal task-artifact {task-id} inspect --family validation-run`，读取最新 review-code 人工校验项；再运行 `agent-infra-internal platform-pr inspect {task-id}`，按 reference 的状态矩阵发现、归并并编号。仅在自动模式下，可靠来源无项或唯一可能来源不可读时才在 started 前停止；合法显式模式始终以用户命令作为有效工作继续。
 3. 从核心结果取得轮次和产物名；确认存在有效显式工作或非空发现清单后，运行 `agent-infra-internal task-event {task-id} validation-run.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}`，并逐项分类为 `executable|unavailable|unknown|unsafe|unresolved`。
-4. 每个可执行项分别调用 `agent-infra-internal task-validate {task-ref} --scope snapshot --format json -- {command...}`；只有证据表明必须原位时才对该项进行第二次显式 inplace 调用。零项可执行时不运行伪造命令，但仍继续产出覆盖缺口证据。
+4. 为每个验证目标分配 `{evidence-file}`，分别调用 `agent-infra-internal task-validate {task-ref} --scope snapshot --format json --evidence-file {evidence-file} -- {command...}`；只有证据表明必须原位时才对该项进行第二次显式 inplace 调用并写入对应 evidence 文件。零项可执行时不运行伪造命令，但仍继续产出覆盖缺口证据。
 5. 读取 `reference/report-template.md`，创建 `validation-run.md|validation-run-r{N}.md`；记录输入模式、发现清单、逐项结果、CLI JSON allowlist 与去敏摘要。
 6. 运行 `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {artifact}`。存在 Issue 时依次运行 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` 和 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}`。
 7. 运行 `agent-infra-internal task-verify {task-id} validation-run.completed --artifact {artifact} --format text`；未通过则修复后重跑。
@@ -57,7 +57,7 @@ branch-only 无 `{task-id}`，跳过本步，并在产物 `## 状态核对` 记�
 - **仅接受显式模式**：`task-artifact` 和 `platform-pr inspect` 都要求 task ref，branch-only 无法自动发现。缺少 `--` 后的用户命令时，在写入任何产物前停止。
 - **跳过第 0 步与第 2 步的发现**：把两个来源记为 `unavailable`，并在产物 `## 发现清单` 用 `explicit` 来源登记本轮项。
 - **第 3 步只跳过事件调用**：不发 `validation-run.started`，但逐项分类为 `executable|unavailable|unknown|unsafe|unresolved` 照常执行。
-- **第 4 步照常执行**：`agent-infra-internal task-validate {branch-ref} --scope snapshot --format json -- {command...}`。
+- **第 4 步照常执行**：将 evidence 文件写入同一 branch-only validation 目录，调用 `agent-infra-internal task-validate {branch-ref} --scope snapshot --format json --evidence-file {evidence-file} -- {command...}`。
 - **第 5 步改写产物位置**：写入 `.agents/workspace/validations/{branch-slug}/validation-run.md|validation-run-r{N}.md`，沿用同一份 `reference/report-template.md`。`{branch-slug}` 由 `--branch` 的 ref 逐字符转换：保留 `[A-Za-z0-9._-]`，其余（含 `/`）一律换成 `-`，结果必须是单层目录名；若结果为空或仅由 `.` 组成，判为非法输入并在写入任何产物前停止。
 - **跳过第 6、7 步**：不发 `validation-run.completed`，不做 `platform-comment sync`，不跑 `task-verify`。
 - **第 8 步追加提示**：明确告知产物不可恢复、未登记账本，需带回持有任务工作区的宿主机后再由维护者执行 `complete-manual-validation`。

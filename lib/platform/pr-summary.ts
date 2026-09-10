@@ -33,6 +33,7 @@ import type {
   MechanicalChangeReport,
   PrChangeReport
 } from './pr-change-report.ts';
+import { manualValidationEvidenceDigest, readManualValidationEvidence } from '../task/manual-validation-evidence.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -50,8 +51,21 @@ type PullRequestSummaryResult = PlatformResult & {
 };
 type PullRequestPrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
 type SummaryOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
+type ManualValidationSummaryOptions = {
+  phase: 'pending' | 'final';
+  evidenceFile: string;
+  transactionId?: string;
+  receiptDigest?: string;
+  evidenceDigest?: string;
+  prHeadSha?: string;
+};
 type ReportWriteResult = PlatformResult & {
   report: { path: string; status: 'written' | 'no-op' | 'planned'; precheckVerdict: 'clear' | 'needs-review'; nextAction: 'watch-pr' | 'review-code' } | null;
+};
+type SummaryCommentStateResult = Omit<PlatformResult, 'comment'> & {
+  task: { id: string | null; prNumber: number | null };
+  pullRequest: PlatformChangeRequestSnapshot | null;
+  comment: SummaryComment | null;
 };
 
 function summaryMarker(taskId: string): string {
@@ -354,6 +368,23 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
   };
 }
 
+async function summaryCommentState(taskRef: string, options: SummaryOptions = {}): Promise<SummaryCommentStateResult> {
+  const context = await summaryContext(taskRef, options);
+  if (!context.task.prNumber || !context.pullRequest) return { ...context, comment: null };
+  const loaded = await resolvePlatformProviderContext({ cwd: options.cwd, client: options.client });
+  if (!loaded.ok || !loaded.value.provider.comments?.list) return { ...context, comment: null };
+  const listed = await loaded.value.provider.comments.list({
+    context: providerOperationContext(loaded.value),
+    parent: providerResourceToken(loaded.value.provider, 'pull-request', String(context.task.prNumber))
+  });
+  if (!listed.ok) return { ...context, comment: null };
+  const matches = listed.value.filter((comment) => comment.body.includes(summaryMarker(context.task.id!)));
+  return {
+    ...context,
+    comment: matches.length === 1 ? { id: /^\d+$/u.test(matches[0]!.id) ? Number(matches[0]!.id) : matches[0]!.id, body: matches[0]!.body } : null
+  };
+}
+
 type ReportWriteOptions = {
   agent: string;
   mechanicalFile: string;
@@ -450,7 +481,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
 
 async function syncPullRequestSummary(
   taskRef: string,
-  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string }
+  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
@@ -519,6 +550,20 @@ async function syncPullRequestSummary(
       const prNumber = boundPrNumber;
       const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
       if (!initial.ok) return fail(initial.status, context, initial.error);
+      const manual = options.manualValidation;
+      const hasFinalManualValidation = /###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)/u.test(options.body);
+      if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
+      if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
+      if (manual) {
+        const evidence = readManualValidationEvidence(path.isAbsolute(manual.evidenceFile) ? manual.evidenceFile : path.resolve(resolved.repoRoot, manual.evidenceFile), {
+          taskId: resolved.taskId,
+          branch: initial.value.head.ref,
+          commit: initial.value.head.sha
+        });
+        if (!evidence.ok) return fail('failed', context, { code: evidence.error.code, message: evidence.error.message, retryable: false }, prNumber);
+        if (manual.evidenceDigest && manualValidationEvidenceDigest(evidence.value) !== manual.evidenceDigest) return fail('failed', context, { code: 'MANUAL_VALIDATION_EVIDENCE_STALE', message: 'evidence digest does not match the summary transaction', retryable: false }, prNumber);
+        if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
+      }
       const expectedReportPath = taskReportPath(resolved.taskDir);
       const suppliedReportPath = path.resolve(resolved.repoRoot, options.changeReportFile!);
       if (suppliedReportPath !== expectedReportPath) return fail('failed', context, { code: 'PR_CHANGE_REPORT_PATH_INVALID', message: 'summary-sync must consume the task-bound pr-change-report.json', retryable: false });
@@ -664,9 +709,10 @@ export {
   buildPullRequestSummary,
   reconcileSummaryComment,
   reportWrite,
+  summaryCommentState,
   summaryContext,
   summaryMarker,
   syncPullRequestSummary,
   warningResultForPrimary
 };
-export type { PullRequestSummaryResult, ReportWriteOptions, ReportWriteResult, SummaryContextResult };
+export type { ManualValidationSummaryOptions, PullRequestSummaryResult, ReportWriteOptions, ReportWriteResult, SummaryCommentStateResult, SummaryContextResult };

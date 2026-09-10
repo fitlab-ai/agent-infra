@@ -1,6 +1,6 @@
 ---
 description: "Mark PR manual validation as completed and update the summary comment"
-usage: "/complete-manual-validation [--task <ref> | -t <ref>] [pr-ref] <verification-summary>"
+usage: "/complete-manual-validation [--task <ref> | -t <ref>] [pr-ref] --evidence-file <path> <verification-summary>"
 disable-model-invocation: true
 ---
 
