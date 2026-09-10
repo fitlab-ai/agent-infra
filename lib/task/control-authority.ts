@@ -458,6 +458,7 @@ export function recoverLifecycleRecoveryOperation(
   }
   const capability = capabilities[0]!;
   const build = verifyLifecycleBuildIdentity(capability.buildIdentity, buildIdentity);
+  const expiredReserved = capability.status === 'expired' && capability.recoveryState === 'reserved';
   if (!build.ok
     || capability.taskId !== selector.taskId
     || capability.hookDefinitionHash !== selector.expectedHookDefinitionHash
@@ -465,7 +466,7 @@ export function recoverLifecycleRecoveryOperation(
     || capability.controller?.instanceDigest !== options.controllerBinding.instanceDigest
     || capability.recoveryState === 'unreserved'
     || capability.recoveryOperationId !== selector.operationId
-    || !['attested', 'consumed'].includes(capability.status)) {
+    || (!['attested', 'consumed'].includes(capability.status) && !expiredReserved)) {
     throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_PROVENANCE_INVALID', 'durable capability provenance does not match the recovery request');
   }
   const phase = capability.recoveryPhases.find((entry) => entry.phase === selector.phase);
@@ -491,9 +492,9 @@ export function recoverLifecycleRecoveryOperation(
   }
   if (capability.recoveryState === 'reserved') {
     if (phase.state === 'issued') {
-      store.consumeRecoveryPhase(selector.authorityRef, selector.operationId, selector.phase, phase.requestId, expected);
+      store.consumeRecoveryPhase(selector.authorityRef, selector.operationId, selector.phase, phase.requestId, expected, { allowExpiredReserved: true });
     }
-    store.consumeReference(selector.authorityRef, selector.operationId, expected);
+    store.consumeReference(selector.authorityRef, selector.operationId, expected, { allowExpiredReserved: true });
   } else if (phase.state !== 'consumed') {
     throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_STATE_INVALID', 'consumed capability has an unconsumed completion phase');
   }

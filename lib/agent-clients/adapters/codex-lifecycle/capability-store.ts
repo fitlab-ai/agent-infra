@@ -499,13 +499,16 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     return Object.freeze(result) as CodexCapabilityRecord & Readonly<{ capabilityRef: string; path: string; marker: string }>;
   }
 
-  function loadActive(capabilityRef: string): Readonly<{ file: string; record: CodexCapabilityRecord }> {
+  function loadActive(
+    capabilityRef: string,
+    options: Readonly<{ allowExpiredReserved?: boolean }> = {}
+  ): Readonly<{ file: string; record: CodexCapabilityRecord }> {
     const file = fileFor(capabilityRef);
     if (!fs.existsSync(file)) {
       throw capabilityError('CODEX_CAPABILITY_MISSING', 'capability token was not found');
     }
     const record = expire(read(file), file, now());
-    if (record.status === 'expired') {
+    if (record.status === 'expired' && !options.allowExpiredReserved) {
       throw capabilityError('CODEX_CAPABILITY_EXPIRED', 'capability token expired');
     }
     return { file, record };
@@ -555,11 +558,14 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     hookDefinitionHash: string;
     buildIdentity: LifecycleBuildIdentity;
     controller?: CodexControllerBinding;
-  }>): CodexCapabilityRecord {
+  }>, options: Readonly<{ allowExpiredReserved?: boolean }> = {}): CodexCapabilityRecord {
     if (record.status === 'consumed') {
       throw capabilityError('CODEX_CAPABILITY_REPLAY', 'capability token was already consumed');
     }
-    if (record.status !== 'attested') {
+    const expiredReserved = options.allowExpiredReserved
+      && record.status === 'expired'
+      && record.recoveryState === 'reserved';
+    if (record.status !== 'attested' && !expiredReserved) {
       throw capabilityError('CODEX_CAPABILITY_NOT_ATTESTED', 'capability token has no current-session hook attestation');
     }
     const identity = record.buildIdentity && typeof record.buildIdentity === 'object'
@@ -594,16 +600,16 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     hookDefinitionHash: string;
     buildIdentity: LifecycleBuildIdentity;
     controller?: CodexControllerBinding;
-  }>): CodexCapabilityRecord {
+  }>, options: Readonly<{ allowExpiredReserved?: boolean }> = {}): CodexCapabilityRecord {
     sweep();
     if (!operationId || /[\r\n]/u.test(operationId)) {
       throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'recovery operation id is invalid');
     }
-    const { file, record } = loadActive(capabilityRef);
+    const { file, record } = loadActive(capabilityRef, options);
     if (record.status === 'consumed' && record.recoveryState === 'consumed' && record.recoveryOperationId === operationId) {
       return record;
     }
-    validateRecord(record, expected);
+    validateRecord(record, expected, options);
     if (record.recoveryState === 'consumed') {
       if (record.recoveryOperationId === operationId) return record;
       throw capabilityError('CODEX_CAPABILITY_REPLAY', 'capability recovery operation was already consumed');
@@ -669,15 +675,16 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
       hookDefinitionHash: string;
       buildIdentity: LifecycleBuildIdentity;
       controller?: CodexControllerBinding;
-    }>
+    }>,
+    options: Readonly<{ allowExpiredReserved?: boolean }> = {}
   ): CodexCapabilityRecord {
     if (!operationId || /[\r\n]/u.test(operationId) || !isRecoveryPhase(phase)
       || !/^[a-f0-9-]{16,64}$/u.test(requestId)) {
       throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'recovery phase identity is invalid');
     }
     sweep();
-    const { file, record } = loadActive(capabilityRef);
-    validateRecord(record, expected);
+    const { file, record } = loadActive(capabilityRef, options);
+    validateRecord(record, expected, options);
     if (record.recoveryState !== 'reserved' && record.recoveryState !== 'consumed') {
       throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'capability has no reserved recovery operation');
     }

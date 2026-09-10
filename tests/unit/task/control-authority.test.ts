@@ -295,3 +295,94 @@ test('lifecycle recovery requires the persisted task event before consuming a re
   fs.rmSync(root, { recursive: true, force: true });
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
+
+test('lifecycle recovery compensates a retained expired capability tombstone after sweep', () => {
+  let now = 1_000;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-expired-'));
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-expired-repo-'));
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskPath = path.join(taskDir, 'task.md');
+  const initialTask = [
+    '---',
+    `id: ${taskId}`,
+    'status: active',
+    'current_step: code',
+    '---',
+    '',
+    '# Recovery fixture',
+    '',
+    '## 活动日志',
+    '',
+    ''
+  ].join('\n');
+  const completedTask = `${initialTask}- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1)** by codex — Fixed 0 blockers, 0 major, 0 minor issues → code.md\n`;
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(taskPath, completedTask);
+  const store = createCodexCapabilityStore({
+    root,
+    reference: () => 'authority-expired-reference',
+    now: () => now,
+    ttlMs: 30_000,
+    tombstoneMs: 60_000
+  });
+  const armed = store.arm({ taskId, buildIdentity: build, controller: binding });
+  const hookDefinitionHash = 'd'.repeat(64);
+  store.attestByReference({
+    capabilityRef: armed.capabilityRef,
+    sessionId: 'session-1', turnId: 'turn-1', toolUseId: 'tool-1',
+    hookDefinitionHash, buildIdentity: build, controller: binding
+  });
+  const selector = request(armed.capabilityRef, { phase: 'task-event.completed' });
+  const issued = issueLifecycleRecoveryAttestation(selector, {
+    capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => now
+  });
+  assert.equal(issued.status, 'issued');
+  writeArtifactRepairIntent(repoRoot, {
+    version: 2,
+    taskId,
+    family: 'code',
+    artifact: 'code.md',
+    state: 'consumed',
+    baselineSemanticDigest: null,
+    artifactSha256: 'e'.repeat(64),
+    semanticDigest: 'f'.repeat(64),
+    recoveryOperationId: selector.operationId,
+    phase: selector.phase,
+    authorityDigest: digest(issued.attestation),
+    requestId: selector.lifecycleRequestId,
+    createdAt: now,
+    updatedAt: now
+  });
+  store.consumeRecoveryPhase(
+    armed.capabilityRef,
+    selector.operationId,
+    selector.phase,
+    issued.attestation!.requestId,
+    { taskId, hookDefinitionHash, buildIdentity: build, controller: binding }
+  );
+  const taskBeforeRecovery = fs.readFileSync(taskPath, 'utf8');
+
+  now = armed.expiresAt + 1;
+  store.sweep();
+  const observed = queryLifecycleRecoveryOperation(selector.operationId, {
+    repoRoot, capabilityStore: createCodexCapabilityStore({ root, now: () => now })
+  });
+  assert.equal(observed.status, 'committed');
+  assert.equal(observed.capabilityState, 'reserved');
+  assert.equal(store.findByRecoveryOperation(selector.operationId)[0]?.status, 'expired');
+
+  const recovered = recoverLifecycleRecoveryOperation(selector, {
+    repoRoot,
+    capabilityStore: createCodexCapabilityStore({ root, now: () => now }),
+    buildIdentity: build,
+    controllerBinding: binding,
+    now: () => now
+  });
+  assert.equal(recovered.status, 'committed');
+  assert.equal(recovered.capabilityState, 'consumed');
+  assert.equal(fs.readFileSync(taskPath, 'utf8'), taskBeforeRecovery);
+  assert.equal(store.findByRecoveryOperation(selector.operationId)[0]?.status, 'consumed');
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
