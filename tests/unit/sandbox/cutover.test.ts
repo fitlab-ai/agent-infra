@@ -68,8 +68,18 @@ test('cutover preserves a changed projection outside the view and is replayable'
     const cutoverRoot = sandboxTaskCutoverRoot(input);
     assert.equal(fs.readFileSync(path.join(f.hostTaskDir, 'task.md'), 'utf8'), 'same\n');
     assert.equal(fs.readFileSync(path.join(cutoverRoot, 'payload', 'projection', 'plan.md'), 'utf8'), 'projection-only\n');
-    await assert.rejects(prepareSandboxTaskCutover(input), /SANDBOX_TASK_CUTOVER_CONFLICT/);
-    await assert.rejects(completeSandboxTaskCutover(input), /SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED/);
+    await assert.rejects(
+      prepareSandboxTaskCutover(input),
+      /SANDBOX_TASK_CUTOVER_CONFLICT: host=/
+    );
+    fs.copyFileSync(
+      path.join(cutoverRoot, 'payload', 'projection', 'plan.md'),
+      path.join(f.hostTaskDir, 'plan.md')
+    );
+    const reconciled = await prepareSandboxTaskCutover(input);
+    assert.equal(reconciled.state, 'verified-equal');
+    await completeSandboxTaskCutover(input);
+    assert.equal(fs.existsSync(cutoverRoot), false);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

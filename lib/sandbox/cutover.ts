@@ -178,6 +178,63 @@ function copyTree(source: SandboxTaskTreeSnapshot, target: string): void {
   }
 }
 
+async function replayPreservedSandboxTaskCutover(
+  params: Readonly<{
+    root: string;
+    journal: SandboxTaskCutoverJournal;
+    hostTaskDir: string;
+    projectionDir: string;
+    manifestPath: string;
+  }>
+): Promise<SandboxTaskCutoverJournal> {
+  const hostTaskDir = assertRealDirectory(params.hostTaskDir, 'SANDBOX_TASK_CUTOVER_IDENTITY_INVALID');
+  const projectionDir = assertRealDirectory(params.projectionDir, 'SANDBOX_TASK_CUTOVER_IDENTITY_INVALID');
+  const manifestPath = canonicalTerminalPath(params.manifestPath);
+  const payloadRoot = path.join(params.root, 'payload');
+  if (hostTaskDir !== params.journal.hostTaskDir
+    || projectionDir !== params.journal.projectionDir
+    || manifestPath !== params.journal.manifestPath
+    || params.journal.payloadRoot !== payloadRoot) {
+    throw new Error('SANDBOX_TASK_CUTOVER_IDENTITY_INVALID');
+  }
+
+  let host: SandboxTaskTreeSnapshot;
+  let projection: SandboxTaskTreeSnapshot;
+  let payloadProjection: SandboxTaskTreeSnapshot;
+  try {
+    host = snapshotSandboxTaskTree(hostTaskDir);
+    projection = snapshotSandboxTaskTree(projectionDir);
+    payloadProjection = snapshotSandboxTaskTree(path.join(payloadRoot, 'projection'));
+    await readStableFile(manifestPath, {
+      maxBytes: 1024 * 1024,
+      expectedSha256: params.journal.manifestSha256
+    });
+    await readStableFile(path.join(payloadRoot, 'manifest.json'), {
+      maxBytes: 1024 * 1024,
+      expectedSha256: params.journal.manifestSha256
+    });
+  } catch (error) {
+    throw new Error(`SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (projection.treeSha256 !== params.journal.projectionTreeSha256
+    || payloadProjection.treeSha256 !== params.journal.projectionTreeSha256) {
+    throw new Error('SANDBOX_TASK_CUTOVER_RECONCILIATION_REQUIRED: preserved projection changed');
+  }
+  if (host.treeSha256 !== payloadProjection.treeSha256) {
+    const preserved = { ...params.journal, hostTreeSha256: host.treeSha256, state: 'preserved' as const };
+    await writeJournal(params.root, preserved);
+    throw new Error(`SANDBOX_TASK_CUTOVER_CONFLICT: host=${host.treeSha256} payload=${payloadProjection.treeSha256} journal=${path.join(params.root, 'journal.json')}`);
+  }
+  const verifiedEqual = {
+    ...params.journal,
+    state: 'verified-equal' as const,
+    hostTreeSha256: host.treeSha256,
+    projectionTreeSha256: payloadProjection.treeSha256
+  };
+  await writeJournal(params.root, verifiedEqual);
+  return verifiedEqual;
+}
+
 /**
  * The only compatibility boundary for manifests written before direct mounts.
  * It never reconciles projection bytes into the task directory.
@@ -200,7 +257,13 @@ export async function prepareSandboxTaskCutover(params: Readonly<{
       throw new Error('SANDBOX_TASK_CUTOVER_JOURNAL_INVALID');
     }
     if (existing.state === 'preserved') {
-      throw new Error(`SANDBOX_TASK_CUTOVER_CONFLICT: replay preserved payload at ${root}`);
+      return replayPreservedSandboxTaskCutover({
+        root,
+        journal: existing,
+        hostTaskDir: params.hostTaskDir,
+        projectionDir: params.projectionDir,
+        manifestPath: params.manifestPath
+      });
     }
     if (existing.state === 'verified-equal') return existing;
   }

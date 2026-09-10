@@ -1365,14 +1365,6 @@ export async function create(args: string[]): Promise<void> {
               container,
               taskId: target.workspace.taskId
             });
-            if (existingCutover?.state === 'preserved') {
-              throw new Error(`SANDBOX_TASK_CUTOVER_CONFLICT: replay preserved payload at ${sandboxTaskCutoverRoot({
-                base: cutoverBase,
-                project: effectiveConfig.project,
-                container,
-                taskId: target.workspace.taskId
-              })}`);
-            }
             if (existingCutover?.state === 'verified-equal') legacyTaskCutover = existingCutover;
             if (existingCutover && existingCutover.state !== 'verified-equal'
               && (!previousManifest || !hasLegacySandboxProjection(previousManifest))) {
