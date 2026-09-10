@@ -176,30 +176,38 @@ jobs:
 
   coverage:
     name: ubuntu-latest / coverage
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
+      - name: Skip coverage on pull requests
+        if: github.event_name == 'pull_request'
+        run: echo 'Coverage is generated only on pushes to main.'
+
       - name: Checkout repository
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/checkout@v7
         with:
           lfs: true
 
       - name: Setup Node.js
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: npm ci
 
       - name: Verify inline build output is committed
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: node scripts/build-inline.js --check
 
       - name: Coverage report (informational)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         run: |
           coverage_output=$(npm run test:coverage --silent 2>&1)
@@ -215,6 +223,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage to Codecov
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         uses: codecov/codecov-action@v7
         with:
