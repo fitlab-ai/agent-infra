@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 
-import { classifySandboxControlEnvironment } from '../lib/sandbox/control/client.ts';
 import {
   formatTaskViewDiagnostic,
   guardTaskOperation,
+  resolveSandboxControlTransport,
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
 import { INTERNAL_HANDLER_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
+import {
+  hostControlRequestForCommand,
+  requestHostControl,
+  HostControlClientError,
+  HOST_CONTROL_TEST_ENVIRONMENT_KEYS,
+  type HostControlCommand
+} from '../lib/host-control/client.ts';
+import { resolveHostControlEndpoint, readHostControlWorkerToken } from '../lib/host-control/path.ts';
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
 if (major < 22 || (major === 22 && minor < 9)) {
   process.stderr.write(
@@ -18,6 +26,15 @@ if (major < 22 || (major === 22 && minor < 9)) {
 const command = process.argv[2] || '';
 const internalRouteRegistered = Object.hasOwn(INTERNAL_HANDLER_ROUTE_SELECTORS, command);
 const taskControlCommand = command === 'task-lifecycle' || command === 'task-orchestration' || command === 'task-finalization';
+const taskWorkflowCommand = command === 'task-artifact'
+  || command === 'task-review'
+  || command === 'task-event'
+  || command === 'task-ledger'
+  || command === 'task-invalidation'
+  || command === 'task-warning';
+const localTaskControlHelp = taskControlCommand
+  && (process.argv[3] === '--help' || process.argv[3] === '-h')
+  && !process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
 
 let taskViewGuardFailed = false;
 try {
@@ -35,42 +52,86 @@ try {
   }
 }
 
-function taskControlTransportFailure(message: string): never {
+function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANSPORT_INVALID', changed: false | null = false): never {
   process.stdout.write(`${JSON.stringify({
-    status: 'failed', changed: false,
-    error: { code: 'TASK_CONTROL_TRANSPORT_INVALID', message }
+    status: 'failed', changed,
+    error: { code, message }
   })}\n`);
   process.exit(1);
 }
 
-if (!taskViewGuardFailed && taskControlCommand) {
-  const environment = classifySandboxControlEnvironment();
-  if (environment.kind === 'invalid') {
-    taskControlTransportFailure(environment.message ?? 'sandbox client control configuration is invalid');
+async function runHostControlCommand(commandName: HostControlCommand, args: string[]): Promise<void> {
+  let response;
+  try {
+    const testEndpoint = process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
+    const forwardedEnvironment = testEndpoint
+      ? Object.fromEntries(HOST_CONTROL_TEST_ENVIRONMENT_KEYS.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]!]]))
+      : {};
+    response = await requestHostControl({
+      request: hostControlRequestForCommand(commandName, args, process.cwd(), forwardedEnvironment),
+      endpoint: process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint()
+    });
+  } catch (error) {
+    if (error instanceof HostControlClientError) {
+      taskControlTransportFailure(error.message, error.changed === false
+        ? 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE' : error.code, error.changed);
+    }
+    throw error;
   }
-  if (environment.kind === 'controlled') {
-    const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
-    await sandboxControl(['client', command, ...process.argv.slice(3)]);
-  } else {
-    switch (command) {
-      case 'task-orchestration': {
-        const { taskOrchestration } = await import('../lib/internal/task-orchestration.ts');
-        await taskOrchestration(process.argv.slice(3));
-        break;
-      }
-      case 'task-lifecycle': {
-        const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
-        await taskLifecycle(process.argv.slice(3));
-        break;
-      }
-      case 'task-finalization': {
-        const { taskFinalization } = await import('../lib/internal/task-finalization.ts');
-        await taskFinalization(process.argv.slice(3));
-        break;
-      }
+  process.stdout.write(response.stdout);
+  process.stderr.write(response.stderr);
+  process.exitCode = response.exitCode;
+}
+
+const hostWorkerRequested = process.env.AGENT_INFRA_HOST_CONTROL_WORKER === '1';
+const hostWorker = hostWorkerRequested && (() => {
+  try {
+    const endpoint = process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint();
+    return process.env.AGENT_INFRA_HOST_CONTROL_WORKER_TOKEN === readHostControlWorkerToken(endpoint);
+  } catch {
+    return false;
+  }
+})();
+if (hostWorkerRequested && !hostWorker && (taskControlCommand || taskWorkflowCommand)) {
+  taskControlTransportFailure('host-control worker authorization is invalid', 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE');
+}
+let controlRouted = false;
+if (!taskViewGuardFailed && (taskControlCommand || taskWorkflowCommand) && !hostWorker && !localTaskControlHelp) {
+  const transport = resolveSandboxControlTransport(process.env);
+  switch (transport.kind) {
+    case 'fail-closed': {
+      const reason = transport.reasonCode ?? 'TASK_CONTROL_TRANSPORT_INVALID';
+      taskControlTransportFailure(reason, reason.startsWith('SANDBOX_CONTROL_IDENTITY_') ? reason : undefined);
+      break;
+    }
+    case 'direct-host':
+      await runHostControlCommand(command as HostControlCommand, process.argv.slice(3));
+      break;
+    case 'broker-client': {
+      const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
+      await sandboxControl(['client', ...(taskControlCommand ? [command] : ['task-workflow', command]), ...process.argv.slice(3)]);
+      break;
     }
   }
-} else if (!taskViewGuardFailed && internalRouteRegistered) switch (command) {
+  controlRouted = true;
+}
+
+if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (command) {
+  case 'task-orchestration': {
+    const { taskOrchestration } = await import('../lib/internal/task-orchestration.ts');
+    await taskOrchestration(process.argv.slice(3));
+    break;
+  }
+  case 'task-lifecycle': {
+    const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
+    await taskLifecycle(process.argv.slice(3));
+    break;
+  }
+  case 'task-finalization': {
+    const { taskFinalization } = await import('../lib/internal/task-finalization.ts');
+    await taskFinalization(process.argv.slice(3));
+    break;
+  }
 
   case 'task-create': {
     const { taskCreate } = await import('../lib/internal/task-create.ts');
@@ -81,6 +142,11 @@ if (!taskViewGuardFailed && taskControlCommand) {
   case 'sandbox-control': {
     const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
     await sandboxControl(process.argv.slice(3));
+    break;
+  }
+  case 'host-control': {
+    const { hostControl } = await import('../lib/internal/host-control.ts');
+    await hostControl(process.argv.slice(3));
     break;
   }
   case 'agent-client': {

@@ -2,8 +2,12 @@ import fs from 'node:fs';
 
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
-import { validateCompletedArtifact } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
+import {
+  hasOpenArtifactRound,
+  validateArtifactPublication,
+  validateCompletedArtifact
+} from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
@@ -81,19 +85,6 @@ type LocalArtifactFinalizationResult = {
 
 type LocalArtifactFinalizationIntent = ArtifactRepairIntent;
 
-function readLocalArtifactFinalizationIntent(
-  repoRoot: string,
-  taskId: string,
-  family: LocalArtifactFamily,
-  artifact: string
-): LocalArtifactFinalizationIntent | null {
-  return readArtifactRepairIntent(repoRoot, taskId, family, artifact);
-}
-
-function writeLocalArtifactFinalizationIntent(repoRoot: string, value: LocalArtifactFinalizationIntent): void {
-  writeArtifactRepairIntent(repoRoot, value);
-}
-
 function consumeLocalArtifactFinalizationIntent(
   repoRoot: string,
   intent: LocalArtifactFinalizationIntent
@@ -101,7 +92,7 @@ function consumeLocalArtifactFinalizationIntent(
   if (intent.state === 'consumed') return intent;
   if (intent.state !== 'passed') throw new Error('LOCAL_FINALIZATION_INTENT_INVALID: only passed provenance can be consumed');
   const consumed = { ...intent, state: 'consumed' as const };
-  writeLocalArtifactFinalizationIntent(repoRoot, consumed);
+  writeArtifactRepairIntent(repoRoot, consumed);
   return consumed;
 }
 
@@ -221,200 +212,108 @@ function failedFinalization(
   };
 }
 
-function provenanceFailure(
+type LocalArtifactPreparation = Readonly<{
+  result: LocalArtifactFinalizationResult;
+  content: string;
+  repoRoot?: string;
+  provenance?: ArtifactRepairIntent;
+}>;
+
+/** Read and validate once; callers publish this content before committing provenance. */
+function prepareLocalArtifact(
   request: LocalArtifactFinalizationRequest,
-  resolved: { taskId: string; taskDir: string },
-  content: string,
-  artifactSha256: string,
-  semanticDigestValue: string,
-  code: LocalArtifactDiagnosticCode,
-  message: string
-): LocalArtifactFinalizationResult {
-  return failedFinalization(request, { code, message }, {
-    taskId: resolved.taskId,
-    taskDir: resolved.taskDir,
-    artifactSha256,
-    semanticDigest: semanticDigestValue,
-    diagnostics: [{ code, message, repairable: false, line: null }]
+  candidate?: string
+): LocalArtifactPreparation {
+  const failed = (code: string, message: string): LocalArtifactPreparation => ({
+    result: failedFinalization(request, { code, message }), content: candidate ?? ''
   });
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: request.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message);
+  const parsed = parseArtifactName(request.artifact);
+  if (!parsed || parsed.family !== request.family) return failed('ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${request.family}`);
+  let content: string;
+  let taskContent: string;
+  try {
+    taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    if (candidate !== undefined) {
+      const error = validateArtifactPublication(resolved.taskDir, request.family, request.artifact);
+      if (error) return failed(error.code, error.message);
+      if (resolved.state !== 'active' || !hasOpenArtifactRound(taskContent, request.family, parsed.round)) {
+        return failed('ARTIFACT_IDENTITY_INVALID', 'candidate must match one open started round in an active task');
+      }
+      content = candidate;
+    } else {
+      const validated = validateCompletedArtifact(resolved.taskDir, request.family, request.artifact, parsed.round);
+      if (!validated.ok) return failed(validated.error.code, validated.error.message);
+      content = fs.readFileSync(validated.artifact.path, 'utf8');
+    }
+  } catch (error) { return failed('ARTIFACT_NOT_READABLE', String(error)); }
+  const validation = validateLocalArtifact(content, {
+    family: request.family, requiredSections: request.requiredSections, taskContent, artifact: request.artifact
+  });
+  const artifactSha256 = sha256Content(content);
+  const { semanticDigest, repairable, diagnostics } = validation;
+  const result = failedFinalization(request, {
+    code: 'LOCAL_ARTIFACT_INVALID', message: diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
+  }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest, repairable, diagnostics });
+  const prepared = { result, content, repoRoot: resolved.repoRoot };
+  const reject = (code: LocalArtifactDiagnosticCode, message: string): LocalArtifactPreparation => ({
+    ...prepared, result: { ...result, repairable: false, error: { code, message },
+      diagnostics: [{ code, message, repairable: false, line: null }] }
+  });
+  let intent: ArtifactRepairIntent | null;
+  try { intent = readArtifactRepairIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact); }
+  catch (error) {
+    return { ...prepared, result: { ...result, repairable: false, diagnostics: [],
+      error: { code: 'LOCAL_FINALIZATION_INTENT_INVALID', message: String(error) } } };
+  }
+  if (repairable) {
+    if (intent && (intent.state !== 'awaiting-repair' || intent.baselineSemanticDigest !== semanticDigest)) {
+      return reject('LOCAL_REPAIR_PROVENANCE_CONFLICT', 'a different local repair baseline is already recorded for this artifact');
+    }
+    if (intent) return prepared;
+  } else {
+    if (!validation.ok) return prepared;
+    if (intent?.state === 'awaiting-repair' && intent.baselineSemanticDigest !== semanticDigest) {
+      return reject('LOCAL_REPAIR_BASELINE_MISMATCH', 'the repaired artifact semantic digest does not match the recorded repair baseline');
+    }
+    if ((intent?.state === 'passed' || intent?.state === 'consumed')
+      && (intent.artifactSha256 !== artifactSha256 || intent.semanticDigest !== semanticDigest)) {
+      return reject('LOCAL_REPAIR_PROVENANCE_CONFLICT', 'the artifact changed after its finalization provenance was recorded');
+    }
+    prepared.result = { ...result, status: 'passed', error: null };
+    if (intent?.state === 'consumed') return prepared;
+  }
+  return { ...prepared, provenance: {
+    version: 1, taskId: resolved.taskId, family: request.family, artifact: request.artifact,
+    state: repairable ? 'awaiting-repair' : 'passed',
+    baselineSemanticDigest: repairable ? semanticDigest : intent?.baselineSemanticDigest ?? null,
+    artifactSha256, semanticDigest
+  } };
+}
+
+function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): LocalArtifactFinalizationResult {
+  try {
+    if (prepared.provenance) writeArtifactRepairIntent(prepared.repoRoot!, prepared.provenance);
+    return prepared.result;
+  } catch (error) {
+    return { ...prepared.result, status: 'failed', error: {
+      code: 'LOCAL_FINALIZATION_INTENT_WRITE_FAILED', message: String(error)
+    } };
+  }
 }
 
 function finalizeLocalArtifact(request: LocalArtifactFinalizationRequest): LocalArtifactFinalizationResult {
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: request.repoRoot });
-  if (!resolved.ok) return failedFinalization(request, { code: resolved.code, message: resolved.message });
-  const parsed = parseArtifactName(request.artifact);
-  if (!parsed || parsed.family !== request.family) {
-    return failedFinalization(request, {
-      code: 'ARTIFACT_IDENTITY_INVALID',
-      message: `artifact '${request.artifact}' does not match ${request.family}`
-    }, { taskId: resolved.taskId, taskDir: resolved.taskDir });
-  }
-  const validated = validateCompletedArtifact(resolved.taskDir, request.family, request.artifact, parsed.round);
-  if (!validated.ok) {
-    return failedFinalization(request, validated.error, { taskId: resolved.taskId, taskDir: resolved.taskDir });
-  }
-  let content: string;
-  try { content = fs.readFileSync(validated.artifact.path, 'utf8'); }
-  catch (error) {
-    return failedFinalization(request, { code: 'ARTIFACT_NOT_READABLE', message: String(error) }, {
-      taskId: resolved.taskId, taskDir: resolved.taskDir
-    });
-  }
-  let taskContent: string;
-  try { taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
-  catch (error) {
-    return failedFinalization(request, { code: 'TASK_READ_FAILED', message: error instanceof Error ? error.message : String(error) }, {
-      taskId: resolved.taskId, taskDir: resolved.taskDir
-    });
-  }
-  const result = validateLocalArtifact(content, {
-    family: request.family,
-    requiredSections: request.requiredSections,
-    taskContent,
-    artifact: request.artifact
-  });
-  const artifactSha256 = sha256Content(content);
-  let intent: LocalArtifactFinalizationIntent | null;
-  try {
-    intent = readLocalArtifactFinalizationIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
-  } catch (error) {
-    return failedFinalization(request, {
-      code: 'LOCAL_FINALIZATION_INTENT_INVALID',
-      message: error instanceof Error ? error.message : String(error)
-    }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest: result.semanticDigest });
-  }
-  if (result.repairable) {
-    if (intent && (intent.state !== 'awaiting-repair' || intent.baselineSemanticDigest !== result.semanticDigest)) {
-      return provenanceFailure(
-        request, resolved, content, artifactSha256, result.semanticDigest,
-        'LOCAL_REPAIR_PROVENANCE_CONFLICT',
-        'a different local repair baseline is already recorded for this artifact'
-      );
-    }
-    if (!intent) {
-      try {
-        writeLocalArtifactFinalizationIntent(resolved.repoRoot, {
-          version: 1,
-          taskId: resolved.taskId,
-          family: request.family,
-          artifact: request.artifact,
-          state: 'awaiting-repair',
-          baselineSemanticDigest: result.semanticDigest,
-          artifactSha256,
-          semanticDigest: result.semanticDigest
-        });
-      } catch (error) {
-        return failedFinalization(request, {
-          code: 'LOCAL_FINALIZATION_INTENT_WRITE_FAILED',
-          message: error instanceof Error ? error.message : String(error)
-        }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest: result.semanticDigest });
-      }
-    }
-    return {
-      status: 'failed',
-      changed: false,
-      taskId: resolved.taskId,
-      taskDir: resolved.taskDir,
-      family: request.family,
-      artifact: request.artifact,
-      artifactSha256,
-      semanticDigest: result.semanticDigest,
-      repairable: true,
-      diagnostics: result.diagnostics,
-      error: {
-        code: 'LOCAL_ARTIFACT_INVALID',
-        message: result.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
-      }
-    };
-  }
-  if (!result.ok) {
-    return {
-      status: 'failed',
-      changed: false,
-      taskId: resolved.taskId,
-      taskDir: resolved.taskDir,
-      family: request.family,
-      artifact: request.artifact,
-      artifactSha256,
-      semanticDigest: result.semanticDigest,
-      repairable: false,
-      diagnostics: result.diagnostics,
-      error: {
-        code: 'LOCAL_ARTIFACT_INVALID',
-        message: result.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
-      }
-    };
-  }
-  if (intent?.state === 'awaiting-repair' && intent.baselineSemanticDigest !== result.semanticDigest) {
-    return provenanceFailure(
-      request, resolved, content, artifactSha256, result.semanticDigest,
-      'LOCAL_REPAIR_BASELINE_MISMATCH',
-      'the repaired artifact semantic digest does not match the recorded repair baseline'
-    );
-  }
-  if ((intent?.state === 'passed' || intent?.state === 'consumed')
-    && (intent.artifactSha256 !== artifactSha256 || intent.semanticDigest !== result.semanticDigest)) {
-    return provenanceFailure(
-      request, resolved, content, artifactSha256, result.semanticDigest,
-      'LOCAL_REPAIR_PROVENANCE_CONFLICT',
-      'the artifact changed after its finalization provenance was recorded'
-    );
-  }
-  if (intent?.state === 'consumed') {
-    return {
-      status: 'passed',
-      changed: false,
-      taskId: resolved.taskId,
-      taskDir: resolved.taskDir,
-      family: request.family,
-      artifact: request.artifact,
-      artifactSha256,
-      semanticDigest: result.semanticDigest,
-      repairable: false,
-      diagnostics: result.diagnostics,
-      error: null
-    };
-  }
-  try {
-    writeLocalArtifactFinalizationIntent(resolved.repoRoot, {
-      version: 1,
-      taskId: resolved.taskId,
-      family: request.family,
-      artifact: request.artifact,
-      state: 'passed',
-      baselineSemanticDigest: intent?.baselineSemanticDigest ?? null,
-      artifactSha256,
-      semanticDigest: result.semanticDigest
-    });
-  } catch (error) {
-    return failedFinalization(request, {
-      code: 'LOCAL_FINALIZATION_INTENT_WRITE_FAILED',
-      message: error instanceof Error ? error.message : String(error)
-    }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest: result.semanticDigest });
-  }
-  return {
-    status: result.ok ? 'passed' : 'failed',
-    changed: false,
-    taskId: resolved.taskId,
-    taskDir: resolved.taskDir,
-    family: request.family,
-    artifact: request.artifact,
-    artifactSha256,
-    semanticDigest: result.semanticDigest,
-    repairable: result.repairable,
-    diagnostics: result.diagnostics,
-    error: result.ok ? null : {
-      code: 'LOCAL_ARTIFACT_INVALID',
-      message: result.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
-    }
-  };
+  return commitLocalArtifactProvenance(prepareLocalArtifact(request));
 }
 
 export {
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
   consumeLocalArtifactFinalizationIntent,
   finalizeLocalArtifact,
-  readLocalArtifactFinalizationIntent,
+  prepareLocalArtifact,
+  commitLocalArtifactProvenance,
+  readArtifactRepairIntent as readLocalArtifactFinalizationIntent,
   canonicalSemanticDigest as semanticDigest,
   sha256Content,
   validateLocalArtifact
@@ -426,6 +325,7 @@ export type {
   LocalArtifactFinalizationRequest,
   LocalArtifactFinalizationResult,
   LocalArtifactFinalizationIntent,
+  LocalArtifactPreparation,
   LocalArtifactValidationOptions,
   LocalArtifactValidationResult
 };

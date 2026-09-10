@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
@@ -10,6 +11,8 @@ import {
   PUBLIC_DISPATCHER_ROUTES,
   PUBLIC_OPERATION_DESCRIPTORS,
   guardTaskOperation,
+  resolveSandboxControlTransport,
+  SANDBOX_CONTROL_STATUS_MOUNT,
   resolveDelegatedTaskOperation,
   resolveTaskOperation,
   type TaskOperationDescriptor
@@ -21,6 +24,11 @@ import {
   PUBLIC_CLI_ROUTE_SELECTORS
 } from '../../../lib/internal/cli-route-inventory.ts';
 import type { SandboxTaskView } from '../../../lib/sandbox/control/task-view.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
+import { onPlatforms } from '../../helpers.ts';
+import { TASK_WORKFLOW_COMMANDS } from '../../../lib/task/workflow-command.ts';
+import { parseArtifactCommand } from '../../../lib/task/artifact-command.ts';
+import { parseReviewCommand } from '../../../lib/task/review-command.ts';
 
 const staleView: SandboxTaskView = {
   state: 'finalized-stale',
@@ -49,6 +57,18 @@ function routeKeysFromHandlerBranches(): Set<string> {
     if (name === 'cli-route-inventory.ts') continue;
     const source = fs.readFileSync(path.join(internalDir, name), 'utf8');
     for (const match of source.matchAll(marker)) keys.add(routeKey(match[1]!, match[2]!));
+  }
+  // Shared domain commands have no CLI-local branch marker: exercise their parsers.
+  for (const [command, selector] of Object.values(TASK_WORKFLOW_COMMANDS)) {
+    if (command === 'task-artifact') {
+      const args = ['TASK-20260101-000001', selector, '--family', 'plan'];
+      if (selector !== 'inspect') args.push('--artifact', 'plan.md');
+      if (selector === 'repair') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
+      keys.add(routeKey(command, parseArtifactCommand(args).operation));
+    } else if (command === 'task-review') {
+      parseReviewCommand(['TASK-20260101-000001', selector, '--stage', 'analysis', '--artifact', 'review-analysis.md']);
+      keys.add(routeKey(command, selector));
+    }
   }
   return keys;
 }
@@ -153,6 +173,7 @@ test('task-view guard refuses stale progress before a route can import its modul
     AGENT_INFRA_TASK_ID: staleView.taskId!,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
     AGENT_INFRA_RUNTIME_DIR: '/runtime'
@@ -190,6 +211,7 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
     env: {
       AGENT_INFRA_CONTROL_TOKEN: 'token',
       AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_DIR: '/control',
       AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
       AGENT_INFRA_RUNTIME_DIR: undefined
@@ -204,6 +226,7 @@ test('task-bound guard rejects incomplete markers and cross-task references', ()
         AGENT_INFRA_TASK_ID: staleView.taskId!,
         AGENT_INFRA_CONTROL_TOKEN: 'token',
         AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+        AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
         AGENT_INFRA_CONTROL_DIR: '/control',
         AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
         AGENT_INFRA_RUNTIME_DIR: '/runtime'
@@ -221,6 +244,7 @@ test('task-bound git input identity is checked before the commit module can load
     AGENT_INFRA_TASK_ID: staleView.taskId!,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation-1',
+    AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
     AGENT_INFRA_CONTROL_DIR: '/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/status',
     AGENT_INFRA_RUNTIME_DIR: '/runtime'
@@ -254,4 +278,87 @@ test('task-bound git input identity is checked before the commit module can load
 test('host-direct routes remain unchanged without task-bound markers', () => {
   assert.doesNotThrow(() => guardTaskOperation('internal', 'git-workflow', ['commit'], { env: {} }));
   assert.doesNotThrow(() => guardTaskOperation('public', 'decide', ['--task', '11'], { env: {} }));
+});
+
+test('mounted sandbox control requires a matching identity sentinel', onPlatforms('linux', 'darwin'), () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-identity-'));
+  const statusDir = path.join(root, 'status');
+  const generation = 'registry-generation';
+  const controlRootId = 'a'.repeat(96);
+  fs.mkdirSync(statusDir);
+  const baseEnv = {
+    AGENT_INFRA_CONTROL_TOKEN: 'token',
+    AGENT_INFRA_CONTROL_GENERATION: generation,
+    AGENT_INFRA_CONTROL_DIR: path.join(root, 'control'),
+    AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
+    AGENT_INFRA_CONTROL_ROOT_ID: controlRootId
+  };
+  try {
+    assert.equal(resolveSandboxControlTransport(baseEnv).kind, 'fail-closed');
+    writeSandboxControlIdentitySentinel(statusDir, {
+      version: 1, mode: 'branch-only', taskId: null, generation, controlRootId
+    });
+    assert.deepEqual(resolveSandboxControlTransport(baseEnv), { kind: 'broker-client', reasonCode: null });
+    assert.deepEqual(resolveSandboxControlTransport({ ...baseEnv, AGENT_INFRA_CONTROL_ROOT_ID: 'b'.repeat(96) }), {
+      kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH'
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('fixed status mount fails closed after all control environment variables are cleared', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-fixed-mount-'));
+  const statusDir = path.join(root, 'status');
+  fs.mkdirSync(statusDir);
+  try {
+    assert.equal(SANDBOX_CONTROL_STATUS_MOUNT, '/run/agent-infra/control-status');
+    assert.deepEqual(resolveSandboxControlTransport({}, { statusMountPath: statusDir }), {
+      kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_MISSING'
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('tampered native status probe fails closed instead of selecting direct-host', () => {
+  const script = [
+    "const realBinding = process.binding;",
+    "process.binding = (name) => name === 'fs' ? { internalModuleStat: () => -2 } : realBinding(name);",
+    "const { resolveSandboxControlTransport } = await import('./lib/internal/task-operation-registry.ts');",
+    "console.log(JSON.stringify(resolveSandboxControlTransport({}, { statusMountPath: '/run/agent-infra/control-status' })));"
+  ].join(' ');
+  const result = spawnSync(process.execPath, ['--experimental-strip-types', '--eval', script], {
+    cwd: path.resolve('.'),
+    env: {
+      ...process.env,
+      AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: undefined,
+      AGENT_INFRA_TASK_ID: undefined,
+      AGENT_INFRA_CONTROL_TOKEN: undefined,
+      AGENT_INFRA_CONTROL_GENERATION: undefined,
+      AGENT_INFRA_CONTROL_ROOT_ID: undefined,
+      AGENT_INFRA_CONTROL_DIR: undefined,
+      AGENT_INFRA_CONTROL_STATUS_DIR: undefined,
+      AGENT_INFRA_RUNTIME_DIR: undefined,
+      AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
+      AGENT_INFRA_CONTROL_CONTROLLER_BINDING: undefined
+    },
+    encoding: 'utf8'
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_UNAVAILABLE'
+  });
+});
+
+test('ordinary environment variables cannot select the production status mount', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-env-mount-'));
+  const fakeMount = path.join(root, 'status');
+  fs.mkdirSync(fakeMount);
+  try {
+    const decision = resolveSandboxControlTransport({ AGENT_INFRA_TEST_STATUS_MOUNT: fakeMount });
+    assert.notEqual(decision.kind, 'broker-client');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

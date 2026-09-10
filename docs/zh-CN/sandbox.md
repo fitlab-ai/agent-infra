@@ -144,13 +144,19 @@ request 做恢复。如果 broker 恢复时无法保留输出 payload，会返�
 `SANDBOX_CONTROL_OUTPUT_UNAVAILABLE` task 结果并标记
 `recovery: inspect-domain-state`；应先检查宿主任务状态，再判断后续重试是否安全。
 
-任务生命周期、完成收尾和编排统一使用一个 typed Task Control Authority，但入口承载分开。direct-host 命令通过本地 authority adapter 执行，不创建 broker、control channel、manifest 或沙箱 authority 根目录。沙箱 client 只负责创建 control request；只有 broker 启动的 executor 依次通过 gate、current manifest、request、owner、lease 和 controller 校验后，才能成为 authority caller。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。
+任务生命周期、完成收尾和编排统一使用一个 typed Task Control Authority，但入口承载分开。direct-host 命令通过固定 host-control service 进入，不创建沙箱 broker、manifest 或 authority 根目录。沙箱 client 只负责创建 control request；只有 broker 启动的 executor 依次通过 gate、current manifest、request、owner、lease 和 controller 校验后，才能成为 authority caller。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。
 
 v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑有意不兼容。升级时，或回滚时旧代码访问较新的 per-state 容器，检查都会 fail closed；请执行一次 `ai sandbox start --recreate <task-ref-or-branch>`。容器内进程、tmux 会话、writable layer、普通 `/tmp` 和 RAM 状态可能丢失，但 worktree、本地分支以及宿主管理的任务/工具数据会保留。
 
 控制 broker 会向容器发布只读健康状态，并在一个授权请求由独立、可追踪的进程组执行期间持续存活。请求携带每沙箱 generation 和两秒绝对受理截止时间；broker 发布 `healthy`、`busy` 或 `parked`，在 acceptance 前拒绝过期或 generation 不匹配的请求，并在恢复时先终止遗留进程树再接收新工作。调用方可以用新 request ID 重试 acceptance 前的 `BUSY` 或超时拒绝；一旦请求已被接受而最终结果未知，则不得自动重试。
 
 控制时序集中在可注入的 policy 中：生产默认 control tick 为 250ms，慢速检查和容器 heartbeat 为 5s，parked 退避从 1s 增长到 5s，quiesce deadline 为 7s。测试可以注入更短的值，不需要改变安全状态机。canonical control manifest 只有一份 current、无 version 的 schema，包含精确 container identity、受控 labels 和 root-relative `runtimeDir`；request、response、status、lease、execution、broker owner 与 controller 记录继续保留各自独立的协议版本。materialize 阶段只创建 control 目录并保留内存 draft；完成 container identity 和 labels 检查后，finalize 才通过原子写入发布完整 manifest，随后才能启动 broker。缺失、带 version、字段不完整或未知的 manifest 会 fail closed，并给出 container-only recreation/rebuild 指引；不会按兼容格式解析或迁移。task-bound 容器会把 `runtimeDir` 以读写方式挂载到 `/run/agent-infra/runtime`，客户端状态位于 `runtime/clients/<client>/<store>`，direct-host 则使用仓库内 `.agents/workspace/.runtime/codex-*` fallback。替换失败或结果不确定时保留 control root 和证据。
+
+host-control service 是 direct-host 执行 task-control 和 workflow 写操作的唯一宿主 authority。Linux 固定端点为 `/run/user/<uid>/agent-infra/host-control.sock`；macOS 固定端点为 `/Users/<login>/Library/Application Support/agent-infra/run/host-control.sock`。端点根据宿主账户身份解析，绝不读取 `HOME`、`TMPDIR`、普通环境变量或命令参数。服务目录和 socket 必须属于宿主用户，权限分别为 `0700` 和 `0600`。安装脚本会管理 systemd 用户单元或 launchd 用户代理；`agent-infra-internal host-control status` 可检查端点。服务 authority 缺失或无效时返回 `SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE`，CLI 不会回退到进程内 task handler。
+
+task-bound workspace 挂载由宿主创建的可写 task projection，权威 task 目录保持在容器可写视图之外。workflow 传输层绑定 task、generation 和封闭操作目录，原样传递参数，由 CLI 共用的领域解析器解释。已授权 executor 直接调用共享产物操作，其他 workflow 命令复用隔离的 CLI worker。worker 继承 executor 的进程组，因此现有恢复流程也能终止实际命令，沙箱执行不再转交服务。direct-host worker 仍由服务持有。响应直接携带业务退出码，失败审计也使用该退出码。执行前拒绝表示未执行；执行失败或请求发出后的传输失败表示结果未知，不得自动重试。服务在端点整个生命周期持有原生文件锁，即使调用方断连，也会等已派发工作结束后再释放资源。重复关闭旧实例不会删除后续实例的资源。
+
+产物初始化和修复只修改候选文件。最终化读取权威任务元数据和产物目录，通过共享领域逻辑一次性准备已验证内容和待写凭据，发布缓冲区后提交凭据，不重复运行校验。宿主校验记录的 projection 拓扑，使用 `O_NOFOLLOW` 打开顶层规范候选文件，通过同一文件描述符读取并计算摘要，检查可观察的身份与元数据变化。发布时不重新打开候选文件；projection 中的编辑不会把 `task.md` 或任意文件复制回权威目录。恢复逻辑复用生命周期日志解析器和完整的编排完成证据契约，保留其中的 PR 字段。单个产物替换是原子的，但替换与 provenance 并非跨文件事务：发布后失败时，可能需要先检查领域状态再决定能否重试。
 
 显式 `ai sandbox rm` 和 `--purge` 使用 manifest 记录的精确容器 ID。创建时会记录脱敏后的 Docker authority 指纹（route、daemon identity 和 API version），清理前必须先复核该 authority 并按同一路由重放。复核使用 `container ls --all --no-trunc --filter id=<full-id>` 及固定的 machine-readable ID 格式；只有命令成功且输出确认为零行时，才证明精确资源 absent。随后先 quiesce broker 与 execution，等待软停止阶段，再删除精确容器，重新确认 exact-ID 得到权威 absent，复核 manifest、owner 与 generation，最后才使用剩余 deadline 做 force cleanup。精确 ID 的 not-found 不会被同名新容器混淆。inspect 未知、删除失败、owner 被替换或 deadline 耗尽时，会保留 control root 与证据，等待下一次受控重试。清理竞争者使用位于 control tree 外的每用户 native 文件锁串行化；锁对象会保留给后续重试使用。
 
@@ -188,7 +194,7 @@ tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/
 
 所有删除路径都会在破坏性清理前检查全部目标 worktree。存在 staged、unstaged、冲突或非 ignored untracked 修改时，批量删除、purge、prune、`--yes` 和其他非交互删除都会 fail closed。只有交互式 `ai sandbox rm <branch>` 可以在展示 dirty snapshot 后，通过一次默认否定的独立确认丢弃该 worktree。丢弃授权包含同一 worktree、同一分支内随后产生的修改；仅允许清理干净 worktree 的授权仍会在 snapshot 变化时失效。
 
-正常任务沙箱清理发生在 `complete-task` 成功、短号释放、任务移入 completed 目录之后。删除时使用完整 `TASK-id`，因为已释放的短号可能已指向另一任务。异常清理表示操作者明确决定丢弃选定沙箱并重建，允许终止其中运行。两种路径都保留精确容器 authority/身份、受管路径和归属检查，并在宿主清理前停止执行；不承诺抵御其他宿主程序在清理期间并发替换选定目录的源实例原子移动保证。不需要特权宿主服务。引擎不可达或删除结果未知仍保留可重试状态，不能报告成功。
+正常任务沙箱清理发生在 `complete-task` 成功、短号释放、任务移入 completed 目录之后。删除时使用完整 `TASK-id`，因为已释放的短号可能已指向另一任务。异常清理表示操作者明确决定丢弃选定沙箱并重建，允许终止其中运行。两种路径都保留精确容器 authority/身份、受管路径和归属检查，并在宿主清理前停止执行；不承诺抵御其他宿主程序在清理期间并发替换选定目录的源实例原子移动保证。不需要特权宿主服务；task-control 使用上文所述的用户级 host-control service。引擎不可达或删除结果未知仍保留可重试状态，不能报告成功。
 可先用 `ai sandbox prune --dry-run` 查看旧版本或异常中断遗留的孤儿 per-branch 状态目录，再用 `ai sandbox prune` 只删除没有活跃 sandbox 容器对应的目录。
 已有沙箱可通过 `ai sandbox start --recreate <task-ref-or-branch>` 加载托管挂载点变更，包括已移除的挂载。readiness 会先识别过期的 mount plan，再授权 container-only replacement，并保留 worktree。
 
@@ -212,6 +218,9 @@ root 的写权限或宿主控制 authority。
 ```text
 control-root/
 ├── manifest.json
+├── public/
+│   ├── identity.json
+│   └── status.json
 ├── broker.json
 ├── channel/
 │   ├── requests/<request-id>.json
@@ -225,9 +234,30 @@ control-root/
 │   ├── reservation.json
 │   └── result.json
 ├── consumed/<request-id>
-├── public/status.json
 └── audit.ndjson
 ```
+
+`public/identity.json` 是只读挂载的沙箱身份哨兵，包含当前 mode、任务绑定、generation
+和不透明的 `controlRootId`，绝不包含 control token。宿主 manifest 以及每个 broker/client
+在路由或执行 task operation 前都会比较这些值。哨兵缺失、格式错误或发生冲突时会 fail
+closed。旧的 task-bound 容器必须停止并重建，才能获得新的 control root。
+task-control 分发在环境 marker 缺失时还会独立检查固定的只读状态挂载
+`/run/agent-infra/control-status`；发现挂载但缺少有效且匹配的哨兵时会 fail closed。
+
+broker 使用分开的 critical 与 diagnostic 路径写结构化审计记录。critical phase 会持久化并
+fsync；mutation 前失败会阻断请求，accepted start 后失败则保留不确定结果，绝不会授权重放。
+审计字段会过滤 token、凭据、proof、参数和原始输出。请求仍在 processing 时，audit 文件可以
+暂时超过 1 MiB 软阈值；只有所有 processing 目录都有 terminal transition 后才会在共享锁内
+rename、fsync 旧段并轮换。
+
+当前请求还会在 `processing/<request-id>/transitions/` 下写入不可变 transition record，覆盖
+`accepted-committed`、`started-committed` 和 `published-committed` 等边界。`terminal-result.json`
+把持久化结果绑定到 request ID、generation 和 operation digest，保留目标状态与完成证据；
+生命周期进度从领域日志读取，不在回执中重复存储。
+broker recovery 只能依据这份绑定以及对应 operation 的领域证据重建 response，区分
+not-executed、in-progress、success、failure 和 unknown。已经 started 但缺少匹配 terminal 或
+领域证据的请求保持 unknown，不会重放。编排 route read 与 `route.clean-completion` 分开；后者
+只有在 reviewed head 和 clean-worktree completion evidence 完整时才允许 success。
 
 client 首先检查 `status.json` 中的 generation 和 broker heartbeat，然后把请求写入
 私有临时文件，再 rename 为 `requests/<request-id>.json`。请求包含协议版本、请求

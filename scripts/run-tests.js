@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import spawn from 'cross-spawn';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from './process-tree.js';
 import { acquireTestRunLock, releaseTestRunLock, testRunLockEnv } from './test-run-lock.js';
@@ -14,6 +17,8 @@ const env = Object.fromEntries(
       && normalized !== 'AGENT_INFRA_RUNTIME_DIR';
   })
 );
+const testIsolationModule = fileURLToPath(new URL('./test-status-mount-isolation.cjs', import.meta.url));
+env.NODE_OPTIONS = [env.NODE_OPTIONS, `--require=${testIsolationModule}`].filter(Boolean).join(' ');
 const args = process.argv.slice(2);
 const skipBuild = args[0] === '--skip-build';
 if (skipBuild) args.shift();
@@ -24,6 +29,8 @@ let activeChild;
 let receivedSignal;
 let terminationPromise;
 let testRunLock;
+let hostControlService;
+let hostControlReadyDir;
 
 function forwardSignal(signal) {
   receivedSignal ??= signal;
@@ -74,6 +81,53 @@ function finish(result) {
   return true;
 }
 
+async function startHostControlTestService(projectRoot) {
+  if (!testRunLock?.owned || String(process.platform) === 'win32') return;
+  const testRoot = process.platform === 'darwin'
+    ? fs.realpathSync.native(os.homedir())
+    : os.tmpdir();
+  hostControlReadyDir = fs.mkdtempSync(path.join(testRoot, '.agent-infra-host-control-'));
+  const readyPath = path.join(hostControlReadyDir, 'ready');
+  env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = path.join(hostControlReadyDir, 'host-control.sock');
+  hostControlService = spawn(process.execPath, [
+    '--experimental-strip-types', '--no-warnings',
+    path.join(projectRoot, 'scripts', 'test-host-control-service.ts')
+  ], {
+    cwd: projectRoot,
+    env: { ...env, NODE_OPTIONS: '', AGENT_INFRA_TEST_HOST_CONTROL_READY: readyPath },
+    stdio: 'ignore',
+    detached: process.platform !== 'win32'
+  });
+  await new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5_000;
+    const poll = () => {
+      if (fs.existsSync(readyPath)) { resolve(true); return; }
+      if (hostControlService.exitCode !== null || hostControlService.signalCode !== null) {
+        reject(new Error('host-control test service failed to start'));
+        return;
+      }
+      if (Date.now() >= deadline) {
+        reject(new Error('host-control test service did not become ready'));
+        return;
+      }
+      setTimeout(poll, 25);
+    };
+    poll();
+  });
+}
+
+async function stopHostControlTestService() {
+  const child = hostControlService;
+  hostControlService = undefined;
+  if (child && child.exitCode === null && child.signalCode === null) {
+    child.kill('SIGTERM');
+    await new Promise((resolve) => child.once('close', resolve));
+  }
+  if (hostControlReadyDir) fs.rmSync(hostControlReadyDir, { recursive: true, force: true });
+  delete env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
+  hostControlReadyDir = undefined;
+}
+
 try {
   const projectRoot = fileURLToPath(new URL('..', import.meta.url));
   testRunLock = await acquireTestRunLock(projectRoot);
@@ -81,6 +135,7 @@ try {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const buildSucceeded = skipBuild || finish(await run(npm, ['run', 'build']));
   if (buildSucceeded) {
+    await startHostControlTestService(projectRoot);
     finish(await run(process.execPath, [
       '--experimental-strip-types',
       '--no-warnings',
@@ -96,6 +151,7 @@ try {
     process.exitCode = 1;
   }
 } finally {
+  await stopHostControlTestService();
   releaseTestRunLock(testRunLock);
   for (const signal of signals) {
     process.off(signal, forwardSignal);

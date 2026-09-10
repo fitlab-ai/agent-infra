@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { finalizeReviewSummary } from '../../../lib/task/review-finalization.ts';
+import { finalizeReviewSummary, prepareReviewSummaryCandidate } from '../../../lib/task/review-finalization.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { applyArtifactRepair } from '../../../lib/task/artifact-operations.ts';
 import { readArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
@@ -20,7 +20,7 @@ const counts = { blocker: 1, major: 2, minor: 3 };
 const TASK_ID = 'TASK-20260101-000001';
 
 function domainFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-finalization-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'review-finalization-')));
   spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(dir, { recursive: true });
@@ -178,6 +178,25 @@ test('review finalizer rejects a missing schema pattern before summary mutation'
   assert.equal(result.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
   assert.match(result.error?.message ?? '', /ARTIFACT_REQUIRED_PATTERN_MISSING/);
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
+});
+
+test('projection review preparation enforces the same artifact contract without publishing', () => {
+  const f = domainFixture();
+  try {
+    const before = fs.readFileSync(f.artifactPath, 'utf8');
+    const invalid = before.replace('\n### 审查决定\n通过\n', '\n');
+    const prepared = prepareReviewSummaryCandidate(
+      { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+      invalid,
+      { repoRoot: f.root }
+    );
+    assert.equal(prepared.result.status, 'failed');
+    assert.equal(prepared.result.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
+    assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
+    assert.equal(readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test('review finalizer exposes a repair baseline and the shared repair can restore the artifact', () => {

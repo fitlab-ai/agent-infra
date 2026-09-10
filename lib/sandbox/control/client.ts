@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { hasTaskBoundMarker } from '../../internal/task-operation-registry.ts';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -12,7 +13,8 @@ import {
   type SandboxTaskCreateRequest,
   type SandboxTaskCommandRequest,
   type SandboxTaskFinalizationRequest,
-  type SandboxCodexControllerRequest
+  type SandboxCodexControllerRequest,
+  type SandboxTaskWorkflowRequest
 } from './protocol.ts';
 import type {
   CodexControllerLeaseProofV1,
@@ -23,64 +25,11 @@ import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
+import { readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
+import type { TaskWorkflowRequest } from './task-workflow.ts';
+import { configuredShortIdLength, resolveShortIdReadOnly } from '../../task/short-id.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
-
-type SandboxControlEnvironmentClassification = Readonly<{
-  kind: 'direct' | 'controlled' | 'invalid';
-  mode?: 'task-bound' | 'branch-only';
-  code?: 'TASK_CONTROL_TRANSPORT_INVALID';
-  message?: string;
-}>;
-
-export function classifySandboxControlEnvironment(
-  env: NodeJS.ProcessEnv = process.env
-): SandboxControlEnvironmentClassification {
-  const controlKeys = [
-    'AGENT_INFRA_CONTROL_TOKEN',
-    'AGENT_INFRA_CONTROL_GENERATION',
-    'AGENT_INFRA_CONTROL_DIR',
-    'AGENT_INFRA_CONTROL_STATUS_DIR'
-  ] as const;
-  const hasControlMarker = controlKeys.some((key) => Boolean(env[key]));
-  const hasTaskIdentity = Boolean(env.AGENT_INFRA_TASK_ID);
-  const hasRuntime = Boolean(env.AGENT_INFRA_RUNTIME_DIR);
-  const hasExecutorMarker = Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
-  const hasControllerBinding = Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING);
-  const hasAnyMarker = hasControlMarker || hasTaskIdentity || hasRuntime || hasExecutorMarker || hasControllerBinding;
-  const hasCompleteControl = controlKeys.every((key) => Boolean(env[key]));
-
-  if (!hasAnyMarker) return { kind: 'direct' };
-  if (hasExecutorMarker) {
-    return {
-      kind: 'invalid',
-      code: 'TASK_CONTROL_TRANSPORT_INVALID',
-      message: 'executor context is only valid for sandbox-control execute'
-    };
-  }
-  if (hasControllerBinding) {
-    return {
-      kind: 'invalid',
-      code: 'TASK_CONTROL_TRANSPORT_INVALID',
-      message: 'sandbox client control configuration is incomplete or conflicting'
-    };
-  }
-  if (!hasCompleteControl) {
-    return {
-      kind: 'invalid',
-      code: 'TASK_CONTROL_TRANSPORT_INVALID',
-      message: 'sandbox client control configuration is incomplete or conflicting'
-    };
-  }
-  if (hasTaskIdentity !== hasRuntime) {
-    return {
-      kind: 'invalid',
-      code: 'TASK_CONTROL_TRANSPORT_INVALID',
-      message: 'sandbox task identity and runtime binding must be provided together'
-    };
-  }
-  return { kind: 'controlled', mode: hasTaskIdentity ? 'task-bound' : 'branch-only' };
-}
 
 export class SandboxControlClientError extends Error {
   readonly detail: SandboxControlError;
@@ -109,12 +58,6 @@ function clientError(
   throw new SandboxControlClientError({ code, message: `${code}: ${message}`, retryable }, accepted, requestId);
 }
 
-function hasTaskBoundMarker(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(env.AGENT_INFRA_TASK_ID)
-    && Boolean(env.AGENT_INFRA_CONTROL_TOKEN || env.AGENT_INFRA_CONTROL_GENERATION
-      || env.AGENT_INFRA_CONTROL_STATUS_DIR || env.AGENT_INFRA_RUNTIME_DIR || env.AGENT_INFRA_CONTROL_DIR);
-}
-
 function preflight(
   statusDir: string,
   generation: string,
@@ -122,6 +65,23 @@ function preflight(
   now = Date.now(),
   env: NodeJS.ProcessEnv = process.env
 ): void {
+  if (fs.existsSync(statusDir)) {
+    let identity;
+    try {
+      identity = readSandboxControlIdentitySentinel(statusDir);
+    } catch (error) {
+      const code = error instanceof Error && error.message.endsWith('MISSING')
+        ? 'SANDBOX_CONTROL_IDENTITY_MISSING'
+        : 'SANDBOX_CONTROL_IDENTITY_MALFORMED';
+      clientError(code, 'sandbox control identity is missing or invalid', false);
+    }
+    if (identity.generation !== generation) {
+      clientError('SANDBOX_CONTROL_IDENTITY_GENERATION_MISMATCH', 'sandbox control identity generation does not match the request', false);
+    }
+    if (env.AGENT_INFRA_CONTROL_ROOT_ID && identity.controlRootId !== env.AGENT_INFRA_CONTROL_ROOT_ID) {
+      clientError('SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH', 'sandbox control identity root does not match the client configuration', false);
+    }
+  }
   let status;
   try {
     status = readSandboxControlStatus(statusDir);
@@ -159,6 +119,7 @@ function preflight(
 function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAccessEffect | null {
   if (request.family === 'task-lifecycle' || request.family === 'task-finalization') return 'progress';
   if (request.family === 'task-orchestration') return request.args[1] === 'status' ? 'diagnostic' : 'progress';
+  if (request.family === 'task-workflow') return request.workflow.operation === 'artifact-inspect' || request.workflow.operation === 'decision-next-id' ? 'diagnostic' : 'progress';
   return null;
 }
 
@@ -204,6 +165,44 @@ function cancelPendingRequest(requestPath: string): boolean {
   }
 }
 
+const CONTROL_TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
+const CONTROL_SHORT_ID_RE = /^\d+$/;
+
+type CanonicalRequestTask =
+  | Readonly<{ kind: 'none' }>
+  | Readonly<{ kind: 'task'; taskId: string }>
+  | Readonly<{ kind: 'unresolved' }>;
+
+// Use the current short-id contract for the first visible active registry.
+export function resolveVisibleActiveShortId(ref: string): string | null {
+  let dir = process.cwd();
+  for (let depth = 0; depth < 64; depth += 1) {
+    const registryPath = path.join(dir, '.agents', 'workspace', 'active', '.short-ids.json');
+    if (fs.existsSync(registryPath)) {
+      const resolved = resolveShortIdReadOnly(ref, dir, { shortIdLength: configuredShortIdLength(dir) });
+      return resolved.ok ? resolved.taskId : null;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+// A request's leading argument is only a task reference for some families and
+// may be a documented short id. Compare canonical ids so a bound sandbox keeps
+// refusing other tasks without rejecting its own task's short id.
+function canonicalRequestTask(request: SandboxControlRequest): CanonicalRequestTask {
+  const ref = request.family === 'task-workflow'
+    ? request.workflow.taskId
+    : 'args' in request ? request.args[0] ?? null : null;
+  if (!ref) return { kind: 'none' };
+  if (CONTROL_TASK_ID_RE.test(ref)) return { kind: 'task', taskId: ref };
+  if (!CONTROL_SHORT_ID_RE.test(ref)) return { kind: 'none' };
+  const resolved = resolveVisibleActiveShortId(ref);
+  return resolved ? { kind: 'task', taskId: resolved } : { kind: 'unresolved' };
+}
+
 function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly<{
   channelDir?: string;
   statusDir?: string;
@@ -213,6 +212,20 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   const statusDir = params.statusDir ?? process.env.AGENT_INFRA_CONTROL_STATUS_DIR ?? '/run/agent-infra/control-status';
   const taskViewEffect = taskViewEffectForRequest(request);
   preflight(statusDir, request.generation, taskViewEffect);
+  const identityPath = path.join(statusDir, 'identity.json');
+  if (fs.existsSync(statusDir)) {
+    const identity = readSandboxControlIdentitySentinel(statusDir);
+    const requestTask = canonicalRequestTask(request);
+    if (identity.mode === 'task-bound'
+      && ((process.env.AGENT_INFRA_TASK_ID && process.env.AGENT_INFRA_TASK_ID !== identity.taskId)
+        || requestTask.kind === 'unresolved'
+        || (requestTask.kind === 'task' && requestTask.taskId !== identity.taskId))) {
+      clientError('SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH', 'request task does not match the sandbox identity', false);
+    }
+    if (identity.mode === 'branch-only' && (request.family === 'task-finalization' || request.family === 'task-workflow')) {
+      clientError('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot finalize tasks', false);
+    }
+  }
   const encoded = `${JSON.stringify(request)}\n`;
   if (Buffer.byteLength(encoded, 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
     clientError('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit', false, false, request.id);
@@ -370,7 +383,7 @@ export function requestSandboxControl(params: Readonly<{
   token?: string; generation?: string; timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isSandboxControlFamily(params.family)) clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' is not allowed`, false);
-  if (params.family === 'task-create' || params.family === 'codex-controller' || params.family === 'task-finalization') {
+  if (params.family === 'task-create' || params.family === 'codex-controller' || params.family === 'task-finalization' || params.family === 'task-workflow') {
     clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' requires a typed request`, false);
   }
   const auth = authority(params);
@@ -435,6 +448,31 @@ export function requestSandboxTaskFinalization(params: Readonly<{
     args: [],
     controllerProcess: null,
     controllerProof: null
+  };
+  return exchangeSandboxControl(request, params);
+}
+
+export function requestSandboxTaskWorkflow(params: Readonly<{
+  workflow: TaskWorkflowRequest;
+  channelDir?: string;
+  statusDir?: string;
+  token?: string;
+  generation?: string;
+  timeoutMs?: number;
+}>): SandboxControlResponse {
+  const auth = authority(params);
+  const issuedAt = Date.now();
+  const request: SandboxTaskWorkflowRequest = {
+    version: 3,
+    id: params.workflow.id,
+    ...auth,
+    issuedAt,
+    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
+    family: 'task-workflow',
+    args: [],
+    controllerProcess: null,
+    controllerProof: null,
+    workflow: params.workflow
   };
   return exchangeSandboxControl(request, params);
 }

@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
+import { sandboxControlSafeEnv } from '../../../lib/sandbox/control/server.ts';
 import {
-  sandboxControlSafeEnv,
   serveSandboxControl,
   writeSandboxControlResponse
 } from '../../../lib/sandbox/control/server.ts';
@@ -19,7 +19,8 @@ import {
   SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
   SANDBOX_CONTROL_RESERVATION_BYTES,
   validateSandboxControlRequest,
-  type SandboxControlManifest
+  type SandboxControlManifest,
+  type SandboxControlRequest
 } from '../../../lib/sandbox/control/protocol.ts';
 import {
   appendSandboxControlAudit,
@@ -53,6 +54,7 @@ import {
   nodeEntryArgs
 } from '../../../lib/sandbox/control/executor.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../lib/sandbox/control/client.ts';
+import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import {
   closeCodexControllerRegistration,
   CodexControllerRegistrationError,
@@ -60,6 +62,11 @@ import {
   readCodexControllerRegistration,
   resolveCodexControllerBinding
 } from '../../../lib/sandbox/control/controller-registration.ts';
+import { onPlatforms } from '../../helpers.ts';
+
+function testRoot(prefix: string): string {
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+}
 
 const manifest: SandboxControlManifest = {
   engine: 'docker',
@@ -85,6 +92,7 @@ const manifest: SandboxControlManifest = {
   taskId: 'TASK-20260809-010203',
   token: 'secret',
   generation: 'generation-1',
+  controlRootId: 'a'.repeat(96),
   channelDir: '/channel',
   publicStatusDir: '/public',
   processingDir: '/processing',
@@ -910,6 +918,10 @@ test('control broker strips mixed-case sandbox authority from child environments
     agent_infra_control_token: 'live-token',
     Agent_Infra_Control_Dir: 'live-channel',
     aGeNt_InFrA_cOnTrOl_FuTuRe: 'future-authority',
+    AGENT_INFRA_TASK_ID: 'task-id',
+    AGENT_INFRA_RUNTIME_DIR: '/runtime',
+    AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest.json',
+    AGENT_INFRA_CONTROL_CONTROLLER_BINDING: 'binding',
     AGENT_INFRA_TEST_SENTINEL: 'preserved'
   }), {
     AGENT_INFRA_TEST_SENTINEL: 'preserved'
@@ -950,7 +962,7 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
   }
 });
 
-test('control broker ownership is acquired exclusively', async () => {
+test('control broker ownership is acquired exclusively', onPlatforms('linux', 'darwin'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-'));
   fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
   const git = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
@@ -967,10 +979,14 @@ test('control broker ownership is acquired exclusively', async () => {
   fs.mkdirSync(channelDir, { recursive: true });
   fs.mkdirSync(publicStatusDir);
   fs.mkdirSync(processingDir);
+  const controlRootId = manifest.controlRootId;
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     ...manifest, repoRoot: root, worktreeRoot: root, branch, channelDir, publicStatusDir, processingDir,
     runtimeDir: path.join(root, 'runtime')
   })}\n`);
+  writeSandboxControlIdentitySentinel(publicStatusDir, {
+    version: 1, mode: manifest.mode, taskId: manifest.taskId, generation: manifest.generation, controlRootId
+  });
   fs.writeFileSync(path.join(root, 'broker.json'), '{}\n');
   const controller = new AbortController();
   controller.abort();

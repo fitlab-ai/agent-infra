@@ -372,6 +372,7 @@ function writeTaskBoundControlEvidence(
     taskId,
     token: `${taskId}-token`,
     generation: `${taskId}-generation`,
+    controlRootId: "a".repeat(96),
     channelDir,
     publicStatusDir,
     processingDir,

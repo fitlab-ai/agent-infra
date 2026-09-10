@@ -1,3 +1,5 @@
+import { isCompletionEvidence, type CleanCompletionEvidence } from '../../task/orchestration.ts';
+import { parseControlOutput } from '../../task/control-recovery.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -99,6 +101,82 @@ export function payloadPath(manifest: SandboxControlManifest, requestId: string)
 export function reservationPath(manifest: SandboxControlManifest, requestId: string): string {
   if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) throw new Error('SANDBOX_CONTROL_RESERVATION_INVALID');
   return path.join(manifest.processingDir, requestId, 'reservation.json');
+}
+
+export type SandboxControlTerminalResult = Readonly<{
+  version: 1;
+  requestId: string;
+  generation: string;
+  taskId: string | null;
+  intentDigest: string;
+  targetState: string | null;
+  status: string;
+  changed: boolean | null;
+  completionEvidence: CleanCompletionEvidence | null;
+}>;
+
+export function terminalResultPath(manifest: SandboxControlManifest, requestId: string): string {
+  if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
+  return path.join(manifest.processingDir, requestId, 'terminal-result.json');
+}
+
+export function createSandboxControlTerminalResult(
+  manifest: SandboxControlManifest,
+  request: Readonly<{ id: string; family: string; operation?: string | null }>,
+  output: string
+): SandboxControlTerminalResult {
+  const nested = parseControlOutput(output) ?? {};
+  const run = nested.run && typeof nested.run === 'object' && !Array.isArray(nested.run)
+    ? nested.run as Record<string, unknown> : null;
+  const rawCompletion = nested.completionEvidence ?? run?.completionEvidence;
+  const operation = request.operation ?? (typeof nested.intent === 'string' ? nested.intent : null) ?? '';
+  return {
+    version: 1,
+    requestId: request.id,
+    generation: manifest.generation,
+    taskId: manifest.taskId,
+    intentDigest: createHash('sha256').update(`${request.family}\0${operation}`, 'utf8').digest('hex'),
+    targetState: typeof nested.targetState === 'string' ? nested.targetState : null,
+    status: typeof nested.status === 'string' ? nested.status : 'completed',
+    changed: typeof nested.changed === 'boolean' ? nested.changed : null,
+    completionEvidence: isCompletionEvidence(rawCompletion) ? rawCompletion : null
+  };
+}
+
+export function writeSandboxControlTerminalResult(
+  manifest: SandboxControlManifest,
+  request: Readonly<{ id: string; family: string; operation?: string | null }>,
+  output: string
+): SandboxControlTerminalResult {
+  const result = createSandboxControlTerminalResult(manifest, request, output);
+  const filePath = terminalResultPath(manifest, request.id);
+  try {
+    atomicWriteJsonNoReplace(filePath, result);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'SANDBOX_CONTROL_TERMINAL_ALREADY_EXISTS') throw error;
+    const existing = readSandboxControlTerminalResult(filePath);
+    if (JSON.stringify(existing) !== JSON.stringify(result)) throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_CONFLICT');
+  }
+  return readSandboxControlTerminalResult(filePath);
+}
+
+export function readSandboxControlTerminalResult(filePath: string): SandboxControlTerminalResult {
+  const value = readJsonFile(filePath) as Partial<SandboxControlTerminalResult> | null;
+  if (!value || value.version !== 1 || typeof value.requestId !== 'string'
+    || typeof value.generation !== 'string' || (value.taskId !== null && typeof value.taskId !== 'string')
+    || typeof value.intentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.intentDigest)
+    || (value.targetState !== null && typeof value.targetState !== 'string')
+    || typeof value.status !== 'string'
+    || (value.changed !== null && typeof value.changed !== 'boolean')) {
+    throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
+  }
+  if (value.completionEvidence !== null && !isCompletionEvidence(value.completionEvidence)) {
+    throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
+  }
+  if (value.changed === undefined) {
+    throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
+  }
+  return value as SandboxControlTerminalResult;
 }
 
 export function readSandboxControlResultEvidence(filePath: string): SandboxControlResultEvidence {

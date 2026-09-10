@@ -36,7 +36,7 @@ test('structure inspection retains fence diagnostics and ignores fenced repair c
 });
 
 function taskFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-operations-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-operations-')));
   const id = 'TASK-20260101-000001';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(taskDir, { recursive: true });

@@ -327,6 +327,7 @@ function writeTaskBoundCleanupEvidence(
     taskId,
     token: "task-bound-token",
     generation,
+    controlRootId: "a".repeat(96),
     channelDir,
     publicStatusDir,
     processingDir,
@@ -441,7 +442,7 @@ test("sandbox rm retries control and workspace cleanup after the container is al
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-      mode: "branch-only", taskId: null, token: "partial-secret", generation: "partial-generation",
+      mode: "branch-only", taskId: null, token: "partial-secret", generation: "partial-generation", controlRootId: "a".repeat(96),
       channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
       runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
@@ -514,7 +515,7 @@ test("sandbox rm removes an empty control container parent after control cleanup
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-      mode: "branch-only", taskId: null, token: "empty-parent-secret", generation: "empty-parent-generation",
+      mode: "branch-only", taskId: null, token: "empty-parent-secret", generation: "empty-parent-generation", controlRootId: "a".repeat(96),
       channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
       runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
@@ -1042,6 +1043,7 @@ test("sandbox rm rejects a control manifest whose container does not match its c
       taskId,
       token: "manifest-mismatch-token",
       generation: "manifest-mismatch-generation",
+      controlRootId: "a".repeat(96),
       channelDir,
       publicStatusDir,
       processingDir,
@@ -1132,6 +1134,7 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
       taskId,
       token: "completed-task-token",
       generation: "completed-task-generation",
+      controlRootId: "a".repeat(96),
       channelDir,
       publicStatusDir,
       processingDir,
@@ -1215,6 +1218,58 @@ test("sandbox rm rejects malformed auxiliary evidence before destructive cleanup
     assert.equal(fs.existsSync(evidence.intentPath), true);
     assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
   } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm proceeds when auxiliary intents are preserved for a still-active task", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-active-"));
+  const branch = "feature/auxiliary-preflight-active";
+  const taskId = "TASK-20260824-000014";
+  const previousRemovalUpdates = process.env.DOCKER_REMOVAL_UPDATES_INSPECT;
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  try {
+    process.env.DOCKER_REMOVAL_UPDATES_INSPECT = "1";
+    process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    const completedDir = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+    const activeDir = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+    fs.mkdirSync(path.dirname(activeDir), { recursive: true });
+    fs.renameSync(completedDir, activeDir);
+    fs.writeFileSync(
+      path.join(activeDir, "task.md"),
+      `---\nid: ${taskId}\nstatus: active\nbranch: ${branch}\n---\n`,
+      "utf8"
+    );
+
+    const intentBytes = fs.readFileSync(evidence.intentPath);
+    const taskBytes = fs.readFileSync(path.join(activeDir, "task.md"));
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      assumeYes: true,
+      cleanupTarget: {
+        requestedRef: taskId,
+        branch,
+        workspace: { mode: "task-bound", taskId },
+        taskState: "active"
+      },
+      target: evidence.target
+    }));
+    assert.equal(fs.existsSync(evidence.controlRoot), false);
+    assert.deepEqual(fs.readFileSync(evidence.intentPath), intentBytes);
+    assert.deepEqual(fs.readFileSync(path.join(activeDir, "task.md")), taskBytes);
+    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "rm"), [["rm", FIXTURE_CONTAINER_ID]]);
+  } finally {
+    if (previousRemovalUpdates === undefined) delete process.env.DOCKER_REMOVAL_UPDATES_INSPECT;
+    else process.env.DOCKER_REMOVAL_UPDATES_INSPECT = previousRemovalUpdates;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -1595,7 +1650,7 @@ test("sandbox rm preserves a replacement after a share cleanup phase crash", onP
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-      mode: "branch-only", taskId: null, token: "share-phase-token", generation: "share-phase-generation",
+      mode: "branch-only", taskId: null, token: "share-phase-token", generation: "share-phase-generation", controlRootId: "a".repeat(96),
       channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
     fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
@@ -1685,7 +1740,7 @@ test("sandbox rm preserves a same-head branch replacement after a branch phase c
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
     engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
     project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-    mode: "branch-only", taskId: null, token: "branch-phase-token", generation: "branch-phase-generation",
+    mode: "branch-only", taskId: null, token: "branch-phase-token", generation: "branch-phase-generation", controlRootId: "a".repeat(96),
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
@@ -1781,7 +1836,7 @@ test("sandbox rm preserves a replacement worktree after a workspace phase crash"
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
     engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
     project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-    mode: "branch-only", taskId: null, token: "worktree-phase-token", generation: "worktree-phase-generation",
+    mode: "branch-only", taskId: null, token: "worktree-phase-token", generation: "worktree-phase-generation", controlRootId: "a".repeat(96),
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
@@ -1875,7 +1930,7 @@ test("sandbox rm recovers a worktree after a prune-phase crash", onPlatforms("li
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
     engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
     project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-    mode: "branch-only", taskId: null, token: "worktree-prune-token", generation: "worktree-prune-generation",
+    mode: "branch-only", taskId: null, token: "worktree-prune-token", generation: "worktree-prune-generation", controlRootId: "a".repeat(96),
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
@@ -1966,7 +2021,7 @@ test("sandbox rm preserves an unowned tombstone when the source is absent", onPl
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
     engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
     project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-    mode: "branch-only", taskId: null, token: "unowned-tombstone-token", generation: "unowned-tombstone-generation",
+    mode: "branch-only", taskId: null, token: "unowned-tombstone-token", generation: "unowned-tombstone-generation", controlRootId: "a".repeat(96),
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
@@ -2047,7 +2102,7 @@ test("sandbox rm retains an unexpected moved share payload for diagnosis", onPla
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-      mode: "branch-only", taskId: null, token: "share-replacement-token", generation: "share-replacement-generation",
+      mode: "branch-only", taskId: null, token: "share-replacement-token", generation: "share-replacement-generation", controlRootId: "a".repeat(96),
       channelDir: path.join(controlRoot, "channel"), publicStatusDir: path.join(controlRoot, "public"),
       processingDir: path.join(controlRoot, "processing"), runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
@@ -2136,7 +2191,7 @@ test("sandbox rm preserves foreign tombstone payload on interrupted retry", onPl
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
       engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-      mode: "branch-only", taskId: null, token: "share-replacement-crash-token", generation: "share-replacement-crash-generation",
+      mode: "branch-only", taskId: null, token: "share-replacement-crash-token", generation: "share-replacement-crash-generation", controlRootId: "a".repeat(96),
       channelDir: path.join(controlRoot, "channel"), publicStatusDir: path.join(controlRoot, "public"),
       processingDir: path.join(controlRoot, "processing"), runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
@@ -2223,7 +2278,7 @@ test("sandbox rm preserves untouched targets after a partial workspace phase cra
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
     engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
     project: "demo", container, containerIdentity: { id: FIXTURE_CONTAINER_ID, labels: {} }, authorityEvidence: fixtureAuthorityEvidence(), branch,
-    mode: "branch-only", taskId: null, token: "multi-target-phase-token", generation: "multi-target-phase-generation",
+    mode: "branch-only", taskId: null, token: "multi-target-phase-token", generation: "multi-target-phase-generation", controlRootId: "a".repeat(96),
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(controlRoot, "runtime")
   })}\n`);
   fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({

@@ -816,9 +816,24 @@ function projectSandboxControlBindingEvidence(
   return createSandboxControlBindingEvidence(config.repoRoot, controlRoots, removalJournals);
 }
 
+// Reasons that mean "intentionally preserved", not "cleanup is unsafe". A task
+// that is still active keeps its auxiliary intents by design, so preserving
+// them must not make its sandbox unremovable. Every other protected reason
+// signals tampering or an unreadable path and still blocks, as does any
+// failure, so unknown reasons stay fail-closed.
+const REMOVAL_PRESERVED_REASONS: ReadonlySet<string> = new Set([
+  'TASK_STATE_PROTECTED',
+  'TASK_NOT_FOUND',
+  'LFAI_STATE_PROTECTED',
+  'LFAI_RETRY_OR_WARNING_OPEN',
+  'FINALIZATION_RECEIPT_MISSING',
+  'FINALIZATION_RECEIPT_PENDING',
+  'AUXILIARY_ROOT_NOT_EMPTY'
+]);
+
 function assertIntermediateCleanupPreflight(report: IntermediateCleanupReport): void {
-  const blockers = report.items.filter((candidate) => candidate.disposition === 'protected'
-    || candidate.disposition === 'failed');
+  const blockers = report.items.filter((candidate) => candidate.disposition === 'failed'
+    || (candidate.disposition === 'protected' && !REMOVAL_PRESERVED_REASONS.has(candidate.reason)));
   if (blockers.length === 0) return;
   throw new Error([
     'SANDBOX_AUXILIARY_PREFLIGHT_FAILED:',

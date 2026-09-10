@@ -2,10 +2,12 @@ import fs from 'node:fs';
 import { parseArtifactName } from './artifact-name.ts';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { readStableFileSync } from '../host-control/secure-fs.ts';
 
 import { scanVisibleMarkdown, type VisibleMarkdown, type VisibleHeading } from './markdown.ts';
-import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
+import { hasOpenArtifactRound } from './artifact-lifecycle.ts';
 import { readArtifactRepairIntent } from './artifact-repair-intent.ts';
+import { resolveTaskRef } from './resolve-ref.ts';
 import {
   getArtifactSchema,
   renderArtifactSkeleton
@@ -413,25 +415,11 @@ function validateRepairContext(request: ArtifactRepairRequest, content: string):
     return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'artifact context marker does not match the requested task, family, and round' };
   }
   let taskContent: string;
-  try { taskContent = fs.readFileSync(path.join(request.taskDir, 'task.md'), 'utf8'); }
+  const resolved = resolveTaskRef(request.taskId, { repoRoot: request.repoRoot });
+  if (!resolved.ok) return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: resolved.message };
+  try { taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
   catch (error) { return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: `cannot read task lifecycle context: ${String(error)}` }; }
-  const activity = locateActivityLog(taskContent);
-  if (!activity) return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'task has no unique Activity Log section' };
-  const label: Record<ArtifactSchemaFamily, string> = {
-    analysis: 'Analyze Task',
-    'review-analysis': 'Review Analysis',
-    plan: 'Plan Task',
-    'review-plan': 'Review Plan',
-    code: 'Code Task',
-    'review-code': 'Review Code'
-  };
-  const escaped = escapeRegExp(label[request.family]);
-  const qualifier = request.family === 'code'
-    ? '(?:, (?:fix for review-code(?:-r(?:[2-9]|[1-9]\\d+))?\\.md|decision II-[1-9]\\d+))?'
-    : '';
-  const expected = new RegExp(`^${escaped} \\(Round ${round}${qualifier}\\)$`);
-  const open = startedBackedRows(pairEntries(activity.entries)).filter((row) => expected.test(row.step) && !row.done);
-  if (open.length !== 1) {
+  if (!hasOpenArtifactRound(taskContent, request.family, round)) {
     return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: `artifact '${request.artifact}' does not have exactly one matching open started lifecycle event` };
   }
   let intent;
@@ -471,7 +459,7 @@ function applyRepairUnlocked(request: ArtifactRepairRequest): ArtifactFileResult
   const target = validateTarget(request.taskDir, request.family, request.artifact);
   if ('status' in target) return target;
   let content: string;
-  try { content = fs.readFileSync(target.path, 'utf8'); }
+  try { content = readStableFileSync(target.path, { maxBytes: 1024 * 1024 }).bytes.toString('utf8'); }
   catch (error) { return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', String(error)); }
   const actualSha256 = sha256Content(content);
   if (actualSha256 !== request.expectedSha256) return resultFailure('ARTIFACT_REPAIR_BASELINE_MISMATCH', 'artifact SHA-256 does not match the expected repair baseline');
@@ -499,7 +487,7 @@ function applyRepairUnlocked(request: ArtifactRepairRequest): ArtifactFileResult
     mode = fs.statSync(target.path).mode & 0o777;
     fs.writeFileSync(tempPath, transformed, { encoding: 'utf8', mode, flag: 'wx' });
     const currentStat = fs.lstatSync(target.path);
-    if (currentStat.isSymbolicLink() || !currentStat.isFile() || sha256Content(fs.readFileSync(target.path, 'utf8')) !== actualSha256) {
+    if (currentStat.isSymbolicLink() || !currentStat.isFile() || readStableFileSync(target.path, { maxBytes: 1024 * 1024 }).sha256 !== actualSha256) {
       fs.unlinkSync(tempPath);
       return resultFailure('ARTIFACT_REPAIR_CONFLICT', 'artifact changed or was replaced during repair');
     }
@@ -538,7 +526,7 @@ function initializeArtifactSkeleton(request: ArtifactInitRequest): ArtifactFileR
       try {
         const existing = fs.lstatSync(target);
         if (existing.isSymbolicLink() || !existing.isFile()) return resultFailure('ARTIFACT_INIT_TARGET_INVALID', 'artifact target is not a regular file');
-        return resultNoOp(fs.readFileSync(target, 'utf8'));
+        return resultNoOp(readStableFileSync(target, { maxBytes: 1024 * 1024 }).bytes.toString('utf8'));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return resultFailure('ARTIFACT_INIT_TARGET_INVALID', String(error));
       }

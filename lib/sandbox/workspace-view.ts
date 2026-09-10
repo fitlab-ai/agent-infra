@@ -1,8 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeDurableFile } from '../fs/durable-write.ts';
 import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
+import {
+  createSandboxControlIdentitySentinel,
+  writeSandboxControlIdentitySentinel
+} from './control/identity-sentinel.ts';
+import type { ProjectionAncestorIdentity } from './control/task-workflow.ts';
 
 export type SandboxWorkspaceView = Readonly<{
   root: string;
@@ -55,6 +61,7 @@ export type SandboxControlSetup = Readonly<{
   manifestDraft: SandboxControlManifestDraft;
   token: string;
   generation: string;
+  controlRootId: string;
 }>;
 
 export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 'containerIdentity' | 'engine' | 'authorityEvidence'> & {
@@ -133,6 +140,63 @@ export function assertSandboxTaskSource(repoRoot: string, taskId: string): strin
   return canonical;
 }
 
+function copyTaskProjection(source: string, target: string): void {
+  const sourceStat = fs.lstatSync(source);
+  if (sourceStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_PROJECTION_SOURCE_INVALID');
+  if (sourceStat.isDirectory()) {
+    fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+    fs.chmodSync(target, 0o700);
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+      copyTaskProjection(path.join(source, entry.name), path.join(target, entry.name));
+    }
+    return;
+  }
+  if (!sourceStat.isFile()) throw new Error('SANDBOX_TASK_PROJECTION_SOURCE_INVALID');
+  fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(target, 0o600);
+}
+
+/** Materialize a writable candidate view without mounting authoritative task state. */
+export function prepareSandboxTaskProjection(repoRoot: string, taskId: string, projectionRoot: string): string {
+  const source = assertSandboxTaskSource(repoRoot, taskId);
+  const resolvedProjection = path.resolve(projectionRoot);
+  const projectionParent = path.dirname(resolvedProjection);
+  fs.mkdirSync(projectionParent, { recursive: true, mode: 0o700 });
+  const parentStat = fs.lstatSync(projectionParent);
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_PROJECTION_TOPOLOGY_INVALID');
+  if (fs.existsSync(resolvedProjection)) {
+    const existing = fs.lstatSync(resolvedProjection);
+    if (!existing.isDirectory() || existing.isSymbolicLink()) throw new Error('SANDBOX_TASK_PROJECTION_TOPOLOGY_INVALID');
+    fs.rmSync(resolvedProjection, { recursive: true, force: true });
+  }
+  fs.mkdirSync(resolvedProjection, { recursive: true, mode: 0o700 });
+  copyTaskProjection(source, resolvedProjection);
+  fs.chmodSync(resolvedProjection, 0o700);
+  return resolvedProjection;
+}
+
+/** Refresh host-owned task metadata while preserving agent-produced artifacts. */
+export function refreshSandboxTaskProjection(repoRoot: string, taskId: string, projectionRoot: string): string {
+  const source = assertSandboxTaskSource(repoRoot, taskId);
+  const resolvedProjection = path.resolve(projectionRoot);
+  const projectionStat = fs.lstatSync(resolvedProjection);
+  if (!projectionStat.isDirectory() || projectionStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_PROJECTION_TOPOLOGY_INVALID');
+  for (const name of ['task.md']) {
+    const sourcePath = path.join(source, name);
+    const targetPath = path.join(resolvedProjection, name);
+    const sourceStat = fs.lstatSync(sourcePath);
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_PROJECTION_SOURCE_INVALID');
+    try {
+      const targetStat = fs.lstatSync(targetPath);
+      if (!targetStat.isFile() || targetStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_PROJECTION_SOURCE_INVALID');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    writeDurableFile(targetPath, fs.readFileSync(sourcePath, 'utf8'), { mode: 0o600, replace: true });
+  }
+  return resolvedProjection;
+}
+
 export function prepareSandboxWorkspaceMountTargets(worktreeRoot: string): void {
   const resolvedWorktreeRoot = path.resolve(worktreeRoot);
   const canonicalWorktreeRoot = fs.realpathSync.native(resolvedWorktreeRoot);
@@ -195,6 +259,8 @@ export function materializeSandboxControl(params: Readonly<{
   branch: string;
   identity: SandboxWorkspaceIdentity;
   engine?: string;
+  taskProjectionDir?: string;
+  taskProjectionTopology?: readonly ProjectionAncestorIdentity[];
   replacementLease?: Readonly<{
     root: string;
     assertOwned(): void;
@@ -234,6 +300,12 @@ export function materializeSandboxControl(params: Readonly<{
   }
   const token = randomBytes(32).toString('hex');
   const generation = randomBytes(16).toString('hex');
+  const identitySentinel = createSandboxControlIdentitySentinel({
+    mode: params.identity.mode,
+    taskId: params.identity.mode === 'task-bound' ? params.identity.taskId : null,
+    generation
+  });
+  writeSandboxControlIdentitySentinel(statusDir, identitySentinel);
   const repoRoot = fs.realpathSync.native(params.repoRoot);
   const manifestDraft: SandboxControlManifestDraft = {
     engine: params.engine ?? 'docker',
@@ -246,12 +318,17 @@ export function materializeSandboxControl(params: Readonly<{
     taskId: params.identity.mode === 'task-bound' ? params.identity.taskId : null,
     token,
     generation,
+    controlRootId: identitySentinel.controlRootId,
     channelDir,
     publicStatusDir: statusDir,
     processingDir,
-    runtimeDir
+    runtimeDir,
+    ...(params.taskProjectionDir === undefined ? {} : {
+      taskProjectionDir: fs.realpathSync.native(params.taskProjectionDir),
+      taskProjectionTopology: params.taskProjectionTopology
+    })
   };
-  return { root, channelDir, statusDir, runtimeDir, manifestPath, manifestDraft, token, generation };
+  return { root, channelDir, statusDir, runtimeDir, manifestPath, manifestDraft, token, generation, controlRootId: identitySentinel.controlRootId };
 }
 
 export function finalizeSandboxControlManifest(

@@ -6,7 +6,8 @@ import path from 'node:path';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
-import { filePath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { filePath, onPlatforms } from '../../helpers.ts';
+import { sandboxControlSafeEnv } from '../../../lib/sandbox/control/server.ts';
 import { terminateProcessTree } from '../../../scripts/process-tree.js';
 import {
   acquireTestRunLock,

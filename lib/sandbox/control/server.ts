@@ -1,4 +1,5 @@
 import { finalizationTerminalResponse } from './finalization-response.ts';
+import { isDeepStrictEqual } from 'node:util';
 import { completedReentryView } from './completed-reentry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,7 +18,6 @@ import {
 } from './protocol.ts';
 import { prepareSandboxControlExecution, type PreparedSandboxControlExecution, type SandboxControlExecutionResult } from './executor.ts';
 import {
-  appendSandboxControlAudit,
   atomicWriteJsonNoReplace,
   createSandboxControlPayload,
   cleanupStaleSandboxControlLease,
@@ -27,6 +27,8 @@ import {
   readExecution,
   readSandboxControlPayload,
   readSandboxControlResultEvidence,
+  readSandboxControlTerminalResult,
+  createSandboxControlTerminalResult,
   sandboxControlEncodedJsonBytes,
   sandboxControlGenerationUsage,
   sanitizeSandboxControlOutput,
@@ -35,11 +37,36 @@ import {
   writeSandboxControlPayload,
   writeSandboxControlReservation,
   writeSandboxControlResultEvidence,
+  writeSandboxControlTerminalResult,
+  appendSandboxControlAudit,
   terminateSandboxControlExecution,
   writeSandboxControlStatus,
   readSandboxControlStatus
 } from './state.ts';
 import { validateSandboxControlRequest } from './protocol.ts';
+import {
+  requestAuditFields,
+  resultAuditFields,
+  appendCriticalAudit,
+  appendDiagnosticAudit,
+  createSandboxControlAuditContext,
+  writeSandboxControlTransition,
+  readSandboxControlTransition
+} from './audit.ts';
+import { parseTaskControlOperation } from '../../task/control-authority.ts';
+import {
+  parseControlOutput,
+  classifySandboxControlRecovery,
+  findSandboxControlRecoveryOperation,
+  operationRecoveryBinding,
+  SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES
+} from '../../task/control-recovery.ts';
+import { readRun } from '../../task/orchestration.ts';
+import { captureRepositorySnapshot } from '../../task/workspace-snapshot.ts';
+import { parseTypedTaskFrontmatter } from '../../task/frontmatter.ts';
+import { readLifecycleJournalEvidence } from '../../task/lifecycle.ts';
+import { resolveTaskRef } from '../../task/resolve-ref.ts';
+import { loadShortIdByTaskId } from '../../task/short-id.ts';
 import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
 import {
   acquireSandboxControlBrokerStartup,
@@ -50,7 +77,8 @@ import {
 import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
-import { resolveTaskRef } from '../../task/resolve-ref.ts';
+import { readCodexControllerRegistration } from './controller-registration.ts';
+import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
   taskViewAfterFinalization,
@@ -68,66 +96,77 @@ type ActiveExecution = {
   settled: boolean;
 };
 
-function safeRealpath(value: string): string | null {
-  try {
-    return fs.realpathSync.native(value);
-  } catch {
-    return null;
-  }
-}
-
 function appendBrokerAudit(
   manifest: SandboxControlManifest,
   event: string,
   fields: Record<string, string | number | boolean | null> = {}
 ): void {
+  appendDiagnosticAudit(manifest, event, { source: 'broker', ...fields });
+}
+
+function operationKey(request: SandboxControlRequest, output?: string): string | null {
+  if (request.family === 'task-finalization') return request.operation;
+  if (request.family === 'task-create') return 'create';
+  if (request.family === 'codex-controller') return request.command;
+  if (request.family === 'task-workflow') return request.workflow.operation;
+  if (request.family !== 'task-lifecycle' && request.family !== 'task-orchestration') return null;
+  if (request.family === 'task-orchestration' && request.args[1] === 'route') {
+    if (!output) return 'route';
+    const result = parseControlOutput(output);
+    return result?.changed === true && result.status === 'completed' ? 'route.clean-completion' : 'route.read';
+  }
   try {
-    appendSandboxControlAudit(manifest, event, { source: 'broker', ...fields });
+    const operation = parseTaskControlOperation(request.family, request.args);
+    return operation.family === 'task-orchestration' ? operation.intent : operation.request.intent;
   } catch {
-    // Diagnostics must never change the control protocol.
+    return null;
   }
 }
 
-function requestAuditFields(
-  manifest: SandboxControlManifest,
-  manifestPath: string,
-  request: SandboxControlRequest
-): Record<string, string | number | boolean | null> {
-  const args = 'args' in request ? request.args : [];
-  const encodedArgs = JSON.stringify(args);
-  return {
-    requestId: request.id,
-    requestFamily: request.family,
-    sandboxTaskId: manifest.taskId,
-    requestGeneration: request.generation,
-    requestIssuedAt: request.issuedAt,
-    requestExpiresAt: request.expiresAt,
-    requestArgCount: args.length,
-    requestArgsSha256: createHash('sha256').update(encodedArgs, 'utf8').digest('hex'),
-    requestTaskRef: args[0] ?? null,
-    requestCommand: args[1] ?? null,
-    controllerProofPresent: request.controllerProof !== null,
-    hostCwd: process.cwd(),
-    manifestPath,
-    manifestPathRealpath: safeRealpath(manifestPath),
-    repoRoot: manifest.repoRoot,
-    repoRootRealpath: safeRealpath(manifest.repoRoot),
-    worktreeRoot: manifest.worktreeRoot,
-    worktreeRootRealpath: safeRealpath(manifest.worktreeRoot),
-    runtimeDir: manifest.runtimeDir,
-    runtimeDirRealpath: safeRealpath(manifest.runtimeDir)
-  };
+function recoveryOperationKey(
+  request: SandboxControlRequest,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult> | null,
+  output: string | undefined
+): string | null {
+  const operation = operationKey(request, output);
+  if (operation !== 'route') return operation;
+  const digest = terminalResult?.intentDigest;
+  for (const candidate of ['route.read', 'route.clean-completion'] as const) {
+    const expected = operationRecoveryBinding(request.id, request.generation, null, request.family, candidate).intentDigest;
+    if (digest === expected) return candidate;
+  }
+  return null;
 }
 
-function resultAuditFields(result: SandboxControlExecutionResult): Record<string, string | number | boolean | null> {
-  return {
-    exitCode: result.exitCode,
-    stdoutBytes: Buffer.byteLength(result.stdout, 'utf8'),
-    stderrBytes: Buffer.byteLength(result.stderr, 'utf8'),
-    stdoutSha256: createHash('sha256').update(result.stdout, 'utf8').digest('hex'),
-    stderrSha256: createHash('sha256').update(result.stderr, 'utf8').digest('hex')
-  };
+function terminalResultMatchesRequest(
+  request: SandboxControlRequest,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>
+): boolean {
+  const operation = operationKey(request);
+  const candidates = operation === 'route'
+    ? ['route.read', 'route.clean-completion']
+    : operation ? [operation] : [];
+  return candidates.some((candidate) => createHash('sha256').update(`${request.family}\0${candidate}`, 'utf8').digest('hex') === terminalResult.intentDigest);
 }
+
+function criticalRequestPhase(
+  manifest: SandboxControlManifest,
+  request: SandboxControlRequest,
+  phase: Parameters<typeof createSandboxControlAuditContext>[1]['phase'],
+  outcome: Parameters<typeof createSandboxControlAuditContext>[1]['outcome'],
+  reference?: string | null
+): void {
+  const context = createSandboxControlAuditContext(manifest, {
+    requestId: request.id,
+    family: request.family,
+    operation: operationKey(request),
+    phase,
+    outcome
+  });
+  appendCriticalAudit(manifest, context, { reference: reference ?? null });
+  writeSandboxControlTransition(manifest, { requestId: request.id, phase, reference });
+}
+
 
 function assertRealDirectory(directory: string, parent?: string): void {
   const stat = fs.lstatSync(directory);
@@ -297,29 +336,248 @@ function genericRecoveryResponse(
   };
 }
 
+type RecoveryDomainEvidence = Readonly<{
+  domain: Readonly<Record<string, unknown>> | null;
+  journal?: ReturnType<typeof readLifecycleJournalEvidence>;
+}>;
+
+function taskCreateDomainEvidence(
+  manifest: SandboxControlManifest,
+  output: Record<string, unknown> | null
+): Readonly<Record<string, unknown>> {
+  if (!output || !['applied', 'no-op', 'degraded'].includes(String(output.status))) {
+    return { consistent: false };
+  }
+  const task = output.task && typeof output.task === 'object' && !Array.isArray(output.task)
+    ? output.task as Record<string, unknown> : null;
+  const taskId = typeof task?.id === 'string' ? task.id : null;
+  const shortId = typeof task?.shortId === 'string' ? task.shortId : null;
+  if (!taskId || !shortId) return { consistent: false };
+  try {
+    const resolved = resolveTaskRef(taskId, { repoRoot: manifest.repoRoot });
+    const shortIds = loadShortIdByTaskId(manifest.repoRoot);
+    return {
+      consistent: resolved.ok && resolved.taskId === taskId && resolved.state === 'active' && shortIds.get(taskId) === shortId,
+      taskId,
+      shortId
+    };
+  } catch {
+    return { consistent: false };
+  }
+}
+
+function controllerDomainEvidence(
+  manifest: SandboxControlManifest,
+  manifestPath: string,
+  request: SandboxControlRequest,
+  output: Record<string, unknown> | null
+): Readonly<Record<string, unknown>> {
+  if (!output || output.error !== null || typeof output.status !== 'string') return { consistent: false };
+  try {
+    const registration = readCodexControllerRegistration(manifestPath);
+    if (request.family !== 'codex-controller') return { consistent: false };
+    if (request.command === 'open') {
+      const lease = output.lease && typeof output.lease === 'object' && !Array.isArray(output.lease)
+        ? output.lease as Record<string, unknown> : null;
+      return {
+        consistent: output.status === 'opened' && output.changed === true
+          && lease?.taskId === registration.taskId
+          && lease.controlGeneration === registration.controlGeneration
+          && lease.controllerInstanceDigest === registration.controllerInstanceDigest
+          && registration.taskId === manifest.taskId
+          && registration.controlGeneration === manifest.generation
+      };
+    }
+    if (request.command === 'verify') {
+      const binding = output.binding && typeof output.binding === 'object' && !Array.isArray(output.binding)
+        ? output.binding as Record<string, unknown> : null;
+      return {
+        consistent: output.status === 'verified' && output.changed === false
+          && binding?.taskId === registration.taskId
+          && binding.controlGeneration === registration.controlGeneration
+          && binding.controllerInstanceDigest === registration.controllerInstanceDigest
+      };
+    }
+    return { consistent: false };
+  } catch (error) {
+    return { consistent: request.family === 'codex-controller' && request.command === 'close'
+      && (error as { code?: string }).code === 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_MISSING'
+      && output?.status === 'closed' && typeof output.changed === 'boolean' };
+  }
+}
+
+function orchestrationDomainEvidence(
+  operation: ReturnType<typeof findSandboxControlRecoveryOperation>,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>,
+  output: Record<string, unknown> | null,
+  run: ReturnType<typeof readRun> | null
+): Readonly<Record<string, unknown>> {
+  if (!operation || !output) return { consistent: false };
+  const outputRun = output.run && typeof output.run === 'object' && !Array.isArray(output.run)
+    ? output.run as Record<string, unknown> : null;
+  const runMatches = outputRun === null ? run === null : run !== null && JSON.stringify(run) === JSON.stringify(outputRun);
+  if (operation.class === 'read-only') {
+    return {
+      consistent: output.status === terminalResult.status && output.changed === terminalResult.changed && runMatches,
+      snapshotValid: true,
+      status: run?.status ?? terminalResult.status,
+      pendingDelegation: run?.pendingDelegation ?? null
+    };
+  }
+  if (!run || !outputRun) return { consistent: false };
+  return {
+    consistent: output.status === terminalResult.status && output.changed === terminalResult.changed && runMatches,
+    status: run.status,
+    pendingDelegation: run.pendingDelegation
+  };
+}
+
+function readRecoveryDomain(
+  manifest: SandboxControlManifest,
+  manifestPath: string,
+  request: SandboxControlRequest,
+  operation: ReturnType<typeof findSandboxControlRecoveryOperation>,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>,
+  payloadOutput: string | null
+): RecoveryDomainEvidence {
+  if (!operation) return { domain: null };
+  const taskRef = request.family === 'task-finalization' || request.family === 'task-workflow'
+    ? manifest.taskId
+    : 'args' in request ? request.args[0] ?? null : manifest.taskId;
+  const output = parseControlOutput(payloadOutput);
+  if (!taskRef && operation.family !== 'task-create' && operation.family !== 'codex-controller') {
+    return { domain: null };
+  }
+
+  if (operation.family === 'task-lifecycle') {
+    if (!taskRef || !terminalResult.targetState) return { domain: null };
+    const journal = readLifecycleJournalEvidence(manifest.repoRoot, taskRef);
+    try {
+      const resolved = resolveTaskRef(taskRef, { repoRoot: manifest.repoRoot });
+      const shortIds = loadShortIdByTaskId(manifest.repoRoot);
+      const shortIdMatches = terminalResult.targetState === 'active'
+        ? shortIds.has(resolved.ok ? resolved.taskId : taskRef)
+        : !shortIds.has(resolved.ok ? resolved.taskId : taskRef);
+      return {
+        domain: { consistent: resolved.ok && resolved.state === terminalResult.targetState && shortIdMatches },
+        journal
+      };
+    } catch {
+      return { domain: { consistent: false }, journal };
+    }
+  }
+
+  if (operation.family === 'task-orchestration') {
+    if (!taskRef) return { domain: null };
+    try {
+      const resolved = resolveTaskRef(taskRef, { repoRoot: manifest.repoRoot });
+      if (!resolved.ok) return { domain: { consistent: false } };
+      const run = readRun(resolved.taskDir);
+      if (!run && operation.class !== 'read-only') return { domain: { consistent: false } };
+      if (operation.class === 'route.clean-completion') {
+        const snapshot = captureRepositorySnapshot(manifest.repoRoot);
+        const metadata = parseTypedTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+        const completion = run?.completionEvidence ?? null;
+        const consistent = run !== null && completion !== null
+          && terminalResult.completionEvidence !== null
+          && isDeepStrictEqual(completion, terminalResult.completionEvidence);
+        return {
+          domain: {
+            consistent,
+            status: run?.status ?? null,
+            pendingDelegation: run?.pendingDelegation ?? null,
+            completionEvidence: completion,
+            snapshot,
+            lastReviewedCommit: metadata.last_reviewed_commit
+          }
+        };
+      }
+      return { domain: orchestrationDomainEvidence(operation, terminalResult, output, run) };
+    } catch {
+      return { domain: { consistent: false } };
+    }
+  }
+
+  if (operation.family === 'task-create') {
+    return { domain: taskCreateDomainEvidence(manifest, output) };
+  }
+  if (operation.family === 'codex-controller') {
+    return { domain: controllerDomainEvidence(manifest, manifestPath, request, output) };
+  }
+  if (operation.family === 'task-workflow') {
+    return {
+      domain: { consistent: output?.status === terminalResult.status && output.changed === terminalResult.changed, snapshotValid: true }
+    };
+  }
+  return { domain: null };
+}
+
+function readCommittedCriticalPhases(manifest: SandboxControlManifest, requestId: string): readonly string[] {
+  return SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES.filter((phase) => {
+    try {
+      readSandboxControlTransition(manifest, requestId, phase);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 function recoveryResponse(
   manifest: SandboxControlManifest,
+  manifestPath: string,
   request: SandboxControlRequest,
   evidence: ReturnType<typeof readSandboxControlResultEvidence>,
-  payload: ReturnType<typeof readSandboxControlPayload> | null
+  payload: ReturnType<typeof readSandboxControlPayload> | null,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult>
 ): SandboxControlResponse | null {
+  const operationName = recoveryOperationKey(request, terminalResult, payload?.stdout);
+  const operation = operationName ? findSandboxControlRecoveryOperation(request.family, operationName) : null;
+  if (!operation) return null;
+  if (payload) {
+    const payloadTerminal = createSandboxControlTerminalResult(manifest, {
+      id: request.id, family: request.family, operation: operationName
+    }, payload.stdout);
+    if (JSON.stringify(payloadTerminal) !== JSON.stringify(terminalResult)) return unknown(request.id);
+  }
+  const finalization = request.family === 'task-finalization' ? finalizationRecoveryResponse(manifest, request.id, 0) : null;
+  if (evidence.exitCode === 0 && finalization?.status === 'deferred') return null;
+  const recovery: RecoveryDomainEvidence = finalization
+    ? { domain: { consistent: finalization.status === 'matched' } }
+    : readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);
+  const binding = operationRecoveryBinding(request.id, manifest.generation, manifest.taskId, request.family, operationName!);
+  const decision = classifySandboxControlRecovery({
+    operation,
+    binding,
+    startedCommitted: true,
+    terminalResult,
+    criticalPhases: readCommittedCriticalPhases(manifest, request.id),
+    domain: recovery.domain,
+    journal: recovery.journal
+  });
+  if (decision.outcome === 'unknown' || decision.outcome === 'in-progress') return unknown(request.id);
+  if (decision.outcome === 'not-executed') return notExecuted(request.id);
+  if (decision.outcome !== 'success' && decision.outcome !== 'failure') return null;
   if (request.family === 'task-finalization' && evidence.exitCode === 0) {
-    const finalization = finalizationRecoveryResponse(manifest, request.id, evidence.exitCode);
-    return finalization.status === 'matched' ? finalization.response ?? null : null;
+    if (finalization?.status !== 'matched') return null;
+    return finalization.response ?? null;
   }
   return genericRecoveryResponse(request, evidence.exitCode, payload);
 }
 
 function terminalMatchesEvidence(
   manifest: SandboxControlManifest,
+  manifestPath: string,
   request: SandboxControlRequest,
   response: SandboxControlResponse,
   evidence: ReturnType<typeof readSandboxControlResultEvidence>,
   payload: ReturnType<typeof readSandboxControlPayload> | null,
-  payloadInvalid: boolean
+  payloadInvalid: boolean,
+  terminalResult: ReturnType<typeof readSandboxControlTerminalResult> | null
 ): { valid: boolean; payloadReferenced: boolean } {
   if (request.family === 'task-finalization' && evidence.exitCode === 0) {
-    const expected = recoveryResponse(manifest, request, evidence, payload);
+    if (!terminalResult) return { valid: false, payloadReferenced: false };
+    const expected = recoveryResponse(manifest, manifestPath, request, evidence, payload, terminalResult);
     return {
       valid: expected !== null && JSON.stringify(response) === JSON.stringify(expected),
       payloadReferenced: false
@@ -367,6 +625,16 @@ function publishExecutionResult(
   brokerOwns: () => boolean
 ): boolean {
   const normalized = sanitizeSandboxControlResult(manifest, result);
+  writeSandboxControlTerminalResult(manifest, {
+    id: request.id,
+    family: request.family,
+    operation: operationKey(request, normalized.stdout)
+  }, normalized.stdout);
+  if (fs.existsSync(path.join(manifest.processingDir, request.id, 'transitions'))) {
+    criticalRequestPhase(manifest, request, 'completed', normalized.exitCode === 0 ? 'success' : 'failure');
+    criticalRequestPhase(manifest, request, 'evidence-written', normalized.exitCode === 0 ? 'success' : 'failure');
+    criticalRequestPhase(manifest, request, 'publish-authorized', normalized.exitCode === 0 ? 'success' : 'failure');
+  }
   let terminal: SandboxControlResponse | null = null;
   if (request.family === 'task-finalization') {
     const finalization = finalizationRecoveryResponse(manifest, request.id, normalized.exitCode);
@@ -402,7 +670,11 @@ function publishExecutionResult(
     const view = publishFinalizationTaskView(manifest, broker, request.id, 'healthy', null, null);
     if (view.state === 'unknown') return false;
   }
-  return writeSandboxControlResponse(manifest, terminal);
+  const committed = writeSandboxControlResponse(manifest, terminal);
+  if (committed && fs.existsSync(path.join(manifest.processingDir, request.id, 'transitions'))) {
+    criticalRequestPhase(manifest, request, 'published-committed', normalized.exitCode === 0 ? 'success' : 'failure');
+  }
+  return committed;
 }
 
 function writeAcceptedResponse(manifest: SandboxControlManifest, response: SandboxControlResponse): void {
@@ -467,21 +739,40 @@ function bindingReason(manifest: SandboxControlManifest): string | null {
   }
 }
 
-function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner, brokerOwns: () => boolean): boolean {
+function assertCurrentSandboxControlIdentity(manifest: SandboxControlManifest, manifestPath: string): void {
+  const result = validateSandboxControlIdentity({
+    publicStatusDir: manifest.publicStatusDir,
+    root: path.dirname(path.resolve(manifestPath)),
+    mode: manifest.mode,
+    taskId: manifest.taskId,
+    generation: manifest.generation,
+    controlRootId: manifest.controlRootId
+  });
+  if (result.state !== 'valid') {
+    throw new Error(`SANDBOX_CONTROL_IDENTITY_${result.state.replaceAll('-', '_').toUpperCase()}`);
+  }
+}
+
+function recoverProcessing(manifest: SandboxControlManifest, manifestPath: string, broker: BrokerOwner, brokerOwns: () => boolean): boolean {
   for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/.test(entry.name)) continue;
     if (!brokerOwns()) return false;
     const descriptor = executionPath(manifest, entry.name);
     const existingResponse = responsePath(manifest, entry.name);
     const processingDirectory = path.join(manifest.processingDir, entry.name);
+    const transitionsDirectory = path.join(processingDirectory, 'transitions');
+    const transitionProtocolActive = fs.existsSync(transitionsDirectory);
+    const startedCommitted = fs.existsSync(path.join(transitionsDirectory, 'started-committed.json'));
     let payloadReferenced = false;
     if (fs.existsSync(descriptor)) {
       const execution = readExecution(descriptor);
       let resultEvidence: ReturnType<typeof readSandboxControlResultEvidence> | null = null;
+      let terminalResult: ReturnType<typeof readSandboxControlTerminalResult> | null = null;
       let payload: ReturnType<typeof readSandboxControlPayload> | null = null;
       let payloadInvalid = false;
       let request: SandboxControlRequest | null = null;
       let existingTerminalResponse: SandboxControlResponse | null = null;
+      let terminalReconciled = false;
       try {
         const rawRequest = JSON.parse(fs.readFileSync(path.join(processingDirectory, 'request.json'), 'utf8')) as Record<string, unknown>;
         request = validateSandboxControlRequest(rawRequest, manifest, {
@@ -501,6 +792,18 @@ function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner
           resultEvidence = null;
         }
       }
+      const terminalResultPathValue = path.join(processingDirectory, 'terminal-result.json');
+      if (fs.existsSync(terminalResultPathValue)) {
+        try {
+          terminalResult = readSandboxControlTerminalResult(terminalResultPathValue);
+          if (terminalResult.requestId !== entry.name || terminalResult.generation !== manifest.generation
+            || !request || !terminalResultMatchesRequest(request, terminalResult)) {
+            terminalResult = null;
+          }
+        } catch {
+          terminalResult = null;
+        }
+      }
       const publishedPayloadPath = payloadPath(manifest, entry.name);
       if (fs.existsSync(publishedPayloadPath)) {
         try {
@@ -513,11 +816,21 @@ function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner
           payloadInvalid = true;
         }
       }
+      if (transitionProtocolActive && startedCommitted && !terminalResult) {
+        if (!brokerOwns()) return false;
+        if (!terminateSandboxControlExecution(execution)) {
+          throw new Error(`SANDBOX_CONTROL_EXECUTION_STILL_RUNNING: ${entry.name}`);
+        }
+        appendDiagnosticAudit(manifest, 'orphan-tree-terminated', { requestId: entry.name });
+        writeSandboxControlResponse(manifest, unknown(entry.name));
+        continue;
+      }
+      if (transitionProtocolActive && !startedCommitted && terminalResult) continue;
       if (!terminateSandboxControlExecution(execution)) {
         throw new Error(`SANDBOX_CONTROL_EXECUTION_STILL_RUNNING: ${entry.name}`);
       }
       if (!brokerOwns()) return false;
-      appendSandboxControlAudit(manifest, 'orphan-tree-terminated', { requestId: entry.name });
+      appendDiagnosticAudit(manifest, 'orphan-tree-terminated', { requestId: entry.name });
       let terminal = false;
       if (fs.existsSync(existingResponse)) {
         try {
@@ -546,28 +859,61 @@ function recoverProcessing(manifest: SandboxControlManifest, broker: BrokerOwner
       }
       if (terminal && (!request || !resultEvidence)) continue;
       if (terminal && request && resultEvidence) {
-        const reconciliation = terminalMatchesEvidence(manifest, request, existingTerminalResponse!, resultEvidence, payload, payloadInvalid);
+        if (!terminalResult && request.family !== 'task-create') continue;
+        const reconciliation = terminalMatchesEvidence(
+          manifest,
+          manifestPath,
+          request,
+          existingTerminalResponse!,
+          resultEvidence,
+          payload,
+          payloadInvalid,
+          terminalResult
+        );
         if (!reconciliation.valid) continue;
+        terminalReconciled = true;
         payloadReferenced = reconciliation.payloadReferenced;
         if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
           const view = publishFinalizationTaskView(manifest, broker, request.id, 'starting', null, null);
           if (view.state === 'unknown') continue;
         }
       }
+      if (!terminalResult && !terminalReconciled) {
+        if (terminal) continue;
+        if (!brokerOwns()) return false;
+        if (!resultEvidence || !request || payloadInvalid) continue;
+        if (request.family === 'task-create' && resultEvidence.exitCode === 0 && payload === null) {
+          writeSandboxControlResponse(manifest, genericRecoveryResponse(request, resultEvidence.exitCode, null));
+          terminalReconciled = true;
+          terminal = true;
+        } else {
+          writeSandboxControlResponse(manifest, unknown(entry.name));
+          continue;
+        }
+      }
       if (!terminal) {
         if (!brokerOwns()) return false;
         if (!resultEvidence || !request || payloadInvalid) continue;
-        const recovered = recoveryResponse(manifest, request, resultEvidence, payload);
+        const recovered = recoveryResponse(manifest, manifestPath, request, resultEvidence, payload, terminalResult!);
         if (!recovered) continue;
         if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
           const view = publishFinalizationTaskView(manifest, broker, request.id, 'starting', null, null);
           if (view.state === 'unknown') continue;
         }
         writeSandboxControlResponse(manifest, recovered);
+        const preserveRecoveryEvidence = recovered.error?.code === 'SANDBOX_CONTROL_RESULT_UNKNOWN';
+        if (transitionProtocolActive && !preserveRecoveryEvidence) {
+          writeSandboxControlTransition(manifest, { requestId: entry.name, phase: 'recovered' });
+        }
+        if (preserveRecoveryEvidence) continue;
         payloadReferenced = Boolean(payload) && request.family !== 'task-finalization';
       }
     } else {
       if (!brokerOwns()) return false;
+      if (transitionProtocolActive && startedCommitted) {
+        writeSandboxControlResponse(manifest, unknown(entry.name));
+        continue;
+      }
       writeSandboxControlResponse(manifest, notExecuted(entry.name));
     }
     if (!brokerOwns()) return false;
@@ -609,6 +955,7 @@ export async function serveSandboxControl(
   const prepareExecution = options.prepareExecution ?? prepareSandboxControlExecution;
   const manifest = readSandboxControlManifest(manifestPath);
   const root = path.dirname(manifestPath);
+  assertCurrentSandboxControlIdentity(manifest, manifestPath);
   const startTime = getProcessStartTime(process.pid);
   if (!startTime) throw new Error('SANDBOX_CONTROL_BROKER_IDENTITY_UNAVAILABLE');
   const brokerId = randomUUID();
@@ -696,22 +1043,9 @@ export async function serveSandboxControl(
     if (!brokerOwns()) return;
     appendBrokerAudit(manifest, 'broker-start', {
       pid: broker.pid,
-      brokerId: broker.brokerId,
-      hostCwd: process.cwd(),
-      manifestPath,
-      manifestPathRealpath: safeRealpath(manifestPath),
-      repoRoot: manifest.repoRoot,
-      repoRootRealpath: safeRealpath(manifest.repoRoot),
-      worktreeRoot: manifest.worktreeRoot,
-      worktreeRootRealpath: safeRealpath(manifest.worktreeRoot),
-      runtimeDir: manifest.runtimeDir,
-      runtimeDirRealpath: safeRealpath(manifest.runtimeDir),
-      channelDir: manifest.channelDir,
-      publicStatusDir: manifest.publicStatusDir,
-      processingDir: manifest.processingDir,
-      internalCliPath: options.internalCliPath ?? process.argv[1] ?? null
+      brokerId: broker.brokerId
     });
-    if (!recoverProcessing(manifest, broker, brokerOwns)) return;
+    if (!recoverProcessing(manifest, manifestPath, broker, brokerOwns)) return;
     try {
       const published = readSandboxControlStatus(manifest.publicStatusDir);
       if (published.generation === manifest.generation) taskView = published.taskView;
@@ -724,6 +1058,7 @@ export async function serveSandboxControl(
       let current: SandboxControlManifest;
       try {
         current = readSandboxControlManifest(manifestPath);
+        assertCurrentSandboxControlIdentity(current, manifestPath);
       } catch {
         break;
       }
@@ -754,7 +1089,7 @@ export async function serveSandboxControl(
           nextContainerHeartbeatAt = Date.now() + timing.containerHeartbeatMs;
         } else if (observation.state === 'unknown') {
           containerReasonCode = 'SANDBOX_CONTROL_CONTAINER_UNKNOWN';
-          appendSandboxControlAudit(manifest, 'container-heartbeat-unknown', { reason: observation.reason });
+          appendDiagnosticAudit(manifest, 'container-heartbeat-unknown', { reason: observation.reason });
           const backoff = nextSandboxControlBackoff(containerBackoffMs, timing.slowCheckMs);
           nextContainerHeartbeatAt = Date.now() + backoff.delayMs;
           containerBackoffMs = backoff.nextDelayMs;
@@ -770,7 +1105,7 @@ export async function serveSandboxControl(
           } catch (error) {
             if (!brokerOwns()) break;
             containerReasonCode = 'SANDBOX_CONTROL_CONTAINER_ABSENT_GC_FAILED';
-            appendSandboxControlAudit(manifest, 'container-gc-failed', { reason: controlError(error).code });
+            appendDiagnosticAudit(manifest, 'container-gc-failed', { reason: controlError(error).code });
             const backoff = nextSandboxControlBackoff(containerBackoffMs, timing.slowCheckMs);
             nextContainerHeartbeatAt = Date.now() + backoff.delayMs;
             containerBackoffMs = backoff.nextDelayMs;
@@ -847,7 +1182,7 @@ export async function serveSandboxControl(
         }
         if (!terminalCommitted) return;
         appendBrokerAudit(manifest, 'executor-result-published', {
-          ...requestAuditFields(manifest, manifestPath, settledExecution.request),
+          ...requestAuditFields(manifest, settledExecution.request),
           resultAvailable: settledExecution.result !== null,
           resultEvidenceWritten: settledExecution.resultEvidenceWritten,
           ...(settledExecution.result ? resultAuditFields(settledExecution.result) : {})
@@ -864,6 +1199,7 @@ export async function serveSandboxControl(
         const source = path.join(requestsDir, name);
         let claimed: string | null = null;
         let validatedRequest: SandboxControlRequest | null = null;
+        let prepared: PreparedSandboxControlExecution | null = null;
         try {
           if (!brokerOwns()) {
             retiring = true;
@@ -889,69 +1225,75 @@ export async function serveSandboxControl(
           if (active) throw new Error('SANDBOX_CONTROL_BUSY');
           const request = validateSandboxControlRequest(JSON.parse(fs.readFileSync(claimed, 'utf8')), manifest);
           validatedRequest = request;
+          criticalRequestPhase(manifest, request, 'validated', 'in-progress');
           appendBrokerAudit(manifest, 'request-validated', {
-            ...requestAuditFields(manifest, manifestPath, request),
+            ...requestAuditFields(manifest, request),
             requestPath: claimed
           });
           if (bindingCheck(manifest)) throw new Error('SANDBOX_WORKTREE_BINDING_LOST');
           if (readActiveLease(manifest)) throw new Error('SANDBOX_CONTROL_HANDOFF_ACTIVE');
+          criticalRequestPhase(manifest, request, 'gated', 'in-progress');
           appendBrokerAudit(manifest, 'request-gates-passed', {
-            ...requestAuditFields(manifest, manifestPath, request),
+            ...requestAuditFields(manifest, request),
             requestPath: claimed,
             bindingChecked: true,
             handoffLeaseChecked: true
           });
+          criticalRequestPhase(manifest, request, 'reserved', 'in-progress');
           writeSandboxControlReservation(manifest, request.id, sandboxControlGenerationUsage(manifest));
           appendBrokerAudit(manifest, 'executor-reservation-written', {
-            ...requestAuditFields(manifest, manifestPath, request),
+            ...requestAuditFields(manifest, request),
             requestPath: claimed,
             executionPath: executionPath(manifest, request.id)
           });
           appendBrokerAudit(manifest, 'executor-prepare-start', {
-            ...requestAuditFields(manifest, manifestPath, request),
+            ...requestAuditFields(manifest, request),
             requestPath: claimed,
             executorCwd: manifest.repoRoot,
             executorEntry: options.internalCliPath ?? process.argv[1] ?? null
           });
-          const prepared = await prepareExecution({
+          prepared = await prepareExecution({
             manifest, manifestPath, request, requestPath: claimed,
             internalCliPath: options.internalCliPath ?? process.argv[1]!
           });
+          const preparedExecution = prepared;
+          if (!preparedExecution) throw new Error('SANDBOX_CONTROL_EXECUTION_PREPARE_INVALID');
+          criticalRequestPhase(manifest, request, 'prepared', 'in-progress', `${preparedExecution.execution.child.pid}`);
           appendBrokerAudit(manifest, 'executor-prepared', {
-            ...requestAuditFields(manifest, manifestPath, request),
+            ...requestAuditFields(manifest, request),
             requestPath: claimed,
             executorCwd: manifest.repoRoot,
-            childPid: prepared.execution.child.pid,
-            childStartTime: prepared.execution.child.startTime,
-            childProcessGroupId: prepared.execution.child.processGroupId,
+            childPid: preparedExecution.execution.child.pid,
+            childStartTime: preparedExecution.execution.child.startTime,
+            childProcessGroupId: preparedExecution.execution.child.processGroupId,
             executionPath: executionPath(manifest, request.id)
           });
           const execution: ActiveExecution = {
-            request, prepared, result: null, resultEvidenceWritten: false, failure: null, settled: false
+            request, prepared: preparedExecution, result: null, resultEvidenceWritten: false, failure: null, settled: false
           };
           active = execution;
-          prepared.completion.then(
+          preparedExecution.completion.then(
             (result) => {
               execution.result = sanitizeSandboxControlResult(manifest, result);
               appendBrokerAudit(manifest, 'executor-completed', {
-                ...requestAuditFields(manifest, manifestPath, request),
+                ...requestAuditFields(manifest, request),
                 ...resultAuditFields(execution.result),
-                childPid: prepared.execution.child.pid,
-                childStartTime: prepared.execution.child.startTime
+                childPid: preparedExecution.execution.child.pid,
+                childStartTime: preparedExecution.execution.child.startTime
               });
               try {
                 writeSandboxControlResultEvidence(manifest, request.id, execution.result);
                 execution.resultEvidenceWritten = true;
                 execution.settled = true;
                 appendBrokerAudit(manifest, 'executor-result-evidence-written', {
-                  ...requestAuditFields(manifest, manifestPath, request),
+                  ...requestAuditFields(manifest, request),
                   resultPath: path.join(manifest.processingDir, request.id, 'result.json'),
                   ...resultAuditFields(execution.result)
                 });
               } catch (error) {
                 execution.failure = error;
                 appendBrokerAudit(manifest, 'executor-result-evidence-failed', {
-                  ...requestAuditFields(manifest, manifestPath, request),
+                  ...requestAuditFields(manifest, request),
                   errorType: error instanceof Error ? error.name : typeof error,
                 });
               }
@@ -960,9 +1302,9 @@ export async function serveSandboxControl(
               execution.failure = error;
               execution.settled = true;
               appendBrokerAudit(manifest, 'executor-failed', {
-                ...requestAuditFields(manifest, manifestPath, request),
-                childPid: prepared.execution.child.pid,
-                childStartTime: prepared.execution.child.startTime,
+                ...requestAuditFields(manifest, request),
+                childPid: preparedExecution.execution.child.pid,
+                childStartTime: preparedExecution.execution.child.startTime,
                 errorType: error instanceof Error ? error.name : typeof error,
               });
             }
@@ -979,11 +1321,13 @@ export async function serveSandboxControl(
             retiring = true;
             continue;
           }
+          criticalRequestPhase(manifest, request, 'accepted-authorized', 'in-progress');
           writeAcceptedResponse(manifest, {
             version: 2, id, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
           });
+          writeSandboxControlTransition(manifest, { requestId: request.id, phase: 'accepted-committed' });
           appendBrokerAudit(manifest, 'request-accepted', {
-            ...requestAuditFields(manifest, manifestPath, request),
+            ...requestAuditFields(manifest, request),
             acceptedPath: acceptedResponsePath(manifest, id),
             executionPhase: 'prepared'
           });
@@ -994,8 +1338,9 @@ export async function serveSandboxControl(
             break;
           }
           try {
+            criticalRequestPhase(manifest, request, 'start-authorized', 'in-progress', `${prepared.execution.child.pid}`);
             appendBrokerAudit(manifest, 'executor-start', {
-              ...requestAuditFields(manifest, manifestPath, request),
+              ...requestAuditFields(manifest, request),
               childPid: prepared.execution.child.pid,
               childStartTime: prepared.execution.child.startTime,
               executionPath: executionPath(manifest, request.id)
@@ -1003,7 +1348,7 @@ export async function serveSandboxControl(
             prepared.start(brokerOwns);
           } catch (error) {
             appendBrokerAudit(manifest, 'executor-start-failed', {
-              ...requestAuditFields(manifest, manifestPath, request),
+              ...requestAuditFields(manifest, request),
               errorType: error instanceof Error ? error.name : typeof error,
             });
             const owned = brokerOwns();
@@ -1031,6 +1376,11 @@ export async function serveSandboxControl(
             continue;
           }
         } catch (error) {
+          if (prepared) {
+            try { prepared.terminate(brokerOwns()); } catch { /* cleanup is best effort after a failed admission */ }
+            prepared = null;
+            active = null;
+          }
           if (!brokerOwns()) {
             retiring = true;
             break;
@@ -1050,6 +1400,7 @@ export async function serveSandboxControl(
             retiring = true;
             break;
           }
+          removeAcceptedResponse(manifest, id);
           if (claimed) fs.rmSync(path.dirname(claimed), { recursive: true, force: true });
         }
       }
@@ -1101,7 +1452,7 @@ export async function serveSandboxControl(
       }
     }
     if (brokerOwns()) {
-      appendSandboxControlAudit(manifest, 'broker-stop', { pid: broker.pid, brokerId: broker.brokerId });
+      appendDiagnosticAudit(manifest, 'broker-stop', { pid: broker.pid, brokerId: broker.brokerId });
       try {
         if (fs.readFileSync(brokerPath, 'utf8') === brokerRecord) fs.unlinkSync(brokerPath);
       } catch {

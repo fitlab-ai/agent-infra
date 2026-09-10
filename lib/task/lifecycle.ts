@@ -338,6 +338,21 @@ function parseJournal(content: string): LifecycleJournal {
   return value as LifecycleJournal;
 }
 
+/** Recovery reads the same journal contract as the lifecycle writer. */
+export function readLifecycleJournalEvidence(repoRoot: string, taskId: string): Readonly<{
+  exists: boolean; completedSteps: readonly string[]; failure: string | null;
+}> {
+  const journalPath = locateHotTaskDirs(repoRoot, taskId)
+    .map((entry) => path.join(entry.taskDir, '.task-lifecycle.json'))
+    .find((candidate) => fs.existsSync(candidate));
+  if (!journalPath) return { exists: false, completedSteps: [], failure: null };
+  try {
+    const journal = parseJournal(fs.readFileSync(journalPath, 'utf8'));
+    if (journal.taskId !== taskId) throw new Error('journal task identity mismatch');
+    return { exists: true, completedSteps: journal.completedSteps, failure: journal.failure?.code ?? null };
+  } catch { return { exists: true, completedSteps: [], failure: 'SANDBOX_CONTROL_LIFECYCLE_JOURNAL_INVALID' }; }
+}
+
 type DirectoryEntry = Readonly<{ relativePath: string; kind: 'file' | 'directory'; size: number; digest: string }>;
 
 function directoryManifest(root: string): DirectoryEntry[] {

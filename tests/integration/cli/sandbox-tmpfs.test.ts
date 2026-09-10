@@ -30,7 +30,8 @@ import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 import type { AgentClientState } from "../../../lib/agent-clients/types.ts";
 import {
   materializeSandboxControl,
-  materializeSandboxWorkspaceView
+  materializeSandboxWorkspaceView,
+  prepareSandboxTaskProjection
 } from "../../../lib/sandbox/workspace-view.ts";
 
 const BRANCH_ONLY_LABELS = {
@@ -235,6 +236,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     branch: "feature/demo",
     identity
   });
+  const projection = prepareSandboxTaskProjection(config.repoRoot, taskId, view.taskMountPath!);
   const seedDir = path.join(
     config.home,
     ".agent-infra",
@@ -252,7 +254,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
       Destination: path.posix.join("/workspace/.agents/workspace", state),
       RW: false
     })),
-    { Type: "bind", Source: taskSource, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
+    { Type: "bind", Source: projection, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
     { Type: "bind", Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
     { Type: "bind", Source: control.runtimeDir, Destination: "/run/agent-infra/runtime", RW: true },
@@ -442,13 +444,20 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
   const taskSource = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
   fs.mkdirSync(taskSource, { recursive: true });
   fs.writeFileSync(path.join(taskSource, "task.md"), `---\nid: ${taskId}\n---\n`, "utf8");
+  const view = materializeSandboxWorkspaceView({
+    base: config.workspaceViewBase,
+    project: config.project,
+    container: "demo-dev-feature..demo",
+    identity: { mode: "task-bound", taskId, shortId: "7" }
+  });
+  const projection = prepareSandboxTaskProjection(config.repoRoot, taskId, view.taskMountPath!);
   const labels = recoveryLabels(config, {
     "demo.sandbox.workspace-mode": "task-bound",
     "demo.sandbox.task-id": taskId
   });
   const mounts = recoveryFixtureMounts(config).concat({
     Type: "bind",
-    Source: taskSource,
+    Source: projection,
     Destination: `/workspace/.agents/workspace/active/${taskId}`,
     RW: true
   }, {

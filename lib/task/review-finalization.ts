@@ -2,9 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
-import { validateCompletedArtifact } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
+import { validateCompletedArtifact, hasOpenArtifactRound, validateArtifactPublication } from './artifact-lifecycle.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';
@@ -80,10 +79,10 @@ type ReviewFinalizationOptions = {
   lockAlreadyHeld?: boolean;
 };
 
-const STAGES: Record<ReviewStage, { family: 'review-analysis' | 'review-plan' | 'review-code'; action: string }> = {
-  analysis: { family: 'review-analysis', action: 'Review Analysis' },
-  plan: { family: 'review-plan', action: 'Review Plan' },
-  code: { family: 'review-code', action: 'Review Code' }
+const STAGES: Record<ReviewStage, { family: 'review-analysis' | 'review-plan' | 'review-code' }> = {
+  analysis: { family: 'review-analysis' },
+  plan: { family: 'review-plan' },
+  code: { family: 'review-code' }
 };
 const DEFAULT_FILE_SYSTEM: ReviewFileSystem = {
   readFileSync: (file) => fs.readFileSync(file, 'utf8'),
@@ -120,15 +119,6 @@ function failed(
   };
 }
 
-function openReviewRound(content: string, action: string, round: number): boolean {
-  const section = locateActivityLog(content);
-  if (!section) return false;
-  const expected = `${action} (Round ${round})`;
-  return startedBackedRows(pairEntries(section.entries)).filter((row) => (
-    row.step === expected && !row.done
-  )).length === 1;
-}
-
 function cleanupTemp(fileSystem: ReviewFileSystem, tempPath: string): void {
   try {
     fileSystem.unlinkSync(tempPath);
@@ -137,288 +127,161 @@ function cleanupTemp(fileSystem: ReviewFileSystem, tempPath: string): void {
   }
 }
 
+type ReviewSummaryCandidatePreparation = Readonly<{
+  result: ReviewFinalizationResult;
+  content: string;
+  provenance?: Parameters<typeof writeArtifactRepairIntent>[1];
+}>;
+
+/** Prepare domain validation, summary bytes and provenance before any publication. */
+function prepareReviewSummaryCandidate(
+  request: ReviewFinalizationRequest,
+  artifactContent: string,
+  options: ReviewFinalizationOptions = {}
+): ReviewSummaryCandidatePreparation {
+  let taskId: string | null = null;
+  let stageStatus: LedgerStageStatus | null = null;
+  const reject = (code: ReviewFinalizationErrorCode, message: string, extra: Partial<ReviewFinalizationResult> = {}): ReviewSummaryCandidatePreparation => ({
+    result: failed(request, code, message, taskId, stageStatus, extra), content: artifactContent
+  });
+  const stage = request.stage as ReviewStage;
+  const spec = STAGES[stage];
+  if (!spec) return reject('REVIEW_STAGE_INVALID', `unsupported review stage '${request.stage}'`);
+  if (!request.taskRef || !request.artifact) return reject('REVIEW_PAYLOAD_INVALID', 'taskRef, stage, and artifact are required');
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  taskId = resolved.taskId ?? null;
+  if (!resolved.ok) return reject(resolved.code, resolved.message);
+  if (resolved.state !== 'active' && !allowsManualOverride(options.manualOverride, 'review-finalization', 'TASK_STATE_MISMATCH')) {
+    return reject('TASK_STATE_MISMATCH', `task ${taskId} is ${resolved.state}, expected active`);
+  }
+  const parsed = parseArtifactName(request.artifact);
+  if (!parsed || parsed.family !== spec.family) return reject('REVIEW_ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${spec.family}`);
+  const publicationError = validateArtifactPublication(resolved.taskDir, spec.family, request.artifact);
+  if (publicationError) return reject('REVIEW_ARTIFACT_IDENTITY_INVALID', publicationError.message);
+  let taskContent: string;
+  try { taskContent = (options.fileSystem?.readFileSync ?? DEFAULT_FILE_SYSTEM.readFileSync)(resolved.taskMdPath); }
+  catch (error) { return reject('REVIEW_ARTIFACT_NOT_REGULAR', String(error)); }
+  const artifactSha256 = sha256Content(artifactContent);
+  const semanticDigest = canonicalSemanticDigest(artifactContent);
+  const digests = { artifactSha256, semanticDigest };
+  let repairIntent;
+  try { repairIntent = readArtifactRepairIntent(resolved.repoRoot, taskId!, spec.family, request.artifact); }
+  catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), digests); }
+  const schema = getArtifactSchema(spec.family)!;
+  const structure = inspectArtifactContract(artifactContent, schema);
+  if (!structure.ok) {
+    const repairable = structure.repair !== null && structure.diagnostics.length === 1 && structure.diagnostics[0]?.repairable === true;
+    if (repairable && repairIntent && (repairIntent.state !== 'awaiting-repair'
+      || repairIntent.artifactSha256 !== artifactSha256 || repairIntent.semanticDigest !== structure.semanticDigest)) {
+      return reject('REVIEW_PROVENANCE_INVALID', 'a different review repair baseline is already recorded for this artifact', digests);
+    }
+    return {
+      ...reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), {
+        artifactSha256, semanticDigest: structure.semanticDigest, repairable, operation: structure.repair
+      }),
+      ...(repairable && !repairIntent ? { provenance: {
+        version: 1 as const, taskId: taskId!, family: spec.family, artifact: request.artifact,
+        state: 'awaiting-repair' as const, baselineSemanticDigest: structure.semanticDigest,
+        artifactSha256, semanticDigest: structure.semanticDigest
+      } } : {})
+    };
+  }
+  if (repairIntent?.state === 'awaiting-repair' && repairIntent.baselineSemanticDigest !== semanticDigest) {
+    return reject('REVIEW_PROVENANCE_INVALID', 'the repaired review artifact semantic digest does not match the recorded repair baseline', digests);
+  }
+  if ((repairIntent?.state === 'passed' || repairIntent?.state === 'consumed')
+    && (repairIntent.artifactSha256 !== artifactSha256 || repairIntent.semanticDigest !== semanticDigest)) {
+    return reject('REVIEW_PROVENANCE_INVALID', 'the review artifact changed after its finalization provenance was recorded', digests);
+  }
+  if (!hasOpenArtifactRound(taskContent, spec.family, parsed.round)) {
+    return reject('REVIEW_ARTIFACT_IDENTITY_INVALID', `${request.artifact} does not have one matching open started review event`);
+  }
+  const execution = validateLifecycleExecution(request.taskRef, {
+    mode: request.orchestrated ? 'orchestrated' : 'standalone',
+    identity: { stage: spec.family, round: parsed.round, artifact: request.artifact, role: 'reviewer' },
+    dryRun: request.dryRun
+  }, { repoRoot: options.repoRoot });
+  if (!execution.ok) {
+    return reject('REVIEW_PROVENANCE_INVALID', `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`);
+  }
+  try {
+    const ledger = parseLedgerDocument(taskContent);
+    if (!ledger.present) return reject('REVIEW_LEDGER_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`);
+    const error = validateLedgerRows(ledger.rows);
+    if (error) return reject('REVIEW_LEDGER_INVALID', `${error.code}: ${error.message}`);
+    stageStatus = summarizeLedgerStage(ledger.rows, stage);
+  } catch (error) { return reject('REVIEW_LEDGER_INVALID', String(error)); }
+  const detail = inspectDecisionDetailDuplicates(artifactContent);
+  if (!detail.ok) return reject('REVIEW_DECISION_DETAIL_INVALID', `${detail.code}: ${detail.message}`);
+  const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts);
+  if (!transformed.ok) return reject(transformed.code, transformed.message);
+  const finalDigests = { artifactSha256: sha256Content(transformed.content), semanticDigest: canonicalSemanticDigest(transformed.content) };
+  return {
+    content: transformed.content,
+    result: {
+      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', taskId, stageStatus, finalDigests),
+      status: transformed.changed ? request.dryRun ? 'planned' : 'applied' : 'no-op',
+      changed: transformed.changed,
+      operations: transformed.changed ? [{ kind: 'artifact', artifact: request.artifact, operation: 'update' }] : [],
+      error: null
+    },
+    ...(repairIntent?.state === 'awaiting-repair' ? {
+      provenance: { ...repairIntent, state: 'passed' as const, ...finalDigests }
+    } : {})
+  };
+}
+
+function commitReviewSummaryProvenance(
+  prepared: ReviewSummaryCandidatePreparation,
+  repoRoot: string
+): ReviewFinalizationResult {
+  try {
+    if (prepared.provenance) writeArtifactRepairIntent(repoRoot, prepared.provenance);
+    return prepared.result;
+  } catch (error) {
+    return { ...prepared.result, status: 'failed', error: {
+      code: 'REVIEW_PROVENANCE_INVALID', message: `cannot record review provenance: ${String(error)}`
+    } };
+  }
+}
+
 function finalizeReviewSummaryUnlocked(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
-  const stage = request.stage as ReviewStage;
-  const spec = STAGES[stage];
-  if (!spec) return failed(request, 'REVIEW_STAGE_INVALID', `unsupported review stage '${request.stage}'`);
-  if (!request.taskRef || !request.artifact) {
-    return failed(request, 'REVIEW_PAYLOAD_INVALID', 'taskRef, stage, and artifact are required');
-  }
+  const spec = STAGES[request.stage as ReviewStage];
+  if (!spec || !request.taskRef || !request.artifact) return prepareReviewSummaryCandidate(request, '', options).result;
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(request, resolved.code, resolved.message, resolved.taskId);
-  if (resolved.state !== 'active' && !allowsManualOverride(options.manualOverride, 'review-finalization', 'TASK_STATE_MISMATCH')) {
-    return failed(request, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
-  }
-  const parsedArtifact = parseArtifactName(request.artifact);
-  if (!parsedArtifact || parsedArtifact.family !== spec.family) {
-    return failed(
-      request,
-      'REVIEW_ARTIFACT_IDENTITY_INVALID',
-      `artifact '${request.artifact}' does not match ${spec.family}`,
-      resolved.taskId
-    );
-  }
-  const validated = validateCompletedArtifact(
-    resolved.taskDir,
-    spec.family,
-    request.artifact,
-    parsedArtifact.round
-  );
+  const validated = validateCompletedArtifact(resolved.taskDir, spec.family, request.artifact);
   if (!validated.ok) {
-    const code = validated.error.code === 'ARTIFACT_NOT_REGULAR'
-      ? 'REVIEW_ARTIFACT_NOT_REGULAR'
-      : 'REVIEW_ARTIFACT_IDENTITY_INVALID';
-    return failed(request, code, validated.error.message, resolved.taskId);
+    return failed(request, validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID', validated.error.message, resolved.taskId);
   }
-
   const fileSystem = { ...DEFAULT_FILE_SYSTEM, ...options.fileSystem };
-  let taskContent: string;
-  let artifactContent: string;
+  let content: string;
+  try { content = fileSystem.readFileSync(validated.artifact.path); }
+  catch (error) { return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
+  const prepared = prepareReviewSummaryCandidate(request, content, options);
+  if (request.dryRun) return prepared.result;
+  if (prepared.result.status !== 'applied') return commitReviewSummaryProvenance(prepared, resolved.repoRoot);
+  const tempPath = path.join(resolved.taskDir, `.${request.artifact}.tmp-${process.pid}-${(options.randomSuffix ?? randomUUID)()}`);
   try {
-    taskContent = fileSystem.readFileSync(resolved.taskMdPath);
-    artifactContent = fileSystem.readFileSync(validated.artifact.path);
-  } catch (error) {
-    return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId);
-  }
-  const schema = getArtifactSchema(spec.family);
-  const structure = schema ? inspectArtifactContract(artifactContent, schema) : null;
-  const artifactSha256 = sha256Content(artifactContent);
-  const artifactSemanticDigest = canonicalSemanticDigest(artifactContent);
-  let repairIntent;
-  try {
-    repairIntent = readArtifactRepairIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact);
-  } catch (error) {
-    return failed(request, 'REVIEW_PROVENANCE_INVALID', String(error), resolved.taskId, null, {
-      artifactSha256,
-      semanticDigest: artifactSemanticDigest
-    });
-  }
-  if (structure && !structure.ok) {
-    const repairable = structure.repair !== null && structure.diagnostics.length === 1 && structure.diagnostics[0]?.repairable === true;
-    if (repairable) {
-      if (repairIntent && (
-        repairIntent.state !== 'awaiting-repair' ||
-        repairIntent.artifactSha256 !== artifactSha256 ||
-        repairIntent.semanticDigest !== structure.semanticDigest
-      )) {
-        return failed(request, 'REVIEW_PROVENANCE_INVALID', 'a different review repair baseline is already recorded for this artifact', resolved.taskId, null, {
-          artifactSha256,
-          semanticDigest: structure.semanticDigest
-        });
-      }
-      try {
-        if (!repairIntent) {
-          writeArtifactRepairIntent(resolved.repoRoot, {
-            version: 1,
-            taskId: resolved.taskId,
-            family: spec.family,
-            artifact: request.artifact,
-            state: 'awaiting-repair',
-            baselineSemanticDigest: structure.semanticDigest,
-            artifactSha256,
-            semanticDigest: structure.semanticDigest
-          });
-        }
-      } catch (error) {
-        return failed(request, 'REVIEW_PROVENANCE_INVALID', `cannot record repair provenance: ${String(error)}`, resolved.taskId, null, {
-          artifactSha256,
-          semanticDigest: structure.semanticDigest,
-          operation: structure.repair
-        });
-      }
-    }
-    return failed(
-      request,
-      'REVIEW_ARTIFACT_STRUCTURE_INVALID',
-      structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '),
-      resolved.taskId,
-      null,
-      {
-        artifactSha256,
-        semanticDigest: structure.semanticDigest,
-        repairable,
-        operation: structure.repair
-      }
-    );
-  }
-  if (repairIntent?.state === 'awaiting-repair' && repairIntent.baselineSemanticDigest !== artifactSemanticDigest) {
-    return failed(request, 'REVIEW_PROVENANCE_INVALID', 'the repaired review artifact semantic digest does not match the recorded repair baseline', resolved.taskId, null, {
-      artifactSha256,
-      semanticDigest: artifactSemanticDigest
-    });
-  }
-  if ((repairIntent?.state === 'passed' || repairIntent?.state === 'consumed')
-    && (repairIntent.artifactSha256 !== artifactSha256 || repairIntent.semanticDigest !== artifactSemanticDigest)) {
-    return failed(request, 'REVIEW_PROVENANCE_INVALID', 'the review artifact changed after its finalization provenance was recorded', resolved.taskId, null, {
-      artifactSha256,
-      semanticDigest: artifactSemanticDigest
-    });
-  }
-  if (!openReviewRound(taskContent, spec.action, parsedArtifact.round)) {
-    return failed(
-      request,
-      'REVIEW_ARTIFACT_IDENTITY_INVALID',
-      `${request.artifact} does not have one matching open started review event`,
-      resolved.taskId
-    );
-  }
-  const execution = validateLifecycleExecution(request.taskRef, {
-    mode: request.orchestrated ? 'orchestrated' : 'standalone',
-    identity: {
-      stage: spec.family,
-      round: parsedArtifact.round,
-      artifact: request.artifact,
-      role: 'reviewer'
-    },
-    dryRun: request.dryRun
-  }, { repoRoot: options.repoRoot });
-  if (!execution.ok) {
-    return failed(
-      request,
-      'REVIEW_PROVENANCE_INVALID',
-      `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`,
-      resolved.taskId
-    );
-  }
-
-  let rows;
-  try {
-    const ledger = parseLedgerDocument(taskContent);
-    if (!ledger.present) {
-      return failed(request, 'REVIEW_LEDGER_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`, resolved.taskId);
-    }
-    rows = ledger.rows;
-  } catch (error) {
-    return failed(request, 'REVIEW_LEDGER_INVALID', String(error), resolved.taskId);
-  }
-  const ledgerError = validateLedgerRows(rows);
-  if (ledgerError) {
-    return failed(
-      request,
-      'REVIEW_LEDGER_INVALID',
-      `${ledgerError.code}: ${ledgerError.message}`,
-      resolved.taskId
-    );
-  }
-  const stageStatus = summarizeLedgerStage(rows, stage);
-  const detailInspection = inspectDecisionDetailDuplicates(artifactContent);
-  if (!detailInspection.ok) {
-    return failed(
-      request,
-      'REVIEW_DECISION_DETAIL_INVALID',
-      `${detailInspection.code}: ${detailInspection.message}`,
-      resolved.taskId,
-      stageStatus
-    );
-  }
-  const transformed = finalizeReviewSummaryContent(
-    artifactContent,
-    stageStatus.unresolvedFindingCounts
-  );
-  if (!transformed.ok) {
-    return failed(request, transformed.code, transformed.message, resolved.taskId, stageStatus);
-  }
-  if (!transformed.changed) {
-    if (repairIntent?.state === 'awaiting-repair') {
-      try {
-        writeArtifactRepairIntent(resolved.repoRoot, {
-          ...repairIntent,
-          state: 'passed',
-          artifactSha256,
-          semanticDigest: artifactSemanticDigest
-        });
-      } catch (error) {
-        return failed(request, 'REVIEW_PROVENANCE_INVALID', `cannot record repaired review provenance: ${String(error)}`, resolved.taskId, stageStatus, {
-          artifactSha256,
-          semanticDigest: artifactSemanticDigest
-        });
-      }
-    }
-    return {
-      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus, {
-        artifactSha256,
-        semanticDigest: artifactSemanticDigest
-      }),
-      status: 'no-op',
-      error: null
-    };
-  }
-  const operations = [{ kind: 'artifact' as const, artifact: request.artifact, operation: 'update' as const }];
-  if (request.dryRun) {
-    return {
-      ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, stageStatus, {
-        artifactSha256: sha256Content(transformed.content),
-        semanticDigest: canonicalSemanticDigest(transformed.content)
-      }),
-      status: 'planned',
-      changed: true,
-      operations,
-      error: null
-    };
-  }
-
-  const tempPath = path.join(
-    resolved.taskDir,
-    `.${request.artifact}.tmp-${process.pid}-${(options.randomSuffix ?? randomUUID)()}`
-  );
-  let mode: number;
-  try {
-    mode = fileSystem.statModeSync(validated.artifact.path);
-    fileSystem.writeFileSync(tempPath, transformed.content, mode);
+    fileSystem.writeFileSync(tempPath, prepared.content, fileSystem.statModeSync(validated.artifact.path));
   } catch (error) {
     cleanupTemp(fileSystem, tempPath);
-    return failed(request, 'REVIEW_TEMP_WRITE_FAILED', String(error), resolved.taskId, stageStatus);
+    return failed(request, 'REVIEW_TEMP_WRITE_FAILED', String(error), resolved.taskId, prepared.result.stageStatus);
   }
   try {
-    if (fileSystem.readFileSync(validated.artifact.path) !== artifactContent) {
+    if (fileSystem.readFileSync(validated.artifact.path) !== content) {
       cleanupTemp(fileSystem, tempPath);
-      return failed(
-        request,
-        'REVIEW_ARTIFACT_CONFLICT',
-        `${request.artifact} changed during finalization`,
-        resolved.taskId,
-        stageStatus
-      );
+      return failed(request, 'REVIEW_ARTIFACT_CONFLICT', `${request.artifact} changed during finalization`, resolved.taskId, prepared.result.stageStatus);
     }
     fileSystem.renameSync(tempPath, validated.artifact.path);
   } catch (error) {
     cleanupTemp(fileSystem, tempPath);
-    return failed(request, 'REVIEW_RENAME_FAILED', String(error), resolved.taskId, stageStatus);
+    return failed(request, 'REVIEW_RENAME_FAILED', String(error), resolved.taskId, prepared.result.stageStatus);
   }
-  if (repairIntent?.state === 'awaiting-repair') {
-    try {
-      writeArtifactRepairIntent(resolved.repoRoot, {
-        ...repairIntent,
-        state: 'passed',
-        artifactSha256: sha256Content(transformed.content),
-        semanticDigest: canonicalSemanticDigest(transformed.content)
-      });
-    } catch (error) {
-      return failed(request, 'REVIEW_PROVENANCE_INVALID', `cannot record repaired review provenance: ${String(error)}`, resolved.taskId, stageStatus, {
-        artifactSha256: sha256Content(transformed.content),
-        semanticDigest: canonicalSemanticDigest(transformed.content)
-      });
-    }
-  }
-  return {
-    status: 'applied',
-    changed: true,
-    intent: 'finalize-summary',
-    requestRef: request.taskRef,
-    taskId: resolved.taskId,
-    stage,
-    artifact: request.artifact,
-    stageStatus,
-    artifactSha256: sha256Content(transformed.content),
-    semanticDigest: canonicalSemanticDigest(transformed.content),
-    repairable: false,
-    operation: null,
-    operations,
-    error: null
-  };
+  return commitReviewSummaryProvenance(prepared, resolved.repoRoot);
 }
 
 function finalizeReviewSummary(
@@ -446,11 +309,12 @@ function finalizeReviewSummary(
   }
 }
 
-export { finalizeReviewSummary };
+export { finalizeReviewSummary, prepareReviewSummaryCandidate, commitReviewSummaryProvenance };
 export type {
   ReviewFinalizationError,
   ReviewFinalizationErrorCode,
   ReviewFinalizationOptions,
   ReviewFinalizationRequest,
-  ReviewFinalizationResult
+  ReviewFinalizationResult,
+  ReviewSummaryCandidatePreparation
 };

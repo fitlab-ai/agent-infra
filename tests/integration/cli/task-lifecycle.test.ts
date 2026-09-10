@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { filePath, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -21,7 +21,7 @@ function fixture() {
 }
 
 function run(root: string, args: string[], env: NodeJS.ProcessEnv = sandboxControlSafeEnv()) {
-  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-lifecycle', ...args], {
+  return spawnSync(filePath('bin/internal-cli.sh'), ['task-lifecycle', ...args], {
     cwd: root,
     encoding: 'utf8',
     env
@@ -38,11 +38,7 @@ function runOverride(root: string, args: string[]) {
 
 test('task-lifecycle CLI stays inside its fixture with sandbox control authority removed', () => {
   const f = fixture();
-  const env = sandboxControlSafeEnv({
-    ...process.env,
-    AGENT_INFRA_CONTROL_TOKEN: 'live-sandbox-token',
-    AGENT_INFRA_CONTROL_DIR: path.join(f.root, 'live-control-channel')
-  });
+  const env = sandboxControlSafeEnv({ ...process.env });
   const result = run(f.root, [TASK_ID, 'complete', '--agent', 'codex'], env);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).taskId, TASK_ID);

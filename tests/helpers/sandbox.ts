@@ -266,7 +266,7 @@ function writeSandboxEngineFixture(
       "    const defaults = [",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'worktrees', project, branchDir), Destination: '/workspace', RW: true },",
       "      ...workspaceMounts,",
-      "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(process.cwd(), '.agents', 'workspace', 'active', taskId), Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true }] : []),",
+      "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(view, 'active', taskId), Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true }] : []),",
       "      { Type: 'bind', Source: control, Destination: '/run/agent-infra/control', RW: true },",
       "      { Type: 'bind', Source: path.join(controlRoot, 'public'), Destination: '/run/agent-infra/control-status', RW: false },",
       "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(controlRoot, 'runtime'), Destination: '/run/agent-infra/runtime', RW: true }] : []),",

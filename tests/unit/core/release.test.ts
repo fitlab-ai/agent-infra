@@ -79,12 +79,13 @@ test("package metadata supports scoped npm publishing", () => {
   assert.deepEqual(pkg.bin, {
     "agent-infra": "./dist/bin/cli.js",
     "ai": "./dist/bin/cli.js",
-    "agent-infra-internal": "./dist/bin/internal-cli.js"
+    "agent-infra-internal": "./bin/internal-cli.sh"
   });
   assert.deepEqual(pkg.files, [
     "dist/",
     "!dist/**/*.map",
     "bin/cli.ts",
+    "bin/internal-cli.sh",
     "lib/",
     "runtime/",
     "templates/"

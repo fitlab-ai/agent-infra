@@ -94,6 +94,14 @@ export type TaskControlOperation =
 
 export type TaskControlDispatchResult = TaskLifecycleResult | TaskFinalizationResult | OrchestrationResult;
 
+export function taskControlOperationKey(operation: TaskControlOperation): string {
+  if (operation.family === 'task-finalization') return 'complete';
+  if (operation.family === 'task-lifecycle') return operation.request.intent;
+  return operation.intent === 'route'
+    ? operation.input && operation.input.completed === true ? 'route.clean-completion' : 'route.read'
+    : operation.intent;
+}
+
 export type TaskLifecycleControlRequest = TaskLifecycleRequest & Readonly<{
   overrideTicket?: string;
   overrideTarget?: string;

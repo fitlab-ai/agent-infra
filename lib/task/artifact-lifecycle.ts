@@ -4,7 +4,7 @@ import path from 'node:path';
 import { ARTIFACT_FAMILY_CATALOG, artifactName, parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import type { ResolveTaskRefErrorCode, TaskWorkspaceState } from './resolve-ref.ts';
-import { locateActivityLog } from './activity-log.ts';
+import { locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import { parseImplementationInputs, selectPendingImplementationInput } from './implementation-inputs.ts';
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
@@ -15,6 +15,24 @@ import { validateQualificationAudit } from './qualification-audit.ts';
 import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-name.ts';
 
 const artifactFamilyCatalog = ARTIFACT_FAMILY_CATALOG;
+const ARTIFACT_STEPS: Readonly<Record<string, string>> = {
+  analysis: 'Analyze Task', 'review-analysis': 'Review Analysis',
+  plan: 'Plan Task', 'review-plan': 'Review Plan',
+  code: 'Code Task', 'review-code': 'Review Code'
+};
+
+/** Init, repair and finalization share the same authoritative round identity. */
+export function hasOpenArtifactRound(content: string, family: string, round: number): boolean {
+  const activity = locateActivityLog(content);
+  const step = ARTIFACT_STEPS[family];
+  if (!activity || !step) return false;
+  const qualifier = family === 'code'
+    ? '(?:, (?:fix for review-code(?:-r(?:[2-9]|[1-9]\\d+))?\\.md|decision II-[1-9]\\d*))?'
+    : '';
+  const expected = new RegExp(`^${step} \\(Round ${round}${qualifier}\\)$`);
+  return startedBackedRows(pairEntries(activity.entries)).filter((row) => expected.test(row.step) && !row.done).length === 1;
+}
+
 type ArtifactIdentity = {
   family: ArtifactFamily;
   round: number;
@@ -494,6 +512,15 @@ function validateCompletedArtifact(taskDir: string, family: ArtifactFamily, name
   if (topology) return { ok: false, error: topology };
   const artifact = inventory.artifacts.find((item) => item.name === name);
   return artifact ? { ok: true, artifact } : { ok: false, error: { code: 'ARTIFACT_NOT_FOUND', message: `artifact '${name}' is not in inventory` } };
+}
+
+/** A candidate may replace its current slot or fill the next slot, never skip rounds. */
+export function validateArtifactPublication(taskDir: string, family: ArtifactFamily, name: string): ArtifactError | null {
+  const inventory = inspectArtifactDirectory(taskDir, family);
+  const error = assertWritableInventory(inventory);
+  if (error) return error;
+  if (inventory.next?.name === name || inventory.artifacts.some((artifact) => artifact.name === name)) return null;
+  return { code: 'ARTIFACT_IDENTITY_INVALID', message: `artifact '${name}' is not a current or next ${family} slot` };
 }
 
 function buildArtifactLinkSection(content: string, artifact: ArtifactIdentity): {

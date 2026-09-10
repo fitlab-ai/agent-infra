@@ -36,6 +36,59 @@ info "Installing $NPM_PACKAGE via npm ..."
 npm install -g "$NPM_PACKAGE"
 ok "agent-infra installed successfully!"
 
+# ---------- host-control service ----------
+# The service is user-scoped and owns the fixed host-control endpoint used by
+# task-control commands. If the platform service manager is unavailable, keep
+# the installation usable for read-only commands while task-control fails
+# closed until the service is started manually.
+if command -v agent-infra-internal >/dev/null 2>&1; then
+  case "$(uname -s)" in
+    Linux)
+      if command -v systemctl >/dev/null 2>&1 && systemctl --user list-unit-files >/dev/null 2>&1; then
+        agent-infra-internal host-control install >/dev/null
+        systemctl --user daemon-reload
+        if systemctl --user enable agent-infra-host-control.service >/dev/null 2>&1 \
+          && systemctl --user restart agent-infra-host-control.service >/dev/null 2>&1; then
+          ok "host-control service enabled"
+        else
+          warn "host-control service was installed but could not be started; run: systemctl --user enable agent-infra-host-control.service && systemctl --user restart agent-infra-host-control.service"
+        fi
+      else
+        warn "systemd user services are unavailable; task-control will fail closed until host-control is started manually."
+      fi
+      ;;
+    Darwin)
+      if command -v launchctl >/dev/null 2>&1; then
+        agent-infra-internal host-control install >/dev/null
+        launch_agent="$HOME/Library/LaunchAgents/com.fitlab-ai.agent-infra.host-control.plist"
+        launch_domain="gui/$(id -u)"
+        launchctl bootout "$launch_domain/com.fitlab-ai.agent-infra.host-control" >/dev/null 2>&1 || true
+        # bootout can return before launchd releases the previous registration.
+        launch_attempt=0
+        until launchctl bootstrap "$launch_domain" "$launch_agent" >/dev/null 2>&1; do
+          launch_attempt=$((launch_attempt + 1))
+          if [ "$launch_attempt" -ge 30 ]; then
+            err "host-control service could not be loaded; run: launchctl bootstrap $launch_domain $launch_agent"
+            exit 1
+          fi
+          sleep 1
+        done
+        if launchctl kickstart -k "$launch_domain/com.fitlab-ai.agent-infra.host-control" >/dev/null 2>&1; then
+          ok "host-control service enabled"
+        else
+          err "host-control service could not be started; run: launchctl kickstart -k $launch_domain/com.fitlab-ai.agent-infra.host-control"
+          exit 1
+        fi
+      else
+        warn "launchd is unavailable; task-control will fail closed until host-control is started manually."
+      fi
+      ;;
+    *)
+      warn "host-control service is unsupported on this platform; task-control will fail closed."
+      ;;
+  esac
+fi
+
 if [ "$(uname -s)" = "Linux" ] && ! command -v docker >/dev/null 2>&1; then
   warn "Note: 'ai sandbox' requires Docker Engine. See README 'Platform Support → Linux'."
 fi

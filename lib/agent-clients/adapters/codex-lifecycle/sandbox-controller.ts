@@ -351,9 +351,10 @@ function prepareCodexSandboxController(
     const shimDir = path.join(home, 'bin');
     fs.mkdirSync(shimDir, { mode: 0o700 });
     const internalCli = path.resolve(process.argv[1] ?? path.join(repoRoot, 'bin', 'internal-cli.ts'));
+    const launcherPrefix = ['#!/bin/sh', 'set -eu', 'unset NODE_OPTIONS NODE_PATH'].join('\n') + '\n';
     const source = internalCli.endsWith('.ts')
-      ? `#!/bin/sh\nexec ${shellQuote(process.execPath)} --experimental-strip-types ${shellQuote(internalCli)} "$@"\n`
-      : `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(internalCli)} "$@"\n`;
+      ? `${launcherPrefix}exec ${shellQuote(process.execPath)} --experimental-strip-types ${shellQuote(internalCli)} "$@"\n`
+      : `${launcherPrefix}exec ${shellQuote(process.execPath)} ${shellQuote(internalCli)} "$@"\n`;
     fs.writeFileSync(path.join(shimDir, 'agent-infra-internal'), source, { mode: 0o700 });
 
     const policy = [

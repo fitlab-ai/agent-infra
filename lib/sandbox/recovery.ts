@@ -26,6 +26,8 @@ import { toEnginePath } from './engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from './mounts.ts';
 import {
   assertSandboxTaskSource,
+  prepareSandboxTaskProjection,
+  refreshSandboxTaskProjection,
   sandboxControlPaths,
   sandboxWorkspaceViewPaths
 } from './workspace-view.ts';
@@ -60,9 +62,10 @@ import {
   type BrokerOwner
 } from './control/lifecycle.ts';
 import {
-  appendSandboxControlAudit,
   readSandboxControlStatus
 } from './control/state.ts';
+import { validateSandboxControlIdentity } from './control/identity-sentinel.ts';
+import { appendDiagnosticAudit as appendControlDiagnosticAudit } from './control/audit.ts';
 import { inspectSandboxControlContainer } from './control/container-identity.ts';
 import {
   SANDBOX_CONTROL_FUTURE_SKEW_MS,
@@ -224,6 +227,17 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
   const internalCli = path.resolve(directory, '..', '..', 'bin', `internal-cli${extension}`);
   const manifest = readSandboxControlManifest(manifestPath);
   const root = path.dirname(manifestPath);
+  const identity = validateSandboxControlIdentity({
+    publicStatusDir: manifest.publicStatusDir,
+    root,
+    mode: manifest.mode,
+    taskId: manifest.taskId,
+    generation: manifest.generation,
+    controlRootId: manifest.controlRootId
+  });
+  if (identity.state !== 'valid') {
+    throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
+  }
   if (isSandboxControlRootQuiescing(root)) throw new Error('SANDBOX_CONTROL_QUIESCING');
   const brokerPath = path.join(root, 'broker.json');
   let brokerSnapshot: string | null = null;
@@ -296,8 +310,8 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
       }
     }
     if (replacedBrokerRecord) {
-      appendSandboxControlAudit(manifest, 'broker-observed-crash');
-      appendSandboxControlAudit(manifest, 'broker-restart');
+      appendControlDiagnosticAudit(manifest, 'broker-observed-crash');
+      appendControlDiagnosticAudit(manifest, 'broker-restart');
     }
     child = spawn(
       process.execPath,
@@ -338,6 +352,17 @@ async function ensureSandboxControlBroker(params: {
   });
   if (!fs.existsSync(control.manifestPath)) return;
   const validatedManifest = readSandboxControlManifest(control.manifestPath);
+  const identity = validateSandboxControlIdentity({
+    publicStatusDir: validatedManifest.publicStatusDir,
+    root: control.root,
+    mode: validatedManifest.mode,
+    taskId: validatedManifest.taskId,
+    generation: validatedManifest.generation,
+    controlRootId: validatedManifest.controlRootId
+  });
+  if (identity.state !== 'valid') {
+    throw new Error(`SANDBOX_CONTROL_IDENTITY_${identity.state.replaceAll('-', '_').toUpperCase()}`);
+  }
   const containerObservation = await inspectSandboxControlContainer(validatedManifest);
   if (containerObservation.state === 'unknown') {
     throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${containerObservation.reason}`);
@@ -740,6 +765,7 @@ function expectedMounts(params: {
   const taskSources = params.workspace.mode === 'task-bound'
     ? recoveryTaskSources(config.repoRoot, params.workspace.taskId)
     : null;
+  const taskProjection = params.workspace.mode === 'task-bound' ? view.taskMountPath : null;
   const taskId = params.workspace.mode === 'task-bound' ? params.workspace.taskId : null;
   const core = sandboxCoreBindMounts(config, branch, {
     workspaceViewRoot: view.root,
@@ -749,7 +775,7 @@ function expectedMounts(params: {
       ? {}
       : {
         runtimeDir: control.runtimeDir,
-        taskSources: taskSources.mountPaths,
+        taskSources: [taskProjection!],
         taskId: taskId!
       })
   }).map((mount) => ({
@@ -758,7 +784,7 @@ function expectedMounts(params: {
     hostPaths: mount.hostPaths,
     ...(taskSources !== null && taskId !== null
       && mount.containerPath === `/workspace/.agents/workspace/active/${taskId}`
-      ? { sourceAccessiblePaths: taskSources.accessiblePaths }
+      ? { sourceAccessiblePaths: taskProjection && fs.existsSync(taskProjection) ? [taskProjection] : [] }
       : {}),
     expectedRW: !mount.readOnly
   }));
@@ -1238,6 +1264,26 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   const warnings: string[] = [];
   let failure: Error | null = null;
   try {
+    if (params.workspace?.mode === 'task-bound') {
+      const view = sandboxWorkspaceViewPaths({
+        base: params.config.workspaceViewBase ?? path.join(params.config.home, '.agent-infra', 'workspace-views'),
+        project: params.config.project,
+        container: params.row.name,
+        identity: params.workspace
+      });
+      const activeSource = path.join(params.config.repoRoot, '.agents', 'workspace', 'active', params.workspace.taskId);
+      try {
+        const sourceStat = fs.lstatSync(activeSource);
+        if (sourceStat.isSymbolicLink()) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
+        let projectionExists = false;
+        try { projectionExists = fs.lstatSync(view.taskMountPath!).isDirectory(); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        if (projectionExists) refreshSandboxTaskProjection(params.config.repoRoot, params.workspace.taskId, view.taskMountPath!);
+        else prepareSandboxTaskProjection(params.config.repoRoot, params.workspace.taskId, view.taskMountPath!);
+      } catch (error) {
+        if (error instanceof Error && (error.message.startsWith('SANDBOX_TASK_SOURCE_INVALID') || error.message.startsWith('SANDBOX_TASK_PROJECTION'))) throw error;
+      }
+    }
     if (deps?.ensureControlBroker) {
       await deps.ensureControlBroker();
     } else {

@@ -153,13 +153,19 @@ returns a failed `SANDBOX_CONTROL_OUTPUT_UNAVAILABLE` task result with
 `recovery: inspect-domain-state`; inspect the host task state before deciding
 whether a later retry is safe.
 
-Task lifecycle, finalization, and orchestration use one typed Task Control Authority with separate transport entries. Direct-host commands call the local authority adapter and do not create a broker, control channel, manifest, or sandbox authority root. A sandbox client only creates a control request; the broker-spawned executor becomes the authority caller only after the gate, current manifest, request, owner, lease, and controller checks pass. Branch-only containers, mismatched IDs, unknown command families, and stale shared-workspace containers fail closed. `ai sandbox ls` exposes `WORKSPACE` and `TASK` columns, while `ai sandbox show` reports the same label-derived identity.
+Task lifecycle, finalization, and orchestration use one typed Task Control Authority with separate transport entries. Direct-host commands enter through the fixed host-control service and do not create a sandbox broker, manifest, or authority root. A sandbox client only creates a control request; the broker-spawned executor becomes the authority caller only after the gate, current manifest, request, owner, lease, and controller checks pass. Branch-only containers, mismatched IDs, unknown command families, and stale shared-workspace containers fail closed. `ai sandbox ls` exposes `WORKSPACE` and `TASK` columns, while `ai sandbox show` reports the same label-derived identity.
 
 The parent-plus-child bind topology from v0.9.7 is legacy and intentionally incompatible with the current per-state topology. On upgrade, or when old code encounters a newer per-state container during rollback, the check fails closed; run `ai sandbox start --recreate <task-ref-or-branch>` once. Container-local processes, tmux sessions, the writable layer, ordinary `/tmp`, and RAM state may be lost, while the worktree, local branch, and host-managed task/tool data are preserved.
 
 The control broker publishes a read-only health view inside the container and remains alive while one authorized request runs in a separately tracked process group. Requests carry a per-sandbox generation and a two-second absolute admission deadline. The broker reports `healthy`, `busy`, or `parked`, rejects expired or stale-generation work before acceptance, and terminates a recovered orphan process tree before serving new work. A caller may retry a pre-acceptance `BUSY` or deadline rejection with a new request ID, but must not automatically retry after acceptance when the final result is unknown.
 
 Control timing is centralized in an injectable policy: the production defaults are a 250 ms control tick, 5 s slow checks and container heartbeat, 1 s initial parked backoff growing to 5 s, and a 7 s quiesce deadline. Tests may supply shorter values without changing the safety state machine. The canonical control manifest has one current, versionless schema containing the exact container identity, controlled labels, and root-relative `runtimeDir`; request, response, status, lease, execution, broker-owner, and controller records retain their own independent protocol versions. Materialization creates the control directories and an in-memory draft only. After container identity and labels are inspected, finalization atomically publishes the complete manifest, and only then may the broker start. A missing, versioned, incomplete, or unknown manifest fails closed with a container-only recreation/rebuild instruction; it is not parsed or migrated as a compatibility format. Task-bound containers mount `runtimeDir` read-write at `/run/agent-infra/runtime`, with client state under `runtime/clients/<client>/<store>`, while direct-host execution uses the repository-local `.agents/workspace/.runtime/codex-*` fallback. Failed or uncertain replacement operations retain the control root and evidence.
+
+The host-control service is the only direct-host authority for task-control and workflow writes. Its fixed Linux endpoint is `/run/user/<uid>/agent-infra/host-control.sock`; its macOS endpoint is `/Users/<login>/Library/Application Support/agent-infra/run/host-control.sock`. The endpoint is resolved from the host account identity, never from `HOME`, `TMPDIR`, ordinary environment variables, or command arguments. The service directory and socket must be owned by the host user with modes `0700` and `0600`. The installer manages a user-scoped systemd unit or launchd user agent; `agent-infra-internal host-control status` checks the endpoint. Missing or invalid service authority returns `SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE`; the CLI does not fall back to an in-process task handler.
+
+Task-bound workspaces mount a host-created writable task projection. The authoritative task directory remains outside the container writable view. Workflow transport binds the task, generation and a closed operation catalog, preserving arguments for the same domain parser used by the CLI. The authorized executor calls shared artifact operations directly and runs other workflow commands through the shared isolated CLI worker. That worker inherits the executor's process group, so existing recovery also terminates the actual command; sandbox execution is not redispatched to the service. Direct-host workers remain owned by the service. Responses carry the business exit code, including in failure audits. Rejection before dispatch means no execution; dispatch failures and transport failures after submission mean the result is unknown and must not be automatically retried. The service holds a native file lock for its endpoint lifetime and drains dispatched work before releasing its resources, even after a caller disconnects. Repeated close calls cannot remove a subsequent instance's resources.
+
+Artifact initialization and repair affect candidates only. Finalization uses authoritative task metadata and inventory, prepares validated content and pending provenance once through shared domain logic, publishes that buffer, then commits provenance without repeating validation. The host verifies recorded projection topology, opens canonical top-level candidates with `O_NOFOLLOW`, and reads and hashes each through the same descriptor with observable identity and metadata checks. Publication never reopens the candidate; projection edits never copy `task.md` or arbitrary files into authority. Recovery reuses the lifecycle journal parser and the complete orchestration evidence contract, including its PR fields. Artifact replacement is atomic, but replacement and provenance are not a cross-file transaction: a failure after publication can require inspecting domain state before retrying.
 
 Explicit `ai sandbox rm` and `--purge` use the exact recorded container ID. Creation records a redacted Docker authority fingerprint (route, daemon identity, and API version); cleanup must verify that authority before replaying the route. The verified Docker CLI query uses `container ls --all --no-trunc --filter id=<full-id>` with a fixed machine-readable ID format, and only a successful zero-row result proves exact absence. They quiesce the broker and executions, wait through the soft-stop phase, remove the exact container, verify authoritative exact-ID absence, recheck the manifest and owner generation, and only then use remaining-deadline force cleanup. A not-found result for the exact ID is not confused with a newly recreated container using the same name. Unknown inspection, removal failure, owner replacement, or an exhausted deadline leaves the control root and evidence in place for a later controlled retry. Cleanup serializes contenders with a per-user native file lock stored outside the control tree; the lock object is retained for future retries.
 
@@ -234,7 +240,7 @@ operator decision to discard the selected sandbox and rebuild it, and may stop
 running executions. Both paths retain exact container authority/identity, managed
 path and ownership checks, and stop execution before host cleanup. They do not
 promise atomic source-instance moves against unrelated host programs replacing
-the selected directories concurrently. No privileged host service is required.
+the selected directories concurrently. A privileged host service is not required; task-control uses the user-scoped host-control service described above.
 An unreachable engine or an unknown removal result remains retryable, not success.
 Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
 behind by older versions or interrupted cleanup, then `ai sandbox prune` to
@@ -263,6 +269,9 @@ manifest and is not necessarily the same host path as the container path):
 ```text
 control-root/
 ├── manifest.json
+├── public/
+│   ├── identity.json
+│   └── status.json
 ├── broker.json
 ├── channel/
 │   ├── requests/<request-id>.json
@@ -276,9 +285,40 @@ control-root/
 │   ├── reservation.json
 │   └── result.json
 ├── consumed/<request-id>
-├── public/status.json
 └── audit.ndjson
 ```
+
+`public/identity.json` is the read-only sandbox identity sentinel. It contains
+the current mode, task binding, generation, and an opaque `controlRootId`; it
+never contains the control token. The host manifest and each broker/client
+compare these values before routing or executing a task operation. A missing,
+malformed, or conflicting sentinel fails closed. An old task-bound container
+must be stopped and recreated so it receives a current control root.
+Task-control dispatch also checks the fixed read-only status mount at
+`/run/agent-infra/control-status` when environment markers are absent; a
+discovered mount without a valid matching sentinel fails closed.
+
+The broker writes structured audit records with separate critical and
+diagnostic paths. Critical phases are durable and fsynced; failure before a
+mutation blocks the request, while failure after an accepted start preserves
+an uncertain result and never authorizes replay. Audit fields are filtered so
+tokens, credentials, proofs, arguments, and raw output are not logged. The
+audit file may exceed its soft 1 MiB limit while a request is active; rotation
+waits until every processing directory has a terminal transition, then
+renames and fsyncs the old segment under the shared lock.
+
+Each current request also has immutable transition records under
+`processing/<request-id>/transitions/`, including `accepted-committed`,
+`started-committed`, and `published-committed` when those boundaries are
+reached. `terminal-result.json` binds the durable result to the request ID,
+generation and operation digest, retaining target state and completion evidence.
+Lifecycle progress is read from the domain journal rather than duplicated here. Broker
+recovery reconstructs a response only from this binding plus the operation's
+domain evidence. It distinguishes not-executed, in-progress, success,
+failure, and unknown; a started request without matching terminal or domain
+evidence remains unknown and is not replayed. Orchestration route reads are
+separate from `route.clean-completion`, whose success requires the reviewed
+head and clean-worktree completion evidence.
 
 The client first checks the generation and broker heartbeat in `status.json`.
 It then writes a request to a private temporary file and renames it to

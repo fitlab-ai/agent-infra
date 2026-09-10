@@ -8,11 +8,12 @@ import {
   assertSandboxTaskSource,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
+  prepareSandboxTaskProjection,
   prepareSandboxWorkspaceMountTargets,
   sandboxWorkspaceViewStatePaths
 } from '../../../lib/sandbox/workspace-view.ts';
 import { acquireSandboxControlReplacement } from '../../../lib/sandbox/control/lifecycle.ts';
-import { assertModeBits } from '../../helpers.ts';
+import { assertModeBits, onPlatforms } from '../../helpers.ts';
 
 test('workspace view state paths use the isolated runtime state allowlist', () => {
   assert.deepEqual(sandboxWorkspaceViewStatePaths('/views/current'), [
@@ -112,7 +113,21 @@ test('task sources reject symlinks before they become writable mounts', () => {
   assert.throws(() => assertSandboxTaskSource(root, 'TASK-20260809-010203'), /SOURCE_INVALID/);
 });
 
-test('control materialization rotates token and generation and creates isolated status paths', () => {
+test('task-bound writable source is a host-owned projection copy', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-projection-'));
+  const taskId = 'TASK-20260809-010203';
+  const source = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const projection = path.join(root, 'view', taskId);
+  fs.mkdirSync(source, { recursive: true });
+  fs.writeFileSync(path.join(source, 'task.md'), 'authoritative\n');
+  const result = prepareSandboxTaskProjection(root, taskId, projection);
+  fs.writeFileSync(path.join(result, 'task.md'), 'candidate\n');
+  assert.equal(fs.readFileSync(path.join(source, 'task.md'), 'utf8'), 'authoritative\n');
+  assert.equal(fs.readFileSync(path.join(result, 'task.md'), 'utf8'), 'candidate\n');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('control materialization rotates token and generation and creates isolated status paths', onPlatforms('linux', 'darwin'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-view-'));
   const repoRoot = path.join(root, 'repo');
   fs.mkdirSync(repoRoot);
