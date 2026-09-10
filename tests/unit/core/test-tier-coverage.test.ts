@@ -47,6 +47,16 @@ test("test:smoke:fast script targets the same unit tier without a build", () => 
     "test:smoke:fast must not include integration/e2e globs");
 });
 
+test("platform smoke scripts target only the migrated integration boundary", () => {
+  const pkg = JSON.parse(read("package.json"));
+  for (const name of ["test:platform-smoke", "test:platform-smoke:fast"]) {
+    const script = pkg.scripts[name];
+    assert.match(script, /tests\/integration\/platform-smoke\/\*\*\/\*\.test\.ts/);
+    assert.ok(!/tests\/unit|tests\/e2e/.test(script),
+      `${name} must not include unit/e2e globs`);
+  }
+});
+
 test("test:core script targets unit and integration tiers", () => {
   const pkg = JSON.parse(read("package.json"));
   const core = pkg.scripts["test:core"];

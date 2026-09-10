@@ -1,0 +1,165 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import {
+  assertSandboxTaskSource,
+  materializeSandboxControl,
+  materializeSandboxWorkspaceView,
+  prepareSandboxTaskProjection,
+  prepareSandboxWorkspaceMountTargets,
+  sandboxWorkspaceViewStatePaths
+} from '../../../../lib/sandbox/workspace-view.ts';
+import { acquireSandboxControlReplacement } from '../../../../lib/sandbox/control/lifecycle.ts';
+import { assertModeBits, onPlatforms } from '../../../helpers.ts';
+
+test('workspace view state paths use the isolated runtime state allowlist', () => {
+  assert.deepEqual(sandboxWorkspaceViewStatePaths('/views/current'), [
+    { state: 'active', hostPath: path.join('/views/current', 'active') },
+    { state: 'completed', hostPath: path.join('/views/current', 'completed') },
+    { state: 'blocked', hostPath: path.join('/views/current', 'blocked') },
+    { state: 'archive', hostPath: path.join('/views/current', 'archive') }
+  ]);
+});
+
+test('task-bound view contains only the scoped registry and task placeholder', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-view-'));
+  const view = materializeSandboxWorkspaceView({
+    base: root,
+    project: 'p',
+    container: 'p-dev-feature',
+    identity: { mode: 'task-bound', taskId: 'TASK-20260809-010203', shortId: '8' }
+  });
+
+  assert.deepEqual(fs.readdirSync(view.root).sort(), ['active', 'archive', 'blocked', 'completed']);
+  assert.deepEqual(fs.readdirSync(path.join(view.root, 'active')).sort(), [
+    '.short-ids.json',
+    'TASK-20260809-010203'
+  ]);
+  assert.equal(
+    fs.readFileSync(path.join(view.root, 'active', '.short-ids.json'), 'utf8'),
+    '{"version":1,"ids":{"8":"TASK-20260809-010203"}}\n'
+  );
+});
+
+test('branch-only view is stable and exposes an empty registry', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-view-'));
+  const view = materializeSandboxWorkspaceView({
+    base: root,
+    project: 'p',
+    container: 'p-dev-feature',
+    identity: { mode: 'branch-only' }
+  });
+  assert.deepEqual(fs.readdirSync(path.join(view.root, 'active')), ['.short-ids.json']);
+  assert.equal(fs.readFileSync(path.join(view.root, 'active', '.short-ids.json'), 'utf8'), '{"version":1,"ids":{}}\n');
+});
+
+test('workspace mount targets are created by the host with private permissions', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-'));
+
+  prepareSandboxWorkspaceMountTargets(root);
+
+  const workspace = path.join(root, '.agents', 'workspace');
+  assert.equal(fs.statSync(workspace).isDirectory(), true);
+  assertModeBits(workspace, 0o700);
+  for (const { hostPath } of sandboxWorkspaceViewStatePaths(workspace)) {
+    assert.equal(fs.statSync(hostPath).isDirectory(), true);
+    assertModeBits(hostPath, 0o700);
+  }
+  assert.equal(fs.statSync(path.join(workspace, 'active', '.short-ids.json')).isFile(), true);
+});
+
+test('workspace mount targets preserve existing runtime content on repeat', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-repeat-'));
+  const workspace = path.join(root, '.agents', 'workspace');
+  prepareSandboxWorkspaceMountTargets(root);
+  const registry = path.join(workspace, 'active', '.short-ids.json');
+  const sentinel = path.join(workspace, 'active', 'sentinel');
+  fs.writeFileSync(registry, '{"keep":true}\n');
+  fs.writeFileSync(sentinel, 'preserve\n');
+
+  prepareSandboxWorkspaceMountTargets(root);
+
+  assert.equal(fs.readFileSync(registry, 'utf8'), '{"keep":true}\n');
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'preserve\n');
+});
+
+test('workspace mount targets reject symbolic-link destinations', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-link-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-outside-'));
+  fs.mkdirSync(path.join(root, '.agents'));
+  fs.symlinkSync(outside, path.join(root, '.agents', 'workspace'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  assert.throws(() => prepareSandboxWorkspaceMountTargets(root), /must not contain a symbolic link/);
+});
+
+test('workspace mount target rejects symbolic-link ancestors', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-ancestor-link-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-ancestor-outside-'));
+  fs.symlinkSync(outside, path.join(root, '.agents'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  assert.throws(() => prepareSandboxWorkspaceMountTargets(root), /must not contain a symbolic link/);
+});
+
+test('task sources reject symlinks before they become writable mounts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-source-'));
+  const active = path.join(root, '.agents', 'workspace', 'active');
+  const outside = path.join(root, 'outside');
+  fs.mkdirSync(active, { recursive: true });
+  fs.mkdirSync(outside);
+  fs.symlinkSync(outside, path.join(active, 'TASK-20260809-010203'));
+  assert.throws(() => assertSandboxTaskSource(root, 'TASK-20260809-010203'), /SOURCE_INVALID/);
+});
+
+test('task-bound writable source is a host-owned projection copy', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-projection-'));
+  const taskId = 'TASK-20260809-010203';
+  const source = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const projection = path.join(root, 'view', taskId);
+  fs.mkdirSync(source, { recursive: true });
+  fs.writeFileSync(path.join(source, 'task.md'), 'authoritative\n');
+  const result = prepareSandboxTaskProjection(root, taskId, projection);
+  fs.writeFileSync(path.join(result, 'task.md'), 'candidate\n');
+  assert.equal(fs.readFileSync(path.join(source, 'task.md'), 'utf8'), 'authoritative\n');
+  assert.equal(fs.readFileSync(path.join(result, 'task.md'), 'utf8'), 'candidate\n');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('control materialization rotates token and generation and creates isolated status paths', onPlatforms('linux', 'darwin'), () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-view-'));
+  const repoRoot = path.join(root, 'repo');
+  fs.mkdirSync(repoRoot);
+  fs.writeFileSync(path.join(repoRoot, 'source.txt'), 'base\n');
+  const git = (args: string[]) => execFileSync('git', args, { cwd: repoRoot });
+  git(['init', '-q']);
+  git(['config', 'user.name', 'Test']);
+  git(['config', 'user.email', 'test@example.com']);
+  git(['add', 'source.txt']);
+  git(['commit', '-qm', 'base']);
+  const branch = execFileSync('git', ['branch', '--show-current'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  const params = {
+    base: path.join(root, 'controls'), repoRoot, worktreeRoot: repoRoot, project: 'p', container: 'p-dev-feature', branch,
+    identity: { mode: 'branch-only' as const }
+  };
+  const first = materializeSandboxControl(params);
+  const controlRoot = path.dirname(first.manifestPath);
+  fs.writeFileSync(path.join(controlRoot, 'consumed', 'request-id'), '');
+  const replacementLease = acquireSandboxControlReplacement(controlRoot);
+  const second = materializeSandboxControl({ ...params, replacementLease });
+  replacementLease.release();
+  assert.notEqual(second.token, first.token);
+  assert.notEqual(second.generation, first.generation);
+  assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'consumed')), []);
+  assert.equal(path.dirname(path.join(controlRoot, 'consumed')), controlRoot);
+  assert.equal(fs.existsSync(second.manifestPath), false);
+  const manifest = second.manifestDraft;
+  assert.equal(manifest.generation, second.generation);
+  assert.equal(manifest.publicStatusDir, path.join(controlRoot, 'public'));
+  assert.equal(manifest.processingDir, path.join(controlRoot, 'processing'));
+  assert.equal(manifest.runtimeDir, path.join(controlRoot, 'runtime'));
+  assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'runtime', 'clients', 'codex')).sort(), ['capabilities', 'lifecycle']);
+  assert.equal(second.statusDir, path.join(controlRoot, 'public'));
+  assert.equal(manifest.worktreeRoot, fs.realpathSync.native(repoRoot));
+});
