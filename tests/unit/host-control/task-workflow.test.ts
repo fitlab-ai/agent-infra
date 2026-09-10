@@ -5,15 +5,12 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
-  captureProjectionTopology,
   createTaskWorkflowRequest,
-  landProjectionArtifact,
+  readTaskArtifact,
   validateTaskWorkflowRequest,
-  readProjectionArtifact,
-  type TaskProjectionManifest
+  writeTaskArtifact
 } from '../../../lib/sandbox/control/task-workflow.ts';
 import { parseArtifactCommand } from '../../../lib/task/artifact-command.ts';
-import { onPlatforms } from '../../helpers.ts';
 
 function testRoot(prefix: string): string {
   return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -46,64 +43,27 @@ test('task-workflow routes candidate initialization and repair with task binding
   }
 });
 
-test('artifact landing refuses an unverified projection topology before reading', async () => {
-  const root = testRoot('task-workflow-topology-');
-  const projection = path.join(root, 'projection');
-  const authoritative = path.join(root, 'authoritative');
-  fs.mkdirSync(projection);
-  fs.mkdirSync(authoritative);
-  fs.writeFileSync(path.join(projection, 'plan.md'), 'candidate\n');
-  const manifest: TaskProjectionManifest = {
-    version: 1,
-    taskId: 'TASK-20260904-002407',
-    generation: 'generation-1',
-    projectionRoot: projection,
-    authoritativeTaskDir: authoritative,
-    topology: { verified: false, ancestors: [] }
-  };
+test('task-workflow reads and compare-writes the shared task directory', async () => {
+  const root = testRoot('task-workflow-direct-');
+  const taskDir = path.join(root, 'active', 'TASK-20260904-002407');
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'plan.md'), 'candidate\n');
+  const candidate = await readTaskArtifact(taskDir, { artifact: 'plan.md' });
+  await writeTaskArtifact(taskDir, {
+    artifact: candidate.artifact,
+    bytes: Buffer.from('published\n'),
+    expectedSha256: candidate.sha256
+  });
+  assert.equal(fs.readFileSync(path.join(taskDir, 'plan.md'), 'utf8'), 'published\n');
+  fs.writeFileSync(path.join(taskDir, 'plan.md'), 'concurrent\n');
   await assert.rejects(
-    readProjectionArtifact(manifest, { artifact: 'plan.md' }),
-    /TASK_PROJECTION_TOPOLOGY_UNVERIFIED/
+    writeTaskArtifact(taskDir, {
+      artifact: candidate.artifact,
+      bytes: Buffer.from('stale\n'),
+      expectedSha256: candidate.sha256
+    }),
+    /TASK_ARTIFACT_WRITE_CONFLICT/
   );
-  assert.equal(fs.readdirSync(authoritative).length, 0);
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('projection topology records canonical ancestors through a directory alias', onPlatforms('linux', 'darwin'), () => {
-  const root = testRoot('task-workflow-alias-');
-  const alias = `${root}-alias`;
-  const projection = path.join(root, 'projection');
-  fs.mkdirSync(projection);
-  fs.symlinkSync(root, alias, 'dir');
-  try {
-    const topology = captureProjectionTopology(path.join(alias, 'projection'));
-    assert.equal(topology[0]?.path, fs.realpathSync.native(projection));
-    assert.equal(topology.some((ancestor) => ancestor.path.startsWith(alias)), false);
-  } finally {
-    fs.rmSync(alias, { force: true });
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('artifact landing verifies, hashes, and atomically copies the same projection bytes', onPlatforms('linux', 'darwin'), async () => {
-  const root = testRoot('task-workflow-landing-');
-  const projection = path.join(root, 'projection');
-  const authoritative = path.join(root, 'authoritative');
-  fs.mkdirSync(projection);
-  fs.mkdirSync(authoritative);
-  fs.writeFileSync(path.join(projection, 'plan.md'), 'candidate\n');
-  const manifest: TaskProjectionManifest = {
-    version: 1,
-    taskId: 'TASK-20260904-002407',
-    generation: 'generation-1',
-    projectionRoot: projection,
-    authoritativeTaskDir: authoritative,
-    topology: { verified: true, ancestors: captureProjectionTopology(projection) }
-  };
-  const candidate = await readProjectionArtifact(manifest, { artifact: 'plan.md' });
-  fs.writeFileSync(path.join(projection, 'plan.md'), 'changed after validation\n');
-  await landProjectionArtifact(manifest, candidate);
-  assert.equal(candidate.bytes.length, Buffer.byteLength('candidate\n'));
-  assert.equal(fs.readFileSync(path.join(authoritative, 'plan.md'), 'utf8'), 'candidate\n');
+  assert.equal(fs.readFileSync(path.join(taskDir, 'plan.md'), 'utf8'), 'concurrent\n');
   fs.rmSync(root, { recursive: true, force: true });
 });

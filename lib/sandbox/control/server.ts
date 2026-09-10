@@ -68,6 +68,7 @@ import { readLifecycleJournalEvidence } from '../../task/lifecycle.ts';
 import { resolveTaskRef } from '../../task/resolve-ref.ts';
 import { loadShortIdByTaskId } from '../../task/short-id.ts';
 import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
+import { hasLegacySandboxProjection } from '../cutover.ts';
 import {
   acquireSandboxControlBrokerStartup,
   garbageCollectSandboxControlRoot,
@@ -1029,6 +1030,7 @@ export async function serveSandboxControl(
   const bindingCheck = options.bindingCheck ?? bindingReason;
   const prepareExecution = options.prepareExecution ?? prepareSandboxControlExecution;
   const manifest = readSandboxControlManifest(manifestPath);
+  if (hasLegacySandboxProjection(manifest)) throw new Error('SANDBOX_CONTROL_RECREATE_REQUIRED');
   const root = path.dirname(manifestPath);
   assertCurrentSandboxControlIdentity(manifest, manifestPath);
   const startTime = getProcessStartTime(process.pid);

@@ -6,23 +6,6 @@ import { readStableFile, SecureFileError, writeAtomicFile } from '../../host-con
 
 import { TASK_WORKFLOW_COMMANDS, TASK_WORKFLOW_OPERATIONS, type TaskWorkflowOperation, type WorkflowCommand } from '../../task/workflow-command.ts';
 
-export type ProjectionAncestorIdentity = Readonly<{
-  path: string;
-  realpath: string;
-  dev: number;
-  ino: number;
-  mountIdentity: string;
-}>;
-
-export type TaskProjectionManifest = Readonly<{
-  version: 1;
-  taskId: string;
-  generation: string;
-  projectionRoot: string;
-  authoritativeTaskDir: string;
-  topology: Readonly<{ verified: boolean; ancestors: readonly ProjectionAncestorIdentity[] }>;
-}>;
-
 export type TaskWorkflowRequest = Readonly<{
   version: 1;
   id: string;
@@ -68,63 +51,45 @@ export function canonicalArtifactName(value: string): boolean {
     && path.basename(value) === value;
 }
 
-export function captureProjectionTopology(root: string): readonly ProjectionAncestorIdentity[] {
-  const ancestors: ProjectionAncestorIdentity[] = [];
-  let current = fs.realpathSync.native(path.resolve(root));
-  while (true) {
-    const stat = fs.lstatSync(current);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED');
-    const realpath = fs.realpathSync.native(current);
-    ancestors.push({ path: current, realpath, dev: stat.dev, ino: stat.ino, mountIdentity: String(stat.dev) });
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
+function assertTaskArtifactDirectory(directory: string): string {
+  const resolved = path.resolve(directory);
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(resolved);
+  } catch {
+    throw new SecureFileError('TASK_ARTIFACT_WRITE_DENIED', 'task directory is unavailable');
   }
-  return ancestors;
-}
-
-export function verifyProjectionTopology(manifest: TaskProjectionManifest): void {
-  if (!manifest.topology.verified || manifest.topology.ancestors.length === 0) throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED');
-  for (const expected of manifest.topology.ancestors) {
-    let stat: fs.Stats;
-    try { stat = fs.lstatSync(expected.path); } catch { throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED'); }
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED');
-    if (stat.dev !== expected.dev || stat.ino !== expected.ino || fs.realpathSync.native(expected.path) !== expected.realpath) {
-      throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED');
-    }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new SecureFileError('TASK_ARTIFACT_WRITE_DENIED', 'task directory must be a real directory');
   }
+  return resolved;
 }
 
-function assertAuthoritativeDirectory(directory: string): void {
-  const stat = fs.lstatSync(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('TASK_ARTIFACT_WRITE_DENIED');
-}
-
-/** Publish the already-validated buffer; never reopen an agent-controlled candidate. */
-export async function landProjectionArtifact(
-  manifest: TaskProjectionManifest,
-  artifact: Readonly<{ artifact: string; bytes: Buffer }>
-): Promise<void> {
-  if (!canonicalArtifactName(artifact.artifact)) throw new Error('TASK_ARTIFACT_WRITE_DENIED');
-  await writeAtomicFile(path.join(manifest.authoritativeTaskDir, artifact.artifact), artifact.bytes);
-}
-
-export async function readProjectionArtifact(
-  manifest: TaskProjectionManifest,
+export async function readTaskArtifact(
+  taskDir: string,
   input: Readonly<{
     artifact: string;
     expectedSha256?: string;
   }>
 ): Promise<Readonly<{ artifact: string; bytes: Buffer; sha256: string }>> {
   if (!canonicalArtifactName(input.artifact)) throw new SecureFileError('TASK_ARTIFACT_WRITE_DENIED', 'artifact must be a canonical top-level basename');
-  verifyProjectionTopology(manifest);
-  assertAuthoritativeDirectory(manifest.authoritativeTaskDir);
-  const candidate = path.join(manifest.projectionRoot, input.artifact);
-  const root = path.resolve(manifest.projectionRoot);
-  if (path.dirname(candidate) !== root) throw new SecureFileError('TASK_ARTIFACT_WRITE_DENIED', 'artifact escapes projection root');
+  const root = assertTaskArtifactDirectory(taskDir);
+  const candidate = path.join(root, input.artifact);
+  if (path.dirname(candidate) !== root) throw new SecureFileError('TASK_ARTIFACT_WRITE_DENIED', 'artifact escapes task directory');
   const stable = await readStableFile(candidate, {
     maxBytes: 1024 * 1024,
     ...(input.expectedSha256 ? { expectedSha256: input.expectedSha256 } : {})
   });
   return { artifact: input.artifact, bytes: stable.bytes, sha256: stable.sha256 };
+}
+
+export async function writeTaskArtifact(
+  taskDir: string,
+  artifact: Readonly<{ artifact: string; bytes: Buffer; expectedSha256?: string }>
+): Promise<void> {
+  if (!canonicalArtifactName(artifact.artifact)) throw new SecureFileError('TASK_ARTIFACT_WRITE_DENIED', 'artifact must be a canonical top-level basename');
+  const root = assertTaskArtifactDirectory(taskDir);
+  const target = path.join(root, artifact.artifact);
+  if (path.dirname(target) !== root) throw new SecureFileError('TASK_ARTIFACT_WRITE_DENIED', 'artifact escapes task directory');
+  await writeAtomicFile(target, artifact.bytes, 0o600, artifact.expectedSha256);
 }
