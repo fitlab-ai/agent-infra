@@ -46,7 +46,7 @@ test('manual-validation final summary digest binds the canonical identity projec
     ...input,
     finalSummaryDigest: manualValidationFinalSummaryDigest(placeholder)
   });
-  const body = placeholder.replace('<receipt>', receipt.receiptDigest);
+  const body = `<!-- sync-pr:TASK-20260910-000001:summary -->\n\n### PR 代码增减\n\nreport\n\n${placeholder.replace('<receipt>', receipt.receiptDigest)}`;
   assert.equal(manualValidationFinalSummaryProjectionMatches(body, receipt), true);
   assert.equal(manualValidationFinalSummaryProjectionMatches(body.replace(input.prHeadSha, 'f'.repeat(40)), receipt), false);
 });

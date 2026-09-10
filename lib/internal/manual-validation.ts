@@ -16,13 +16,25 @@ import type { ManualValidationTransaction } from '../task/manual-validation-tran
 import type { ManualValidationReceipt } from '../task/manual-validation-receipt.ts';
 import { sha256File } from '../task/artifact-receipts.ts';
 import { summaryCommentState, summaryContext, syncPullRequestSummary } from '../platform/pr-summary.ts';
+import type { PlatformClient } from '../platform/context.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal manual-validation verify <task-ref> --evidence-file <path> [--format json|text] [--cwd <path>]
        agent-infra-internal manual-validation transaction <task-ref> --prepare --evidence-file <path> --artifact <artifact> --summary-file <path> --agent <agent> [--cwd <path>]
        agent-infra-internal manual-validation transaction <task-ref> --evidence-file <path> --artifact <artifact> --summary-file <path> --change-report-file <path> --agent <agent> [--result pr_created|pr_reused|no_op] [--cwd <path>]`;
 
-type VerifyOptions = { evidenceFile: string; format: 'json' | 'text'; cwd?: string };
+type VerifyOptions = { evidenceFile: string; format: 'json' | 'text'; cwd?: string; client?: PlatformClient };
+type ManualValidationCoordinatorOptions = { client?: PlatformClient };
+type ManualValidationResult = {
+  status: 'applied' | 'failed';
+  changed: false;
+  error: { code: string; message: string } | null;
+  transaction?: ManualValidationTransaction;
+  receipt?: ManualValidationReceipt;
+  prepared?: boolean;
+  idempotent?: boolean;
+  [key: string]: unknown;
+};
 type VerifiedManualValidation = {
   status: 'applied';
   changed: false;
@@ -34,7 +46,7 @@ type VerifiedManualValidation = {
   freshness: 'current';
 };
 
-function result(status: 'applied' | 'failed', error: { code: string; message: string } | null = null, extra: Record<string, unknown> = {}) {
+function result(status: 'applied' | 'failed', error: { code: string; message: string } | null = null, extra: Record<string, unknown> = {}): ManualValidationResult {
   return { status, changed: false, error, ...extra };
 }
 
@@ -52,7 +64,7 @@ async function verifyManualValidationEvidence(taskRef: string, options: VerifyOp
   catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_EVIDENCE_INVALID', message: error instanceof Error ? error.message : String(error) }); }
   const fact = readPrDeliveryFact(frontmatter);
   if (fact.status !== 'valid' || fact.fact.state !== 'bound') return result('failed', { code: 'MANUAL_VALIDATION_EVIDENCE_PR_REQUIRED', message: 'task has no verified bound pull request' });
-  const summary = await summaryContext(taskRef, { cwd: resolved.repoRoot });
+  const summary = await summaryContext(taskRef, { cwd: resolved.repoRoot, client: options.client });
   if (!summary.pullRequest) return result('failed', { code: 'MANUAL_VALIDATION_EVIDENCE_PR_REQUIRED', message: 'canonical pull-request head is unavailable' });
   const evidence = readManualValidationEvidence(path.resolve(resolved.repoRoot, options.evidenceFile));
   if (!evidence.ok) return result('failed', evidence.error);
@@ -98,7 +110,7 @@ function openManualValidationStarted(taskMdPath: string): { present: boolean; tr
   };
 }
 
-async function executeManualValidationTransaction(taskRef: string, values: Record<string, string>, cwd: string) {
+async function executeManualValidationTransaction(taskRef: string, values: Record<string, string>, cwd: string, options: ManualValidationCoordinatorOptions = {}) {
   const prepareOnly = values.prepare === 'true';
   const required = prepareOnly
     ? ['evidenceFile', 'artifact', 'summaryFile', 'agent'] as const
@@ -116,7 +128,7 @@ async function executeManualValidationTransaction(taskRef: string, values: Recor
       resolved.repoRoot,
       resolved.taskId,
       `manual-validation:${taskRef}`,
-      () => executeManualValidationTransactionLocked(taskRef, values, cwd, resolved, agent, primaryResult as 'pr_created' | 'pr_reused' | 'no_op', prepareOnly)
+      () => executeManualValidationTransactionLocked(taskRef, values, cwd, resolved, agent, primaryResult as 'pr_created' | 'pr_reused' | 'no_op', prepareOnly, options)
     );
   } catch (error) {
     if (error instanceof TaskExecutionLockError) return result('failed', { code: error.code, message: error.message });
@@ -131,16 +143,18 @@ async function executeManualValidationTransactionLocked(
   resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
   agent: string,
   primaryResult: 'pr_created' | 'pr_reused' | 'no_op',
-  prepareOnly: boolean
+  prepareOnly: boolean,
+  options: ManualValidationCoordinatorOptions
 ) {
-  const verified = await verifyManualValidationEvidence(taskRef, { evidenceFile: values.evidenceFile!, format: 'json', cwd });
+  const verified = await verifyManualValidationEvidence(taskRef, { evidenceFile: values.evidenceFile!, format: 'json', cwd, client: options.client });
   if (verified.status === 'failed') return verified;
   if (!('evidence' in verified) || !('pullRequest' in verified)) return result('failed', { code: 'MANUAL_VALIDATION_EVIDENCE_INVALID', message: 'verified evidence result is incomplete' });
-  const evidence = verified.evidence;
-  const pullRequest = verified.pullRequest as { number: number; head: { repository: string; ref: string; sha: string }; base: { repository: string; ref: string; sha: string } };
+  const verifiedSuccess = verified as VerifiedManualValidation;
+  const evidence = verifiedSuccess.evidence;
+  const pullRequest = verifiedSuccess.pullRequest as { number: number; head: { repository: string; ref: string; sha: string }; base: { repository: string; ref: string; sha: string } };
   const artifactPath = path.resolve(resolved.taskDir, values.artifact!);
   if (!prepareOnly && !fs.existsSync(artifactPath)) return result('failed', { code: 'MANUAL_VALIDATION_ARTIFACT_MISSING', message: `manual-validation artifact is missing: ${values.artifact}` });
-  const currentState = await summaryCommentState(taskRef, { cwd });
+  const currentState = await summaryCommentState(taskRef, { cwd, client: options.client });
   if (!currentState.pullRequest || currentState.pullRequest.head.sha !== pullRequest.head.sha) return result('failed', { code: 'MANUAL_VALIDATION_EVIDENCE_STALE', message: 'pull-request head changed before transaction preparation' });
   const preimageBody = currentState.comment?.body ?? '';
   const preimage = { commentId: currentState.comment?.id ?? null, body: preimageBody, digest: summaryPreimageDigest(preimageBody) };
@@ -195,12 +209,12 @@ async function executeManualValidationTransactionLocked(
         writeManualValidationTransactionAtomic(resolved.taskDir, prepared);
       }
       if (prepared.phase === 'prepared') {
-        const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: prepared.transactionId, reasonCode: 'user-request', transactionId: prepared.transactionId }, { lockAlreadyHeld: true });
+        const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: prepared.transactionId, reasonCode: 'user-request', transactionId: prepared.transactionId }, { lockAlreadyHeld: true, repoRoot: cwd });
         if (started.status === 'failed') return result('failed', started.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation started event failed' });
       }
       return result('applied', null, { transaction: prepared, prepared: true, idempotent: true });
     }
-    const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: transactionId, reasonCode: 'user-request', transactionId }, { lockAlreadyHeld: true });
+    const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: transactionId, reasonCode: 'user-request', transactionId }, { lockAlreadyHeld: true, repoRoot: cwd });
     if (started.status === 'failed') return result('failed', started.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation started event failed' });
     prepared = createTransaction();
     if (previousTransaction) {
@@ -213,7 +227,7 @@ async function executeManualValidationTransactionLocked(
   let transaction: ManualValidationTransaction;
   if (!transactionResult.ok) {
     transaction = createTransaction();
-    const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: transactionId, reasonCode: 'user-request', transactionId }, { lockAlreadyHeld: true });
+    const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: transactionId, reasonCode: 'user-request', transactionId }, { lockAlreadyHeld: true, repoRoot: cwd });
     if (started.status === 'failed') return result('failed', started.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation started event failed' });
     if (previousTransaction) {
       try { archiveManualValidationGeneration(resolved.taskDir, previousTransaction, previousTransaction.phase === 'committed'); }
@@ -234,10 +248,10 @@ async function executeManualValidationTransactionLocked(
   };
   try {
     if (transaction.phase === 'prepared') {
-      const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: transaction.transactionId, reasonCode: 'user-request', transactionId: transaction.transactionId }, { lockAlreadyHeld: true });
+      const started = applyTaskEvent({ taskRef, event: 'manual-validation.started', agent, initiator: 'model', requestId: transaction.transactionId, reasonCode: 'user-request', transactionId: transaction.transactionId }, { lockAlreadyHeld: true, repoRoot: cwd });
       if (started.status === 'failed') transactionFailure(started.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation started event failed' });
       const staged = await syncPullRequestSummary(taskRef, {
-        cwd, agent, body: pendingBody, changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', strict: true,
+        cwd, client: options.client, agent, body: pendingBody, changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', strict: true,
         manualValidation: { phase: 'pending', evidenceFile: values.evidenceFile!, evidenceDigest: transaction.evidenceDigest }, lockAlreadyHeld: true
       });
       if (!['applied', 'no-op'].includes(staged.status)) transactionFailure(staged.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'pending summary staging failed' });
@@ -280,7 +294,7 @@ async function executeManualValidationTransactionLocked(
       writeManualValidationTransactionAtomic(resolved.taskDir, transaction);
     }
     if (transaction.phase === 'receipt-committed' && !transaction.eventAppended) {
-      const completed = applyTaskEvent({ taskRef, event: 'manual-validation.completed', agent, initiator: 'model', requestId: transaction.transactionId, reasonCode: 'user-request', artifact: values.artifact, summaryResult: 'verified current evidence and committed receipt', evidenceFile: values.evidenceFile, transactionId: transaction.transactionId, receiptDigest: receipt.receiptDigest, evidenceDigest: receipt.evidenceDigest, prHeadSha: receipt.prHeadSha }, { lockAlreadyHeld: true });
+      const completed = applyTaskEvent({ taskRef, event: 'manual-validation.completed', agent, initiator: 'model', requestId: transaction.transactionId, reasonCode: 'user-request', artifact: values.artifact, summaryResult: 'verified current evidence and committed receipt', evidenceFile: values.evidenceFile, transactionId: transaction.transactionId, receiptDigest: receipt.receiptDigest, evidenceDigest: receipt.evidenceDigest, prHeadSha: receipt.prHeadSha }, { lockAlreadyHeld: true, repoRoot: cwd });
       if (completed.status === 'failed') transactionFailure(completed.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation completion event failed' });
       const eventTransaction = transitionManualValidationTransaction(transaction, 'receipt-committed', { eventAppended: true });
       if (!eventTransaction.ok) throw new Error(`${eventTransaction.error.code}: ${eventTransaction.error.message}`);
@@ -294,11 +308,11 @@ async function executeManualValidationTransactionLocked(
       writeManualValidationTransactionAtomic(resolved.taskDir, transaction);
     }
     const promoted = await syncPullRequestSummary(taskRef, {
-      cwd, agent, body: manualSummaryBody(finalBodyWithoutReceipt, 'final', transaction.transactionId, receipt.receiptDigest, receipt.evidenceDigest, receipt.prHeadSha), changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult, strict: true,
+      cwd, client: options.client, agent, body: manualSummaryBody(finalBodyWithoutReceipt, 'final', transaction.transactionId, receipt.receiptDigest, receipt.evidenceDigest, receipt.prHeadSha), changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult, strict: true,
       manualValidation: { phase: 'final', evidenceFile: values.evidenceFile!, transactionId: transaction.transactionId, receiptDigest: receipt.receiptDigest, evidenceDigest: receipt.evidenceDigest, prHeadSha: receipt.prHeadSha, authority: 'coordinator' }, lockAlreadyHeld: true
     });
     if (!['applied', 'no-op'].includes(promoted.status)) transactionFailure(promoted.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary promotion failed' });
-    const postWrite = await summaryCommentState(taskRef, { cwd });
+    const postWrite = await summaryCommentState(taskRef, { cwd, client: options.client });
     if (!postWrite.comment?.body.includes('### ✅ Manual Validation Passed') || postWrite.pullRequest?.head.sha !== receipt.prHeadSha || !manualValidationFinalSummaryProjectionMatches(postWrite.comment.body, receipt)) transactionFailure({ code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary post-write verification failed' });
     const committed = transitionManualValidationTransaction(transaction, 'committed', { postWriteVerified: true });
     if (!committed.ok) throw new Error(`${committed.error.code}: ${committed.error.message}`);
@@ -309,7 +323,7 @@ async function executeManualValidationTransactionLocked(
     if (transaction.phase === 'final-promotion-in-progress') {
       try {
         await syncPullRequestSummary(taskRef, {
-          cwd, agent, body: pendingBody, changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', strict: true,
+          cwd, client: options.client, agent, body: pendingBody, changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', strict: true,
           manualValidation: { phase: 'pending', evidenceFile: values.evidenceFile!, evidenceDigest: transaction.evidenceDigest }, lockAlreadyHeld: true
         });
       } catch {
