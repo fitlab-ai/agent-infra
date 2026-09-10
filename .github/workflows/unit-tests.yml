@@ -46,16 +46,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Linux is the canonical full-suite runner. macOS and Windows keep the
-      # platform-sensitive unit boundary; package installation is covered by
-      # pack-smoke on all three operating systems.
-      - name: Run full test suite
-        if: matrix.os == 'ubuntu-latest'
-        run: npm test
+      - name: Run unit smoke
+        run: npm run test:smoke:fast
 
-      - name: Run cross-platform unit smoke
+      - name: Run cross-platform platform smoke
         if: matrix.os != 'ubuntu-latest'
-        run: npm run test:smoke
+        run: npm run test:platform-smoke:fast
 
       - name: Verify canonical demo LFS object
         if: matrix.os == 'ubuntu-latest'
@@ -68,6 +64,66 @@ jobs:
           test "$(wc -c < assets/demo-init.gif)" -le 4194304
           grep -q 'assets/demo-init.gif' README.md
           grep -q 'assets/demo-init.gif' README.zh-CN.md
+
+  integration-tests:
+    name: ubuntu-latest / integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify inline build output is committed
+        run: node scripts/build-inline.js --check
+
+      - name: Build
+        run: npm run build
+
+      - name: Run integration tests
+        run: node scripts/run-tests.js --skip-build "tests/integration/**/*.test.ts"
+
+  e2e-tests:
+    name: ubuntu-latest / e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify inline build output is committed
+        run: node scripts/build-inline.js --check
+
+      - name: Build
+        run: npm run build
+
+      - name: Run e2e tests
+        run: node scripts/run-tests.js --skip-build "tests/e2e/**/*.test.ts"
 
   minimum-node-baseline:
     name: ubuntu-latest / Node 22.9.0 minimum baseline
@@ -89,9 +145,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Build
-        run: npm run build
 
       - name: Run tests
         run: npm test
