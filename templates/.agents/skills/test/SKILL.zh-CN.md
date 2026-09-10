@@ -21,11 +21,11 @@ description: >
 
 确认没有编译错误。
 
-## 2. 运行单元测试（按层级选择）
+## 2. 运行测试（按层级选择）
 
-三层测试是可选的反馈速度优化；如果测试套件较小，所有层级都可以映射到同一个完整测试命令。
+测试层级是可选的反馈速度优化；如果测试套件较小，所有层级都可以映射到同一个完整测试命令。
 
-### fast smoke（目标 <5s）
+### fast smoke（参考目标 <10s）
 
 ```bash
 # TODO：替换为项目的 fast smoke 子集命令
@@ -36,7 +36,16 @@ description: >
 
 当项目提供不重复构建的快速路径时，用于 code-task 内循环。它应覆盖与 smoke 相同的测试，同时跳过重复的编译或生成步骤。
 
-### smoke（目标 <5s）
+### platform-smoke（跨平台边界）
+
+```bash
+# TODO：替换为项目的跨平台 integration 子集命令
+# npm run test:platform-smoke:fast (Node.js)
+```
+
+用于承接从 unit 层迁出的真实 CLI、git、shell 或子进程测试，同时保留其原有 Windows/macOS 执行边界。
+
+### smoke（参考目标 <10s）
 
 ```bash
 # TODO：替换为项目的 smoke 子集命令
@@ -50,7 +59,7 @@ description: >
 - 项目没有 fast 路径时的保存即跑 / 频繁反馈
 - 仅断言项目结构、配置、模板契约
 
-### core（目标 <15s）
+### core（参考目标 <95s）
 
 ```bash
 # TODO：替换为项目的 core 子集命令
@@ -64,7 +73,7 @@ description: >
 - 写 code.md / code-r{N}.md 报告前的最终验证
 - 推送 PR 前的本地把关
 
-### full（完整测试套件）
+### full（参考目标 <100s）
 
 ```bash
 # TODO：替换为项目的完整测试命令
@@ -80,6 +89,8 @@ description: >
 - main 合并前的最终把关
 
 如果项目尚未分层，smoke / core / full 可以全部使用完整测试命令；分层不是使用协作工作流的前置条件。
+
+参考目标是反馈预算，不是合并门禁。如果采集覆盖率，应说明是否仅在 main 分支运行，以及是否阻塞验收。
 
 ## 3. 输出结果
 

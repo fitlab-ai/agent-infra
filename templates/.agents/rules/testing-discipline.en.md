@@ -43,6 +43,8 @@ This mirrors "Goal-Driven Execution" in AGENTS.md: define a verifiable success c
 
 Complete each item below for this repository. Record the chosen behavior and its boundaries so contributors can select and validate tests consistently.
 
+When a project uses a cross-platform smoke boundary, keep real CLI, git, shell, environment-forwarding, and process-lifecycle tests outside the unit tier. Document which operating systems execute that boundary and keep structural tier checks separate from line coverage.
+
 ### 1. Test commands
 
 > TODO: Document the complete test command and any faster commands used during development.

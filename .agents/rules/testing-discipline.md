@@ -61,9 +61,9 @@ stdout 末尾会打印按文件粒度的行 / 分支 / 函数覆盖率以及未�
 
 ##### CI 展示
 
-`.github/workflows/unit-tests.yml` 在 ubuntu-latest 分片上把覆盖率块写入 GitHub Actions 的 step summary（PR Checks 页可见）。Windows / macOS 分片不重复输出。
+`.github/workflows/unit-tests.yml` 的独立 coverage job 仅在 push main 时把覆盖率块写入 GitHub Actions 的 step summary。PR 不运行 coverage。
 
-README 顶部的 Codecov 徽章由 `.github/workflows/unit-tests.yml` 在 ubuntu-latest 分片上传 `coverage.lcov` 后由 Codecov 生成。
+README 顶部的 Codecov 徽章由该 main-only coverage job 上传 `coverage.lcov` 后由 Codecov 生成。
 
 ##### 边界
 
@@ -76,11 +76,18 @@ README 顶部的 Codecov 徽章由 `.github/workflows/unit-tests.yml` 在 ubuntu
 
 测试文件放入哪一层决定它会被哪些 npm script 自动执行：
 
-- `tests/unit/<module>/`：快速、结构性或纯函数类测试；不启动真实 CLI 子进程，不依赖外部工具，适合 `test:smoke`。
+- `tests/unit/<module>/`：快速、结构性或纯函数类测试；不启动真实 CLI 子进程，不依赖外部工具，适合 `test:smoke`。仅导入并 stub 边界模块但不启动进程的测试可以留在 unit。
+- `tests/integration/platform-smoke/<module>/`：从 unit 迁出的真实 CLI、git、shell、环境透传或进程生命周期测试；Windows/macOS 必须继续运行，以保持原平台边界。
 - `tests/integration/<module>/`：会组合多个模块、运行 CLI 子进程、触达临时文件系统或验证模板同步流程，但仍应保持稳定和相对快速，适合 `test:core`。
 - `tests/e2e/<module>/`：较慢的契约、平台同步、打包产物、跨进程或端到端流程测试，只在完整 `npm test` 中运行。
 
 模块继续作为第二级目录（如 `cli`、`core`、`scripts`、`templates`）。共享 helper 和 fixtures 保持在 `tests/helpers/`、`tests/helpers.ts`、`tests/fixtures/`，不要放入任一 tier。
+
+#### CI 与参考预算
+
+unit job 在 Ubuntu/Windows/macOS 矩阵运行；Windows/macOS 运行 unit 与 `platform-smoke`，integration/e2e 在 Ubuntu 独立运行。显式 build 后使用 build-free runner；baseline 与 main-only coverage 由默认 runner 各自只 build 一次。
+
+fast smoke、smoke、core、full 的秒数只作为反馈预算，不是 merge gate。coverage 只在 main push 的独立 job 采集、上传，且不阻塞合并。
 
 #### 与"测试 tier 覆盖"的关系
 
