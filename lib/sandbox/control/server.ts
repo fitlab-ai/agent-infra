@@ -89,6 +89,7 @@ import { taskCreateOutputUnavailableResult } from '../../task/create-service.ts'
 import {
   consumeLifecycleRecoveryAttestation,
   issueLifecycleRecoveryAttestation,
+  recoverLifecycleRecoveryOperation,
   type LifecycleAuthorityResponseV1
 } from '../../task/control-authority.ts';
 import { createCodexCapabilityStore } from '../../agent-clients/adapters/codex-lifecycle/capability-store.ts';
@@ -595,6 +596,27 @@ function recoveryResponse(
   }
   const finalization = request.family === 'task-finalization' ? finalizationRecoveryResponse(manifest, request.id, 0) : null;
   if (evidence.exitCode === 0 && finalization?.status === 'deferred') return null;
+  if (evidence.exitCode === 0 && request.family === 'task-workflow' && request.authority?.phase === 'task-event.completed') {
+    try {
+      const registration = readCodexControllerRegistration(manifestPath);
+      const recovered = recoverLifecycleRecoveryOperation(request.authority, {
+        repoRoot: manifest.repoRoot,
+        capabilityStore: createCodexCapabilityStore(),
+        buildIdentity: computeLifecycleBuildIdentity(manifest.repoRoot),
+        controllerBinding: {
+          instanceDigest: registration.controllerInstanceDigest,
+          controlGeneration: registration.controlGeneration
+        }
+      });
+      if (recovered.status !== 'committed') return null;
+    } catch (error) {
+      appendBrokerAudit(manifest, 'lifecycle-authority-recovery-failed', {
+        ...requestAuditFields(manifest, request),
+        errorCode: error instanceof Error ? error.name : 'LIFECYCLE_AUTHORITY_RECOVERY_FAILED'
+      });
+      return null;
+    }
+  }
   const recovery: RecoveryDomainEvidence = finalization
     ? { domain: { consistent: finalization.status === 'matched' } }
     : readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);

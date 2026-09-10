@@ -1,5 +1,6 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
@@ -38,13 +39,19 @@ import {
   type TaskLifecycleRequest,
   type TaskLifecycleResult
 } from './lifecycle.ts';
+import { locateActivityLog } from './activity-log.ts';
 import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
-import { findArtifactRepairIntentsByOperation } from './artifact-repair-intent.ts';
+import {
+  findArtifactRepairIntentsByOperation,
+  writeArtifactRepairIntent,
+  type ArtifactRepairIntent
+} from './artifact-repair-intent.ts';
 import {
   computeLifecycleBuildIdentity,
+  verifyLifecycleBuildIdentity,
   type LifecycleBuildIdentity
 } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 
@@ -372,6 +379,132 @@ export function queryLifecycleRecoveryOperation(
     capabilityState,
     phases: Object.freeze([...phaseMap.values()])
   };
+}
+
+type LifecycleRecoveryCompensationOptions = Readonly<{
+  repoRoot: string;
+  controllerBinding: TaskControlControllerBinding;
+  capabilityStore?: ReturnType<typeof createCodexCapabilityStore>;
+  buildIdentity?: LifecycleBuildIdentity;
+  now?: () => number;
+}>;
+
+function lifecycleRecoveryCompensationError(code: string, message: string): Error {
+  const error = new Error(`${code}: ${message}`);
+  error.name = code;
+  return error;
+}
+
+function lifecycleRecoveryEventCommitted(
+  selector: LifecycleAuthorityRequestV1,
+  repoRoot: string
+): boolean {
+  const resolved = resolveTaskRef(selector.taskId, { repoRoot });
+  if (!resolved.ok || resolved.taskId !== selector.taskId) return false;
+  let content: string;
+  try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
+  catch { return false; }
+  const section = locateActivityLog(content);
+  if (!section) return false;
+  const labels = { analysis: 'Analyze Task', plan: 'Plan Task', code: 'Code Task' } as const;
+  const prefix = `${labels[selector.family]} (Round ${selector.round}`;
+  return section.entries.some((entry) => {
+    if (entry.step.endsWith(' [started]') || !entry.step.startsWith(prefix)) return false;
+    const delimiter = entry.step[prefix.length];
+    return (delimiter === ',' || delimiter === ')') && entry.note.endsWith(`→ ${selector.artifact}`);
+  });
+}
+
+function lifecycleRecoveryIntentMatches(
+  intent: ArtifactRepairIntent,
+  selector: LifecycleAuthorityRequestV1
+): boolean {
+  return intent.taskId === selector.taskId
+    && intent.family === selector.family
+    && intent.artifact === selector.artifact
+    && (intent.state === 'commit-started' || intent.state === 'consumed');
+}
+
+/**
+ * Completes only the durable tail of a committed task event after a process
+ * restart. The task event itself is the commit boundary and is never replayed.
+ */
+export function recoverLifecycleRecoveryOperation(
+  input: LifecycleAuthorityRequestV1,
+  options: LifecycleRecoveryCompensationOptions
+): LifecycleRecoveryOperationQueryV1 {
+  const selector = validateLifecycleAuthorityRequest(input);
+  if (selector.phase !== 'task-event.completed') {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_PHASE_UNSUPPORTED', 'only task-event.completed supports durable compensation');
+  }
+  const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(options.repoRoot);
+  if (selector.expectedBuildIdentityDigest !== lifecycleAuthorityBuildDigest(buildIdentity)) {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_AUTHORITY_BUILD_MISMATCH', 'current lifecycle build does not match the recovery request');
+  }
+  if (selector.expectedControlGeneration !== options.controllerBinding.controlGeneration
+    || selector.expectedControllerInstanceDigest !== options.controllerBinding.instanceDigest) {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_AUTHORITY_CONTROLLER_MISMATCH', 'current controller binding does not match the recovery request');
+  }
+  const store = options.capabilityStore ?? createCodexCapabilityStore();
+  const expected = {
+    taskId: selector.taskId,
+    hookDefinitionHash: selector.expectedHookDefinitionHash,
+    buildIdentity,
+    controller: options.controllerBinding
+  };
+  const capabilities = store.findByRecoveryOperation(selector.operationId);
+  if (capabilities.length !== 1 || capabilities[0]!.capabilityRefDigest !== lifecycleAuthorityDigest(selector.authorityRef)) {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_PROVENANCE_INVALID', 'durable capability provenance does not identify this operation');
+  }
+  const capability = capabilities[0]!;
+  const build = verifyLifecycleBuildIdentity(capability.buildIdentity, buildIdentity);
+  if (!build.ok
+    || capability.taskId !== selector.taskId
+    || capability.hookDefinitionHash !== selector.expectedHookDefinitionHash
+    || capability.controller?.controlGeneration !== options.controllerBinding.controlGeneration
+    || capability.controller?.instanceDigest !== options.controllerBinding.instanceDigest
+    || capability.recoveryState === 'unreserved'
+    || capability.recoveryOperationId !== selector.operationId
+    || !['attested', 'consumed'].includes(capability.status)) {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_PROVENANCE_INVALID', 'durable capability provenance does not match the recovery request');
+  }
+  const phase = capability.recoveryPhases.find((entry) => entry.phase === selector.phase);
+  if (!phase) {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_PHASE_MISSING', 'durable task completion phase is missing');
+  }
+  const intents = findArtifactRepairIntentsByOperation(options.repoRoot, selector.operationId)
+    .filter((intent) => intent.taskId === selector.taskId
+      && intent.family === selector.family
+      && intent.artifact === selector.artifact);
+  if (intents.length !== 1) {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_INTENT_INVALID', 'durable artifact repair intent does not identify this task event');
+  }
+  const intent = intents[0]!;
+  if (!lifecycleRecoveryIntentMatches(intent, selector)
+    || intent.phase !== selector.phase
+    || intent.requestId !== selector.lifecycleRequestId
+    || intent.authorityDigest === null) {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_INTENT_INVALID', 'durable artifact repair intent does not match the recovery request');
+  }
+  if (!lifecycleRecoveryEventCommitted(selector, options.repoRoot)) {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_COMMIT_UNCONFIRMED', 'task completion is not durably present; compensation is not allowed');
+  }
+  if (capability.recoveryState === 'reserved') {
+    if (phase.state === 'issued') {
+      store.consumeRecoveryPhase(selector.authorityRef, selector.operationId, selector.phase, phase.requestId, expected);
+    }
+    store.consumeReference(selector.authorityRef, selector.operationId, expected);
+  } else if (phase.state !== 'consumed') {
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_STATE_INVALID', 'consumed capability has an unconsumed completion phase');
+  }
+  if (intent.state !== 'consumed') {
+    writeArtifactRepairIntent(options.repoRoot, {
+      ...intent,
+      state: 'consumed',
+      updatedAt: (options.now ?? Date.now)()
+    }, { expected: intent });
+  }
+  return queryLifecycleRecoveryOperation(selector.operationId, { repoRoot: options.repoRoot, capabilityStore: store });
 }
 
 function authorityRejected(request: LifecycleAuthorityRequestV1, code: string, message: string): LifecycleAuthorityResponseV1 {

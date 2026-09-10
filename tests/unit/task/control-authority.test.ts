@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,9 +11,11 @@ import {
   consumeLifecycleRecoveryAttestation,
   issueLifecycleRecoveryAttestation,
   queryLifecycleRecoveryOperation,
+  recoverLifecycleRecoveryOperation,
   validateLifecycleAuthorityRequest,
   validateLifecycleRecoveryAttestation
 } from '../../../lib/task/control-authority.ts';
+import { writeArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
 
 const build = {
   protocolVersion: 3,
@@ -139,4 +142,156 @@ test('lifecycle authority persists phase replay state across requests and store 
   consumeLifecycleRecoveryAttestation(completed.attestation!, 1_000);
   assert.equal(queryLifecycleRecoveryOperation(observed.operationId, { capabilityStore: restartedStore }).status, 'committed');
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('lifecycle recovery compensates a committed task event across processes without replaying the task write', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-compensation-'));
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-repo-'));
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const taskPath = path.join(taskDir, 'task.md');
+  const sourcePath = path.resolve('lib/task/control-authority.ts');
+  const initialTask = [
+    '---',
+    `id: ${taskId}`,
+    'status: active',
+    'current_step: code',
+    '---',
+    '',
+    '# Recovery fixture',
+    '',
+    '## 活动日志',
+    '',
+    ''
+  ].join('\n');
+  const completedTask = `${initialTask}- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1)** by codex — Fixed 0 blockers, 0 major, 0 minor issues → code.md\n`;
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(taskPath, initialTask);
+  const store = createCodexCapabilityStore({ root, reference: () => 'authority-reference', now: () => 1_000 });
+  const armed = store.arm({ taskId, buildIdentity: build, controller: binding });
+  store.attestByReference({
+    capabilityRef: armed.capabilityRef,
+    sessionId: 'session-1', turnId: 'turn-1', toolUseId: 'tool-1',
+    hookDefinitionHash: 'd'.repeat(64), buildIdentity: build, controller: binding
+  });
+  const selector = request(armed.capabilityRef, {
+    requestId: '33333333-3333-4333-8333-333333333333',
+    phase: 'task-event.completed'
+  });
+  const issued = issueLifecycleRecoveryAttestation(selector, {
+    capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => 1_000
+  });
+  assert.equal(issued.status, 'issued');
+  writeArtifactRepairIntent(repoRoot, {
+    version: 2,
+    taskId,
+    family: 'code',
+    artifact: 'code.md',
+    state: 'commit-started',
+    baselineSemanticDigest: null,
+    artifactSha256: 'e'.repeat(64),
+    semanticDigest: 'f'.repeat(64),
+    recoveryOperationId: selector.operationId,
+    phase: selector.phase,
+    authorityDigest: digest(issued.attestation),
+    requestId: selector.lifecycleRequestId,
+    createdAt: 1_000,
+    updatedAt: 1_000
+  });
+  store.consumeRecoveryPhase(
+    armed.capabilityRef,
+    selector.operationId,
+    selector.phase,
+    issued.attestation!.requestId,
+    { taskId, hookDefinitionHash: 'd'.repeat(64), buildIdentity: build, controller: binding }
+  );
+
+  const runChild = (childBinding = binding) => {
+    const script = `
+      const [root, repoRoot, sourcePath, selectorJson, buildJson, bindingJson] = process.argv.slice(1);
+      const { createCodexCapabilityStore } = await import(${JSON.stringify(path.resolve('lib/agent-clients/adapters/codex-lifecycle/capability-store.ts'))});
+      const { recoverLifecycleRecoveryOperation, queryLifecycleRecoveryOperation } = await import(sourcePath);
+      const selector = JSON.parse(selectorJson);
+      const result = recoverLifecycleRecoveryOperation(selector, {
+        repoRoot,
+        capabilityStore: createCodexCapabilityStore({ root, now: () => 1000 }),
+        buildIdentity: JSON.parse(buildJson),
+        controllerBinding: JSON.parse(bindingJson),
+        now: () => 2000
+      });
+      const query = queryLifecycleRecoveryOperation(selector.operationId, {
+        repoRoot,
+        capabilityStore: createCodexCapabilityStore({ root, now: () => 1000 })
+      });
+      process.stdout.write(JSON.stringify({ result, query }));
+    `;
+    return spawnSync(process.execPath, [
+      '--experimental-strip-types', '--input-type=module', '-e', script,
+      root, repoRoot, sourcePath, JSON.stringify(selector), JSON.stringify(build), JSON.stringify(childBinding)
+    ], { cwd: process.cwd(), encoding: 'utf8' });
+  };
+
+  const beforeCommit = runChild();
+  assert.notEqual(beforeCommit.status, 0);
+  assert.match(`${beforeCommit.stdout}${beforeCommit.stderr}`, /LIFECYCLE_RECOVERY_COMMIT_UNCONFIRMED/u);
+  assert.equal(store.inspectReference(armed.capabilityRef).recoveryState, 'reserved');
+  fs.writeFileSync(taskPath, completedTask);
+  const taskAfterCommit = fs.readFileSync(taskPath, 'utf8');
+  const staleBinding = { ...binding, controlGeneration: 'generation-stale' };
+  const staleRecovery = runChild(staleBinding);
+  assert.notEqual(staleRecovery.status, 0);
+  assert.match(`${staleRecovery.stdout}${staleRecovery.stderr}`, /LIFECYCLE_AUTHORITY_CONTROLLER_MISMATCH/u);
+  const recovered = runChild();
+  assert.equal(recovered.status, 0, recovered.stderr);
+  const payload = JSON.parse(recovered.stdout) as {
+    result: { status: string; capabilityState: string };
+    query: { status: string; capabilityState: string };
+  };
+  assert.equal(payload.result.status, 'committed');
+  assert.equal(payload.result.capabilityState, 'consumed');
+  assert.equal(payload.query.status, 'committed');
+  assert.equal(payload.query.capabilityState, 'consumed');
+  assert.equal(fs.readFileSync(taskPath, 'utf8'), taskAfterCommit);
+  assert.equal(store.inspectReference(armed.capabilityRef).recoveryState, 'consumed');
+  const intentPath = path.join(repoRoot, '.agents', 'workspace', '.local-artifact-finalization-intents', `${taskId}-code-code.md.json`);
+  assert.equal(JSON.parse(fs.readFileSync(intentPath, 'utf8')).state, 'consumed');
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('lifecycle recovery requires the persisted task event before consuming a reserved capability', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-uncommitted-'));
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-uncommitted-repo-'));
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), [
+    '---', `id: ${taskId}`, 'status: active', 'current_step: code', '---', '',
+    '## 活动日志', '', '- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started', ''
+  ].join('\n'));
+  const store = createCodexCapabilityStore({ root, reference: () => 'authority-reference', now: () => 1_000 });
+  const armed = store.arm({ taskId, buildIdentity: build, controller: binding });
+  store.attestByReference({
+    capabilityRef: armed.capabilityRef,
+    sessionId: 'session-1', turnId: 'turn-1', toolUseId: 'tool-1',
+    hookDefinitionHash: 'd'.repeat(64), buildIdentity: build, controller: binding
+  });
+  const selector = request(armed.capabilityRef, { phase: 'task-event.completed' });
+  const issued = issueLifecycleRecoveryAttestation(selector, {
+    capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => 1_000
+  });
+  writeArtifactRepairIntent(repoRoot, {
+    version: 2, taskId, family: 'code', artifact: 'code.md', state: 'commit-started',
+    baselineSemanticDigest: null, artifactSha256: 'e'.repeat(64), semanticDigest: 'f'.repeat(64),
+    recoveryOperationId: selector.operationId, phase: selector.phase,
+    authorityDigest: digest(issued.attestation), requestId: selector.lifecycleRequestId,
+    createdAt: 1_000, updatedAt: 1_000
+  });
+  assert.throws(() => recoverLifecycleRecoveryOperation(selector, {
+    repoRoot, capabilityStore: createCodexCapabilityStore({ root, now: () => 1_000 }),
+    buildIdentity: build, controllerBinding: binding, now: () => 2_000
+  }), /LIFECYCLE_RECOVERY_COMMIT_UNCONFIRMED/u);
+  assert.equal(store.inspectReference(armed.capabilityRef).recoveryState, 'reserved');
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(repoRoot, { recursive: true, force: true });
 });
