@@ -319,7 +319,8 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   if (internalHandlerRoute('release-workflow', 'prepare', action || '')) {
     if (before.phase !== 'unprepared') {
       const milestones = await reconcileReleaseMilestones(version, { cwd });
-      process.stdout.write(`${JSON.stringify({ ...milestones, snapshot: before })}\n`);
+      const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
+      process.stdout.write(`${JSON.stringify({ ...milestones, snapshot })}\n`);
       process.exitCode = milestones.status === 'failed' ? 1 : milestones.status === 'blocked' ? 2 : 0;
       return;
     }

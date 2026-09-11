@@ -19,15 +19,19 @@ description: >
 agent-infra-internal release-workflow inspect {version}
 ```
 
-未 prepared 时执行 prepare 并重新 inspect；已准备或部分发布时复用当前事实。unknown 必须 blocked。
+保留并展示该命令的完整非空 stdout。未 prepared 时执行 prepare 并重新 inspect；已准备或部分发布时复用当前事实。unknown 必须 blocked。
 
 ```bash
 agent-infra-internal release-workflow prepare {version} --entropy-report {path}
 ```
 
+展示 prepare 的 `status`、`error` 和 `operations`，包括里程碑关闭与后续里程碑创建结果。`failed` 或 `blocked` 时停止，不得请求发布授权；只有 prepare 成功且重新 inspect 得到的最新快照才可继续。
+
+prepare 后必须重新 inspect。
+
 ## 3. 展示快照并确认
 
-展示最新 snapshot。只有当前会话中针对该快照的无歧义明确肯定答复才授权发布；否定、调整、疑问、歧义或中断均停止。快照变化后重新确认。
+展示最新 snapshot 的完整 JSON，包括所有渠道状态。只有当前会话中针对该快照的无歧义明确肯定答复才授权发布；否定、调整、疑问、歧义或中断均停止。快照变化后重新确认。
 
 ## 4. 发布并复核
 
@@ -35,7 +39,7 @@ agent-infra-internal release-workflow prepare {version} --entropy-report {path}
 agent-infra-internal release-workflow publish {version}
 ```
 
-逐 ref 普通 push；部分成功可重放，禁止 force push。操作后重新 inspect。
+逐 ref 普通 push；部分成功可重放，禁止 force push。操作后重新 inspect，并明确列出仍未完成的 GitHub Release、npm、Homebrew 或 smoke 项。
 
 ## 5. 输出事实摘要
 

@@ -881,7 +881,12 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
           }
           continue;
         }
-        const response = client.json(['api', '--method', 'POST', `repos/${repository(context)}/milestones`, '-f', `title=${item.title}`, '-f', `description=${item.description}`], { cwd: context.workingDirectory });
+        const response = client.json([
+          'api', '--method', 'POST', `repos/${repository(context)}/milestones`,
+          '-f', `title=${item.title}`,
+          '-f', `description=${item.description}`,
+          '-f', `state=${item.state}`
+        ], { cwd: context.workingDirectory });
         if (!response.ok) return response;
         created.push(item.title);
       }

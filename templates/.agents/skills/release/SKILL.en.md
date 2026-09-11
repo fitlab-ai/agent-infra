@@ -19,15 +19,19 @@ Require one canonical SemVer `{version}` and a satisfied entropy checkpoint.
 agent-infra-internal release-workflow inspect {version}
 ```
 
-Run prepare and inspect again only when the snapshot is not prepared. Reuse prepared or partially published facts. Unknown state is blocked.
+Preserve and present the complete non-empty stdout. Run prepare and inspect again only when the snapshot is not prepared. Reuse prepared or partially published facts. Unknown state is blocked.
 
 ```bash
 agent-infra-internal release-workflow prepare {version} --entropy-report {path}
 ```
 
+Present the prepare `status`, `error`, and `operations`, including milestone closure and creation of the next planning milestones. Stop on `failed` or `blocked`; do not request publish authorization. Continue only after a successful prepare and a fresh inspect.
+
+Inspect again after prepare.
+
 ## 3. Present and Confirm
 
-Present the latest snapshot. Only an unambiguous affirmative reply for that snapshot in the current session authorizes publishing. A denial, adjustment, question, ambiguity, interruption, or changed snapshot stops the write and requires a new preview.
+Present the complete latest snapshot JSON, including every channel state. Only an unambiguous affirmative reply for that snapshot in the current session authorizes publishing. A denial, adjustment, question, ambiguity, interruption, or changed snapshot stops the write and requires a new preview.
 
 ## 4. Publish and Reinspect
 
@@ -35,7 +39,7 @@ Present the latest snapshot. Only an unambiguous affirmative reply for that snap
 agent-infra-internal release-workflow publish {version}
 ```
 
-Push refs normally, preserve partial success for replay, never force push, and inspect again after the operation.
+Push refs normally, preserve partial success for replay, never force push, and inspect again after the operation. Explicitly list any incomplete GitHub Release, npm, Homebrew, or smoke state; a successful Git ref push is not a complete release.
 
 ## 5. Report Facts
 

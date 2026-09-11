@@ -143,10 +143,10 @@ test('release milestone reconciliation closes current and ensures planning miles
     ]]);
     assert.equal(milestones[0]!.state, 'closed');
     assert.deepEqual(postFields, [
-      { title: '0.8.1', description: 'Issues that we want to release in v0.8.1.' },
-      { title: '0.8.x', description: 'Issues that we want to resolve in 0.8 line.' },
-      { title: '0.9.0', description: 'Issues that we want to release in v0.9.0.' },
-      { title: '0.9.x', description: 'Issues that we want to resolve in 0.9 line.' }
+      { title: '0.8.1', description: 'Issues that we want to release in v0.8.1.', state: 'open' },
+      { title: '0.8.x', description: 'Issues that we want to resolve in 0.8 line.', state: 'open' },
+      { title: '0.9.0', description: 'Issues that we want to release in v0.9.0.', state: 'open' },
+      { title: '0.9.x', description: 'Issues that we want to resolve in 0.9 line.', state: 'open' }
     ]);
 
     const patchCount = patchCalls.length;
@@ -154,6 +154,42 @@ test('release milestone reconciliation closes current and ensures planning miles
     assert.equal((await reconcileReleaseMilestones('0.8.0', { cwd: root, client: mutable })).status, 'no-op');
     assert.equal(patchCalls.length, patchCount);
     assert.equal(postFields.length, postCount);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('release milestone reconciliation creates the released milestone closed', async () => {
+  const root = fixture();
+  const postFields: Array<Record<string, string>> = [];
+  const clientWithEmptyMilestones: GitHubClient = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) ?? '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { admin: true } } } as never;
+      if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+        return { ok: true, value: { data: { viewer: { login: 'codex' } } } } as never;
+      }
+      if (endpoint.includes('/milestones?')) return { ok: true, value: [] } as never;
+      if (args.includes('POST')) {
+        const fields = args.reduce<Record<string, string>>((result, arg, index) => {
+          if (args[index - 1] !== '-f') return result;
+          const separator = arg.indexOf('=');
+          result[arg.slice(0, separator)] = arg.slice(separator + 1);
+          return result;
+        }, {});
+        postFields.push(fields);
+        return { ok: true, value: {} } as never;
+      }
+      return { ok: true, value: {} } as never;
+    },
+    text: () => ({ ok: true, value: '' })
+  };
+  try {
+    const result = await reconcileReleaseMilestones('0.8.0', { cwd: root, client: clientWithEmptyMilestones });
+    assert.equal(result.status, 'applied');
+    assert.equal(postFields[0]?.title, '0.8.0');
+    assert.equal(postFields[0]?.state, 'closed');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

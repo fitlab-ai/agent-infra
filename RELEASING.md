@@ -82,8 +82,9 @@ npm 发布走 GitHub Actions OIDC + npm Trusted Publishing，CI 不再读取长�
 - 运行测试
 - 同步更新 `package.json` 和 `.agents/.airc.json`
 - 创建发布提交和本地标签
+- 关闭当前版本里程碑，并创建下一补丁版本、当前 minor 版本线及必要的下一 minor 规划里程碑
 
-prepare 完成后必须停止并展示事实快照；它不会推送任何 ref。
+prepare 完成后必须展示命令返回的 `status`、`error`、`operations` 和重新 inspect 后的完整事实快照。里程碑操作失败或阻塞时必须停止，不能请求 publish；prepare 不会推送任何 ref。
 
 ### 2. 独立授权发布
 
@@ -102,6 +103,8 @@ publish 是独立人工授权点。core 逐 ref 普通 push 并用远端事实�
 - 使用 `gh release create --generate-notes` 创建 GitHub Release
 - 校验 `package.json` 版本与 tag 一致
 - 使用 GitHub Actions OIDC 和 `npm publish --provenance` 发布 `@fitlab-ai/agent-infra`
+
+`release-workflow publish` 只负责 Git 分支和标签的普通推送。推送成功不等于 GitHub Release、npm、Homebrew 和 smoke 已完成；必须重新 inspect 并逐项报告 pending、blocked 或 failed 状态。
 
 `.github/release.yml` 负责定义自动生成发布说明时的分类规则。
 
