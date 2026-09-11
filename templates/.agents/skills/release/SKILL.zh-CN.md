@@ -39,7 +39,7 @@ prepare 后必须重新 inspect。
 agent-infra-internal release-workflow publish {version}
 ```
 
-逐 ref 普通 push；部分成功可重放，禁止 force push。操作后重新 inspect，并明确列出仍未完成的 GitHub Release、npm、Homebrew 或 smoke 项。
+逐 ref 普通 push；部分成功可重放，禁止 force push。操作后重新 inspect，并明确列出仍未完成的平台 Release、npm、Homebrew 或 smoke 项。
 
 ## 5. 输出事实摘要
 

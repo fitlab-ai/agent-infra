@@ -39,7 +39,7 @@ prepare 后必须重新 inspect；不得重复已满足动作。
 agent-infra-internal release-workflow publish {version}
 ```
 
-逐 ref 普通 push；部分成功可重放，禁止 force push。core 保留已成功事实并返回 degraded，重跑只补未满足事实。操作后重新 inspect；unknown 必须 blocked。发布后的 inspect 必须展示完整快照；如果 GitHub Release、npm、Homebrew 或 smoke 仍为 pending，明确标出未完成项，不得把 Git ref 推送成功表述为完整发布。
+逐 ref 普通 push；部分成功可重放，禁止 force push。core 保留已成功事实并返回 degraded，重跑只补未满足事实。操作后重新 inspect；unknown 必须 blocked。发布后的 inspect 必须展示完整快照；如果平台 Release、npm、Homebrew 或 smoke 仍为 pending，明确标出未完成项，不得把 Git ref 推送成功表述为完整发布。
 
 ## 5. 输出事实摘要
 

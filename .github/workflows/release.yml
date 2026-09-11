@@ -9,6 +9,9 @@ jobs:
   npm-publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    env:
+      # Include the full suite run by npm publish's prepublishOnly hook.
+      AGENT_INFRA_TEST_CONCURRENCY: '2'
     permissions:
       contents: write
       id-token: write

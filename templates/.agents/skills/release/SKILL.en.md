@@ -39,7 +39,7 @@ Present the complete latest snapshot JSON, including every channel state. Only a
 agent-infra-internal release-workflow publish {version}
 ```
 
-Push refs normally, preserve partial success for replay, never force push, and inspect again after the operation. Explicitly list any incomplete GitHub Release, npm, Homebrew, or smoke state; a successful Git ref push is not a complete release.
+Push refs normally, preserve partial success for replay, never force push, and inspect again after the operation. Explicitly list any incomplete platform release, npm, Homebrew, or smoke state; a successful Git ref push is not a complete release.
 
 ## 5. Report Facts
 
