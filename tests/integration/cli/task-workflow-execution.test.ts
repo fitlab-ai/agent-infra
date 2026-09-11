@@ -144,7 +144,6 @@ test('summary feedback preserves a concurrent direct candidate edit', onPlatform
     assert.equal(result.body.changed, null);
     assert.equal(result.body.error.code, 'TASK_ARTIFACT_WRITE_CONFLICT');
     assert.equal(fs.readFileSync(candidate, 'utf8'), draft);
-    assert.equal(fs.readFileSync(candidate, 'utf8'), draft);
     assert.deepEqual(fs.readdirSync(f.taskDir).sort(), ['analysis.md', artifact, 'task.md']);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
