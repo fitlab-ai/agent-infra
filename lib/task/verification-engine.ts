@@ -927,7 +927,6 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
     && entry.note.includes(`Manual validation passed → ${artifactName};`)
         && entry.note.includes(`transaction=${receipt.transactionId};`)
         && entry.note.includes(`receipt=${receipt.receiptDigest};`)
-        && entry.note.includes(`evidence=${receipt.evidenceDigest};`)
         && entry.note.includes(`head=${receipt.prHeadSha}`));
   if (reviewDoneIndex === -1) return failResult("manual-validation", `Latest review-code (round ${review.round}) completion entry is missing from the Activity Log`);
   if (completedIndex === -1) return failResult("manual-validation", `Committed manual validation completion is not recorded for ${artifactName}`);

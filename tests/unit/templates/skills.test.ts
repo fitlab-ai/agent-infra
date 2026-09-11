@@ -168,7 +168,7 @@ test("complete-manual-validation skill docs retain completion control structures
     assert.notEqual(gateIndex, -1, `${relativePath} should include the verification gate command`);
 
     const prepareCommand = content.indexOf('manual-validation transaction {task-id} --prepare');
-    const coordinatorCommand = content.indexOf('manual-validation transaction {task-id} \\\n  --evidence-file', prepareCommand + 1);
+    const coordinatorCommand = content.indexOf('manual-validation transaction {task-id} \\\n  --artifact', prepareCommand + 1);
     const artifactCommand = content.indexOf('--artifact {manual-validation-artifact}', prepareCommand);
     const summaryCommand = content.indexOf('--change-report-file .agents/workspace/active/{task-id}/pr-change-report.json', coordinatorCommand + 1);
     assert.ok(prepareCommand >= 0 && artifactCommand > prepareCommand && coordinatorCommand > prepareCommand && summaryCommand > coordinatorCommand, `${relativePath} should keep prepare, artifact, and coordinator commands in order`);

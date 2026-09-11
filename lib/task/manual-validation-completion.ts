@@ -27,7 +27,6 @@ function readManualValidationCompletion(taskDir: string, expected: ManualValidat
     taskId: receipt.value.taskId,
     prNumber: receipt.value.prNumber,
     prHeadSha: receipt.value.prHeadSha,
-    evidenceDigest: receipt.value.evidenceDigest,
     artifact: receipt.value.artifact
   });
   if (!transaction.ok) return transaction;

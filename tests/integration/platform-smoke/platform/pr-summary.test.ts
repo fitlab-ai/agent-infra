@@ -15,7 +15,6 @@ import {
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import type { PrecheckCandidate } from '../../../../lib/platform/pr-change-report.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
-import { createManualValidationEvidence, manualValidationEvidenceDigest } from '../../../../lib/task/manual-validation-evidence.ts';
 import { createManualValidationReceipt, manualValidationFinalSummaryDigest, writeManualValidationReceiptAtomic } from '../../../../lib/task/manual-validation-receipt.ts';
 import { createManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../../lib/task/manual-validation-transaction.ts';
 import {
@@ -302,14 +301,7 @@ test('summary-sync rejects a direct final manual-validation writer without coord
   try {
     const artifact = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'manual-validation.md');
     fs.writeFileSync(artifact, '# Manual Validation\n');
-    const evidence = createManualValidationEvidence({
-      mode: 'branch-only', taskId: null, branch: 'feature', commit: fixture.headSha, recoverable: false,
-      scope: 'snapshot', command: 'node', startedAt: '2026-01-01T00:00:00.000Z', completedAt: '2026-01-01T00:00:01.000Z',
-      exitCode: 0, signal: null, cleanup: 'completed'
-    });
-    const evidencePath = path.join(fixture.root, 'evidence.json');
-    fs.writeFileSync(evidencePath, `${JSON.stringify(evidence)}\n`);
-    const evidenceDigest = manualValidationEvidenceDigest(evidence);
+    const evidenceDigest = 'a'.repeat(64);
     const transactionId = 'mv-direct-final';
     const placeholderBody = `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${transactionId}; receipt=<receipt>; evidence=${evidenceDigest}; head=${fixture.headSha}.\n`;
     const transaction = createManualValidationTransaction({
@@ -338,7 +330,7 @@ test('summary-sync rejects a direct final manual-validation writer without coord
       cwd: fixture.root, agent: 'codex', body: placeholderBody.replace('<receipt>', receipt.receiptDigest),
       changeReportFile: fixture.reportPath, primaryResult: 'no_op', strict: true,
       client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha),
-      manualValidation: { phase: 'final', evidenceFile: evidencePath, transactionId, receiptDigest: receipt.receiptDigest, evidenceDigest, prHeadSha: fixture.headSha }
+      manualValidation: { phase: 'final', transactionId, receiptDigest: receipt.receiptDigest, prHeadSha: fixture.headSha }
     });
     assert.equal(result.status, 'failed');
     assert.equal(result.error?.code, 'MANUAL_VALIDATION_TRANSACTION_REQUIRED');

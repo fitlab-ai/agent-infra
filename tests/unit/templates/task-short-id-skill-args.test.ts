@@ -18,7 +18,7 @@ const TASK_CONTEXT_SKILL_USAGES: Record<string, string> = {
   'cancel-task': '[--task <ref> | -t <ref>] <reason>',
   'block-task': '[--task <ref> | -t <ref>] [reason]',
   'check-task': '[--task <ref> | -t <ref>]',
-  'complete-manual-validation': '[--task <ref> | -t <ref>] [pr-ref] --evidence-file <path> <verification-summary>',
+  'complete-manual-validation': '[--task <ref> | -t <ref>] [pr-ref] <verification-summary>',
   'watch-pr': '[--task <ref> | -t <ref>] | [--pr <number>] | [<pr-url>]',
   'run-manual-validation': '[--task <ref> | -t <ref> | --branch <ref>] [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command...>',
   'run-task': '[--task <ref> | -t <ref>] [--executor-model <model> --executor-reasoning-effort <effort> --reviewer-model <model> --reviewer-reasoning-effort <effort>]'

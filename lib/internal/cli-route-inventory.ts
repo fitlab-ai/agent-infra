@@ -69,7 +69,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-snapshot': ['snapshot'],
   'task-verify': ['event'],
   'task-validate': ['snapshot', 'inplace'],
-  'manual-validation': ['verify', 'transaction']
+  'manual-validation': ['transaction']
 } as const);
 
 export const INTERNAL_CLI_ROUTE_SELECTORS = INTERNAL_HANDLER_ROUTE_SELECTORS;

@@ -80,7 +80,7 @@ function addCommittedManualValidation(taskDir: string, appendCompletion = true) 
   assert.equal(committed.ok, true);
   writeManualValidationReceiptAtomic(taskDir, receipt);
   writeManualValidationTransactionAtomic(taskDir, committed.value);
-  const completion = `- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; verified current evidence; transaction=${transaction.transactionId}; receipt=${receipt.receiptDigest}; evidence=${evidenceDigest}; head=${prHeadSha}`;
+  const completion = `- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; human-confirmed validation and committed receipt; transaction=${transaction.transactionId}; receipt=${receipt.receiptDigest}; head=${prHeadSha}`;
   if (appendCompletion) {
     const taskPath = path.join(taskDir, 'task.md');
     const task = fs.readFileSync(taskPath, 'utf8');
@@ -148,7 +148,7 @@ test('manual-validation check passes on the standard flow when completion follow
 test('manual-validation check fails when completion predates a newer review-code round', async () => {
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md',
-    '- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; verified current evidence; transaction=mv-test-1; receipt=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; evidence=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; head=cccccccccccccccccccccccccccccccccccccccc',
+    '- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; human-confirmed validation and committed receipt; transaction=mv-test-1; receipt=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; head=cccccccccccccccccccccccccccccccccccccccc',
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 2)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code-r2.md'
   ]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);

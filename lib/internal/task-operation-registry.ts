@@ -157,7 +157,6 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'task-verify', 'event', 'task-bound', 'terminal-verdict'),
     descriptor('internal', 'task-validate', 'snapshot', 'conditional', 'diagnostic'),
     descriptor('internal', 'task-validate', 'inplace', 'task-bound', 'progress'),
-    descriptor('internal', 'manual-validation', 'verify', 'task-bound', 'diagnostic'),
     descriptor('internal', 'manual-validation', 'transaction', 'task-bound', 'remote-write')
   ];
 }

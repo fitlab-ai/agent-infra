@@ -14,7 +14,6 @@ import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import type { ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
-import { createManualValidationEvidence } from '../../../lib/task/manual-validation-evidence.ts';
 import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
 import { archiveManualValidationGeneration, createManualValidationTransaction, manualValidationTransactionPath, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../../../lib/task/manual-validation-transaction.ts';
@@ -28,7 +27,6 @@ type Fixture = {
   taskId: string;
   taskDir: string;
   taskPath: string;
-  evidencePath: string;
   summaryPath: string;
   reportPath: string;
   baseSha: string;
@@ -193,13 +191,6 @@ function createFixture(): Fixture {
   const taskWithReceipt = upsertArtifactReceipt(fs.readFileSync(taskPath, 'utf8'), reviewReceipt);
   fs.writeFileSync(taskPath, upsertSection(fs.readFileSync(taskPath, 'utf8'), taskWithReceipt).content);
 
-  const evidencePath = path.join(root, 'evidence.json');
-  const evidence = createManualValidationEvidence({
-    mode: 'task-bound', taskId: TASK_ID, branch: 'feature', commit: headSha, recoverable: true,
-    scope: 'snapshot', command: 'node', startedAt: '2026-01-01T00:00:00.000Z', completedAt: '2026-01-01T00:00:01.000Z',
-    exitCode: 0, signal: null, cleanup: 'completed'
-  });
-  fs.writeFileSync(evidencePath, `${JSON.stringify(evidence)}\n`);
   const summaryPath = path.join(root, 'summary.md');
   fs.writeFileSync(summaryPath, '## Summary\n\n<!-- canonical-pr-change-report -->\n');
   const reportPath = path.join(taskDir, 'pr-change-report.json');
@@ -215,13 +206,12 @@ function createFixture(): Fixture {
   writePrChangeReportAtomic(reportPath, report.value);
   const artifactPath = path.join(taskDir, 'manual-validation.md');
   fs.writeFileSync(artifactPath, '# Manual Validation\n\nValidated.\n');
-  return { root, taskId: TASK_ID, taskDir, taskPath, evidencePath, summaryPath, reportPath, baseSha, headSha };
+  return { root, taskId: TASK_ID, taskDir, taskPath, summaryPath, reportPath, baseSha, headSha };
 }
 
 function values(fixture: Fixture, prepare = false): Record<string, string> {
   return {
     ...(prepare ? { prepare: 'true' } : {}),
-    evidenceFile: fixture.evidencePath,
     artifact: 'manual-validation.md',
     summaryFile: fixture.summaryPath,
     ...(prepare ? {} : { changeReportFile: fixture.reportPath }),

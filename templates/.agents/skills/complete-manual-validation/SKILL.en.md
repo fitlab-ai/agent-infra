@@ -9,7 +9,7 @@ description: >
 # Complete Manual Validation
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-The transaction coordinator appends lifecycle events and the final PR summary state. The caller must provide one structured `--evidence-file`; free text and CLI identity flags cannot replace it.
+The transaction coordinator appends lifecycle events and the final PR summary state. The maintainer's validation summary and PR manual-validation comment are the human-validation authority; the transaction receipt provides state-transition and recovery consistency.
 
 
 ## Boundary / Critical Rules
@@ -49,12 +49,11 @@ agent-infra-internal task-snapshot {task-id} --format text
 Input:
 
 ```text
-complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] --evidence-file <path> {verification-summary}
+complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] {verification-summary}
 ```
 
 - The task scope may be omitted; explicit scope accepts only `--task <ref>` or `-t <ref>`.
 - `{pr-ref}` is optional and accepts `#NN`, `NN`, or a full PR URL.
-- `--evidence-file` is required and must be the current-only envelope produced by `run-manual-validation`.
 - `{verification-summary}` is required. If it is missing, stop and ask for a validation summary; do not write an artifact or update the PR.
 
 ### 2. Verify Prerequisites
@@ -67,15 +66,15 @@ Stop if the task is missing, the validation summary is missing, or no valid PR c
 
 ### 3. Resolve the Artifact Context
 
-Run `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`. Continue only for `ready`; take the round and `{manual-validation-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. The transaction coordinator owns the started event; pass it the same evidence file.
+Run `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`. Continue only for `ready`; take the round and `{manual-validation-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. The transaction coordinator owns the started event.
 
 ### 4. Register Manual Validation Start
 
-Before creating any manual-validation artifact, obtain the canonical summary body from `platform-pr summary-context`, run evidence verification, and call the transaction coordinator in prepare mode:
+Before creating any manual-validation artifact, obtain the canonical summary body from `platform-pr summary-context`, then call the transaction coordinator in prepare mode:
 
 ```bash
 agent-infra-internal manual-validation transaction {task-id} --prepare \
-  --evidence-file {evidence-file} --artifact {manual-validation-artifact} \
+  --artifact {manual-validation-artifact} \
   --summary-file {summary-body-file} --agent {standard-agent-token}
 ```
 
@@ -95,18 +94,17 @@ Before this step, read:
 Follow `reference/summary-update.md` to validate the PR binding, obtain canonical inputs from `platform-pr summary-context`, and call the transaction coordinator once:
 
 ```bash
-agent-infra-internal manual-validation verify {task-id} --evidence-file {evidence-file} --format json
 agent-infra-internal manual-validation transaction {task-id} \
-  --evidence-file {evidence-file} --artifact {manual-validation-artifact} \
+  --artifact {manual-validation-artifact} \
   --summary-file {summary-body-file} --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
   --agent {standard-agent-token} --result no_op
 ```
 
-The coordinator owns pending summary, receipt, completion log, final promotion, and post-write verification; it internally uses the controlled `agent-infra-internal task-event {task-id}` route. Do not call final `summary-sync` or `manual-validation.completed` separately.
+The coordinator owns pending summary, receipt, completion log, final promotion, and post-write verification; it internally uses the controlled `agent-infra-internal task-event {task-id}` route. Do not call final `summary-sync` or `manual-validation.completed` separately. Raw evidence files from other hosts are not required.
 
 ### 7. Update task.md
 
-After the transaction coordinator succeeds, the core has atomically recorded `manual-validation.completed` with the same transaction/receipt/evidence/head identity. Do not append the Activity Log manually.
+After the transaction coordinator succeeds, the core has atomically recorded `manual-validation.completed` with the same transaction/receipt/head identity. Do not append the Activity Log manually.
 
 If the task has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`.
 

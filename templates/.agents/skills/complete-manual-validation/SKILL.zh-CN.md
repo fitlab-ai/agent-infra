@@ -9,7 +9,7 @@ description: >
 # 完成人工验证
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
-事务协调器统一追加 lifecycle 事件和 PR 摘要最终状态。调用方必须提供同一份结构化 `--evidence-file`，不得用自由文本或 CLI 身份字段替代。
+事务协调器统一追加 lifecycle 事件和 PR 摘要最终状态。维护者提供的验证说明和 PR 摘要留言就是人工验证依据；事务回执负责保证状态转换和恢复一致性。
 
 
 ## 行为边界 / 关键规则
@@ -49,12 +49,11 @@ agent-infra-internal task-snapshot {task-id} --format text
 输入格式：
 
 ```text
-complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] --evidence-file <path> {verification-summary}
+complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] {verification-summary}
 ```
 
 - task scope 可省略；显式 scope 只接受 `--task <ref>` 或 `-t <ref>`。
 - `{pr-ref}` 可选，支持 `#NN`、`NN` 或完整 PR URL。
-- `--evidence-file` 必填，必须是 `run-manual-validation` 生成的 current-only evidence envelope。
 - `{verification-summary}` 必填。若缺失，立即停止并提示补充验证说明；不写产物、不更新 PR。
 
 ### 2. 验证前置条件
@@ -67,15 +66,15 @@ complete-manual-validation [--task <ref> | -t <ref>] [{pr-ref}] --evidence-file 
 
 ### 3. 解析产物上下文
 
-运行 `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`。仅当结果为 `ready` 时继续；从 `next.round` / `next.name` 取得本轮 round 与 `{manual-validation-artifact}`。不得自行扫描轮次或拼装文件名。事务协调器负责 started 事件，技能只传递同一 evidence 文件。
+运行 `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`。仅当结果为 `ready` 时继续；从 `next.round` / `next.name` 取得本轮 round 与 `{manual-validation-artifact}`。不得自行扫描轮次或拼装文件名。事务协调器负责 started 事件。
 
 ### 4. 登记人工验证开始
 
-在创建任何人工验证 artifact 前，先从 `platform-pr summary-context` 取得 canonical 摘要正文并运行 evidence verify，然后调用事务协调器的 prepare 模式：
+在创建任何人工验证 artifact 前，先从 `platform-pr summary-context` 取得 canonical 摘要正文，然后调用事务协调器的 prepare 模式：
 
 ```bash
 agent-infra-internal manual-validation transaction {task-id} --prepare \
-  --evidence-file {evidence-file} --artifact {manual-validation-artifact} \
+  --artifact {manual-validation-artifact} \
   --summary-file {summary-body-file} --agent {standard-agent-token}
 ```
 
@@ -95,18 +94,17 @@ prepare 必须先幂等登记 `manual-validation.started`，再写入 prepared t
 按 `reference/summary-update.md` 校验 PR 绑定，从 `platform-pr summary-context` 取得 canonical 输入，并调用一次 transaction coordinator：
 
 ```bash
-agent-infra-internal manual-validation verify {task-id} --evidence-file {evidence-file} --format json
 agent-infra-internal manual-validation transaction {task-id} \
-  --evidence-file {evidence-file} --artifact {manual-validation-artifact} \
+  --artifact {manual-validation-artifact} \
   --summary-file {summary-body-file} --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
   --agent {standard-agent-token} --result no_op
 ```
 
-coordinator 负责 pending summary、receipt、通过日志、final promotion 和 post-write verification；内部受控调用 `agent-infra-internal task-event {task-id}`，不要分别调用 final `summary-sync` 或 `manual-validation.completed`。
+coordinator 负责 pending summary、receipt、通过日志、final promotion 和 post-write verification；内部受控调用 `agent-infra-internal task-event {task-id}`，不要分别调用 final `summary-sync` 或 `manual-validation.completed`。不要求调用方提供其他主机上的原始 evidence 文件。
 
 ### 7. 更新 task.md
 
-transaction coordinator 成功后，核心已使用同一 transaction/receipt/evidence/head identity 原子登记 `manual-validation.completed`；不要手工补写 Activity Log。
+transaction coordinator 成功后，核心已使用同一 transaction/receipt/head identity 原子登记 `manual-validation.completed`；不要手工补写 Activity Log。
 
 如任务存在有效 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`。
 

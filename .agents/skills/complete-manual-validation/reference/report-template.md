@@ -7,7 +7,7 @@
 
 - **验证轮次**：Round {N}
 - **产物文件**：`manual-validation.md`
-- **Evidence 文件**：`{evidence-file}`（只记录 basename）
+- **人工验证依据**：维护者提供的 PR 验证留言和验证说明
 
 ## 状态核对
 

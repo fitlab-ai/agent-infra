@@ -7,7 +7,7 @@ Read this file before creating `manual-validation.md` / `manual-validation-r{N}.
 
 - **Validation Round**: Round {N}
 - **Artifact File**: `manual-validation.md`
-- **Evidence File**: `{evidence-file}` (basename only)
+- **Human Validation Basis**: Maintainer's PR validation comment and validation summary
 
 ## State Check
 

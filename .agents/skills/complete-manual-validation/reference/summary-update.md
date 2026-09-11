@@ -4,21 +4,20 @@
 
 摘要结构与失败语义统一遵循 `.agents/rules/pr-sync.md`。
 
-1. 在 evidence envelope 落盘后，调用 `agent-infra-internal platform-pr summary-context {task-id}`，取得 canonical 摘要正文。
-2. 运行 `agent-infra-internal manual-validation verify {task-id} --evidence-file {evidence-file} --format json`，确认 task-bound evidence 与当前 PR head 一致。
-3. 在创建 canonical `manual-validation*` artifact 前，调用 transaction coordinator 的 prepare 模式，先登记 started，再写 prepared transaction：
+1. 调用 `agent-infra-internal platform-pr summary-context {task-id}`，取得 canonical 摘要正文；维护者提供的 PR 人工验证留言和验证说明作为完成人工校验依据。
+2. 在创建 canonical `manual-validation*` artifact 前，调用 transaction coordinator 的 prepare 模式，先登记 started，再写 prepared transaction：
 
 ```bash
 agent-infra-internal manual-validation transaction {task-id} --prepare \
-  --evidence-file {evidence-file} --artifact {manual-validation-artifact} \
+  --artifact {manual-validation-artifact} \
   --summary-file {summary-body-file} --agent {standard-agent-token}
 ```
 
-4. prepare 成功后写入 canonical `manual-validation*` artifact，并把只含一次 `<!-- canonical-pr-change-report -->` 的 pending 正文写入临时文件，调用 transaction coordinator：
+3. prepare 成功后写入 canonical `manual-validation*` artifact，并把只含一次 `<!-- canonical-pr-change-report -->` 的 pending 正文写入临时文件，调用 transaction coordinator：
 
 ```bash
 agent-infra-internal manual-validation transaction {task-id} \
-  --evidence-file {evidence-file} --artifact {manual-validation-artifact} \
+  --artifact {manual-validation-artifact} \
   --summary-file {summary-body-file} \
   --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
   --agent {standard-agent-token} --result no_op

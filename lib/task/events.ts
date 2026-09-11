@@ -55,7 +55,6 @@ import {
   validateLifecycleRecoveryAttestation,
   type LifecycleRecoveryAttestationV1
 } from './control-authority.ts';
-import { readManualValidationEvidence, manualValidationEvidenceDigest, validateManualValidationEvidence } from './manual-validation-evidence.ts';
 import { readManualValidationCompletion } from './manual-validation-completion.ts';
 
 const eventCatalog = [
@@ -77,9 +76,6 @@ type TaskEventErrorCode =
   | 'EVENT_LOG_CONFLICT' | 'EVENT_ARTIFACT_CONFLICT' | 'EVENT_FINDING_COUNT_MISMATCH'
   | 'EVENT_VERDICT_INVALID'
   | 'EVENT_ORCHESTRATION_COMMIT_FAILED'
-  | 'MANUAL_VALIDATION_EVIDENCE_MISSING' | 'MANUAL_VALIDATION_EVIDENCE_INVALID'
-  | 'MANUAL_VALIDATION_EVIDENCE_IDENTITY_MISMATCH' | 'MANUAL_VALIDATION_EVIDENCE_UNSUCCESSFUL'
-  | 'MANUAL_VALIDATION_EVIDENCE_STALE' | 'MANUAL_VALIDATION_EVIDENCE_PR_REQUIRED'
   | 'MANUAL_VALIDATION_RECEIPT_MISSING' | 'MANUAL_VALIDATION_RECEIPT_INVALID'
   | 'MANUAL_VALIDATION_RECEIPT_IDENTITY_MISMATCH'
   | 'MANUAL_VALIDATION_TRANSACTION_MISSING' | 'MANUAL_VALIDATION_TRANSACTION_INVALID'
@@ -95,7 +91,7 @@ type TaskEventRequest = {
   verdict?: Verdict; blockers?: number; major?: number; minor?: number;
   manualValidation?: number; filesModified?: number; testsPassed?: number;
   summaryResult?: string;
-  evidenceFile?: string; transactionId?: string; receiptDigest?: string; evidenceDigest?: string; prHeadSha?: string;
+  transactionId?: string; receiptDigest?: string; prHeadSha?: string;
 };
 type TaskEventError = { code: TaskEventErrorCode; message: string };
 type TaskEventOptions = TaskWriteOptions & {
@@ -131,7 +127,7 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'review-code.started': { optional: ['round'] },
   'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'manual-validation.started': { optional: ['round', 'transactionId'] },
-  'manual-validation.completed': { required: ['artifact', 'summaryResult', 'evidenceFile', 'transactionId', 'receiptDigest', 'evidenceDigest', 'prHeadSha'], optional: ['round'] },
+  'manual-validation.completed': { required: ['artifact', 'summaryResult', 'transactionId', 'receiptDigest', 'prHeadSha'], optional: ['round'] },
   'validation-run.started': { optional: ['round'] },
   'validation-run.completed': { required: ['artifact'], optional: ['round'] }
 };
@@ -171,11 +167,9 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
   if (request.fixFor && request.implementationInput) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor and implementationInput are mutually exclusive' };
   if (request.summaryResult !== undefined && (!request.summaryResult.trim() || /[\r\n]/.test(request.summaryResult))) return { code: 'EVENT_PAYLOAD_INVALID', message: 'summaryResult must be a non-empty single line' };
   if (request.event === 'manual-validation.completed') {
-    if (!request.evidenceFile || /[\r\n]/.test(request.evidenceFile)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'manual-validation.completed requires a valid evidence file' };
     for (const [name, value, pattern] of [
       ['transactionId', request.transactionId, /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u],
       ['receiptDigest', request.receiptDigest, /^[a-f0-9]{64}$/u],
-      ['evidenceDigest', request.evidenceDigest, /^[a-f0-9]{64}$/u],
       ['prHeadSha', request.prHeadSha, /^[a-f0-9]{40}$/u]
     ] as const) if (!value || !pattern.test(value)) return { code: 'EVENT_PAYLOAD_INVALID', message: `manual-validation.completed requires a valid ${name}` };
   }
@@ -287,7 +281,7 @@ function identity(request: TaskEventRequest) {
       family, phase, action: spec.label,
       note: phase === 'started'
         ? `started${request.transactionId ? `; transaction=${request.transactionId}` : ''}`
-        : `Manual validation passed → ${request.artifact}; ${request.summaryResult}; transaction=${request.transactionId}; receipt=${request.receiptDigest}; evidence=${request.evidenceDigest}; head=${request.prHeadSha}`,
+        : `Manual validation passed → ${request.artifact}; ${request.summaryResult}; transaction=${request.transactionId}; receipt=${request.receiptDigest}; head=${request.prHeadSha}`,
       target: null
     } as const;
   }
@@ -337,10 +331,8 @@ function normalizeStarted(request: TaskEventRequest, repoRoot: string): { reques
 }
 
 function validateManualValidationCompletion(
-  repoRoot: string,
   taskDir: string,
   taskId: string,
-  branch: string,
   request: TaskEventRequest,
   artifactPath: string
 ): TaskEventError | null {
@@ -348,7 +340,6 @@ function validateManualValidationCompletion(
     transactionId: request.transactionId,
     taskId,
     prHeadSha: request.prHeadSha,
-    evidenceDigest: request.evidenceDigest,
     artifact: request.artifact,
     receiptDigest: request.receiptDigest
   });
@@ -357,12 +348,6 @@ function validateManualValidationCompletion(
   if (!['receipt-committed', 'final-promotion-in-progress', 'committed'].includes(transaction.phase)) {
     return { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'manual validation completion requires the receipt-backed transaction phase' };
   }
-  const evidenceFile = path.isAbsolute(request.evidenceFile!) ? request.evidenceFile! : path.resolve(repoRoot, request.evidenceFile!);
-  const evidence = readManualValidationEvidence(evidenceFile);
-  if (!evidence.ok) return evidence.error;
-  const evidenceIdentity = validateManualValidationEvidence(evidence.value, { taskId: evidence.value.mode === 'branch-only' ? null : taskId, branch, commit: receipt.prHeadSha });
-  if (!evidenceIdentity.ok) return evidenceIdentity.error;
-  if (manualValidationEvidenceDigest(evidence.value) !== receipt.evidenceDigest) return { code: 'MANUAL_VALIDATION_EVIDENCE_STALE', message: 'evidence digest does not match the committed receipt' };
   if (sha256File(artifactPath) !== receipt.artifactSha256) return { code: 'MANUAL_VALIDATION_RECEIPT_INVALID', message: 'manual-validation artifact digest does not match the receipt' };
   return null;
 }
@@ -755,13 +740,9 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     completedArtifact = validated.artifact;
     if (eventIdentity.family === 'manual-validation') {
-      const branch = typeof frontmatter.branch === 'string' ? frontmatter.branch : '';
-      if (!branch) return failed(normalized, { code: 'MANUAL_VALIDATION_EVIDENCE_IDENTITY_MISMATCH', message: 'task branch is missing from task.md' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       const validationError = validateManualValidationCompletion(
-        resolved.repoRoot,
         resolved.taskDir,
         resolved.taskId,
-        branch,
         normalized,
         completedArtifact.path
       );
