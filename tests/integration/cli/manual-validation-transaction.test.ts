@@ -285,88 +285,77 @@ function prepare(
   });
 }
 
-test('coordinator resumes a started-only generation with the persisted identity', async () => {
+test('coordinator resumes a started-only generation with the persisted identity', async (t) => {
   const fixture = createFixture();
-  try {
-    const started = applyTaskEvent({
-      taskRef: fixture.taskId, event: 'manual-validation.started', agent: 'codex', initiator: 'model',
-      requestId: 'mv-started-only', reasonCode: 'user-request', transactionId: 'mv-started-only'
-    }, { repoRoot: fixture.root });
-    assert.equal(started.status, 'applied');
-    const result = await prepare(fixture);
-    assert.equal(result.status, 'applied');
-    assert.equal(result.transaction?.transactionId, 'mv-started-only');
-    assert.equal(countStarted(fixture.taskPath), 1);
-    const replay = await prepare(fixture);
-    assert.equal(replay.status, 'applied');
-    assert.equal(replay.transaction?.transactionId, 'mv-started-only');
-    assert.equal(countStarted(fixture.taskPath), 1);
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const started = applyTaskEvent({
+    taskRef: fixture.taskId, event: 'manual-validation.started', agent: 'codex', initiator: 'model',
+    requestId: 'mv-started-only', reasonCode: 'user-request', transactionId: 'mv-started-only'
+  }, { repoRoot: fixture.root });
+  assert.equal(started.status, 'applied');
+  const result = await prepare(fixture);
+  assert.equal(result.status, 'applied');
+  assert.equal(result.transaction?.transactionId, 'mv-started-only');
+  assert.equal(countStarted(fixture.taskPath), 1);
+  const replay = await prepare(fixture);
+  assert.equal(replay.status, 'applied');
+  assert.equal(replay.transaction?.transactionId, 'mv-started-only');
+  assert.equal(countStarted(fixture.taskPath), 1);
 });
 
-test('coordinator archives a committed generation before preparing the new head', async () => {
+test('coordinator archives a committed generation before preparing the new head', async (t) => {
   const fixture = createFixture();
-  try {
-    const old = committedGeneration(fixture, 'mv-old', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
-    const historyDir = path.join(fixture.taskDir, '.manual-validation', 'history');
-    fs.mkdirSync(historyDir, { recursive: true });
-    fs.renameSync(path.join(fixture.taskDir, '.manual-validation', 'receipt.json'), path.join(historyDir, 'receipt-mv-old-attempt-1.json'));
-    const result = await prepare(fixture);
-    assert.equal(result.status, 'applied');
-    assert.equal(result.transaction?.transactionId === old.transaction.transactionId, false);
-    assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
-    assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'transaction-mv-old-attempt-1.json')), true);
-    assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'receipt-mv-old-attempt-1.json')), true);
-    assert.equal(countStarted(fixture.taskPath), 1);
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const old = committedGeneration(fixture, 'mv-old', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
+  const historyDir = path.join(fixture.taskDir, '.manual-validation', 'history');
+  fs.mkdirSync(historyDir, { recursive: true });
+  fs.renameSync(path.join(fixture.taskDir, '.manual-validation', 'receipt.json'), path.join(historyDir, 'receipt-mv-old-attempt-1.json'));
+  const result = await prepare(fixture);
+  assert.equal(result.status, 'applied');
+  assert.equal(result.transaction?.transactionId === old.transaction.transactionId, false);
+  assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
+  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'transaction-mv-old-attempt-1.json')), true);
+  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'receipt-mv-old-attempt-1.json')), true);
+  assert.equal(countStarted(fixture.taskPath), 1);
 });
 
-test('coordinator fails closed when the archived receipt is invalid', async () => {
+test('coordinator fails closed when the archived receipt is invalid', async (t) => {
   const fixture = createFixture();
-  try {
-    const old = committedGeneration(fixture, 'mv-invalid-history', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
-    const historyDir = path.join(fixture.taskDir, '.manual-validation', 'history');
-    fs.mkdirSync(historyDir, { recursive: true });
-    fs.renameSync(path.join(fixture.taskDir, '.manual-validation', 'receipt.json'), path.join(historyDir, 'receipt-mv-invalid-history-attempt-1.json'));
-    const invalidReceipt = JSON.parse(fs.readFileSync(path.join(historyDir, 'receipt-mv-invalid-history-attempt-1.json'), 'utf8')) as Record<string, unknown>;
-    invalidReceipt.prHeadSha = 'f'.repeat(40);
-    fs.writeFileSync(path.join(historyDir, 'receipt-mv-invalid-history-attempt-1.json'), `${JSON.stringify(invalidReceipt)}\n`);
-    const result = await prepare(fixture);
-    assert.equal(result.status, 'failed');
-    assert.equal(result.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
-    assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
-    assert.equal(countStarted(fixture.taskPath), 0);
-    assert.equal(old.transaction.phase, 'committed');
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const old = committedGeneration(fixture, 'mv-invalid-history', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
+  const historyDir = path.join(fixture.taskDir, '.manual-validation', 'history');
+  fs.mkdirSync(historyDir, { recursive: true });
+  fs.renameSync(path.join(fixture.taskDir, '.manual-validation', 'receipt.json'), path.join(historyDir, 'receipt-mv-invalid-history-attempt-1.json'));
+  const invalidReceipt = JSON.parse(fs.readFileSync(path.join(historyDir, 'receipt-mv-invalid-history-attempt-1.json'), 'utf8')) as Record<string, unknown>;
+  invalidReceipt.prHeadSha = 'f'.repeat(40);
+  fs.writeFileSync(path.join(historyDir, 'receipt-mv-invalid-history-attempt-1.json'), `${JSON.stringify(invalidReceipt)}\n`);
+  const result = await prepare(fixture);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
+  assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
+  assert.equal(countStarted(fixture.taskPath), 0);
+  assert.equal(old.transaction.phase, 'committed');
 });
 
-test('coordinator retries after archive completion without duplicating the started event', async () => {
+test('coordinator retries after archive completion without duplicating the started event', async (t) => {
   const fixture = createFixture();
-  try {
-    const old = committedGeneration(fixture, 'mv-archived', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
-    const started = applyTaskEvent({
-      taskRef: fixture.taskId, event: 'manual-validation.started', agent: 'codex', initiator: 'model',
-      requestId: 'mv-new-after-archive', reasonCode: 'user-request', transactionId: 'mv-new-after-archive'
-    }, { repoRoot: fixture.root });
-    assert.equal(started.status, 'applied');
-    archiveManualValidationGeneration(fixture.taskDir, old.transaction, true);
-    const result = await prepare(fixture);
-    assert.equal(result.status, 'applied');
-    assert.equal(result.transaction?.transactionId, 'mv-new-after-archive');
-    assert.equal(countStarted(fixture.taskPath), 1);
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const old = committedGeneration(fixture, 'mv-archived', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
+  const started = applyTaskEvent({
+    taskRef: fixture.taskId, event: 'manual-validation.started', agent: 'codex', initiator: 'model',
+    requestId: 'mv-new-after-archive', reasonCode: 'user-request', transactionId: 'mv-new-after-archive'
+  }, { repoRoot: fixture.root });
+  assert.equal(started.status, 'applied');
+  archiveManualValidationGeneration(fixture.taskDir, old.transaction, true);
+  const result = await prepare(fixture);
+  assert.equal(result.status, 'applied');
+  assert.equal(result.transaction?.transactionId, 'mv-new-after-archive');
+  assert.equal(countStarted(fixture.taskPath), 1);
 });
 
-test('coordinator recovers a receipt-first archive interruption on the same retry identity', async () => {
+test('coordinator recovers a receipt-first archive interruption on the same retry identity', async (t) => {
   const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
   const fault = { injected: false };
   const archiveGeneration = (taskDir: string, transaction: ManualValidationTransaction, requireReceipt?: boolean): void => {
     return archiveManualValidationGeneration(taskDir, transaction, requireReceipt, {
@@ -378,47 +367,40 @@ test('coordinator recovers a receipt-first archive interruption on the same retr
       }
     });
   };
-  try {
-    const old = committedGeneration(fixture, 'mv-fault', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
-    const first = await prepare(fixture, undefined, { archiveGeneration });
-    assert.equal(first.status, 'failed');
-    assert.equal(first.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
-    assert.equal(countStarted(fixture.taskPath), 1);
-    assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'receipt-mv-fault-attempt-1.json')), true);
-    assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
-    assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'transaction-mv-fault-attempt-1.json')), false);
+  const old = committedGeneration(fixture, 'mv-fault', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
+  const first = await prepare(fixture, undefined, { archiveGeneration });
+  assert.equal(first.status, 'failed');
+  assert.equal(first.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
+  assert.equal(countStarted(fixture.taskPath), 1);
+  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'receipt-mv-fault-attempt-1.json')), true);
+  assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
+  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'transaction-mv-fault-attempt-1.json')), false);
 
-    const retry = await prepare(fixture, undefined, { archiveGeneration });
-    assert.equal(retry.status, 'applied');
-    assert.equal(retry.transaction?.transactionId === old.transaction.transactionId, false);
-    assert.equal(countStarted(fixture.taskPath), 1);
-    assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'transaction-mv-fault-attempt-1.json')), true);
+  const retry = await prepare(fixture, undefined, { archiveGeneration });
+  assert.equal(retry.status, 'applied');
+  assert.equal(retry.transaction?.transactionId === old.transaction.transactionId, false);
+  assert.equal(countStarted(fixture.taskPath), 1);
+  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'transaction-mv-fault-attempt-1.json')), true);
 
-    const replay = await prepare(fixture, undefined, { archiveGeneration });
-    assert.equal(replay.status, 'applied');
-    assert.equal(replay.transaction?.transactionId, retry.transaction?.transactionId);
-    assert.equal(replay.idempotent, true);
-    assert.equal(countStarted(fixture.taskPath), 1);
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
+  const replay = await prepare(fixture, undefined, { archiveGeneration });
+  assert.equal(replay.status, 'applied');
+  assert.equal(replay.transaction?.transactionId, retry.transaction?.transactionId);
+  assert.equal(replay.idempotent, true);
+  assert.equal(countStarted(fixture.taskPath), 1);
 });
 
-test('actual coordinator execution converges on replay without repeated remote writes', async () => {
+test('actual coordinator execution converges on replay without repeated remote writes', async (t) => {
   const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
   const state: FakeGitHubState = { comments: [], writes: 0 };
-  try {
-    const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
-    assert.equal(first.status, 'applied', JSON.stringify({ first, state }));
-    assert.equal(first.transaction?.phase, 'committed');
-    const writesAfterFirst = state.writes;
-    assert.ok(writesAfterFirst > 0);
-    const second = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
-    assert.equal(second.status, 'applied');
-    assert.equal(second.transaction?.transactionId, first.transaction?.transactionId);
-    assert.equal(state.writes, writesAfterFirst);
-    assert.equal(countStarted(fixture.taskPath), 1);
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
+  const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
+  assert.equal(first.status, 'applied', JSON.stringify({ first, state }));
+  assert.equal(first.transaction?.phase, 'committed');
+  const writesAfterFirst = state.writes;
+  assert.ok(writesAfterFirst > 0);
+  const second = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
+  assert.equal(second.status, 'applied');
+  assert.equal(second.transaction?.transactionId, first.transaction?.transactionId);
+  assert.equal(state.writes, writesAfterFirst);
+  assert.equal(countStarted(fixture.taskPath), 1);
 });

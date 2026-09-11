@@ -232,6 +232,15 @@ async function executeManualValidationTransactionLocked(
   const transactionFailure = (failure: { code: string; message: string }): never => {
     throw new Error(`${failure.code}: ${failure.message}`);
   };
+  const transitionAndPersist = (
+    phase: Parameters<typeof transitionManualValidationTransaction>[1],
+    patch: Parameters<typeof transitionManualValidationTransaction>[2] = {}
+  ): void => {
+    const next = transitionManualValidationTransaction(transaction, phase, patch);
+    if (!next.ok) throw new Error(`${next.error.code}: ${next.error.message}`);
+    transaction = next.value;
+    writeManualValidationTransactionAtomic(resolved.taskDir, transaction);
+  };
   try {
     if (transaction.phase === 'prepared') {
       const staged = await syncPullRequestSummary(taskRef, {
@@ -239,10 +248,7 @@ async function executeManualValidationTransactionLocked(
         manualValidation: { phase: 'pending', evidenceFile: values.evidenceFile!, evidenceDigest: transaction.evidenceDigest }, lockAlreadyHeld: true
       });
       if (!['applied', 'no-op'].includes(staged.status)) transactionFailure(staged.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'pending summary staging failed' });
-      const stagedTransaction = transitionManualValidationTransaction(transaction, 'summary-staged');
-      if (!stagedTransaction.ok) throw new Error(`${stagedTransaction.error.code}: ${stagedTransaction.error.message}`);
-      transaction = stagedTransaction.value;
-      writeManualValidationTransactionAtomic(resolved.taskDir, transaction);
+      transitionAndPersist('summary-staged');
     }
     let receiptResult = readManualValidationReceipt(resolved.taskDir, {
       transactionId: transaction.transactionId,
@@ -272,24 +278,15 @@ async function executeManualValidationTransactionLocked(
       writeManualValidationReceiptAtomic(resolved.taskDir, receipt);
     }
     if (transaction.phase === 'summary-staged') {
-      const receiptTransaction = transitionManualValidationTransaction(transaction, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
-      if (!receiptTransaction.ok) throw new Error(`${receiptTransaction.error.code}: ${receiptTransaction.error.message}`);
-      transaction = receiptTransaction.value;
-      writeManualValidationTransactionAtomic(resolved.taskDir, transaction);
+      transitionAndPersist('receipt-committed', { committedReceipt: receipt.receiptDigest });
     }
     if (transaction.phase === 'receipt-committed' && !transaction.eventAppended) {
       const completed = applyTaskEvent({ taskRef, event: 'manual-validation.completed', agent, initiator: 'model', requestId: transaction.transactionId, reasonCode: 'user-request', artifact: values.artifact, summaryResult: 'verified current evidence and committed receipt', evidenceFile: values.evidenceFile, transactionId: transaction.transactionId, receiptDigest: receipt.receiptDigest, evidenceDigest: receipt.evidenceDigest, prHeadSha: receipt.prHeadSha }, { lockAlreadyHeld: true, repoRoot: cwd });
       if (completed.status === 'failed') transactionFailure(completed.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_FAILED', message: 'manual-validation completion event failed' });
-      const eventTransaction = transitionManualValidationTransaction(transaction, 'receipt-committed', { eventAppended: true });
-      if (!eventTransaction.ok) throw new Error(`${eventTransaction.error.code}: ${eventTransaction.error.message}`);
-      transaction = eventTransaction.value;
-      writeManualValidationTransactionAtomic(resolved.taskDir, transaction);
+      transitionAndPersist('receipt-committed', { eventAppended: true });
     }
     if (transaction.phase === 'receipt-committed') {
-      const finalTransaction = transitionManualValidationTransaction(transaction, 'final-promotion-in-progress');
-      if (!finalTransaction.ok) throw new Error(`${finalTransaction.error.code}: ${finalTransaction.error.message}`);
-      transaction = finalTransaction.value;
-      writeManualValidationTransactionAtomic(resolved.taskDir, transaction);
+      transitionAndPersist('final-promotion-in-progress');
     }
     const promoted = await syncPullRequestSummary(taskRef, {
       cwd, client: options.client, agent, body: manualSummaryBody(finalBodyWithoutReceipt, 'final', transaction.transactionId, receipt.receiptDigest, receipt.evidenceDigest, receipt.prHeadSha), changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult, strict: true,
@@ -298,10 +295,8 @@ async function executeManualValidationTransactionLocked(
     if (!['applied', 'no-op'].includes(promoted.status)) transactionFailure(promoted.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary promotion failed' });
     const postWrite = await summaryCommentState(taskRef, { cwd, client: options.client });
     if (!postWrite.comment?.body.includes('### ✅ Manual Validation Passed') || postWrite.pullRequest?.head.sha !== receipt.prHeadSha || !manualValidationFinalSummaryProjectionMatches(postWrite.comment.body, receipt)) transactionFailure({ code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary post-write verification failed' });
-    const committed = transitionManualValidationTransaction(transaction, 'committed', { postWriteVerified: true });
-    if (!committed.ok) throw new Error(`${committed.error.code}: ${committed.error.message}`);
-    writeManualValidationTransactionAtomic(resolved.taskDir, committed.value);
-    return result('applied', null, { transaction: committed.value, receipt, idempotent: false });
+    transitionAndPersist('committed', { postWriteVerified: true });
+    return result('applied', null, { transaction, receipt, idempotent: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (transaction.phase === 'final-promotion-in-progress') {

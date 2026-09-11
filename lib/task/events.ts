@@ -56,8 +56,7 @@ import {
   type LifecycleRecoveryAttestationV1
 } from './control-authority.ts';
 import { readManualValidationEvidence, manualValidationEvidenceDigest, validateManualValidationEvidence } from './manual-validation-evidence.ts';
-import { readManualValidationReceipt } from './manual-validation-receipt.ts';
-import { readManualValidationTransaction } from './manual-validation-transaction.ts';
+import { readManualValidationCompletion } from './manual-validation-completion.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -345,34 +344,26 @@ function validateManualValidationCompletion(
   request: TaskEventRequest,
   artifactPath: string
 ): TaskEventError | null {
-  const receipt = readManualValidationReceipt(taskDir, {
+  const completion = readManualValidationCompletion(taskDir, {
     transactionId: request.transactionId,
     taskId,
     prHeadSha: request.prHeadSha,
     evidenceDigest: request.evidenceDigest,
-    artifact: request.artifact
+    artifact: request.artifact,
+    receiptDigest: request.receiptDigest
   });
-  if (!receipt.ok) return receipt.error;
-  if (receipt.value.receiptDigest !== request.receiptDigest) return { code: 'MANUAL_VALIDATION_RECEIPT_INVALID', message: 'receipt digest does not match the completion request' };
-  const transaction = readManualValidationTransaction(taskDir, {
-    transactionId: request.transactionId,
-    taskId,
-    prNumber: receipt.value.prNumber,
-    prHeadSha: receipt.value.prHeadSha,
-    evidenceDigest: receipt.value.evidenceDigest,
-    artifact: receipt.value.artifact
-  });
-  if (!transaction.ok) return transaction.error;
-  if (!['receipt-committed', 'final-promotion-in-progress', 'committed'].includes(transaction.value.phase) || transaction.value.committedReceipt !== receipt.value.receiptDigest) {
+  if (!completion.ok) return completion.error;
+  const { receipt, transaction } = completion.value;
+  if (!['receipt-committed', 'final-promotion-in-progress', 'committed'].includes(transaction.phase)) {
     return { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'manual validation completion requires the receipt-backed transaction phase' };
   }
   const evidenceFile = path.isAbsolute(request.evidenceFile!) ? request.evidenceFile! : path.resolve(repoRoot, request.evidenceFile!);
   const evidence = readManualValidationEvidence(evidenceFile);
   if (!evidence.ok) return evidence.error;
-  const evidenceIdentity = validateManualValidationEvidence(evidence.value, { taskId: evidence.value.mode === 'branch-only' ? null : taskId, branch, commit: receipt.value.prHeadSha });
+  const evidenceIdentity = validateManualValidationEvidence(evidence.value, { taskId: evidence.value.mode === 'branch-only' ? null : taskId, branch, commit: receipt.prHeadSha });
   if (!evidenceIdentity.ok) return evidenceIdentity.error;
-  if (manualValidationEvidenceDigest(evidence.value) !== receipt.value.evidenceDigest) return { code: 'MANUAL_VALIDATION_EVIDENCE_STALE', message: 'evidence digest does not match the committed receipt' };
-  if (sha256File(artifactPath) !== receipt.value.artifactSha256) return { code: 'MANUAL_VALIDATION_RECEIPT_INVALID', message: 'manual-validation artifact digest does not match the receipt' };
+  if (manualValidationEvidenceDigest(evidence.value) !== receipt.evidenceDigest) return { code: 'MANUAL_VALIDATION_EVIDENCE_STALE', message: 'evidence digest does not match the committed receipt' };
+  if (sha256File(artifactPath) !== receipt.artifactSha256) return { code: 'MANUAL_VALIDATION_RECEIPT_INVALID', message: 'manual-validation artifact digest does not match the receipt' };
   return null;
 }
 

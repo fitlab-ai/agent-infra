@@ -34,8 +34,8 @@ import type {
   PrChangeReport
 } from './pr-change-report.ts';
 import { manualValidationEvidenceDigest, readManualValidationEvidence, validateManualValidationEvidence } from '../task/manual-validation-evidence.ts';
-import { manualValidationFinalSummaryProjectionMatches, readManualValidationReceipt } from '../task/manual-validation-receipt.ts';
-import { readManualValidationTransaction } from '../task/manual-validation-transaction.ts';
+import { manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
+import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -570,24 +570,18 @@ async function syncPullRequestSummary(
         if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
         if (manual.phase === 'final') {
           if (manual.authority !== 'coordinator') return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires coordinator authority', retryable: false }, prNumber);
-          const receipt = readManualValidationReceipt(resolved.taskDir, {
+          const completion = readManualValidationCompletion(resolved.taskDir, {
             transactionId: manual.transactionId,
             taskId: resolved.taskId,
             prNumber,
             prHeadSha: initial.value.head.sha,
-            evidenceDigest: manual.evidenceDigest
+            evidenceDigest: manual.evidenceDigest,
+            receiptDigest: manual.receiptDigest
           });
-          if (!receipt.ok || receipt.value.receiptDigest !== manual.receiptDigest) return fail('failed', context, { code: receipt.ok ? 'MANUAL_VALIDATION_RECEIPT_IDENTITY_MISMATCH' : receipt.error.code, message: receipt.ok ? 'final summary receipt does not match the canonical receipt' : receipt.error.message, retryable: false }, prNumber);
-          const transaction = readManualValidationTransaction(resolved.taskDir, {
-            transactionId: receipt.value.transactionId,
-            taskId: resolved.taskId,
-            prNumber,
-            prHeadSha: initial.value.head.sha,
-            evidenceDigest: receipt.value.evidenceDigest,
-            artifact: receipt.value.artifact
-          });
-          if (!transaction.ok || transaction.value.phase !== 'final-promotion-in-progress' || !transaction.value.eventAppended || transaction.value.committedReceipt !== receipt.value.receiptDigest) return fail('failed', context, { code: transaction.ok ? 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID' : transaction.error.code, message: transaction.ok ? 'final summary requires a receipt-backed promotion intent' : transaction.error.message, retryable: false }, prNumber);
-          if (!manualValidationFinalSummaryProjectionMatches(options.body, receipt.value)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the canonical receipt projection', retryable: false }, prNumber);
+          if (!completion.ok) return fail('failed', context, platformError(completion.error), prNumber);
+          const { receipt, transaction } = completion.value;
+          if (transaction.phase !== 'final-promotion-in-progress' || !transaction.eventAppended) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'final summary requires a receipt-backed promotion intent', retryable: false }, prNumber);
+          if (!manualValidationFinalSummaryProjectionMatches(options.body, receipt)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the canonical receipt projection', retryable: false }, prNumber);
         }
       }
       const expectedReportPath = taskReportPath(resolved.taskDir);

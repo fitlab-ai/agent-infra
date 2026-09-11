@@ -44,9 +44,8 @@ import { validateQualificationAudit } from "./qualification-audit.ts";
 import { getArtifactSchema } from "./artifact-schema.ts";
 import { inspectArtifactContract } from "./artifact-operations.ts";
 import type { VerificationShared } from "./verification-types.ts";
-import { readManualValidationReceipt } from "./manual-validation-receipt.ts";
 import { manualValidationFinalSummaryProjectionMatches } from "./manual-validation-receipt.ts";
-import { readManualValidationTransaction } from "./manual-validation-transaction.ts";
+import { readManualValidationCompletion } from "./manual-validation-completion.ts";
 import { sha256File } from "./artifact-receipts.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
 
@@ -896,27 +895,22 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   const artifactName = path.basename(resolved.path);
   const task = loadTask(taskDir);
   if (!task.ok) return failResult("manual-validation", task.message);
-  const receipt = readManualValidationReceipt(taskDir, {
+  const completion = readManualValidationCompletion(taskDir, {
     taskId: task.metadata.id,
     artifact: artifactName
   });
-  if (!receipt.ok) return failResult("manual-validation", `Manual validation receipt is unavailable: ${receipt.error.message}`);
-  const transaction = readManualValidationTransaction(taskDir, {
-    taskId: task.metadata.id,
-    prNumber: receipt.value.prNumber,
-    prHeadSha: receipt.value.prHeadSha,
-    evidenceDigest: receipt.value.evidenceDigest,
-    artifact: receipt.value.artifact,
-    transactionId: receipt.value.transactionId
-  });
-  if (!transaction.ok) return failResult("manual-validation", `Manual validation transaction is unavailable: ${transaction.error.message}`);
-  if (transaction.value.phase !== "committed" || transaction.value.committedReceipt !== receipt.value.receiptDigest || !transaction.value.eventAppended || !transaction.value.postWriteVerified) {
+  if (!completion.ok) {
+    const source = completion.error.code.startsWith('MANUAL_VALIDATION_RECEIPT_') ? 'receipt' : 'transaction';
+    return failResult("manual-validation", `Manual validation ${source} is unavailable: ${completion.error.message}`);
+  }
+  const { receipt, transaction } = completion.value;
+  if (transaction.phase !== "committed" || !transaction.eventAppended || !transaction.postWriteVerified) {
     return failResult("manual-validation", "Manual validation transaction has not reached the committed post-write-verified state");
   }
-  if (transaction.value.pendingSummaryDigest !== receipt.value.pendingSummaryDigest || transaction.value.finalSummaryDigest !== receipt.value.finalSummaryDigest) {
+  if (transaction.pendingSummaryDigest !== receipt.pendingSummaryDigest || transaction.finalSummaryDigest !== receipt.finalSummaryDigest) {
     return failResult("manual-validation", "Manual validation summary digests do not match the committed receipt");
   }
-  if (sha256File(resolved.path) !== receipt.value.artifactSha256) {
+  if (sha256File(resolved.path) !== receipt.artifactSha256) {
     return failResult("manual-validation", `Manual validation artifact digest does not match the receipt for ${artifactName}`);
   }
   // 6. Timing correlation (PL-3 fix, PL-4 corrected): the completion entry must
@@ -931,10 +925,10 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   const reviewDoneIndex = inspectedLog.section.entries.findIndex((entry) => entry.step === `Review Code (Round ${review.round})`);
   const completedIndex = inspectedLog.section.entries.findIndex((entry) => entry.step === "Complete Manual Validation"
     && entry.note.includes(`Manual validation passed → ${artifactName};`)
-    && entry.note.includes(`transaction=${receipt.value.transactionId};`)
-    && entry.note.includes(`receipt=${receipt.value.receiptDigest};`)
-    && entry.note.includes(`evidence=${receipt.value.evidenceDigest};`)
-    && entry.note.includes(`head=${receipt.value.prHeadSha}`));
+        && entry.note.includes(`transaction=${receipt.transactionId};`)
+        && entry.note.includes(`receipt=${receipt.receiptDigest};`)
+        && entry.note.includes(`evidence=${receipt.evidenceDigest};`)
+        && entry.note.includes(`head=${receipt.prHeadSha}`));
   if (reviewDoneIndex === -1) return failResult("manual-validation", `Latest review-code (round ${review.round}) completion entry is missing from the Activity Log`);
   if (completedIndex === -1) return failResult("manual-validation", `Committed manual validation completion is not recorded for ${artifactName}`);
   if (completedIndex < reviewDoneIndex) return failResult("manual-validation", `Latest review-code (round ${review.round}) came after the manual validation completion recorded for ${artifactName}`);
@@ -944,10 +938,10 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   if (fact.status === "valid" && fact.fact.state === "bound") {
     const inspected = await inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
     if (!inspected.pullRequest) return failResult("manual-validation", inspected.error?.message ?? "canonical pull-request head is unavailable");
-    if (inspected.pullRequest.head.sha !== receipt.value.prHeadSha) return failResult("manual-validation", "manual validation receipt is stale for the current pull-request head");
+    if (inspected.pullRequest.head.sha !== receipt.prHeadSha) return failResult("manual-validation", "manual validation receipt is stale for the current pull-request head");
     const summary = await summaryCommentState(task.metadata.id, { cwd: repositoryRoot });
     if (!summary.comment) return failResult("manual-validation", "canonical pull-request summary comment is unavailable");
-    if (!manualValidationFinalSummaryProjectionMatches(summary.comment.body, receipt.value)) return failResult("manual-validation", "canonical pull-request summary does not match the committed manual validation projection");
+    if (!manualValidationFinalSummaryProjectionMatches(summary.comment.body, receipt)) return failResult("manual-validation", "canonical pull-request summary does not match the committed manual validation projection");
   }
   return passResult("manual-validation", `Manual validation completed → ${artifactName} (committed receipt and post-write verification)`);
 }
