@@ -8,7 +8,6 @@ import {
   assertSandboxTaskSource,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
-  prepareSandboxTaskProjection,
   prepareSandboxWorkspaceMountTargets,
   sandboxWorkspaceViewStatePaths
 } from '../../../../lib/sandbox/workspace-view.ts';
@@ -24,7 +23,7 @@ test('workspace view state paths use the isolated runtime state allowlist', () =
   ]);
 });
 
-test('task-bound view contains only the scoped registry and task placeholder', () => {
+test('task-bound view contains only the scoped registry', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-view-'));
   const view = materializeSandboxWorkspaceView({
     base: root,
@@ -34,10 +33,7 @@ test('task-bound view contains only the scoped registry and task placeholder', (
   });
 
   assert.deepEqual(fs.readdirSync(view.root).sort(), ['active', 'archive', 'blocked', 'completed']);
-  assert.deepEqual(fs.readdirSync(path.join(view.root, 'active')).sort(), [
-    '.short-ids.json',
-    'TASK-20260809-010203'
-  ]);
+  assert.deepEqual(fs.readdirSync(path.join(view.root, 'active')).sort(), ['.short-ids.json']);
   assert.equal(
     fs.readFileSync(path.join(view.root, 'active', '.short-ids.json'), 'utf8'),
     '{"version":1,"ids":{"8":"TASK-20260809-010203"}}\n'
@@ -111,20 +107,6 @@ test('task sources reject symlinks before they become writable mounts', () => {
   fs.mkdirSync(outside);
   fs.symlinkSync(outside, path.join(active, 'TASK-20260809-010203'));
   assert.throws(() => assertSandboxTaskSource(root, 'TASK-20260809-010203'), /SOURCE_INVALID/);
-});
-
-test('task-bound writable source is a host-owned projection copy', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-projection-'));
-  const taskId = 'TASK-20260809-010203';
-  const source = path.join(root, '.agents', 'workspace', 'active', taskId);
-  const projection = path.join(root, 'view', taskId);
-  fs.mkdirSync(source, { recursive: true });
-  fs.writeFileSync(path.join(source, 'task.md'), 'authoritative\n');
-  const result = prepareSandboxTaskProjection(root, taskId, projection);
-  fs.writeFileSync(path.join(result, 'task.md'), 'candidate\n');
-  assert.equal(fs.readFileSync(path.join(source, 'task.md'), 'utf8'), 'authoritative\n');
-  assert.equal(fs.readFileSync(path.join(result, 'task.md'), 'utf8'), 'candidate\n');
-  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('control materialization rotates token and generation and creates isolated status paths', onPlatforms('linux', 'darwin'), () => {

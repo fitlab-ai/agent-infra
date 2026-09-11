@@ -6,7 +6,6 @@ import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
 import { validateTaskWorkflowRequest, type TaskWorkflowRequest } from './task-workflow.ts';
-import type { ProjectionAncestorIdentity } from './task-workflow.ts';
 import {
   validateLifecycleAuthorityRequest,
   type LifecycleAuthorityRequestV1,
@@ -49,8 +48,6 @@ export type SandboxControlManifestBase = Readonly<{
   authorityEvidence: SandboxAuthorityEvidenceV1;
   branch: string; mode: 'task-bound' | 'branch-only'; taskId: string | null; token: string;
   generation: string; controlRootId: string; channelDir: string; publicStatusDir: string; processingDir: string;
-  taskProjectionDir?: string;
-  taskProjectionTopology?: readonly ProjectionAncestorIdentity[];
 }>;
 export type SandboxControlManifest = SandboxControlManifestBase & Readonly<{ runtimeDir: string }>;
 export type SandboxControlBrokerOwner = ProcessIdentity & Readonly<{

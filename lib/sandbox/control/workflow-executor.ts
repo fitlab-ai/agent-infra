@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import { TASK_WORKFLOW_COMMANDS } from '../../task/workflow-command.ts';
 
 import { parseArtifactCommand, executeArtifactCommand } from '../../task/artifact-command.ts';
@@ -8,12 +6,10 @@ import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../task/
 import { prepareReviewSummaryCandidate, commitReviewSummaryProvenance } from '../../task/review-finalization.ts';
 import { withTaskExecutionLock } from '../../task/task-execution-lock.ts';
 import { dispatchHostControlCommand } from '../../host-control/command.ts';
-import { writeAtomicFile } from '../../host-control/secure-fs.ts';
-import { refreshSandboxTaskProjection } from '../workspace-view.ts';
+import { assertSandboxTaskSource } from '../workspace-view.ts';
 import { appendDiagnosticAudit } from './audit.ts';
 import {
-  readProjectionArtifact, landProjectionArtifact, verifyProjectionTopology,
-  type TaskProjectionManifest, type TaskWorkflowRequest
+  readTaskArtifact, writeTaskArtifact, type TaskWorkflowRequest
 } from './task-workflow.ts';
 import type { SandboxControlManifest } from './protocol.ts';
 import type { SandboxControlExecutionResult } from './executor.ts';
@@ -33,14 +29,7 @@ export async function executeTaskWorkflow(
 ): Promise<SandboxControlExecutionResult> {
   let publicationStarted = false;
   try {
-    const projection: TaskProjectionManifest | null = manifest.taskProjectionDir && manifest.taskProjectionTopology ? {
-      version: 1, taskId: request.taskId, generation: request.generation,
-      projectionRoot: manifest.taskProjectionDir,
-      authoritativeTaskDir: path.join(manifest.repoRoot, '.agents', 'workspace', 'active', request.taskId),
-      topology: { verified: true, ancestors: manifest.taskProjectionTopology }
-    } : null;
-    if (manifest.taskProjectionDir && !projection) throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED');
-    if (projection) verifyProjectionTopology(projection);
+    const taskDir = assertSandboxTaskSource(manifest.repoRoot, request.taskId);
     const [command] = TASK_WORKFLOW_COMMANDS[request.operation];
     if (request.operation === 'event') {
       const eventRequest = parseTaskEventRequest(request.args);
@@ -60,22 +49,17 @@ export async function executeTaskWorkflow(
       const result = await dispatchHostControlCommand({
         operation: command, payload: { workingDirectory: manifest.repoRoot, args: request.args }
       });
-      if (projection) {
-        verifyProjectionTopology(projection);
-        refreshSandboxTaskProjection(manifest.repoRoot, request.taskId, projection.projectionRoot);
-      }
       return result;
     }
     const input = command === 'task-artifact' ? parseArtifactCommand(request.args) : parseReviewCommand(request.args);
     if (command === 'task-artifact' && 'operation' in input && input.operation === 'inspect') {
       return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot }));
     }
-    if (!projection) throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED');
     if ('operation' in input && (input.operation === 'init' || input.operation === 'repair')) {
-      return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot, artifactDir: projection.projectionRoot }));
+      return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot, artifactDir: taskDir }));
     }
     return await withTaskExecutionLock(manifest.repoRoot, request.taskId, `sandbox-control.${request.operation}`, async () => {
-      const artifact = await readProjectionArtifact(projection, { artifact: input.artifact });
+      const artifact = await readTaskArtifact(taskDir, { artifact: input.artifact });
       const content = artifact.bytes.toString('utf8');
       let result: Record<string, unknown>;
       if ('operation' in input) {
@@ -85,7 +69,11 @@ export async function executeTaskWorkflow(
         const prepared = prepareLocalArtifact(local, content, lifecycleRecoveryAttestation ?? undefined);
         if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared));
         publicationStarted = true;
-        await landProjectionArtifact(projection, artifact);
+        await writeTaskArtifact(taskDir, {
+          artifact: artifact.artifact,
+          bytes: artifact.bytes,
+          expectedSha256: artifact.sha256
+        });
         result = commitLocalArtifactProvenance(prepared);
       } else {
         if (input.overrideTicket) throw new Error('TASK_WORKFLOW_OVERRIDE_UNSUPPORTED');
@@ -93,14 +81,14 @@ export async function executeTaskWorkflow(
         if (input.dryRun || prepared.result.status === 'planned') return executionResult(prepared.result);
         if (prepared.result.status === 'failed') return executionResult(commitReviewSummaryProvenance(prepared, manifest.repoRoot));
         publicationStarted = true;
-        await landProjectionArtifact(projection, { artifact: input.artifact, bytes: Buffer.from(prepared.content, 'utf8') });
+        await writeTaskArtifact(taskDir, {
+          artifact: input.artifact,
+          bytes: Buffer.from(prepared.content, 'utf8'),
+          expectedSha256: artifact.sha256
+        });
         result = commitReviewSummaryProvenance(prepared, manifest.repoRoot);
-        if (result.status !== 'failed') {
-          verifyProjectionTopology(projection);
-          await writeAtomicFile(path.join(projection.projectionRoot, input.artifact), Buffer.from(prepared.content, 'utf8'), 0o600, artifact.sha256);
-        }
       }
-      if (result.status !== 'failed') appendDiagnosticAudit(manifest, 'task-workflow-artifact-landed', {
+      if (result.status !== 'failed') appendDiagnosticAudit(manifest, 'task-workflow-artifact-finalized', {
         requestId: request.id, sandboxTaskId: request.taskId, workflowOperation: request.operation,
         artifact: input.artifact, sha256: result.artifactSha256 as string, semanticDigest: result.semanticDigest as string
       });

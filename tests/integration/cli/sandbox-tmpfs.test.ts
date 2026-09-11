@@ -30,8 +30,7 @@ import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 import type { AgentClientState } from "../../../lib/agent-clients/types.ts";
 import {
   materializeSandboxControl,
-  materializeSandboxWorkspaceView,
-  prepareSandboxTaskProjection
+  materializeSandboxWorkspaceView
 } from "../../../lib/sandbox/workspace-view.ts";
 
 const BRANCH_ONLY_LABELS = {
@@ -236,7 +235,6 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     branch: "feature/demo",
     identity
   });
-  const projection = prepareSandboxTaskProjection(config.repoRoot, taskId, view.taskMountPath!);
   const seedDir = path.join(
     config.home,
     ".agent-infra",
@@ -254,7 +252,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
       Destination: path.posix.join("/workspace/.agents/workspace", state),
       RW: false
     })),
-    { Type: "bind", Source: projection, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
+    { Type: "bind", Source: taskSource, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
     { Type: "bind", Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
     { Type: "bind", Source: control.runtimeDir, Destination: "/run/agent-infra/runtime", RW: true },
@@ -293,11 +291,14 @@ function legacyTaskBoundMounts(fixture: { mounts: Array<Record<string, unknown>>
     });
 }
 
-function moveTaskToCompleted(config: SandboxConfig, taskId: string): void {
+function moveTaskToCompleted(config: SandboxConfig, taskId: string, mounts?: Array<Record<string, unknown>>): void {
   const activePath = path.join(config.repoRoot, '.agents', 'workspace', 'active', taskId);
   const completedRoot = path.join(config.repoRoot, '.agents', 'workspace', 'completed');
   fs.mkdirSync(completedRoot, { recursive: true });
-  fs.renameSync(activePath, path.join(completedRoot, taskId));
+  const completedPath = path.join(completedRoot, taskId);
+  fs.renameSync(activePath, completedPath);
+  const taskMount = mounts?.find((mount) => mount.Destination === `/workspace/.agents/workspace/active/${taskId}`);
+  if (taskMount) taskMount.Source = completedPath;
 }
 
 test("recovery classification preserves healthy running seed content drift", () => {
@@ -450,14 +451,13 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
     container: "demo-dev-feature..demo",
     identity: { mode: "task-bound", taskId, shortId: "7" }
   });
-  const projection = prepareSandboxTaskProjection(config.repoRoot, taskId, view.taskMountPath!);
   const labels = recoveryLabels(config, {
     "demo.sandbox.workspace-mode": "task-bound",
     "demo.sandbox.task-id": taskId
   });
   const mounts = recoveryFixtureMounts(config).concat({
     Type: "bind",
-    Source: projection,
+    Source: taskSource,
     Destination: `/workspace/.agents/workspace/active/${taskId}`,
     RW: true
   }, {
@@ -510,7 +510,7 @@ test("completed task-bound recovery accepts the moved task source and historical
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223554";
   const fixture = taskBoundRecoveryFixture(config, taskId);
-  moveTaskToCompleted(config, taskId);
+  moveTaskToCompleted(config, taskId, fixture.mounts);
 
   try {
     const snapshot = collectSandboxRecoverySnapshot({
@@ -546,7 +546,7 @@ test("completed readiness failures never invoke replacement and provide manual d
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223555";
   const fixture = taskBoundRecoveryFixture(config, taskId);
-  moveTaskToCompleted(config, taskId);
+  moveTaskToCompleted(config, taskId, fixture.mounts);
   let recreated = false;
   let writes = 0;
   const row = {
@@ -619,7 +619,7 @@ test("healthy completed re-entry rejects an explicit recreate request", async ()
   const config = recoveryFixtureConfig(tmpDir);
   const taskId = "TASK-20260814-223556";
   const fixture = taskBoundRecoveryFixture(config, taskId);
-  moveTaskToCompleted(config, taskId);
+  moveTaskToCompleted(config, taskId, fixture.mounts);
   let recreated = false;
 
   try {

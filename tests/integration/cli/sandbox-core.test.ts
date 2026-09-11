@@ -1359,7 +1359,7 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
 
     const viewContainerRoot = path.join(tmpDir, ".agent-infra", "workspace-views", "demo", `demo-dev-${branch}`);
     const viewRoot = path.join(viewContainerRoot, fs.readdirSync(viewContainerRoot)[0]!);
-    assert.deepEqual(fs.readdirSync(path.join(viewRoot, "active")).sort(), [".short-ids.json", taskId]);
+    assert.deepEqual(fs.readdirSync(path.join(viewRoot, "active")).sort(), [".short-ids.json"]);
     assert.deepEqual(
       JSON.parse(fs.readFileSync(path.join(viewRoot, "active", ".short-ids.json"), "utf8")),
       { version: 1, ids: { "1": taskId } }

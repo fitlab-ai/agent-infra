@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 import { filePath, INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
+import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
 import { upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
@@ -1566,6 +1567,33 @@ test('decision code event clears the review baseline and consumes its input on c
     '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4', ...digests
   ]);
   assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
+});
+
+test('internal event preserves a human decision in the same task directory', () => {
+  const f = decisionFixture();
+  const task = fs.readFileSync(f.file, 'utf8')
+    .replace(
+      '| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:59:00+08:00 | pending | |',
+      '| II-1 | CD-1 | review-code.md#CD-1 | code | true | | declared | |'
+    )
+    .replace(
+      '|----|-------|-------|----------|--------|----------|',
+      '|----|-------|-------|----------|--------|----------|\n| CD-1 | code | 1 | major | needs-human-decision | review-code.md#CD-1 |'
+    );
+  fs.writeFileSync(f.file, task);
+  const decision = applyHumanDecision({ taskRef: f.id, selector: 'CD-1', decision: 'Use the direct task directory' }, {
+    repoRoot: f.root,
+    metadataProvider: () => ({ timestamp: '2026-07-18 10:03:00+08:00', agentInfraVersion: 'v0.9.11-alpha.0' })
+  });
+  assert.equal(decision.status, 'applied', JSON.stringify(decision));
+  const decided = fs.readFileSync(f.file, 'utf8');
+  assert.match(decided, /\| CD-1 \| code \| 1 \| major \| human-decided \| task\.md#HDR-1 \|/);
+  const started = run(f.root, [f.id, 'code.started', '--agent', 'codex', '--implementation-input', 'II-1']);
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  const afterEvent = fs.readFileSync(f.file, 'utf8');
+  assert.match(afterEvent, /\| CD-1 \| code \| 1 \| major \| human-decided \| task\.md#HDR-1 \|/);
+  assert.match(afterEvent, /### HDR-1/);
+  assert.match(afterEvent, /Code Task \(Round 2, decision II-1\) \[started\]/);
 });
 
 test('code completion rejects a report without a canonical plan input', () => {
