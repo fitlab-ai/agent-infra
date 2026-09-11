@@ -33,6 +33,8 @@ import type {
   MechanicalChangeReport,
   PrChangeReport
 } from './pr-change-report.ts';
+import { manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
+import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -50,8 +52,20 @@ type PullRequestSummaryResult = PlatformResult & {
 };
 type PullRequestPrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
 type SummaryOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
+type ManualValidationSummaryOptions = {
+  phase: 'pending' | 'final';
+  transactionId?: string;
+  receiptDigest?: string;
+  prHeadSha?: string;
+  authority?: 'coordinator';
+};
 type ReportWriteResult = PlatformResult & {
   report: { path: string; status: 'written' | 'no-op' | 'planned'; precheckVerdict: 'clear' | 'needs-review'; nextAction: 'watch-pr' | 'review-code' } | null;
+};
+type SummaryCommentStateResult = Omit<PlatformResult, 'comment'> & {
+  task: { id: string | null; prNumber: number | null };
+  pullRequest: PlatformChangeRequestSnapshot | null;
+  comment: SummaryComment | null;
 };
 
 function summaryMarker(taskId: string): string {
@@ -354,6 +368,23 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
   };
 }
 
+async function summaryCommentState(taskRef: string, options: SummaryOptions = {}): Promise<SummaryCommentStateResult> {
+  const context = await summaryContext(taskRef, options);
+  if (!context.task.prNumber || !context.pullRequest) return { ...context, comment: null };
+  const loaded = await resolvePlatformProviderContext({ cwd: options.cwd, client: options.client });
+  if (!loaded.ok || !loaded.value.provider.comments?.list) return { ...context, comment: null };
+  const listed = await loaded.value.provider.comments.list({
+    context: providerOperationContext(loaded.value),
+    parent: providerResourceToken(loaded.value.provider, 'pull-request', String(context.task.prNumber))
+  });
+  if (!listed.ok) return { ...context, comment: null };
+  const matches = listed.value.filter((comment) => comment.body.includes(summaryMarker(context.task.id!)));
+  return {
+    ...context,
+    comment: matches.length === 1 ? { id: /^\d+$/u.test(matches[0]!.id) ? Number(matches[0]!.id) : matches[0]!.id, body: matches[0]!.body } : null
+  };
+}
+
 type ReportWriteOptions = {
   agent: string;
   mechanicalFile: string;
@@ -450,7 +481,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
 
 async function syncPullRequestSummary(
   taskRef: string,
-  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string }
+  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; lockAlreadyHeld?: boolean }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
@@ -503,7 +534,7 @@ async function syncPullRequestSummary(
     return preserveFailure(context);
   }
   try {
-    return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, async () => {
+    const execute = async (): Promise<PullRequestSummaryResult> => {
       const { taskContent, boundFact } = readBoundTaskSnapshot(resolved.taskMdPath);
       if (!boundFact) return {
         ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }),
@@ -519,6 +550,27 @@ async function syncPullRequestSummary(
       const prNumber = boundPrNumber;
       const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
       if (!initial.ok) return fail(initial.status, context, initial.error);
+      const manual = options.manualValidation;
+      const hasFinalManualValidation = /###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)/u.test(options.body);
+      if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
+      if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
+      if (manual) {
+        if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
+        if (manual.phase === 'final') {
+          if (manual.authority !== 'coordinator') return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires coordinator authority', retryable: false }, prNumber);
+          const completion = readManualValidationCompletion(resolved.taskDir, {
+            transactionId: manual.transactionId,
+            taskId: resolved.taskId,
+            prNumber,
+            prHeadSha: initial.value.head.sha,
+            receiptDigest: manual.receiptDigest
+          });
+          if (!completion.ok) return fail('failed', context, platformError(completion.error), prNumber);
+          const { receipt, transaction } = completion.value;
+          if (transaction.phase !== 'final-promotion-in-progress' || !transaction.eventAppended) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'final summary requires a receipt-backed promotion intent', retryable: false }, prNumber);
+          if (!manualValidationFinalSummaryProjectionMatches(options.body, receipt)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the canonical receipt projection', retryable: false }, prNumber);
+        }
+      }
       const expectedReportPath = taskReportPath(resolved.taskDir);
       const suppliedReportPath = path.resolve(resolved.repoRoot, options.changeReportFile!);
       if (suppliedReportPath !== expectedReportPath) return fail('failed', context, { code: 'PR_CHANGE_REPORT_PATH_INVALID', message: 'summary-sync must consume the task-bound pr-change-report.json', retryable: false });
@@ -651,7 +703,10 @@ async function syncPullRequestSummary(
         operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }],
         result: null, warnings: [], ...info
       };
-    });
+    };
+    return await (options.lockAlreadyHeld
+      ? execute()
+      : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, execute));
   } catch (error) {
     const lockError = error instanceof TaskExecutionLockError
       ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }
@@ -664,9 +719,10 @@ export {
   buildPullRequestSummary,
   reconcileSummaryComment,
   reportWrite,
+  summaryCommentState,
   summaryContext,
   summaryMarker,
   syncPullRequestSummary,
   warningResultForPrimary
 };
-export type { PullRequestSummaryResult, ReportWriteOptions, ReportWriteResult, SummaryContextResult };
+export type { ManualValidationSummaryOptions, PullRequestSummaryResult, ReportWriteOptions, ReportWriteResult, SummaryCommentStateResult, SummaryContextResult };

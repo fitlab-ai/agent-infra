@@ -3,6 +3,7 @@
 ## Input Mode
 
 - Mode: `{explicit|automatic}`
+- Context: `{task-bound|branch-only}` (branch-only also records `recoverable: false`)
 - Input decision: {sanitized-input-decision}
 - PR source status: `{success|no-op|failed|blocked}` / `{stable-code-or-none}`
 
@@ -13,6 +14,7 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 {command-summary-and-key-result}
 ```
 > Follow `.agents/rules/evidence-reporting.md`: record command name, target scope, exit status, sanitized result, and coverage gap; do not paste complete argv or sensitive transcripts.
+> Branch-only has no `{task-id}`: record `not-applicable (branch-only)` in this section.
 
 ## Validation Target
 

@@ -55,3 +55,14 @@ test('decision implementation identity is canonical and mutually exclusive with 
     taskRef: '1', event: 'code.started', agent: 'codex', implementationInput: 'II-0'
   })?.code, 'EVENT_PAYLOAD_INVALID');
 });
+
+test('manual-validation started accepts only a canonical transaction identity', () => {
+  assert.equal(validateTaskEventRequest({
+    taskRef: '1', event: 'manual-validation.started', agent: 'codex',
+    initiator: 'model', requestId: 'mv-1', reasonCode: 'user-request', transactionId: 'mv-generation-1'
+  }), null);
+  assert.equal(validateTaskEventRequest({
+    taskRef: '1', event: 'manual-validation.started', agent: 'codex',
+    initiator: 'model', requestId: 'mv-1', reasonCode: 'user-request', transactionId: 'bad id'
+  })?.code, 'EVENT_PAYLOAD_INVALID');
+});

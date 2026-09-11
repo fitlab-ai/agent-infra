@@ -104,7 +104,7 @@ Run /create-pr --task {task-ref} first, then complete; --skip-pr is not accepted
 Before lifecycle, verify only the hard gates:
 - [ ] Task identity, active state, concurrency locks, and local atomic lifecycle operations are available
 - [ ] Required-PR delivery is satisfied when `prFlow=required`
-- [ ] Other business evidence (workflow, review, commit, tests, disagreement ledger, manual validation, and platform sync) is recorded or can be checked after lifecycle
+- [ ] Other business evidence (workflow, review, commit, tests, disagreement ledger, manual validation, and platform sync) is recorded or can be checked after lifecycle; manual validation requires a committed transaction, receipt, current artifact digest, and an identity-bearing completion log
 
 > **⚠️ Prerequisite Branch Check — you must decide whether to continue or stop before proceeding:**
 >

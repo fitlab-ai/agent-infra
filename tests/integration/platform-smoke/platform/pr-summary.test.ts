@@ -15,6 +15,8 @@ import {
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import type { PrecheckCandidate } from '../../../../lib/platform/pr-change-report.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
+import { createManualValidationReceipt, manualValidationFinalSummaryDigest, writeManualValidationReceiptAtomic } from '../../../../lib/task/manual-validation-receipt.ts';
+import { createManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../../lib/task/manual-validation-transaction.ts';
 import {
   buildPrChangeReport,
   readPrChangeReport,
@@ -289,6 +291,49 @@ test('summary-sync renders the task-bound report and publishes one canonical com
     assert.deepEqual(result.comment?.ids, [9]);
     assert.equal(result.precheckVerdict, 'clear');
     assert.equal(result.nextAction, 'watch-pr');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('summary-sync rejects a direct final manual-validation writer without coordinator authority', async () => {
+  const fixture = summaryFixture();
+  try {
+    const artifact = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'manual-validation.md');
+    fs.writeFileSync(artifact, '# Manual Validation\n');
+    const evidenceDigest = 'a'.repeat(64);
+    const transactionId = 'mv-direct-final';
+    const placeholderBody = `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${transactionId}; receipt=<receipt>; evidence=${evidenceDigest}; head=${fixture.headSha}.\n`;
+    const transaction = createManualValidationTransaction({
+      transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
+      summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') }, pendingSummaryDigest: 'a'.repeat(64),
+      finalSummaryDigest: manualValidationFinalSummaryDigest(placeholderBody), artifact: 'manual-validation.md', attempt: 1,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+    });
+    const staged = transitionManualValidationTransaction(transaction, 'summary-staged');
+    assert.equal(staged.ok, true);
+    if (!staged.ok) return;
+    const receipt = createManualValidationReceipt({
+      transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
+      artifact: 'manual-validation.md', artifactSha256: 'b'.repeat(64), pendingSummaryDigest: transaction.pendingSummaryDigest,
+      finalSummaryDigest: transaction.finalSummaryDigest, committedAt: '2026-01-01T00:00:00.000Z'
+    });
+    const receiptCommitted = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
+    assert.equal(receiptCommitted.ok, true);
+    if (!receiptCommitted.ok) return;
+    const finalReady = transitionManualValidationTransaction(receiptCommitted.value, 'final-promotion-in-progress', { eventAppended: true });
+    assert.equal(finalReady.ok, true);
+    if (!finalReady.ok) return;
+    writeManualValidationReceiptAtomic(path.dirname(artifact), receipt);
+    writeManualValidationTransactionAtomic(path.dirname(artifact), finalReady.value);
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', body: placeholderBody.replace('<receipt>', receipt.receiptDigest),
+      changeReportFile: fixture.reportPath, primaryResult: 'no_op', strict: true,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha),
+      manualValidation: { phase: 'final', transactionId, receiptDigest: receipt.receiptDigest, prHeadSha: fixture.headSha }
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'MANUAL_VALIDATION_TRANSACTION_REQUIRED');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

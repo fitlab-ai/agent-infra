@@ -10,8 +10,11 @@
 | 存在 literal `--`，但目标或命令为空 | 非法输入；在 `validation-run.started` 前停止 |
 | 不存在 `--`，且只有 task ref | 自动模式 |
 | 不存在 `--`，但还有位置参数 | 非法/半截输入；不得忽略参数或猜测命令 |
+| 传入 `--branch <ref>` | branch-only 降级；必须同时是显式模式，缺少 `--` 后命令即非法输入 |
 
 显式模式也要读取可用来源以映射覆盖范围，但不得为同一目标另行合成命令。自动模式才为发现项构造动作。
+
+branch-only 没有 task ref，两个发现来源都不可读，一律记为 `unavailable`；本轮项以 `explicit` 来源登记，不得据此触发自动模式的来源停止条件。
 
 ## 工作门禁矩阵
 
@@ -58,7 +61,7 @@
 1. 每个可执行项分别调用：
 
    ```bash
-   agent-infra-internal task-validate {task-ref} --scope snapshot --format json -- {command...}
+   agent-infra-internal task-validate {task-ref|branch-ref} --scope snapshot --format json -- {command...}
    ```
 
 2. 仅当项目要求或首次证据证明依赖未提交内容、原挂载或原位权限时，再为该项显式调用一次 `--scope inplace`，并记录升级理由。

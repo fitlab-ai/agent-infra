@@ -24,9 +24,12 @@ import {
 } from '../sandbox/control/protocol.ts';
 import { getProcessStartTime } from '../server/process-state.ts';
 import { assertGitWorktreeBinding } from '../git/worktree-identity.ts';
+import { createManualValidationEvidence, manualValidationEvidenceSummary } from '../task/manual-validation-evidence.ts';
+import type { ManualValidationCleanup } from '../task/manual-validation-evidence.ts';
+import { writeJsonAtomic } from '../task/manual-validation-shared.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = `Usage: agent-infra-internal task-validate <branch | TASK-id | N> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command> [args...]`;
+const USAGE = `Usage: agent-infra-internal task-validate <branch | TASK-id | N> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] [--evidence-file <path>] -- <command> [args...]`;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const RECOVERY_GRACE_MS = 30_000;
 
@@ -35,13 +38,14 @@ type ValidateOptions = {
   scope: 'snapshot' | 'inplace';
   timeoutMs: number;
   format: 'text' | 'json';
+  evidenceFile: string | null;
   command: string[];
   help: boolean;
 };
 
 export function parseValidateArgs(args: string[]): ValidateOptions {
   if (args.includes('--help') || args.includes('-h')) {
-    return { target: '', scope: 'snapshot', timeoutMs: 300_000, format: 'text', command: [], help: true };
+    return { target: '', scope: 'snapshot', timeoutMs: 300_000, format: 'text', evidenceFile: null, command: [], help: true };
   }
   const separator = args.indexOf('--');
   if (separator < 0) throw new Error(`${USAGE}\nA literal -- must separate validation options from the command.`);
@@ -50,6 +54,7 @@ export function parseValidateArgs(args: string[]): ValidateOptions {
   let scope: ValidateOptions['scope'] = 'snapshot';
   let timeoutMs = 300_000;
   let format: ValidateOptions['format'] = 'text';
+  let evidenceFile: string | null = null;
   const positionals: string[] = [];
   for (let index = 0; index < optionArgs.length; index += 1) {
     const arg = optionArgs[index]!;
@@ -65,6 +70,10 @@ export function parseValidateArgs(args: string[]): ValidateOptions {
       const value = optionArgs[++index];
       if (value !== 'text' && value !== 'json') throw new Error('validate --format must be text or json');
       format = value;
+    } else if (arg === '--evidence-file') {
+      const value = optionArgs[++index];
+      if (!value || value.startsWith('-')) throw new Error('validate --evidence-file requires a path');
+      evidenceFile = value;
     } else if (arg.startsWith('-')) {
       throw new Error(`Unknown option: ${arg}`);
     } else {
@@ -72,7 +81,7 @@ export function parseValidateArgs(args: string[]): ValidateOptions {
     }
   }
   if (positionals.length !== 1 || command.length === 0) throw new Error(USAGE);
-  return { target: positionals[0]!, scope, timeoutMs, format, command, help: false };
+  return { target: positionals[0]!, scope, timeoutMs, format, evidenceFile, command, help: false };
 }
 
 function runValidationCommand(command: string[], cwd: string, scope: string, timeoutMs: number, json: boolean) {
@@ -294,23 +303,30 @@ function taskValidate(args: string[]): void {
       : internalHandlerRoute('task-validate', 'inplace', options.scope)
         ? inplaceValidation(config, target, options)
         : (() => { throw new Error('TASK_VALIDATE_SCOPE_UNREGISTERED'); })();
-    const evidence = {
-      version: 1,
+    const cleanup = result.cleanup() as ManualValidationCleanup;
+    const evidence = createManualValidationEvidence({
+      mode: target.workspace.mode,
       taskId: target.workspace.mode === 'task-bound' ? target.workspace.taskId : null,
       branch: target.branch,
-      scope: options.scope,
       commit,
+      recoverable: target.workspace.mode === 'task-bound',
+      scope: options.scope,
       command: path.basename(options.command[0]!),
       startedAt,
       completedAt: new Date().toISOString(),
       exitCode: result.exitCode,
       signal: result.signal,
-      cleanup: result.cleanup()
-    };
+      cleanup
+    });
+    if (options.evidenceFile) {
+      try { writeJsonAtomic(path.resolve(options.evidenceFile), evidence); }
+      catch (error) { throw new Error(`MANUAL_VALIDATION_EVIDENCE_WRITE_FAILED: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    const evidenceSummary = manualValidationEvidenceSummary(evidence);
     if (options.format === 'json') {
-      process.stdout.write(`${JSON.stringify({ status: 'applied', changed: false, evidence, error: null })}\n`);
+      process.stdout.write(`${JSON.stringify({ status: 'applied', changed: false, evidence: evidenceSummary, evidenceFile: options.evidenceFile, error: null })}\n`);
     } else {
-      process.stdout.write(`Validation ${result.exitCode === 0 ? 'passed' : 'failed'} (${options.scope}, ${evidence.command}, cleanup=${evidence.cleanup}).\n`);
+      process.stdout.write(`Validation ${result.exitCode === 0 ? 'passed' : 'failed'} (${options.scope}, ${evidenceSummary.command}, cleanup=${evidenceSummary.cleanup}).\n`);
     }
     process.exitCode = result.exitCode;
   } catch (error) {

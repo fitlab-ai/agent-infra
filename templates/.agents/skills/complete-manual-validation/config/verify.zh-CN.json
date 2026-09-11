@@ -37,7 +37,7 @@
       "when": "pr_fact_bound",
       "expected_pr_comment_marker_key": "prSummary",
       "expected_pr_comment_required_patterns": [
-        "^### ✅ 人工验证已通过$"
+        "^### ✅ (?:人工验证已通过|Manual Validation Passed)$"
       ],
       "verify_task_comment_content": true,
       "verify_issue_type": true,

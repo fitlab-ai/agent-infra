@@ -21,6 +21,7 @@ const FLAGS: Record<string, keyof TaskEventRequest> = {
   '--verdict': 'verdict', '--blockers': 'blockers', '--major': 'major',
   '--minor': 'minor', '--manual-validation': 'manualValidation', '--files-modified': 'filesModified',
   '--tests-passed': 'testsPassed', '--summary-result': 'summaryResult',
+  '--transaction-id': 'transactionId', '--receipt-digest': 'receiptDigest', '--pr-head-sha': 'prHeadSha',
   '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
 };
 const NUMERIC = new Set(['round', 'question', 'blockers', 'major', 'minor', 'manualValidation', 'filesModified', 'testsPassed']);

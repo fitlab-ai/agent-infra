@@ -5,11 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
+import { sha256File } from '../../../lib/task/artifact-receipts.ts';
+import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
+import { createManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
 
 // Branch matrix for the complete-task.preflight `manual-validation` check
-// (see plan-r5 改动二). The decision relies only on the latest review-code
-// artifact plus the append-only Activity Log, so the fixture is a bare task
-// directory with task.md and optional artifacts.
+// (see plan-r6). Completion requires a committed receipt, transaction, artifact
+// digest, and a matching append-only Activity Log entry.
 
 const REVIEW_CODE_MV_1 = `# Code Review
 
@@ -32,6 +34,59 @@ id: TASK-20260101-000001
 ${activityEntries.join('\n')}
 `);
   return taskDir;
+}
+
+function addCommittedManualValidation(taskDir: string, appendCompletion = true) {
+  const artifact = path.join(taskDir, 'manual-validation.md');
+  fs.writeFileSync(artifact, '# Manual Validation\n');
+  const now = new Date().toISOString();
+  const evidenceDigest = 'a'.repeat(64);
+  const prHeadSha = 'b'.repeat(40);
+  const transaction = createManualValidationTransaction({
+    transactionId: 'mv-test-1',
+    taskId: 'TASK-20260101-000001',
+    prNumber: 1,
+    prHeadSha,
+    evidenceDigest,
+    summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') },
+    pendingSummaryDigest: 'c'.repeat(64),
+    finalSummaryDigest: 'd'.repeat(64),
+    artifact: 'manual-validation.md',
+    attempt: 1,
+    createdAt: now,
+    updatedAt: now
+  });
+  const receipt = createManualValidationReceipt({
+    transactionId: transaction.transactionId,
+    taskId: transaction.taskId,
+    prNumber: transaction.prNumber,
+    prHeadSha,
+    evidenceDigest,
+    artifact: 'manual-validation.md',
+    artifactSha256: sha256File(artifact),
+    pendingSummaryDigest: transaction.pendingSummaryDigest,
+    finalSummaryDigest: transaction.finalSummaryDigest,
+    committedAt: now
+  });
+  const staged = transitionManualValidationTransaction(transaction, 'summary-staged');
+  assert.equal(staged.ok, true);
+  const receiptCommitted = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
+  assert.equal(receiptCommitted.ok, true);
+  const eventAppended = transitionManualValidationTransaction(receiptCommitted.value, 'receipt-committed', { eventAppended: true });
+  assert.equal(eventAppended.ok, true);
+  const promoting = transitionManualValidationTransaction(eventAppended.value, 'final-promotion-in-progress');
+  assert.equal(promoting.ok, true);
+  const committed = transitionManualValidationTransaction(promoting.value, 'committed', { postWriteVerified: true });
+  assert.equal(committed.ok, true);
+  writeManualValidationReceiptAtomic(taskDir, receipt);
+  writeManualValidationTransactionAtomic(taskDir, committed.value);
+  const completion = `- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; human-confirmed validation and committed receipt; transaction=${transaction.transactionId}; receipt=${receipt.receiptDigest}; head=${prHeadSha}`;
+  if (appendCompletion) {
+    const taskPath = path.join(taskDir, 'task.md');
+    const task = fs.readFileSync(taskPath, 'utf8');
+    fs.writeFileSync(taskPath, task.replace(/\n$/, `\n${completion}\n`));
+  }
+  return { receipt, transaction: committed.value, completion };
 }
 
 async function check(taskDir: string) {
@@ -76,30 +131,32 @@ test('manual-validation check fails when the artifact exists but completion is n
   fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
   const result = await check(taskDir);
   assert.equal(result.status, 'fail');
-  assert.match(result.message, /completion is not recorded/);
+  assert.match(result.message, /receipt is unavailable/);
 });
 
 test('manual-validation check passes on the standard flow when completion follows the latest review-code', async () => {
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md',
-    '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; verified on staging'
   ]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
-  fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
+  addCommittedManualValidation(taskDir);
   const result = await check(taskDir);
   assert.equal(result.status, 'pass');
-  assert.match(result.message, /Manual validation completed → manual-validation\.md/);
+  assert.match(result.message, /committed receipt and post-write verification/);
 });
 
 test('manual-validation check fails when completion predates a newer review-code round', async () => {
   const taskDir = fixture([
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md',
-    '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; verified on staging',
+    '- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; human-confirmed validation and committed receipt; transaction=mv-test-1; receipt=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; head=cccccccccccccccccccccccccccccccccccccccc',
     '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 2)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code-r2.md'
   ]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
   fs.writeFileSync(path.join(taskDir, 'review-code-r2.md'), REVIEW_CODE_MV_1);
-  fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
+  const committed = addCommittedManualValidation(taskDir, false);
+  const taskPath = path.join(taskDir, 'task.md');
+  const task = fs.readFileSync(taskPath, 'utf8');
+  fs.writeFileSync(taskPath, task.replace(/(- 2026-01-01 00:00:00\+00:00 — \*\*Review Code \(Round 2\)\*\*)/u, `${committed.completion}\n$1`));
   const result = await check(taskDir);
   assert.equal(result.status, 'fail');
   assert.match(result.message, /Latest review-code \(round 2\) came after/);
@@ -107,11 +164,11 @@ test('manual-validation check fails when completion predates a newer review-code
 
 test('manual-validation check fails closed when the latest review-code completion entry is missing', async () => {
   const taskDir = fixture([
-    '- 2026-01-01 00:00:00+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; verified on staging'
+    '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md'
   ]);
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
-  fs.writeFileSync(path.join(taskDir, 'manual-validation.md'), '# Manual Validation\n');
+  addCommittedManualValidation(taskDir, false);
   const result = await check(taskDir);
   assert.equal(result.status, 'fail');
-  assert.match(result.message, /completion entry is missing from the Activity Log/);
+  assert.match(result.message, /Committed manual validation completion is not recorded/);
 });

@@ -4,16 +4,25 @@
 
 摘要结构与失败语义统一遵循 `.agents/rules/pr-sync.md`。
 
-1. 在 canonical `manual-validation*` artifact 落盘后，调用 `agent-infra-internal platform-pr summary-context {task-id}`。
-2. 从返回的最新产物重新聚合摘要，将人工校验段渲染为 `### ✅ 人工验证已通过`，写明验证时间和说明。
-3. 把只含一次 `<!-- canonical-pr-change-report -->` 的纯正文写入临时文件，调用：
+1. 调用 `agent-infra-internal platform-pr summary-context {task-id}`，取得 canonical 摘要正文；维护者提供的 PR 人工验证留言和验证说明作为完成人工校验依据。
+2. 在创建 canonical `manual-validation*` artifact 前，调用 transaction coordinator 的 prepare 模式，先登记 started，再写 prepared transaction：
 
 ```bash
-agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {standard-agent-token} --body-file {summary-body-file} \
-  --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json --result no_op
+agent-infra-internal manual-validation transaction {task-id} --prepare \
+  --artifact {manual-validation-artifact} \
+  --summary-file {summary-body-file} --agent {standard-agent-token}
 ```
 
-marker、报告段、权威 PR head、分页查找和原地更新由 core 负责。若当前 context 表明无需人工校验，则停止并返回 `summary failed: no manual validation required`，不误标通过。
+3. prepare 成功后写入 canonical `manual-validation*` artifact，并把只含一次 `<!-- canonical-pr-change-report -->` 的 pending 正文写入临时文件，调用 transaction coordinator：
+
+```bash
+agent-infra-internal manual-validation transaction {task-id} \
+  --artifact {manual-validation-artifact} \
+  --summary-file {summary-body-file} \
+  --change-report-file .agents/workspace/active/{task-id}/pr-change-report.json \
+  --agent {standard-agent-token} --result no_op
+```
+
+marker、报告段、权威 PR head、分页查找、pending-first 顺序、receipt、通过日志和 final promotion 由 core 负责。若当前 context 表明无需人工校验，则停止并返回 `summary failed: no manual validation required`，不误标通过。receipt/log 前不得出现 `### ✅ 人工验证已通过`。
 
 结果回传：`summary updated`、`summary skipped (no diff)` 或 `summary failed: <reason>`。

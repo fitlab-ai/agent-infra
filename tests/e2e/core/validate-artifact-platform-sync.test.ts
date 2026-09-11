@@ -914,7 +914,7 @@ for (const c of createPrCases) {
   }));
 }
 
-test("validate-artifact platform-sync passes for complete-manual-validation when PR summary shows passed manual validation", () => (
+test("validate-artifact platform-sync passes for complete-manual-validation when PR summary shows either passed manual-validation heading", () => (
   withTempRoot("agent-infra-platform-sync-manual-validation-pass-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({
@@ -924,32 +924,35 @@ test("validate-artifact platform-sync passes for complete-manual-validation when
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.commentsPath, [{ body: buildTaskComment(taskId, taskContent) }]);
-    writeJson(ctx.prCommentsPath, [{
-      body: [
-        "<!-- sync-pr:TASK-20260328-000001:summary -->",
-        "## Review Summary",
-        "",
-        "### ✅ 人工验证已通过",
-        "",
-        "- 验证说明：staging smoke passed"
-      ].join("\n")
-    }]);
 
-    const result = await runValidatorWithFakeGh([
-      "check",
-      "platform-sync",
-      ctx.taskDir,
-      "--skill",
-      "complete-manual-validation"
-    ], ctx, {
-      GH_FAKE_ISSUE_PATH: ctx.issuePath,
-      GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
-      GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
-      GH_FAKE_ISSUE_NUMBER: "65",
-      GH_FAKE_PR_NUMBER: "77"
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    for (const heading of ["### ✅ 人工验证已通过", "### ✅ Manual Validation Passed"]) {
+      writeJson(ctx.prCommentsPath, [{
+        body: [
+          "<!-- sync-pr:TASK-20260328-000001:summary -->",
+          "## Review Summary",
+          "",
+          heading,
+          "",
+          "- 验证说明：staging smoke passed"
+        ].join("\n")
+      }]);
+
+      const result = await runValidatorWithFakeGh([
+        "check",
+        "platform-sync",
+        ctx.taskDir,
+        "--skill",
+        "complete-manual-validation"
+      ], ctx, {
+        GH_FAKE_ISSUE_PATH: ctx.issuePath,
+        GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
+        GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
+        GH_FAKE_ISSUE_NUMBER: "65",
+        GH_FAKE_PR_NUMBER: "77"
+      });
+      assert.equal(result.status, 0, `${heading}: ${result.stderr}`);
+      assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    }
   })
 ));
 

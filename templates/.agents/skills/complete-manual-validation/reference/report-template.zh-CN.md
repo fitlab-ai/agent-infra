@@ -7,6 +7,7 @@
 
 - **验证轮次**：Round {N}
 - **产物文件**：`manual-validation.md`
+- **人工验证依据**：维护者提供的 PR 验证留言和验证说明
 
 ## 状态核对
 
@@ -39,6 +40,7 @@ $ tail .agents/workspace/active/{task-id}/task.md
 - 结果：{summary-result}
 - 摘要评论：{comment-id 或 URL}
 - 更新状态：`### ✅ 人工验证已通过`
+- Transaction：`{transaction-id}`；receipt=`{receipt-digest}`；head=`{pr-head-sha}`
 ````
 
 ## 填写规则

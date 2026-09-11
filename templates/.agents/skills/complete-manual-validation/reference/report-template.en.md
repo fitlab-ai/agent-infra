@@ -7,6 +7,7 @@ Read this file before creating `manual-validation.md` / `manual-validation-r{N}.
 
 - **Validation Round**: Round {N}
 - **Artifact File**: `manual-validation.md`
+- **Human Validation Basis**: Maintainer's PR validation comment and validation summary
 
 ## State Check
 
@@ -39,6 +40,7 @@ $ tail .agents/workspace/active/{task-id}/task.md
 - Result: {summary-result}
 - Summary comment: {comment-id or URL}
 - Updated status: `### ✅ Manual Validation Passed`
+- Transaction: `{transaction-id}`; receipt=`{receipt-digest}`; head=`{pr-head-sha}`
 ````
 
 ## Filling Rules

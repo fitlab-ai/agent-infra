@@ -55,6 +55,18 @@ test('implementation input gate accepts matching action, report, and task row', 
   }
 });
 
+test('implementation input gate ignores later non-code activity entries', async () => {
+  const f = fixture();
+  try {
+    const taskPath = path.join(f.taskDir, 'task.md');
+    fs.appendFileSync(taskPath, '- 2026-07-18 10:03:00+08:00 — **Commit** by codex — abc1234\n');
+    const result = await run(f.taskDir);
+    assert.equal(result.status, 'pass');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('implementation input gate rejects identity and consumption mismatches', async () => {
   for (const replacement of [
     ['`II-1`', '`II-2`'],

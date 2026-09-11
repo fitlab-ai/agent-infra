@@ -25,11 +25,11 @@ const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd
        agent-infra-internal platform-pr sync-in-labels --pr <N> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr summary-context <task-ref> [--cwd <path>]
        agent-infra-internal platform-pr change-report <task-ref> --agent <agent> --mechanical-file <path> --precheck-file <path> [--dry-run] [--cwd <path>]
-       agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --change-report-file <path> --result <pr_created|pr_reused|no_op> [--strict] [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr summary-sync <task-ref> --agent <agent> --body-file <path|-> --change-report-file <path> --result <pr_created|pr_reused|no_op> [--manual-phase pending|final ...] [--strict] [--dry-run] [--cwd <path>]
 `;
 
 const BOOLEAN_FLAGS = new Set(['--draft', '--dry-run', '--metadata', '--closing-issue', '--strict']);
-const VALUE_FLAGS = new Set(['--cwd', '--agent', '--base', '--head', '--title-file', '--body-file', '--change-report-file', '--mechanical-file', '--precheck-file', '--pr', '--result']);
+const VALUE_FLAGS = new Set(['--cwd', '--agent', '--base', '--head', '--title-file', '--body-file', '--change-report-file', '--mechanical-file', '--precheck-file', '--pr', '--result', '--manual-phase', '--transaction-id', '--receipt-digest', '--pr-head-sha']);
 
 function key(flag: string): string {
   return flag.slice(2).replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
@@ -111,7 +111,7 @@ async function platformPr(args: string[] = []): Promise<void> {
     'sync-in-labels': ['cwd', 'pr', 'dryRun'],
     'summary-context': ['cwd'],
     'change-report': ['cwd', 'agent', 'mechanicalFile', 'precheckFile', 'dryRun'],
-    'summary-sync': ['cwd', 'agent', 'bodyFile', 'changeReportFile', 'result', 'dryRun', 'strict']
+    'summary-sync': ['cwd', 'agent', 'bodyFile', 'changeReportFile', 'result', 'manualPhase', 'transactionId', 'receiptDigest', 'prHeadSha', 'dryRun', 'strict']
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
@@ -160,7 +160,18 @@ async function platformPr(args: string[] = []): Promise<void> {
     if (typeof values.changeReportFile !== 'string') { fail('summary-sync requires --change-report-file'); return; }
     if (!primaryResult) { fail('summary-sync requires --result pr_created, pr_reused, or no_op'); return; }
     try {
-      finish(await syncPullRequestSummary(taskRef, { cwd, agent: values.agent, body: readFile(values.bodyFile, cwd), changeReportFile: values.changeReportFile, primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', dryRun: values.dryRun === true, strict: values.strict === true }));
+      const manualPhase = values.manualPhase;
+      if (manualPhase !== undefined && manualPhase !== 'pending' && manualPhase !== 'final') { fail('--manual-phase must be pending or final'); return; }
+      finish(await syncPullRequestSummary(taskRef, {
+        cwd, agent: values.agent, body: readFile(values.bodyFile, cwd), changeReportFile: values.changeReportFile,
+        primaryResult: primaryResult as 'pr_created' | 'pr_reused' | 'no_op', dryRun: values.dryRun === true, strict: values.strict === true,
+        ...(manualPhase ? { manualValidation: {
+          phase: manualPhase,
+          ...(typeof values.transactionId === 'string' ? { transactionId: values.transactionId } : {}),
+          ...(typeof values.receiptDigest === 'string' ? { receiptDigest: values.receiptDigest } : {}),
+          ...(typeof values.prHeadSha === 'string' ? { prHeadSha: values.prHeadSha } : {})
+        } } : {})
+      }));
     } catch (error) {
       fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`);
     }

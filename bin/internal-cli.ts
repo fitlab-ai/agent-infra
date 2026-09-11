@@ -32,6 +32,7 @@ const taskWorkflowCommand = command === 'task-artifact'
   || command === 'task-ledger'
   || command === 'task-invalidation'
   || command === 'task-warning';
+const manualValidationWorkflowCommand = command === 'manual-validation';
 const localTaskControlHelp = taskControlCommand
   && (process.argv[3] === '--help' || process.argv[3] === '-h')
   && !process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
@@ -92,11 +93,11 @@ const hostWorker = hostWorkerRequested && (() => {
     return false;
   }
 })();
-if (hostWorkerRequested && !hostWorker && (taskControlCommand || taskWorkflowCommand)) {
+if (hostWorkerRequested && !hostWorker && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand)) {
   taskControlTransportFailure('host-control worker authorization is invalid', 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE');
 }
 let controlRouted = false;
-if (!taskViewGuardFailed && (taskControlCommand || taskWorkflowCommand) && !hostWorker && !localTaskControlHelp) {
+if (!taskViewGuardFailed && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand) && !hostWorker && !localTaskControlHelp) {
   const transport = resolveSandboxControlTransport(process.env);
   switch (transport.kind) {
     case 'fail-closed': {
@@ -312,6 +313,11 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
   case 'task-validate': {
     const { taskValidate } = await import('../lib/internal/task-validate.ts');
     taskValidate(process.argv.slice(3));
+    break;
+  }
+  case 'manual-validation': {
+    const { manualValidation } = await import('../lib/internal/manual-validation.ts');
+    await manualValidation(process.argv.slice(3));
     break;
   }
   default:
