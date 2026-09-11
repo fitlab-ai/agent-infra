@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   activateDelegation,
+  abortActivatedDelegation,
   completeDelegationStage,
   consumeDelegation,
   dispatchDelegation,
@@ -184,6 +185,51 @@ test('persisted Codex receipts require lifecycle provenance and status-bound hos
     ...sealed.receipt,
     hostEvidence: { ...sealed.receipt.hostEvidence, consumer: 'other' }
   }), false);
+});
+
+test('activated Codex receipts support only controller-bound recovery aborts', () => {
+  const provenance = {
+    ...codexProvenance,
+    controllerInstanceDigest: 'e'.repeat(64),
+    controlGeneration: 'generation-1'
+  } as const;
+  const prepared = dispatched(prepareDelegation({
+    ...input,
+    client: 'codex',
+    workspaceSnapshotScope: 'task',
+    lifecycleProvenance: provenance
+  }, { id: () => 'delegation-recovery' }));
+  const activated = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer',
+    childId: 'child-recovery',
+    parentId: 'parent-codex',
+    spawnMode: 'fresh',
+    actualModel: 'review-model',
+    actualReasoningEffort: 'high',
+    hostEvidence: {
+      kind: 'codex-lifecycle-v2',
+      startRevision: 4,
+      ...provenance,
+      spawnToolUseId: 'spawn-tool',
+      spawnObservedAt: '2099-01-01T00:00:00.500Z'
+    }
+  }, { now: () => '2099-01-01T00:00:01.000Z', monotonicNow: () => 2 });
+  assert.equal(activated.ok, true);
+  if (!activated.ok) return;
+  const aborted = abortActivatedDelegation(activated.receipt, {
+    childId: 'child-recovery',
+    stopRevision: 7,
+    consumer: 'lifecycle-recovery:TASK-20260101-000001:delegation-recovery',
+    consumedAt: '2099-01-01T00:00:02.000Z'
+  });
+  assert.equal(aborted.ok, true);
+  if (!aborted.ok) return;
+  assert.equal(aborted.receipt.status, 'aborted');
+  assert.equal(aborted.receipt.agent, null);
+  assert.equal(isDelegationReceipt(aborted.receipt), true);
+  assert.equal(abortActivatedDelegation(activated.receipt, {
+    childId: 'child-recovery', stopRevision: 7, consumer: 'ordinary-consumer', consumedAt: '2099-01-01T00:00:02.000Z'
+  }).ok, false);
 });
 
 test('delegation dispatch allows a sixty-second default activation window', () => {

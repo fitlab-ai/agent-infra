@@ -53,7 +53,7 @@ export type ControlRecoveryDecision = Readonly<{
   reasonCode: string;
 }>;
 
-const LIFECYCLE_INTENTS = ['block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'] as const;
+const LIFECYCLE_INTENTS = ['block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'] as const;
 const ORCHESTRATION_INTENTS = [
   'begin-or-resume', 'route.read', 'route.clean-completion', 'status', 'prepare', 'dispatch',
   'await-activation', 'recover-prepared', 'hook-start', 'hook-stop', 'advance', 'pause'

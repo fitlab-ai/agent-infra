@@ -86,6 +86,19 @@ test('task-lifecycle CLI rejects unknown and duplicate options as one JSON failu
   }
 });
 
+test('task-lifecycle recover-started exposes a structured owner-unknown result', () => {
+  const f = fixture();
+  const result = run(f.root, [
+    TASK_ID, 'recover-started', '--agent', 'codex', '--stage', 'code', '--round', '1',
+    '--artifact', 'code.md', '--reason', 'managed child termination requires evidence'
+  ]);
+  assert.equal(result.status, 1);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.status, 'owner-unknown');
+  assert.equal(parsed.error.code, 'RECOVERY_ORCHESTRATION_MISSING');
+  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID)), false);
+});
+
 const RESTORE_TASK_ID = 'TASK-20260202-000002';
 
 function stagingFixture({ initGit = true } = {}) {

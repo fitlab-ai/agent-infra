@@ -249,7 +249,8 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
 
   function read(childThreadId: string): StoredCodexLifecycle {
     const matches = findByChild(childThreadId);
-    if (matches.length !== 1) throw new Error(`Codex lifecycle child '${childThreadId}' was not found uniquely`);
+    if (matches.length === 0) throw new Error(`Codex lifecycle child '${childThreadId}' was not found uniquely`);
+    if (matches.length > 1) throw new Error(`Codex lifecycle child '${childThreadId}' is ambiguous`);
     return readRecord(matches[0]!);
   }
 
@@ -291,12 +292,26 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     });
   }
 
+  function releaseRecovery(childThreadId: string, consumer: string): boolean {
+    if (!/^lifecycle-recovery:[^:\r\n]+:[^:\r\n]+$/.test(consumer)) return false;
+    return withWriteLock(() => {
+      const matches = findByChild(childThreadId);
+      if (matches.length !== 1) return false;
+      const file = matches[0]!;
+      const current = readRecord(file);
+      if (current.state.status !== 'stop-ready' || current.consumer !== consumer || !current.consumedAt) return false;
+      fs.unlinkSync(file);
+      return true;
+    });
+  }
+
   function expireBefore(cutoff: string): number {
     return withWriteLock(() => {
       let changed = 0;
       for (const file of recordFiles(root)) {
         const current = readRecord(file);
         if (current.updatedAt >= cutoff) continue;
+        if (current.consumer?.startsWith('lifecycle-recovery:')) continue;
         if (current.consumer || ['invalid', 'expired', 'stop-ready'].includes(current.state.status)) {
           fs.unlinkSync(file);
           changed += 1;
@@ -316,7 +331,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     });
   }
 
-  return Object.freeze({ root, apply, applyToSpawn, consume, expireBefore, findByParent, read });
+  return Object.freeze({ root, apply, applyToSpawn, consume, releaseRecovery, expireBefore, findByParent, read });
 }
 
 export { createCodexLifecycleStore, hasActiveCodexLifecycleEvidence };

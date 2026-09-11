@@ -175,3 +175,41 @@ test('Codex lifecycle store marks stale active evidence expired before cleanup',
   assert.equal(store.expireBefore('2026-08-13T01:30:00.000Z'), 1);
   assert.throws(() => store.read('child'), /not found uniquely/);
 });
+
+test('Codex lifecycle store preserves and releases a recovery-owned stop-ready claim', () => {
+  const root = temporaryRoot();
+  let now = '2026-08-14T00:00:00.000Z';
+  const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0', now: () => now });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash: 'hash'
+  });
+  store.apply({
+    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+  });
+  store.apply({
+    type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent',
+    forkedFromId: null, sourceParentThreadId: 'parent',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  });
+  store.apply({
+    type: 'app-settings', childThreadId: 'child', model: 'model', reasoningEffort: 'high'
+  });
+  store.apply({
+    type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed'
+  });
+  store.apply({
+    type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  });
+
+  const consumer = 'lifecycle-recovery:TASK-20260101-000001:receipt-1';
+  assert.equal(store.consume('child', consumer, 'hash').consumer, consumer);
+
+  now = '2026-08-15T00:00:00.000Z';
+  assert.equal(store.expireBefore('2026-08-14T12:00:00.000Z'), 0);
+  assert.equal(store.read('child').consumer, consumer);
+  assert.equal(store.releaseRecovery('child', consumer), true);
+  assert.throws(() => store.read('child'), /not found uniquely/);
+});
