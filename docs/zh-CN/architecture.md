@@ -48,7 +48,8 @@ IM 用户 / 本地用户 / AI TUI
                   ┌────────────────┴────────────────┐
                   ▼                                 ▼
         create-task 宿主路径                 task skill 沙箱路径
-        宿主 AI TUI 子进程                   docker exec → tmux work 窗口
+        宿主 AI TUI 子进程                   docker exec → tmux `work` session
+        stdin 忽略；stdout/stderr 继承       → `ai-<run-id>` window
         等待 TUI 退出                        → run script → 沙箱 AI TUI
                   │                                 │
                   └────────────────┬────────────────┘
@@ -59,8 +60,8 @@ IM 用户 / 本地用户 / AI TUI
 这里的边界必须分开理解：
 
 - daemon 的每消息 `ai` 子进程负责调度本地 CLI，不是执行所选 skill 的 AI TUI。
-- `create-task` 是宿主路径。`ai run` 启动选定 TUI，继承宿主 stdio，并等待该子进程退出。
-- task skill 绑定任务。`ai run` 通过 `docker exec` 创建沙箱 tmux 窗口，启动 run script 和实际 TUI；窗口创建后命令即可返回，这只表示调度成功，不表示 skill 完成。
+- `create-task` 是宿主路径。`ai run` 启动选定 TUI，忽略 stdin、继承 stdout/stderr，并等待该子进程退出。
+- task skill 绑定任务。`ai run` 通过 `docker exec` 创建沙箱 tmux `work` session 及 `ai-<run-id>` window，启动 run script 和实际 TUI；窗口创建后命令即可返回，这只表示调度成功，不表示 skill 完成。
 - `run status`、`exit_code`、`finished_at` 和 `output.log` 描述一次沙箱运行；`task.md`、生命周期 journal、artifact 和 receipt 描述任务控制权威。两类事实不能互相替代。
 - host-control、沙箱 broker/executor、任务生命周期领域、容器引擎和操作系统服务管理器拥有不同身份和失败域。
 
@@ -71,9 +72,9 @@ IM 用户 / 本地用户 / AI TUI
 | `ai server` daemon | `ai server start` 以前台或 detached 方式启动；收到信号后停止 adapter 并清理 | 本地子进程、adapter context、heartbeat 和日志 | 以本机 OS 用户运行；IM 身份必须先通过 adapter-qualified role 检查 | 按项目/checkout 隔离的 PID identity、server log 和合并后的 server 配置 | stale 或不匹配的 PID 不用于错杀其他进程；adapter 与命令失败相互隔离。 |
 | IM adapter / 长连接 | daemon 加载并启动；退出时逆序停止 | provider WebSocket/API 与规范化消息 | `<adapter>:<userId>` 是应用身份，不是 OS 身份 | 连接状态在进程内；配置来自 committed、local 和环境层 | malformed 消息丢弃；单个 adapter 的凭据或连接失败不停止 daemon。 |
 | 每消息 local `ai` 子进程 | daemon 为已授权命令启动，命令结束后退出 | stdout/stderr → runner/streamer → adapter 回复 | 继承 daemon 的本机 OS 上下文；自身不授予任务权威 | 退出码、signal 和脱敏流事件属于消息级证据 | 启动、非零退出和回复失败分别报告；已接受但未知的工作不盲目重放。 |
-| 宿主 AI TUI 子进程 | `create-task` 启动选定的 Claude、Codex、Antigravity、OpenCode 或 Trae CLI，TUI 关闭后回收 | 继承宿主 stdio | 运行在宿主用户上下文；宿主 create 路径不是沙箱边界 | 进程结果以及 task-create/lifecycle 记录 | 启动和非零失败返回调用方；不能把 TUI 退出静默转换成任务成功。 |
-| 沙箱 capture launcher | task skill 调用 `docker exec` 创建 `work` tmux 窗口和 run script | Docker exec、容器 shell 和 tmux launcher | 受 sandbox/container 与 task/generation identity 约束；不替代 broker authority | run metadata、run directory、状态文件和输出日志 | 窗口创建前失败属于调度失败；创建后检查 status、exit code 和 output。 |
-| 沙箱 tmux TUI/skill 进程 | run script 在 `work` 窗口启动实际 TUI；命令记录结果后 pane 仍可附着 | 容器 tmux pane、TUI stdio 和 run script | 在 task-bound 容器及其 runtime projection 中执行 | `started_at`、`status`、`exit_code`、`finished_at` 和 `output.log` | `completed`/`failed` 与任务状态分离；用 `ai sandbox enter` 观察运行。 |
+| 宿主 AI TUI 子进程 | `create-task` 启动选定的 Claude、Codex、Antigravity、OpenCode 或 Trae CLI，TUI 关闭后回收 | stdin 忽略；stdout/stderr 继承 | 运行在宿主用户上下文；宿主 create 路径不是沙箱边界 | 进程结果以及 task-create/lifecycle 记录 | 启动和非零失败返回调用方；不能把 TUI 退出静默转换成任务成功。 |
+| 沙箱 capture launcher | task skill 调用 `docker exec` 创建 `work` tmux session、`ai-<run-id>` window 和 run script | Docker exec、容器 shell 和 tmux launcher | 受 sandbox/container 与 task/generation identity 约束；不替代 broker authority | run metadata、run directory、状态文件和输出日志 | 窗口创建前失败属于调度失败；创建后检查 status、exit code 和 output。 |
+| 沙箱 tmux TUI/skill 进程 | run script 在 `work` session 的 `ai-<run-id>` window 启动实际 TUI；命令记录结果后 pane 仍可附着 | 容器 tmux pane、TUI stdio 和 run script | 在 task-bound 容器及其 runtime projection 中执行 | `started_at`、`status`、`exit_code`、`finished_at` 和 `output.log` | `completed`/`failed` 与任务状态分离；用 `ai sandbox enter` 观察运行。 |
 | host-control 服务与 worker | systemd user service 或 macOS launchd 托管服务并启动受控 worker | 私有 endpoint/socket 与 worker stdio | endpoint 所有权、token、用户权限和 worker identity | endpoint/token 文件与审计记录 | 客户端断连不取消已接受工作；dispatch 失败报告为 unknown。 |
 | Task Control Authority / 生命周期领域 | 由 host worker、sandbox executor 或本地 CLI 路径调用，不是独立常驻服务 | 领域调用与控制请求 | 校验 task、generation、operation、recovery 和 artifact authority | `task.md`、active/blocked/completed 目录、journal、短号和 receipt | 多步写入与目录移动后必须核验最终状态。 |
 | 沙箱 broker / executor | recovery 启动 broker；每个授权请求使用短生命周期 executor | control channel 与 request/response/status records | manifest、lease、controller binding 和 attestation gate | owner、lease、execution audit 和状态记录 | broker 重启不等于请求重试；已接受但未知的副作用不自动重放。 |
@@ -93,7 +94,7 @@ IM adapter 将 provider 事件规范化为 daemon 消息契约。内置命令可
 已授权消息或本地 CLI
   → ai run --skill create-task <description>
   → 选择 TUI 并构造命令
-  → 以继承的 stdio 启动宿主 TUI
+  → 忽略 stdin、继承 stdout/stderr，启动宿主 TUI
   → 等待 TUI 退出并返回进程结果
   → task-create/lifecycle authority 记录任务结果
 ```
@@ -107,7 +108,7 @@ IM adapter 将 provider 事件规范化为 daemon 消息契约。内置命令可
   → ai run --skill <task-skill> --task <task-ref>
   → 解析任务沙箱和运行时身份
   → docker exec 沙箱 launcher
-  → 创建 tmux session/window `work` 和 run directory
+  → 创建 tmux session `work`、window `ai-<run-id>` 和 run directory
   → 写入 `running`，启动实际 TUI，捕获输出与退出码
   → tmux 窗口创建后返回
   → 通过 status/output 观察，或用 `ai sandbox enter` 附着
@@ -132,7 +133,8 @@ host-control 负责授权和审计宿主 worker；任务生命周期领域负责
 - **Rejected** 表示接纳或授权在操作接受前失败。只有修正输入或 authority 问题后才能重试。
 - **Failed** 表示已知进程或操作以失败结束。使用对应的退出码、状态记录、日志或审计定位失败。
 - **Unknown** 表示无法确定是否已接受或是否产生副作用。不要自动重放 task event、worker 请求、sandbox execution 或 TUI 命令。
-- **Dispatch complete** 表示宿主子进程退出，或沙箱 tmux 窗口已经创建；它不表示 TUI、skill 或任务完成。
+- **Host command returned** 表示选定的宿主 TUI 子进程退出并返回进程结果；它本身不表示任务创建或所选 skill 成功。
+- **Sandbox dispatch complete** 表示 tmux `work` session 和 `ai-<run-id>` window 已创建；它不表示沙箱 TUI、skill 或任务完成。
 - **Recovery** 由所属边界负责：daemon PID/log 清理、adapter 重连、sandbox broker 重启、executor 对账、run status/output 检查、lifecycle journal 恢复或平台同步重试。一个边界的证据不能替代另一个边界。
 - run script 写入终态后，tmux pane 仍可能保留以便观察；pane 存在不是运行成功信号。
 
