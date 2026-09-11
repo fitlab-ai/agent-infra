@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import {
@@ -151,6 +152,8 @@ test('lifecycle recovery compensates a committed task event across processes wit
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   const taskPath = path.join(taskDir, 'task.md');
   const sourcePath = path.resolve('lib/task/control-authority.ts');
+  const capabilityStoreUrl = pathToFileURL(path.resolve('lib/agent-clients/adapters/codex-lifecycle/capability-store.ts')).href;
+  const sourceUrl = pathToFileURL(sourcePath).href;
   const initialTask = [
     '---',
     `id: ${taskId}`,
@@ -208,9 +211,9 @@ test('lifecycle recovery compensates a committed task event across processes wit
 
   const runChild = (childBinding = binding) => {
     const script = `
-      const [root, repoRoot, sourcePath, selectorJson, buildJson, bindingJson] = process.argv.slice(1);
-      const { createCodexCapabilityStore } = await import(${JSON.stringify(path.resolve('lib/agent-clients/adapters/codex-lifecycle/capability-store.ts'))});
-      const { recoverLifecycleRecoveryOperation, queryLifecycleRecoveryOperation } = await import(sourcePath);
+      const [root, repoRoot, sourceUrl, selectorJson, buildJson, bindingJson] = process.argv.slice(1);
+      const { createCodexCapabilityStore } = await import(${JSON.stringify(capabilityStoreUrl)});
+      const { recoverLifecycleRecoveryOperation, queryLifecycleRecoveryOperation } = await import(sourceUrl);
       const selector = JSON.parse(selectorJson);
       const result = recoverLifecycleRecoveryOperation(selector, {
         repoRoot,
@@ -227,7 +230,7 @@ test('lifecycle recovery compensates a committed task event across processes wit
     `;
     return spawnSync(process.execPath, [
       '--experimental-strip-types', '--input-type=module', '-e', script,
-      root, repoRoot, sourcePath, JSON.stringify(selector), JSON.stringify(build), JSON.stringify(childBinding)
+      root, repoRoot, sourceUrl, JSON.stringify(selector), JSON.stringify(build), JSON.stringify(childBinding)
     ], { cwd: process.cwd(), encoding: 'utf8' });
   };
 
