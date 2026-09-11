@@ -11,6 +11,7 @@ import {
   writeTaskArtifact
 } from '../../../lib/sandbox/control/task-workflow.ts';
 import { parseArtifactCommand } from '../../../lib/task/artifact-command.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 function testRoot(prefix: string): string {
   return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -43,7 +44,7 @@ test('task-workflow routes candidate initialization and repair with task binding
   }
 });
 
-test('task-workflow reads and compare-writes the shared task directory', async () => {
+test('task-workflow reads and compare-writes the shared task directory', onPlatforms('linux', 'darwin'), async () => {
   const root = testRoot('task-workflow-direct-');
   const taskDir = path.join(root, 'active', 'TASK-20260904-002407');
   fs.mkdirSync(taskDir, { recursive: true });
