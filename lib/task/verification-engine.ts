@@ -659,7 +659,9 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   }
 
   const doneActions = (inspectActivityLog(task.content).section?.entries ?? [])
-    .filter((entry) => !ACTIVITY_LOG_STARTED_RE.test(entry.step)).map((entry) => entry.step);
+    .filter((entry) => !ACTIVITY_LOG_STARTED_RE.test(entry.step))
+    .map((entry) => entry.step)
+    .filter((step) => /^(?:Code Task|Code) \(Round \d+/.test(step));
   const latestAction = doneActions.at(-1) || "";
   const actionDecision = /(?:Code Task|Code) \(Round \d+, decision (II-[1-9]\d*)\)/.exec(latestAction)?.[1] || null;
   const report = fs.readFileSync(artifactPath, "utf8");
