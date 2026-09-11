@@ -724,6 +724,9 @@ async function probePlatformFailure(
       return number === null ? null : resourceIdentity(number);
     })();
   const fact = readPrDeliveryFact(frontmatter);
+  if (fact.status === 'invalid') {
+    return error(fact.error.code, fact.error.message);
+  }
   const pullRequestIdentity = options.probePullRequestNumber !== undefined
     ? resourceIdentity(options.probePullRequestNumber)
     : fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;

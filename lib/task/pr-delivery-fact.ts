@@ -1,5 +1,4 @@
 import type { ResourceIdentity } from '../platform/resource-identity.ts';
-import { isLegacyCompatibilityEnabled, legacyCompatibilityError, VERSION } from '../version.ts';
 import {
   isResourceIdentity,
   parseResourceIdentity,
@@ -17,14 +16,6 @@ type PrDeliveryIdentity = {
   base: { repository: string; ref: string; sha: string };
 };
 
-type LegacyPrDeliveryIdentity = {
-  repository: string;
-  number: number;
-  nodeId: string;
-  url: string;
-  head: { repository: string; ref: string; sha: string };
-  base: { repository: string; ref: string; sha: string };
-};
 type CurrentPrDeliveryIdentityInput = {
   resource: ResourceIdentity;
   repository: string;
@@ -93,10 +84,6 @@ function timestamp(value: unknown, label: string): string {
   if (Number.isNaN(Date.parse(result))) throw factError(`${label} must be a valid timestamp`);
   return new Date(result).toISOString();
 }
-function positiveNumber(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) <= 0) throw factError(`${label} must be a positive integer`);
-  return value as number;
-}
 function parseRef(value: unknown, label: string): { repository: string; ref: string; sha: string } {
   if (!isRecord(value)) throw factError(`${label} must be an object`);
   exactKeys(value, ['repository', 'ref', 'sha'], label);
@@ -115,35 +102,19 @@ function canonicalIdentity(value: unknown): PrDeliveryIdentity {
   };
 }
 
-function decodeLegacyIdentity(value: unknown): PrDeliveryIdentity {
-  if (!isRecord(value)) throw factError('legacy identity must be an object');
-  // TODO(compat): Remove the v1 identity decoder before the first stable v1.0.0 release.
-  exactKeys(value, ['repository', 'number', 'nodeId', 'url', 'head', 'base'], 'legacy identity');
-  const legacy = {
-    number: positiveNumber(value.number, 'legacy identity.number'),
-    repository: text(value.repository, 'identity.repository'),
-    nodeId: text(value.nodeId, 'legacy identity.nodeId'),
-    url: text(value.url, 'identity.url'),
-    head: parseRef(value.head, 'identity.head'),
-    base: parseRef(value.base, 'identity.base')
-  } satisfies LegacyPrDeliveryIdentity;
-  return {
-    resource: { kind: 'number', value: legacy.number },
-    repository: legacy.repository,
-    url: legacy.url,
-    head: legacy.head,
-    base: legacy.base
-  };
-}
-
 function provenanceForSource(source: PrDeliveryBindingSource): PrDeliveryProvenance { return source === 'created' ? 'create-post' : source === 'reused' ? 'reuse' : source; }
 
-function parseFact(value: unknown, runtimeVersion = VERSION): PrDeliveryFact {
+function legacyFactError(): PrDeliveryFactError {
+  return Object.assign(
+    new Error('PLATFORM_IDENTITY_LEGACY_UNSUPPORTED: v1 PR delivery fact requires migration to version 2'),
+    { code: 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED' }
+  );
+}
+
+function parseFact(value: unknown): PrDeliveryFact {
   if (!isRecord(value)) throw factError('fact must be an object');
-  if ((value.version !== 1 && value.version !== 2) || typeof value.state !== 'string') throw factError('version or state is invalid');
-  if (value.version === 1 && !isLegacyCompatibilityEnabled(runtimeVersion)) {
-    throw legacyCompatibilityError('v1 PR delivery fact', runtimeVersion);
-  }
+  if (value.version === 1) throw legacyFactError();
+  if (value.version !== 2 || typeof value.state !== 'string') throw factError('version or state is invalid');
   if (value.state === 'unbound') {
     exactKeys(value, ['version', 'state', 'reason'], 'unbound fact');
     if (value.reason !== 'initial') throw factError('unbound reason is invalid');
@@ -155,24 +126,6 @@ function parseFact(value: unknown, runtimeVersion = VERSION): PrDeliveryFact {
     return { version: 2, state: 'skipped', reason: 'explicit', decidedAt: timestamp(value.decidedAt, 'skipped.decidedAt') };
   }
   if (value.state !== 'bound') throw factError('state is invalid');
-  if (value.version === 1) {
-    // TODO(compat): Remove this v1-to-v2 shape conversion before the first stable v1.0.0 release.
-    exactKeys(value, ['version', 'state', 'identity', 'binding', 'provenance'], 'legacy bound fact');
-    if (!isRecord(value.binding) || !isRecord(value.provenance)) throw factError('legacy binding or provenance is invalid');
-    exactKeys(value.binding, ['status', 'source', 'verifiedAt', 'issueNumber', 'remoteState', 'mergedAt', 'mergeCommitSha'], 'legacy binding');
-    const issueNumber = value.binding.issueNumber === null ? null : positiveNumber(value.binding.issueNumber, 'legacy binding.issueNumber');
-    return parseFact({
-      version: 2,
-      state: 'bound',
-      identity: decodeLegacyIdentity(value.identity),
-      binding: {
-        status: 'verified', source: value.binding.source, verifiedAt: timestamp(value.binding.verifiedAt, 'binding.verifiedAt'),
-        issueIdentity: issueNumber === null ? null : { kind: 'number', value: issueNumber }, remoteState: value.binding.remoteState,
-        mergedAt: value.binding.mergedAt === null ? null : timestamp(value.binding.mergedAt, 'binding.mergedAt'), mergeCommitSha: nullableText(value.binding.mergeCommitSha, 'binding.mergeCommitSha')
-      },
-      provenance: value.provenance
-    }, runtimeVersion);
-  }
   exactKeys(value, ['version', 'state', 'identity', 'binding', 'provenance'], 'bound fact');
   if (!isRecord(value.binding) || !isRecord(value.provenance)) throw factError('binding or provenance is invalid');
   exactKeys(value.binding, ['status', 'source', 'verifiedAt', 'issueIdentity', 'remoteState', 'mergedAt', 'mergeCommitSha'], 'binding');
@@ -195,19 +148,19 @@ function parseFact(value: unknown, runtimeVersion = VERSION): PrDeliveryFact {
   };
 }
 
-function decodePrDeliveryFact(value: unknown, runtimeVersion = VERSION): PrDeliveryFact {
+function decodePrDeliveryFact(value: unknown, _runtimeVersion?: string): PrDeliveryFact {
   if (typeof value === 'string') {
     let decoded: unknown;
     try { decoded = JSON.parse(value); }
     catch { throw factError('value is not valid JSON'); }
-    return parseFact(decoded, runtimeVersion);
+    return parseFact(decoded);
   }
-  return parseFact(value, runtimeVersion);
+  return parseFact(value);
 }
 function encodePrDeliveryFact(fact: PrDeliveryFact): string { return JSON.stringify(parseFact(fact)); }
-function readPrDeliveryFact(metadata: Record<string, unknown>, runtimeVersion = VERSION): PrDeliveryFactReadResult {
+function readPrDeliveryFact(metadata: Record<string, unknown>, _runtimeVersion?: string): PrDeliveryFactReadResult {
   if (!Object.hasOwn(metadata, PR_DELIVERY_FACT_KEY) || metadata[PR_DELIVERY_FACT_KEY] === '') return { status: 'missing', fact: null };
-  try { return { status: 'valid', fact: decodePrDeliveryFact(metadata[PR_DELIVERY_FACT_KEY], runtimeVersion) }; }
+  try { return { status: 'valid', fact: decodePrDeliveryFact(metadata[PR_DELIVERY_FACT_KEY]) }; }
   catch (error) { return { status: 'invalid', fact: null, error: asFactError(error) }; }
 }
 function buildUnboundFact(): PrDeliveryFact { return { version: 2, state: 'unbound', reason: 'initial' }; }

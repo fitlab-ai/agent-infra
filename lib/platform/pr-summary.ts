@@ -343,9 +343,16 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
   };
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const frontmatter = parseTypedTaskFrontmatter(taskContent);
-  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
-  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? resourceIdentityNumber(fact.fact.identity.resource) : null;
   const reportPath = taskReportPath(resolved.taskDir);
+  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
+  if (fact.status === 'invalid') return {
+    ...platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }),
+    task: { id: resolved.taskId, prNumber: null },
+    pullRequest: null,
+    changeReport: { status: 'invalid', path: reportPath, taskIntentSha256: null, reason: fact.error.message },
+    artifacts: []
+  };
+  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? resourceIdentityNumber(fact.fact.identity.resource) : null;
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   let pullRequest: PlatformChangeRequestSnapshot | null = null;

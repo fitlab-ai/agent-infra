@@ -9,6 +9,7 @@ import {
   buildPullRequestSummary,
   reportWrite,
   reconcileSummaryComment,
+  summaryCommentState,
   syncPullRequestSummary,
   warningResultForPrimary
 } from '../../../../lib/platform/pr-summary.ts';
@@ -188,7 +189,7 @@ test('PR summary warning result preserves the primary lifecycle outcome', () => 
   assert.equal(warningResultForPrimary('no_op'), 'no_op_with_warnings');
 });
 
-test('PR summary preserves the structured legacy cutoff error from a persisted fact', async () => {
+test('PR summary preserves the structured v1 unsupported error from a persisted fact', async () => {
   const fixture = summaryFixture();
   try {
     const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
@@ -203,6 +204,15 @@ test('PR summary preserves the structured legacy cutoff error from a persisted f
     });
     assert.equal(result.status, 'failed');
     assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    let providerCalls = 0;
+    const noSideEffectClient = {
+      version: () => { providerCalls += 1; return { ok: true as const, value: '2.72.0' }; },
+      json: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; },
+      text: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; }
+    } as unknown as GitHubClient;
+    const state = await summaryCommentState(fixture.taskId, { cwd: fixture.root, client: noSideEffectClient });
+    assert.equal(state.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    assert.equal(providerCalls, 0);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

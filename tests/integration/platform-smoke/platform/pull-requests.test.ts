@@ -333,6 +333,30 @@ function boundPullRequestFixture(options: {
   };
 }
 
+test('task-bound PR sync rejects v1 facts before provider or task writes', async () => {
+  const fixture = boundPullRequestFixture();
+  let providerCalls = 0;
+  const client = {
+    version: () => { providerCalls += 1; return fixture.client.version(); },
+    json: (args: string[], options?: RequestOptions) => { providerCalls += 1; return fixture.client.json(args, options); },
+    text: (args: string[]) => { providerCalls += 1; return fixture.client.text(args); }
+  } as unknown as GitHubClient;
+  try {
+    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
+    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(legacy)}`));
+    const result = await syncPlatformPullRequest(fixture.taskId, {
+      cwd: fixture.root, agent: 'codex', metadata: true, primaryResult: 'no_op', client
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    assert.equal(providerCalls, 0);
+    assert.deepEqual(fixture.writes, []);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('task-bound PR sync reads milestone prerequisites before writing Issue labels', async () => {
   const fixture = boundPullRequestFixture({ milestoneFailure: true });
   try {

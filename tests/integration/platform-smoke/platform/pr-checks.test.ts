@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { classifyPullRequestReadiness, classifyRequiredChecks, resolveRunCandidate, watchPullRequestReadiness } from '../../../../lib/platform/pr-checks.ts';
+import { classifyPullRequestReadiness, classifyRequiredChecks, inspectRequiredChecks, resolveRunCandidate, watchPullRequestReadiness } from '../../../../lib/platform/pr-checks.ts';
 import { fetchCheckLogText, parseRunJobIdentity } from '../../../../lib/platform/github-data.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../../lib/task/pr-delivery-fact.ts';
@@ -16,6 +16,33 @@ test('required checks classify terminal and non-terminal states', () => {
   assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'fail' }]).state, 'failed');
   assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'pending' }]).state, 'pending');
   assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'cancel' }]).state, 'cancelled');
+});
+
+test('required checks reject v1 facts before loading a provider', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-checks-v1-'));
+  const taskId = 'TASK-20260101-000001';
+  let providerCalls = 0;
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), [
+      '---', `id: ${taskId}`, 'status: active',
+      `pr_delivery_fact: ${JSON.stringify(JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' }))}`,
+      '---', ''
+    ].join('\n'));
+    const client = {
+      version: () => { providerCalls += 1; return { ok: true as const, value: '2.72.0' }; },
+      json: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; },
+      text: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; }
+    } as unknown as GitHubClient;
+    const result = await inspectRequiredChecks(taskId, { cwd: root, client });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    assert.equal(providerCalls, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('PR readiness watcher reaches injected deadline and preserves the observed head', async () => {

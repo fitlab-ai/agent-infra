@@ -138,6 +138,30 @@ test('collectHostCandidates tolerates a missing workspace root', () => {
   }
 });
 
+test('collectHostCandidates keeps v1 tasks issue-only and never infers a PR identity', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'evidence-host-v1-'));
+  try {
+    const taskId = 'TASK-20260101-000005';
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), [
+      '---',
+      `id: ${taskId}`,
+      'issue_number: 7',
+      `pr_delivery_fact: ${JSON.stringify(JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' }))}`,
+      '---', ''
+    ].join('\n'));
+    assert.deepEqual(collectHostCandidates({ prNumber: 42, closingIssues: [7], workspaceRoot: root }), [{
+      taskId,
+      taskDir,
+      issueNumber: 7,
+      prNumber: null
+    }]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('deriveTaskIssueMatches mechanically derives the S1(a) trust factor from resolved data', () => {
   // unique host whose bound issue_number is among the PR closing issues -> trusted
   assert.equal(deriveTaskIssueMatches(UNIQUE_HOST, [7, 9]), true);
