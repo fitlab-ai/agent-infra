@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "migrationId": "pr-delivery-fact-v1-to-v2-2026-09-11T13:55:47.347Z-41ee1ea8-c6be-4a08-9d6c-c072ed57462b",
+  "repositoryRoot": "/workspace",
+  "toolVersion": "v0.9.16-alpha.0",
+  "startedAt": "2026-09-11T13:55:47.347Z",
+  "status": "completed",
+  "inventory": [
+    "TASK-20260904-095758"
+  ],
+  "entries": [
+    {
+      "taskId": "TASK-20260904-095758",
+      "taskFile": ".agents/workspace/active/TASK-20260904-095758/task.md",
+      "sourceVersion": 1,
+      "state": "applied",
+      "beforeSha256": "c572037a55db47a76a69a81c6ff837c0e91652d5a02fcca56dd18b7603023296",
+      "postSha256": "29dc21a2bdaf91790f9206a842752af0d0ad36e502c90edf1522ff93cf7ca220",
+      "targetFact": {
+        "version": 2,
+        "state": "unbound",
+        "reason": "initial"
+      },
+      "beforeFact": {
+        "version": 1,
+        "state": "unbound",
+        "reason": "initial"
+      }
+    }
+  ],
+  "verification": {
+    "completedAt": "2026-09-11T13:55:47.361Z",
+    "activeTaskCount": 1,
+    "digest": "a3951b6c576ec63bb1bee8c41ec8b5fb1d7fb4a89edc3c6bf5f0a05ce5244742"
+  },
+  "metadataTimestamp": "2026-09-11T13:55:47.347Z",
+  "agentInfraVersion": "v0.9.16-alpha.0"
+}

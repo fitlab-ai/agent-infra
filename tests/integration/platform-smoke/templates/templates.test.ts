@@ -211,7 +211,8 @@ test("root and template gitignore cover local dependency and lifecycle runtime p
 
   for (const content of [rootGitignore, templateGitignore]) {
     assert.match(content, /^node_modules\/$/m);
-    assert.match(content, /^\.agents\/workspace\/$/m);
+    assert.match(content, /^\.agents\/workspace\/\*$/m);
+    assert.match(content, /^!\.agents\/workspace\/migrations\/pr-delivery-fact-v1-to-v2\.json$/m);
   }
 });
 

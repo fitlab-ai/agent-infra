@@ -61,6 +61,8 @@ test('all v1 delivery fact states and representations fail closed for every runt
           (error: unknown) => error instanceof Error
             && 'code' in error
             && error.code === 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED'
+            && error.message.includes('previous tool version')
+            && error.message.includes('version 2')
         );
       }
     }

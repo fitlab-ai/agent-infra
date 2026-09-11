@@ -106,7 +106,7 @@ function provenanceForSource(source: PrDeliveryBindingSource): PrDeliveryProvena
 
 function legacyFactError(): PrDeliveryFactError {
   return Object.assign(
-    new Error('PLATFORM_IDENTITY_LEGACY_UNSUPPORTED: v1 PR delivery fact requires migration to version 2'),
+    new Error('PLATFORM_IDENTITY_LEGACY_UNSUPPORTED: v1 PR delivery fact is unsupported; use the previous tool version to view this task or migrate its fact to version 2 before using this version'),
     { code: 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED' }
   );
 }

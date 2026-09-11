@@ -1,5 +1,7 @@
-# Agent workspace (runtime data)
-.agents/workspace/
+# Agent workspace (runtime data), except the approved migration record.
+.agents/workspace/*
+!.agents/workspace/migrations/
+!.agents/workspace/migrations/pr-delivery-fact-v1-to-v2.json
 
 # agent-infra-server local secrets (in-repo). Runtime state (PID, logs) lives
 # under ~/.agent-infra/, outside the repo, so it needs no ignore rule here.

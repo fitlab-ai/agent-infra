@@ -1,5 +1,7 @@
-# Agent workspace (runtime data)
-.agents/workspace/
+# Agent workspace (runtime data), except the approved migration record.
+.agents/workspace/*
+!.agents/workspace/migrations/
+!.agents/workspace/migrations/pr-delivery-fact-v1-to-v2.json
 
 # Claude Code local settings
 .claude/settings.local.json
