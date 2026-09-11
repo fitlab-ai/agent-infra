@@ -10,6 +10,8 @@ import {
   buildCommandSyncFiles,
   escapeRegExp,
   exists,
+  gitSafeEnv,
+  initIsolatedGitRepo,
   langTemplate,
   listFilesRecursive,
   listTrackedFiles,
@@ -127,11 +129,56 @@ test("required template files were migrated into templates/", () => {
   });
 });
 
-test("runtime workspace contains no tracked repository files", () => {
+test("runtime workspace tracks only the approved migration manifest", () => {
   assert.deepEqual(
     listTrackedFiles(".agents/workspace").filter((relativePath) => exists(relativePath)),
-    []
+    [".agents/workspace/migrations/pr-delivery-fact-v1-to-v2.json"]
   );
+});
+
+test("workspace gitignore allows only the approved migration manifest", () => {
+  for (const [label, gitignorePath] of [
+    ["root", ".gitignore"],
+    ["template", "templates/.gitignore"]
+  ] as const) {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `workspace-gitignore-${label}-`));
+
+    try {
+      initIsolatedGitRepo(tempRoot);
+      const workspaceRoot = path.join(tempRoot, ".agents", "workspace");
+      fs.mkdirSync(path.join(workspaceRoot, "migrations"), { recursive: true });
+      fs.mkdirSync(path.join(workspaceRoot, "active", "TASK-20260101-000001"), { recursive: true });
+      fs.writeFileSync(path.join(tempRoot, ".gitignore"), read(gitignorePath));
+      fs.writeFileSync(path.join(workspaceRoot, "migrations", "pr-delivery-fact-v1-to-v2.json"), "{}");
+      fs.writeFileSync(path.join(workspaceRoot, "migrations", "other-runtime.json"), "{}");
+      fs.writeFileSync(path.join(workspaceRoot, "active", "TASK-20260101-000001", "task.md"), "runtime");
+
+      const isIgnored = (relativePath: string): boolean =>
+        spawnSync("git", ["check-ignore", "--no-index", "--quiet", "--", relativePath], {
+          cwd: tempRoot,
+          encoding: "utf8",
+          env: gitSafeEnv()
+        }).status === 0;
+
+      assert.equal(
+        isIgnored(".agents/workspace/migrations/pr-delivery-fact-v1-to-v2.json"),
+        false,
+        `${label} gitignore should allow the approved migration manifest`
+      );
+      assert.equal(
+        isIgnored(".agents/workspace/migrations/other-runtime.json"),
+        true,
+        `${label} gitignore should ignore other migration files`
+      );
+      assert.equal(
+        isIgnored(".agents/workspace/active/TASK-20260101-000001/task.md"),
+        true,
+        `${label} gitignore should ignore active task files`
+      );
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }
 });
 
 test("human-decision context rules define complete comparable option blocks", () => {
