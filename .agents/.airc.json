@@ -157,7 +157,7 @@
       ".claude/commands/review-code.md": "sha256:4d7958f04237241006cdaf63ac47bd9547c8c04b66b75fc8bc27b2a18ae48898",
       ".claude/commands/review-plan.md": "sha256:fba112f44958401915aa44372f58e6dff899f8f410b22fc8488ef228a867c6c5",
       ".claude/commands/review-pr.md": "sha256:8c2c6100b2e3ef783a276757ed4f44d23d7734f27ce9952ede00c5ba58bef8ea",
-      ".claude/commands/run-manual-validation.md": "sha256:bc740ae3ac15f70bc371feaf673aff312672768abef2cbeb31440b3ccdcf7ca8",
+      ".claude/commands/run-manual-validation.md": "sha256:a1d3c3cae97772fe86120eebbe9a4b6fea7a617c5402d6eed609a9f31318466e",
       ".claude/commands/run-task.md": "sha256:92b1707e8aa06686bac422c2f09002ddf86ffbdb4ad8779631c341ac787ceddb",
       ".claude/commands/watch-pr.md": "sha256:c4a6f8033c34e5a39296f57c70d9381920a25aa346cfcc93f0e45e9f3b4c7a87",
       ".codex/hooks.json": "sha256:c67cdc0e064f0b8efbe0eb8ae05a457a5544389b42f95a9a97463e02dd344f8b",
