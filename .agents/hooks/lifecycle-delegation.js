@@ -16,7 +16,7 @@ function internalCliInvocation(args) {
   return { command: 'agent-infra-internal', commandArgs: args, shell: process.platform === 'win32' };
 }
 
-function findCapabilityToken(value, depth = 0) {
+function findCapabilityRef(value, depth = 0) {
   if (depth > 5 || value == null) return '';
   if (typeof value === 'string') {
     const match = /agent-infra-codex-capability:([A-Za-z0-9_-]{20,})/.exec(value);
@@ -24,14 +24,14 @@ function findCapabilityToken(value, depth = 0) {
   }
   if (Array.isArray(value)) {
     for (const entry of value) {
-      const found = findCapabilityToken(entry, depth + 1);
+      const found = findCapabilityRef(entry, depth + 1);
       if (found) return found;
     }
     return '';
   }
   if (typeof value === 'object') {
     for (const entry of Object.values(value)) {
-      const found = findCapabilityToken(entry, depth + 1);
+      const found = findCapabilityRef(entry, depth + 1);
       if (found) return found;
     }
   }
@@ -77,11 +77,11 @@ process.stdin.on('end', () => {
       process.exit(1);
     }
     const managedAgent = /^agent-infra-lifecycle-(executor|reviewer)$/.test(String(nativeAgent || ''));
-    const capabilityToken = hook === 'post-tool' ? findCapabilityToken(toolResponse) : '';
+    const capabilityRef = hook === 'post-tool' ? findCapabilityRef(toolResponse) : '';
     const parentReconcile = hook === 'post-tool'
       && toolName === 'collaborationwait_agent'
       && toolResponse.timed_out !== true;
-    if (!managedAgent && !parentReconcile && !capabilityToken) process.exit(0);
+    if (!managedAgent && !parentReconcile && !capabilityRef) process.exit(0);
     const hookDefinitionHash = createHash('sha256').update(readFileSync(codexHooks)).digest('hex');
     const normalized = {
       sessionId: String(event.session_id || ''),
@@ -96,7 +96,7 @@ process.stdin.on('end', () => {
       taskName: String(toolInput.task_name || ''),
       transcriptPath: String(event.transcript_path || '')
     };
-    if (capabilityToken) normalized.capabilityToken = capabilityToken;
+    if (capabilityRef) normalized.capabilityRef = capabilityRef;
     const args = ['codex-lifecycle', 'hook-event', '--event', hook, '--bridge', 'true'];
     try {
       const { command, commandArgs, shell } = internalCliInvocation(args);

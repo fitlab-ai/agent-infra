@@ -30,6 +30,7 @@ import {
 } from '../../../lib/task/orchestration.ts';
 
 const taskId = 'TASK-20260101-000001';
+const defaultController = { instanceDigest: 'e'.repeat(64), controlGeneration: 'generation-1' } as const;
 const policy = {
   executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
   reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
@@ -50,7 +51,7 @@ const hookProvenance = {
   hookSourceHash: 'd'.repeat(64)
 };
 const preflight = async () => ({
-  cliVersion: '0.147.0', hookDefinitionHash: 'hook-hash', staticReady: true,
+  cliVersion: '0.147.0', hookDefinitionHash: 'c'.repeat(64), staticReady: true,
   discoveredHooks: [], hookProvenance, runtimeLiveness: false, diagnostics: []
 } as const);
 
@@ -60,30 +61,32 @@ function fixture() {
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\ncurrent_step: requirement-analysis\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = JSON.stringify(defaultController);
   beginOrResumeOrchestration(taskId, { repoRoot: root, client: 'codex', modelPolicy: policy, id: () => 'run-1' });
   return { root, taskDir };
 }
 
 function capability(
   root: string,
-  token: string,
+  capabilityRef: string,
   controller?: Readonly<{ instanceDigest: string; controlGeneration: string }>
 ) {
+  const effectiveController = controller ?? defaultController;
   const store = createCodexCapabilityStore({
     root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-capabilities'),
-    token: () => token
+    reference: () => capabilityRef
   });
-  const armed = store.arm({ taskId, buildIdentity, ...(controller ? { controller } : {}) });
-  store.attest({
-    token: armed.token,
+  const armed = store.arm({ taskId, buildIdentity, controller: effectiveController });
+  store.attestByReference({
+    capabilityRef: armed.capabilityRef,
     sessionId: 'parent',
     turnId: 'parent-turn',
     toolUseId: 'capability-tool',
-    hookDefinitionHash: 'hook-hash',
+    hookDefinitionHash: 'c'.repeat(64),
     buildIdentity,
-    ...(controller ? { controller } : {})
+    controller: effectiveController
   });
-  return { store, token: armed.token };
+  return { store, capabilityRef: armed.capabilityRef };
 }
 
 function writeControllerContext(
@@ -135,7 +138,7 @@ test('Codex prepare consumes a controller-bound capability from the trusted brok
       client: 'codex',
       requestedModel: 'executor-model',
       requestedReasoningEffort: 'xhigh',
-      capabilityToken: currentCapability.token
+      capabilityRef: currentCapability.capabilityRef
     }, {
       repoRoot: f.root,
       capabilityStore: currentCapability.store,
@@ -168,7 +171,7 @@ test('Codex prepare rejects mismatched broker and verified local controller bind
   });
   try {
     const result = await prepareCodexOrchestrationDelegation(taskId, {
-      client: 'codex', capabilityToken: currentCapability.token
+      client: 'codex', capabilityRef: currentCapability.capabilityRef
     }, {
       repoRoot: f.root,
       capabilityStore: currentCapability.store,
@@ -177,7 +180,7 @@ test('Codex prepare rejects mismatched broker and verified local controller bind
       orchestrationOptions: { captureWorkspace: () => { throw new Error('workspace must not be captured'); } }
     });
     assert.equal(result.error?.code, 'CODEX_SANDBOX_CONTROLLER_BINDING_MISMATCH');
-    assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+    assert.equal(currentCapability.store.inspectReference(currentCapability.capabilityRef).status, 'attested');
     assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
   } finally {
     if (previousContext === undefined) delete process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
@@ -212,7 +215,7 @@ test('Codex prepare accepts matching broker and context without child control au
       client: 'codex',
       requestedModel: 'executor-model',
       requestedReasoningEffort: 'xhigh',
-      capabilityToken: currentCapability.token
+      capabilityRef: currentCapability.capabilityRef
     }, {
       repoRoot: f.root,
       capabilityStore: currentCapability.store,
@@ -245,7 +248,7 @@ test('Codex prepare rejects missing model or effort without consuming the capabi
     const result = await prepareCodexOrchestrationDelegation(taskId, {
       client: 'codex',
       ...input,
-      capabilityToken: currentCapability.token
+      capabilityRef: currentCapability.capabilityRef
     }, {
       repoRoot: f.root,
       capabilityStore: currentCapability.store,
@@ -254,7 +257,7 @@ test('Codex prepare rejects missing model or effort without consuming the capabi
       orchestrationOptions: { captureWorkspace: () => 'before' }
     });
     assert.equal(result.error?.code, expectedCode);
-    assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+    assert.equal(currentCapability.store.inspectReference(currentCapability.capabilityRef).status, 'attested');
     assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
   }
 });
@@ -268,7 +271,7 @@ test('Codex prepare rejects route policy mismatches before consuming the capabil
     const currentCapability = capability(f.root, `mismatch-policy-${Object.keys(input)[0]}`);
     let captures = 0;
     const result = await prepareCodexOrchestrationDelegation(taskId, {
-      client: 'codex', ...input, capabilityToken: currentCapability.token
+      client: 'codex', ...input, capabilityRef: currentCapability.capabilityRef
     }, {
       repoRoot: f.root,
       capabilityStore: currentCapability.store,
@@ -277,7 +280,7 @@ test('Codex prepare rejects route policy mismatches before consuming the capabil
       orchestrationOptions: { captureWorkspace: () => { captures += 1; return 'before'; } }
     });
     assert.equal(result.error?.code, expectedCode);
-    assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+    assert.equal(currentCapability.store.inspectReference(currentCapability.capabilityRef).status, 'attested');
     assert.equal(captures, 0);
     assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
     assert.equal(readRun(f.taskDir)?.baseline, '');
@@ -290,7 +293,7 @@ test('Codex prepare keeps the capability attested when workspace snapshot fails'
   let captures = 0;
   const result = await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
-    capabilityToken: currentCapability.token
+    capabilityRef: currentCapability.capabilityRef
   }, {
     repoRoot: f.root,
     capabilityStore: currentCapability.store,
@@ -304,7 +307,7 @@ test('Codex prepare keeps the capability attested when workspace snapshot fails'
     }
   });
   assert.equal(result.error?.code, 'ORCHESTRATION_SNAPSHOT_FAILED');
-  assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+  assert.equal(currentCapability.store.inspectReference(currentCapability.capabilityRef).status, 'attested');
   assert.equal(captures, 1);
   assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
   assert.equal(readRun(f.taskDir)?.baseline, '');
@@ -338,7 +341,7 @@ test('Codex prepare preserves the typed orchestration state error', async () => 
     client: 'codex',
     requestedModel: 'executor-model',
     requestedReasoningEffort: 'xhigh',
-    capabilityToken: currentCapability.token
+    capabilityRef: currentCapability.capabilityRef
   }, {
     repoRoot: f.root,
     capabilityStore: currentCapability.store,
@@ -360,7 +363,7 @@ test('Codex prepare continues with build drift warnings', async () => {
   const currentCapability = capability(f.root, 'capability-detail-token');
   const result = await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
-    capabilityToken: currentCapability.token
+    capabilityRef: currentCapability.capabilityRef
   }, {
     repoRoot: f.root,
     capabilityStore: currentCapability.store,
@@ -388,21 +391,20 @@ test('Codex prepare rejects hook mismatch before side effects', async () => {
   let captures = 0;
   const result = await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
-    capabilityToken: currentCapability.token
+    capabilityRef: currentCapability.capabilityRef
   }, {
     repoRoot: f.root,
     capabilityStore: currentCapability.store,
     buildIdentity,
-    preflight: async () => ({ ...(await preflight()), hookDefinitionHash: 'mismatched-hook-hash' }),
+    preflight: async () => ({ ...(await preflight()), hookDefinitionHash: 'e'.repeat(64) }),
     orchestrationOptions: { captureWorkspace: () => { captures += 1; return 'before'; } }
   });
 
   assert.equal(result.error?.code, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH');
-  assert.equal(result.error?.detail?.kind, 'codex-capability-provenance-mismatch');
-  assert.equal(result.error?.detail?.version, 1);
-  assert.equal(JSON.stringify(result.error?.detail).includes('hook-mismatch-token'), false);
+  assert.equal(result.error?.detail, undefined);
+  assert.equal(JSON.stringify(result.error?.message).includes('hook-mismatch-token'), false);
   assert.equal(captures, 0);
-  assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+  assert.equal(currentCapability.store.inspectReference(currentCapability.capabilityRef).status, 'attested');
   assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
   assert.equal(readRun(f.taskDir)?.baseline, '');
 });
@@ -423,7 +425,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
   const currentCapability = capability(f.root, 'capability-token-one');
   const prepared = await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
-    capabilityToken: currentCapability.token
+    capabilityRef: currentCapability.capabilityRef
   }, {
     repoRoot: f.root,
     capabilityStore: currentCapability.store,
@@ -444,7 +446,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
   store.apply({
     type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
-    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'hook-hash'
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64)
   });
   store.apply({
     type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
@@ -469,13 +471,13 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
   assert.equal(started.run?.pendingDelegation?.hostEvidence?.kind, 'codex-lifecycle-v2');
   assert.deepEqual(started.run?.pendingDelegation?.lifecycleProvenance, {
     ...buildIdentity,
-    hookDefinitionHash: 'hook-hash',
+    hookDefinitionHash: 'c'.repeat(64),
     ...hookProvenance,
     capabilitySessionId: 'parent',
     capabilityTurnId: 'parent-turn',
     capabilityToolUseId: 'capability-tool',
-    controllerInstanceDigest: null,
-    controlGeneration: null
+    controllerInstanceDigest: defaultController.instanceDigest,
+    controlGeneration: defaultController.controlGeneration
   });
   assert.equal(started.run?.pendingDelegation?.hostEvidence?.startRevision, 4);
   assert.equal((await activateCodexOrchestrationDelegation('child', {
@@ -527,7 +529,7 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
   const currentCapability = capability(f.root, 'capability-token-two');
   await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
-    capabilityToken: currentCapability.token
+    capabilityRef: currentCapability.capabilityRef
   }, {
     repoRoot: f.root,
     buildIdentity,
@@ -543,7 +545,7 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
   store.apply({
     type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
-    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'hook-hash'
+    requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'c'.repeat(64)
   });
   store.apply({
     type: 'hook-child', sessionId: 'parent', turnId: 'parent-turn', childThreadId: 'child',

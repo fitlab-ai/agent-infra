@@ -17,6 +17,9 @@ import {
 } from './task-workflow.ts';
 import type { SandboxControlManifest } from './protocol.ts';
 import type { SandboxControlExecutionResult } from './executor.ts';
+import type { LifecycleRecoveryAttestationV1 } from '../../task/control-authority.ts';
+import { applyTaskEvent } from '../../task/events.ts';
+import { parseTaskEventRequest } from '../../internal/task-event.ts';
 
 function executionResult(result: Record<string, unknown>): SandboxControlExecutionResult {
   return { exitCode: result.status === 'failed' || result.status === 'refused' ? 1 : 0, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
@@ -25,7 +28,8 @@ function executionResult(result: Record<string, unknown>): SandboxControlExecuti
 /** The broker already authorized this host executor; domain operations own validation. */
 export async function executeTaskWorkflow(
   manifest: SandboxControlManifest,
-  request: TaskWorkflowRequest
+  request: TaskWorkflowRequest,
+  lifecycleRecoveryAttestation: LifecycleRecoveryAttestationV1 | null = null
 ): Promise<SandboxControlExecutionResult> {
   let publicationStarted = false;
   try {
@@ -38,6 +42,18 @@ export async function executeTaskWorkflow(
     if (manifest.taskProjectionDir && !projection) throw new Error('TASK_PROJECTION_TOPOLOGY_UNVERIFIED');
     if (projection) verifyProjectionTopology(projection);
     const [command] = TASK_WORKFLOW_COMMANDS[request.operation];
+    if (request.operation === 'event') {
+      const eventRequest = parseTaskEventRequest(request.args);
+      const boundEventRequest = lifecycleRecoveryAttestation && eventRequest.requestId === undefined
+        ? { ...eventRequest, requestId: lifecycleRecoveryAttestation.lifecycleRequestId }
+        : eventRequest;
+      const result = applyTaskEvent(boundEventRequest, {
+        repoRoot: manifest.repoRoot,
+        lifecycleRecoveryAttestation,
+        deferLifecycleRecoveryConsumption: true
+      });
+      return executionResult(result);
+    }
     if (command !== 'task-artifact' && command !== 'task-review') {
       publicationStarted = true;
       // Inherit this executor's process group so its existing recovery owns the worker too.
@@ -66,7 +82,7 @@ export async function executeTaskWorkflow(
         const { family } = input;
         if (family !== 'analysis' && family !== 'plan' && family !== 'code') throw new Error('ARTIFACT_IDENTITY_INVALID');
         const local = { taskRef: request.taskId, family, artifact: input.artifact, repoRoot: manifest.repoRoot } as const;
-        const prepared = prepareLocalArtifact(local, content);
+        const prepared = prepareLocalArtifact(local, content, lifecycleRecoveryAttestation ?? undefined);
         if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared));
         publicationStarted = true;
         await landProjectionArtifact(projection, artifact);

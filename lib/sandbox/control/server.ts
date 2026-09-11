@@ -86,15 +86,69 @@ import {
   type SandboxTaskView
 } from './task-view.ts';
 import { taskCreateOutputUnavailableResult } from '../../task/create-service.ts';
+import {
+  consumeLifecycleRecoveryAttestation,
+  issueLifecycleRecoveryAttestation,
+  recoverLifecycleRecoveryOperation,
+  type LifecycleAuthorityResponseV1
+} from '../../task/control-authority.ts';
+import { createCodexCapabilityStore } from '../../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 
 type ActiveExecution = {
   request: SandboxControlRequest;
   prepared: PreparedSandboxControlExecution;
+  lifecycleAuthority: LifecycleAuthorityResponseV1 | undefined;
   result: SandboxControlExecutionResult | null;
   resultEvidenceWritten: boolean;
   failure: unknown;
   settled: boolean;
 };
+
+function consumeLifecycleAuthorityForResult(
+  manifest: SandboxControlManifest,
+  execution: ActiveExecution
+): boolean {
+  const authority = execution.lifecycleAuthority?.attestation;
+  if (!authority || execution.result?.exitCode !== 0) return true;
+  try {
+    consumeLifecycleRecoveryAttestation(authority);
+    return true;
+  } catch (error) {
+    appendBrokerAudit(manifest, 'lifecycle-authority-consume-retry', {
+      ...requestAuditFields(manifest, execution.request),
+      errorCode: error instanceof Error ? error.name : 'LIFECYCLE_AUTHORITY_CONSUME_FAILED'
+    });
+    return false;
+  }
+}
+
+function lifecycleAuthorityForRequest(
+  manifest: SandboxControlManifest,
+  manifestPath: string,
+  request: SandboxControlRequest
+): LifecycleAuthorityResponseV1 | undefined {
+  const selector = request.family === 'task-workflow' || request.family === 'task-orchestration'
+    ? request.authority
+    : undefined;
+  if (!selector) return undefined;
+  let controllerBinding: { instanceDigest: string; controlGeneration: string } | null = null;
+  try {
+    const registration = readCodexControllerRegistration(manifestPath);
+    controllerBinding = {
+      instanceDigest: registration.controllerInstanceDigest,
+      controlGeneration: registration.controlGeneration
+    };
+  } catch {
+    // The issuer reports the stable unavailable result; the broker never trusts
+    // a controller binding supplied by the request.
+  }
+  return issueLifecycleRecoveryAttestation(selector, {
+    controllerBinding,
+    capabilityStore: createCodexCapabilityStore(),
+    buildIdentity: computeLifecycleBuildIdentity(manifest.repoRoot)
+  });
+}
 
 function appendBrokerAudit(
   manifest: SandboxControlManifest,
@@ -542,6 +596,27 @@ function recoveryResponse(
   }
   const finalization = request.family === 'task-finalization' ? finalizationRecoveryResponse(manifest, request.id, 0) : null;
   if (evidence.exitCode === 0 && finalization?.status === 'deferred') return null;
+  if (evidence.exitCode === 0 && request.family === 'task-workflow' && request.authority?.phase === 'task-event.completed') {
+    try {
+      const registration = readCodexControllerRegistration(manifestPath);
+      const recovered = recoverLifecycleRecoveryOperation(request.authority, {
+        repoRoot: manifest.repoRoot,
+        capabilityStore: createCodexCapabilityStore(),
+        buildIdentity: computeLifecycleBuildIdentity(manifest.repoRoot),
+        controllerBinding: {
+          instanceDigest: registration.controllerInstanceDigest,
+          controlGeneration: registration.controlGeneration
+        }
+      });
+      if (recovered.status !== 'committed') return null;
+    } catch (error) {
+      appendBrokerAudit(manifest, 'lifecycle-authority-recovery-failed', {
+        ...requestAuditFields(manifest, request),
+        errorCode: error instanceof Error ? error.name : 'LIFECYCLE_AUTHORITY_RECOVERY_FAILED'
+      });
+      return null;
+    }
+  }
   const recovery: RecoveryDomainEvidence = finalization
     ? { domain: { consistent: finalization.status === 'matched' } }
     : readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);
@@ -1168,6 +1243,10 @@ export async function serveSandboxControl(
         if (!brokerOwns()) break;
         let terminalCommitted = false;
         if (settledExecution.result && settledExecution.resultEvidenceWritten) {
+          if (!consumeLifecycleAuthorityForResult(manifest, settledExecution)) {
+            active = settledExecution;
+            continue;
+          }
           terminalCommitted = publishExecutionResult(manifest, settledExecution.request, settledExecution.result, broker, brokerOwns);
           if (terminalCommitted && settledExecution.request.family === 'task-finalization') {
             try {
@@ -1252,9 +1331,17 @@ export async function serveSandboxControl(
             executorCwd: manifest.repoRoot,
             executorEntry: options.internalCliPath ?? process.argv[1] ?? null
           });
+          const lifecycleAuthority = lifecycleAuthorityForRequest(manifest, manifestPath, request);
+          if (lifecycleAuthority?.status === 'rejected') {
+            throw Object.assign(
+              new Error(lifecycleAuthority.error?.message ?? 'lifecycle authority was rejected'),
+              { code: lifecycleAuthority.error?.code ?? 'LIFECYCLE_AUTHORITY_REJECTED' }
+            );
+          }
           prepared = await prepareExecution({
             manifest, manifestPath, request, requestPath: claimed,
-            internalCliPath: options.internalCliPath ?? process.argv[1]!
+            internalCliPath: options.internalCliPath ?? process.argv[1]!,
+            ...(lifecycleAuthority ? { lifecycleAuthority } : {})
           });
           const preparedExecution = prepared;
           if (!preparedExecution) throw new Error('SANDBOX_CONTROL_EXECUTION_PREPARE_INVALID');
@@ -1269,7 +1356,8 @@ export async function serveSandboxControl(
             executionPath: executionPath(manifest, request.id)
           });
           const execution: ActiveExecution = {
-            request, prepared: preparedExecution, result: null, resultEvidenceWritten: false, failure: null, settled: false
+            request, prepared: preparedExecution, lifecycleAuthority, result: null,
+            resultEvidenceWritten: false, failure: null, settled: false
           };
           active = execution;
           preparedExecution.completion.then(
@@ -1422,7 +1510,8 @@ export async function serveSandboxControl(
         }
       }
       if (owned && active.result && active.resultEvidenceWritten) {
-        if (publishExecutionResult(manifest, active.request, active.result, broker, brokerOwns)) {
+        if (consumeLifecycleAuthorityForResult(manifest, active)
+          && publishExecutionResult(manifest, active.request, active.result, broker, brokerOwns)) {
           if (brokerOwns()) {
             removeAcceptedResponse(manifest, active.request.id);
             fs.rmSync(path.join(manifest.processingDir, active.request.id), { recursive: true, force: true });

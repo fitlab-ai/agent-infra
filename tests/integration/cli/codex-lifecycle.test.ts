@@ -279,15 +279,16 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
     internalExecutableBuildHash: 'a'.repeat(64),
     lifecycleContractHash: 'b'.repeat(64)
   } as const;
+  const controller = { instanceDigest: 'e'.repeat(64), controlGeneration: 'generation-1' } as const;
   const capabilityStore = createCodexCapabilityStore({
     root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-capabilities'),
-    token: () => 'capability-token'
+    reference: () => 'capability-reference'
   });
-  const armed = capabilityStore.arm({ taskId, buildIdentity });
-  capabilityStore.attest({
-    token: armed.token,
+  const armed = capabilityStore.arm({ taskId, buildIdentity, controller });
+  capabilityStore.attestByReference({
+    capabilityRef: armed.capabilityRef,
     sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'capability-tool',
-    hookDefinitionHash, buildIdentity
+    hookDefinitionHash, buildIdentity, controller
   });
   const preflight = async () => ({
     cliVersion: '0.147.0', hookDefinitionHash, staticReady: true as const,
@@ -299,10 +300,11 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
   });
   await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'model', requestedReasoningEffort: 'high',
-    capabilityToken: armed.token
+    capabilityRef: armed.capabilityRef
   }, {
     repoRoot: root,
     buildIdentity,
+    controllerBinding: controller,
     capabilityStore,
     preflight,
     orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
@@ -331,6 +333,7 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
   const activated = await activateCodexOrchestrationDelegation('child', {
     repoRoot: root,
     store,
+    controllerBinding: controller,
     buildIdentity,
     preflight,
     resolveThread: async () => ({

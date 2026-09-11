@@ -291,14 +291,20 @@ function writeTaskBoundCleanupEvidence(
   fs.mkdirSync(intentDir, { recursive: true });
   const intentPath = path.join(intentDir, `${taskId}-plan-${artifact}.json`);
   fs.writeFileSync(intentPath, `${JSON.stringify({
-    version: 1,
+    version: 2,
     taskId,
     family: "plan",
     artifact,
     state: "consumed",
     baselineSemanticDigest: null,
     artifactSha256: sha256Content(content),
-    semanticDigest: semanticDigest(content)
+    semanticDigest: semanticDigest(content),
+    recoveryOperationId: null,
+    phase: null,
+    authorityDigest: null,
+    requestId: "sandbox-fixture",
+    createdAt: 1,
+    updatedAt: 1
   })}\n`, "utf8");
 
   const container = `${config.containerPrefix}-${branch.replaceAll("/", "..")}`;

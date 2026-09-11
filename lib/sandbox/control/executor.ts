@@ -11,7 +11,14 @@ import {
   type TaskCreateResult
 } from '../../task/create-service.ts';
 import { applyTaskFinalization } from '../../task/finalization.ts';
-import { bindSandboxControlTask, validateSandboxControlRequest, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
+import {
+  bindSandboxControlTask,
+  validateSandboxControlRequest,
+  type SandboxControlExecution,
+  type SandboxControlExecutorGateV2,
+  type SandboxControlManifest,
+  type SandboxControlRequest
+} from './protocol.ts';
 import {
   atomicWriteJson,
   executionPath,
@@ -24,6 +31,9 @@ import {
   createSandboxExecutorExecutionContext,
   dispatchTaskControlOperation,
   parseTaskControlOperation,
+  validateLifecycleRecoveryAttestation,
+  type LifecycleAuthorityResponseV1,
+  type LifecycleRecoveryAttestationV1,
   type TaskControlOperation
 } from '../../task/control-authority.ts';
 import { executeTaskWorkflow } from './workflow-executor.ts';
@@ -117,6 +127,7 @@ export async function prepareSandboxControlExecution(params: {
   request: SandboxControlRequest;
   requestPath: string;
   internalCliPath: string;
+  lifecycleAuthority?: LifecycleAuthorityResponseV1;
 }): Promise<PreparedSandboxControlExecution> {
   const nonce = randomUUID();
   const child = spawn(
@@ -170,7 +181,16 @@ export async function prepareSandboxControlExecution(params: {
       if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
       atomicWriteJson(executionPath(params.manifest, params.request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
       if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
-      child.send({ version: 1, nonce, owner: gateOwner });
+      const authority = params.lifecycleAuthority?.attestation ?? null;
+      child.send({
+        version: 2,
+        nonce,
+        owner: gateOwner,
+        requestId: params.request.id,
+        operationId: authority?.operationId ?? params.request.id,
+        phase: authority?.phase ?? (params.request.family === 'task-workflow' ? 'artifact.finalize-local' : 'orchestration.prepare'),
+        authority
+      } satisfies SandboxControlExecutorGateV2);
     },
     completion,
     terminate(updateState = true) {
@@ -184,7 +204,7 @@ export async function prepareSandboxControlExecution(params: {
   };
 }
 
-function waitForGate(nonce: string, timeoutMs = 2_000): Promise<BrokerOwner> {
+function waitForGate(nonce: string, timeoutMs = 2_000): Promise<Readonly<{ owner: BrokerOwner; authority: LifecycleRecoveryAttestationV1 | null; requestId: string; operationId: string; phase: SandboxControlExecutorGateV2['phase'] }>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('SANDBOX_CONTROL_EXECUTOR_GATE_TIMEOUT')), timeoutMs);
     const onDisconnect = () => {
@@ -199,9 +219,14 @@ function waitForGate(nonce: string, timeoutMs = 2_000): Promise<BrokerOwner> {
         version?: unknown;
         nonce?: unknown;
         owner?: Partial<BrokerOwner> | null;
+        requestId?: unknown;
+        operationId?: unknown;
+        phase?: unknown;
+        authority?: unknown;
       } | null;
       const owner = value?.owner;
-      if (!value || value.version !== 1 || value.nonce !== nonce
+      if (!value || Object.keys(value).sort().join(',') !== 'authority,nonce,operationId,owner,phase,requestId,version'
+        || value.version !== 2 || value.nonce !== nonce
         || !owner || owner.version !== 3 || !Number.isSafeInteger(owner.pid) || (owner.pid ?? 0) <= 0
         || typeof owner.startTime !== 'number' || !Number.isSafeInteger(owner.startTime)
         || typeof owner.brokerId !== 'string' || owner.brokerId.length === 0
@@ -209,7 +234,21 @@ function waitForGate(nonce: string, timeoutMs = 2_000): Promise<BrokerOwner> {
         reject(new Error('SANDBOX_CONTROL_EXECUTOR_GATE_INVALID'));
         return;
       }
-      resolve(owner as BrokerOwner);
+      if (typeof value.requestId !== 'string' || typeof value.operationId !== 'string'
+        || !['orchestration.prepare', 'artifact.finalize-local', 'task-event.completed'].includes(value.phase as string)
+        || (value.authority !== null && value.authority !== undefined && (() => {
+          try { validateLifecycleRecoveryAttestation(value.authority); return false; } catch { return true; }
+        })())) {
+        reject(new Error('SANDBOX_CONTROL_EXECUTOR_GATE_INVALID'));
+        return;
+      }
+      resolve({
+        owner: owner as BrokerOwner,
+        authority: value.authority === null || value.authority === undefined ? null : value.authority as LifecycleRecoveryAttestationV1,
+        requestId: value.requestId,
+        operationId: value.operationId,
+        phase: value.phase as SandboxControlExecutorGateV2['phase']
+      });
     });
   });
 }
@@ -289,6 +328,7 @@ function finalizationResult(result: Awaited<ReturnType<typeof applyTaskFinalizat
 type ExecuteRequestOptions = Readonly<{
   buildIdentity?: typeof computeLifecycleBuildIdentity;
   resolveControllerBinding?: typeof resolveCodexControllerBinding;
+  lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
 }>;
 
 async function executeRequestInner(
@@ -364,7 +404,7 @@ async function executeRequestInner(
       return controllerFailure(error);
     }
   }
-  if (request.family === 'task-workflow') return executeTaskWorkflow(manifest, request.workflow);
+  if (request.family === 'task-workflow') return executeTaskWorkflow(manifest, request.workflow, options.lifecycleRecoveryAttestation ?? null);
   if (request.family === 'task-finalization') {
     const operation = parseTaskControlOperation(
       'task-finalization', [manifest.taskId!, 'complete', '--agent', request.agent]
@@ -378,7 +418,8 @@ async function executeRequestInner(
         taskId: manifest.taskId!,
         generation: manifest.generation,
         manifestPath,
-        requestId: request.id
+        requestId: request.id,
+        lifecycleRecoveryAttestation: options.lifecycleRecoveryAttestation ?? null
       }),
       operation
     );
@@ -408,23 +449,31 @@ async function executeRequestInner(
       && operation.input.client === 'codex';
     if (codexPrepare) {
       if (!request.controllerProof) {
-        return orchestrationFailure(
-          'CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED',
-          'Codex prepare requires a current controller lease proof'
-        );
-      }
-      try {
-        controllerBinding = (options.resolveControllerBinding ?? resolveCodexControllerBinding)({
-          manifest,
-          manifestPath,
-          proof: request.controllerProof,
-          buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
-        });
-      } catch (error) {
-        const code = error instanceof CodexControllerRegistrationError
-          ? error.code
-          : 'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID';
-        return orchestrationFailure(code, `${code}: Codex controller proof was rejected`);
+        const authority = options.lifecycleRecoveryAttestation;
+        if (!authority || authority.phase !== 'orchestration.prepare') {
+          return orchestrationFailure(
+            'CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED',
+            'Codex prepare requires a current controller lease proof'
+          );
+        }
+        controllerBinding = {
+          instanceDigest: authority.controllerInstanceDigest,
+          controlGeneration: authority.controlGeneration
+        };
+      } else {
+        try {
+          controllerBinding = (options.resolveControllerBinding ?? resolveCodexControllerBinding)({
+            manifest,
+            manifestPath,
+            proof: request.controllerProof,
+            buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
+          });
+        } catch (error) {
+          const code = error instanceof CodexControllerRegistrationError
+            ? error.code
+            : 'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID';
+          return orchestrationFailure(code, `${code}: Codex controller proof was rejected`);
+        }
       }
     } else if (request.controllerProof !== null) {
       return orchestrationFailure(
@@ -450,7 +499,8 @@ async function executeRequestInner(
     manifestPath,
     requestId: request.id,
     diagnosticLog,
-    ...(controllerBinding ? { controllerBinding } : {})
+    ...(controllerBinding ? { controllerBinding } : {}),
+    lifecycleRecoveryAttestation: options.lifecycleRecoveryAttestation ?? null
   });
   const format = (value: unknown): SandboxControlExecutionResult => {
     const result = value as { status?: string };
@@ -497,7 +547,8 @@ export async function executeRequest(
 }
 
 export async function runSandboxControlExecutor(requestPath: string, nonce: string): Promise<void> {
-  const gateOwner = await waitForGate(nonce);
+  const gate = await waitForGate(nonce);
+  const gateOwner = gate.owner;
   process.disconnect?.();
   const manifestPath = process.env.AGENT_INFRA_EXECUTOR_MANIFEST;
   if (!manifestPath) throw new Error('SANDBOX_CONTROL_EXECUTOR_MANIFEST_MISSING');
@@ -525,6 +576,13 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   }
   const raw = JSON.parse(fs.readFileSync(requestPath, 'utf8')) as unknown;
   const request = validateSandboxControlRequest(raw, manifest);
+  if (gate.requestId !== request.id) throw new Error('SANDBOX_CONTROL_EXECUTOR_GATE_REQUEST_MISMATCH');
+  if (gate.authority !== null
+    && (gate.authority.requestId !== request.id
+      || gate.authority.operationId !== gate.operationId
+      || gate.authority.phase !== gate.phase)) {
+    throw new Error('SANDBOX_CONTROL_EXECUTOR_GATE_AUTHORITY_MISMATCH');
+  }
   appendExecutorAudit(manifest, 'executor-request-validated', requestAuditFields(manifest, request));
   const requestDirectory = path.resolve(path.dirname(requestPath));
   const processingDirectory = path.resolve(path.join(manifest.processingDir, request.id));
@@ -562,7 +620,9 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
     writeSandboxControlTransition(manifest, { requestId: request.id, phase: 'started-committed' });
     const execution = readJsonExecution(executionPath(manifest, request.id));
     atomicWriteJson(executionPath(manifest, request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
-    result = await executeRequest(manifest, manifestPath, request);
+    result = await executeRequest(manifest, manifestPath, request, {
+      lifecycleRecoveryAttestation: gate.authority
+    });
   } catch (error) {
     appendExecutorAudit(manifest, 'executor-authority-or-dispatch-failed', {
       ...requestAuditFields(manifest, request),

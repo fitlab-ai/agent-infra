@@ -18,6 +18,7 @@ import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { readArtifactRepairIntent, writeArtifactRepairIntent } from './artifact-repair-intent.ts';
 import type { ArtifactRepairOperation } from './artifact-operations.ts';
+import type { ArtifactRepairIntent } from './artifact-repair-intent.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -131,6 +132,7 @@ type ReviewSummaryCandidatePreparation = Readonly<{
   result: ReviewFinalizationResult;
   content: string;
   provenance?: Parameters<typeof writeArtifactRepairIntent>[1];
+  expectedIntent?: ArtifactRepairIntent | null;
 }>;
 
 /** Prepare domain validation, summary bytes and provenance before any publication. */
@@ -180,10 +182,12 @@ function prepareReviewSummaryCandidate(
         artifactSha256, semanticDigest: structure.semanticDigest, repairable, operation: structure.repair
       }),
       ...(repairable && !repairIntent ? { provenance: {
-        version: 1 as const, taskId: taskId!, family: spec.family, artifact: request.artifact,
+        version: 2 as const, taskId: taskId!, family: spec.family, artifact: request.artifact,
         state: 'awaiting-repair' as const, baselineSemanticDigest: structure.semanticDigest,
-        artifactSha256, semanticDigest: structure.semanticDigest
-      } } : {})
+        artifactSha256, semanticDigest: structure.semanticDigest,
+        recoveryOperationId: null, phase: null, authorityDigest: null,
+        requestId: `review-finalize:${taskId!}`, createdAt: Date.now(), updatedAt: Date.now()
+      }, expectedIntent: null } : {})
     };
   }
   if (repairIntent?.state === 'awaiting-repair' && repairIntent.baselineSemanticDigest !== semanticDigest) {
@@ -226,7 +230,8 @@ function prepareReviewSummaryCandidate(
       error: null
     },
     ...(repairIntent?.state === 'awaiting-repair' ? {
-      provenance: { ...repairIntent, state: 'passed' as const, ...finalDigests }
+      provenance: { ...repairIntent, state: 'passed' as const, ...finalDigests },
+      expectedIntent: repairIntent
     } : {})
   };
 }
@@ -236,7 +241,9 @@ function commitReviewSummaryProvenance(
   repoRoot: string
 ): ReviewFinalizationResult {
   try {
-    if (prepared.provenance) writeArtifactRepairIntent(repoRoot, prepared.provenance);
+    if (prepared.provenance) {
+      writeArtifactRepairIntent(repoRoot, prepared.provenance, { expected: prepared.expectedIntent ?? null });
+    }
     return prepared.result;
   } catch (error) {
     return { ...prepared.result, status: 'failed', error: {

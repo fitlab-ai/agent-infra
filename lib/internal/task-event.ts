@@ -31,37 +31,45 @@ function usageFailure(message: string): void {
   process.exitCode = 1;
 }
 
-async function taskEvent(args: string[] = []): Promise<void> {
-  if (!ensureInternalHandlerRoute('task-event', args)) return;
-  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
-  if (args.length < 2 || !internalHandlerRoute('task-event', 'event', args[1] ? 'event' : '')) { usageFailure('task ref and event are required'); return; }
+export function parseTaskEventRequest(args: readonly string[]): TaskEventRequest {
+  if (args.length < 2) throw new Error('task ref and event are required');
   const request: TaskEventRequest = { taskRef: args[0]!, event: args[1]!, agent: '' };
   const seen = new Set<string>();
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
     if (flag === '--orchestrated') {
-      if (seen.has(flag)) { usageFailure(`duplicate option '${flag}'`); return; }
+      if (seen.has(flag)) throw new Error(`duplicate option '${flag}'`);
       seen.add(flag); request.orchestrated = true; continue;
     }
     if (flag === '--dry-run') {
-      if (seen.has(flag)) { usageFailure(`duplicate option '${flag}'`); return; }
+      if (seen.has(flag)) throw new Error(`duplicate option '${flag}'`);
       seen.add(flag); request.dryRun = true; continue;
     }
     const key = FLAGS[flag];
-    if (!key) { usageFailure(`unknown option '${flag}'`); return; }
-    if (seen.has(flag)) { usageFailure(`duplicate option '${flag}'`); return; }
+    if (!key) throw new Error(`unknown option '${flag}'`);
+    if (seen.has(flag)) throw new Error(`duplicate option '${flag}'`);
     const value = args[++index];
-    if (value === undefined || value.startsWith('--')) { usageFailure(`option '${flag}' requires a value`); return; }
+    if (value === undefined || value.startsWith('--')) throw new Error(`option '${flag}' requires a value`);
     seen.add(flag);
     if (NUMERIC.has(key)) (request as Record<string, unknown>)[key] = Number(value);
     else if (key === 'verdict') request.verdict = value as Verdict;
     else (request as Record<string, unknown>)[key] = value;
   }
   const agent = normalizeAgentToken(String(request.agent ?? ''));
-  if (!agent) { usageFailure(`invalid --agent '${request.agent}': ${AGENT_USAGE_HINT}`); return; }
+  if (!agent) throw new Error(`invalid --agent '${request.agent}': ${AGENT_USAGE_HINT}`);
   request.agent = agent;
   const dryRunConflict = overrideDryRunConflict(request as unknown as Record<string, unknown>);
-  if (dryRunConflict) { usageFailure(dryRunConflict.message); return; }
+  if (dryRunConflict) throw new Error(dryRunConflict.message);
+  return request;
+}
+
+async function taskEvent(args: string[] = []): Promise<void> {
+  if (!ensureInternalHandlerRoute('task-event', args)) return;
+  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
+  if (!internalHandlerRoute('task-event', 'event', args[1] ? 'event' : '')) { usageFailure('task ref and event are required'); return; }
+  let request: TaskEventRequest;
+  try { request = parseTaskEventRequest(args); }
+  catch (error) { usageFailure(error instanceof Error ? error.message : String(error)); return; }
   const resolved = resolveTaskRef(request.taskRef);
   if (!resolved.ok) {
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: resolved.code, message: resolved.message } })}\n`);

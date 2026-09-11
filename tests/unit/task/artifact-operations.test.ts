@@ -56,9 +56,11 @@ test('repair applies exactly one structural operation and preserves canonical di
   assert.equal(inspection.repair?.kind, 'replace-line');
   assert.equal(inspection.diagnostics.length, 1);
   writeArtifactRepairIntent(f.root, {
-    version: 1, taskId: f.id, family: 'plan', artifact,
+    version: 2, taskId: f.id, family: 'plan', artifact,
     state: 'awaiting-repair', baselineSemanticDigest: inspection.semanticDigest,
-    artifactSha256: sha256Content(malformed), semanticDigest: inspection.semanticDigest
+    artifactSha256: sha256Content(malformed), semanticDigest: inspection.semanticDigest,
+    recoveryOperationId: null, phase: null, authorityDigest: null,
+    requestId: 'test-repair-1', createdAt: 1, updatedAt: 1
   });
 
   const result = applyArtifactRepair({
@@ -87,9 +89,11 @@ test('repair fails closed on stale digest, symlink, and empty marker body', () =
   assert.ok(inspection.repair);
   fs.writeFileSync(path.join(f.taskDir, 'task.md'), fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').replace('technical-design', 'requirement-analysis').replace('Plan Task', 'Analyze Task'));
   writeArtifactRepairIntent(f.root, {
-    version: 1, taskId: f.id, family: 'analysis', artifact,
+    version: 2, taskId: f.id, family: 'analysis', artifact,
     state: 'awaiting-repair', baselineSemanticDigest: inspection.semanticDigest,
-    artifactSha256: sha256Content(malformed), semanticDigest: inspection.semanticDigest
+    artifactSha256: sha256Content(malformed), semanticDigest: inspection.semanticDigest,
+    recoveryOperationId: null, phase: null, authorityDigest: null,
+    requestId: 'test-repair-2', createdAt: 1, updatedAt: 1
   });
   const stale = applyArtifactRepair({
     repoRoot: f.root,
@@ -133,9 +137,11 @@ test('insert-section repairs one missing heading only at a unique marker with se
   assert.equal(inspection.diagnostics.length, 1);
   assert.equal(inspection.diagnostics[0]?.repairable, true);
   writeArtifactRepairIntent(f.root, {
-    version: 1, taskId: f.id, family: 'plan', artifact,
+    version: 2, taskId: f.id, family: 'plan', artifact,
     state: 'awaiting-repair', baselineSemanticDigest: inspection.semanticDigest,
-    artifactSha256: sha256Content(malformed), semanticDigest: inspection.semanticDigest
+    artifactSha256: sha256Content(malformed), semanticDigest: inspection.semanticDigest,
+    recoveryOperationId: null, phase: null, authorityDigest: null,
+    requestId: 'test-repair-3', createdAt: 1, updatedAt: 1
   });
   const result = applyArtifactRepair({
     repoRoot: f.root, taskId: f.id, taskDir: f.taskDir, family: 'plan', artifact,
@@ -163,9 +169,11 @@ test('repair rejects a completed lifecycle even when the artifact baseline and o
   const inspection = inspectArtifactStructure(malformed, getArtifactSchema('plan')!);
   assert.ok(inspection.repair);
   writeArtifactRepairIntent(f.root, {
-    version: 1, taskId: f.id, family: 'plan', artifact,
+    version: 2, taskId: f.id, family: 'plan', artifact,
     state: 'awaiting-repair', baselineSemanticDigest: inspection.semanticDigest,
-    artifactSha256: sha256Content(malformed), semanticDigest: inspection.semanticDigest
+    artifactSha256: sha256Content(malformed), semanticDigest: inspection.semanticDigest,
+    recoveryOperationId: null, phase: null, authorityDigest: null,
+    requestId: 'test-repair-4', createdAt: 1, updatedAt: 1
   });
   const mismatchedContext = malformed.replace(`artifact-context:${f.id}:plan:1`, 'artifact-context:TASK-20260101-000002:plan:1');
   fs.writeFileSync(path.join(f.taskDir, artifact), mismatchedContext);

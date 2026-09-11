@@ -332,7 +332,7 @@ test('Codex PostToolUse forwards a current-loop capability marker from an ordina
   }), { ...fixture, client: 'codex', event: 'post-tool', hook: fixture.hook });
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
-  assert.equal(parsed.input.capabilityToken, token);
+  assert.equal(parsed.input.capabilityRef, token);
   assert.equal(parsed.input.sessionId, 'codex-parent');
   assert.equal(parsed.input.toolUseId, 'capability-tool');
 });

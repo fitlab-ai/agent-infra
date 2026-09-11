@@ -27,6 +27,7 @@ import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
 import { readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
 import type { TaskWorkflowRequest } from './task-workflow.ts';
+import type { LifecycleAuthorityRequestV1 } from '../../task/control-authority.ts';
 import { configuredShortIdLength, resolveShortIdReadOnly } from '../../task/short-id.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
@@ -402,6 +403,7 @@ export function requestSandboxTaskControl(params: Readonly<{
   family: 'task-lifecycle' | 'task-orchestration';
   args: string[];
   controllerProof: CodexControllerLeaseProofV1 | null;
+  authority?: LifecycleAuthorityRequestV1;
   channelDir?: string;
   statusDir?: string;
   token?: string;
@@ -412,14 +414,15 @@ export function requestSandboxTaskControl(params: Readonly<{
   const issuedAt = Date.now();
   const request: SandboxTaskCommandRequest = {
     version: 3,
-    id: randomUUID(),
+    id: params.authority?.requestId ?? randomUUID(),
     ...auth,
     issuedAt,
     expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
     family: params.family,
     args: params.args,
     controllerProcess: null,
-    controllerProof: params.controllerProof
+    controllerProof: params.authority ? null : params.controllerProof,
+    ...(params.authority ? { authority: params.authority } : {})
   };
   return exchangeSandboxControl(request, params);
 }
@@ -459,6 +462,7 @@ export function requestSandboxTaskWorkflow(params: Readonly<{
   token?: string;
   generation?: string;
   timeoutMs?: number;
+  authority?: LifecycleAuthorityRequestV1;
 }>): SandboxControlResponse {
   const auth = authority(params);
   const issuedAt = Date.now();
@@ -472,7 +476,8 @@ export function requestSandboxTaskWorkflow(params: Readonly<{
     args: [],
     controllerProcess: null,
     controllerProof: null,
-    workflow: params.workflow
+    workflow: params.workflow,
+    ...(params.authority ? { authority: params.authority } : {})
   };
   return exchangeSandboxControl(request, params);
 }

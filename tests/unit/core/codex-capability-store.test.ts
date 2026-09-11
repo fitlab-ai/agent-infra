@@ -36,14 +36,14 @@ test('Codex capability tolerates build drift and is consumed once', () => {
   const store = createCodexCapabilityStore({
     root,
     now: () => now,
-    token: () => 'secret-token'
+    reference: () => 'secret-reference'
   });
   const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
   assert.equal(armed.status, 'armed');
-  assert.equal(fs.readFileSync(armed.path, 'utf8').includes('secret-token'), false);
+  assert.equal(fs.readFileSync(armed.path, 'utf8').includes('secret-reference'), false);
 
-  const attested = store.attest({
-    token: armed.token,
+  const attested = store.attestByReference({
+    capabilityRef: armed.capabilityRef,
     sessionId: 'session',
     turnId: 'turn',
     toolUseId: 'tool',
@@ -51,23 +51,17 @@ test('Codex capability tolerates build drift and is consumed once', () => {
     buildIdentity: driftedBuild
   });
   assert.equal(attested.status, 'attested');
-  assert.equal(store.validate(armed.token, {
+  const expected = {
     taskId: 'TASK-20260101-000001',
     hookDefinitionHash: 'c'.repeat(64),
     buildIdentity: driftedBuild
-  }).status, 'attested');
-  const consumed = store.consume(armed.token, {
-    taskId: 'TASK-20260101-000001',
-    hookDefinitionHash: 'c'.repeat(64),
-    buildIdentity: driftedBuild
-  });
+  } as const;
+  assert.equal(store.validateReference(armed.capabilityRef, expected).status, 'attested');
+  store.reserveReference(armed.capabilityRef, 'operation-1', expected);
+  const consumed = store.consumeReference(armed.capabilityRef, 'operation-1', expected);
   assert.equal(consumed.status, 'consumed');
   assert.throws(
-    () => store.consume(armed.token, {
-      taskId: 'TASK-20260101-000001',
-      hookDefinitionHash: 'c'.repeat(64),
-      buildIdentity: driftedBuild
-    }),
+    () => store.consumeReference(armed.capabilityRef, 'operation-2', expected),
     /CODEX_CAPABILITY_REPLAY/
   );
 
@@ -83,12 +77,12 @@ test('Codex capability expiry and provenance mismatch fail closed', () => {
   const store = createCodexCapabilityStore({
     root,
     now: () => now,
-    token: () => ['expiring-token', 'mismatched-token'][tokenIndex++]!
+    reference: () => ['expiring-reference', 'mismatched-reference'][tokenIndex++]!
   });
   const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
   now += 30_001;
-  assert.throws(() => store.attest({
-    token: armed.token,
+  assert.throws(() => store.attestByReference({
+    capabilityRef: armed.capabilityRef,
     sessionId: 'session',
     turnId: 'turn',
     toolUseId: 'tool',
@@ -98,8 +92,8 @@ test('Codex capability expiry and provenance mismatch fail closed', () => {
 
   now = 3_000;
   const second = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
-  assert.throws(() => store.attest({
-    token: second.token,
+  assert.throws(() => store.attestByReference({
+    capabilityRef: second.capabilityRef,
     sessionId: 'session',
     turnId: 'turn',
     toolUseId: 'tool',
@@ -111,14 +105,14 @@ test('Codex capability expiry and provenance mismatch fail closed', () => {
 test('Codex capability mismatch exposes fixed safe field detail without consuming', () => {
   const root = mkdtempSync('codex-capability-detail-');
   const controller = { instanceDigest: 'i'.repeat(64), controlGeneration: 'generation-1' };
-  const store = createCodexCapabilityStore({ root, token: () => 'detail-token' });
+  const store = createCodexCapabilityStore({ root, reference: () => 'detail-reference' });
   const armed = store.arm({
     taskId: 'TASK-20260101-000001',
     buildIdentity: build,
     controller
   });
-  store.attest({
-    token: armed.token,
+  store.attestByReference({
+    capabilityRef: armed.capabilityRef,
     sessionId: 'session-secret',
     turnId: 'turn-secret',
     toolUseId: 'tool-secret',
@@ -127,7 +121,13 @@ test('Codex capability mismatch exposes fixed safe field detail without consumin
     controller
   });
 
-  assert.throws(() => store.consume(armed.token, {
+  store.reserveReference(armed.capabilityRef, 'operation-detail', {
+    taskId: 'TASK-20260101-000001',
+    hookDefinitionHash: 'c'.repeat(64),
+    buildIdentity: build,
+    controller
+  });
+  assert.throws(() => store.consumeReference(armed.capabilityRef, 'operation-detail', {
     taskId: 'TASK-20260101-000002',
     hookDefinitionHash: 'd'.repeat(64),
     buildIdentity: {
@@ -190,24 +190,25 @@ test('Codex capability mismatch exposes fixed safe field detail without consumin
         }
       }
     });
-    assert.equal(JSON.stringify(detail).includes('detail-token'), false);
+    assert.equal(JSON.stringify(detail).includes('detail-reference'), false);
     assert.equal(JSON.stringify(detail).includes('session-secret'), false);
     return true;
   });
 
-  assert.deepEqual(store.inspect(armed.token), {
-    ...store.inspect(armed.token),
+  assert.deepEqual(store.inspectReference(armed.capabilityRef), {
+    ...store.inspectReference(armed.capabilityRef),
     status: 'attested',
-    revision: 2
+    recoveryState: 'reserved',
+    revision: 3
   });
 });
 
 test('Codex capability detail maps malformed persisted identity to absent', () => {
   const root = mkdtempSync('codex-capability-detail-invalid-');
-  const store = createCodexCapabilityStore({ root, token: () => 'invalid-detail-token' });
+  const store = createCodexCapabilityStore({ root, reference: () => 'invalid-detail-reference' });
   const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
-  store.attest({
-    token: armed.token,
+  store.attestByReference({
+    capabilityRef: armed.capabilityRef,
     sessionId: 'session',
     turnId: 'turn',
     toolUseId: 'tool',
@@ -218,7 +219,10 @@ test('Codex capability detail maps malformed persisted identity to absent', () =
   record.buildIdentity.packageVersion = 'arbitrary raw identity';
   fs.writeFileSync(armed.path, `${JSON.stringify(record)}\n`);
 
-  assert.throws(() => store.consume(armed.token, {
+  store.reserveReference(armed.capabilityRef, 'operation-invalid-detail', {
+    taskId: 'TASK-20260101-000001', hookDefinitionHash: 'c'.repeat(64), buildIdentity: build
+  });
+  assert.throws(() => store.consumeReference(armed.capabilityRef, 'operation-invalid-detail', {
     taskId: 'TASK-20260101-000002',
     hookDefinitionHash: 'c'.repeat(64),
     buildIdentity: build
@@ -233,14 +237,14 @@ test('Codex capability detail maps malformed persisted identity to absent', () =
 test('Codex capability rejects malformed persisted controller without consuming', () => {
   const root = mkdtempSync('codex-capability-controller-invalid-');
   const controller = { instanceDigest: 'i'.repeat(64), controlGeneration: 'generation-1' };
-  const store = createCodexCapabilityStore({ root, token: () => 'invalid-controller-token' });
+  const store = createCodexCapabilityStore({ root, reference: () => 'invalid-controller-reference' });
   const armed = store.arm({
     taskId: 'TASK-20260101-000001',
     buildIdentity: build,
     controller
   });
-  store.attest({
-    token: armed.token,
+  store.attestByReference({
+    capabilityRef: armed.capabilityRef,
     sessionId: 'session',
     turnId: 'turn',
     toolUseId: 'tool',
@@ -248,11 +252,14 @@ test('Codex capability rejects malformed persisted controller without consuming'
     buildIdentity: build,
     controller
   });
+  store.reserveReference(armed.capabilityRef, 'operation-invalid-controller', {
+    taskId: 'TASK-20260101-000001', hookDefinitionHash: 'c'.repeat(64), buildIdentity: build, controller
+  });
   const record = JSON.parse(fs.readFileSync(armed.path, 'utf8'));
   record.controller = {};
   fs.writeFileSync(armed.path, `${JSON.stringify(record)}\n`);
 
-  assert.throws(() => store.consume(armed.token, {
+  assert.throws(() => store.consumeReference(armed.capabilityRef, 'operation-invalid-controller', {
     taskId: 'TASK-20260101-000001',
     hookDefinitionHash: 'c'.repeat(64),
     buildIdentity: build
@@ -262,8 +269,8 @@ test('Codex capability rejects malformed persisted controller without consuming'
     assert.equal(detail?.fields?.controller?.instanceDigest?.matches, false);
     return true;
   });
-  assert.equal(store.inspect(armed.token).status, 'attested');
-  assert.equal(store.inspect(armed.token).revision, 2);
+  assert.equal(store.inspectReference(armed.capabilityRef).status, 'attested');
+  assert.equal(store.inspectReference(armed.capabilityRef).revision, 3);
 });
 
 test('Codex capability detail localizes one controller field mismatch', () => {
@@ -283,14 +290,14 @@ test('Codex capability detail localizes one controller field mismatch', () => {
   for (const scenario of scenarios) {
     const root = mkdtempSync(`codex-capability-controller-${scenario.name.replaceAll(' ', '-')}-`);
     const controller = { instanceDigest: 'i'.repeat(64), controlGeneration: 'generation-1' };
-    const store = createCodexCapabilityStore({ root, token: () => `controller-${scenario.name}` });
+    const store = createCodexCapabilityStore({ root, reference: () => `controller-${scenario.name}` });
     const armed = store.arm({
       taskId: 'TASK-20260101-000001',
       buildIdentity: build,
       controller
     });
-    store.attest({
-      token: armed.token,
+    store.attestByReference({
+      capabilityRef: armed.capabilityRef,
       sessionId: 'session',
       turnId: 'turn',
       toolUseId: 'tool',
@@ -299,7 +306,10 @@ test('Codex capability detail localizes one controller field mismatch', () => {
       controller
     });
 
-    assert.throws(() => store.consume(armed.token, {
+    store.reserveReference(armed.capabilityRef, `operation-${scenario.name}`, {
+      taskId: 'TASK-20260101-000001', hookDefinitionHash: 'c'.repeat(64), buildIdentity: build, controller
+    });
+    assert.throws(() => store.consumeReference(armed.capabilityRef, `operation-${scenario.name}`, {
       taskId: 'TASK-20260101-000001',
       hookDefinitionHash: 'c'.repeat(64),
       buildIdentity: build,
@@ -313,8 +323,8 @@ test('Codex capability detail localizes one controller field mismatch', () => {
       assert.equal(detail?.fields?.controller?.controlGeneration?.matches, scenario.matches.controlGeneration);
       return true;
     });
-    assert.equal(store.inspect(armed.token).status, 'attested');
-    assert.equal(store.inspect(armed.token).revision, 2);
+    assert.equal(store.inspectReference(armed.capabilityRef).status, 'attested');
+    assert.equal(store.inspectReference(armed.capabilityRef).revision, 3);
   }
 });
 
@@ -324,7 +334,7 @@ test('Codex capability compare-and-swap preserves a competing attestation', () =
   let injectConflict = false;
   const store = createCodexCapabilityStore({
     root,
-    token: () => 'cas-token',
+    reference: () => 'cas-reference',
     beforeCompareAndSwap({ path: recordPath, expectedRevision }) {
       if (!injectConflict || expectedRevision !== 1) return;
       injectConflict = false;
@@ -338,8 +348,8 @@ test('Codex capability compare-and-swap preserves a competing attestation', () =
   const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
   armedPath = armed.path;
   injectConflict = true;
-  assert.throws(() => store.attest({
-    token: armed.token,
+  assert.throws(() => store.attestByReference({
+    capabilityRef: armed.capabilityRef,
     sessionId: 'session',
     turnId: 'turn',
     toolUseId: 'tool',
@@ -351,7 +361,7 @@ test('Codex capability compare-and-swap preserves a competing attestation', () =
 
 test('Codex capability serializes concurrent attestation writers', async () => {
   const root = mkdtempSync('codex-capability-concurrent-');
-  const store = createCodexCapabilityStore({ root, token: () => 'concurrent-token' });
+  const store = createCodexCapabilityStore({ root, reference: () => 'concurrent-reference' });
   const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
   const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 3));
   const workerSource = `
@@ -371,8 +381,8 @@ test('Codex capability serializes concurrent attestation writers', async () => {
       parentPort.postMessage({ status: 'ready' });
       parentPort.once('message', () => {
         try {
-          store.attest({
-            token: workerData.token,
+          store.attestByReference({
+            capabilityRef: workerData.capabilityRef,
             sessionId: \`session-\${workerData.index}\`,
             turnId: \`turn-\${workerData.index}\`,
             toolUseId: \`tool-\${workerData.index}\`,
@@ -389,7 +399,7 @@ test('Codex capability serializes concurrent attestation writers', async () => {
   const moduleUrl = new URL('../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts', import.meta.url).href;
   const workers = [0, 1].map((index) => new Worker(workerSource, {
     eval: true,
-    workerData: { root, token: armed.token, build, buffer: state.buffer, index, moduleUrl }
+        workerData: { root, capabilityRef: armed.capabilityRef, build, buffer: state.buffer, index, moduleUrl }
   }));
   const nextMessage = (worker: Worker) => new Promise<Record<string, string>>((resolve, reject) => {
     worker.once('message', resolve);
@@ -422,26 +432,25 @@ test('Codex capability consume lazily removes old terminal records', () => {
   const store = createCodexCapabilityStore({
     root,
     now: () => now,
-    token: () => ['first-token', 'second-token'][tokenIndex++]!,
+    reference: () => ['first-reference', 'second-reference'][tokenIndex++]!,
     ttlMs: 10_000,
     tombstoneMs: 100
   });
   const first = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
-  store.attest({
-    token: first.token, sessionId: 'session-1', turnId: 'turn-1', toolUseId: 'tool-1',
+  store.attestByReference({
+    capabilityRef: first.capabilityRef, sessionId: 'session-1', turnId: 'turn-1', toolUseId: 'tool-1',
     hookDefinitionHash: 'c'.repeat(64), buildIdentity: build
   });
-  store.consume(first.token, {
-    taskId: 'TASK-20260101-000001', hookDefinitionHash: 'c'.repeat(64), buildIdentity: build
-  });
+  const expected = { taskId: 'TASK-20260101-000001', hookDefinitionHash: 'c'.repeat(64), buildIdentity: build } as const;
+  store.reserveReference(first.capabilityRef, 'operation-first', expected);
+  store.consumeReference(first.capabilityRef, 'operation-first', expected);
   const second = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
-  store.attest({
-    token: second.token, sessionId: 'session-2', turnId: 'turn-2', toolUseId: 'tool-2',
+  store.attestByReference({
+    capabilityRef: second.capabilityRef, sessionId: 'session-2', turnId: 'turn-2', toolUseId: 'tool-2',
     hookDefinitionHash: 'c'.repeat(64), buildIdentity: build
   });
   now += 101;
-  store.consume(second.token, {
-    taskId: 'TASK-20260101-000001', hookDefinitionHash: 'c'.repeat(64), buildIdentity: build
-  });
+  store.reserveReference(second.capabilityRef, 'operation-second', expected);
+  store.consumeReference(second.capabilityRef, 'operation-second', expected);
   assert.equal(fs.existsSync(first.path), false);
 });

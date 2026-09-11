@@ -7,6 +7,11 @@ import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
 import { validateTaskWorkflowRequest, type TaskWorkflowRequest } from './task-workflow.ts';
 import type { ProjectionAncestorIdentity } from './task-workflow.ts';
+import {
+  validateLifecycleAuthorityRequest,
+  type LifecycleAuthorityRequestV1,
+  type LifecycleRecoveryAttestationV1
+} from '../../task/control-authority.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
 export const SANDBOX_CONTROL_MAX_LOGICAL_RECORDS = 1024;
@@ -54,6 +59,15 @@ export type SandboxControlBrokerOwner = ProcessIdentity & Readonly<{
   token: string;
   generation: string;
 }>;
+export type SandboxControlExecutorGateV2 = Readonly<{
+  version: 2;
+  nonce: string;
+  owner: SandboxControlBrokerOwner;
+  requestId: string;
+  operationId: string;
+  phase: 'orchestration.prepare' | 'artifact.finalize-local' | 'task-event.completed';
+  authority: LifecycleRecoveryAttestationV1 | null;
+}>;
 type RequestBase = Readonly<{
   version: 3; id: string; token: string; generation: string; issuedAt: number; expiresAt: number;
   controllerProcess: ProcessIdentity | null;
@@ -61,6 +75,7 @@ type RequestBase = Readonly<{
 }>;
 export type SandboxTaskCommandRequest = RequestBase & Readonly<{
   family: 'task-lifecycle' | 'task-orchestration'; args: string[];
+  authority?: LifecycleAuthorityRequestV1;
 }>;
 export type SandboxTaskFinalizationRequest = RequestBase & Readonly<{
   family: 'task-finalization'; operation: 'complete'; agent: string; args: [];
@@ -77,6 +92,7 @@ export type SandboxTaskWorkflowRequest = RequestBase & Readonly<{
   family: 'task-workflow';
   args: [];
   workflow: TaskWorkflowRequest;
+  authority?: LifecycleAuthorityRequestV1;
 }>;
 export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest | SandboxTaskWorkflowRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
@@ -296,8 +312,9 @@ export function validateSandboxControlRequest(
     return request as SandboxTaskFinalizationRequest;
   }
   if (request.family === 'task-workflow') {
-    const expected = ['args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version', 'workflow'];
-    if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
+    const expected = ['args', 'authority', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version', 'workflow'];
+    const baseExpected = expected.filter((key) => key !== 'authority');
+    if (![baseExpected, expected].some((keys) => Object.keys(request).sort().join(',') === keys.sort().join(','))
       || !Array.isArray(request.args) || request.args.length !== 0
       || request.controllerProcess !== null || request.controllerProof !== null) {
       fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-workflow request schema is invalid');
@@ -307,10 +324,12 @@ export function validateSandboxControlRequest(
     if (workflow.taskId !== manifest.taskId || workflow.generation !== manifest.generation || workflow.id !== request.id) {
       fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-workflow binding does not match the sandbox manifest');
     }
+    if (request.authority !== undefined) validateAuthoritySelector(request.authority, request, manifest);
     return { ...request, workflow } as SandboxTaskWorkflowRequest;
   }
-  const expected = ['args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
-  if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
+  const expected = ['args', 'authority', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
+  const baseExpected = expected.filter((key) => key !== 'authority');
+  if (![baseExpected, expected].some((keys) => Object.keys(request).sort().join(',') === keys.sort().join(','))
     || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
   }
@@ -331,7 +350,37 @@ export function validateSandboxControlRequest(
   if (request.family !== 'task-orchestration' && request.controllerProof !== null) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller proof is not allowed for this family');
   }
+  if (request.authority !== undefined) validateAuthoritySelector(request.authority, request, manifest);
   return request as SandboxTaskCommandRequest;
+}
+
+function validateAuthoritySelector(
+  value: unknown,
+  request: Record<string, unknown>,
+  manifest: SandboxControlManifest
+): asserts value is LifecycleAuthorityRequestV1 {
+  let authority: LifecycleAuthorityRequestV1;
+  try { authority = validateLifecycleAuthorityRequest(value); }
+  catch { fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'lifecycle authority selector is invalid'); }
+  if (authority.requestId !== request.id
+    || authority.taskId !== manifest.taskId
+    || authority.expectedControlGeneration !== manifest.generation) {
+    fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'lifecycle authority selector is not bound to this request');
+  }
+  const args = Array.isArray(request.args) ? request.args : [];
+  if (request.family === 'task-orchestration'
+    && (args[1] !== 'prepare' || authority.phase !== 'orchestration.prepare')) {
+    fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'orchestration authority is only valid for prepare');
+  }
+  const workflow = request.workflow as TaskWorkflowRequest | undefined;
+  if (request.family === 'task-workflow') {
+    const expectedPhase = workflow?.operation === 'artifact-finalize-local'
+      ? 'artifact.finalize-local'
+      : workflow?.operation === 'event' ? 'task-event.completed' : null;
+    if (authority.phase !== expectedPhase) {
+      fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'workflow authority phase does not match the workflow operation');
+    }
+  }
 }
 
 export function bindSandboxControlTask(request: SandboxControlRequest, taskId: string): string[] {
