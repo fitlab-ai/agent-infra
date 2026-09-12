@@ -135,20 +135,27 @@ flowchart TD
 
 ## 详细运行实体与证据矩阵
 
-下面的条目用于解释项目拥有的下层运行行为，但不会改变最高层进程数量。这里按类型明确区分：短生命周期子进程不是常驻服务，进程内业务逻辑也不是进程。沙箱内由用户创建的程序仍不纳入固定清单。
+下面的矩阵覆盖项目为任务创建并管理的下层运行实体及其证据边界，但不会改变最高层进程数量。六列是有意拆开的：生命周期、通信、信任边界、持久事实和失败/恢复不能混为一谈。短生命周期子进程和生成的运行文件不是常驻服务；进程内逻辑和 skill 也不是进程。
 
-| 条目 | 类型与数量 | 职责 | 证据或边界 |
-| --- | --- | --- | --- |
-| IM adapter / 长连接 | `ai server` 内的进程内 adapter；每个已配置 provider 至多一个活动 adapter | 接收 provider 消息，把已接纳请求交给本地调度 | provider identity、连接状态和回复证据 |
-| 按消息创建的本地 `ai` 子进程 | 临时子进程；IM 路径调用本地 CLI 时为 `0..N / 消息` | 执行一条已接纳的本地命令；不是常驻服务 | 子进程退出结果和命令结果 |
-| 宿主侧 AI TUI 调用 | 临时子进程；`0..1 / 宿主侧 run` | 执行宿主侧 `ai run` 选择的非交互客户端 | 子进程退出码或信号；不是沙箱内进程 |
-| `ai run` 请求启动器 | 临时调度进程；`0..1 / 调用` | 选择宿主执行路径或任务绑定沙箱路径 | 选择的路径、任务引用、run receipt 和终态结果 |
-| Task Control Authority | 进程内领域逻辑，不是进程 | 授权任务创建、生命周期转换、完成收尾和编排 | typed request、identity、lease、controller 与生命周期记录 |
-| Codex lifecycle controller / App Server | controller 逻辑；收集 Codex 证据时创建短生命周期 `codex app-server --stdio` 子进程 | 校验新子进程 identity、thread 元数据、model、effort 和终态 | hook 记录、App Server 响应和 lifecycle evidence |
-| 容器引擎 / OS 服务管理器 | 外部基础设施；宿主级服务，不是每个沙箱一个进程 | 启停 host-control、创建/停止 Docker 容器 | 服务 identity、容器 identity、generation 和 readiness 检查 |
-| 平台同步边界 | 外部集成边界，不是进程 | 向配置的平台发布任务状态和完成证据 | 同步 receipt 和平台响应 |
+| 实体 | 类型 / 生命周期 | 通信 | 信任边界 | 持久事实 | 失败 / 恢复 |
+| --- | --- | --- | --- | --- | --- |
+| IM adapter / 长连接 | `ai server` 内的进程内 adapter；每个已配置 provider 至多一个活动 adapter | Provider API 或长连接 adapter 到本地调度 | provider identity、凭据和 daemon 接纳 | provider 消息、连接状态和回复证据 | 连接或接纳失败不等于任务成功；按 provider/daemon 规则恢复。 |
+| 按消息创建的本地 `ai` 子进程 | 临时宿主子进程；IM 调用本地 CLI 时为 `0..N / 消息` | 本地 argv、stdio 和 daemon 结果处理 | daemon allow-list 和宿主用户；不是常驻服务 | 子进程退出结果和命令结果 | spawn/退出失败属于消息调度；不能证明后续工作已完成。 |
+| 宿主侧 AI TUI 调用 | 临时宿主子进程；`0..1 / 宿主侧 run` | 选择的 TUI argv 和宿主标准流 | 宿主用户与 TUI 策略；不是沙箱进程 | 退出码或信号和宿主命令结果 | TUI 失败会返回给调用方；TUI 成功退出仍不同于任务完成。 |
+| `ai run` 请求启动器 | 临时调度调用；`0..1 / 调用` | 解析 skill/task 选项、选择 TUI，再调用宿主或沙箱 runner | task ref 和命令 allow-list；不新增 authority | 选择的路径、task ref、适用时的 run record 和调度结果 | 路由或 readiness 失败会在用户工作前停止；dispatch 成功只表示选定边界接纳了 run。 |
+| 沙箱请求启动器 | 临时宿主侧调度；`0..1 / 任务绑定调用` | 容器引擎 `exec` 在匹配容器中执行 launcher shell | branch/task identity、容器 readiness 和任务绑定沙箱 | run ID、容器、run 目录、命令和宿主 run record | 容器缺失/readiness 失败或 `exec` 失败会在 run window 前停止；接纳 dispatch 不等于 TUI 完成。 |
+| `tmux` work session / server | 项目管理的沙箱运行时；session 惰性创建，至多 `0..1 / sandbox` | 容器内的 `tmux` server/session 命令 | 匹配的沙箱容器和任务工作树；不同于用户任意 session | session 名称、健康状态和沙箱运行时状态 | 缺失或陈旧的 tmux 状态由沙箱 readiness/entry 恢复；它不是任务 authority。 |
+| 每次运行的 tmux window / pane | 项目管理的运行时端点；`0..N / sandbox`，每次接纳的 run 一个 | launcher 创建 window、pipe pane 输出并发送运行命令 | run ID、task ref 和沙箱内命令 | run 目录下的 window、pane、session 文件 | window/pane 创建失败是 dispatch 失败；pane 存在不代表 TUI 或 skill 已完成。 |
+| 生成的 `run.sh` | 每次 run 一个生成的 shell 脚本和一个执行中的 shell；不是常驻服务 | 执行选定 TUI 命令并写入运行状态文件 | 根据任务绑定请求和 shell-quoted argv 生成 | `started_at`、`finished_at`、`status`、`exit_code` 和 `output.log` | 根据命令退出码写入 `completed` 或 `failed`，随后保留 pane shell；文件缺失时检查 run 目录。 |
+| 沙箱 AI TUI + skill 调用 | 临时 TUI 子进程；每次 run 选择一个客户端；skill 是进程内 workflow 逻辑，不是进程 | TUI 通过 pane 使用 stdio、internal CLI、任务投影和生命周期记录 | 沙箱 task identity、TUI 命令策略和 skill authority | TUI 退出码、skill receipt/artifact/status、任务 journal 和输出元数据 | TUI 退出、skill 完成和任务完成相互独立；输出或状态未知时对账任务 receipt。 |
+| host-control worker | 临时宿主进程；`0..1 / 宿主请求` | 私有宿主 endpoint 与请求/响应记录 | host-control token、OS 用户和生命周期 authority | accepted/completed 审计和 worker 结果 | accepted-but-unknown 工作按 request identity 对账；不能静默重放。 |
+| sandbox executor | 临时沙箱侧 worker；`0..1 / 已接受 broker 请求` | broker 请求通道和隔离 CLI worker | manifest、owner、lease、controller 和 task authority gate | request、executor、终端响应和执行审计 | 拒绝时不执行；dispatch/transport 不确定时保持 unknown，由 broker 恢复。 |
+| Task Control Authority | 进程内领域逻辑，不是进程 | typed control request、任务文件、journal、receipt 和生命周期 API | task identity、authority caller、lease 和 controller 检查 | 任务状态、receipt、journal、artifact provenance 和完成证据 | identity 无效或 authority 缺失时 fail closed；不成为进程节点。 |
+| Codex lifecycle controller / App Server | controller 逻辑；收集证据时创建短生命周期 `codex app-server --stdio` 子进程 | hook、换行分隔 JSON-RPC 和 rollout 元数据 | 新子进程 identity、parent、role、model、effort 和终态检查 | hook 记录、App Server 响应和 lifecycle evidence | 证据缺失/冲突时 fail closed；App Server 证据不替代任务完成。 |
+| 容器引擎 / OS 服务管理器 | 外部基础设施；宿主级服务，不是每个沙箱一个进程 | launchd/systemd 服务控制和 Docker/WSL2 runtime | 宿主用户/服务边界和容器 identity | 服务 identity、容器 identity、generation 和 readiness 检查 | backend 可用不等于任务 authority，也不会增加第二个 broker。 |
+| 平台同步边界 | 外部集成边界，不是进程 | 平台 API 和同步 receipt | 配置的 provider/repository identity | 同步 receipt 和平台响应 | 发布失败不同于本地任务状态；只按记录的 identity 重试。 |
 
-这些条目解释核心拓扑之下的实现和证据路径，但不会把临时启动器、本地子进程、TUI 调用或进程内 authority 变成额外的核心服务。图中也有意不枚举 tmux、run script、沙箱 TUI 或沙箱内其他由用户创建的程序。
+本矩阵列出项目为任务绑定 run 自动创建并管理的实体，但仍排除用户在沙箱内任意启动的程序。具体来说，skill 是 workflow 逻辑而非独立进程；`tmux`、`run.sh`、选定 TUI 及其 status/output 文件则必须列出，因为它们由项目创建并用于观察一次 run。
 
 ## 控制与生命周期视图
 
@@ -181,13 +188,16 @@ flowchart TD
 ### 控制路径细节
 
 - IM adapter 把消息交给可选 daemon 接纳，之后可能创建一个临时本地 `ai` 子进程。本地 CLI 调用可以直接进入 `ai run`，不经过 daemon。
-- `ai run` 启动器对没有 task ref 的请求执行宿主侧 TUI 子进程；带 task ref 的请求选择匹配沙箱路径。沙箱内部由用户创建的程序不属于本概览。
+- `ai run` 启动器对没有 task ref 的请求执行宿主侧 TUI 子进程；带 task ref 的请求选择匹配沙箱路径，检查 readiness，再通过容器引擎调用沙箱请求启动器。
+- 沙箱请求启动器创建或复用项目管理的 `work` tmux session，为本次 run 创建一个 window/pane，写入 `run.sh`，再把脚本发送到 pane；选定的 TUI 随后在任务绑定工作树中执行请求的 skill。
 - `create-task` 是一条独立的条件路径。只有存在沙箱标记时，`resolveSandboxControlTransport()` 才选择 broker-client；否则命令在宿主进程内直接调用 task-create 领域逻辑。直连宿主的 create 不等同于常驻 host-control 服务，也不是只能经过 host-control。
 
 ### 完成与恢复事实
 
-- 宿主命令返回退出码，只能证明选定的宿主侧子进程结束；沙箱 dispatch receipt 只能证明 broker/executor 边界记录了结果。
-- `run` 的终态结果和任务生命周期终态是两类独立事实；任务完成仍需通过 lifecycle 和 artifact gate。
+- 宿主命令返回退出码，只能证明选定的宿主侧子进程结束。任务绑定的 `ai run` 在沙箱 window/pane dispatch 后返回，不等待 TUI 或 skill 结束。
+- 生成的 `run.sh` 将 `status` 从 `pending` 推进到 `running`，再写入 `completed` 或 `failed`，同时写入 `exit_code`、时间戳和 `output.log`；这些是 run 观察事实，不是任务生命周期 authority。
+- TUI 退出、skill receipt/artifact、任务生命周期终态和平台同步 receipt 是四类独立事实；任务完成仍需通过 lifecycle 和 artifact gate。
+- `ai sandbox enter` 是观察/附着路径。看到 session、window、pane 或 output log，本身不能证明 skill 或任务已完成。
 - Codex lifecycle evidence 有自己的 controller、App Server、hook 和终态检查；子进程 identity 缺失或冲突时不能视为成功。
 - rejected、failed 和 accepted-but-unknown 有不同恢复规则。accepted-but-unknown 必须保留 receipt 和 request identity 供对账，不能静默重试。
 - 平台同步是外部边界：同步 receipt 只证明发布动作，不替代本地任务状态。
