@@ -46,6 +46,12 @@ Delivery after `review-code` is conditional: the workflow may enter `commit`, `c
 
 The runtime views are intentionally split. The first view answers only: which entry points and core long-lived components exist, where they live, and how many instances may exist. The second view explains only the short-lived processes derived by one accepted request.
 
+Cardinality notation in the views below has three meanings:
+
+- `1 / supported host` or `1 / sandbox` is required for each existing supported boundary. `0` is not a valid steady-state count for that boundary; absence means the boundary is unavailable or not ready, and its control requests fail closed.
+- `0..1` is an optional singleton, such as the IM daemon or a worker created only when a request needs it.
+- `0..N` is a population derived from the current scope. `0` is valid only when no sandbox or request has been created in that scope yet.
+
 ### 1. Highest-level core topology
 
 ```mermaid
@@ -62,7 +68,7 @@ flowchart LR
   end
 
   subgraph H["HOST OS · host boundary"]
-    HC["PROCESS<br/>host-control service<br/>[0..1 / host]"]:::process
+    HC["PROCESS<br/>host-control service<br/>[1 / supported host]"]:::process
   end
 
   subgraph F["SANDBOX FLEET · repeated per sandbox"]
@@ -70,6 +76,8 @@ flowchart LR
     B["PROCESS × N<br/>sandbox broker<br/>[1 / sandbox]"]:::process
     C --> B
   end
+
+  HC -. "same host · parallel boundaries · no proxy" .-> B
 
   CLI -. host or sandbox request .-> HC
   D -. host or sandbox request .-> HC
@@ -81,9 +89,10 @@ This is the primary architecture picture:
 
 - `local user / CLI` and `IM provider` are the two entry families.
 - `ai server daemon` is an optional IM entry process: at most one per checkout. A local CLI does not require it.
-- `host-control service` is one host-level service: `[0..1 / host]`.
+- `host-control service` is one required host-level service on a supported host: `[1 / supported host]`. If it is absent, the host control boundary is unavailable; that is not a valid zero-process runtime.
 - `CONTAINER INSTANCES` means one Docker container per sandbox, `[0..N / host]`. It is a sandbox boundary and count, not another project process.
 - Every sandbox has one `sandbox broker`, `[1 / sandbox]`. The broker is the sandbox's long-lived control process.
+- One supported host's `host-control service` is a sibling control boundary to the sandbox fleet: it corresponds to `[0..N]` sandbox containers and one broker per existing sandbox. The dashed relation in the picture expresses this boundary/cardinality relationship, not a parent-child call; host-control does not proxy the broker.
 - Dashed arrows show which control route an entry may select. They are not a fixed parent-child process chain. The transient dispatch implementation is intentionally hidden here.
 
 The container engine and OS service manager own infrastructure around this picture, but they are not one process per sandbox and are not included in the core process count. User-created programs inside a sandbox are also outside this architecture view.
@@ -93,7 +102,7 @@ The container engine and OS service manager own infrastructure around this pictu
 | Local CLI entry | `0..N / invocation` | A user-facing entry; it may select a host or task-bound sandbox route. |
 | IM provider entry | `0..N / provider` | An external message source. |
 | `ai server daemon` | `0..1 / checkout` | The optional process that admits IM traffic for one checkout. |
-| `host-control service` | `0..1 / host` | The host-side control service and direct-host authority. |
+| `host-control service` | `1 / supported host` | The required host-side control service and direct-host authority. |
 | Docker sandbox container | `0..N / host` | One isolated container instance per sandbox. |
 | `sandbox broker` | `1 / sandbox` | One control broker inside each sandbox container. |
 
@@ -102,7 +111,7 @@ The container engine and OS service manager own infrastructure around this pictu
 ```mermaid
 flowchart TD
   REQUEST["one accepted control request"]
-  HOST["host-control service<br/>[0..1 / host]"]
+  HOST["host-control service<br/>[1 / supported host]"]
   HW["temporary host-control worker<br/>[0..1 / request]"]
   BROKER["sandbox broker<br/>[1 / sandbox]"]
   EXEC["temporary sandbox executor<br/>[0..1 / accepted request]"]
@@ -129,7 +138,7 @@ This lower view does not enumerate the programs a user starts inside the contain
 | Local CLI entry | Started by a user invocation; ends with that invocation | Local process arguments and standard streams | Host user entry; `0..N / invocation` | Command result and any task receipt | The command result does not prove that a remote or sandbox operation completed. |
 | IM provider entry | External provider delivers messages; the provider owns its connection lifecycle | Provider API or long-lived adapter connection | External identity; not an OS process in this repository | Provider message and reply evidence | Provider, credential, and connection failures remain outside local task authority. |
 | `ai server` daemon | `ai server start` starts at most one daemon per checkout; signals stop it | Provider adapter and admitted request dispatch | Host user process; `0..1 / checkout` | Checkout-scoped PID identity and daemon logs | Stale identity or adapter failure must not be confused with task success. |
-| `host-control` service | OS user service manager starts/stops one service per host | Private host endpoint and request/response records | Host user boundary; `0..1 / host` | Endpoint, token, audit, and worker records | Missing authority fails closed; accepted work is not silently replayed after an uncertain result. Direct-host `create-task` is a separate in-process path. |
+| `host-control` service | OS user service manager starts/stops one service per supported host | Private host endpoint and request/response records | Host user boundary; `1 / supported host` | Endpoint, token, audit, and worker records | Missing authority fails closed; accepted work is not silently replayed after an uncertain result. Direct-host `create-task` is a separate in-process path. |
 | Docker sandbox container | Container engine creates/stops one container per sandbox | Container runtime and mounted task projection | Sandbox boundary; `0..N / host` | Container identity, generation, and sandbox control records | Container availability alone does not prove host-control or task-lifecycle readiness. |
 | Sandbox broker | Starts with its sandbox control state and stops with that sandbox | Sandbox control channel and request records | One broker inside each sandbox; `[1 / sandbox]` | Manifest, lease, owner, generation, and execution audit | Stale identity, lease, or admission failure is rejected before execution. |
 

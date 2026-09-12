@@ -46,6 +46,12 @@ flowchart TD
 
 运行时视图刻意分层。第一层只回答：有哪些入口和核心常驻组件、它们位于哪里、可能有多少个实例。第二层只解释一次已接受请求会派生哪些短生命周期进程。
 
+下面的视图使用三种数量记法：
+
+- `1 / supported host` 或 `1 / sandbox` 表示每个已有的受支持边界都必须有一个实例。该边界在稳定运行态不能为 `0`；缺失表示边界不可用或尚未就绪，控制请求会 fail closed。
+- `0..1` 表示可选的单例，例如 IM daemon，或只有请求需要时才创建的 worker。
+- `0..N` 表示由当前范围产生的实例集合。只有当前范围尚未创建任何沙箱或请求时，`0` 才是有效数量。
+
 ### 1. 最高层核心拓扑
 
 ```mermaid
@@ -62,7 +68,7 @@ flowchart LR
   end
 
   subgraph H["宿主 OS · 宿主边界"]
-    HC["进程<br/>host-control 服务<br/>[0..1 / 宿主机]"]:::process
+    HC["进程<br/>host-control 服务<br/>[1 / supported host]"]:::process
   end
 
   subgraph F["沙箱集合 · 每个沙箱重复"]
@@ -70,6 +76,8 @@ flowchart LR
     B["进程 × N<br/>sandbox broker<br/>[1 / sandbox]"]:::process
     C --> B
   end
+
+  HC -. "同一宿主 · 并列边界 · 不代理" .-> B
 
   CLI -. 宿主或沙箱请求 .-> HC
   D -. 宿主或沙箱请求 .-> HC
@@ -81,9 +89,10 @@ flowchart LR
 
 - `本地用户 / CLI` 和 `IM provider` 是两组入口。
 - `ai server daemon` 是 IM 入口的可选进程：每个 checkout 最多一个。本地 CLI 不依赖它。
-- `host-control 服务` 是宿主机级服务：`[0..1 / 宿主机]`。
+- `host-control 服务` 是受支持宿主机上必需的宿主级服务：`[1 / supported host]`。如果它缺失，表示宿主控制边界不可用，不是合法的零进程运行态。
 - `容器实例集合` 表示每个沙箱一个 Docker 容器，宿主机上为 `[0..N]` 个。它是沙箱边界和数量，不是另一个项目进程。
 - 每个沙箱有一个 `sandbox broker`：`[1 / sandbox]`。broker 是该沙箱长期存在的控制进程。
+- 一台受支持宿主机的 `host-control 服务` 与沙箱集合是并列的控制边界：对应 `[0..N]` 个沙箱容器，每个已有沙箱内一个 broker。图中的虚线关系表示边界/数量关系，不表示父子调用；host-control 不代理 broker。
 - 虚线表示入口可以选择的控制路径，不表示固定的父子进程链；短暂的调度实现有意隐藏在本图之外。
 
 容器引擎和 OS 服务管理器负责外围基础设施，但不是每个沙箱一个进程，所以不计入核心进程数量。用户在沙箱内自行创建的程序也不属于这张架构图。
@@ -93,7 +102,7 @@ flowchart LR
 | 本地 CLI 入口 | `0..N / 调用` | 用户入口，可选择宿主路径或任务绑定沙箱路径。 |
 | IM provider 入口 | `0..N / provider` | 外部消息来源。 |
 | `ai server` daemon | `0..1 / checkout` | 接纳一个 checkout 的 IM 流量的可选进程。 |
-| `host-control` 服务 | `0..1 / 宿主机` | 宿主侧控制服务和 direct-host authority。 |
+| `host-control` 服务 | `1 / supported host` | 受支持宿主机必需的宿主侧控制服务和 direct-host authority。 |
 | Docker 沙箱容器 | `0..N / 宿主机` | 每个沙箱一个隔离容器实例。 |
 | `sandbox broker` | `1 / sandbox` | 每个沙箱容器内一个控制 broker。 |
 
@@ -102,7 +111,7 @@ flowchart LR
 ```mermaid
 flowchart TD
   REQUEST["一次已接受的控制请求"]
-  HOST["host-control 服务<br/>[0..1 / 宿主机]"]
+  HOST["host-control 服务<br/>[1 / supported host]"]
   HW["临时 host-control worker<br/>[0..1 / 请求]"]
   BROKER["sandbox broker<br/>[1 / sandbox]"]
   EXEC["临时 sandbox executor<br/>[0..1 / 已接受请求]"]
@@ -129,7 +138,7 @@ flowchart TD
 | 本地 CLI 入口 | 用户调用时启动，随调用结束 | 本地参数和标准流 | 宿主用户入口；`0..N / 调用` | 命令结果和任务 receipt | 命令返回不证明远端或沙箱操作已完成。 |
 | IM provider 入口 | 外部 provider 投递消息，连接由 provider 管理 | Provider API 或长连接 adapter | 外部身份；不是本仓库内的 OS 进程 | provider 消息和回复证据 | provider、凭据和连接失败不等于本地任务权威成功。 |
 | `ai server` daemon | `ai server start` 每个 checkout 至多启动一个；收到信号后停止 | provider adapter 与已接纳请求调度 | 宿主用户进程；`0..1 / checkout` | checkout 级 PID identity 和 daemon log | stale identity 或 adapter 失败不能被解释为任务成功。 |
-| `host-control` 服务 | OS 服务管理器在每台宿主机启动/停止一个服务 | 私有宿主 endpoint 与请求/响应记录 | 宿主用户边界；`0..1 / 宿主机` | endpoint、token、审计和 worker 记录 | authority 缺失时 fail closed；已接受但未知的结果不静默重放。直连宿主的 `create-task` 是独立的进程内路径。 |
+| `host-control` 服务 | OS 服务管理器在每台受支持宿主机启动/停止一个服务 | 私有宿主 endpoint 与请求/响应记录 | 宿主用户边界；`1 / supported host` | endpoint、token、审计和 worker 记录 | authority 缺失时 fail closed；已接受但未知的结果不静默重放。直连宿主的 `create-task` 是独立的进程内路径。 |
 | Docker 沙箱容器 | 容器引擎为每个沙箱创建/停止一个容器 | 容器运行时和任务投影 | 沙箱边界；`0..N / 宿主机` | 容器 identity、generation 和沙箱控制记录 | 容器可用不等于 host-control 或任务生命周期已就绪。 |
 | sandbox broker | 随沙箱控制状态启动，随沙箱停止 | 沙箱控制通道和请求记录 | 每个沙箱一个；`[1 / sandbox]` | manifest、lease、owner、generation 和执行审计 | identity、lease 或接纳失败在执行前拒绝。 |
 
