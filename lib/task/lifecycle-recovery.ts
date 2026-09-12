@@ -18,6 +18,8 @@ import {
   readRun
 } from './orchestration.ts';
 import type { OrchestrationOptions, OrchestrationRun } from './orchestration.ts';
+import { isRecoveryWarning, sameRecoveryWarning } from './recovery-warning.ts';
+import type { RecoveryWarning } from './recovery-warning.ts';
 
 const RECOVERY_NOTE_PREFIX = 'lifecycle-recovery:v1 ';
 const RECOVERY_STAGES = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
@@ -44,7 +46,6 @@ type LifecycleRecoveryRequest = Readonly<{
   artifact: string;
   reason: string;
 }>;
-type RecoveryWarning = Readonly<{ code: string; message: string; action: string }>;
 type RecoveryCommitVerification = { ok: true; receipt: DelegationReceipt } | { ok: false; message: string };
 type LifecycleRecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'owner-unknown' | 'conflict';
@@ -93,23 +94,28 @@ type RecoveryNote = Readonly<{
   owner: 'terminated';
   reason: string;
 }>;
+type RecoveryTerminalFacts = Readonly<{
+  note: RecoveryNote;
+  receipt: DelegationReceipt;
+  consumer: string;
+  stored: StoredCodexLifecycle | null;
+}>;
+type RecoveryTerminalFactsResult =
+  | { ok: true; facts: RecoveryTerminalFacts }
+  | { ok: false; code: string; message: string };
+
+const RECOVERY_RELEASE_RETRY_WARNING: RecoveryWarning = Object.freeze({
+  code: 'RECOVERY_RELEASE_RETRY_REQUIRED',
+  message: 'recovery receipt and Activity Log are complete but the protected lifecycle claim could not be released',
+  action: 'retry recover-started with the same selector and reason'
+});
 
 function text(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value && !/[\r\n]/u.test(value);
 }
 
-function isRecoveryWarning(value: unknown): value is RecoveryWarning {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const warning = value as Record<string, unknown>;
-  return Object.keys(warning).sort().join(',') === 'action,code,message'
-    && text(warning.code) && text(warning.message) && text(warning.action);
-}
-
 function isReleaseRetryWarning(value: unknown): value is RecoveryWarning {
-  return isRecoveryWarning(value)
-    && value.code === 'RECOVERY_RELEASE_RETRY_REQUIRED'
-    && value.message === 'recovery receipt and Activity Log are complete but the protected lifecycle claim could not be released'
-    && value.action === 'retry recover-started with the same selector and reason';
+  return sameRecoveryWarning(value, RECOVERY_RELEASE_RETRY_WARNING);
 }
 
 function timestamp(value: unknown): value is string {
@@ -238,18 +244,6 @@ function targetRows(sectionEntries: readonly LogEntry[], stage: RecoveryStage, r
   return { rows, recoveryEntries };
 }
 
-function matchingReceipt(run: OrchestrationRun, taskId: string, request: LifecycleRecoveryRequest, receiptId?: string): DelegationReceipt | null {
-  const candidates = [
-    ...(run.pendingDelegation ? [run.pendingDelegation] : []),
-    ...run.receipts
-  ].filter((receipt) => receipt.taskId === taskId
-    && receipt.stage === request.stage
-    && receipt.round === request.round
-    && receipt.artifact === request.artifact
-    && (receiptId === undefined || receipt.id === receiptId));
-  return candidates.length === 1 ? candidates[0]! : null;
-}
-
 function validateStopRecord(
   record: StoredCodexLifecycle,
   receipt: DelegationReceipt,
@@ -370,12 +364,22 @@ function releaseResult(
     taskId,
     receiptId: receipt.id,
     childId: receipt.childId,
-    warning: {
-      code: 'RECOVERY_RELEASE_RETRY_REQUIRED',
-      message: 'recovery receipt and Activity Log are complete but the protected lifecycle claim could not be released',
-      action: 'retry recover-started with the same selector and reason'
-    }
+    warning: RECOVERY_RELEASE_RETRY_WARNING
   });
+}
+
+function isPostActivationAbortedReceipt(
+  receipt: DelegationReceipt,
+  taskId: string,
+  request: LifecycleRecoveryRequest
+): boolean {
+  return receipt.status === 'aborted'
+    && receipt.activatedAt !== null
+    && receipt.agent === null
+    && receipt.taskId === taskId
+    && receipt.stage === request.stage
+    && receipt.round === request.round
+    && receipt.artifact === request.artifact;
 }
 
 function matchingPostActivationAbortedReceipts(
@@ -383,13 +387,7 @@ function matchingPostActivationAbortedReceipts(
   taskId: string,
   request: LifecycleRecoveryRequest
 ): DelegationReceipt[] {
-  return run.receipts.filter((receipt) => receipt.status === 'aborted'
-    && receipt.activatedAt !== null
-    && receipt.agent === null
-    && receipt.taskId === taskId
-    && receipt.stage === request.stage
-    && receipt.round === request.round
-    && receipt.artifact === request.artifact);
+  return run.receipts.filter((receipt) => isPostActivationAbortedReceipt(receipt, taskId, request));
 }
 
 function sameRecoveryNote(left: RecoveryNote, right: RecoveryNote): boolean {
@@ -408,6 +406,76 @@ function sameRecoveryNote(left: RecoveryNote, right: RecoveryNote): boolean {
     && left.reason === right.reason;
 }
 
+function recoveryNoteMatchesRequest(
+  note: RecoveryNote,
+  taskId: string,
+  request: LifecycleRecoveryRequest
+): boolean {
+  return note.taskId === taskId
+    && note.stage === request.stage
+    && note.round === request.round
+    && note.artifact === request.artifact
+    && note.startedAgent === request.agent
+    && note.reason === request.reason;
+}
+
+function recoveryReferencesMatch(
+  receipt: DelegationReceipt,
+  note: RecoveryNote,
+  consumer: string
+): boolean {
+  return receipt.childId === note.childId
+    && note.consumer === consumer
+    && receipt.hostEvidence?.stopRevision === note.stopRevision
+    && receipt.hostEvidence.consumer === consumer
+    && receipt.hostEvidence.consumedAt === note.consumedAt;
+}
+
+function recoveryRunIsStable(run: OrchestrationRun | null): run is OrchestrationRun {
+  return run !== null && run.status === 'running' && run.pendingDelegation === null;
+}
+
+function readRecoveryTerminalFacts(
+  section: Readonly<{ entries: readonly LogEntry[] }>,
+  taskId: string,
+  request: LifecycleRecoveryRequest,
+  run: OrchestrationRun | null,
+  store: ReturnType<typeof createCodexLifecycleStore>
+): RecoveryTerminalFactsResult {
+  const targets = targetRows(section.entries, request.stage, request.round);
+  const paired = targets.rows.filter((row) => row.started !== '' && row.done !== '');
+  if (targets.recoveryEntries.length !== 1 || paired.length !== 1
+    || paired[0]!.done !== targets.recoveryEntries[0]!.time) {
+    return { ok: false, code: 'RECOVERY_LOG_CONFLICT', message: 'recovery Activity Log does not contain one completed started/aborted pair' };
+  }
+  const note = parseRecoveryNote(targets.recoveryEntries[0]!.note);
+  if (!note || !recoveryNoteMatchesRequest(note, taskId, request)) {
+    return { ok: false, code: 'RECOVERY_NOTE_INVALID', message: 'recovery Activity Log note does not match the selector' };
+  }
+  if (!recoveryRunIsStable(run)) {
+    return { ok: false, code: 'RECOVERY_ORCHESTRATION_INVALID', message: 'completed recovery state must be running with no pending delegation' };
+  }
+  const receipts = matchingPostActivationAbortedReceipts(run, taskId, request);
+  if (receipts.length !== 1 || receipts[0]!.id !== note.receiptId) {
+    return { ok: false, code: 'RECOVERY_RECEIPT_INVALID', message: 'there is not one matching post-activation aborted receipt' };
+  }
+  const receipt = receipts[0]!;
+  const consumer = recoveryConsumer(taskId, receipt.id);
+  if (!recoveryReferencesMatch(receipt, note, consumer)) {
+    return { ok: false, code: 'RECOVERY_REFERENCE_CONFLICT', message: 'recovery receipt and Activity Log references do not match' };
+  }
+  const stored = readStoredEvidence(store, note.childId);
+  if ('error' in stored) return { ok: false, code: 'RECOVERY_STORE_UNKNOWN', message: stored.error.message };
+  if ('missing' in stored) return { ok: true, facts: { note, receipt, consumer, stored: null } };
+  const evidence = validateStopRecord(stored, receipt, consumer);
+  if (!evidence.ok) return evidence;
+  if (stored.consumer !== consumer || !stored.consumedAt
+    || evidence.stopRevision !== note.stopRevision || evidence.consumedAt !== note.consumedAt) {
+    return { ok: false, code: 'RECOVERY_REFERENCE_CONFLICT', message: 'complete recovery facts do not reference the protected recovery claim' };
+  }
+  return { ok: true, facts: { note, receipt, consumer, stored } };
+}
+
 function verifyRecoveryCommit(
   taskMdPath: string,
   taskDir: string,
@@ -421,39 +489,15 @@ function verifyRecoveryCommit(
     parseTypedTaskFrontmatter(content);
     const section = locateActivityLog(content);
     if (!section) return { ok: false, message: 'recovery Activity Log cannot be reread uniquely' };
-    const targets = targetRows(section.entries, request.stage, request.round);
-    const paired = targets.rows.filter((row) => row.started !== '' && row.done !== '');
-    if (targets.recoveryEntries.length !== 1 || paired.length !== 1 || paired[0]!.done !== targets.recoveryEntries[0]!.time) {
-      return { ok: false, message: 'recovery Activity Log does not contain one completed started/aborted pair' };
-    }
-    const logged = parseRecoveryNote(targets.recoveryEntries[0]!.note);
-    if (!logged || !sameRecoveryNote(logged, note)) {
+    const run = readRun(taskDir, options.orchestration);
+    const store = readLifecycleStore(options, options.repoRoot ?? path.resolve(taskDir, '../../../..'));
+    const facts = readRecoveryTerminalFacts(section, taskId, request, run, store);
+    if (!facts.ok) return { ok: false, message: facts.message };
+    if (!sameRecoveryNote(facts.facts.note, note)) {
       return { ok: false, message: 'recovery Activity Log note changed during commit verification' };
     }
-    const run = readRun(taskDir, options.orchestration);
-    if (!run || run.status !== 'running' || run.pendingDelegation !== null) {
-      return { ok: false, message: 'orchestration recovery state is not running with no pending delegation' };
-    }
-    const receipts = matchingPostActivationAbortedReceipts(run, taskId, request);
-    if (receipts.length !== 1 || receipts[0]!.id !== note.receiptId) {
-      return { ok: false, message: 'orchestration recovery state does not contain one matching aborted receipt' };
-    }
-    const receipt = receipts[0]!;
-    if (
-      receipt.childId !== note.childId
-      || receipt.hostEvidence?.stopRevision !== note.stopRevision
-      || receipt.hostEvidence.consumer !== note.consumer
-      || receipt.hostEvidence.consumedAt !== note.consumedAt
-    ) return { ok: false, message: 'orchestration recovery references changed during commit verification' };
-    const store = readLifecycleStore(options, options.repoRoot ?? path.resolve(taskDir, '../../../..'));
-    const stored = readStoredEvidence(store, note.childId);
-    if ('error' in stored) return { ok: false, message: stored.error.message };
-    if ('missing' in stored) return { ok: false, message: 'protected lifecycle claim disappeared before release' };
-    const evidence = validateStopRecord(stored, receipt, note.consumer);
-    if (!evidence.ok || evidence.stopRevision !== note.stopRevision || evidence.consumedAt !== note.consumedAt) {
-      return { ok: false, message: evidence.ok ? 'protected lifecycle claim references changed during commit verification' : evidence.message };
-    }
-    return { ok: true, receipt };
+    if (!facts.facts.stored) return { ok: false, message: 'protected lifecycle claim disappeared before release' };
+    return { ok: true, receipt: facts.facts.receipt };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
@@ -484,33 +528,11 @@ export function readLifecycleRecoveryDomainEvidence(
     parseTypedTaskFrontmatter(content);
     const section = locateActivityLog(content);
     if (!section) return recoveryDomainFailure();
-    const targets = targetRows(section.entries, request.stage, request.round);
-    const paired = targets.rows.filter((row) => row.started !== '' && row.done !== '');
-    if (targets.recoveryEntries.length !== 1 || paired.length !== 1
-      || paired[0]!.done !== targets.recoveryEntries[0]!.time) return recoveryDomainFailure();
-    const note = parseRecoveryNote(targets.recoveryEntries[0]!.note);
-    if (!note || note.taskId !== resolved.taskId || note.stage !== request.stage
-      || note.round !== request.round || note.artifact !== request.artifact
-      || note.startedAgent !== request.agent || note.reason !== request.reason) return recoveryDomainFailure();
     const run = readRun(resolved.taskDir);
-    if (!run || run.status !== 'running' || run.pendingDelegation !== null) return recoveryDomainFailure();
-    const receipts = matchingPostActivationAbortedReceipts(run, resolved.taskId, request);
-    if (receipts.length !== 1 || receipts[0]!.id !== note.receiptId) return recoveryDomainFailure();
-    const receipt = receipts[0]!;
-    const consumer = recoveryConsumer(resolved.taskId, receipt.id);
-    if (receipt.childId !== note.childId || note.consumer !== consumer
-      || receipt.hostEvidence?.stopRevision !== note.stopRevision
-      || receipt.hostEvidence.consumer !== consumer
-      || receipt.hostEvidence.consumedAt !== note.consumedAt) return recoveryDomainFailure();
     const store = readLifecycleStore(options, repoRoot);
-    const stored = readStoredEvidence(store, note.childId);
-    if ('error' in stored) return recoveryDomainFailure();
-    if ('missing' in stored) return { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' };
-    if (stored.consumer !== consumer || !stored.consumedAt) return recoveryDomainFailure();
-    const evidence = validateStopRecord(stored, receipt, consumer);
-    if (!evidence.ok || evidence.stopRevision !== note.stopRevision || evidence.consumedAt !== note.consumedAt) {
-      return recoveryDomainFailure();
-    }
+    const facts = readRecoveryTerminalFacts(section, resolved.taskId, request, run, store);
+    if (!facts.ok) return recoveryDomainFailure();
+    if (!facts.facts.stored) return { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' };
     if (!isReleaseRetryWarning(terminalResult.warning)) return recoveryDomainFailure();
     return {
       consistent: true,
@@ -555,38 +577,13 @@ function recoverStartedLifecycleUnderLock(
     if (targets.recoveryEntries.length !== 1) {
       return failure(request, 'conflict', 'RECOVERY_TERMINAL_MISSING', 'there is no matching open or structured recovery lifecycle row', { taskId });
     }
-    const paired = targets.rows.filter((row) => row.started !== '' && row.done !== '');
-    if (paired.length !== 1 || paired[0]!.done !== targets.recoveryEntries[0]!.time) {
-      return failure(request, 'conflict', 'RECOVERY_LOG_CONFLICT', 'recovery terminal row is not paired with the matching started row', { taskId });
-    }
-    const note = parseRecoveryNote(targets.recoveryEntries[0]!.note);
-    if (!note || note.taskId !== taskId || note.stage !== request.stage || note.round !== request.round || note.artifact !== request.artifact || note.startedAgent !== request.agent || note.reason !== request.reason) {
-      return failure(request, 'conflict', 'RECOVERY_NOTE_INVALID', 'recovery Activity Log note does not match the selector', { taskId });
-    }
-    if (run.status !== 'running' || run.pendingDelegation !== null) {
-      return failure(request, 'conflict', 'RECOVERY_ORCHESTRATION_INVALID', 'completed recovery state must be running with no pending delegation', { taskId });
-    }
-    const postActivationReceipts = matchingPostActivationAbortedReceipts(run, taskId, request);
-    if (postActivationReceipts.length !== 1) {
-      return failure(request, 'conflict', 'RECOVERY_RECEIPT_INVALID', 'there is not one unique post-activation aborted receipt', { taskId });
-    }
-    const receipt = matchingReceipt(run, taskId, request, note.receiptId);
-    if (!receipt || receipt.status !== 'aborted' || receipt.agent !== null || receipt.childId !== note.childId) {
-      return failure(request, 'conflict', 'RECOVERY_RECEIPT_INVALID', 'there is not one matching post-activation aborted receipt', { taskId, receiptId: note.receiptId, childId: note.childId });
-    }
-    const consumer = recoveryConsumer(taskId, receipt.id);
-    if (note.consumer !== consumer || receipt.hostEvidence?.stopRevision !== note.stopRevision || receipt.hostEvidence.consumer !== consumer || receipt.hostEvidence.consumedAt !== note.consumedAt) {
-      return failure(request, 'conflict', 'RECOVERY_REFERENCE_CONFLICT', 'recovery receipt and Activity Log references do not match', { taskId, receiptId: receipt.id, childId: receipt.childId });
-    }
     const store = readLifecycleStore(options, resolved.repoRoot);
-    const stored = readStoredEvidence(store, note.childId);
-    if ('error' in stored) return failure(request, 'owner-unknown', 'RECOVERY_STORE_UNKNOWN', stored.error.message, { taskId, receiptId: receipt.id, childId: receipt.childId });
-    if ('missing' in stored) return result(request, 'no-op', { taskId, receiptId: receipt.id, childId: receipt.childId });
-    if (stored.consumer === null || !stored.consumedAt) {
-      return failure(request, 'conflict', 'RECOVERY_REFERENCE_CONFLICT', 'complete recovery facts do not reference the protected recovery claim', { taskId, receiptId: receipt.id, childId: receipt.childId });
+    const facts = readRecoveryTerminalFacts(section, taskId, request, run, store);
+    if (!facts.ok) {
+      return failure(request, facts.code === 'RECOVERY_CONSUMER_CONFLICT' ? 'conflict' : 'owner-unknown', facts.code, facts.message, { taskId });
     }
-    const evidence = validateStopRecord(stored, receipt, consumer);
-    if (!evidence.ok) return failure(request, evidence.code === 'RECOVERY_CONSUMER_CONFLICT' ? 'conflict' : 'owner-unknown', evidence.code, evidence.message, { taskId, receiptId: receipt.id, childId: receipt.childId });
+    const { note, receipt, consumer, stored } = facts.facts;
+    if (!stored) return result(request, 'no-op', { taskId, receiptId: receipt.id, childId: receipt.childId });
     let released = false;
     try { released = (options.releaseRecovery ?? store.releaseRecovery)(note.childId, consumer); }
     catch (error) {
@@ -603,13 +600,7 @@ function recoverStartedLifecycleUnderLock(
     return failure(request, 'conflict', 'RECOVERY_LOG_CONFLICT', 'open lifecycle execution already has a recovery terminal row', { taskId });
   }
   const pending = run.pendingDelegation;
-  const recovered = run.receipts.filter((candidate) => candidate.status === 'aborted'
-    && candidate.activatedAt !== null
-    && candidate.agent === null
-    && candidate.taskId === taskId
-    && candidate.stage === request.stage
-    && candidate.round === request.round
-    && candidate.artifact === request.artifact);
+  const recovered = run.receipts.filter((candidate) => isPostActivationAbortedReceipt(candidate, taskId, request));
   if (pending && recovered.length > 0) {
     return failure(request, 'conflict', 'RECOVERY_RECEIPT_INVALID', 'open lifecycle execution has both a pending and an aborted matching delegation', { taskId });
   }

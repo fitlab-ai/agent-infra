@@ -137,6 +137,22 @@ test('recover-started response-loss recovery preserves a release retry warning',
     domain,
     criticalPhases
   }).reasonCode, 'RECOVERY_RELEASE_RETRY_REQUIRED');
+  assert.equal(classifySandboxControlRecovery({
+    operation,
+    binding,
+    startedCommitted: true,
+    terminalResult: { ...result, warning: { action: warning.action, message: warning.message, code: warning.code } },
+    domain,
+    criticalPhases
+  }).outcome, 'success');
+  assert.equal(classifySandboxControlRecovery({
+    operation,
+    binding,
+    startedCommitted: true,
+    terminalResult: { ...result, warning: { ...warning, extra: 'unexpected' } },
+    domain,
+    criticalPhases
+  }).outcome, 'unknown');
 });
 
 test('recovery matrix distinguishes explicit failure, journal partial state, and read-only changes', () => {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isCompletionEvidence } from './orchestration.ts';
 import { TASK_WORKFLOW_OPERATIONS } from './workflow-command.ts';
+import { sameRecoveryWarning } from './recovery-warning.ts';
 
 export type ControlRecoveryOutcome = 'not-executed' | 'in-progress' | 'success' | 'failure' | 'unknown' | 'rejected';
 
@@ -109,8 +110,7 @@ function domainEvidenceMatches(
   }
   if (operation.family === 'task-lifecycle' && operation.intent === 'recover-started') {
     const retryRequired = domain.recoveryState === 'retry-required'
-      && JSON.stringify(domain.warning) === JSON.stringify(result.warning)
-      && typeof result.warning === 'object' && result.warning !== null;
+      && sameRecoveryWarning(domain.warning, result.warning);
     return result.targetState === 'active'
       && ['applied', 'no-op'].includes(String(result.status))
       && domain.recovery === true

@@ -1,5 +1,6 @@
 import { isCompletionEvidence, type CleanCompletionEvidence } from '../../task/orchestration.ts';
 import { parseControlOutput } from '../../task/control-recovery.ts';
+import { isRecoveryWarning } from '../../task/recovery-warning.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -117,15 +118,6 @@ export type SandboxControlTerminalResult = Readonly<{
   warning?: SandboxControlRecoveryWarning | null;
 }>;
 
-function isSandboxControlRecoveryWarning(value: unknown): value is SandboxControlRecoveryWarning {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const warning = value as Record<string, unknown>;
-  return Object.keys(warning).sort().join(',') === 'action,code,message'
-    && [warning.code, warning.message, warning.action].every((field) => (
-      typeof field === 'string' && field.length > 0 && field.trim() === field && !/[\r\n]/u.test(field)
-    ));
-}
-
 export function terminalResultPath(manifest: SandboxControlManifest, requestId: string): string {
   if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   return path.join(manifest.processingDir, requestId, 'terminal-result.json');
@@ -141,7 +133,7 @@ export function createSandboxControlTerminalResult(
     ? nested.run as Record<string, unknown> : null;
   const rawCompletion = nested.completionEvidence ?? run?.completionEvidence;
   const operation = request.operation ?? (typeof nested.intent === 'string' ? nested.intent : null) ?? '';
-  const warning = isSandboxControlRecoveryWarning(nested.warning) ? nested.warning : null;
+  const warning = isRecoveryWarning(nested.warning) ? nested.warning : null;
   return {
     version: 1,
     requestId: request.id,
@@ -186,7 +178,7 @@ export function readSandboxControlTerminalResult(filePath: string): SandboxContr
   if (value.completionEvidence !== null && !isCompletionEvidence(value.completionEvidence)) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
-  if (value.warning !== undefined && value.warning !== null && !isSandboxControlRecoveryWarning(value.warning)) {
+  if (value.warning !== undefined && value.warning !== null && !isRecoveryWarning(value.warning)) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
   if (value.changed === undefined) {
