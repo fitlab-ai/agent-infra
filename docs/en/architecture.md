@@ -63,6 +63,7 @@ flowchart LR
   classDef external fill:#f3f4f6,stroke:#6b7280,color:#111827;
 
   IM["EXTERNAL ACTOR<br/>IM provider"]:::external
+  LOCAL["EXTERNAL ACTOR<br/>local user / CLI"]:::external
 
   subgraph H["HOST OS · trust boundary"]
     D["PROCESS<br/>ai server daemon<br/>[0..1 / checkout]"]:::process
@@ -89,6 +90,7 @@ flowchart LR
   STATE["DURABLE FACTS<br/>task.md / journals / artifacts / receipts"]:::domain
 
   IM --> D
+  LOCAL --> L
   D --> C --> L
   L --> HT
   L -.-> SF

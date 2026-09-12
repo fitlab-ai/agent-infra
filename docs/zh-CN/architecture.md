@@ -63,6 +63,7 @@ flowchart LR
   classDef external fill:#f3f4f6,stroke:#6b7280,color:#111827;
 
   IM["外部参与者<br/>IM provider"]:::external
+  LOCAL["外部参与者<br/>本地用户 / CLI"]:::external
 
   subgraph H["宿主 OS · 信任边界"]
     D["进程<br/>ai server daemon<br/>[0..1 / checkout]"]:::process
@@ -89,6 +90,7 @@ flowchart LR
   STATE["持久事实<br/>task.md / journal / artifact / receipt"]:::domain
 
   IM --> D
+  LOCAL --> L
   D --> C --> L
   L --> HT
   L -.-> SF
