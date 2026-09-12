@@ -4,7 +4,7 @@
 
 ## Typed 状态机
 
-调用 `agent-infra-internal platform-pr resolve-external {task-id} --agent {agent} [--pr {N}]`。core 先检查 completion inventory；非空时返回 `mode=normal`，且显式 `--pr` 会失败。空 inventory 必须有正整数 `issue_number`，否则返回 `EXTERNAL_DELIVERY_ISSUE_REQUIRED`。
+调用 `agent-infra-internal platform-pr resolve-external {task-id} --agent {agent} [--pr {N}]`。core 先检查 completion inventory；非空时返回 `mode=normal`，且显式 `--pr` 会失败。空 inventory 必须有有效 `platform_issue_identity`，否则返回 `EXTERNAL_DELIVERY_ISSUE_REQUIRED`。
 
 core 通过平台 adapter 读取 Issue 的权威 closing change requests，穷尽分页后只把 base 仓库匹配任务仓库且已经合并、身份字段完整的候选视为 eligible。唯一候选自动选择；多候选、身份冲突或证据缺失均 fail closed。`--pr` 只能从权威 closing eligible 集合中显式选择，不能绕过仓库、Issue、合并或身份校验。
 

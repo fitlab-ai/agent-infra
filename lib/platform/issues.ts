@@ -85,7 +85,7 @@ async function resolvedContext(taskRef: string, options: SharedOptions) {
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const frontmatter = parseTaskFrontmatter(content);
   let issueIdentity: ResourceIdentity | null;
-  try { issueIdentity = taskIssueIdentity(frontmatter, undefined, options.runtimeVersion); }
+  try { issueIdentity = taskIssueIdentity(frontmatter); }
   catch (error) {
     return { ok: false as const, output: result('failed', resolved.taskId, null, { error: { ...taskIssueIdentityError(error), retryable: false } }) };
   }

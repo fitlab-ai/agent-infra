@@ -323,12 +323,6 @@ function flattenComments(value: unknown): RemoteComment[] {
   );
 }
 
-function issueNumberFromTask(content: string): number | null {
-  const value = parseTaskFrontmatter(content).issue_number;
-  const number = Number(value);
-  return Number.isInteger(number) && number > 0 ? number : null;
-}
-
 function listRemoteComments(client: PlatformClient, repo: string, issue: number, cwd: string) {
   const result = client.json<unknown>([
     'api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`
@@ -452,11 +446,11 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   }
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   let issueIdentityFromTask: ReturnType<typeof taskIssueIdentity>;
-  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent), undefined, options.runtimeVersion); }
+  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent)); }
   catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
   if (!issueIdentityFromTask) {
     return platformResult('no-op', {
-      error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false }
+      error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
     });
   }
   let desired: RenderedChunk[];
@@ -614,7 +608,7 @@ async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: strin
   if (!resolved.ok) return platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } });
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
   let issueIdentity: ReturnType<typeof taskIssueIdentity>;
-  try { issueIdentity = taskIssueIdentity(parseTaskFrontmatter(content), undefined, options.runtimeVersion); }
+  try { issueIdentity = taskIssueIdentity(parseTaskFrontmatter(content)); }
   catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
   if (!issueIdentity) return platformResult('no-op', { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false } });
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });

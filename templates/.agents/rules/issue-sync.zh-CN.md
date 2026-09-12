@@ -16,7 +16,7 @@
 
 `prSummary` 属于 `.agents/rules/pr-sync.md`，本规则不实现 PR 聚合。
 
-`pr-review` 原文只通过 `artifact` / `artifactChunk` marker 同步为 Issue artifact 评论，不作为 `restore-task` 恢复来源；恢复仍只接受 Issue 编号并只读注册的 Issue marker，不新增 PR 来源。
+`pr-review` 原文只通过 `artifact` / `artifactChunk` marker 同步为 Issue artifact 评论，不作为 `restore-task` 恢复来源；恢复仍只接受 Issue 原始 token 并只读注册的 Issue marker，不新增 PR 来源。
 
 ## 平台 intent
 
@@ -24,7 +24,7 @@
 
 ```bash
 agent-infra-internal platform-context resolve [--cwd <path>]
-agent-infra-internal platform-comment list --issue <N> [--cwd <path>]
+agent-infra-internal platform-comment list --issue <issue-token> [--cwd <path>]
 agent-infra-internal platform-comment owner <task-ref>
 agent-infra-internal platform-comment sync <task-ref> \
   --kind task|artifact|summary|cancel --agent {standard-agent-token} \
@@ -59,7 +59,7 @@ agent-infra-internal task-warning {task-id} add \
 ```bash
 agent-infra-internal platform-issue inspect {task-id}
 agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
-agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {standard-agent-token}
+agent-infra-internal platform-issue bind {task-id} --issue {issue-token} --agent {standard-agent-token}
 agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} {desired-state-flags}
 ```
 

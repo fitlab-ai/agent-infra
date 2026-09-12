@@ -102,7 +102,7 @@ source 可以是包名，也可以是相对于仓库根目录解析的本地 ESM
 
 `context.resolve` 是必需操作，会在加载阶段校验。其他 operation group 可以缺失，但声明的 group 必须完整实现全部方法。缺失 group 返回结构化的 `PLATFORM_CAPABILITY_UNSUPPORTED`；选定 provider 缺失、无法解析/导入、导出形状错误、factory 抛错、type/version 不匹配或 contract 校验失败时，返回稳定的不可重试错误，且绝不回退到 GitHub。错误信息不会包含 provider config、token 或不必要的绝对路径。私有 provider 的包访问和认证由部署环境负责。
 
-资源身份统一使用 canonical `{ "kind": "id" | "number" | "key", "value": string | number }` 形状。每个 provider 为每类资源声明一个 primary kind，core 不使用全局 `id > number > key` 回退。`--issue`、`--pr` 等 CLI 参数仍接收直观的原始字符串 token，并在选定 provider 加载后再解析。独立的旧 `issue_number` 回退仍保留在自己的边界；PR fact 只使用 v2 schema。v1 PR fact 会以 `PLATFORM_IDENTITY_LEGACY_UNSUPPORTED` 拒绝，必须先迁移才能执行结构化操作。新写入使用 `platform_issue_identity` 和 v2 PR fact，不重复写入旧字段。数字 identity 的 review marker 保留 `pr<N>`，不透明 identity 使用 `pr:<base64url-canonical-identity>`。provider 时间戳和 release-note facts 统一使用 UTC `Z`；本地时间只在展示层转换。
+资源身份统一使用 canonical `{ "kind": "id" | "number" | "key", "value": string | number }` 形状。每个 provider 为每类资源声明一个 primary kind，core 不使用全局 `id > number > key` 回退。`--issue`、`--pr` 等 CLI 参数仍接收直观的原始字符串 token，并在选定 provider 加载后再解析。任务绑定只使用 `platform_issue_identity`，不再保留旧 `issue_number` identity 回退；PR fact 只使用 v2 schema。v1 PR fact 会以 `PLATFORM_IDENTITY_LEGACY_UNSUPPORTED` 拒绝，必须先迁移才能执行结构化操作。新写入使用 `platform_issue_identity` 和 v2 PR fact，不重复写入旧字段。数字 identity 的 review marker 保留 `pr<N>`，不透明 identity 使用 `pr:<base64url-canonical-identity>`。provider 时间戳和 release-note facts 统一使用 UTC `Z`；本地时间只在展示层转换。
 
 ## Agent Client 契约
 

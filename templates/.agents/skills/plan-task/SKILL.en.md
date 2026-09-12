@@ -142,7 +142,7 @@ Use the digests from that same `status=passed` result in `agent-infra-internal t
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 
-If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
+If task.md contains a valid `platform_issue_identity`, perform these sync actions (skip and continue on any failure):
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status pending-design-work --fields`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {plan-artifact} --agent {standard-agent-token}`

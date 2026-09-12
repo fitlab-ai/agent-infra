@@ -155,7 +155,6 @@ function buildTaskFrontmatter(overrides: FrontmatterOverrides = {}) {
     agent_infra_version: "v0.9.11-alpha.0",
     pr_delivery_fact: factValue(buildUnboundFact()),
     delivery_base_ref: "main",
-    issue_number: "N/A",
     current_step: "code",
     assigned_to: "codex",
     ...overrides
@@ -472,14 +471,6 @@ async function runPlatformSyncAdapter(
           return null;
         }
       },
-      parseIssueNumber(value: unknown) {
-        const number = Number(value);
-        return Number.isInteger(number) && number > 0 ? number : null;
-      },
-      parsePrNumber(value: unknown) {
-        const number = Number(value);
-        return Number.isInteger(number) && number > 0 ? number : null;
-      }
     });
   } finally {
     for (const [key, value] of Object.entries(oldEnv)) {

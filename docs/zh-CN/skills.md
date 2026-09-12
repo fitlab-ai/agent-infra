@@ -19,7 +19,7 @@ agent-infra 提供 **丰富的内置 AI skills**。它们按使用场景分组�
 | Skill | 描述 | 参数 | 推荐场景 |
 |-------|------|------|---------|
 | `create-task` | 根据自然语言请求创建任务骨架，并在平台规则可用时级联创建 Issue。 | `description` | 从零开始记录新功能、缺陷或改进需求。 |
-| `import-issue` | 将 GitHub Issue 导入本地任务工作区。 | `issue-number` | 把已有 Issue 转成可执行的任务目录。 |
+| `import-issue` | 将 GitHub Issue 导入本地任务工作区。 | `issue-token` | 把已有 Issue 转成可执行的任务目录。 |
 | `analyze-task` | 为已有任务输出需求分析产物。 | `task-id` | 在设计前明确范围、风险和受影响文件。 |
 | `review-analysis` | 审查需求分析产物，并按严重程度分类问题。 | `task-id` | 在设计前确认分析完整可用。 |
 | `plan-task` | 编写技术实施方案，并设置审查检查点。 | `task-id` | 分析获批后定义具体实现路径。 |
@@ -35,7 +35,7 @@ agent-infra 提供 **丰富的内置 AI skills**。它们按使用场景分组�
 |-------|------|------|---------|
 | `check-task` | 查看当前任务状态、工作流进度和下一步建议。 | `task-id` | 不修改任务状态，仅检查当前进展。 |
 | `block-task` | 将任务标记为阻塞并记录阻塞原因。 | `task-id`、`reason`（可选） | 缺少外部依赖、决策或资源时暂停任务。 |
-| `restore-task` | 从 GitHub Issue 同步评论中还原本地任务文件。 | `issue-number`、`task-id`（可选） | 换机器或清空本地状态后恢复任务工作区。 |
+| `restore-task` | 从 GitHub Issue 同步评论中还原本地任务文件。 | `issue-token`、`task-id`（可选） | 换机器或清空本地状态后恢复任务工作区。 |
 
 ## Issue 与 PR
 

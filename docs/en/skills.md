@@ -19,7 +19,7 @@ These are not thin command aliases. Each skill encapsulates standardized process
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
 | `create-task` | Create a task scaffold from a natural-language request and cascade Issue creation through the platform rule when available. | `description` | Start a new feature, bug-fix, or improvement from scratch. |
-| `import-issue` | Import a GitHub Issue into the local task workspace. | `issue-number` | Convert an existing Issue into an actionable task folder. |
+| `import-issue` | Import a GitHub Issue into the local task workspace. | `issue-token` | Convert an existing Issue into an actionable task folder. |
 | `analyze-task` | Produce a requirement analysis artifact for an existing task. | `task-id` | Capture scope, risks, and impacted files before designing. |
 | `review-analysis` | Review the requirement analysis and classify findings by severity. | `task-id` | Confirm the analysis is complete before design. |
 | `plan-task` | Write the technical plan with a review checkpoint. | `task-id` | Define the approach after analysis approval. |
@@ -35,7 +35,7 @@ These are not thin command aliases. Each skill encapsulates standardized process
 |-------|-------------|------------|----------------------|
 | `check-task` | Inspect the current task status, workflow progress, and next step. | `task-id` | Check progress without modifying task state. |
 | `block-task` | Move a task to blocked state and record the blocker reason. | `task-id`, `reason` (optional) | Pause work when an external dependency or decision is missing. |
-| `restore-task` | Restore local task files from GitHub Issue sync comments. | `issue-number`, `task-id` (optional) | Recover a task workspace after switching machines or clearing local state. |
+| `restore-task` | Restore local task files from GitHub Issue sync comments. | `issue-token`, `task-id` (optional) | Recover a task workspace after switching machines or clearing local state. |
 
 ## Issue and PR
 

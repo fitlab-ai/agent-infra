@@ -73,9 +73,9 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 ### 6. Sync to Issue (Optional)
 
-Check whether `task.md` includes a valid `issue_number`. If not, skip this step.
+Check whether `task.md` includes a valid `platform_issue_identity`. If not, skip this step.
 
-If a valid `issue_number` exists, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status blocked`.
+If a valid `platform_issue_identity` exists, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status blocked`.
 Then run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`.
 
 ### 7. Verification Gate

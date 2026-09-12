@@ -263,7 +263,7 @@ function boundPullRequestFixture(options: {
     }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open', issueIdentity: { kind: 'number', value: 7 }
   });
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
-    '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7',
+    '---', `id: ${taskId}`, 'type: feature', 'status: active', 'platform_issue_identity: \'{"kind":"number","value":7}\'',
     'delivery_base_ref: HEAD~1', `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(fact))}`, '---', ''
   ].join('\n'));
   let issueLabels = ['in: stale', 'keep'];

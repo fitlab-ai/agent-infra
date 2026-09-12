@@ -111,10 +111,10 @@ test('collectHostCandidates scans active tasks and prioritizes verified fact ide
       fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\n${frontmatter}---\n`);
     };
     const factLine = (number: number) => `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(buildBoundFact({ identity: { resource: { kind: 'number', value: number }, repository: 'acme/widgets', url: `https://github.com/acme/widgets/pull/${number}`, head: { repository: 'acme/widgets', ref: 'feature', sha: 'a'.repeat(40) }, base: { repository: 'acme/widgets', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open' })))}`;
-    writeTask('TASK-1', `issue_number: 7\n${factLine(42)}\n`);
-    writeTask('TASK-2', 'issue_number: 7\n');
-    writeTask('TASK-3', 'issue_number: 9\n');
-    writeTask('TASK-4', `issue_number: 10\n${factLine(99)}\n`);
+    writeTask('TASK-1', `platform_issue_identity: '{"kind":"number","value":7}'\n${factLine(42)}\n`);
+    writeTask('TASK-2', "platform_issue_identity: '{\"kind\":\"number\",\"value\":7}'\n");
+    writeTask('TASK-3', "platform_issue_identity: '{\"kind\":\"number\",\"value\":9}'\n");
+    writeTask('TASK-4', `platform_issue_identity: '{"kind":"number","value":10}'\n${factLine(99)}\n`);
 
     const candidates = collectHostCandidates({ prNumber: 42, closingIssues: [7, 9], workspaceRoot: root });
     const byId = new Map(candidates.map((candidate) => [candidate.taskId, candidate]));
@@ -138,32 +138,8 @@ test('collectHostCandidates tolerates a missing workspace root', () => {
   }
 });
 
-test('collectHostCandidates keeps v1 tasks issue-only and never infers a PR identity', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'evidence-host-v1-'));
-  try {
-    const taskId = 'TASK-20260101-000005';
-    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(path.join(taskDir, 'task.md'), [
-      '---',
-      `id: ${taskId}`,
-      'issue_number: 7',
-      `pr_delivery_fact: ${JSON.stringify(JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' }))}`,
-      '---', ''
-    ].join('\n'));
-    assert.deepEqual(collectHostCandidates({ prNumber: 42, closingIssues: [7], workspaceRoot: root }), [{
-      taskId,
-      taskDir,
-      issueNumber: 7,
-      prNumber: null
-    }]);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('deriveTaskIssueMatches mechanically derives the S1(a) trust factor from resolved data', () => {
-  // unique host whose bound issue_number is among the PR closing issues -> trusted
+  // unique host whose bound issue identity is among the PR closing issues -> trusted
   assert.equal(deriveTaskIssueMatches(UNIQUE_HOST, [7, 9]), true);
   assert.equal(deriveTaskIssueMatches(UNIQUE_HOST, [9]), false);
   // none / ambiguous hosts and unbounded tasks cannot be confirmed -> false (fail closed)

@@ -53,11 +53,11 @@ test(
   async () => withTempRoot("agent-infra-platform-sync-win32-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const argsPath = path.join(tempRoot, "gh-args.jsonl");
-    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     writeJson(ctx.issuePath, buildIssuePayload());
 
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       expected_status_label: "status: in-progress"
     }, ctx.env({
       AGENT_INFRA_GH_BIN: "gh",
@@ -79,10 +79,10 @@ test("platform-sync reads Issue metadata through the shared REST snapshot adapte
   await withTempRoot("agent-infra-platform-sync-shared-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const argsPath = path.join(tempRoot, "gh-args.jsonl");
-    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     writeJson(ctx.issuePath, buildIssuePayload());
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       expected_status_label: "status: in-progress"
     }, ctx.env({ GH_FAKE_ARGS_PATH: argsPath, GH_FAKE_ISSUE_PATH: ctx.issuePath }));
     assert.equal(result.status, "pass", result.message);
@@ -96,9 +96,9 @@ test("platform-sync performs no GitHub operation when the repository selects non
     const ctx = setupPlatformSyncEnv(tempRoot);
     const argsPath = path.join(tempRoot, "gh-args.jsonl");
     write(path.join(tempRoot, ".agents", ".airc.json"), '{"platform":{"type":"none"}}');
-    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       expected_status_label: "status: in-progress"
     }, ctx.env({ GH_FAKE_ARGS_PATH: argsPath }), tempRoot);
 
@@ -116,7 +116,7 @@ test("requirements sync converges before the complete-task platform gate", async
     const commentsPath = path.join(tempRoot, "comments.json");
     const fakeGhPath = path.join(tempRoot, "fake-gh.cjs");
     write(path.join(tempRoot, ".agents", ".airc.json"), '{"platform":{"type":"github"}}');
-    write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", type: "bugfix" }));
+    write(path.join(taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'', type: "bugfix" }));
     write(fakeGhPath, loadFixture("fake-gh.js"));
     writeJson(issuePath, {
       number: 65,
@@ -173,7 +173,7 @@ test("requirements sync converges before the complete-task platform gate", async
 test("platform-sync compares artifact comments after the same sanitization used by comment sync", async () => {
   await withTempRoot("agent-infra-platform-sync-sanitized-artifact-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
-    const taskContent = buildTaskContent({ issue_number: "65" });
+    const taskContent = buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' });
     const artifactContent = [
       "<!-- artifact-context:TASK-20260328-000001:code:1 -->",
       "# 实现报告",
@@ -202,7 +202,7 @@ test("platform-sync compares artifact comments after the same sanitization used 
 test("platform-sync compares task comments after the same sanitization used by comment sync", async () => {
   await withTempRoot("agent-infra-platform-sync-sanitized-task-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
-    const taskContent = `${buildTaskContent({ issue_number: "65" })}\n\n<!-- sync-pr:TASK-20260328-000001:summary -->`;
+    const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n\n<!-- sync-pr:TASK-20260328-000001:summary -->`;
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     write(path.join(ctx.taskDir, "code.md"), "# 实现报告\n\n通过");
     writeJson(ctx.issuePath, buildIssuePayload());
@@ -558,7 +558,7 @@ const implementSyncCases = [
 for (const c of implementSyncCases) {
   test(c.name, () => withTempRoot("agent-infra-platform-sync-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
-    const taskContent = buildTaskContent({ issue_number: "65", ...c.taskOverrides });
+    const taskContent = buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'', ...c.taskOverrides });
     const artifactContent = loadFixture("valid-code.md");
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     if (c.skill === "code-task") {
@@ -587,7 +587,7 @@ for (const c of implementSyncCases) {
 
 test("validate-artifact platform-sync preserves source @ content when comparing artifact data", () => withTempRoot("agent-infra-platform-sync-content-policy-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
-  const taskContent = buildTaskContent({ issue_number: "65" });
+  const taskContent = buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' });
   const artifactContent = `${loadFixture("valid-code.md")}@2x\n`;
   write(path.join(ctx.taskDir, "task.md"), taskContent);
   write(path.join(ctx.taskDir, "code.md"), artifactContent);
@@ -608,7 +608,7 @@ test("validate-artifact platform-sync preserves source @ content when comparing 
 
 test("validate-artifact platform-sync compares sanitized artifact content", () => withTempRoot("agent-infra-platform-sync-sanitized-content-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
-  const taskContent = buildTaskContent({ issue_number: "65" });
+  const taskContent = buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' });
   const artifactContent = `${loadFixture("valid-code.md")}\n<!-- artifact-section:code:summary -->\n`;
   const sanitized = sanitizeMarkdownDocument(artifactContent, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
   assert.equal(sanitized.ok, true);
@@ -633,7 +633,7 @@ test("validate-artifact platform-sync compares sanitized artifact content", () =
 
 test("validate-artifact platform-sync compares sanitized task content", () => withTempRoot("agent-infra-platform-sync-sanitized-task-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
-  const taskContent = `${buildTaskContent({ issue_number: "65" })}\n<!-- task-section:summary -->\n`;
+  const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n<!-- task-section:summary -->\n`;
   const artifactContent = loadFixture("valid-code.md");
 
   write(path.join(ctx.taskDir, "task.md"), taskContent);
@@ -655,7 +655,7 @@ test("validate-artifact platform-sync compares sanitized task content", () => wi
 
 test("validate-artifact platform-sync preserves source @ content when comparing task data", () => withTempRoot("agent-infra-platform-sync-task-content-policy-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
-  const taskContent = `${buildTaskContent({ issue_number: "65" })}\n@2x\n`;
+  const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n@2x\n`;
   const artifactContent = loadFixture("valid-code.md");
   write(path.join(ctx.taskDir, "task.md"), taskContent);
   write(path.join(ctx.taskDir, "code.md"), artifactContent);
@@ -678,7 +678,7 @@ const issueFieldCases = [
   {
     name: "validate-artifact platform-sync passes when Issue fields match task frontmatter",
     taskOverrides: {
-      issue_number: "65",
+      platform_issue_identity: '\'{"kind":"number","value":65}\'',
       type: "feature",
       priority: "高",
       effort: "Medium",
@@ -701,7 +701,7 @@ const issueFieldCases = [
   {
     name: "validate-artifact platform-sync fails when an Issue field differs from task frontmatter",
     taskOverrides: {
-      issue_number: "65",
+      platform_issue_identity: '\'{"kind":"number","value":65}\'',
       priority: "High"
     },
     fields: buildIssueFieldsPayload({
@@ -722,7 +722,7 @@ for (const c of issueFieldCases) {
     writeJson(ctx.issueFieldsPath, c.fields);
 
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       verify_issue_fields: true
     }, {
       PATH: pathWithPrependedBin(ctx.binDir),
@@ -742,7 +742,7 @@ test("validate-artifact platform-sync skips Issue field verification when fields
   withTempRoot("agent-infra-platform-sync-issue-fields-skip-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
-      issue_number: "65",
+      platform_issue_identity: '\'{"kind":"number","value":65}\'',
       target_date: "2026-06-30"
     }));
     writeJson(ctx.issuePath, buildIssuePayload());
@@ -755,7 +755,7 @@ test("validate-artifact platform-sync skips Issue field verification when fields
     }));
 
     const inapplicableResult = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       verify_issue_fields: true
     }, {
       PATH: pathWithPrependedBin(ctx.binDir),
@@ -767,7 +767,7 @@ test("validate-artifact platform-sync skips Issue field verification when fields
     assert.equal(inapplicableResult.status, "pass");
 
     const unavailableResult = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       verify_issue_fields: true
     }, {
       PATH: pathWithPrependedBin(ctx.binDir),
@@ -781,7 +781,7 @@ test("validate-artifact platform-sync skips Issue field verification when fields
 
     writeJson(ctx.issueFieldsPath, buildIssueFieldsPayload({ issueType: null }));
     const missingTypeFieldsResult = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       verify_issue_fields: true
     }, {
       PATH: pathWithPrependedBin(ctx.binDir),
@@ -887,7 +887,7 @@ for (const c of createPrCases) {
       assert.equal(commitResult.status, 0, commitResult.stderr);
     }
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
-      issue_number: "65",
+      platform_issue_identity: '\'{"kind":"number","value":65}\'',
       pr_delivery_fact: boundFactValue(77),
       ...c.taskOverrides
     }));
@@ -918,7 +918,7 @@ test("validate-artifact platform-sync passes for complete-manual-validation when
   withTempRoot("agent-infra-platform-sync-manual-validation-pass-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({
-      issue_number: "65",
+      platform_issue_identity: '\'{"kind":"number","value":65}\'',
       pr_delivery_fact: boundFactValue(77)
     });
     write(path.join(ctx.taskDir, "task.md"), taskContent);
@@ -960,7 +960,7 @@ test("validate-artifact platform-sync fails for complete-manual-validation when 
   withTempRoot("agent-infra-platform-sync-manual-validation-fail-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({
-      issue_number: "65",
+      platform_issue_identity: '\'{"kind":"number","value":65}\'',
       pr_delivery_fact: boundFactValue(77)
     });
     write(path.join(ctx.taskDir, "task.md"), taskContent);
@@ -1002,7 +1002,7 @@ test("validate-artifact platform-sync fails for complete-manual-validation when 
 const commitCases = [
   {
     name: "validate-artifact platform-sync skips for commit when task has no bound PR fact",
-    taskOverrides: { issue_number: "65" },
+    taskOverrides: { platform_issue_identity: '\'{"kind":"number","value":65}\'' },
     useFakeGh: false,
     expectedStatus: 0,
     assertMessage: "Skipped: task has no verified bound pull request"
@@ -1048,7 +1048,7 @@ for (const c of commitCases) {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const headSha = c.setupHead ? createHeadCommit(tempRoot) : "";
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
-      issue_number: "65",
+      platform_issue_identity: '\'{"kind":"number","value":65}\'',
       ...(c.useFakeGh === false ? {} : { pr_delivery_fact: boundFactValue(77) }),
       ...c.taskOverrides
     }));
@@ -1088,7 +1088,7 @@ test("validate-artifact platform-sync passes for commit with last-commit from ta
     addWorktree(tempRoot, worktreePath, branch);
     const prSha = commitInWorktree(worktreePath, "sandbox commit");
     assert.notEqual(prSha, mainSha);
-    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ branch, issue_number: "65", pr_delivery_fact: boundFactValue(77, prSha) }));
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ branch, platform_issue_identity: '\'{"kind":"number","value":65}\'', pr_delivery_fact: boundFactValue(77, prSha) }));
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.prCommentsPath, [{ body: summaryCommentWithSha(prSha) }]);
 
@@ -1108,7 +1108,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
   withTempRoot("agent-infra-platform-sync-commit-no-branch-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const mainSha = createHeadCommit(tempRoot);
-    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_delivery_fact: boundFactValue(77, mainSha) }));
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'', pr_delivery_fact: boundFactValue(77, mainSha) }));
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
     writeJson(ctx.prCommentsPath, [{ body: summaryCommentWithSha(mainSha) }]);
 
@@ -1129,7 +1129,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
     const mainSha = createHeadCommit(tempRoot);
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
       branch: "agent-infra-feature-missing",
-      issue_number: "65",
+      platform_issue_identity: '\'{"kind":"number","value":65}\'',
       pr_delivery_fact: boundFactValue(77, mainSha)
     }));
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
@@ -1152,7 +1152,7 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
     const binDir = path.join(tempRoot, "bin");
     const ghPath = path.join(binDir, "gh");
     const ghScriptPath = path.join(binDir, "gh.js");
-    write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    write(path.join(taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     write(path.join(taskDir, "code.md"), loadFixture("valid-code.md"));
     write(ghScriptPath, "console.error('network timeout');\nprocess.exit(1);\n");
     writeNodeCommandShim(ghPath, ghScriptPath);
@@ -1192,7 +1192,7 @@ for (const c of retryCases) {
   test(c.name, () => withTempRoot(c.prefix, async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const counterPath = path.join(tempRoot, "transient.count");
-    const taskContent = buildTaskContent({ issue_number: "65" });
+    const taskContent = buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' });
     const artifactContent = loadFixture("valid-code.md");
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     write(path.join(ctx.taskDir, "code.md"), artifactContent);
@@ -1219,14 +1219,14 @@ for (const c of retryCases) {
 test("platform-sync rejects status labels on closed issues without triage permission", async () => (
   withTempRoot("agent-infra-platform-sync-closed-status-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
-    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     writeJson(ctx.issuePath, buildIssuePayload({
       state: "CLOSED",
       labels: [{ name: "status: in-progress" }, { name: "priority: high" }]
     }));
 
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       verify_closed_issue_has_no_status_labels: true
     }, {
       PATH: pathWithPrependedBin(ctx.binDir),
@@ -1249,11 +1249,11 @@ for (const issuePayload of [
   test(`platform-sync accepts lifecycle status state for ${issuePayload.state.toLowerCase()} issues`, async () => (
     withTempRoot("agent-infra-platform-sync-valid-status-", async (tempRoot) => {
       const ctx = setupPlatformSyncEnv(tempRoot);
-      write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+      write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
       writeJson(ctx.issuePath, issuePayload);
 
       const result = await runPlatformSyncAdapter(ctx.taskDir, {
-        when: "issue_number_exists",
+        when: "platform_issue_identity_exists",
         verify_closed_issue_has_no_status_labels: true
       }, {
         PATH: pathWithPrependedBin(ctx.binDir),

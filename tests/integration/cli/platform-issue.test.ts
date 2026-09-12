@@ -54,7 +54,7 @@ test('platform-issue requirements sync persists once and converges across CLI pr
       `id: ${taskId}`,
       'type: bugfix',
       'status: active',
-      'issue_number: 7',
+      'platform_issue_identity: \'{"kind":"number","value":7}\'',
       '---',
       '',
       '# Task',

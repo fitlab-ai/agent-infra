@@ -113,8 +113,8 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any, shared: 
   }
   const prIdentity = fact.status === "valid" && fact.fact.state === "bound" ? fact.fact.identity.resource : null;
   const prNumber = resourceIdentityNumber(prIdentity);
-  if (config.when === "issue_number_exists" && !issueIdentity) {
-    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no issue_number") };
+  if (config.when === "platform_issue_identity_exists" && !issueIdentity) {
+    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no platform_issue_identity") };
   }
   if (config.when === "pr_fact_bound" && !prIdentity) {
     return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no verified bound pull request") };

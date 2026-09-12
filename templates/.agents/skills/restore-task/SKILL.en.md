@@ -33,7 +33,7 @@ Comment parsing must not write the formal active directory. Step 6 declares one 
 ### 1. Verify Input and Environment
 
 Check:
-- required `{issue-number}`
+- required `{issue-token}`
 - optional `{task-id}`
 - read `.agents/rules/issue-pr-commands.md` first and use its authentication commands to verify current platform access
 
@@ -41,7 +41,7 @@ If the user provided `{task-id}`, validate the `TASK-{yyyyMMdd-HHmmss}` format.
 
 ### 2. Fetch Issue Comments
 
-Run `agent-infra-internal platform-comment list --issue {issue-number}` to read all paginated comments while preserving order and comment IDs; the intent owns platform context, authentication, and upstream resolution.
+Run `agent-infra-internal platform-comment list --issue {issue-token}` to read all paginated comments while preserving order and comment IDs; the intent owns platform context, authentication, and upstream resolution.
 
 ### 3. Determine the task-id and Files to Restore
 

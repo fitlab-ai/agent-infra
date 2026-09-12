@@ -135,11 +135,11 @@ Do not write `status/current_step/completed_at/updated_at/agent_infra_version`, 
 
 ### 4. Sync the Platform While Active
 
-Check whether task.md has a valid `issue_number`. If it does not, skip this step without output.
+Check whether task.md has a valid `platform_issue_identity`. If it does not, skip this step without output.
 
 > Issue metadata boundaries live in `.agents/rules/issue-sync.md`; comments use internal platform intents.
 
-When an `issue_number` exists, execute in this exact order:
+When a valid `platform_issue_identity` exists, execute in this exact order:
 
 1. Run `agent-infra-internal platform-comment backfill {task-id} --agent {standard-agent-token}` so core publishes only the completion canonical inventory in fixed order and resolves matching historical warnings only after full success.
 2. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.

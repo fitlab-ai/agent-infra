@@ -106,7 +106,7 @@ coordinator 负责 pending summary、receipt、通过日志、final promotion �
 
 transaction coordinator 成功后，核心已使用同一 transaction/receipt/head identity 原子登记 `manual-validation.completed`；不要手工补写 Activity Log。
 
-如任务存在有效 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`。
+如任务存在有效 `platform_issue_identity`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`。
 
 ### 8. 完成校验
 

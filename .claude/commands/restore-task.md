@@ -1,6 +1,6 @@
 ---
 description: "从 Issue 评论还原本地任务文件"
-usage: "/restore-task <issue-number> [task-id]"
+usage: "/restore-task <issue-token> [task-id]"
 disable-model-invocation: true
 ---
 
