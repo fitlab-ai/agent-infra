@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export function fsyncDirectory(directory: string): void {
+  if (process.platform === 'win32') return;
   const descriptor = fs.openSync(directory, 'r');
   try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
 }

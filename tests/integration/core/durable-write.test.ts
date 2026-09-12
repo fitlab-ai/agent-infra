@@ -19,6 +19,14 @@ test('durable publication distinguishes replacement from immutable creation', on
   assert.deepEqual(fs.readdirSync(root), ['record']);
 });
 
+test('durable publication remains usable when Windows cannot fsync a directory', onPlatforms('win32'), (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'durable-write-windows-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, 'record');
+  writeDurableFile(target, 'windows', { mode: 0o600, replace: true });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'windows');
+});
+
 test('durable publication preserves the target and cleans temporary files on sync failure', onPlatforms('linux', 'darwin'), (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'durable-write-failure-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
