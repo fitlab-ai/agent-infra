@@ -201,6 +201,78 @@ test('recover-started retries release after a terminal mutation whose release fa
   }
 });
 
+test('recover-started preserves retry evidence after consecutive release failures', () => {
+  const f = fixture();
+  try {
+    const first = recover(f, () => false);
+    assert.equal(first.status, 'applied', JSON.stringify(first));
+    assert.equal(first.changed, true);
+    const second = recover(f, () => false);
+    assert.equal(second.status, 'applied', JSON.stringify(second));
+    assert.equal(second.changed, false);
+    assert.deepEqual(readLifecycleRecoveryDomainEvidence(
+      f.root,
+      recoveryRequest,
+      { status: 'applied', changed: false, targetState: 'active', warning: second.warning },
+      { lifecycleStore: f.store }
+    ), {
+      consistent: true,
+      recovery: true,
+      targetState: 'active',
+      recoveryState: 'retry-required',
+      warning: second.warning
+    });
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('recover-started replays each persisted boundary without duplicating recovery facts', () => {
+  const failedWrite = {
+    status: 'failed',
+    requestRef: TASK_ID,
+    expectedState: 'active',
+    taskId: TASK_ID,
+    taskMdPath: null,
+    actualState: 'active',
+    changed: false,
+    operations: [],
+    timestamp: null,
+    agentInfraVersion: null,
+    error: { code: 'TASK_READ_FAILED', message: 'injected log write failure' }
+  } as ReturnType<typeof writeTask>;
+
+  const beforeLog = fixture();
+  try {
+    const first = recover(beforeLog, undefined, {}, { writeTask: () => failedWrite });
+    assert.equal(first.error?.code, 'RECOVERY_LOG_WRITE_FAILED');
+    assert.equal(readRun(beforeLog.taskDir)?.receipts.length, 1);
+    const retried = recover(beforeLog);
+    assert.equal(retried.status, 'applied', JSON.stringify(retried));
+    assert.equal(readRun(beforeLog.taskDir)?.receipts.length, 1);
+    assert.equal((fs.readFileSync(path.join(beforeLog.taskDir, 'task.md'), 'utf8').match(/lifecycle-recovery:v1 /gu) ?? []).length, 1);
+  } finally {
+    fs.rmSync(beforeLog.root, { recursive: true, force: true });
+  }
+
+  const beforeRelease = fixture();
+  try {
+    const first = recover(beforeRelease, undefined, {}, { verifyRecoveryCommit: () => ({ ok: false, message: 'injected commit verification failure' }) });
+    assert.equal(first.error?.code, 'RECOVERY_COMMIT_VERIFY_FAILED');
+    assert.equal(readRun(beforeRelease.taskDir)?.receipts.length, 1);
+    const retried = recover(beforeRelease, () => false);
+    assert.equal(retried.status, 'applied', JSON.stringify(retried));
+    assert.equal(retried.warning?.code, 'RECOVERY_RELEASE_RETRY_REQUIRED');
+    assert.equal(readRun(beforeRelease.taskDir)?.receipts.length, 1);
+    assert.equal((fs.readFileSync(path.join(beforeRelease.taskDir, 'task.md'), 'utf8').match(/lifecycle-recovery:v1 /gu) ?? []).length, 1);
+    const released = recover(beforeRelease, (child, consumer) => beforeRelease.store.releaseRecovery(child, consumer));
+    assert.equal(released.status, 'applied', JSON.stringify(released));
+    assert.equal(recover(beforeRelease).status, 'no-op');
+  } finally {
+    fs.rmSync(beforeRelease.root, { recursive: true, force: true });
+  }
+});
+
 test('recover-started reports every durable recovery failure code', () => {
   const failedWrite = {
     status: 'failed',

@@ -597,7 +597,7 @@ function readCommittedCriticalPhases(manifest: SandboxControlManifest, requestId
   });
 }
 
-function recoveryResponse(
+export function recoveryResponse(
   manifest: SandboxControlManifest,
   manifestPath: string,
   request: SandboxControlRequest,

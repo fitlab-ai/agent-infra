@@ -105,6 +105,13 @@ function isRecoveryWarning(value: unknown): value is RecoveryWarning {
     && text(warning.code) && text(warning.message) && text(warning.action);
 }
 
+function isReleaseRetryWarning(value: unknown): value is RecoveryWarning {
+  return isRecoveryWarning(value)
+    && value.code === 'RECOVERY_RELEASE_RETRY_REQUIRED'
+    && value.message === 'recovery receipt and Activity Log are complete but the protected lifecycle claim could not be released'
+    && value.action === 'retry recover-started with the same selector and reason';
+}
+
 function timestamp(value: unknown): value is string {
   return text(value) && Number.isFinite(Date.parse(value));
 }
@@ -462,10 +469,13 @@ export function readLifecycleRecoveryDomainEvidence(
   terminalResult: Readonly<{ status: string; changed: boolean | null; targetState: string | null; warning?: unknown | null }>,
   options: Pick<LifecycleRecoveryOptions, 'lifecycleStore' | 'now'> = {}
 ): Readonly<Record<string, unknown>> {
+  const terminalStateValid = terminalResult.status === 'no-op'
+    ? terminalResult.changed === false
+    : terminalResult.status === 'applied'
+      && (terminalResult.changed === true || (terminalResult.changed === false && isReleaseRetryWarning(terminalResult.warning)));
   const normalized = normalizeRequest(requestInput);
   if ('code' in normalized || terminalResult.targetState !== 'active'
-    || !['applied', 'no-op'].includes(terminalResult.status)
-    || terminalResult.changed !== (terminalResult.status === 'applied')) return recoveryDomainFailure();
+    || !terminalStateValid) return recoveryDomainFailure();
   const request = normalized;
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return recoveryDomainFailure();
@@ -501,7 +511,7 @@ export function readLifecycleRecoveryDomainEvidence(
     if (!evidence.ok || evidence.stopRevision !== note.stopRevision || evidence.consumedAt !== note.consumedAt) {
       return recoveryDomainFailure();
     }
-    if (!isRecoveryWarning(terminalResult.warning)) return recoveryDomainFailure();
+    if (!isReleaseRetryWarning(terminalResult.warning)) return recoveryDomainFailure();
     return {
       consistent: true,
       recovery: true,
