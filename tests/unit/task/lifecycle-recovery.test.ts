@@ -201,6 +201,27 @@ test('recover-started retries release after a terminal mutation whose release fa
   }
 });
 
+test('recover-started replays a claim-only cleanup boundary', () => {
+  const f = fixture();
+  try {
+    const consumer = `lifecycle-recovery:${TASK_ID}:receipt-1`;
+    const claimed = f.store.claimRecovery('child', TASK_ID, 'receipt-1', 'hook-hash');
+    assert.equal(claimed.consumer, consumer);
+    assert.equal(f.store.expireBefore('2099-01-01T00:00:00.000Z'), 0);
+    assert.equal(f.store.read('child').consumer, consumer);
+
+    const recovered = recover(f);
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(recovered.changed, true);
+    assert.throws(() => f.store.read('child'), /not found uniquely/u);
+    assert.equal(readRun(f.taskDir)?.receipts.filter((receipt) => receipt.status === 'aborted').length, 1);
+    assert.equal((fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/lifecycle-recovery:v1 /gu) ?? []).length, 1);
+    assert.equal(recover(f).status, 'no-op');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('recover-started preserves retry evidence after consecutive release failures', () => {
   const f = fixture();
   try {
