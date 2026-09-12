@@ -11,6 +11,7 @@ import type { LedgerDocument } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import {
   activateDelegation,
+  abortActivatedDelegation,
   abortPreparedDelegation,
   completeDelegationStage,
   consumeDelegation,
@@ -59,6 +60,7 @@ import { hasOpenLifecycleExecution } from './activity-log.ts';
 import { invalidationBlocks } from './invalidation.ts';
 import type { InvalidationDocument } from './invalidation.ts';
 import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
+import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type ModelPolicySource = Readonly<{
@@ -1444,6 +1446,68 @@ function recoverPreparedOrchestrationDelegation(
   }
 }
 
+function recoverActivatedOrchestrationDelegationUnderLock(
+  taskRef: string,
+  event: Readonly<{
+    receiptId: string;
+    stage: DelegationStage;
+    round: number;
+    artifact: string;
+    startedAgent: string;
+    childId: string;
+    stopRevision: number;
+    consumer: string;
+    consumedAt: string;
+  }>,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  const run = readRun(resolved.taskDir, options);
+  if (!run) return failed('ORCHESTRATION_RUN_MISSING', 'no orchestration run exists', resolved.taskId);
+  const matches = [
+    ...(run.pendingDelegation ? [run.pendingDelegation] : []),
+    ...run.receipts.filter((receipt) => receipt.id === event.receiptId)
+  ];
+  const receipt = matches.find((candidate) => candidate.id === event.receiptId);
+  if (!receipt) return failed('ORCHESTRATION_DELEGATION_MISSING', 'recovery receipt does not exist', resolved.taskId);
+  if (
+    receipt.taskId !== resolved.taskId
+    || receipt.stage !== event.stage
+    || receipt.round !== event.round
+    || receipt.artifact !== event.artifact
+    || receipt.childId !== event.childId
+    || normalizeAgentToken(event.startedAgent) !== normalizeAgentToken(receipt.client)
+  ) {
+    return failed('ORCHESTRATION_PROVENANCE_MISMATCH', 'recovery selector does not match the delegation receipt', resolved.taskId);
+  }
+  if (receipt.status === 'aborted' && run.pendingDelegation === null) {
+    return { status: run.status, changed: false, taskId: resolved.taskId, run, next: null, error: null };
+  }
+  if (run.pendingDelegation?.id !== receipt.id || receipt.status !== 'activated') {
+    return failed('ORCHESTRATION_RECOVERY_UNSAFE', 'recovery requires one matching activated pending delegation', resolved.taskId);
+  }
+  if (run.receipts.some((candidate) => candidate.id === receipt.id)) {
+    return failed('ORCHESTRATION_RECEIPT_DUPLICATE', 'recovery receipt already exists in the completed receipt history', resolved.taskId);
+  }
+  const aborted = abortActivatedDelegation(receipt, {
+    childId: event.childId,
+    stopRevision: event.stopRevision,
+    consumer: event.consumer,
+    consumedAt: event.consumedAt
+  });
+  if (!aborted.ok) return failed(aborted.code, aborted.message, resolved.taskId);
+  const updated = withUpdatedRun(run, {
+    status: 'running',
+    pause: null,
+    nextStage: null,
+    pendingDelegation: null,
+    receipts: Object.freeze([...run.receipts, aborted.receipt])
+  }, options.now);
+  saveRun(resolved.taskDir, updated);
+  return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
+}
+
 function completeOrchestrationStage(
   taskRef: string,
   event: Parameters<typeof completeDelegationStage>[1],
@@ -1598,6 +1662,7 @@ export {
   readRun,
   reconcileMatchingOrchestrationDelegation,
   recoverPreparedOrchestrationDelegation,
+  recoverActivatedOrchestrationDelegationUnderLock,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealMatchingOrchestrationDelegationWithHostEvidence,

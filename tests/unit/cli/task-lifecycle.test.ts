@@ -33,7 +33,7 @@ function fixture(state: 'active' | 'blocked' = 'active') {
 
 test('lifecycle catalog exposes the approved closed intent set', () => {
   assert.deepEqual(lifecycleIntentCatalog, [
-    'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'
+    'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
   ]);
 });
 

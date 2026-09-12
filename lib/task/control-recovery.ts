@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isCompletionEvidence } from './orchestration.ts';
 import { TASK_WORKFLOW_OPERATIONS } from './workflow-command.ts';
+import { sameRecoveryWarning } from './recovery-warning.ts';
 
 export type ControlRecoveryOutcome = 'not-executed' | 'in-progress' | 'success' | 'failure' | 'unknown' | 'rejected';
 
@@ -53,7 +54,7 @@ export type ControlRecoveryDecision = Readonly<{
   reasonCode: string;
 }>;
 
-const LIFECYCLE_INTENTS = ['block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'] as const;
+const LIFECYCLE_INTENTS = ['block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'] as const;
 const ORCHESTRATION_INTENTS = [
   'begin-or-resume', 'route.read', 'route.clean-completion', 'status', 'prepare', 'dispatch',
   'await-activation', 'recover-prepared', 'hook-start', 'hook-stop', 'advance', 'pause'
@@ -107,6 +108,15 @@ function domainEvidenceMatches(
       && snapshot.worktreeTree === completion.worktreeTree
       && lastReviewedCommit === completion.lastReviewedCommit;
   }
+  if (operation.family === 'task-lifecycle' && operation.intent === 'recover-started') {
+    const retryRequired = domain.recoveryState === 'retry-required'
+      && sameRecoveryWarning(domain.warning, result.warning);
+    return result.targetState === 'active'
+      && ['applied', 'no-op'].includes(String(result.status))
+      && domain.recovery === true
+      && domain.targetState === 'active'
+      && (domain.recoveryState === 'released' || retryRequired);
+  }
   if (operation.class === 'read-only') return result.changed === false && domain.snapshotValid === true;
   return true;
 }
@@ -159,6 +169,8 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
     responseReconstructable: true,
     reasonCode: input.operation.class === 'route.clean-completion' && result.changed === false
       ? 'RECOVERY_ROUTE_COMPLETION_NOOP'
+      : input.operation.intent === 'recover-started' && input.domain?.recoveryState === 'retry-required'
+        ? 'RECOVERY_RELEASE_RETRY_REQUIRED'
       : 'RECOVERY_TERMINAL_AND_DOMAIN_MATCH'
   };
 }

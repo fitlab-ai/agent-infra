@@ -186,7 +186,8 @@ function isDelegationHostEvidence(value: unknown): value is DelegationHostEviden
 function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
   const provenance = receipt.lifecycleProvenance;
   if (!provenance) return false;
-  const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
+  const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status)
+    || (receipt.status === 'aborted' && receipt.activatedAt !== null);
   if (!activated) return receipt.hostEvidence === null;
   const host = receipt.hostEvidence;
   if (
@@ -219,6 +220,12 @@ function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
       && host.consumer === receipt.id
       && exactText(host.consumedAt);
   }
+  if (receipt.status === 'aborted') {
+    return Number.isSafeInteger(host.stopRevision)
+      && (host.stopRevision as number) > host.startRevision
+      && host.consumer === `lifecycle-recovery:${receipt.taskId}:${receipt.id}`
+      && exactText(host.consumedAt);
+  }
   return host.stopRevision === null && host.consumer === null && host.consumedAt === null;
 }
 
@@ -244,7 +251,8 @@ function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
   const dispatchComplete = dispatchFields.every((field) => field !== null);
   if (!dispatchEmpty && !dispatchComplete) return false;
 
-  const beforeActivation = ['prepared', 'aborted', 'expired'].includes(receipt.status);
+  const beforeActivation = ['prepared', 'expired'].includes(receipt.status)
+    || (receipt.status === 'aborted' && receipt.activatedAt === null);
   if (beforeActivation) {
     return receipt.parentId === null
       && receipt.childId === null
@@ -280,6 +288,21 @@ function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
       && receipt.changedPaths.length === 0
       && receipt.sealedAt === null
       && receipt.consumedAt === null;
+  }
+
+  if (receipt.status === 'aborted') {
+    const host = receipt.hostEvidence;
+    return receipt.agent === null
+      && receipt.afterFingerprint === null
+      && receipt.changedPaths.length === 0
+      && receipt.sealedAt === null
+      && receipt.consumedAt === null
+      && host !== null
+      && host !== undefined
+      && Number.isSafeInteger(host.stopRevision)
+      && (host.stopRevision as number) > host.startRevision
+      && host.consumer === `lifecycle-recovery:${receipt.taskId}:${receipt.id}`
+      && exactText(host.consumedAt);
   }
 
   if (
@@ -584,6 +607,53 @@ function abortPreparedDelegation(receipt: DelegationReceipt): ReceiptResult {
   };
 }
 
+function abortActivatedDelegation(
+  receipt: DelegationReceipt,
+  event: Readonly<{ childId: string; stopRevision: number; consumer: string; consumedAt: string }>
+): ReceiptResult {
+  if (receipt.status !== 'activated') {
+    return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected activated`);
+  }
+  if (
+    receipt.client !== 'codex'
+    || !receipt.lifecycleProvenance
+    || receipt.hostEvidence?.kind !== 'codex-lifecycle-v2'
+    || typeof receipt.lifecycleProvenance.controllerInstanceDigest !== 'string'
+    || typeof receipt.lifecycleProvenance.controlGeneration !== 'string'
+    || typeof receipt.hostEvidence.controllerInstanceDigest !== 'string'
+    || typeof receipt.hostEvidence.controlGeneration !== 'string'
+  ) {
+    return fail('DELEGATION_RECOVERY_EVIDENCE_INVALID', 'activated delegation lacks the current Codex controller binding');
+  }
+  if (
+    event.childId !== receipt.childId
+    || !Number.isSafeInteger(event.stopRevision)
+    || event.stopRevision <= receipt.hostEvidence.startRevision
+    || event.consumer !== `lifecycle-recovery:${receipt.taskId}:${receipt.id}`
+    || !exactText(event.consumedAt)
+  ) {
+    return fail('DELEGATION_RECOVERY_EVIDENCE_INVALID', 'recovery stop evidence does not match the activated delegation');
+  }
+  return {
+    ok: true,
+    receipt: Object.freeze({
+      ...receipt,
+      status: 'aborted' as const,
+      agent: null,
+      afterFingerprint: null,
+      changedPaths: Object.freeze([]),
+      sealedAt: null,
+      consumedAt: null,
+      hostEvidence: Object.freeze({
+        ...receipt.hostEvidence,
+        stopRevision: event.stopRevision,
+        consumer: event.consumer,
+        consumedAt: event.consumedAt
+      })
+    })
+  };
+}
+
 function completeDelegationStage(
   receipt: DelegationReceipt,
   event: Readonly<{ stage: DelegationStage; round: number; artifact: string; agent: string }>
@@ -666,6 +736,7 @@ function consumeDelegation(receipt: DelegationReceipt, options: { now?: () => st
 
 export {
   activateDelegation,
+  abortActivatedDelegation,
   abortPreparedDelegation,
   completeDelegationStage,
   consumeDelegation,

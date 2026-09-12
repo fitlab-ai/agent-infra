@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { writeDurableFile } from '../../../lib/fs/durable-write.ts';
-import { onPlatforms } from '../../helpers.ts';
+import { writeDurableFile } from '../../../../lib/fs/durable-write.ts';
+import { onPlatforms } from '../../../helpers.ts';
 
 test('durable publication distinguishes replacement from immutable creation', onPlatforms('linux', 'darwin'), (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'durable-write-'));
@@ -17,6 +17,14 @@ test('durable publication distinguishes replacement from immutable creation', on
   assert.equal(fs.readFileSync(target, 'utf8'), 'replacement');
   assert.equal(fs.statSync(target).mode & 0o777, 0o400);
   assert.deepEqual(fs.readdirSync(root), ['record']);
+});
+
+test('durable publication remains usable when Windows cannot fsync a directory', onPlatforms('win32'), (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'durable-write-windows-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, 'record');
+  writeDurableFile(target, 'windows', { mode: 0o600, replace: true });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'windows');
 });
 
 test('durable publication preserves the target and cleans temporary files on sync failure', onPlatforms('linux', 'darwin'), (t) => {

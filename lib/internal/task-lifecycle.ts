@@ -7,9 +7,10 @@ import {
 import { lifecycleIntentCatalog } from '../task/lifecycle.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import type { TaskLifecycleResult } from '../task/lifecycle.ts';
+import type { LifecycleRecoveryResult } from '../task/lifecycle-recovery.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\nOverride: --override-ticket <ticket> --override-target <target> --override-scope <scope>\n`;
+const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\nrecover-started: --stage <stage> --round <round> --artifact <artifact> --reason <reason>\nOverride: --override-ticket <ticket> --override-target <target> --override-scope <scope>\n`;
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'LIFECYCLE_PAYLOAD_INVALID', message } })}\n`);
@@ -61,9 +62,9 @@ async function taskLifecycle(args: string[] = []): Promise<void> {
   const result = await dispatchTaskControlOperation(
     createDirectHostExecutionContext({ repoRoot }),
     operation
-  ) as TaskLifecycleResult & { humanOverride?: unknown };
+  ) as (TaskLifecycleResult | LifecycleRecoveryResult) & { humanOverride?: unknown };
   process.stdout.write(`${JSON.stringify(result)}\n`);
-  if (result.status === 'failed') process.exitCode = 1;
+  if (result.status === 'failed' || result.status === 'owner-unknown' || result.status === 'conflict') process.exitCode = 1;
 }
 
 export { taskLifecycle };

@@ -39,6 +39,12 @@ import {
   type TaskLifecycleRequest,
   type TaskLifecycleResult
 } from './lifecycle.ts';
+import {
+  recoverStartedLifecycleUnderLock,
+  recoveryFailure,
+  type LifecycleRecoveryResult
+} from './lifecycle-recovery.ts';
+import type { LifecycleRecoveryRequest } from './lifecycle-recovery.ts';
 import { locateActivityLog } from './activity-log.ts';
 import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
@@ -565,7 +571,7 @@ export type TaskControlOperation =
       options?: Omit<OrchestrationOptions, 'repoRoot'>;
     }>;
 
-export type TaskControlDispatchResult = TaskLifecycleResult | TaskFinalizationResult | OrchestrationResult;
+export type TaskControlDispatchResult = TaskLifecycleResult | LifecycleRecoveryResult | TaskFinalizationResult | OrchestrationResult;
 
 export function taskControlOperationKey(operation: TaskControlOperation): string {
   if (operation.family === 'task-finalization') return 'complete';
@@ -712,12 +718,15 @@ function lifecycleTaskId(request: TaskLifecycleControlRequest, repoRoot: string)
 async function applyLifecycleWithAuthority(
   context: TaskControlExecutionContext,
   request: TaskLifecycleControlRequest
-): Promise<TaskLifecycleResult & { humanOverride?: unknown }> {
+): Promise<(TaskLifecycleResult | LifecycleRecoveryResult) & { humanOverride?: unknown }> {
   const conflict = overrideDryRunConflict(request as unknown as Record<string, unknown>);
   if (conflict) {
     return taskLifecycleFailure(request, { code: 'LIFECYCLE_PAYLOAD_INVALID', message: conflict.message });
   }
-  const execute = async (): Promise<TaskLifecycleResult & { humanOverride?: unknown }> => {
+  const execute = async (): Promise<(TaskLifecycleResult | LifecycleRecoveryResult) & { humanOverride?: unknown }> => {
+    if (request.intent === 'recover-started') {
+      return recoverStartedLifecycleUnderLock(request as LifecycleRecoveryRequest, { repoRoot: context.repoRoot });
+    }
     const lifecycleResult = applyTaskLifecycle(request, { repoRoot: context.repoRoot });
     if (lifecycleResult.status !== 'failed' || !request.overrideTicket) return lifecycleResult;
     if (!request.overrideTarget || !request.overrideScope) {
@@ -751,6 +760,9 @@ async function applyLifecycleWithAuthority(
     );
   } catch (error) {
     if (!(error instanceof TaskExecutionLockError)) throw error;
+    if (request.intent === 'recover-started') {
+      return recoveryFailure(request as LifecycleRecoveryRequest, 'owner-unknown', error.code, error.message);
+    }
     return taskLifecycleFailure(request, { code: error.code, message: error.message }, taskId);
   }
 }
@@ -829,7 +841,7 @@ function orchestrationFailure(error: unknown): OrchestrationResult {
 export function dispatchTaskControlOperation(
   context: TaskControlExecutionContext,
   operation: Extract<TaskControlOperation, { family: 'task-lifecycle' }>
-): Promise<TaskLifecycleResult & { humanOverride?: unknown }>;
+): Promise<(TaskLifecycleResult | LifecycleRecoveryResult) & { humanOverride?: unknown }>;
 export function dispatchTaskControlOperation(
   context: TaskControlExecutionContext,
   operation: Extract<TaskControlOperation, { family: 'task-finalization' }>
@@ -892,7 +904,7 @@ function operationInvalid(message: string): never {
 
 const LIFECYCLE_FLAGS = new Set([
   '--agent', '--reason', '--unblock-condition', '--note', '--alert-number', '--staging-dir', '--issue-number',
-  '--override-ticket', '--override-target', '--override-scope', '--dry-run'
+  '--stage', '--round', '--artifact', '--override-ticket', '--override-target', '--override-scope', '--dry-run'
 ]);
 
 const FINALIZATION_FLAGS = new Set(['--agent']);
@@ -972,8 +984,29 @@ export function parseTaskControlOperation(
       ...(value(values, '--override-scope') ? { overrideScope: value(values, '--override-scope') } : {}),
       ...(value(values, '--alert-number') ? { alertNumber: Number(value(values, '--alert-number')) } : {}),
       ...(value(values, '--issue-number') ? { issueNumber: Number(value(values, '--issue-number')) } : {}),
+      ...(value(values, '--stage') ? { stage: value(values, '--stage') } : {}),
+      ...(value(values, '--round') ? { round: Number(value(values, '--round')) } : {}),
+      ...(value(values, '--artifact') ? { artifact: value(values, '--artifact') } : {}),
       ...(values['--dry-run'] === true ? { dryRun: true } : {})
     };
+    if (intent === 'recover-started') {
+      const recoveryFlags = new Set(['--agent', '--stage', '--round', '--artifact', '--reason']);
+      for (const flag of Object.keys(values)) {
+        if (!recoveryFlags.has(flag)) operationInvalid(`option '${flag}' is not supported for recover-started`);
+      }
+      required(values, ['--stage', '--round', '--artifact', '--reason']);
+      const stage = value(values, '--stage');
+      if (!['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'].includes(stage ?? '')) {
+        operationInvalid('--stage must be a supported lifecycle stage');
+      }
+      const round = Number(value(values, '--round'));
+      if (!Number.isSafeInteger(round) || round < 1) operationInvalid('--round must be a positive integer');
+      if (value(values, '--reason')!.includes('\n') || value(values, '--reason')!.includes('\r')) {
+        operationInvalid('--reason must be a single line');
+      }
+    } else if (values['--stage'] !== undefined || values['--round'] !== undefined || values['--artifact'] !== undefined) {
+      operationInvalid('--stage, --round, and --artifact are only supported for recover-started');
+    }
     return { family, request: input as unknown as TaskLifecycleControlRequest };
   }
 

@@ -8,6 +8,10 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
 import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { applyTaskEvent } from '../../../lib/task/events.ts';
+import { createDirectHostExecutionContext, dispatchTaskControlOperation, parseTaskControlOperation } from '../../../lib/task/control-authority.ts';
+import type { TaskControlOperation } from '../../../lib/task/control-authority.ts';
+import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import {
   consumeLifecycleRecoveryAttestation,
   issueLifecycleRecoveryAttestation,
@@ -388,4 +392,51 @@ test('lifecycle recovery compensates a retained expired capability tombstone aft
   assert.equal(store.findByRecoveryOperation(selector.operationId)[0]?.status, 'consumed');
   fs.rmSync(root, { recursive: true, force: true });
   fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('production recovery authority and task-event share one task lock', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-competition-'));
+  const taskId = 'TASK-20260101-000009';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const taskPath = path.join(taskDir, 'task.md');
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(taskPath, [
+    '---', `id: ${taskId}`, 'status: active', 'current_step: code',
+    'assigned_to: codex', 'updated_at: 2026-01-01 00:00:00+00:00', 'agent_infra_version: v0.9.16-alpha.0',
+    '---', '', '# Recovery fixture', '', '## Activity Log', ''
+  ].join('\n'));
+  const recoveryOperation = parseTaskControlOperation('task-lifecycle', [
+    taskId, 'recover-started', '--agent', 'codex', '--stage', 'code', '--round', '1',
+    '--artifact', 'code.md', '--reason', 'competing recovery request'
+  ]);
+  let recoveryPromise: Promise<unknown> | undefined;
+  let eventResult: ReturnType<typeof applyTaskEvent> | undefined;
+  const taskBefore = fs.readFileSync(taskPath, 'utf8');
+  try {
+    withTaskExecutionLock(root, taskId, 'test-holder', () => {
+      recoveryPromise = dispatchTaskControlOperation(
+        createDirectHostExecutionContext({ repoRoot: root }),
+        recoveryOperation as Extract<TaskControlOperation, { family: 'task-lifecycle' }>
+      );
+      eventResult = applyTaskEvent({
+        taskRef: taskId,
+        event: 'plan.completed',
+        agent: 'codex',
+        initiator: 'model',
+        requestId: 'competition:task-event',
+        reasonCode: 'user-request',
+        artifact: 'plan.md',
+        artifactSha256: 'a'.repeat(64),
+        semanticDigest: 'b'.repeat(64)
+      }, { repoRoot: root });
+    });
+    const recoveryResult = await recoveryPromise! as { status: string; error?: { code?: string } | null };
+    assert.equal(recoveryResult.status, 'owner-unknown');
+    assert.equal(recoveryResult.error?.code, 'ORCHESTRATION_LOCK_BUSY');
+    assert.equal(eventResult?.status, 'failed');
+    assert.equal(eventResult?.error?.code, 'EVENT_TRANSITION_INVALID');
+    assert.deepEqual(fs.readFileSync(taskPath, 'utf8'), taskBefore);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
