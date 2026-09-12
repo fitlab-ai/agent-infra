@@ -10,8 +10,9 @@ import {
   readLifecycleRecoveryDomainEvidence,
   recoverStartedLifecycleUnderLock
 } from '../../../lib/task/lifecycle-recovery.ts';
-import type { LifecycleRecoveryRequest } from '../../../lib/task/lifecycle-recovery.ts';
+import type { LifecycleRecoveryOptions, LifecycleRecoveryRequest } from '../../../lib/task/lifecycle-recovery.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
+import { writeTask } from '../../../lib/task/write.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const MODEL_POLICY = {
@@ -72,9 +73,13 @@ const recoveryRequest: LifecycleRecoveryRequest = {
 function recover(
   f: ReturnType<typeof fixture>,
   releaseRecovery?: (child: string, consumer: string) => boolean,
-  overrides: Partial<LifecycleRecoveryRequest> = {}
+  overrides: Partial<LifecycleRecoveryRequest> = {},
+  options: Pick<LifecycleRecoveryOptions, 'lifecycleStore' | 'writeTask' | 'verifyRecoveryCommit'> = {}
 ) {
-  return withTaskExecutionLock(path.resolve(f.taskDir, '../../../..'), TASK_ID, 'test.recover-started', () => recoverStartedLifecycleUnderLock({ ...recoveryRequest, ...overrides }, { repoRoot: path.resolve(f.taskDir, '../../../..'), lifecycleStore: f.store, releaseRecovery }));
+  return withTaskExecutionLock(path.resolve(f.taskDir, '../../../..'), TASK_ID, 'test.recover-started', () => recoverStartedLifecycleUnderLock(
+    { ...recoveryRequest, ...overrides },
+    { repoRoot: path.resolve(f.taskDir, '../../../..'), lifecycleStore: f.store, releaseRecovery, ...options }
+  ));
 }
 
 test('recover-started claims, aborts, logs, releases, and replays as no-op', () => {
@@ -94,14 +99,14 @@ test('recover-started claims, aborts, logs, releases, and replays as no-op', () 
       recoveryRequest,
       { status: 'applied', changed: true, targetState: 'active' },
       { lifecycleStore: f.store }
-    ), { consistent: true, recovery: true, targetState: 'active' });
+    ), { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' });
     assert.equal(recover(f).status, 'no-op');
     assert.deepEqual(readLifecycleRecoveryDomainEvidence(
       f.root,
       recoveryRequest,
       { status: 'no-op', changed: false, targetState: 'active' },
       { lifecycleStore: f.store }
-    ), { consistent: true, recovery: true, targetState: 'active' });
+    ), { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' });
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -175,11 +180,92 @@ test('recover-started retries release after a terminal mutation whose release fa
     assert.equal(first.status, 'applied', JSON.stringify(first));
     assert.equal(first.warning?.code, 'RECOVERY_RELEASE_RETRY_REQUIRED');
     assert.notEqual(f.store.read('child').consumer, null);
+    assert.deepEqual(readLifecycleRecoveryDomainEvidence(
+      f.root,
+      recoveryRequest,
+      { status: 'applied', changed: true, targetState: 'active', warning: first.warning },
+      { lifecycleStore: f.store }
+    ), {
+      consistent: true,
+      recovery: true,
+      targetState: 'active',
+      recoveryState: 'retry-required',
+      warning: first.warning
+    });
     const second = recover(f, (child, consumer) => f.store.releaseRecovery(child, consumer));
     assert.equal(second.status, 'applied');
     assert.throws(() => f.store.read('child'), /not found uniquely/u);
     assert.equal(recover(f).status, 'no-op');
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('recover-started reports every durable recovery failure code', () => {
+  const failedWrite = {
+    status: 'failed',
+    requestRef: TASK_ID,
+    expectedState: 'active',
+    taskId: TASK_ID,
+    taskMdPath: null,
+    actualState: 'active',
+    changed: false,
+    operations: [],
+    timestamp: null,
+    agentInfraVersion: null,
+    error: { code: 'TASK_READ_FAILED', message: 'log write failed' }
+  } as ReturnType<typeof writeTask>;
+  type RecoveryTestOptions = Pick<LifecycleRecoveryOptions, 'lifecycleStore' | 'writeTask' | 'verifyRecoveryCommit'>;
+  const cases: readonly [string, (f: ReturnType<typeof fixture>) => void, string, ((f: ReturnType<typeof fixture>) => RecoveryTestOptions)?][] = [
+    ['invalid stop evidence', (f) => {
+      const file = fs.readdirSync(f.store.root).find((entry) => /^[a-f0-9]{64}\.json$/u.test(entry));
+      assert.ok(file);
+      const record = JSON.parse(fs.readFileSync(path.join(f.store.root, file!), 'utf8')) as {
+        state: { stopEvidence: { hookStopObserved: boolean } };
+      };
+      record.state.stopEvidence.hookStopObserved = false;
+      fs.writeFileSync(path.join(f.store.root, file!), `${JSON.stringify(record)}\n`);
+    }, 'RECOVERY_STOP_EVIDENCE_INVALID'],
+    ['unknown orchestration', (f) => { fs.writeFileSync(path.join(f.taskDir, 'orchestration.json'), '{invalid\n'); }, 'RECOVERY_ORCHESTRATION_UNKNOWN'],
+    ['delegation unavailable', (f) => {
+      const file = path.join(f.taskDir, 'orchestration.json');
+      const run = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+        pendingDelegation: unknown;
+        receipts: readonly unknown[];
+      };
+      run.pendingDelegation = null;
+      run.receipts = [];
+      fs.writeFileSync(file, `${JSON.stringify(run)}\n`);
+    }, 'RECOVERY_DELEGATION_UNAVAILABLE'],
+    ['claim failed', () => undefined, 'RECOVERY_CLAIM_FAILED', (f) => ({
+      lifecycleStore: {
+        ...f.store,
+        claimRecovery: () => { throw new Error('claim failed'); }
+      } as ReturnType<typeof createCodexLifecycleStore>
+    })],
+    ['log write failed', () => undefined, 'RECOVERY_LOG_WRITE_FAILED', () => ({ writeTask: () => failedWrite })],
+    ['commit verification failed', () => undefined, 'RECOVERY_COMMIT_VERIFY_FAILED', () => ({
+      verifyRecoveryCommit: () => ({ ok: false, message: 'commit verification failed' })
+    })],
+    ['reference conflict', (f) => {
+      const first = recover(f, () => false);
+      assert.equal(first.status, 'applied');
+      const file = path.join(f.taskDir, 'orchestration.json');
+      const run = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+        receipts: Array<{ hostEvidence: { stopRevision: number } }>;
+      };
+      run.receipts[0]!.hostEvidence.stopRevision = 999;
+      fs.writeFileSync(file, `${JSON.stringify(run)}\n`);
+    }, 'RECOVERY_REFERENCE_CONFLICT']
+  ];
+  for (const [name, setup, expected, optionsForFixture] of cases) {
+    const f = fixture();
+    try {
+      setup(f);
+      const result = recover(f, undefined, {}, optionsForFixture?.(f));
+      assert.equal(result.error?.code, expected, name);
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
   }
 });

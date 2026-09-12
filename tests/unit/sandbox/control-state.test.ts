@@ -11,10 +11,16 @@ test('sandbox terminal evidence preserves recover-started target state for respo
   const result = createSandboxControlTerminalResult(
     manifest,
     { id: 'a'.repeat(32), family: 'task-lifecycle', operation: 'recover-started' },
-    `${JSON.stringify({ status: 'applied', changed: true, targetState: 'active' })}\n`
+    `${JSON.stringify({
+      status: 'applied', changed: true, targetState: 'active',
+      warning: { code: 'RECOVERY_RELEASE_RETRY_REQUIRED', message: 'claim retained', action: 'retry recover-started' }
+    })}\n`
   );
 
   assert.equal(result.status, 'applied');
   assert.equal(result.changed, true);
   assert.equal(result.targetState, 'active');
+  assert.deepEqual(result.warning, {
+    code: 'RECOVERY_RELEASE_RETRY_REQUIRED', message: 'claim retained', action: 'retry recover-started'
+  });
 });

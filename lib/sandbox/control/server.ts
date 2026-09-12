@@ -12,6 +12,7 @@ import {
   SANDBOX_CONTROL_MAX_RESPONSE_BYTES,
   SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
   type SandboxControlManifest,
+  type SandboxControlRecoveryWarning,
   type SandboxControlRequest,
   type SandboxControlResponse,
   type SandboxControlTimingPolicy
@@ -369,11 +370,12 @@ function outputMatchesEvidence(output: string, bytes: number, sha256: string): b
     && createHash('sha256').update(output, 'utf8').digest('hex') === sha256;
 }
 
-function genericRecoveryResponse(
+export function genericRecoveryResponse(
   request: SandboxControlRequest,
   exitCode: number,
   payload: ReturnType<typeof readSandboxControlPayload> | null,
-  cause: 'publish' | 'recovery' = 'recovery'
+  cause: 'publish' | 'recovery' = 'recovery',
+  warning: SandboxControlRecoveryWarning | null = null
 ): SandboxControlResponse {
   const outputUnavailable = request.family === 'task-create' && !payload;
   return {
@@ -382,9 +384,11 @@ function genericRecoveryResponse(
     phase: 'completed',
     exitCode,
     stdout: outputUnavailable ? `${JSON.stringify(taskCreateOutputUnavailableResult(request.id))}\n` : '',
-    stderr: payload ? '' : cause === 'publish'
-      ? 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n'
-      : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
+    stderr: payload ? '' : warning
+      ? `${warning.code}: ${warning.message}\nAction: ${warning.action}\n`
+      : cause === 'publish'
+        ? 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n'
+        : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
     error: null,
     outputState: payload ? 'available' : 'unavailable',
     payload: payload ? payloadReference(payload) : null
@@ -653,7 +657,7 @@ function recoveryResponse(
     if (finalization?.status !== 'matched') return null;
     return finalization.response ?? null;
   }
-  return genericRecoveryResponse(request, evidence.exitCode, payload);
+  return genericRecoveryResponse(request, evidence.exitCode, payload, 'recovery', terminalResult.warning ?? null);
 }
 
 function terminalMatchesEvidence(
@@ -697,7 +701,7 @@ function terminalMatchesEvidence(
   if (response.outputState === 'unavailable') {
     const causes = ['recovery', 'publish'] as const;
     const valid = causes.some((cause) => JSON.stringify(response)
-      === JSON.stringify(genericRecoveryResponse(request, evidence.exitCode, null, cause)));
+      === JSON.stringify(genericRecoveryResponse(request, evidence.exitCode, null, cause, terminalResult?.warning ?? null)));
     return { valid, payloadReferenced: false };
   }
   return {
@@ -716,7 +720,7 @@ function publishExecutionResult(
   brokerOwns: () => boolean
 ): boolean {
   const normalized = sanitizeSandboxControlResult(manifest, result);
-  writeSandboxControlTerminalResult(manifest, {
+  const terminalResult = writeSandboxControlTerminalResult(manifest, {
     id: request.id,
     family: request.family,
     operation: operationKey(request, normalized.stdout)
@@ -753,7 +757,7 @@ function publishExecutionResult(
       } catch {
         payload = null;
       }
-      terminal = genericRecoveryResponse(request, normalized.exitCode, payload, 'publish');
+      terminal = genericRecoveryResponse(request, normalized.exitCode, payload, 'publish', terminalResult.warning ?? null);
     }
   }
   if (!brokerOwns()) return false;

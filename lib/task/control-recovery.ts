@@ -108,10 +108,14 @@ function domainEvidenceMatches(
       && lastReviewedCommit === completion.lastReviewedCommit;
   }
   if (operation.family === 'task-lifecycle' && operation.intent === 'recover-started') {
+    const retryRequired = domain.recoveryState === 'retry-required'
+      && JSON.stringify(domain.warning) === JSON.stringify(result.warning)
+      && typeof result.warning === 'object' && result.warning !== null;
     return result.targetState === 'active'
       && ['applied', 'no-op'].includes(String(result.status))
       && domain.recovery === true
-      && domain.targetState === 'active';
+      && domain.targetState === 'active'
+      && (domain.recoveryState === 'released' || retryRequired);
   }
   if (operation.class === 'read-only') return result.changed === false && domain.snapshotValid === true;
   return true;
@@ -165,6 +169,8 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
     responseReconstructable: true,
     reasonCode: input.operation.class === 'route.clean-completion' && result.changed === false
       ? 'RECOVERY_ROUTE_COMPLETION_NOOP'
+      : input.operation.intent === 'recover-started' && input.domain?.recoveryState === 'retry-required'
+        ? 'RECOVERY_RELEASE_RETRY_REQUIRED'
       : 'RECOVERY_TERMINAL_AND_DOMAIN_MATCH'
   };
 }

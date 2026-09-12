@@ -74,7 +74,7 @@ test('every registered mutation requires a matching domain contract', () => {
       ...(operation.intent === 'recover-started' ? { targetState: 'active' } : {})
     };
     const domain = operation.intent === 'recover-started'
-      ? { consistent: true, recovery: true, targetState: 'active' }
+      ? { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' }
       : { consistent: true };
     assert.equal(classifySandboxControlRecovery({
       operation,
@@ -97,11 +97,38 @@ test('recover-started response-loss recovery requires durable target and domain 
     requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId,
     intentDigest: binding.intentDigest, status: 'applied', changed: true, targetState: 'active'
   };
-  const valid = { consistent: true, recovery: true, targetState: 'active' };
+  const valid = { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' };
   assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: result, domain: valid, criticalPhases }).outcome, 'success');
   assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: result, domain: { consistent: true }, criticalPhases }).outcome, 'unknown');
   assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: { ...result, targetState: null }, domain: valid, criticalPhases }).outcome, 'unknown');
   assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: { ...result, status: 'no-op', changed: false }, domain: valid, criticalPhases }).outcome, 'success');
+});
+
+test('recover-started response-loss recovery preserves a release retry warning', () => {
+  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'recover-started')!;
+  const binding = operationRecoveryBinding('g'.repeat(32), 'generation-8', 'TASK-20260904-002407', operation.family, operation.intent);
+  const warning = {
+    code: 'RECOVERY_RELEASE_RETRY_REQUIRED',
+    message: 'protected claim could not be released',
+    action: 'retry recover-started'
+  };
+  const result = {
+    requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId,
+    intentDigest: binding.intentDigest, status: 'applied', changed: true, targetState: 'active', warning
+  };
+  const domain = {
+    consistent: true, recovery: true, targetState: 'active', recoveryState: 'retry-required', warning
+  };
+  const decision = classifySandboxControlRecovery({
+    operation, binding, startedCommitted: true, terminalResult: result, domain, criticalPhases
+  });
+  assert.deepEqual(decision, {
+    outcome: 'success', responseReconstructable: true, reasonCode: 'RECOVERY_RELEASE_RETRY_REQUIRED'
+  });
+  assert.equal(classifySandboxControlRecovery({
+    operation, binding, startedCommitted: true, terminalResult: { ...result, warning: undefined },
+    domain, criticalPhases
+  }).outcome, 'unknown');
 });
 
 test('recovery matrix distinguishes explicit failure, journal partial state, and read-only changes', () => {

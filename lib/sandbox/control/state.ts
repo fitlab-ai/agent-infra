@@ -14,6 +14,7 @@ import type {
   SandboxControlPayload,
   SandboxControlReservation,
   SandboxControlResultEvidence,
+  SandboxControlRecoveryWarning,
   SandboxControlStatus
 } from './protocol.ts';
 import {
@@ -113,7 +114,17 @@ export type SandboxControlTerminalResult = Readonly<{
   status: string;
   changed: boolean | null;
   completionEvidence: CleanCompletionEvidence | null;
+  warning?: SandboxControlRecoveryWarning | null;
 }>;
+
+function isSandboxControlRecoveryWarning(value: unknown): value is SandboxControlRecoveryWarning {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const warning = value as Record<string, unknown>;
+  return Object.keys(warning).sort().join(',') === 'action,code,message'
+    && [warning.code, warning.message, warning.action].every((field) => (
+      typeof field === 'string' && field.length > 0 && field.trim() === field && !/[\r\n]/u.test(field)
+    ));
+}
 
 export function terminalResultPath(manifest: SandboxControlManifest, requestId: string): string {
   if (!/^[a-f0-9-]{16,64}$/u.test(requestId)) throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
@@ -130,6 +141,7 @@ export function createSandboxControlTerminalResult(
     ? nested.run as Record<string, unknown> : null;
   const rawCompletion = nested.completionEvidence ?? run?.completionEvidence;
   const operation = request.operation ?? (typeof nested.intent === 'string' ? nested.intent : null) ?? '';
+  const warning = isSandboxControlRecoveryWarning(nested.warning) ? nested.warning : null;
   return {
     version: 1,
     requestId: request.id,
@@ -139,7 +151,8 @@ export function createSandboxControlTerminalResult(
     targetState: typeof nested.targetState === 'string' ? nested.targetState : null,
     status: typeof nested.status === 'string' ? nested.status : 'completed',
     changed: typeof nested.changed === 'boolean' ? nested.changed : null,
-    completionEvidence: isCompletionEvidence(rawCompletion) ? rawCompletion : null
+    completionEvidence: isCompletionEvidence(rawCompletion) ? rawCompletion : null,
+    ...(warning ? { warning } : {})
   };
 }
 
@@ -171,6 +184,9 @@ export function readSandboxControlTerminalResult(filePath: string): SandboxContr
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
   if (value.completionEvidence !== null && !isCompletionEvidence(value.completionEvidence)) {
+    throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
+  }
+  if (value.warning !== undefined && value.warning !== null && !isSandboxControlRecoveryWarning(value.warning)) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
   if (value.changed === undefined) {

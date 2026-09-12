@@ -45,6 +45,7 @@ type LifecycleRecoveryRequest = Readonly<{
   reason: string;
 }>;
 type RecoveryWarning = Readonly<{ code: string; message: string; action: string }>;
+type RecoveryCommitVerification = { ok: true; receipt: DelegationReceipt } | { ok: false; message: string };
 type LifecycleRecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'owner-unknown' | 'conflict';
   changed: boolean;
@@ -66,6 +67,15 @@ type LifecycleRecoveryOptions = Readonly<{
   orchestration?: Pick<OrchestrationOptions, 'diagnosticLog' | 'now'>;
   lifecycleStore?: ReturnType<typeof createCodexLifecycleStore>;
   releaseRecovery?: (childThreadId: string, consumer: string) => boolean;
+  writeTask?: typeof writeTask;
+  verifyRecoveryCommit?: (
+    taskMdPath: string,
+    taskDir: string,
+    taskId: string,
+    request: LifecycleRecoveryRequest,
+    note: RecoveryNote,
+    options: LifecycleRecoveryOptions
+  ) => RecoveryCommitVerification;
 }>;
 
 type RecoveryNote = Readonly<{
@@ -86,6 +96,13 @@ type RecoveryNote = Readonly<{
 
 function text(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value && !/[\r\n]/u.test(value);
+}
+
+function isRecoveryWarning(value: unknown): value is RecoveryWarning {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const warning = value as Record<string, unknown>;
+  return Object.keys(warning).sort().join(',') === 'action,code,message'
+    && text(warning.code) && text(warning.message) && text(warning.action);
 }
 
 function timestamp(value: unknown): value is string {
@@ -391,7 +408,7 @@ function verifyRecoveryCommit(
   request: LifecycleRecoveryRequest,
   note: RecoveryNote,
   options: LifecycleRecoveryOptions
-): { ok: true; receipt: DelegationReceipt } | { ok: false; message: string } {
+): RecoveryCommitVerification {
   try {
     const content = fs.readFileSync(taskMdPath, 'utf8');
     parseTypedTaskFrontmatter(content);
@@ -442,7 +459,7 @@ function recoveryDomainFailure(): Readonly<Record<string, unknown>> {
 export function readLifecycleRecoveryDomainEvidence(
   repoRoot: string,
   requestInput: LifecycleRecoveryRequest,
-  terminalResult: Readonly<{ status: string; changed: boolean | null; targetState: string | null }>,
+  terminalResult: Readonly<{ status: string; changed: boolean | null; targetState: string | null; warning?: unknown | null }>,
   options: Pick<LifecycleRecoveryOptions, 'lifecycleStore' | 'now'> = {}
 ): Readonly<Record<string, unknown>> {
   const normalized = normalizeRequest(requestInput);
@@ -478,13 +495,20 @@ export function readLifecycleRecoveryDomainEvidence(
     const store = readLifecycleStore(options, repoRoot);
     const stored = readStoredEvidence(store, note.childId);
     if ('error' in stored) return recoveryDomainFailure();
-    if ('missing' in stored) return { consistent: true, recovery: true, targetState: 'active' };
+    if ('missing' in stored) return { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' };
     if (stored.consumer !== consumer || !stored.consumedAt) return recoveryDomainFailure();
     const evidence = validateStopRecord(stored, receipt, consumer);
     if (!evidence.ok || evidence.stopRevision !== note.stopRevision || evidence.consumedAt !== note.consumedAt) {
       return recoveryDomainFailure();
     }
-    return { consistent: true, recovery: true, targetState: 'active' };
+    if (!isRecoveryWarning(terminalResult.warning)) return recoveryDomainFailure();
+    return {
+      consistent: true,
+      recovery: true,
+      targetState: 'active',
+      recoveryState: 'retry-required',
+      warning: terminalResult.warning
+    };
   } catch {
     return recoveryDomainFailure();
   }
@@ -620,7 +644,7 @@ function recoverStartedLifecycleUnderLock(
   const note = taskNote(taskId, request, receipt, stopRevision, consumer, consumedAt);
   const metadata = captureTaskWriteMetadata();
   const updatedBody = `${section.body ? `${section.body}\n` : ''}- ${metadata.timestamp} — **${baseStep(started.step)} [aborted]** by ${request.agent} — ${renderRecoveryNote(note)}`;
-  const written = writeTask({
+  const written = (options.writeTask ?? writeTask)({
     taskRef: taskId,
     expectedState: 'active',
     mutations: [{ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body: updatedBody }]
@@ -628,7 +652,7 @@ function recoverStartedLifecycleUnderLock(
   if (written.status === 'failed') {
     return failure(request, 'owner-unknown', 'RECOVERY_LOG_WRITE_FAILED', written.error.message, { taskId, receiptId: receipt.id, childId: receipt.childId });
   }
-  const verified = verifyRecoveryCommit(resolved.taskMdPath, resolved.taskDir, taskId, request, note, options);
+  const verified = (options.verifyRecoveryCommit ?? verifyRecoveryCommit)(resolved.taskMdPath, resolved.taskDir, taskId, request, note, options);
   if (!verified.ok) {
     return failure(request, 'owner-unknown', 'RECOVERY_COMMIT_VERIFY_FAILED', verified.message, { taskId, receiptId: receipt.id, childId: receipt.childId });
   }

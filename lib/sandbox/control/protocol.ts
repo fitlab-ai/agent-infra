@@ -131,6 +131,11 @@ export type SandboxControlResponse = Readonly<{
   outputState?: 'available' | 'unavailable';
   payload?: SandboxControlPayloadReference | null;
 }>;
+export type SandboxControlRecoveryWarning = Readonly<{
+  code: string;
+  message: string;
+  action: string;
+}>;
 export type SandboxControlStatus = Readonly<{
   version: 3; generation: string; broker: ProcessIdentity & { brokerId: string };
   state: 'starting' | 'healthy' | 'busy' | 'parked'; reasonCode: string | null;
