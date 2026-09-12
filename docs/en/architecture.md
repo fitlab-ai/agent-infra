@@ -77,7 +77,7 @@ flowchart LR
     C --> B
   end
 
-  HC -. "same host · parallel boundaries · no proxy" .-> B
+  B -. "broker invokes host-control for host-side workflow" .-> HC
 
   CLI -. host or sandbox request .-> HC
   D -. host or sandbox request .-> HC
@@ -92,7 +92,7 @@ This is the primary architecture picture:
 - `host-control service` is one required host-level service on a supported host: `[1 / supported host]`. If it is absent, the host control boundary is unavailable; that is not a valid zero-process runtime.
 - `CONTAINER INSTANCES` means one Docker container per sandbox, `[0..N / host]`. It is a sandbox boundary and count, not another project process.
 - Every sandbox has one `sandbox broker`, `[1 / sandbox]`. The broker is the sandbox's long-lived control process.
-- One supported host's `host-control service` is a sibling control boundary to the sandbox fleet: it corresponds to `[0..N]` sandbox containers and one broker per existing sandbox. The dashed relation in the picture expresses this boundary/cardinality relationship, not a parent-child call; host-control does not proxy the broker.
+- One supported host's `host-control service` is a sibling control boundary to the sandbox fleet: it corresponds to `[0..N]` sandbox containers and one broker per existing sandbox. For a sandbox task workflow, the broker invokes host-control for host-side work; host-control does not call or proxy the broker. The dashed arrow shows that call direction, while the separate multiplicity labels show the boundary/cardinality relationship.
 - Dashed arrows show which control route an entry may select. They are not a fixed parent-child process chain. The transient dispatch implementation is intentionally hidden here.
 
 The container engine and OS service manager own infrastructure around this picture, but they are not one process per sandbox and are not included in the core process count. User-created programs inside a sandbox are also outside this architecture view.
