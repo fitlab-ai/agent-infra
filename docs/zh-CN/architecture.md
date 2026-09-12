@@ -8,8 +8,8 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 
 1. **安装** — `npm install -g @fitlab-ai/agent-infra`（或在 macOS 上使用 `brew install fitlab-ai/tap/agent-infra`，或使用 shell 脚本便捷封装）
 2. **初始化** — 在项目根目录运行 `ai init`，生成 `.agents/.airc.json` 并安装种子命令
-3. **渲染** — 在任意 AI TUI 中执行 `update-agent-infra`，检测当前打包模板版本并生成所有受管理文件
-4. **开发** — 使用内置 skill 驱动完整生命周期。下面展示面向用户的 skill 顺序；内部 workflow 中的 `analysis`、`design` 等名称是阶段标签，不是 skill 入口名。`review-code` 之后的交付是条件路由，图下正文会说明具体分支。
+3. **渲染** — 在任意 AI TUI 中执行 `update-agent-infra`，检测当前打包模板版本并生成受管理文件
+4. **开发** — 使用下面的面向用户的 skill 顺序。内部 workflow 名称不是 skill 入口。
 5. **升级** — 有新模板版本时再次执行 `update-agent-infra` 即可
 
 ```mermaid
@@ -19,13 +19,7 @@ flowchart TD
   RP --> C["code-task"] --> RC["review-code"]
 ```
 
-`review-code` 之后不是无条件执行 `commit`，而是按交付状态路由：
-
-- 审查快照树与基线不同，进入 `commit`。
-- 树未变化且没有 PR 时，`prFlow=disabled` 进入 `complete-task`，否则进入 `create-pr`。
-- 已有 PR 但其 head 与审查基线不同，进入 `commit` 执行交付。
-- PR head 一致但检查仍为 pending、failed、cancelled，或平台不可用，进入 `watch-pr`。
-- PR head 一致且检查通过或没有 required checks，进入 `complete-task`。
+`review-code` 之后的交付是条件路由：根据审查树、PR 状态和检查结果进入 `commit`、`create-pr`、`watch-pr` 或 `complete-task`。
 
 ## 分层架构
 
@@ -50,185 +44,133 @@ flowchart TD
 
 ## 运行时与控制面总览
 
-上面的分层视图说明项目如何被渲染；下面第一张运行时视图刻意保持在最高层，只回答有哪些运行实体、位于哪个边界以及可能有多少实例，不描述操作顺序。
+运行时视图刻意分层。第一层只回答：有哪些入口和核心常驻组件、它们位于哪里、可能有多少个实例。第二层只解释一次已接受请求会派生哪些短生命周期进程。
 
-### 最高层进程拓扑
+### 1. 最高层核心拓扑
 
 ```mermaid
 flowchart LR
   classDef process fill:#e8f1ff,stroke:#2563eb,color:#111827;
-  classDef processGroup fill:#fff7ed,stroke:#c2410c,color:#111827;
-  classDef domain fill:#ecfdf5,stroke:#047857,color:#111827;
   classDef boundary fill:#fefce8,stroke:#a16207,color:#111827;
   classDef external fill:#f3f4f6,stroke:#6b7280,color:#111827;
 
-  IM["外部参与者<br/>IM provider"]:::external
-  LOCAL["外部参与者<br/>本地用户 / CLI"]:::external
-
-  subgraph H["宿主 OS · 信任边界"]
+  subgraph I["入口 · entry family"]
+    CLI["外部入口<br/>本地用户 / CLI"]:::external
+    IM["外部入口<br/>IM provider"]:::external
     D["进程<br/>ai server daemon<br/>[0..1 / checkout]"]:::process
-    C["进程<br/>每消息 local ai 子进程<br/>[0..N / 请求]"]:::processGroup
-    L["进程<br/>本地 `ai run` launcher<br/>[0..N / 调用]"]:::processGroup
-    HT["进程<br/>宿主 AI TUI<br/>[0..N / run]"]:::processGroup
+    IM --> D
+  end
+
+  subgraph H["宿主 OS · 宿主边界"]
     HC["进程<br/>host-control 服务<br/>[0..1 / 宿主机]"]:::process
-    HW["进程<br/>host-control worker<br/>[0..N / 请求]"]:::processGroup
   end
 
-  subgraph F["沙箱集群 · 信任边界"]
-    SF["容器实例集合<br/>[0..N / 宿主机]"]:::boundary
+  subgraph F["沙箱集合 · 每个沙箱重复"]
+    C["容器实例集合<br/>[0..N / 宿主机]"]:::boundary
     B["进程 × N<br/>sandbox broker<br/>[1 / sandbox]"]:::process
-    E["进程组 × N<br/>sandbox executor<br/>[0..1 / 已接受请求]"]:::processGroup
-    R["进程组 × N<br/>tmux + run script + 沙箱 TUI<br/>[0..N / sandbox]"]:::processGroup
+    C --> B
   end
 
-  subgraph X["外部基础设施"]
-    ENG["外部<br/>容器引擎"]:::external
-    SM["外部<br/>OS 服务管理器"]:::external
-  end
-
-  TA["进程内领域逻辑<br/>Task Control Authority"]:::domain
-  STATE["持久事实<br/>task.md / journal / artifact / receipt"]:::domain
-
-  IM --> D
-  LOCAL --> L
-  D --> C --> L
-  L --> HT
-  L -.-> SF
-  SF --> B
-  B --> E
-  E -.-> R
-  SM -. 所有 / 启动 .-> HC
-  HC --> HW
-  ENG -. 创建 / 承载 .-> SF
-  HT -. 任务控制 .-> HC
-  HW --> TA
-  HT --> TA
-  E --> TA
-  TA --> STATE
+  CLI -. 宿主或沙箱请求 .-> HC
+  D -. 宿主或沙箱请求 .-> HC
+  CLI -. 任务绑定请求 .-> C
+  D -. 任务绑定请求 .-> C
 ```
 
-这张图只有一个任务：盘点运行实体及其关系。`进程`表示可单独观察、拥有 OS PID 的进程；`进程组`表示短生命周期或按运行创建的一组进程；`进程内领域逻辑`没有独立 PID；`容器实例集合`是边界和数量，不是进程；`外部`表示由本仓库之外的基础设施拥有。`× N`表示该节点随沙箱集合复制。箭头表示启动、所有、包含或控制关系，不表示按时间排列的操作流程。
+这张图是主要架构图，只回答核心结构：
 
-图中的大框有明确含义：`宿主 OS` 是宿主用户进程与权限边界，`沙箱集群` 是这台宿主上的 `0..N` 个隔离容器实例集合，`外部基础设施` 包含拥有或承载这些实体的外部服务。大框不是额外进程，框的数量也不是实例数量。
+- `本地用户 / CLI` 和 `IM provider` 是两组入口。
+- `ai server daemon` 是 IM 入口的可选进程：每个 checkout 最多一个。本地 CLI 不依赖它。
+- `host-control 服务` 是宿主机级服务：`[0..1 / 宿主机]`。
+- `容器实例集合` 表示每个沙箱一个 Docker 容器，宿主机上为 `[0..N]` 个。它是沙箱边界和数量，不是另一个项目进程。
+- 每个沙箱有一个 `sandbox broker`：`[1 / sandbox]`。broker 是该沙箱长期存在的控制进程。
+- 虚线表示入口可以选择的控制路径，不表示固定的父子进程链；短暂的调度实现有意隐藏在本图之外。
 
-在不渲染 Mermaid 的环境中，下面的运行实体矩阵和控制流视图提供相同的进程、基数、权威边界和生命周期事实。
+容器引擎和 OS 服务管理器负责外围基础设施，但不是每个沙箱一个进程，所以不计入核心进程数量。用户在沙箱内自行创建的程序也不属于这张架构图。
 
-即使在最高层视图中进行了分组，下面这些身份仍然必须分开理解：
+| 核心对象 | 数量 | 含义 |
+| --- | --- | --- |
+| 本地 CLI 入口 | `0..N / 调用` | 用户入口，可选择宿主路径或任务绑定沙箱路径。 |
+| IM provider 入口 | `0..N / provider` | 外部消息来源。 |
+| `ai server` daemon | `0..1 / checkout` | 接纳一个 checkout 的 IM 流量的可选进程。 |
+| `host-control` 服务 | `0..1 / 宿主机` | 宿主侧控制服务和 direct-host authority。 |
+| Docker 沙箱容器 | `0..N / 宿主机` | 每个沙箱一个隔离容器实例。 |
+| `sandbox broker` | `1 / sandbox` | 每个沙箱容器内一个控制 broker。 |
 
-- daemon 的每消息 local `ai` 子进程负责调度本地 CLI，不是执行所选 skill 的 AI TUI。
-- IM 入口和本地入口是两条路径：已授权 IM 消息经 daemon 和 local child；本地 `ai run` 在没有 task ref 时直接进入宿主 TUI，在有 task ref 时直接进入沙箱 launcher。
-- `create-task` 是宿主路径。`ai run` 启动选定 TUI，忽略 stdin、继承 stdout/stderr，并等待该子进程退出。
-- task skill 绑定任务。`ai run` 通过 `docker exec` 创建沙箱 tmux `work` session 及 `ai-<run-id>` window，启动 run script 和实际 TUI；窗口创建后命令即可返回，这只表示调度成功，不表示 skill 完成。
-- task-bound 控制请求由沙箱 TUI/skill 通过 internal CLI 的 broker-client 路径发起，不是由 daemon 的消息级 local child 发起。
-- `run status`、`exit_code`、`finished_at` 和 `output.log` 描述一次沙箱运行；`task.md`、生命周期 journal、artifact 和 receipt 描述任务控制权威。两类事实不能互相替代。
-- host-control、沙箱 broker/executor、任务生命周期领域、容器引擎和操作系统服务管理器拥有不同身份和失败域。
-
-## 运行实体矩阵
-
-| 实体 | 启动 / 停止 | 通信通道 | 权限与信任边界 | 状态与持久化 | 失败与恢复 |
-| --- | --- | --- | --- | --- | --- |
-| `ai server` daemon | `ai server start` 每个 checkout 至多启动一个 daemon；多个 checkout 可各自拥有实例；收到信号后停止 adapter 并清理 | 本地子进程、adapter context、heartbeat 和日志 | 以本机 OS 用户运行；IM 身份必须先通过 adapter-qualified role 检查 | 按项目/checkout 隔离的 PID identity、server log 和合并后的 server 配置 | stale 或不匹配的 PID 不用于错杀其他进程；adapter 与命令失败相互隔离。 |
-| IM adapter / 长连接（进程内模块） | daemon 加载并启动；退出时逆序停止 | provider WebSocket/API 与规范化消息 | `<adapter>:<userId>` 是应用身份，不是 OS 身份 | 连接状态在进程内；配置来自 committed、local 和环境层 | malformed 消息丢弃；单个 adapter 的凭据或连接失败不停止 daemon。 |
-| 每消息 local `ai` 子进程 | daemon 为已授权命令启动，命令结束后退出 | stdout/stderr → runner/streamer → adapter 回复 | 继承 daemon 的本机 OS 上下文；自身不授予任务权威 | 退出码、signal 和脱敏流事件属于消息级证据 | 启动、非零退出和回复失败分别报告；已接受但未知的工作不盲目重放。 |
-| 宿主 AI TUI 子进程 | `create-task` 启动选定的 Claude、Codex、Antigravity、OpenCode 或 Trae CLI，TUI 关闭后回收 | stdin 忽略；stdout/stderr 继承 | 运行在宿主用户上下文；宿主 create 路径不是沙箱边界 | 进程结果以及 task-create/lifecycle 记录 | 启动和非零失败返回调用方；不能把 TUI 退出静默转换成任务成功。 |
-| 沙箱 capture launcher（临时进程） | 直接或 daemon 调度的 task skill 每次 dispatch 调用 `docker exec`；launcher 惰性创建 `work` tmux session、`ai-<run-id>` window 和 run script | Docker exec、容器 shell 和 tmux launcher | 受 sandbox/container 与 task/generation identity 约束；不替代 broker authority | run metadata、run directory、状态文件和输出日志 | 窗口创建前失败属于调度失败；创建后检查 status、exit code 和 output。 |
-| 沙箱 tmux server、pane/run script 与 TUI（多个进程） | 首次 dispatch 惰性创建 `work` session（每个 sandbox 为 `0..1`）；run script 在其中的 `ai-<run-id>` window 启动实际 TUI，命令记录结果后 pane 仍可附着 | 容器 tmux pane、TUI stdio 和 run script | 在 task-bound 容器及其 runtime projection 中执行 | `started_at`、`status`、`exit_code`、`finished_at` 和 `output.log` | `completed`/`failed` 与任务状态分离；用 `ai sandbox enter` 观察运行。 |
-| host-control 服务与 worker（服务 + 临时进程） | systemd user service 或 macOS launchd 托管服务并启动受控 worker | 私有 endpoint/socket 与 worker stdio | endpoint 所有权、token、用户权限和 worker identity | endpoint/token 文件与审计记录 | 客户端断连不取消已接受工作；dispatch 失败报告为 unknown。 |
-| Task Control Authority / 生命周期领域（进程内，不是进程） | 由 host worker、sandbox executor 或本地 CLI 路径调用，不是独立常驻服务 | 领域调用与控制请求 | 校验 task、generation、operation、recovery 和 artifact authority | `task.md`、active/blocked/completed 目录、journal、短号和 receipt | 多步写入与目录移动后必须核验最终状态。 |
-| 沙箱 broker / executor | recovery 启动 broker；每个授权请求使用短生命周期 executor | control channel 与 request/response/status records | manifest、lease、controller binding 和 attestation gate | owner、lease、execution audit 和状态记录 | broker 重启不等于请求重试；已接受但未知的副作用不自动重放。 |
-| Codex controller / App Server | lifecycle adapter 按需启动和停止 | controller binding；App Server 通过 stdio 使用行分隔 JSON-RPC | 只提供 Codex lifecycle evidence，不替代 IM 或 task authority | lifecycle store 中的 thread、turn、settings、reroute 和 terminal 证据 | 子进程输出非法、提前退出、超时或 binding 不一致会使证据失效并关闭 bridge。 |
-| 容器引擎与 OS 服务管理器（外部基础设施） | Docker/BuildKit/Colima/OrbStack/Docker Desktop 以及 systemd/launchd 管理外部生命周期 | Docker API/CLI 和 OS service-manager API | 只是基础设施边界，不替代任务权威 | 容器、unit/plist 和 engine runtime 状态 | 引擎或服务管理器可用，不等于完整 task-bound 链可用。 |
-| 平台同步边界（外部边界，不是进程） | lifecycle、worker 或 CLI 按需调用 | GitHub/platform API 或 provider adapter | 平台凭据与 IM、本地任务权威分离 | Issue/PR/label 状态与本地 receipt 分属不同事实 | 远端失败不能报告成本地生命周期成功。 |
-
-## 控制路径
-
-### 控制流视图（动作，不是进程清单）
-
-上面的拓扑图负责盘点进程；第二张图刻意只表达操作流，图中的框是阶段或事实，不是新增进程。
+### 2. 单次请求派生进程
 
 ```mermaid
 flowchart TD
-  IN["已授权消息或本地 CLI"] --> ENTRY{"入口上下文"}
-  ENTRY -->|无 task ref / create-task| HOST["启动宿主侧 TUI"]
-  ENTRY -->|任务绑定 skill| DISPATCH["调度沙箱 launcher"]
-  HOST --> AUTH["调用 Task Control Authority"]
-  DISPATCH --> RUN["创建 run 并记录调度结果"]
-  RUN --> TUI["沙箱 TUI / skill 继续运行"]
-  TUI --> BROKER["发送 broker-client 控制请求"]
-  BROKER --> AUTH
-  AUTH --> STATE["写入 task.md / journal / artifact / receipt"]
+  REQUEST["一次已接受的控制请求"]
+  HOST["host-control 服务<br/>[0..1 / 宿主机]"]
+  HW["临时 host-control worker<br/>[0..1 / 请求]"]
+  BROKER["sandbox broker<br/>[1 / sandbox]"]
+  EXEC["临时 sandbox executor<br/>[0..1 / 已接受请求]"]
+
+  REQUEST -->|宿主请求| HOST --> HW
+  REQUEST -->|任务绑定沙箱请求| BROKER --> EXEC
 ```
 
-这张流程图不用于统计进程。进程身份和数量看上面的拓扑图与运行实体矩阵；操作完成和恢复语义看下面的文字说明。
+`sandbox executor` 不是另一个沙箱，也不是另一个 broker。它是 broker 接受一次授权控制请求后才创建的短生命周期项目 worker，负责执行这一次请求，完成后退出。没有已接受的请求时，就没有 executor。host-control worker 与它类似，对应一次宿主侧请求。
 
-### IM 与本地 `/run` 接纳
+这张下层图也不枚举用户在容器内启动的程序。那些内容可变、由用户拥有，不属于项目固定的进程拓扑。
 
-IM adapter 将 provider 事件规范化为 daemon 消息契约。内置命令可由 daemon 直接处理；其他命令先通过 adapter-qualified user allow-list 和 role 检查，然后 daemon 才启动本地 `ai` 子进程。`/run` 随后路由为 `ai run --skill ...`；本地子进程只是调度边界。
+### 入口与请求边界
 
-本地 `ai run` 不经过 daemon：没有 task ref 时直接启动宿主 TUI，有 task ref 时直接启动沙箱 launcher。内部 task-control 命令再根据运行时标记选择 direct-host 或 broker-client transport。
+- 本地 CLI 是直接入口组，不需要 IM daemon，即可选择宿主控制或任务绑定沙箱。
+- IM 消息通过可选的 `ai server daemon` 接纳，再选择同样的宿主或沙箱控制边界。
+- host-control 和 sandbox broker 是两个独立的控制边界：host-control 负责宿主授权和 worker；broker 负责沙箱授权以及一次已接受请求的 executor。
+- 校验任务文件和状态转换的任务生命周期逻辑属于进程内领域逻辑，不是进程，也不计入最高层进程数量。
 
-### 宿主侧 `create-task`
+## 核心组件矩阵
 
-```text
-已授权消息或本地 CLI
-  → ai run --skill create-task <description>
-  → 选择 TUI 并构造命令
-  → 忽略 stdin、继承 stdout/stderr，启动宿主 TUI
-  → 等待 TUI 退出并返回进程结果
-  → task-create/lifecycle authority 记录任务结果
+| 组件 | 启动 / 停止 | 通信 | 边界与数量 | 持久事实 | 失败边界 |
+| --- | --- | --- | --- | --- | --- |
+| 本地 CLI 入口 | 用户调用时启动，随调用结束 | 本地参数和标准流 | 宿主用户入口；`0..N / 调用` | 命令结果和任务 receipt | 命令返回不证明远端或沙箱操作已完成。 |
+| IM provider 入口 | 外部 provider 投递消息，连接由 provider 管理 | Provider API 或长连接 adapter | 外部身份；不是本仓库内的 OS 进程 | provider 消息和回复证据 | provider、凭据和连接失败不等于本地任务权威成功。 |
+| `ai server` daemon | `ai server start` 每个 checkout 至多启动一个；收到信号后停止 | provider adapter 与已接纳请求调度 | 宿主用户进程；`0..1 / checkout` | checkout 级 PID identity 和 daemon log | stale identity 或 adapter 失败不能被解释为任务成功。 |
+| `host-control` 服务 | OS 服务管理器在每台宿主机启动/停止一个服务 | 私有宿主 endpoint 与请求/响应记录 | 宿主用户边界；`0..1 / 宿主机` | endpoint、token、审计和 worker 记录 | authority 缺失时 fail closed；已接受但未知的结果不静默重放。 |
+| Docker 沙箱容器 | 容器引擎为每个沙箱创建/停止一个容器 | 容器运行时和任务投影 | 沙箱边界；`0..N / 宿主机` | 容器 identity、generation 和沙箱控制记录 | 容器可用不等于 host-control 或任务生命周期已就绪。 |
+| sandbox broker | 随沙箱控制状态启动，随沙箱停止 | 沙箱控制通道和请求记录 | 每个沙箱一个；`[1 / sandbox]` | manifest、lease、owner、generation 和执行审计 | identity、lease 或接纳失败在执行前拒绝。 |
+
+## 控制与生命周期视图
+
+以下视图描述请求和状态，不是新增进程；它们有意放在核心拓扑之下。
+
+```mermaid
+flowchart TD
+  ENTRY["本地 CLI 或 IM 入口"] --> ROUTE{"选择控制边界"}
+  ROUTE -->|宿主| HC["host-control 服务"]
+  ROUTE -->|任务绑定沙箱| SB["沙箱容器 + broker"]
+  HC --> HW["需要时创建一个宿主请求 worker"]
+  SB --> EX["已接受请求需要执行时创建一个 sandbox executor"]
+  HW --> STATE["任务生命周期状态和 receipt"]
+  EX --> STATE
 ```
 
-这条路径没有 task ref，也没有自动沙箱要求。TUI 启动错误或非零退出必须返回调用方；它不能作为任务创建完成的证据。
+`task.md`、生命周期 journal、artifact、receipt 和平台记录是各自生命周期操作拥有的事实，不是进程，也不计入最高层拓扑。
 
-### 任务绑定的沙箱 skill
-
-```text
-已授权消息或本地 CLI
-  → ai run --skill <task-skill> --task <task-ref>
-  → 解析任务沙箱和运行时身份
-  → docker exec 沙箱 launcher
-  → 创建 tmux session `work`、window `ai-<run-id>` 和 run directory
-  → 写入 `running`，启动实际 TUI，捕获输出与退出码
-  → tmux 窗口创建后返回
-  → 通过 status/output 观察，或用 `ai sandbox enter` 附着
-```
-
-run script 写入 `started_at`、`status`、`exit_code` 和 `finished_at`，并写入 `output.log`。命令可能在 TUI 仍运行时报告调度成功；之后的 `completed` 或 `failed` run 状态也不会自动改变任务生命周期状态。
-
-### 任务生命周期与权威边界
-
-| 操作 | 控制路径 | 权威状态 | 恢复边界 |
+| 操作 | 选择的边界 | 权威结果 | 恢复规则 |
 | --- | --- | --- | --- |
-| Create | CLI/daemon → direct-host 或 host-control worker → task-create domain | `task.md`、任务目录、短号和 create receipt | 接纳失败可在任务创建前返回；部分写入由 lifecycle recovery 处理。 |
-| Task event / artifact | CLI 或 sandbox executor → broker/authority gate → task event/artifact domain | event log、artifact、provenance 和任务状态 | 接受前拒绝；接受后保留 receipt，不猜测副作用是否发生。 |
-| Restore | lifecycle request → staging/active 校验 → journal 与目录移动 | 任务目录、journal、registry 和最终任务状态 | 重试前先对账 journal 和最终目录。 |
-| Block / cancel | 授权 lifecycle 操作 → 状态转换与清理 | 任务状态、原因、journal 和已释放资源 | 在第一个未知副作用处停止，不用第二条命令掩盖未知状态。 |
-| Complete | lifecycle 与 artifact gate → 最终状态核验 | 任务状态、completed 目录、receipt 和平台证据 | 缺少 review、artifact 或同步证据时保持未完成。 |
+| Create | host-control 路径 | `task.md`、任务目录、短号和 create receipt | 重试前对账部分写入。 |
+| Task event / artifact | host-control 或 sandbox broker 路径 | event/artifact provenance 和任务状态 | 保留 receipt；接受后未知时不猜测。 |
+| Restore | lifecycle request 边界 | 任务目录、journal、registry 和最终状态 | 重试前对账 journal 与最终目录。 |
+| Block / cancel | 授权 lifecycle 边界 | 状态、原因、journal 和已释放资源 | 在第一个未知副作用处停止。 |
+| Complete | lifecycle 与 artifact gate | completed 状态、receipt、review 和平台证据 | 缺少证据时保持未完成。 |
 
-host-control 负责授权和审计宿主 worker；任务生命周期领域负责任务文件和状态转换。沙箱 broker 负责 task-bound 执行授权；TUI 进程产生运行输出，但不成为任务权威。
+## 平台边界
 
-## 状态、失败与恢复边界
-
-- **Rejected** 表示接纳或授权在操作接受前失败。只有修正输入或 authority 问题后才能重试。
-- **Failed** 表示已知进程或操作以失败结束。使用对应的退出码、状态记录、日志或审计定位失败。
-- **Unknown** 表示无法确定是否已接受或是否产生副作用。不要自动重放 task event、worker 请求、sandbox execution 或 TUI 命令。
-- **Host command returned** 表示选定的宿主 TUI 子进程退出并返回进程结果；它本身不表示任务创建或所选 skill 成功。
-- **Sandbox dispatch complete** 表示 tmux `work` session 和 `ai-<run-id>` window 已创建；它不表示沙箱 TUI、skill 或任务完成。
-- **Recovery** 由所属边界负责：daemon PID/log 清理、adapter 重连、sandbox broker 重启、executor 对账、run status/output 检查、lifecycle journal 恢复或平台同步重试。一个边界的证据不能替代另一个边界。
-- run script 写入终态后，tmux pane 仍可能保留以便观察；pane 存在不是运行成功信号。
-
-## 平台矩阵
-
-| 执行上下文 | 可用边界 | 重要限制 |
+| 执行上下文 | 核心能力 | 重要限制 |
 | --- | --- | --- |
-| macOS | host-control 使用 launchd user service；可运行本地 daemon、宿主 TUI，以及已配置的容器后端 | 容器可用不替代任务权威或 broker readiness。 |
-| Linux | host-control 使用 systemd user service；可运行本地 daemon、宿主 TUI 和已配置的容器引擎 | engine、broker、host-control 和任务生命周期仍是分别观察的服务。 |
-| 原生 Windows | 部分 CLI/进程和容器路径可能存在；Docker Desktop 可提供容器能力 | 没有等价的原生 host-control 服务来闭合宿主 task-bound 生命周期；容器支持不是完整生命周期支持。 |
-| WSL2 Linux | Linux 侧 Node、systemd/user-service 和容器行为取决于 WSL2 发行版及运行时配置 | WSL2 Linux 行为不能写成原生 Windows host-control 支持；宣称闭环前必须验证实际执行上下文。 |
-| Docker/WSL2 后端 | 可能提供容器沙箱及其内部 run/TUI 路径 | 容器后端可用不证明 host-control、任务权威、平台同步或每个 TUI 都可运行。 |
+| macOS | `host-control` 可由用户级 launchd 服务管理；已配置的容器引擎可提供沙箱 | 容器能力不替代宿主服务或任务绑定生命周期。 |
+| Linux | `host-control` 可由用户级 systemd 服务管理；已配置的容器引擎可提供沙箱 | engine、broker、host-control 和任务生命周期仍是独立边界。 |
+| 原生 Windows | 部分 CLI/进程和 Docker Desktop 容器路径可能存在 | 没有等价的原生 host-control 服务来闭合完整宿主 task-bound 生命周期。 |
+| WSL2 Linux | Linux 侧服务和容器行为取决于发行版及运行时配置 | WSL2 Linux 行为不能写成原生 Windows host-control 支持。 |
 
 ## 范围与事实源
 
-本文描述当前仓库行为。provider 协议和沙箱控制契约的细节继续保留在[飞书桥接](./feishu-bridge.md)、[沙箱](./sandbox.md)和[平台支持](./platform-support.md)文档中；本文集中说明它们之间的关系、权威和恢复边界。
+本文描述仓库固定的控制面组件及其边界。本文有意不枚举沙箱内由用户创建的程序，也不列出每个短生命周期的调度实现细节。
 
-本文不新增 Windows host-control 实现、TUI adapter、兼容 shim、迁移或新的运行状态机。跨平台服务、外部 TUI 可用性和容器健康仍需结合具体环境验证。
+provider、沙箱和平台契约的详细说明继续保留在[飞书桥接](./feishu-bridge.md)、[沙箱](./sandbox.md)和[平台支持](./platform-support.md)文档中；本文集中说明入口组、host-control 数量、沙箱数量、broker 数量和请求派生控制进程。
+
+本文不新增 Windows host-control 实现、adapter、兼容 shim、迁移或运行状态机变化。
