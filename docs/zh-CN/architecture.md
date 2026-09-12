@@ -50,70 +50,70 @@ flowchart TD
 
 ## 运行时与控制面总览
 
-上面的分层视图说明项目如何被渲染；下面的运行时进程拓扑图说明命令如何到达任务控制权威，以及实际 AI TUI 在哪里运行。
+上面的分层视图说明项目如何被渲染；下面第一张运行时视图刻意保持在最高层，只回答有哪些运行实体、位于哪个边界以及可能有多少实例，不描述操作顺序。
+
+### 最高层进程拓扑
 
 ```mermaid
-flowchart TB
+flowchart LR
   classDef process fill:#e8f1ff,stroke:#2563eb,color:#111827;
-  classDef transient fill:#fff7ed,stroke:#c2410c,color:#111827;
+  classDef processGroup fill:#fff7ed,stroke:#c2410c,color:#111827;
   classDef domain fill:#ecfdf5,stroke:#047857,color:#111827;
-  classDef infra fill:#f3f4f6,stroke:#6b7280,color:#111827;
+  classDef boundary fill:#fefce8,stroke:#a16207,color:#111827;
+  classDef external fill:#f3f4f6,stroke:#6b7280,color:#111827;
 
-  IM["IM provider / 已授权消息"]
-  L["本地 `ai run` / AI TUI 入口"]
+  IM["外部参与者<br/>IM provider"]:::external
 
-  subgraph H["宿主 OS"]
-    D["ai server daemon<br/>[0..1 / checkout]"]:::process
-    A["IM adapter / 长连接<br/>[进程内模块]"]:::domain
-    C["每消息 local ai 子进程<br/>[0..N / 已授权请求]"]:::transient
-    HT["宿主 AI TUI<br/>[0..N / 直接或 create-task]"]:::transient
-    HC["host-control 服务<br/>[0..1 / 平台]"]:::process
-    HW["host-control worker<br/>[0..N / 请求]"]:::transient
-    DX["docker exec launcher<br/>[0..N / 直接或 IM 调度]"]:::transient
-    TA["Task Control Authority<br/>[进程内领域逻辑]"]:::domain
+  subgraph H["宿主 OS · 信任边界"]
+    D["进程<br/>ai server daemon<br/>[0..1 / checkout]"]:::process
+    C["进程<br/>每消息 local ai 子进程<br/>[0..N / 请求]"]:::processGroup
+    L["进程<br/>本地 `ai run` launcher<br/>[0..N / 调用]"]:::processGroup
+    HT["进程<br/>宿主 AI TUI<br/>[0..N / run]"]:::processGroup
+    HC["进程<br/>host-control 服务<br/>[0..1 / 宿主机]"]:::process
+    HW["进程<br/>host-control worker<br/>[0..N / 请求]"]:::processGroup
   end
 
-  subgraph S["沙箱容器（每个 sandbox）"]
-    B["sandbox broker<br/>[1 / sandbox]"]:::process
-    E["sandbox executor<br/>[0..1 / 已接受请求]"]:::transient
-    TM["tmux server + `work` session<br/>[0..1 / sandbox，惰性创建]"]:::process
-    P["pane + run script<br/>[1 / run]"]:::transient
-    ST["沙箱 AI TUI<br/>[1 / run]"]:::transient
+  subgraph F["沙箱集群 · 信任边界"]
+    SF["容器实例集合<br/>[0..N / 宿主机]"]:::boundary
+    B["进程 × N<br/>sandbox broker<br/>[1 / sandbox]"]:::process
+    E["进程组 × N<br/>sandbox executor<br/>[0..1 / 已接受请求]"]:::processGroup
+    R["进程组 × N<br/>tmux + run script + 沙箱 TUI<br/>[0..N / sandbox]"]:::processGroup
   end
 
-  subgraph X["外部基础设施与持久事实"]
-    ENG["容器引擎<br/>[外部]"]:::infra
-    SM["OS 服务管理器<br/>[外部]"]:::infra
-    STATE["task.md / journal / artifact / receipt<br/>[持久事实]"]:::domain
+  subgraph X["外部基础设施"]
+    ENG["外部<br/>容器引擎"]:::external
+    SM["外部<br/>OS 服务管理器"]:::external
   end
+
+  TA["进程内领域逻辑<br/>Task Control Authority"]:::domain
+  STATE["持久事实<br/>task.md / journal / artifact / receipt"]:::domain
 
   IM --> D
-  D --- A
-  D --> C
+  D --> C --> L
   L --> HT
-  L --> DX
-  C --> HT
-  C --> DX
-  L -. host-control 请求 .-> HC
-  C -. host-control 请求 .-> HC
-  HC --> HW --> TA
-  DX --> TM --> P --> ST
-  ST -. 沙箱 TUI/skill 控制请求 .-> B
-  B --> E --> TA
-  HT --> TA
-  TA --> STATE
+  L -.-> SF
+  SF --> B
+  B --> E
+  E -.-> R
   SM -. 所有 / 启动 .-> HC
-  ENG -. 所有 / 启动 .-> B
-  ENG -. 承载 .-> TM
+  HC --> HW
+  ENG -. 创建 / 承载 .-> SF
+  HT -. 任务控制 .-> HC
+  HW --> TA
+  HT --> TA
+  E --> TA
+  TA --> STATE
 ```
 
-图中实线表示进程启动或控制，虚线表示所有关系或跨边界控制，并明确标出进程内领域逻辑。运行时没有固定的进程总数：一台宿主可以有 `0..N` 个按 checkout 隔离的 daemon，每个 checkout 至多一个；在已安装且运行时至多一个 host-control 服务；每个已授权 IM 请求可能增加一个 local `ai` 子进程，而直接或 IM 发起的 `ai run` 可能增加一个宿主 TUI 或沙箱 launcher/worker；每个沙箱有一个 broker，并可能在首次调度时惰性创建 `0..1` 个 tmux `work` session，每个活动运行再增加一个 pane/run script 与一个沙箱 TUI。仓库边界之外、由外部 TUI 或基础设施创建的 helper 进程不计入此图。
+这张图只有一个任务：盘点运行实体及其关系。`进程`表示可单独观察、拥有 OS PID 的进程；`进程组`表示短生命周期或按运行创建的一组进程；`进程内领域逻辑`没有独立 PID；`容器实例集合`是边界和数量，不是进程；`外部`表示由本仓库之外的基础设施拥有。`× N`表示该节点随沙箱集合复制。箭头表示启动、所有、包含或控制关系，不表示按时间排列的操作流程。
 
-在不渲染 Mermaid 的环境中，下面的运行实体矩阵和控制路径章节提供相同的进程、基数、权威边界和生命周期事实。
+图中的大框有明确含义：`宿主 OS` 是宿主用户进程与权限边界，`沙箱集群` 是这台宿主上的 `0..N` 个隔离容器实例集合，`外部基础设施` 包含拥有或承载这些实体的外部服务。大框不是额外进程，框的数量也不是实例数量。
 
-这里的边界必须分开理解：
+在不渲染 Mermaid 的环境中，下面的运行实体矩阵和控制流视图提供相同的进程、基数、权威边界和生命周期事实。
 
-- daemon 的每消息 `ai` 子进程负责调度本地 CLI，不是执行所选 skill 的 AI TUI。
+即使在最高层视图中进行了分组，下面这些身份仍然必须分开理解：
+
+- daemon 的每消息 local `ai` 子进程负责调度本地 CLI，不是执行所选 skill 的 AI TUI。
 - IM 入口和本地入口是两条路径：已授权 IM 消息经 daemon 和 local child；本地 `ai run` 在没有 task ref 时直接进入宿主 TUI，在有 task ref 时直接进入沙箱 launcher。
 - `create-task` 是宿主路径。`ai run` 启动选定 TUI，忽略 stdin、继承 stdout/stderr，并等待该子进程退出。
 - task skill 绑定任务。`ai run` 通过 `docker exec` 创建沙箱 tmux `work` session 及 `ai-<run-id>` window，启动 run script 和实际 TUI；窗口创建后命令即可返回，这只表示调度成功，不表示 skill 完成。
@@ -139,6 +139,25 @@ flowchart TB
 | 平台同步边界（外部边界，不是进程） | lifecycle、worker 或 CLI 按需调用 | GitHub/platform API 或 provider adapter | 平台凭据与 IM、本地任务权威分离 | Issue/PR/label 状态与本地 receipt 分属不同事实 | 远端失败不能报告成本地生命周期成功。 |
 
 ## 控制路径
+
+### 控制流视图（动作，不是进程清单）
+
+上面的拓扑图负责盘点进程；第二张图刻意只表达操作流，图中的框是阶段或事实，不是新增进程。
+
+```mermaid
+flowchart TD
+  IN["已授权消息或本地 CLI"] --> ENTRY{"入口上下文"}
+  ENTRY -->|无 task ref / create-task| HOST["启动宿主侧 TUI"]
+  ENTRY -->|任务绑定 skill| DISPATCH["调度沙箱 launcher"]
+  HOST --> AUTH["调用 Task Control Authority"]
+  DISPATCH --> RUN["创建 run 并记录调度结果"]
+  RUN --> TUI["沙箱 TUI / skill 继续运行"]
+  TUI --> BROKER["发送 broker-client 控制请求"]
+  BROKER --> AUTH
+  AUTH --> STATE["写入 task.md / journal / artifact / receipt"]
+```
+
+这张流程图不用于统计进程。进程身份和数量看上面的拓扑图与运行实体矩阵；操作完成和恢复语义看下面的文字说明。
 
 ### IM 与本地 `/run` 接纳
 

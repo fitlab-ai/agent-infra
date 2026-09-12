@@ -50,70 +50,70 @@ After `review-code`, delivery is conditional rather than an unconditional `commi
 
 ## Runtime and Control-Plane Map
 
-The layered view above describes how the project is rendered. The runtime process topology below describes how a command reaches a task authority and where an AI TUI actually runs.
+The layered view above describes how the project is rendered. The first runtime view below is intentionally a highest-level topology: it answers what can exist, where it lives, and how many instances may exist. It does not describe operation order.
+
+### Highest-level process topology
 
 ```mermaid
-flowchart TB
+flowchart LR
   classDef process fill:#e8f1ff,stroke:#2563eb,color:#111827;
-  classDef transient fill:#fff7ed,stroke:#c2410c,color:#111827;
+  classDef processGroup fill:#fff7ed,stroke:#c2410c,color:#111827;
   classDef domain fill:#ecfdf5,stroke:#047857,color:#111827;
-  classDef infra fill:#f3f4f6,stroke:#6b7280,color:#111827;
+  classDef boundary fill:#fefce8,stroke:#a16207,color:#111827;
+  classDef external fill:#f3f4f6,stroke:#6b7280,color:#111827;
 
-  IM["IM provider / authorized message"]
-  L["Local `ai run` / AI TUI entry"]
+  IM["EXTERNAL ACTOR<br/>IM provider"]:::external
 
-  subgraph H["Host OS"]
-    D["ai server daemon<br/>[0..1 / checkout]"]:::process
-    A["IM adapter / long connection<br/>[in-process]"]:::domain
-    C["per-message local ai child<br/>[0..N / authorized request]"]:::transient
-    HT["host AI TUI<br/>[0..N / direct or create-task]"]:::transient
-    HC["host-control service<br/>[0..1 / platform]"]:::process
-    HW["host-control worker<br/>[0..N / request]"]:::transient
-    DX["docker exec launcher<br/>[0..N / direct or IM dispatch]"]:::transient
-    TA["Task Control Authority<br/>[in-process domain]"]:::domain
+  subgraph H["HOST OS · trust boundary"]
+    D["PROCESS<br/>ai server daemon<br/>[0..1 / checkout]"]:::process
+    C["PROCESS<br/>per-message local ai child<br/>[0..N / request]"]:::processGroup
+    L["PROCESS<br/>local `ai run` launcher<br/>[0..N / invocation]"]:::processGroup
+    HT["PROCESS<br/>host AI TUI<br/>[0..N / run]"]:::processGroup
+    HC["PROCESS<br/>host-control service<br/>[0..1 / host]"]:::process
+    HW["PROCESS<br/>host-control worker<br/>[0..N / request]"]:::processGroup
   end
 
-  subgraph S["Sandbox container (per sandbox)"]
-    B["sandbox broker<br/>[1 / sandbox]"]:::process
-    E["sandbox executor<br/>[0..1 / accepted request]"]:::transient
-    TM["tmux server + `work` session<br/>[0..1 / sandbox, lazy]"]:::process
-    P["pane + run script<br/>[1 / run]"]:::transient
-    ST["sandbox AI TUI<br/>[1 / run]"]:::transient
+  subgraph F["SANDBOX FLEET · trust boundary"]
+    SF["CONTAINER INSTANCES<br/>[0..N / host]"]:::boundary
+    B["PROCESS × N<br/>sandbox broker<br/>[1 / sandbox]"]:::process
+    E["PROCESS GROUP × N<br/>sandbox executor<br/>[0..1 / accepted request]"]:::processGroup
+    R["PROCESS GROUP × N<br/>tmux + run script + sandbox TUI<br/>[0..N / sandbox]"]:::processGroup
   end
 
-  subgraph X["External infrastructure and durable facts"]
-    ENG["container engine<br/>[external]"]:::infra
-    SM["OS service manager<br/>[external]"]:::infra
-    STATE["task.md / journals / artifacts / receipts<br/>[persistent facts]"]:::domain
+  subgraph X["EXTERNAL INFRASTRUCTURE"]
+    ENG["EXTERNAL<br/>container engine"]:::external
+    SM["EXTERNAL<br/>OS service manager"]:::external
   end
+
+  TA["IN-PROCESS DOMAIN<br/>Task Control Authority"]:::domain
+  STATE["DURABLE FACTS<br/>task.md / journals / artifacts / receipts"]:::domain
 
   IM --> D
-  D --- A
-  D --> C
+  D --> C --> L
   L --> HT
-  L --> DX
-  C --> HT
-  C --> DX
-  L -. host-control request .-> HC
-  C -. host-control request .-> HC
-  HC --> HW --> TA
-  DX --> TM --> P --> ST
-  ST -. sandbox TUI/skill control request .-> B
-  B --> E --> TA
-  HT --> TA
-  TA --> STATE
+  L -.-> SF
+  SF --> B
+  B --> E
+  E -.-> R
   SM -. owns / starts .-> HC
-  ENG -. owns / starts .-> B
-  ENG -. hosts .-> TM
+  HC --> HW
+  ENG -. creates / hosts .-> SF
+  HT -. task-control .-> HC
+  HW --> TA
+  HT --> TA
+  E --> TA
+  TA --> STATE
 ```
 
-The graph uses solid arrows for process launch or control, dotted arrows for ownership or cross-boundary control, and marks in-process domains explicitly. There is no single fixed process count: a host can have `0..N` checkout-scoped daemon instances, with at most one daemon per checkout, and, where installed and running, at most one host-control service; each authorized IM request may add a local `ai` child, while a direct or IM `ai run` may add a host TUI or sandbox launcher/worker; each sandbox contributes one broker and may lazily create `0..1` tmux `work` session, while each active run contributes a pane/run script and a sandbox TUI. Helper processes outside these repository-controlled boundaries are not counted.
+This view has one job: inventory runtime entities and their relationships. `PROCESS` means a separately observable OS process; `PROCESS GROUP` means a short-lived or per-run collection of processes; `IN-PROCESS DOMAIN` has no separate PID; `CONTAINER INSTANCES` is a boundary and count, not a process; `EXTERNAL` is owned outside this repository. `× N` means the node is replicated with the sandbox fleet. The arrows show launch, ownership, containment, or control relationships; they are not a chronological operation sequence.
 
-For environments that do not render Mermaid, the matrix and control-path sections below provide the same process, cardinality, authority, and lifecycle facts in text.
+The large frames have explicit meanings: `HOST OS` is the host-user process and permission boundary, `SANDBOX FLEET` is the set of `0..N` isolated container instances on that host, and `EXTERNAL INFRASTRUCTURE` contains services that own or host those entities. A frame is not an extra process and the number of frames is not the number of instances.
 
-These are separate boundaries:
+For environments that do not render Mermaid, the matrix and control-flow view below provide the same process, cardinality, authority, and lifecycle facts in text.
 
-- The daemon's per-message `ai` child schedules a local CLI command. It is not the AI TUI that performs the selected skill.
+The detailed identities remain separate even though the highest-level view groups them:
+
+- The daemon's per-message local `ai` child schedules a local CLI command. It is not the AI TUI that performs the selected skill.
 - IM and local entry are separate: an authorized IM message goes through the daemon and its local child, while local `ai run` reaches the host TUI directly when there is no task reference or the sandbox launcher directly when a task reference is present.
 - `create-task` is a host-side skill. `ai run` starts the selected TUI with stdin ignored and stdout/stderr inherited, then waits for that child to close.
 - A task skill is task-bound. `ai run` creates a sandbox tmux `work` session and an `ai-<run-id>` window through `docker exec`, starts a run script and the actual TUI, then returns after the window is created. That return is dispatch success, not skill completion.
@@ -139,6 +139,25 @@ These are separate boundaries:
 | Platform sync boundary (external boundary; not a process) | Invoked by lifecycle, worker, or CLI paths as needed | GitHub/platform APIs or provider adapters | Platform credentials remain separate from IM and local task authority | Issue/PR/label state and local receipts are separate facts | Remote failure must not be reported as local lifecycle success. |
 
 ## Control Paths
+
+### Control-flow view (actions, not process inventory)
+
+The topology above is the process inventory. This second view is deliberately an operation flow: its boxes are stages or facts, not additional processes.
+
+```mermaid
+flowchart TD
+  IN["authorized message or local CLI"] --> ENTRY{"entry context"}
+  ENTRY -->|no task ref / create-task| HOST["start host-side TUI"]
+  ENTRY -->|task-bound skill| DISPATCH["dispatch sandbox launcher"]
+  HOST --> AUTH["call Task Control Authority"]
+  DISPATCH --> RUN["create run and record dispatch result"]
+  RUN --> TUI["sandbox TUI / skill continues"]
+  TUI --> BROKER["send broker-client control request"]
+  BROKER --> AUTH
+  AUTH --> STATE["write task.md / journal / artifact / receipt"]
+```
+
+The flow does not count processes. For process identity and multiplicity, use the topology and entity matrix above; for operation completion and recovery semantics, use the text below.
 
 ### IM and local `/run` admission
 
