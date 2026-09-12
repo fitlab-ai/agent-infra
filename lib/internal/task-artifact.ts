@@ -1,7 +1,7 @@
 import { parseArtifactCommand, executeArtifactCommand } from '../task/artifact-command.ts';
 import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> init --family <family> --artifact <artifact> [--locale <zh-CN|en>]\n       agent-infra-internal task-artifact <N | TASK-id> repair --family <family> --artifact <artifact> --expected-sha256 <sha256> --expected-semantic-digest <digest>\n       agent-infra-internal task-artifact <N | TASK-id> finalize-local --family <analysis|plan|code> --artifact <artifact>\n\nInspect, initialize, repair, or finalize a workflow artifact without changing task state.\n`;
+const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> init --family <family> --artifact <artifact> [--locale <zh-CN|en>]\n       agent-infra-internal task-artifact <N | TASK-id> repair --family <family> --artifact <artifact> --expected-sha256 <sha256> --expected-semantic-digest <digest>\n       agent-infra-internal task-artifact <N | TASK-id> reopen-finalization --family <analysis|plan|code> --artifact <artifact> --expected-sha256 <sha256> --expected-semantic-digest <digest>\n       agent-infra-internal task-artifact <N | TASK-id> finalize-local --family <analysis|plan|code> --artifact <artifact>\n\nInspect, initialize, repair, reopen finalization provenance, or finalize a workflow artifact without changing task state.\n`;
 
 
 function taskArtifact(args: string[] = []): void {

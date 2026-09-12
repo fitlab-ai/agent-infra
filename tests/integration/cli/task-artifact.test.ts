@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+import { readArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-artifact-cli-'));
@@ -123,6 +124,32 @@ test('task-artifact finalize-local returns stable digests without mutating a val
   assert.match(result.artifactSha256, /^[0-9a-f]{64}$/);
   assert.match(result.semanticDigest, /^[0-9a-f]{64}$/);
   assert.deepEqual(fs.readFileSync(artifact), before);
+});
+
+test('task-artifact reopen-finalization recovers an uncommitted passed provenance', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, localArtifact('plan'));
+
+  const finalized = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(finalized.status, 0, finalized.stderr);
+  const previous = JSON.parse(finalized.stdout);
+  fs.appendFileSync(artifact, '\nrecovered after failed completion\n');
+
+  const reopened = run(f.root, [
+    f.id, 'reopen-finalization', '--family', 'plan', '--artifact', 'plan.md',
+    '--expected-sha256', previous.artifactSha256,
+    '--expected-semantic-digest', previous.semanticDigest
+  ]);
+  assert.equal(reopened.status, 0, `${reopened.stderr}\n${reopened.stdout}`);
+  const result = JSON.parse(reopened.stdout);
+  assert.equal(result.status, 'applied');
+  assert.equal(result.changed, true);
+  assert.equal(readArtifactRepairIntent(f.root, f.id, 'plan', 'plan.md')?.state, 'awaiting-repair');
+
+  const retried = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(retried.status, 0, `${retried.stderr}\n${retried.stdout}`);
+  assert.equal(readArtifactRepairIntent(f.root, f.id, 'plan', 'plan.md')?.state, 'passed');
 });
 
 test('task-artifact finalize-local uses repository config from a nested working directory', () => {

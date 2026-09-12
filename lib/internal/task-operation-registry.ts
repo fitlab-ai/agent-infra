@@ -137,6 +137,7 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'task-artifact', 'inspect', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-artifact', 'init', 'task-bound', 'artifact-write'),
     descriptor('internal', 'task-artifact', 'repair', 'task-bound', 'artifact-write'),
+    descriptor('internal', 'task-artifact', 'reopen-finalization', 'task-bound', 'artifact-write'),
     descriptor('internal', 'task-artifact', 'finalize-local', 'task-bound', 'artifact-write'),
     descriptor('internal', 'task-orchestration', 'status', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-orchestration', 'progress', 'task-bound', 'progress'),
