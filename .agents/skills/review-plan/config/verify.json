@@ -27,7 +27,7 @@
       "expected_action_pattern": "(Review Plan|Plan Review) \\(Round \\d+\\)"
     },
     "platform-sync": {
-      "when": "issue_number_exists",
+      "when": "platform_issue_identity_exists",
       "expected_status_label": "status: pending-design-work",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
       "verify_comment_content": true,

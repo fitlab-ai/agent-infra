@@ -21,7 +21,7 @@
       "expected_action_pattern": "(Block Task|Blocked)"
     },
     "platform-sync": {
-      "when": "issue_number_exists",
+      "when": "platform_issue_identity_exists",
       "expected_status_label": "status: blocked",
       "expected_status_label_key": "blocked"
     }

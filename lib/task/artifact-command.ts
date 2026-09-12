@@ -44,8 +44,9 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   if (operation !== 'inspect' && !fields['--artifact']) throw new Error("option '--artifact' is required");
   const locale = fields['--locale'];
   if (locale !== undefined && locale !== 'zh-CN' && locale !== 'en') throw new Error("option '--locale' must be 'zh-CN' or 'en'");
-  if (operation === 'repair' && !['--expected-sha256', '--expected-semantic-digest'].every((flag) => /^[a-f0-9]{64}$/u.test(fields[flag] ?? ''))) {
-    throw new Error('repair requires lowercase 64-character digests');
+  if (operation === 'repair'
+    && !['--expected-sha256', '--expected-semantic-digest'].every((flag) => /^[a-f0-9]{64}$/u.test(fields[flag] ?? ''))) {
+    throw new Error(`${operation} requires lowercase 64-character digests`);
   }
   return {
     taskRef, operation: operation as ArtifactCommand['operation'], family: fields['--family'],

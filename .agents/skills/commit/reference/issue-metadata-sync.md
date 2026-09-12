@@ -4,7 +4,7 @@
 
 仅当以下条件同时满足时执行：
 - `{task-id}` 有效
-- `task.md` frontmatter 中存在有效 `issue_number`
+- `task.md` frontmatter 中存在有效 `platform_issue_identity`
 
 任一条件不满足时，跳过本步骤。
 

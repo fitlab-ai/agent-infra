@@ -12,7 +12,7 @@
     "activity-log": { "expected_action_pattern": "Run Manual Validation \\(Round \\d+\\)" },
     "review-ledger": { "stage_scope": ["analysis", "plan", "code"] },
     "platform-sync": {
-      "when": "issue_number_exists",
+      "when": "platform_issue_identity_exists",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
       "verify_comment_content": true,
       "verify_task_comment_content": true,

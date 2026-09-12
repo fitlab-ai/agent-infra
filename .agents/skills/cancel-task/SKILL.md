@@ -14,7 +14,7 @@ description: >
 
 - 本命令用于终止一个不再需要继续执行的任务，并转移到 `completed/`
 - 只有在确认该任务无需继续实现、审查或修复时才可取消
-- 有效 `issue_number` 存在时，Issue 同步属于必做项
+- 有效 `platform_issue_identity` 存在时，Issue 同步属于必做项
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
@@ -73,9 +73,9 @@ ls .agents/workspace/completed/{task-id}/task.md
 
 ### 6. 同步到 Issue
 
-检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过此步骤。
+检查 `task.md` 中是否存在有效的 `platform_issue_identity`。如果没有，跳过此步骤。
 
-如果存在有效的 `issue_number`：
+如果存在有效的 `platform_issue_identity`：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
 - 将取消正文写入临时文件，调用 `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`

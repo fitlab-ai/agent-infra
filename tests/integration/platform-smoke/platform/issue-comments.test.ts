@@ -206,7 +206,7 @@ function syncFixture() {
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
   fs.writeFileSync(
     path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
-    '---\nid: TASK-20260101-000001\ntype: feature\nissue_number: 7\n---\n\n# Task\n'
+    '---\nid: TASK-20260101-000001\ntype: feature\nplatform_issue_identity: \'{"kind":"number","value":7}\'\n---\n\n# Task\n'
   );
   fs.writeFileSync(
     path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md'),

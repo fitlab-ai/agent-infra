@@ -47,7 +47,7 @@ No Pull Request is required; run instead:
 
 Parse the task scope first: an optional `--task <ref>` or `-t <ref>` selects `{task-id}`; a positional task ref is not interpreted. The remaining positional argument, when present, is `{target-branch}`.
 
-If `{task-id}` is provided, read `.agents/workspace/active/{task-id}/task.md` to load task metadata such as `issue_number` and `type`.
+If `{task-id}` is provided, read `.agents/workspace/active/{task-id}/task.md` to load task metadata such as `platform_issue_identity` and `type`.
 If `{task-id}` is omitted, try to resolve it from the current session context; if it still cannot be determined, skip task-association logic in later steps.
 
 ### 2. Determine the Target Branch
@@ -70,7 +70,7 @@ Run `agent-infra-internal task-delivery {task-id} deliver --agent {standard-agen
 
 Read `.agents/rules/issue-pr-commands.md`, write the title and body to temporary files, then invoke its `platform-pr create` intent. Under the task lock, core uses remote branch and exact head/base/PR identity facts: one existing PR is reused and bound, zero creates, and multiple matches fail deterministically. Review artifacts and task sync records are not create-pr prerequisites, and replays must not create duplicate PRs.
 
-If `{task-id}` is available and the related task provides `issue_number`, keep `Closes #{issue-number}` in the PR body.
+If `{task-id}` is available and the related task provides `platform_issue_identity`, keep `Closes #{issue-number}` or the provider-equivalent closing keyword in the PR body when supported.
 
 ### 6. Sync PR Metadata
 

@@ -18,7 +18,7 @@
       "expected_action_pattern": "(Create PR|PR Created)"
     },
     "platform-sync": {
-      "when": "issue_number_exists",
+      "when": "platform_issue_identity_exists",
       "expected_pr_comment_marker": "<!-- sync-pr:{task-id}:summary -->",
       "verify_in_labels_match_pr": true,
       "verify_in_labels_computed": true,

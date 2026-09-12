@@ -4,7 +4,7 @@ This scenario applies only to an active task whose completion canonical inventor
 
 ## Typed State Machine
 
-Run `agent-infra-internal platform-pr resolve-external {task-id} --agent {agent} [--pr {N}]`. Core checks the completion inventory first. A non-empty inventory returns `mode=normal`, and supplying `--pr` then fails. An empty inventory requires a positive `issue_number`; otherwise core returns `EXTERNAL_DELIVERY_ISSUE_REQUIRED`.
+Run `agent-infra-internal platform-pr resolve-external {task-id} --agent {agent} [--pr {N}]`. Core checks the completion inventory first. A non-empty inventory returns `mode=normal`, and supplying `--pr` then fails. An empty inventory requires a valid `platform_issue_identity`; otherwise core returns `EXTERNAL_DELIVERY_ISSUE_REQUIRED`.
 
 The platform adapter supplies authoritative Issue closing change requests across all pages. Only candidates with a matching base repository, complete identity, and merge evidence are eligible. One candidate is selected automatically; ambiguity, conflicts, and missing evidence fail closed. `--pr` may only select an authoritative eligible closing candidate and cannot bypass repository, Issue, merge, or identity validation.
 

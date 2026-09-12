@@ -15,6 +15,8 @@ import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskFileSystem, TaskMutation, TaskOperationSummary, TaskWriteMetadata } from './write.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
 import { isValidAgentInfraVersion } from '../version.ts';
+import { taskIssueIdentity } from '../platform/task-identities.ts';
+import { resourceIdentityEquals } from '../platform/resource-identity.ts';
 
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'
@@ -251,8 +253,10 @@ function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent:
   if (!fs.existsSync(taskFile)) return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging has no task.md' };
   try {
     const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(taskFile, 'utf8'));
-    if (frontmatter.id !== taskId || Number(frontmatter.issue_number) !== request.issueNumber || frontmatter.current_step === 'completed') {
-      return { code: 'LIFECYCLE_STAGING_IDENTITY_INVALID', message: 'restore task identity, issue, or current_step is invalid' };
+    const issueIdentity = taskIssueIdentity(frontmatter);
+    const requestedIssueIdentity = { kind: 'number' as const, value: request.issueNumber };
+    if (frontmatter.id !== taskId || !issueIdentity || (issueIdentity.kind === 'number' && !resourceIdentityEquals(issueIdentity, requestedIssueIdentity)) || frontmatter.current_step === 'completed') {
+      return { code: 'LIFECYCLE_STAGING_IDENTITY_INVALID', message: 'restore task identity, platform issue identity, or current_step is invalid' };
     }
   } catch (error) {
     return { code: 'LIFECYCLE_STAGING_INVALID', message: error instanceof Error ? error.message : String(error) };

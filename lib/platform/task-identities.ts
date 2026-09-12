@@ -1,13 +1,8 @@
-import type { ProviderIdentityDeclaration, ResourceIdentity } from './resource-identity.ts';
+import type { ResourceIdentity } from './resource-identity.ts';
 import { parseResourceIdentity } from './resource-identity.ts';
-import { isLegacyCompatibilityEnabled, legacyCompatibilityError, VERSION } from '../version.ts';
 import { parse as parseYaml } from 'yaml';
 
-function taskIssueIdentity(
-  frontmatter: Record<string, string | number | boolean | null>,
-  _declaration?: ProviderIdentityDeclaration,
-  runtimeVersion = VERSION
-): ResourceIdentity | null {
+function taskIssueIdentity(frontmatter: Record<string, string | number | boolean | null>): ResourceIdentity | null {
   const serialized = frontmatter.platform_issue_identity;
   if (typeof serialized === 'string' && serialized.trim()) {
     try {
@@ -20,13 +15,16 @@ function taskIssueIdentity(
       return null;
     }
   }
-  const legacy = frontmatter.issue_number;
-  const number = typeof legacy === 'number' ? legacy : typeof legacy === 'string' && /^[1-9]\d*$/u.test(legacy) ? Number(legacy) : NaN;
-  // TODO(compat): Remove the numeric issue_number fallback before the first stable v1.0.0 release.
-  if (Number.isSafeInteger(number) && number > 0 && !isLegacyCompatibilityEnabled(runtimeVersion)) {
-    throw legacyCompatibilityError('issue_number', runtimeVersion);
+  // TODO(compat): Remove this transition-only legacy reader once the active migration manifest is completed and the current-only build is deployed.
+  if (process.env.AGENT_INFRA_TRANSITION_BUILD === '1') {
+    const legacy = frontmatter.issue_number;
+    if (typeof legacy === 'number' && Number.isSafeInteger(legacy) && legacy > 0) return { kind: 'number', value: legacy };
+    if (typeof legacy === 'string' && /^[1-9]\d*$/u.test(legacy)) {
+      const value = Number(legacy);
+      if (Number.isSafeInteger(value) && value > 0) return { kind: 'number', value };
+    }
   }
-  return Number.isSafeInteger(number) && number > 0 ? { kind: 'number', value: number } : null;
+  return null;
 }
 
 function taskIssueIdentityError(error: unknown): { code: string; message: string } {

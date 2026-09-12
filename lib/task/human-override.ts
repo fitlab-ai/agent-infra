@@ -617,10 +617,7 @@ function resourceForSnapshot(
   if (policy.producerId === 'platform.issue') {
     const identity = options.probeIssueNumber !== undefined
       ? resourceIdentity(options.probeIssueNumber)
-      : taskIssueIdentity((frontmatter || {}) as Record<string, string | number | boolean | null>) || (() => {
-        const number = toPositiveInteger(frontmatter?.issue_number);
-        return number === null ? null : resourceIdentity(number);
-      })();
+      : taskIssueIdentity((frontmatter || {}) as Record<string, string | number | boolean | null>);
     return identity ? { kind: 'issue', identity, number: resourceIdentityNumber(identity) } : null;
   }
   if (policy.producerId === 'platform.pull-request') {
@@ -719,11 +716,11 @@ async function probePlatformFailure(
   }
   const issueIdentity = options.probeIssueNumber !== undefined
     ? resourceIdentity(options.probeIssueNumber)
-    : taskIssueIdentity(frontmatter) || (() => {
-      const number = toPositiveInteger(frontmatter.issue_number);
-      return number === null ? null : resourceIdentity(number);
-    })();
+    : taskIssueIdentity(frontmatter);
   const fact = readPrDeliveryFact(frontmatter);
+  if (fact.status === 'invalid') {
+    return error(fact.error.code, fact.error.message);
+  }
   const pullRequestIdentity = options.probePullRequestNumber !== undefined
     ? resourceIdentity(options.probePullRequestNumber)
     : fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;

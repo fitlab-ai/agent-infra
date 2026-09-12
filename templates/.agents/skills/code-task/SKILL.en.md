@@ -64,7 +64,7 @@ Read `reference/branch-management.md`, ensure the current branch matches the tas
 
 ### 3. Narrow the Milestone
 
-**Mandatory; do not skip.** If task.md has a valid `issue_number`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone specific`.
+**Mandatory; do not skip.** If task.md has a valid `platform_issue_identity`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone specific`.
 
 > If the milestone remains `X.Y.x`, step 12 `task-verify code.completed` blocks through the typed milestone check.
 
@@ -112,7 +112,7 @@ When triaging a test failure or unexpected behavior, first read `.agents/rules/d
 
 After tests pass, call the shared commit core with `agent-infra-internal git-workflow commit --input {checkpoint-input}`. Pass `delivery: { "mode": "local" }`, explicit paths, expected HEAD/tree, task ref, agent, and the code round. This creates only a local checkpoint and does not contact a remote. The core writes a durable intent before committing and removes it after task-writer synchronization; do not emit `code.completed` if either checkpoint or task synchronization fails.
 
-After the checkpoint succeeds, when task.md has an `issue_number`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`. The task-bound `delivery_base_ref` is the only source for Issue `in:` evidence; record a warning and stop this round without emitting `code.completed` if this sync fails.
+After the checkpoint succeeds, when task.md has a `platform_issue_identity`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`. The task-bound `delivery_base_ref` is the only source for Issue `in:` evidence; record a warning and stop this round without emitting `code.completed` if this sync fails.
 
 ### 9. Write the Code Report
 
@@ -148,7 +148,7 @@ Do not rescan or manually write digest data; the completion event must include `
 
 After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --files-modified {n} --tests-passed {n} {execution-flag}`; in fix mode add `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
 
-If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then (status/comment failures follow the warning rules; an Issue `in:` evidence failure must not emit `code.completed`):
+If task.md has a valid `platform_issue_identity`, read `.agents/rules/issue-sync.md`, then (status/comment failures follow the warning rules; an Issue `in:` evidence failure must not emit `code.completed`):
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {standard-agent-token}`

@@ -9,6 +9,7 @@ import {
   buildPullRequestSummary,
   reportWrite,
   reconcileSummaryComment,
+  summaryCommentState,
   syncPullRequestSummary,
   warningResultForPrimary
 } from '../../../../lib/platform/pr-summary.ts';
@@ -188,7 +189,7 @@ test('PR summary warning result preserves the primary lifecycle outcome', () => 
   assert.equal(warningResultForPrimary('no_op'), 'no_op_with_warnings');
 });
 
-test('PR summary preserves the structured legacy cutoff error from a persisted fact', async () => {
+test('PR summary preserves the structured v1 unsupported error from a persisted fact', async () => {
   const fixture = summaryFixture();
   try {
     const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
@@ -203,6 +204,15 @@ test('PR summary preserves the structured legacy cutoff error from a persisted f
     });
     assert.equal(result.status, 'failed');
     assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    let providerCalls = 0;
+    const noSideEffectClient = {
+      version: () => { providerCalls += 1; return { ok: true as const, value: '2.72.0' }; },
+      json: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; },
+      text: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; }
+    } as unknown as GitHubClient;
+    const state = await summaryCommentState(fixture.taskId, { cwd: fixture.root, client: noSideEffectClient });
+    assert.equal(state.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    assert.equal(providerCalls, 0);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -243,6 +253,35 @@ test('change-report writes a task-bound sidecar and converges on replay', async 
     });
     assert.equal(replay.status, 'no-op');
     assert.equal(replay.report?.status, 'no-op');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('change-report rejects a v1 fact before loading the provider', async () => {
+  const fixture = summaryFixture();
+  try {
+    fs.rmSync(fixture.reportPath);
+    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
+    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(legacy)}`));
+    let providerCalls = 0;
+    const client = {
+      version: () => { providerCalls += 1; return { ok: true as const, value: '2.72.0' }; },
+      json: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; },
+      text: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; }
+    } as unknown as GitHubClient;
+    const result = await reportWrite(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      mechanicalFile: path.join(fixture.root, 'missing-mechanical.json'),
+      precheckFile: path.join(fixture.root, 'missing-precheck.json'),
+      client
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    assert.equal(providerCalls, 0);
+    assert.equal(fs.existsSync(fixture.reportPath), false);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

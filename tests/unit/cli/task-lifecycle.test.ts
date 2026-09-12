@@ -176,7 +176,7 @@ test('restore validates staging before exposing active and allocates a short id'
   const staging = path.join(repoRoot, '.agents', 'workspace', '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
-  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${TASK_ID}\nissue_number: 42\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(staging, 'analysis.md'), '# Analysis\n');
   const result = applyTaskLifecycle(
     { taskRef: TASK_ID, intent: 'restore', agent: 'codex', stagingDir: staging, issueNumber: 42 },
@@ -195,7 +195,7 @@ test('restore transports task receipts with artifacts without using mtime', () =
   fs.mkdirSync(staging, { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
   const taskPath = path.join(staging, 'task.md');
-  fs.writeFileSync(taskPath, `---\nid: ${TASK_ID}\nissue_number: 42\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
+  fs.writeFileSync(taskPath, `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(staging, 'plan.md'), '# Plan\n');
   fs.writeFileSync(path.join(staging, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n');
   let content = fs.readFileSync(taskPath, 'utf8');

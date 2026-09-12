@@ -5,7 +5,7 @@ import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { renderHumanOverrideAudit } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { TaskExecutionLockError, transitionLeaseHeld, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import type { PrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import { resolvePlatformProviderContext } from './context.ts';
@@ -102,12 +102,17 @@ function taskReportPath(taskDir: string): string {
   return path.join(taskDir, 'pr-change-report.json');
 }
 
-function readBoundTaskSnapshot(taskMdPath: string): { taskContent: string; boundFact: Extract<PrDeliveryFact, { state: 'bound' }> | null } {
+function readBoundTaskSnapshot(taskMdPath: string): {
+  taskContent: string;
+  boundFact: Extract<PrDeliveryFact, { state: 'bound' }> | null;
+  factError: { code: string; message: string } | null;
+} {
   const taskContent = fs.readFileSync(taskMdPath, 'utf8');
   const frontmatter = parseTypedTaskFrontmatter(taskContent);
   const fact = readPrDeliveryFact(frontmatter);
   const boundFact = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact : null;
-  return { taskContent, boundFact };
+  const factError = fact.status === 'invalid' ? { code: fact.error.code, message: fact.error.message } : null;
+  return { taskContent, boundFact, factError };
 }
 
 function boundPrNumberForWarning(taskMdPath: string): number | null {
@@ -343,9 +348,16 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
   };
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const frontmatter = parseTypedTaskFrontmatter(taskContent);
-  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
-  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? resourceIdentityNumber(fact.fact.identity.resource) : null;
   const reportPath = taskReportPath(resolved.taskDir);
+  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
+  if (fact.status === 'invalid') return {
+    ...platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }),
+    task: { id: resolved.taskId, prNumber: null },
+    pullRequest: null,
+    changeReport: { status: 'invalid', path: reportPath, taskIntentSha256: null, reason: fact.error.message },
+    artifacts: []
+  };
+  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? resourceIdentityNumber(fact.fact.identity.resource) : null;
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   let pullRequest: PlatformChangeRequestSnapshot | null = null;
@@ -397,13 +409,30 @@ type ReportWriteOptions = {
 async function reportWrite(taskRef: string, options: ReportWriteOptions): Promise<ReportWriteResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ...platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }), report: null };
+  let preflight: ReturnType<typeof readBoundTaskSnapshot>;
+  try {
+    preflight = readBoundTaskSnapshot(resolved.taskMdPath);
+  } catch (error) {
+    return {
+      ...platformResult('failed', { error: { code: 'PR_CHANGE_REPORT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false } }),
+      report: null
+    };
+  }
+  if (preflight.factError) return {
+    ...platformResult('failed', { error: { code: preflight.factError.code, message: preflight.factError.message, retryable: false } }),
+    report: null
+  };
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!loaded.ok || !context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ...context, report: null };
   let knownPrNumber: number | null = null;
   try {
     return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, async () => {
-      const { taskContent, boundFact } = readBoundTaskSnapshot(resolved.taskMdPath);
+      const { taskContent, boundFact, factError } = readBoundTaskSnapshot(resolved.taskMdPath);
+      if (factError) return {
+        ...basePlatformResult('failed', context, resolved.taskId, null, { code: factError.code, message: factError.message, retryable: false }),
+        report: null
+      };
       if (!boundFact) return {
         ...basePlatformResult('failed', context, resolved.taskId, null, { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false }),
         report: null
@@ -535,7 +564,11 @@ async function syncPullRequestSummary(
   }
   try {
     const execute = async (): Promise<PullRequestSummaryResult> => {
-      const { taskContent, boundFact } = readBoundTaskSnapshot(resolved.taskMdPath);
+      const { taskContent, boundFact, factError } = readBoundTaskSnapshot(resolved.taskMdPath);
+      if (factError) return {
+        ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: factError.code, message: factError.message, retryable: false } }),
+        result: null, warnings: []
+      };
       if (!boundFact) return {
         ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }),
         result: null, warnings: []
@@ -704,7 +737,7 @@ async function syncPullRequestSummary(
         result: null, warnings: [], ...info
       };
     };
-    return await (options.lockAlreadyHeld
+    return await (options.lockAlreadyHeld && transitionLeaseHeld()
       ? execute()
       : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, execute));
   } catch (error) {

@@ -12,14 +12,14 @@
 | `summary` | `<!-- sync-issue:{task-id}:summary -->` |
 | `cancel` | `<!-- sync-issue:{task-id}:cancel -->` |
 
-`pr-review` content is synced only as an Issue artifact comment (via the `artifact` / `artifactChunk` markers) and is never a `restore-task` recovery source; restore still accepts only an Issue number and reads only registered Issue markers, with no PR source.
+`pr-review` content is synced only as an Issue artifact comment (via the `artifact` / `artifactChunk` markers) and is never a `restore-task` recovery source; restore still accepts only an Issue token and reads only registered Issue markers, with no PR source.
 
 Comments use `platform-comment`; Issue resources use `platform-issue`:
 
 ```bash
 agent-infra-internal platform-issue inspect {task-id}
 agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
-agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {standard-agent-token}
+agent-infra-internal platform-issue bind {task-id} --issue {issue-token} --agent {standard-agent-token}
 agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} {desired-state-flags}
 ```
 

@@ -1704,10 +1704,10 @@ test("platform workflow docs delegate comment mechanics to internal intents", ()
     "run-manual-validation": "platform-comment sync {task-id}",
     "complete-task": "platform-comment sync {task-id}",
     "create-task": "platform-comment sync {task-id}",
-    "import-issue": "platform-comment list --issue {issue-number}",
+    "import-issue": "platform-comment list --issue {issue-token}",
     "plan-task": "platform-comment sync {task-id}",
     "refine-title": "platform-context resolve",
-    "restore-task": "platform-comment list --issue {issue-number}",
+    "restore-task": "platform-comment list --issue {issue-token}",
     "review-analysis": "platform-comment sync {task-id}",
     "review-code": "platform-comment sync {task-id}",
     "review-plan": "platform-comment sync {task-id}"
@@ -1780,7 +1780,7 @@ test("complete-task splits active preflight checks from completed-state checks",
     const checks = JSON.parse(read(relativePath)).checks;
 
     assert.deepEqual(checks["platform-sync-preflight"], {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       expected_comment_marker: "<!-- sync-issue:{task-id}:summary -->",
       verify_task_comment_content: false,
       sync_checked_requirements: true,
@@ -1791,7 +1791,7 @@ test("complete-task splits active preflight checks from completed-state checks",
       expected_comment_marker_key: "summary"
     });
     assert.deepEqual(checks["platform-sync"], {
-      when: "issue_number_exists",
+      when: "platform_issue_identity_exists",
       verify_task_comment_content: true,
       verify_closed_issue_has_no_status_labels: true
     });

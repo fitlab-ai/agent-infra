@@ -134,11 +134,11 @@ Please satisfy the hard prerequisite first, then retry complete-task.
 
 ### 4. 在 active 阶段同步平台
 
-检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过本步骤且不输出任何内容。
+检查 `task.md` 中是否存在有效的 `platform_issue_identity`。如果没有，跳过本步骤且不输出任何内容。
 
 > Issue 元数据边界见 `.agents/rules/issue-sync.md`；评论同步统一调用 internal platform intent。
 
-如果存在有效的 `issue_number`，严格按以下顺序执行：
+如果存在有效的 `platform_issue_identity`，严格按以下顺序执行：
 
 1. 调用 `agent-infra-internal platform-comment backfill {task-id} --agent {standard-agent-token}`，由 core 仅按 completion canonical inventory 固定顺序补发产物并在全部成功后精确恢复目标历史告警。
 2. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。

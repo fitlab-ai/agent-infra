@@ -201,7 +201,7 @@ test('review-pr task-verify gate requires re-sync after publication write-back (
       `id: ${id}`,
       `type: feature`,
       `status: active`,
-      `issue_number: 7`,
+      `platform_issue_identity: '{"kind":"number","value":7}'`,
       `pr_delivery_fact: ${JSON.stringify(boundFact(42))}`,
       `---`,
       ``,

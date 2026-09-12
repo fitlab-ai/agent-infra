@@ -107,7 +107,7 @@ function stagingFixture({ initGit = true } = {}) {
   const staging = path.join(root, '.agents', 'workspace', '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
-  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${RESTORE_TASK_ID}\nissue_number: 42\nstatus: active\ncurrent_step: requirement-analysis\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${RESTORE_TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: active\ncurrent_step: requirement-analysis\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return { root, staging };
 }
 

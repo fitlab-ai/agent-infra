@@ -14,7 +14,10 @@ test('concurrent platform checks retain their own repository utilities across aw
       fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'none' } }));
       return check({ taskDir: repoRoot, config: {} }, {
         repoRoot,
-        loadTask: () => ({ ok: true, content: '', metadata: { id: 'TASK-20260101-000001', issue_number: '42' } }),
+        loadTask: () => ({ ok: true, content: '', metadata: {
+          id: 'TASK-20260101-000001',
+          platform_issue_identity: '{"kind":"number","value":42}'
+        } }),
         passResult: (type: string) => ({ type, status: 'pass' as const, message: name }),
         failResult: (type: string, message: string) => ({ type, status: 'fail' as const, message }),
         blockedResult: (type: string, message: string) => ({ type, status: 'blocked' as const, message }),
@@ -23,14 +26,42 @@ test('concurrent platform checks retain their own repository utilities across aw
         isBlank: (value: unknown) => value == null || value === '',
         escapeRegExp: (value: string) => value,
         safeStat: () => null,
-        parseIssueNumber: () => null,
-        parsePrNumber: () => null
       });
     }));
     assert.deepEqual(results.map(({ status, message }) => ({ status, message })), [
       { status: 'pass', message: 'first' },
       { status: 'pass', message: 'second' }
     ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('platform-sync rejects a v1 fact before remote context resolution', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-context-v1-'));
+  try {
+    const result = await check({ taskDir: root, config: {} }, {
+      repoRoot: root,
+      loadTask: () => ({
+        ok: true,
+        content: '',
+        metadata: {
+          id: 'TASK-20260101-000001',
+          platform_issue_identity: '{"kind":"number","value":42}',
+          pr_delivery_fact: JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' })
+        }
+      }),
+      passResult: (type: string, message: string) => ({ type, status: 'pass' as const, message }),
+      failResult: (type: string, message: string) => ({ type, status: 'fail' as const, message }),
+      blockedResult: (type: string, message: string) => ({ type, status: 'blocked' as const, message }),
+      getCheckedRequirements: () => [],
+      normalizeContent: String,
+      isBlank: (value: unknown) => value == null || value === '',
+      escapeRegExp: (value: string) => value,
+      safeStat: () => null,
+    });
+    assert.equal(result.status, 'fail');
+    assert.match(result.message, /PLATFORM_IDENTITY_LEGACY_UNSUPPORTED/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

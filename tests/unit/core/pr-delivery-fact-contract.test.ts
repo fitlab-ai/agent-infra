@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { parse as parseYaml } from "yaml";
 
 import { read } from "../../helpers.ts";
-import { decodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 
 const taskTemplates = [
   ".agents/templates/task.md",
@@ -17,7 +16,8 @@ for (const templatePath of taskTemplates) {
     const line = content.split("\n").find((item) => item.startsWith("pr_delivery_fact:"));
     assert.ok(line);
     const value = line!.slice("pr_delivery_fact:".length).trim();
-    const fact = decodePrDeliveryFact(value.startsWith("'") && value.endsWith("'") ? value.slice(1, -1) : JSON.parse(value));
+    const raw = parseYaml(value);
+    const fact = typeof raw === "string" ? JSON.parse(raw) : raw;
     assert.deepEqual(fact, { version: 2, state: "unbound", reason: "initial" });
   });
 }

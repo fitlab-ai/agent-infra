@@ -1,6 +1,6 @@
 ---
 description: "Restore local task files from Issue comments"
-usage: "/restore-task <issue-number> [task-id]"
+usage: "/restore-task <issue-token> [task-id]"
 disable-model-invocation: true
 ---
 

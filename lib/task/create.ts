@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { DEFAULT_TRANSITION_LOCK_ROOT, TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
 import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS, parseTaskQualification } from './qualification-audit.ts';
@@ -354,7 +354,7 @@ function withCreateLock<T>(repoRoot: string, workspaceRoot: string, operation: (
     return withTaskExecutionLock(repoRoot, 'task-create', 'task-create', () => {
       try { return operation(); }
       catch (error) { callbackError = error; throw error; }
-    }, { lockRoot });
+    }, { lockRoot, transitionLockRoot: DEFAULT_TRANSITION_LOCK_ROOT });
   } catch (error) {
     if (callbackError !== undefined) throw callbackError;
     if (error instanceof TaskExecutionLockError && error.code === 'ORCHESTRATION_LOCK_BUSY') {

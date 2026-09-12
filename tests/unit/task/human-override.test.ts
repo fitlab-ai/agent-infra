@@ -480,6 +480,40 @@ test('platform pull-request tickets reject a different resource number without m
   }
 });
 
+test('human override rejects a v1 pull-request fact before probing the platform', async () => {
+  const f = fixture('active');
+  let providerCalls = 0;
+  const platformClient = {
+    version: () => { providerCalls += 1; return { ok: true as const, value: '2.72.0' }; },
+    json: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; },
+    text: () => { providerCalls += 1; return { ok: false as const, error: { code: 'UNEXPECTED_PROVIDER_CALL', message: 'provider call was not expected', retryable: false } }; }
+  } as NonNullable<HumanOverrideOptions['platformClient']>;
+  const legacyContent = fs.readFileSync(f.taskMd).toString().replace('status: active', [
+    'status: active',
+    `pr_delivery_fact: ${JSON.stringify(JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' }))}`
+  ].join('\n'));
+  fs.writeFileSync(f.taskMd, legacyContent);
+  const input = fs.readFileSync(f.taskMd);
+  try {
+    const issued = await issueHumanOverride({
+      taskRef: TASK_ID,
+      failureId: failureId('platform.pull-request', 'PLATFORM_BIND_FAILED'),
+      target: 'continue-local',
+      operator: 'external-contributor',
+      reason: 'probe legacy fact',
+      scope: 'platform.pull-request',
+      pullRequestNumber: 7,
+      expiresAt: '2026-08-22 15:00:00+00:00'
+    }, { ...options(f.repoRoot), platformClient });
+    assert.equal(issued.status, 'failed');
+    assert.equal(issued.error.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+    assert.equal(providerCalls, 0);
+    assert.deepEqual(fs.readFileSync(f.taskMd), input);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('legacy pull-request tickets without a durable resource binding fail closed for reissue', async () => {
   const f = fixture('active');
   fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({

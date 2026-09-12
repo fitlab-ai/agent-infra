@@ -262,7 +262,7 @@ function createFixture(fact: ReturnType<typeof buildUnboundFact> | ReturnType<ty
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
-    '---', `id: ${taskId}`, 'status: active', 'branch: feature', 'issue_number: 7', 'agent_infra_version: v0.9.12-alpha.0',
+    '---', `id: ${taskId}`, 'status: active', 'branch: feature', 'platform_issue_identity: \'{"kind":"number","value":7}\'', 'agent_infra_version: v0.9.12-alpha.0',
     factLine(fact), '---', '', '# Task', '', '## Review Disagreement Ledger', '',
     '| id | stage | round | severity | status | evidence |',
     '|----|-------|-------|----------|--------|----------|', '', '## Activity Log', ''
@@ -419,7 +419,7 @@ test('platform-pr bind normalizes a potential merge commit on an open PR', () =>
 });
 
 test('platform-pr external binding rechecks the selected identity before writing', () => {
-  const f = externalFixture('---\nid: {task-id}\nstatus: active\nissue_number: 767\n---\n\n# Task\n\n## Activity Log\n');
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\nplatform_issue_identity: \'{"kind":"number","value":767}\'\n---\n\n# Task\n\n## Activity Log\n');
   try {
     const before = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
     const selected = JSON.parse(fs.readFileSync(f.selectedPr, 'utf8')) as Record<string, unknown>;
@@ -442,7 +442,7 @@ for (const [label, mutation] of [
   ['changed merge commit', { merge_commit_sha: 'd'.repeat(40) }]
 ] as const) {
   test(`platform-pr external binding rejects ${label} merged evidence before writing`, () => {
-    const f = externalFixture('---\nid: {task-id}\nstatus: active\nissue_number: 767\n---\n\n# Task\n\n## Activity Log\n');
+    const f = externalFixture('---\nid: {task-id}\nstatus: active\nplatform_issue_identity: \'{"kind":"number","value":767}\'\n---\n\n# Task\n\n## Activity Log\n');
     try {
       const taskPath = path.join(f.taskDir, 'task.md');
       const before = fs.readFileSync(taskPath, 'utf8');
@@ -585,7 +585,7 @@ test('platform-pr resolve-external preserves normal tasks and fails explicitly w
 });
 
 test('platform-pr resolve-external paginates, binds one merged fork PR, audits evidence, and replays idempotently', () => {
-  const f = externalFixture('---\nid: {task-id}\nstatus: active\nissue_number: 767\n---\n\n# Task\n\n## Activity Log\n');
+  const f = externalFixture('---\nid: {task-id}\nstatus: active\nplatform_issue_identity: \'{"kind":"number","value":767}\'\n---\n\n# Task\n\n## Activity Log\n');
   try {
     const args = ['resolve-external', f.taskId, '--agent', 'codex'];
     const first = run(args, { cwd: f.root, env: f.env });
@@ -640,7 +640,7 @@ test('platform-pr create refuses to locate or create a PR before remote branch d
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
-      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7', factLine(buildUnboundFact()), '---', '',
+      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'platform_issue_identity: \'{"kind":"number","value":7}\'', factLine(buildUnboundFact()), '---', '',
       '# Task', '', '## Activity Log', ''
     ].join('\n'));
     const title = path.join(root, 'title.txt');
@@ -689,7 +689,7 @@ test('platform-pr create rechecks a bound PR before replaying it', () => {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
-      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7',
+      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'platform_issue_identity: \'{"kind":"number","value":7}\'',
       factLine(boundFixture(771, headSha)), '---', '', '# Task', '', '## Activity Log', ''
     ].join('\n'));
     const title = path.join(root, 'title.txt');
@@ -743,7 +743,7 @@ test('platform-pr create does not require commit finalization evidence before re
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"},"delivery":{"remote":"origin","baseRef":"main"}}');
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
-      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7', factLine(buildUnboundFact()), '---', '',
+      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'platform_issue_identity: \'{"kind":"number","value":7}\'', factLine(buildUnboundFact()), '---', '',
       '# Task', '', '## Activity Log', '',
       '- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started', ''
     ].join('\n'));

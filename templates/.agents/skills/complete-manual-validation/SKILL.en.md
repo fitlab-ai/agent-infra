@@ -106,7 +106,7 @@ The coordinator owns pending summary, receipt, completion log, final promotion, 
 
 After the transaction coordinator succeeds, the core has atomically recorded `manual-validation.completed` with the same transaction/receipt/head identity. Do not append the Activity Log manually.
 
-If the task has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`.
+If the task has a valid `platform_issue_identity`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`.
 
 ### 8. Verification Gate
 

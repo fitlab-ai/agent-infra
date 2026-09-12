@@ -1,6 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
-
 import { syncPlatformComment } from '../platform/issue-comments.ts';
 import { createPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
 import type { PlatformResult } from '../platform/types.ts';
@@ -190,12 +187,6 @@ function platformOperations(prefix: string, operations: readonly { name: string;
   }));
 }
 
-function issueFromTask(repoRoot: string, taskId: string): { number: number; url: string } | null {
-  const content = fs.readFileSync(path.join(repoRoot, '.agents', 'workspace', 'active', taskId, 'task.md'), 'utf8');
-  const match = /^issue_number:\s*(\d+)\s*$/m.exec(content);
-  return match ? { number: Number(match[1]), url: '' } : null;
-}
-
 async function createTask(value: unknown, options: CreateTaskOptions): Promise<TaskCreateResult> {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...options.dependencies };
   let candidate: TaskCreateCandidateV1;
@@ -215,7 +206,7 @@ async function createTask(value: unknown, options: CreateTaskOptions): Promise<T
   const operations: TaskCreateOperation[] = [{
     name: 'task:local', status: local.status, reasonCode: null
   }];
-  let issue = issueFromTask(options.repoRoot, local.task.id);
+  let issue: TaskCreateResult['issue'] = null;
   const created = await dependencies.createIssue(local.task.id, { cwd: options.repoRoot, agent: candidate.agent });
   operations.push(...platformOperations('platform-create', created.operations));
   if (created.issue) issue = { number: created.issue.number, url: created.issue.url };

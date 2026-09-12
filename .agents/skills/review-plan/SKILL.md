@@ -100,7 +100,7 @@ agent-infra-internal task-artifact {task-id} init --family review-plan --artifac
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 
-如果 task.md 中存在有效的 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`；失败按 `.agents/rules/issue-sync.md` 记录 warning。
+如果 task.md 中存在有效的 `platform_issue_identity`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`；失败按 `.agents/rules/issue-sync.md` 记录 warning。
 
 最终化 intent 会在写入摘要前检查详情块 ID；任何可见重复都返回结构化失败并保持 artifact 字节不变，由模型按共享规则判断是否进行最小编辑。无法通过安全门、诊断重复、没有实际字节变化或达到紧急熔断时，停止在完成事件之前；停止路径仍必须展示已有审查结果，不得吞掉 artifact 内容。
 

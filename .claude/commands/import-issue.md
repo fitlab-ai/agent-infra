@@ -1,6 +1,6 @@
 ---
 description: "从 Issue 导入并创建任务"
-usage: "/import-issue <issue-number>"
+usage: "/import-issue <issue-token>"
 ---
 
 读取并执行 `.agents/skills/import-issue/SKILL.md` 中的 import-issue 技能。

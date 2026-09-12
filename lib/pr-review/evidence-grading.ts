@@ -37,11 +37,6 @@ export class HostResolutionError extends Error {
   }
 }
 
-function toPositiveNumber(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isInteger(n) && n > 0 ? n : null;
-}
-
 /**
  * Parse the PR body for closing-issue references. Handles the conventional
  * `Closes #1` / `Fixes: #2, #3` shapes (case-insensitive, comma/space
@@ -68,7 +63,7 @@ export function extractClosingIssueNumbers(body: string): number[] {
 /**
  * Scan `.agents/workspace/active/{task-id}/task.md` files for tasks bound to the
  * PR number or to one of the PR's closing issues. A task is emitted at most once;
- * a verified fact identity hit takes priority over the issue-number reverse lookup.
+ * a verified fact identity hit takes priority over the issue-identity reverse lookup.
  */
 export function collectHostCandidates(input: {
   prNumber?: number;
@@ -97,7 +92,7 @@ export function collectHostCandidates(input: {
     let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
     try { frontmatter = parseTypedTaskFrontmatter(content); } catch { continue; }
     const issueIdentity = taskIssueIdentity(frontmatter);
-    const issueNumber = resourceIdentityNumber(issueIdentity) ?? toPositiveNumber(frontmatter.issue_number);
+    const issueNumber = resourceIdentityNumber(issueIdentity);
     const fact = readPrDeliveryFact(frontmatter);
     const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
     const prNumber = resourceIdentityNumber(prIdentity);
@@ -209,8 +204,8 @@ function isTrusted(head: HeadState): boolean {
 /**
  * Derive the S1(a) trust factor `taskIssueMatches` (PL-3) mechanically from
  * resolved data: a unique host is trusted on the issue dimension only when the
- * task's bound issue_number is among the PR's closing issues. Ambiguous/none
- * hosts and tasks without a positive issue_number cannot be confirmed -> false
+ * task's bound issue identity is among the PR's closing issues. Ambiguous/none
+ * hosts and tasks without a numeric issue identity cannot be confirmed -> false
  * (fail closed to S2/audit). `resolve-host` emits this value so the prompt layer
  * does not derive the trust factor ad hoc (CD-2).
  */

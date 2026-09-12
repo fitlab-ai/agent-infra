@@ -29,7 +29,7 @@ import { findSectionHeading } from './sections.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
 import { commitOrchestrationStageCompletion } from './orchestration.ts';
 import type { OrchestrationStageCompletion } from './orchestration.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { TaskExecutionLockError, transitionLeaseHeld, withTaskExecutionLock } from './task-execution-lock.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 import { allowsManualOverride } from './guard-override.ts';
@@ -1065,9 +1065,10 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
 function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
   const invalid = validateTaskEventRequest(request);
   if (invalid) return failed(request, invalid);
-  const parts = eventParts(request.event);
-  if (options.lockAlreadyHeld) return applyTaskEventUnlocked(request, options);
-  if (request.dryRun || parts.phase !== 'completed' || parts.family === 'manual-validation') {
+  if (options.lockAlreadyHeld && (request.dryRun || transitionLeaseHeld())) {
+    return applyTaskEventUnlocked(request, options);
+  }
+  if (request.dryRun) {
     return applyTaskEventUnlocked(request, options);
   }
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });

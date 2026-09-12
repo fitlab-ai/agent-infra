@@ -47,7 +47,7 @@ description: >
 
 先解析 task scope：可选的 `--task <ref>` 或 `-t <ref>` 绑定 `{task-id}`；位置 task ref 不再解释。剩余的可选位置参数绑定为 `{target-branch}`。
 
-如果提供了 `{task-id}`，读取 `.agents/workspace/active/{task-id}/task.md` 获取任务信息（例如 `issue_number`、`type` 等）。
+如果提供了 `{task-id}`，读取 `.agents/workspace/active/{task-id}/task.md` 获取任务信息（例如 `platform_issue_identity`、`type` 等）。
 如果未提供，可从当前 session 上下文获取；仍无法确定 `{task-id}` 时，后续步骤中的任务关联逻辑跳过。
 
 ### 2. 确定目标分支
@@ -70,7 +70,7 @@ description: >
 
 执行前先读取 `.agents/rules/issue-pr-commands.md`，把标题和正文写入临时文件，并调用其中的 `platform-pr create` intent。core 在任务锁内按 remote branch、head/base 和 PR 身份事实执行：唯一既有 PR 会复用并绑定，零个才创建，多个稳定失败；review 或 task sync 记录不作为创建 PR 的前置门禁，重放不得产生重复 PR。
 
-如果获取到 `{task-id}` 且对应任务提供了 `issue_number`，必须在 PR 正文中保留 `Closes #{issue-number}`。
+如果获取到 `{task-id}` 且对应任务提供了 `platform_issue_identity`，在 provider 支持 numeric closing reference 时必须在 PR 正文中保留 `Closes #{issue-number}` 或 provider 等价关闭关键字。
 
 ### 6. 同步 PR 元数据
 

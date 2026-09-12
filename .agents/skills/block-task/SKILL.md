@@ -74,9 +74,9 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 ### 6. 同步到 Issue（可选）
 
-检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过。
+检查 `task.md` 中是否存在有效的 `platform_issue_identity`。如果没有，跳过。
 
-如果存在有效的 `issue_number`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status blocked`。
+如果存在有效的 `platform_issue_identity`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status blocked`。
 随后调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` 更新 task 评论。
 
 ### 7. 完成校验

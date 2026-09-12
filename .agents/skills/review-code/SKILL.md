@@ -128,7 +128,7 @@ agent-infra-internal task-artifact {task-id} init --family review-code --artifac
 完成日志必须始终写入 `Manual-validation: {n}` 字段，0 也保留。
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 
-如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
+如果 task.md 中存在有效的 `platform_issue_identity`，执行以下同步操作（任一失败则跳过并继续）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`

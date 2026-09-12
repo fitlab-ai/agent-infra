@@ -28,7 +28,7 @@
     "manual-validation": {},
     "post-review-commit": {},
     "platform-sync-preflight": {
-      "when": "issue_number_exists",
+      "when": "platform_issue_identity_exists",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:summary -->",
       "verify_task_comment_content": false,
       "sync_checked_requirements": true,
@@ -40,7 +40,7 @@
     },
     "required-pr-delivery": {},
     "platform-sync": {
-      "when": "issue_number_exists",
+      "when": "platform_issue_identity_exists",
       "verify_task_comment_content": true,
       "verify_closed_issue_has_no_status_labels": true
     },

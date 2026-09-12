@@ -85,7 +85,6 @@ function buildReviewTask(baseline: string, overrides: Record<string, string | nu
   return buildTaskContent(
     {
       id: TASK_ID,
-      issue_number: "N/A",
       current_step: "code-review",
       agent_infra_version: "v0.0.0-test",
       last_reviewed_commit: baseline,

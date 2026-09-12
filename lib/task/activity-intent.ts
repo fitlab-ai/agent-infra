@@ -10,7 +10,7 @@ import {
 } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import type { ArtifactIdentity } from './artifact-lifecycle.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { TaskExecutionLockError, transitionLeaseHeld, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { TaskExecutionLockOptions } from './task-execution-lock.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
@@ -401,7 +401,9 @@ export function applyPrReviewActivityIntent(intent: PrReviewActivityIntent, opti
   if (resolved.state !== 'active' && !allowsManualOverride(options.manualOverride, 'activity-intent', 'TASK_STATE_MISMATCH')) {
     return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   }
-  if (options.lockAlreadyHeld) return applyLocked(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot });
+  if (options.lockAlreadyHeld && transitionLeaseHeld()) {
+    return applyLocked(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot });
+  }
   try {
     return withTaskExecutionLock(
       resolved.repoRoot,

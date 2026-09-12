@@ -9,6 +9,6 @@ agent-infra-internal platform-issue create {task-id} --agent {standard-agent-tok
 agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
 ```
 
-The core reads only persisted task identity, title, type, description, and requirements, and reuses deterministic `ai task issue-body` rendering. It owns template selection, upstream/capabilities, duplicate prevention, POST outcome boundaries, response validation, and atomic `issue_number` binding.
+The core reads only persisted task identity, title, type, description, and requirements, and reuses deterministic `ai task issue-body` rendering. It owns template selection, upstream/capabilities, duplicate prevention, POST outcome boundaries, response validation, and atomic `platform_issue_identity` binding.
 
 `planned|applied|no-op|degraded` exit 0, `failed` exits 1, and `blocked` exits 2. Callers must not fall back to direct platform CLI or GraphQL orchestration.

@@ -20,7 +20,8 @@ function fixture(issueNumber = '') {
   const dir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: TASK-20260101-000001\ntype: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\nissue_number: ${issueNumber}\n---\n\n# 任务：Add safe sync\n\n## 描述\n\nKeep | shell characters.\n\n## 需求\n\n- [x] first\n- [ ] second\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  const identity = issueNumber ? `platform_issue_identity: '{"kind":"number","value":${issueNumber}}'\n` : '';
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: TASK-20260101-000001\ntype: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n${identity}---\n\n# 任务：Add safe sync\n\n## 描述\n\nKeep | shell characters.\n\n## 需求\n\n- [x] first\n- [ ] second\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   return root;
 }
 
@@ -49,7 +50,7 @@ function inLabelIssueFixture() {
   fs.mkdirSync(path.join(root, 'lib'), { recursive: true });
   fs.writeFileSync(path.join(root, 'lib', 'core.ts'), 'change\n');
   const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
-  const task = fs.readFileSync(taskPath, 'utf8').replace('issue_number: 7\n---', 'issue_number: 7\ndelivery_base_ref: HEAD~1\n---');
+  const task = fs.readFileSync(taskPath, 'utf8').replace('platform_issue_identity: \'{"kind":"number","value":7}\'\n---', 'platform_issue_identity: \'{"kind":"number","value":7}\'\ndelivery_base_ref: HEAD~1\n---');
   fs.writeFileSync(taskPath, task);
   execFileSync('git', ['add', '.'], { cwd: root });
   execFileSync('git', ['commit', '-qm', 'change'], { cwd: root });
@@ -79,18 +80,6 @@ test('issue inspection normalizes stable remote identity and metadata', async ()
   assert.deepEqual(result.issue?.labels, ['a', 'z']);
   assert.deepEqual(result.issue?.assignees, ['a', 'b']);
   assert.equal(result.issue?.nodeId, 'I_7');
-});
-
-test('issue inspection returns a structured legacy cutoff error for numeric identities', async () => {
-  const root = fixture('42');
-  try {
-    const result = await inspectPlatformIssue('TASK-20260101-000001', { cwd: root, runtimeVersion: 'v1.0.0' });
-    assert.equal(result.status, 'failed');
-    assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
-    assert.match(result.error?.message || '', /current schema/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test('issue create binds exactly once and replay inspects the existing binding', async () => {
@@ -182,7 +171,7 @@ test('issue in-label sync requires the task-bound base and uses it for diff evid
     }));
     fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
       fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), 'utf8')
-        .replace('issue_number: 7', 'issue_number: 7\ndelivery_base_ref: main'));
+        .replace('platform_issue_identity: \'{"kind":"number","value":7}\'', 'platform_issue_identity: \'{"kind":"number","value":7}\'\ndelivery_base_ref: main'));
     execFileSync('git', ['add', '.'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'change'], { cwd: root });
     let payload: Record<string, unknown> | null = null;
