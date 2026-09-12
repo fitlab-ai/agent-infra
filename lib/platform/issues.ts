@@ -41,6 +41,7 @@ import { resourceIdentityEquals, resourceIdentityNumber, resourceIdentityString,
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { IssueSnapshot as ProviderIssueSnapshot, RepositoryMetadataSnapshot } from './provider-contract.ts';
+import { TaskExecutionLockError, transitionLeaseHeld, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 type IssueResult = PlatformResult & {
   task: { id: string | null; issueNumber: number | null };
   issue: IssueSnapshot | null;
@@ -97,6 +98,25 @@ async function resolvedContext(taskRef: string, options: SharedOptions) {
     platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
   }) };
   return { ok: true as const, resolved, content, frontmatter, issueIdentity, issueNumber, client: options.client, context, provider: loaded.value.provider, providerType: loaded.value.providerType, loadedContext: loaded.value };
+}
+
+async function withIssueWriterLock(
+  taskRef: string,
+  options: SharedOptions,
+  owner: string,
+  callback: () => Promise<IssueResult>
+): Promise<IssueResult> {
+  if (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld()) return callback();
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return callback();
+  try {
+    return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, owner, callback);
+  } catch (error) {
+    if (!(error instanceof TaskExecutionLockError)) throw error;
+    return result('blocked', resolved.taskId, null, {
+      error: { code: error.code, message: error.message, retryable: true }
+    });
+  }
 }
 
 function normalizeProviderIssue(remote: ProviderIssueSnapshot, repository: string, fallbackNumber: number | null): IssueSnapshot {
@@ -271,7 +291,7 @@ function deterministicIssueBody(repoRoot: string, content: string, taskType: str
   return buildDefaultBody(content);
 }
 
-async function createPlatformIssue(taskRef: string, options: CreateOptions): Promise<IssueResult> {
+async function createPlatformIssueUnlocked(taskRef: string, options: CreateOptions): Promise<IssueResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (base.issueIdentity) return inspectPlatformIssue(taskRef, options);
@@ -358,7 +378,7 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
   }
 }
 
-async function bindPlatformIssue(taskRef: string, options: BindOptions): Promise<IssueResult> {
+async function bindPlatformIssueUnlocked(taskRef: string, options: BindOptions): Promise<IssueResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   let identity: ResourceIdentity;
@@ -478,7 +498,7 @@ function desiredFieldValues(frontmatter: Record<string, string>, fields: IssueFi
   return desired;
 }
 
-async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+async function syncPlatformIssueUnlocked(taskRef: string, options: SyncOptions): Promise<IssueResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.issueIdentity) return result('failed', base.resolved.taskId, null, { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false } });
@@ -616,6 +636,18 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity }, issue: finalIssue,
     operations: plan.operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
   });
+}
+
+async function createPlatformIssue(taskRef: string, options: CreateOptions): Promise<IssueResult> {
+  return withIssueWriterLock(taskRef, options, 'platform-issue.create', () => createPlatformIssueUnlocked(taskRef, options));
+}
+
+async function bindPlatformIssue(taskRef: string, options: BindOptions): Promise<IssueResult> {
+  return withIssueWriterLock(taskRef, options, 'platform-issue.bind', () => bindPlatformIssueUnlocked(taskRef, options));
+}
+
+async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+  return withIssueWriterLock(taskRef, options, 'platform-issue.sync', () => syncPlatformIssueUnlocked(taskRef, options));
 }
 
 export { bindPlatformIssue, createPlatformIssue, inspectPlatformIssue, requirementSectionAnchors, syncPlatformIssue };

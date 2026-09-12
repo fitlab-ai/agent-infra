@@ -17,6 +17,8 @@ import type { ManualOverrideCapability } from './guard-override.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
 import { invalidationBlocks, parseInvalidationDocument } from './invalidation.ts';
+import { transitionLeaseHeld, withTransitionWriter } from './task-execution-lock.ts';
+import type { TaskExecutionLockOptions } from './task-execution-lock.ts';
 import type {
   TableRowDeleteMutation,
   TableRowUpsertMutation
@@ -165,6 +167,7 @@ type TaskWriteOptions = {
   fileSystem?: Partial<TaskFileSystem>;
   manualOverride?: ManualOverrideCapability;
   invalidationContext?: 'standard' | 'source-completion' | 'reconcile';
+  transitionLockOptions?: TaskExecutionLockOptions;
 };
 
 const DEFAULT_FILE_SYSTEM: TaskFileSystem = {
@@ -226,7 +229,7 @@ function errorDetails(error: unknown, fallback: TaskWriteErrorCode): TaskWriteEr
   };
 }
 
-function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
+function writeTaskUnlocked(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
   const resolved = options.taskLocation
     ? {
         ok: true as const,
@@ -480,6 +483,23 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
     );
   }
   return { ...successBase, status: 'applied', changed: true };
+}
+
+function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
+  if (process.env.AGENT_INFRA_TRANSITION_BUILD === '1' && !transitionLeaseHeld()) {
+    const resolved = options.taskLocation
+      ? { ok: true as const, repoRoot: options.taskLocation.repoRoot, taskId: options.taskLocation.taskId }
+      : resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+    if (!resolved.ok) return writeTaskUnlocked(request, options);
+    return withTransitionWriter(
+      resolved.repoRoot,
+      resolved.taskId,
+      'task-write',
+      () => writeTaskUnlocked(request, options),
+      options.transitionLockOptions
+    );
+  }
+  return writeTaskUnlocked(request, options);
 }
 
 export { writeTask, captureTaskWriteMetadata, canonicalTimestamp };

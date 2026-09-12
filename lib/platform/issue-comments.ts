@@ -16,6 +16,7 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityNumber } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
+import { TaskExecutionLockError, transitionLeaseHeld, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import {
   canonicalizeCommentBody,
   escapeHtmlText,
@@ -437,7 +438,7 @@ function writeComment(
   );
 }
 
-async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
+async function syncPlatformCommentUnlocked(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) {
     return platformResult('failed', {
@@ -578,6 +579,28 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     comment: { kind: options.kind, marker: desired[0]!.marker, ids, parts: desired.length },
     error: null
   });
+}
+
+async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
+  if (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld()) {
+    return syncPlatformCommentUnlocked(taskRef, options);
+  }
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return syncPlatformCommentUnlocked(taskRef, options);
+  try {
+    return await withTaskExecutionLock(
+      resolved.repoRoot,
+      resolved.taskId,
+      'platform-comment.sync',
+      () => syncPlatformCommentUnlocked(taskRef, options)
+    );
+  } catch (error) {
+    if (!(error instanceof TaskExecutionLockError)) throw error;
+    return platformResult('blocked', {
+      resource: { kind: 'issue', number: null },
+      error: { code: error.code, message: error.message, retryable: true }
+    });
+  }
 }
 
 async function listPlatformComments(issue: string | number, cwd = process.cwd(), client?: PlatformClient): Promise<PlatformResult & { comments?: RemoteComment[] }> {

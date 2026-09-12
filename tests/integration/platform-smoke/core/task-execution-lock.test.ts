@@ -10,6 +10,8 @@ import {
   TaskExecutionLockError,
   lockKey,
   mapLinkError,
+  withTransitionMigrationLock,
+  withTransitionWriter,
   withTaskExecutionLock
 } from '../../../../lib/task/task-execution-lock.ts';
 
@@ -55,6 +57,42 @@ test('a live owner blocks nested acquisition and the outer lock is released', ()
   assert.ok(nested instanceof TaskExecutionLockError);
   assert.equal(nested.code, 'ORCHESTRATION_LOCK_BUSY');
   assert.deepEqual(fs.readdirSync(lockRoot), []);
+});
+
+test('transition exclusive admission atomically rejects new writers', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
+  const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+  try {
+    assert.equal(
+      withTransitionMigrationLock(root, 'migration', () => {
+        assert.throws(
+          () => withTransitionWriter(root, 'TASK-20260101-000001', 'writer', () => undefined, { lockRoot }),
+          (error: unknown) => error instanceof TaskExecutionLockError
+            && error.code === 'ORCHESTRATION_LOCK_BUSY'
+        );
+        return 'migrating';
+      }, { lockRoot }),
+      'migrating'
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
+test('transition writers hold a shared lease before the task lock', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
+  const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+  try {
+    withTransitionWriter(root, 'TASK-20260101-000001', 'writer', () => {
+      assert.equal(fs.readdirSync(lockRoot).some((name) => name.includes('.shared.')), true);
+      assert.equal(fs.readdirSync(lockRoot).some((name) => name.endsWith('.lock')), true);
+    }, { lockRoot });
+    assert.equal(fs.readdirSync(lockRoot).some((name) => name.includes('.shared.')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(lockRoot, { recursive: true, force: true });
+  }
 });
 
 test('unsupported hard links fail closed before the callback and clean the candidate', () => {

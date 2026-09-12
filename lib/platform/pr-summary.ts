@@ -5,7 +5,7 @@ import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
 import { renderHumanOverrideAudit } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { TaskExecutionLockError, transitionLeaseHeld, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import type { PrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import { resolvePlatformProviderContext } from './context.ts';
@@ -737,7 +737,7 @@ async function syncPullRequestSummary(
         result: null, warnings: [], ...info
       };
     };
-    return await (options.lockAlreadyHeld
+    return await (options.lockAlreadyHeld && (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld())
       ? execute()
       : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, execute));
   } catch (error) {

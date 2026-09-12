@@ -10,7 +10,7 @@ import { finalizeReviewSummaryContent } from './review-artifacts.ts';
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { TaskExecutionLockError, transitionLeaseHeld, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
@@ -295,7 +295,9 @@ function finalizeReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
-  if (request.dryRun || options.lockAlreadyHeld) return finalizeReviewSummaryUnlocked(request, options);
+  if (request.dryRun || (options.lockAlreadyHeld && (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld()))) {
+    return finalizeReviewSummaryUnlocked(request, options);
+  }
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return finalizeReviewSummaryUnlocked(request, options);
   try {
