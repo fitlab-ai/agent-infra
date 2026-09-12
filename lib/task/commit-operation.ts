@@ -32,6 +32,8 @@ type CommitOperationInput = Readonly<{
   agent?: string;
   mode?: CommitExecutionMode;
   round?: number;
+  /** Permit one retry to rebase a prepared intent's expected tree while HEAD and intent identity remain unchanged. */
+  recoverPreparedIntent?: boolean;
   delivery?: Readonly<{
     mode: 'local' | 'push';
     remote: string;
@@ -280,6 +282,20 @@ function checkpointTimestamp(): string {
   return new Date().toISOString();
 }
 
+function samePreparedCheckpointIdentity(
+  pending: NonNullable<ReturnType<typeof readCheckpointIntent>>,
+  identity: Parameters<typeof checkpointIntentDigest>[0]
+): boolean {
+  return pending.state === 'prepared'
+    && pending.taskId === identity.taskId
+    && pending.branch === identity.branch
+    && pending.mode === identity.mode
+    && pending.expectedHead === identity.expectedHead
+    && pending.message === identity.message
+    && pending.round === identity.round
+    && JSON.stringify(pending.paths) === JSON.stringify(identity.paths);
+}
+
 function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mode: CommitExecutionMode): CommitOperationResult {
   const inspected = inspectGitWorkflow(input.cwd);
   if (!inspected.snapshot) return failure(input, mode, task?.taskId ?? null, 'GIT_INSPECT_FAILED', 'Unable to inspect Git repository');
@@ -313,10 +329,25 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
           error: { code: 'COMMIT_INTENT_INVALID', message: error instanceof Error ? error.message : String(error) }
         };
       }
-      if (pendingIntent && !sameCheckpointIntent(pendingIntent, identity)) return {
-        status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
-        error: { code: 'COMMIT_INTENT_CONFLICT', message: 'A different checkpoint intent is still pending for this task' }
-      };
+      if (pendingIntent && !sameCheckpointIntent(pendingIntent, identity)) {
+        if (!input.recoverPreparedIntent || !samePreparedCheckpointIdentity(pendingIntent, identity)) return {
+          status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+          error: { code: 'COMMIT_INTENT_CONFLICT', message: 'A different checkpoint intent is still pending for this task' }
+        };
+        pendingIntent = {
+          ...pendingIntent,
+          expectedTree: identity.expectedTree,
+          digest: checkpointIntentDigest(identity),
+          updatedAt: checkpointTimestamp()
+        };
+        try { writeCheckpointIntent(task!.repoRoot, pendingIntent); }
+        catch (error) {
+          return {
+            status: 'failed' as const, changed: false, snapshot: inspected.snapshot, operations: [],
+            error: { code: 'COMMIT_INTENT_WRITE_FAILED', message: error instanceof Error ? error.message : String(error) }
+          };
+        }
+      }
       if (!pendingIntent) {
         const timestamp = checkpointTimestamp();
         pendingIntent = {
