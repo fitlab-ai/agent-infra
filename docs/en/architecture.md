@@ -9,7 +9,7 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 1. **Install** — `npm install -g @fitlab-ai/agent-infra` (or `brew install fitlab-ai/tap/agent-infra` on macOS, or use the shell script wrapper)
 2. **Initialize** — `ai init` in the project root to generate `.agents/.airc.json` and install the seed command
 3. **Render** — run `update-agent-infra` in any AI TUI to detect the bundled template version and generate all managed files
-4. **Develop** — use built-in skills to drive the full lifecycle. The user-facing skill sequence is shown below; names such as `analysis` and `design` in the internal workflow are stage labels, not skill entry points.
+4. **Develop** — use built-in skills to drive the full lifecycle. The user-facing skill sequence is shown below; names such as `analysis` and `design` in the internal workflow are stage labels, not skill entry points. Delivery after `review-code` is conditional and is described immediately below the graph.
 5. **Update** — run `update-agent-infra` again whenever a new template version is available
 
 ```mermaid
@@ -17,8 +17,15 @@ flowchart TD
   CT["create-task"] --> A["analyze-task"] --> RA["review-analysis"]
   RA --> P["plan-task"] --> RP["review-plan"]
   RP --> C["code-task"] --> RC["review-code"]
-  RC --> COM["commit"] --> PR["create-pr"] --> W["watch-pr"] --> DONE["complete-task"]
 ```
+
+After `review-code`, delivery is conditional rather than an unconditional `commit` step:
+
+- If the review snapshot tree differs from its baseline, enter `commit`.
+- If the tree is unchanged and there is no PR, `prFlow=disabled` enters `complete-task`; otherwise enter `create-pr`.
+- If a PR exists but its head differs from the review baseline, enter `commit` for delivery.
+- If the PR head matches and checks are pending, failed, cancelled, or the platform is unavailable, enter `watch-pr`.
+- If the PR head matches and checks passed or no required checks exist, enter `complete-task`.
 
 ## Layered Architecture
 
@@ -52,23 +59,24 @@ flowchart TB
   classDef domain fill:#ecfdf5,stroke:#047857,color:#111827;
   classDef infra fill:#f3f4f6,stroke:#6b7280,color:#111827;
 
-  U["IM / local user / AI TUI entry"]
+  IM["IM provider / authorized message"]
+  L["Local `ai run` / AI TUI entry"]
 
   subgraph H["Host OS"]
-    D["ai server daemon<br/>[1 / host]"]:::process
+    D["ai server daemon<br/>[0..1 / checkout]"]:::process
     A["IM adapter / long connection<br/>[in-process]"]:::domain
     C["per-message local ai child<br/>[0..N / authorized request]"]:::transient
-    HT["host AI TUI<br/>[0..N / create-task run]"]:::transient
+    HT["host AI TUI<br/>[0..N / direct or create-task]"]:::transient
     HC["host-control service<br/>[0..1 / platform]"]:::process
     HW["host-control worker<br/>[0..N / request]"]:::transient
-    DX["docker exec launcher<br/>[1 / sandbox dispatch]"]:::transient
+    DX["docker exec launcher<br/>[0..N / direct or IM dispatch]"]:::transient
     TA["Task Control Authority<br/>[in-process domain]"]:::domain
   end
 
   subgraph S["Sandbox container (per sandbox)"]
     B["sandbox broker<br/>[1 / sandbox]"]:::process
     E["sandbox executor<br/>[0..1 / accepted request]"]:::transient
-    TM["tmux server + `work` session<br/>[1 / sandbox]"]:::process
+    TM["tmux server + `work` session<br/>[0..1 / sandbox, lazy]"]:::process
     P["pane + run script<br/>[1 / run]"]:::transient
     ST["sandbox AI TUI<br/>[1 / run]"]:::transient
   end
@@ -79,15 +87,18 @@ flowchart TB
     STATE["task.md / journals / artifacts / receipts<br/>[persistent facts]"]:::domain
   end
 
-  U --> D
+  IM --> D
   D --- A
   D --> C
+  L --> HT
+  L --> DX
   C --> HT
   C --> DX
-  U -. privileged host-control request .-> HC
+  L -. host-control request .-> HC
+  C -. host-control request .-> HC
   HC --> HW --> TA
   DX --> TM --> P --> ST
-  C -. task-bound control request .-> B
+  ST -. sandbox TUI/skill control request .-> B
   B --> E --> TA
   HT --> TA
   TA --> STATE
@@ -96,15 +107,17 @@ flowchart TB
   ENG -. hosts .-> TM
 ```
 
-The graph uses solid arrows for process launch or control, dotted arrows for ownership or cross-boundary control, and marks in-process domains explicitly. There is no single fixed process count: a quiet host has one daemon and, where installed and running, at most one host-control service; each authorized request may add a local `ai` child, a host TUI or a sandbox launcher/worker; each sandbox contributes one broker and one tmux server, while each active run contributes a pane/run script and a sandbox TUI. Helper processes outside these repository-controlled boundaries are not counted.
+The graph uses solid arrows for process launch or control, dotted arrows for ownership or cross-boundary control, and marks in-process domains explicitly. There is no single fixed process count: a host can have `0..N` checkout-scoped daemon instances, with at most one daemon per checkout, and, where installed and running, at most one host-control service; each authorized IM request may add a local `ai` child, while a direct or IM `ai run` may add a host TUI or sandbox launcher/worker; each sandbox contributes one broker and may lazily create `0..1` tmux `work` session, while each active run contributes a pane/run script and a sandbox TUI. Helper processes outside these repository-controlled boundaries are not counted.
 
 For environments that do not render Mermaid, the matrix and control-path sections below provide the same process, cardinality, authority, and lifecycle facts in text.
 
 These are separate boundaries:
 
 - The daemon's per-message `ai` child schedules a local CLI command. It is not the AI TUI that performs the selected skill.
+- IM and local entry are separate: an authorized IM message goes through the daemon and its local child, while local `ai run` reaches the host TUI directly when there is no task reference or the sandbox launcher directly when a task reference is present.
 - `create-task` is a host-side skill. `ai run` starts the selected TUI with stdin ignored and stdout/stderr inherited, then waits for that child to close.
 - A task skill is task-bound. `ai run` creates a sandbox tmux `work` session and an `ai-<run-id>` window through `docker exec`, starts a run script and the actual TUI, then returns after the window is created. That return is dispatch success, not skill completion.
+- Task-bound control requests originate from the sandbox TUI/skill through the internal CLI's broker-client route; they do not originate from the daemon's message-level local child.
 - `run status`, `exit_code`, `finished_at`, and `output.log` describe the sandbox run. `task.md`, lifecycle journals, artifacts, and receipts describe task authority. Neither source replaces the other.
 - Host-control, the sandbox broker/executor, the task lifecycle domain, the container engine, and the operating-system service manager have different identities and failure domains.
 
@@ -112,12 +125,12 @@ These are separate boundaries:
 
 | Entity | Start / stop | Communication | Permission and trust boundary | State and persistence | Failure and recovery |
 | --- | --- | --- | --- | --- | --- |
-| `ai server` daemon | `ai server start` launches a foreground or detached daemon; signals stop adapters and clean up | Local child processes, adapter contexts, heartbeat, and logs | Runs as the local OS user; an IM identity must pass adapter-qualified role checks first | Project/checkout-scoped PID identity, server log, and merged server configuration | Stale or mismatched PID records are not used to kill another process; adapter and command failures are isolated. |
+| `ai server` daemon | `ai server start` launches at most one daemon per checkout; multiple checkouts can have separate instances; signals stop adapters and clean up | Local child processes, adapter contexts, heartbeat, and logs | Runs as the local OS user; an IM identity must pass adapter-qualified role checks first | Project/checkout-scoped PID identity, server log, and merged server configuration | Stale or mismatched PID records are not used to kill another process; adapter and command failures are isolated. |
 | IM adapter / long connection (in-process) | Loaded and started by the daemon; stopped in reverse order | Provider WebSocket/API and normalized inbound/outbound messages | `<adapter>:<userId>` is an application identity, not an OS identity | Connection state is process-local; configuration comes from committed, local, and environment layers | Malformed messages are discarded; one adapter's credential or connection failure does not stop the daemon. |
 | Per-message local `ai` child | Spawned for an authorized command and exits when that command ends | stdout/stderr → runner/streamer → adapter reply | Inherits the daemon's local OS context; does not itself grant task authority | Exit code, signal, and redacted stream events are message-level evidence | Spawn, non-zero exit, and reply failures are reported separately; unknown accepted work is not blindly replayed. |
 | Host-side AI TUI child | `create-task` starts the selected Claude, Codex, Antigravity, OpenCode, or Trae CLI process and waits for close | stdin ignored; stdout/stderr inherited | Runs in the host user's context; a host create path is not a sandbox boundary | Process result plus task-create/lifecycle records | Startup and non-zero failures return to the caller; a TUI exit is not silently converted into task success. |
-| Sandbox capture launcher (transient process) | A task skill invokes `docker exec` to create the `work` tmux session, an `ai-<run-id>` window, and the run script | Docker exec, container shell, and tmux launcher | Constrained by sandbox/container and task/generation identity; it does not replace broker authority | Run metadata, run directory, status files, and output log | Failure before window creation is dispatch failure; after creation, inspect status, exit code, and output. |
-| Sandbox tmux server, pane/run script, and TUI (multiple processes) | The run script starts the actual TUI in the `ai-<run-id>` window within the `work` session; the pane remains attachable after the command records its result | Container tmux pane, TUI stdio, and run script | Executes in the task-bound container and its runtime projection | `started_at`, `status`, `exit_code`, `finished_at`, and `output.log` | `completed`/`failed` is separate from task state; attach with `ai sandbox enter` to observe the run. |
+| Sandbox capture launcher (transient process) | A direct or daemon-scheduled task skill invokes `docker exec` per dispatch; the launcher lazily creates the `work` tmux session, an `ai-<run-id>` window, and the run script | Docker exec, container shell, and tmux launcher | Constrained by sandbox/container and task/generation identity; it does not replace broker authority | Run metadata, run directory, status files, and output log | Failure before window creation is dispatch failure; after creation, inspect status, exit code, and output. |
+| Sandbox tmux server, pane/run script, and TUI (multiple processes) | The first dispatch lazily creates the `work` session (`0..1` per sandbox); the run script starts the actual TUI in its `ai-<run-id>` window, and the pane remains attachable after the command records its result | Container tmux pane, TUI stdio, and run script | Executes in the task-bound container and its runtime projection | `started_at`, `status`, `exit_code`, `finished_at`, and `output.log` | `completed`/`failed` is separate from task state; attach with `ai sandbox enter` to observe the run. |
 | Host-control service and worker (service + transient process) | A systemd user service or macOS launchd service accepts requests and spawns controlled workers | Private endpoint/socket and worker stdio | Endpoint ownership, token, user permission, and worker identity | Endpoint/token files and audit records | Accepted work is not cancelled by client disconnect; dispatch failure is reported as unknown. |
 | Task Control Authority / lifecycle domain (in-process; not a process) | Called by host workers, sandbox executors, or local CLI paths; not a separate long-lived service | Domain calls and control requests | Validates task, generation, operation, recovery, and artifact authority | `task.md`, active/blocked/completed directories, journals, short IDs, and receipts | Multi-step writes and directory moves require final-state verification. |
 | Sandbox broker / executor | Recovery starts the broker; each authorized request gets a short-lived executor | Control channel and request/response/status records | Manifest, lease, controller binding, and attestation gates | Owner, lease, execution audit, and status records | Broker restart is distinct from request retry; accepted unknown side effects are not automatically replayed. |
@@ -127,9 +140,11 @@ These are separate boundaries:
 
 ## Control Paths
 
-### IM and `/run` admission
+### IM and local `/run` admission
 
 An IM adapter normalizes a provider event into the daemon's message contract. Built-in commands can be handled by the daemon. Other commands pass the adapter-qualified user allow-list and role check before the daemon spawns a local `ai` child. `/run` is then routed to `ai run --skill ...`; the local child is only the scheduler boundary.
+
+A local `ai run` does not pass through the daemon: without a task reference it starts the host TUI directly, and with a task reference it starts the sandbox launcher directly. Internal task-control commands then choose the direct-host or broker-client transport from their runtime markers.
 
 ### Host-side `create-task`
 

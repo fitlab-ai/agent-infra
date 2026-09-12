@@ -9,7 +9,7 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 1. **安装** — `npm install -g @fitlab-ai/agent-infra`（或在 macOS 上使用 `brew install fitlab-ai/tap/agent-infra`，或使用 shell 脚本便捷封装）
 2. **初始化** — 在项目根目录运行 `ai init`，生成 `.agents/.airc.json` 并安装种子命令
 3. **渲染** — 在任意 AI TUI 中执行 `update-agent-infra`，检测当前打包模板版本并生成所有受管理文件
-4. **开发** — 使用内置 skill 驱动完整生命周期。下面展示面向用户的 skill 顺序；内部 workflow 中的 `analysis`、`design` 等名称是阶段标签，不是 skill 入口名。
+4. **开发** — 使用内置 skill 驱动完整生命周期。下面展示面向用户的 skill 顺序；内部 workflow 中的 `analysis`、`design` 等名称是阶段标签，不是 skill 入口名。`review-code` 之后的交付是条件路由，图下正文会说明具体分支。
 5. **升级** — 有新模板版本时再次执行 `update-agent-infra` 即可
 
 ```mermaid
@@ -17,8 +17,15 @@ flowchart TD
   CT["create-task"] --> A["analyze-task"] --> RA["review-analysis"]
   RA --> P["plan-task"] --> RP["review-plan"]
   RP --> C["code-task"] --> RC["review-code"]
-  RC --> COM["commit"] --> PR["create-pr"] --> W["watch-pr"] --> DONE["complete-task"]
 ```
+
+`review-code` 之后不是无条件执行 `commit`，而是按交付状态路由：
+
+- 审查快照树与基线不同，进入 `commit`。
+- 树未变化且没有 PR 时，`prFlow=disabled` 进入 `complete-task`，否则进入 `create-pr`。
+- 已有 PR 但其 head 与审查基线不同，进入 `commit` 执行交付。
+- PR head 一致但检查仍为 pending、failed、cancelled，或平台不可用，进入 `watch-pr`。
+- PR head 一致且检查通过或没有 required checks，进入 `complete-task`。
 
 ## 分层架构
 
@@ -52,23 +59,24 @@ flowchart TB
   classDef domain fill:#ecfdf5,stroke:#047857,color:#111827;
   classDef infra fill:#f3f4f6,stroke:#6b7280,color:#111827;
 
-  U["IM / 本地用户 / AI TUI 入口"]
+  IM["IM provider / 已授权消息"]
+  L["本地 `ai run` / AI TUI 入口"]
 
   subgraph H["宿主 OS"]
-    D["ai server daemon<br/>[1 / host]"]:::process
+    D["ai server daemon<br/>[0..1 / checkout]"]:::process
     A["IM adapter / 长连接<br/>[进程内模块]"]:::domain
     C["每消息 local ai 子进程<br/>[0..N / 已授权请求]"]:::transient
-    HT["宿主 AI TUI<br/>[0..N / create-task 运行]"]:::transient
+    HT["宿主 AI TUI<br/>[0..N / 直接或 create-task]"]:::transient
     HC["host-control 服务<br/>[0..1 / 平台]"]:::process
     HW["host-control worker<br/>[0..N / 请求]"]:::transient
-    DX["docker exec launcher<br/>[1 / 沙箱调度]"]:::transient
+    DX["docker exec launcher<br/>[0..N / 直接或 IM 调度]"]:::transient
     TA["Task Control Authority<br/>[进程内领域逻辑]"]:::domain
   end
 
   subgraph S["沙箱容器（每个 sandbox）"]
     B["sandbox broker<br/>[1 / sandbox]"]:::process
     E["sandbox executor<br/>[0..1 / 已接受请求]"]:::transient
-    TM["tmux server + `work` session<br/>[1 / sandbox]"]:::process
+    TM["tmux server + `work` session<br/>[0..1 / sandbox，惰性创建]"]:::process
     P["pane + run script<br/>[1 / run]"]:::transient
     ST["沙箱 AI TUI<br/>[1 / run]"]:::transient
   end
@@ -79,15 +87,18 @@ flowchart TB
     STATE["task.md / journal / artifact / receipt<br/>[持久事实]"]:::domain
   end
 
-  U --> D
+  IM --> D
   D --- A
   D --> C
+  L --> HT
+  L --> DX
   C --> HT
   C --> DX
-  U -. 特权 host-control 请求 .-> HC
+  L -. host-control 请求 .-> HC
+  C -. host-control 请求 .-> HC
   HC --> HW --> TA
   DX --> TM --> P --> ST
-  C -. task-bound 控制请求 .-> B
+  ST -. 沙箱 TUI/skill 控制请求 .-> B
   B --> E --> TA
   HT --> TA
   TA --> STATE
@@ -96,15 +107,17 @@ flowchart TB
   ENG -. 承载 .-> TM
 ```
 
-图中实线表示进程启动或控制，虚线表示所有关系或跨边界控制，并明确标出进程内领域逻辑。运行时没有固定的进程总数：安静的宿主有一个 daemon，以及在已安装且运行时至多一个 host-control 服务；每个已授权请求可能增加一个 local `ai` 子进程、一个宿主 TUI，或一个沙箱 launcher/worker；每个沙箱有一个 broker 和一个 tmux server，每个活动运行再增加一个 pane/run script 与一个沙箱 TUI。仓库边界之外、由外部 TUI 或基础设施创建的 helper 进程不计入此图。
+图中实线表示进程启动或控制，虚线表示所有关系或跨边界控制，并明确标出进程内领域逻辑。运行时没有固定的进程总数：一台宿主可以有 `0..N` 个按 checkout 隔离的 daemon，每个 checkout 至多一个；在已安装且运行时至多一个 host-control 服务；每个已授权 IM 请求可能增加一个 local `ai` 子进程，而直接或 IM 发起的 `ai run` 可能增加一个宿主 TUI 或沙箱 launcher/worker；每个沙箱有一个 broker，并可能在首次调度时惰性创建 `0..1` 个 tmux `work` session，每个活动运行再增加一个 pane/run script 与一个沙箱 TUI。仓库边界之外、由外部 TUI 或基础设施创建的 helper 进程不计入此图。
 
 在不渲染 Mermaid 的环境中，下面的运行实体矩阵和控制路径章节提供相同的进程、基数、权威边界和生命周期事实。
 
 这里的边界必须分开理解：
 
 - daemon 的每消息 `ai` 子进程负责调度本地 CLI，不是执行所选 skill 的 AI TUI。
+- IM 入口和本地入口是两条路径：已授权 IM 消息经 daemon 和 local child；本地 `ai run` 在没有 task ref 时直接进入宿主 TUI，在有 task ref 时直接进入沙箱 launcher。
 - `create-task` 是宿主路径。`ai run` 启动选定 TUI，忽略 stdin、继承 stdout/stderr，并等待该子进程退出。
 - task skill 绑定任务。`ai run` 通过 `docker exec` 创建沙箱 tmux `work` session 及 `ai-<run-id>` window，启动 run script 和实际 TUI；窗口创建后命令即可返回，这只表示调度成功，不表示 skill 完成。
+- task-bound 控制请求由沙箱 TUI/skill 通过 internal CLI 的 broker-client 路径发起，不是由 daemon 的消息级 local child 发起。
 - `run status`、`exit_code`、`finished_at` 和 `output.log` 描述一次沙箱运行；`task.md`、生命周期 journal、artifact 和 receipt 描述任务控制权威。两类事实不能互相替代。
 - host-control、沙箱 broker/executor、任务生命周期领域、容器引擎和操作系统服务管理器拥有不同身份和失败域。
 
@@ -112,12 +125,12 @@ flowchart TB
 
 | 实体 | 启动 / 停止 | 通信通道 | 权限与信任边界 | 状态与持久化 | 失败与恢复 |
 | --- | --- | --- | --- | --- | --- |
-| `ai server` daemon | `ai server start` 以前台或 detached 方式启动；收到信号后停止 adapter 并清理 | 本地子进程、adapter context、heartbeat 和日志 | 以本机 OS 用户运行；IM 身份必须先通过 adapter-qualified role 检查 | 按项目/checkout 隔离的 PID identity、server log 和合并后的 server 配置 | stale 或不匹配的 PID 不用于错杀其他进程；adapter 与命令失败相互隔离。 |
+| `ai server` daemon | `ai server start` 每个 checkout 至多启动一个 daemon；多个 checkout 可各自拥有实例；收到信号后停止 adapter 并清理 | 本地子进程、adapter context、heartbeat 和日志 | 以本机 OS 用户运行；IM 身份必须先通过 adapter-qualified role 检查 | 按项目/checkout 隔离的 PID identity、server log 和合并后的 server 配置 | stale 或不匹配的 PID 不用于错杀其他进程；adapter 与命令失败相互隔离。 |
 | IM adapter / 长连接（进程内模块） | daemon 加载并启动；退出时逆序停止 | provider WebSocket/API 与规范化消息 | `<adapter>:<userId>` 是应用身份，不是 OS 身份 | 连接状态在进程内；配置来自 committed、local 和环境层 | malformed 消息丢弃；单个 adapter 的凭据或连接失败不停止 daemon。 |
 | 每消息 local `ai` 子进程 | daemon 为已授权命令启动，命令结束后退出 | stdout/stderr → runner/streamer → adapter 回复 | 继承 daemon 的本机 OS 上下文；自身不授予任务权威 | 退出码、signal 和脱敏流事件属于消息级证据 | 启动、非零退出和回复失败分别报告；已接受但未知的工作不盲目重放。 |
 | 宿主 AI TUI 子进程 | `create-task` 启动选定的 Claude、Codex、Antigravity、OpenCode 或 Trae CLI，TUI 关闭后回收 | stdin 忽略；stdout/stderr 继承 | 运行在宿主用户上下文；宿主 create 路径不是沙箱边界 | 进程结果以及 task-create/lifecycle 记录 | 启动和非零失败返回调用方；不能把 TUI 退出静默转换成任务成功。 |
-| 沙箱 capture launcher（临时进程） | task skill 调用 `docker exec` 创建 `work` tmux session、`ai-<run-id>` window 和 run script | Docker exec、容器 shell 和 tmux launcher | 受 sandbox/container 与 task/generation identity 约束；不替代 broker authority | run metadata、run directory、状态文件和输出日志 | 窗口创建前失败属于调度失败；创建后检查 status、exit code 和 output。 |
-| 沙箱 tmux server、pane/run script 与 TUI（多个进程） | run script 在 `work` session 的 `ai-<run-id>` window 启动实际 TUI；命令记录结果后 pane 仍可附着 | 容器 tmux pane、TUI stdio 和 run script | 在 task-bound 容器及其 runtime projection 中执行 | `started_at`、`status`、`exit_code`、`finished_at` 和 `output.log` | `completed`/`failed` 与任务状态分离；用 `ai sandbox enter` 观察运行。 |
+| 沙箱 capture launcher（临时进程） | 直接或 daemon 调度的 task skill 每次 dispatch 调用 `docker exec`；launcher 惰性创建 `work` tmux session、`ai-<run-id>` window 和 run script | Docker exec、容器 shell 和 tmux launcher | 受 sandbox/container 与 task/generation identity 约束；不替代 broker authority | run metadata、run directory、状态文件和输出日志 | 窗口创建前失败属于调度失败；创建后检查 status、exit code 和 output。 |
+| 沙箱 tmux server、pane/run script 与 TUI（多个进程） | 首次 dispatch 惰性创建 `work` session（每个 sandbox 为 `0..1`）；run script 在其中的 `ai-<run-id>` window 启动实际 TUI，命令记录结果后 pane 仍可附着 | 容器 tmux pane、TUI stdio 和 run script | 在 task-bound 容器及其 runtime projection 中执行 | `started_at`、`status`、`exit_code`、`finished_at` 和 `output.log` | `completed`/`failed` 与任务状态分离；用 `ai sandbox enter` 观察运行。 |
 | host-control 服务与 worker（服务 + 临时进程） | systemd user service 或 macOS launchd 托管服务并启动受控 worker | 私有 endpoint/socket 与 worker stdio | endpoint 所有权、token、用户权限和 worker identity | endpoint/token 文件与审计记录 | 客户端断连不取消已接受工作；dispatch 失败报告为 unknown。 |
 | Task Control Authority / 生命周期领域（进程内，不是进程） | 由 host worker、sandbox executor 或本地 CLI 路径调用，不是独立常驻服务 | 领域调用与控制请求 | 校验 task、generation、operation、recovery 和 artifact authority | `task.md`、active/blocked/completed 目录、journal、短号和 receipt | 多步写入与目录移动后必须核验最终状态。 |
 | 沙箱 broker / executor | recovery 启动 broker；每个授权请求使用短生命周期 executor | control channel 与 request/response/status records | manifest、lease、controller binding 和 attestation gate | owner、lease、execution audit 和状态记录 | broker 重启不等于请求重试；已接受但未知的副作用不自动重放。 |
@@ -127,9 +140,11 @@ flowchart TB
 
 ## 控制路径
 
-### IM 与 `/run` 接纳
+### IM 与本地 `/run` 接纳
 
 IM adapter 将 provider 事件规范化为 daemon 消息契约。内置命令可由 daemon 直接处理；其他命令先通过 adapter-qualified user allow-list 和 role 检查，然后 daemon 才启动本地 `ai` 子进程。`/run` 随后路由为 `ai run --skill ...`；本地子进程只是调度边界。
+
+本地 `ai run` 不经过 daemon：没有 task ref 时直接启动宿主 TUI，有 task ref 时直接启动沙箱 launcher。内部 task-control 命令再根据运行时标记选择 direct-host 或 broker-client transport。
 
 ### 宿主侧 `create-task`
 
