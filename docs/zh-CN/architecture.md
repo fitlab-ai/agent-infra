@@ -9,15 +9,23 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 1. **安装** — `npm install -g @fitlab-ai/agent-infra`（或在 macOS 上使用 `brew install fitlab-ai/tap/agent-infra`，或使用 shell 脚本便捷封装）
 2. **初始化** — 在项目根目录运行 `ai init`，生成 `.agents/.airc.json` 并安装种子命令
 3. **渲染** — 在任意 AI TUI 中执行 `update-agent-infra`，检测当前打包模板版本并生成所有受管理文件
-4. **开发** — 使用内置 skill 驱动完整生命周期：`analysis → analysis-review → design → design-review → code → code-review → commit`
+4. **开发** — 使用内置 skill 驱动完整生命周期。下面展示面向用户的 skill 顺序；内部 workflow 中的 `analysis`、`design` 等名称是阶段标签，不是 skill 入口名。
 5. **升级** — 有新模板版本时再次执行 `update-agent-infra` 即可
+
+```mermaid
+flowchart TD
+  CT["create-task"] --> A["analyze-task"] --> RA["review-analysis"]
+  RA --> P["plan-task"] --> RP["review-plan"]
+  RP --> C["code-task"] --> RC["review-code"]
+  RC --> COM["commit"] --> PR["create-pr"] --> W["watch-pr"] --> DONE["complete-task"]
+```
 
 ## 分层架构
 
 ```text
 ┌───────────────────────────────────────────────────────┐
 │                     AI TUI Layer                      │
-│  Claude Code  ·  Codex  ·  Antigravity CLI  ·  OpenCode    │
+│  Claude Code · Codex · Antigravity · OpenCode         │
 └──────────────────────────┬────────────────────────────┘
                            │ slash 命令
                            ▼
@@ -35,27 +43,62 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 
 ## 运行时与控制面总览
 
-上面的分层视图说明项目如何被渲染；下面的运行时视图说明命令如何到达任务控制权威，以及实际 AI TUI 在哪里运行。
+上面的分层视图说明项目如何被渲染；下面的运行时进程拓扑图说明命令如何到达任务控制权威，以及实际 AI TUI 在哪里运行。
 
-```text
-IM 用户 / 本地用户 / AI TUI
-              │
-              ▼
-本地 ai server daemon ──授权──> 每消息 local ai 子进程
-              │                              │
-              └──────────── /run → ai run ────┘
-                                   │
-                  ┌────────────────┴────────────────┐
-                  ▼                                 ▼
-        create-task 宿主路径                 task skill 沙箱路径
-        宿主 AI TUI 子进程                   docker exec → tmux `work` session
-        stdin 忽略；stdout/stderr 继承       → `ai-<run-id>` window
-        等待 TUI 退出                        → run script → 沙箱 AI TUI
-                  │                                 │
-                  └────────────────┬────────────────┘
-                                   ▼
-              任务控制权威 / 生命周期 / artifact 证据
+```mermaid
+flowchart TB
+  classDef process fill:#e8f1ff,stroke:#2563eb,color:#111827;
+  classDef transient fill:#fff7ed,stroke:#c2410c,color:#111827;
+  classDef domain fill:#ecfdf5,stroke:#047857,color:#111827;
+  classDef infra fill:#f3f4f6,stroke:#6b7280,color:#111827;
+
+  U["IM / 本地用户 / AI TUI 入口"]
+
+  subgraph H["宿主 OS"]
+    D["ai server daemon<br/>[1 / host]"]:::process
+    A["IM adapter / 长连接<br/>[进程内模块]"]:::domain
+    C["每消息 local ai 子进程<br/>[0..N / 已授权请求]"]:::transient
+    HT["宿主 AI TUI<br/>[0..N / create-task 运行]"]:::transient
+    HC["host-control 服务<br/>[0..1 / 平台]"]:::process
+    HW["host-control worker<br/>[0..N / 请求]"]:::transient
+    DX["docker exec launcher<br/>[1 / 沙箱调度]"]:::transient
+    TA["Task Control Authority<br/>[进程内领域逻辑]"]:::domain
+  end
+
+  subgraph S["沙箱容器（每个 sandbox）"]
+    B["sandbox broker<br/>[1 / sandbox]"]:::process
+    E["sandbox executor<br/>[0..1 / 已接受请求]"]:::transient
+    TM["tmux server + `work` session<br/>[1 / sandbox]"]:::process
+    P["pane + run script<br/>[1 / run]"]:::transient
+    ST["沙箱 AI TUI<br/>[1 / run]"]:::transient
+  end
+
+  subgraph X["外部基础设施与持久事实"]
+    ENG["容器引擎<br/>[外部]"]:::infra
+    SM["OS 服务管理器<br/>[外部]"]:::infra
+    STATE["task.md / journal / artifact / receipt<br/>[持久事实]"]:::domain
+  end
+
+  U --> D
+  D --- A
+  D --> C
+  C --> HT
+  C --> DX
+  U -. 特权 host-control 请求 .-> HC
+  HC --> HW --> TA
+  DX --> TM --> P --> ST
+  C -. task-bound 控制请求 .-> B
+  B --> E --> TA
+  HT --> TA
+  TA --> STATE
+  SM -. 所有 / 启动 .-> HC
+  ENG -. 所有 / 启动 .-> B
+  ENG -. 承载 .-> TM
 ```
+
+图中实线表示进程启动或控制，虚线表示所有关系或跨边界控制，并明确标出进程内领域逻辑。运行时没有固定的进程总数：安静的宿主有一个 daemon，以及在已安装且运行时至多一个 host-control 服务；每个已授权请求可能增加一个 local `ai` 子进程、一个宿主 TUI，或一个沙箱 launcher/worker；每个沙箱有一个 broker 和一个 tmux server，每个活动运行再增加一个 pane/run script 与一个沙箱 TUI。仓库边界之外、由外部 TUI 或基础设施创建的 helper 进程不计入此图。
+
+在不渲染 Mermaid 的环境中，下面的运行实体矩阵和控制路径章节提供相同的进程、基数、权威边界和生命周期事实。
 
 这里的边界必须分开理解：
 
@@ -70,17 +113,17 @@ IM 用户 / 本地用户 / AI TUI
 | 实体 | 启动 / 停止 | 通信通道 | 权限与信任边界 | 状态与持久化 | 失败与恢复 |
 | --- | --- | --- | --- | --- | --- |
 | `ai server` daemon | `ai server start` 以前台或 detached 方式启动；收到信号后停止 adapter 并清理 | 本地子进程、adapter context、heartbeat 和日志 | 以本机 OS 用户运行；IM 身份必须先通过 adapter-qualified role 检查 | 按项目/checkout 隔离的 PID identity、server log 和合并后的 server 配置 | stale 或不匹配的 PID 不用于错杀其他进程；adapter 与命令失败相互隔离。 |
-| IM adapter / 长连接 | daemon 加载并启动；退出时逆序停止 | provider WebSocket/API 与规范化消息 | `<adapter>:<userId>` 是应用身份，不是 OS 身份 | 连接状态在进程内；配置来自 committed、local 和环境层 | malformed 消息丢弃；单个 adapter 的凭据或连接失败不停止 daemon。 |
+| IM adapter / 长连接（进程内模块） | daemon 加载并启动；退出时逆序停止 | provider WebSocket/API 与规范化消息 | `<adapter>:<userId>` 是应用身份，不是 OS 身份 | 连接状态在进程内；配置来自 committed、local 和环境层 | malformed 消息丢弃；单个 adapter 的凭据或连接失败不停止 daemon。 |
 | 每消息 local `ai` 子进程 | daemon 为已授权命令启动，命令结束后退出 | stdout/stderr → runner/streamer → adapter 回复 | 继承 daemon 的本机 OS 上下文；自身不授予任务权威 | 退出码、signal 和脱敏流事件属于消息级证据 | 启动、非零退出和回复失败分别报告；已接受但未知的工作不盲目重放。 |
 | 宿主 AI TUI 子进程 | `create-task` 启动选定的 Claude、Codex、Antigravity、OpenCode 或 Trae CLI，TUI 关闭后回收 | stdin 忽略；stdout/stderr 继承 | 运行在宿主用户上下文；宿主 create 路径不是沙箱边界 | 进程结果以及 task-create/lifecycle 记录 | 启动和非零失败返回调用方；不能把 TUI 退出静默转换成任务成功。 |
-| 沙箱 capture launcher | task skill 调用 `docker exec` 创建 `work` tmux session、`ai-<run-id>` window 和 run script | Docker exec、容器 shell 和 tmux launcher | 受 sandbox/container 与 task/generation identity 约束；不替代 broker authority | run metadata、run directory、状态文件和输出日志 | 窗口创建前失败属于调度失败；创建后检查 status、exit code 和 output。 |
-| 沙箱 tmux TUI/skill 进程 | run script 在 `work` session 的 `ai-<run-id>` window 启动实际 TUI；命令记录结果后 pane 仍可附着 | 容器 tmux pane、TUI stdio 和 run script | 在 task-bound 容器及其 runtime projection 中执行 | `started_at`、`status`、`exit_code`、`finished_at` 和 `output.log` | `completed`/`failed` 与任务状态分离；用 `ai sandbox enter` 观察运行。 |
-| host-control 服务与 worker | systemd user service 或 macOS launchd 托管服务并启动受控 worker | 私有 endpoint/socket 与 worker stdio | endpoint 所有权、token、用户权限和 worker identity | endpoint/token 文件与审计记录 | 客户端断连不取消已接受工作；dispatch 失败报告为 unknown。 |
-| Task Control Authority / 生命周期领域 | 由 host worker、sandbox executor 或本地 CLI 路径调用，不是独立常驻服务 | 领域调用与控制请求 | 校验 task、generation、operation、recovery 和 artifact authority | `task.md`、active/blocked/completed 目录、journal、短号和 receipt | 多步写入与目录移动后必须核验最终状态。 |
+| 沙箱 capture launcher（临时进程） | task skill 调用 `docker exec` 创建 `work` tmux session、`ai-<run-id>` window 和 run script | Docker exec、容器 shell 和 tmux launcher | 受 sandbox/container 与 task/generation identity 约束；不替代 broker authority | run metadata、run directory、状态文件和输出日志 | 窗口创建前失败属于调度失败；创建后检查 status、exit code 和 output。 |
+| 沙箱 tmux server、pane/run script 与 TUI（多个进程） | run script 在 `work` session 的 `ai-<run-id>` window 启动实际 TUI；命令记录结果后 pane 仍可附着 | 容器 tmux pane、TUI stdio 和 run script | 在 task-bound 容器及其 runtime projection 中执行 | `started_at`、`status`、`exit_code`、`finished_at` 和 `output.log` | `completed`/`failed` 与任务状态分离；用 `ai sandbox enter` 观察运行。 |
+| host-control 服务与 worker（服务 + 临时进程） | systemd user service 或 macOS launchd 托管服务并启动受控 worker | 私有 endpoint/socket 与 worker stdio | endpoint 所有权、token、用户权限和 worker identity | endpoint/token 文件与审计记录 | 客户端断连不取消已接受工作；dispatch 失败报告为 unknown。 |
+| Task Control Authority / 生命周期领域（进程内，不是进程） | 由 host worker、sandbox executor 或本地 CLI 路径调用，不是独立常驻服务 | 领域调用与控制请求 | 校验 task、generation、operation、recovery 和 artifact authority | `task.md`、active/blocked/completed 目录、journal、短号和 receipt | 多步写入与目录移动后必须核验最终状态。 |
 | 沙箱 broker / executor | recovery 启动 broker；每个授权请求使用短生命周期 executor | control channel 与 request/response/status records | manifest、lease、controller binding 和 attestation gate | owner、lease、execution audit 和状态记录 | broker 重启不等于请求重试；已接受但未知的副作用不自动重放。 |
 | Codex controller / App Server | lifecycle adapter 按需启动和停止 | controller binding；App Server 通过 stdio 使用行分隔 JSON-RPC | 只提供 Codex lifecycle evidence，不替代 IM 或 task authority | lifecycle store 中的 thread、turn、settings、reroute 和 terminal 证据 | 子进程输出非法、提前退出、超时或 binding 不一致会使证据失效并关闭 bridge。 |
-| 容器引擎与 OS 服务管理器 | Docker/BuildKit/Colima/OrbStack/Docker Desktop 以及 systemd/launchd 管理外部生命周期 | Docker API/CLI 和 OS service-manager API | 只是基础设施边界，不替代任务权威 | 容器、unit/plist 和 engine runtime 状态 | 引擎或服务管理器可用，不等于完整 task-bound 链可用。 |
-| 平台同步边界 | lifecycle、worker 或 CLI 按需调用 | GitHub/platform API 或 provider adapter | 平台凭据与 IM、本地任务权威分离 | Issue/PR/label 状态与本地 receipt 分属不同事实 | 远端失败不能报告成本地生命周期成功。 |
+| 容器引擎与 OS 服务管理器（外部基础设施） | Docker/BuildKit/Colima/OrbStack/Docker Desktop 以及 systemd/launchd 管理外部生命周期 | Docker API/CLI 和 OS service-manager API | 只是基础设施边界，不替代任务权威 | 容器、unit/plist 和 engine runtime 状态 | 引擎或服务管理器可用，不等于完整 task-bound 链可用。 |
+| 平台同步边界（外部边界，不是进程） | lifecycle、worker 或 CLI 按需调用 | GitHub/platform API 或 provider adapter | 平台凭据与 IM、本地任务权威分离 | Issue/PR/label 状态与本地 receipt 分属不同事实 | 远端失败不能报告成本地生命周期成功。 |
 
 ## 控制路径
 

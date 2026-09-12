@@ -9,15 +9,23 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 1. **Install** — `npm install -g @fitlab-ai/agent-infra` (or `brew install fitlab-ai/tap/agent-infra` on macOS, or use the shell script wrapper)
 2. **Initialize** — `ai init` in the project root to generate `.agents/.airc.json` and install the seed command
 3. **Render** — run `update-agent-infra` in any AI TUI to detect the bundled template version and generate all managed files
-4. **Develop** — use built-in skills to drive the full lifecycle: `analysis → analysis-review → design → design-review → code → code-review → commit`
+4. **Develop** — use built-in skills to drive the full lifecycle. The user-facing skill sequence is shown below; names such as `analysis` and `design` in the internal workflow are stage labels, not skill entry points.
 5. **Update** — run `update-agent-infra` again whenever a new template version is available
+
+```mermaid
+flowchart TD
+  CT["create-task"] --> A["analyze-task"] --> RA["review-analysis"]
+  RA --> P["plan-task"] --> RP["review-plan"]
+  RP --> C["code-task"] --> RC["review-code"]
+  RC --> COM["commit"] --> PR["create-pr"] --> W["watch-pr"] --> DONE["complete-task"]
+```
 
 ## Layered Architecture
 
 ```text
 ┌───────────────────────────────────────────────────────┐
 │                     AI TUI Layer                      │
-│  Claude Code  ·  Codex  ·  Antigravity CLI  ·  OpenCode    │
+│  Claude Code · Codex · Antigravity · OpenCode         │
 └──────────────────────────┬────────────────────────────┘
                            │ slash commands
                            ▼
@@ -35,27 +43,62 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 
 ## Runtime and Control-Plane Map
 
-The layered view above describes how the project is rendered. The runtime view below describes how a command reaches a task authority and where an AI TUI actually runs.
+The layered view above describes how the project is rendered. The runtime process topology below describes how a command reaches a task authority and where an AI TUI actually runs.
 
-```text
-IM user / local user / AI TUI
-              │
-              ▼
-local ai server daemon ── authorization ──> per-message local ai child
-              │                                      │
-              └────────────── /run → ai run ─────────┘
-                                     │
-                    ┌────────────────┴────────────────┐
-                    ▼                                 ▼
-          create-task host path              task skill sandbox path
-          host AI TUI child                  docker exec → tmux `work` session
-          stdin ignored; stdout/stderr      → `ai-<run-id>` window
-          waits for TUI close                → run script → sandbox AI TUI
-                    │                                 │
-                    └────────────────┬────────────────┘
-                                     ▼
-                 task authority / lifecycle / artifact evidence
+```mermaid
+flowchart TB
+  classDef process fill:#e8f1ff,stroke:#2563eb,color:#111827;
+  classDef transient fill:#fff7ed,stroke:#c2410c,color:#111827;
+  classDef domain fill:#ecfdf5,stroke:#047857,color:#111827;
+  classDef infra fill:#f3f4f6,stroke:#6b7280,color:#111827;
+
+  U["IM / local user / AI TUI entry"]
+
+  subgraph H["Host OS"]
+    D["ai server daemon<br/>[1 / host]"]:::process
+    A["IM adapter / long connection<br/>[in-process]"]:::domain
+    C["per-message local ai child<br/>[0..N / authorized request]"]:::transient
+    HT["host AI TUI<br/>[0..N / create-task run]"]:::transient
+    HC["host-control service<br/>[0..1 / platform]"]:::process
+    HW["host-control worker<br/>[0..N / request]"]:::transient
+    DX["docker exec launcher<br/>[1 / sandbox dispatch]"]:::transient
+    TA["Task Control Authority<br/>[in-process domain]"]:::domain
+  end
+
+  subgraph S["Sandbox container (per sandbox)"]
+    B["sandbox broker<br/>[1 / sandbox]"]:::process
+    E["sandbox executor<br/>[0..1 / accepted request]"]:::transient
+    TM["tmux server + `work` session<br/>[1 / sandbox]"]:::process
+    P["pane + run script<br/>[1 / run]"]:::transient
+    ST["sandbox AI TUI<br/>[1 / run]"]:::transient
+  end
+
+  subgraph X["External infrastructure and durable facts"]
+    ENG["container engine<br/>[external]"]:::infra
+    SM["OS service manager<br/>[external]"]:::infra
+    STATE["task.md / journals / artifacts / receipts<br/>[persistent facts]"]:::domain
+  end
+
+  U --> D
+  D --- A
+  D --> C
+  C --> HT
+  C --> DX
+  U -. privileged host-control request .-> HC
+  HC --> HW --> TA
+  DX --> TM --> P --> ST
+  C -. task-bound control request .-> B
+  B --> E --> TA
+  HT --> TA
+  TA --> STATE
+  SM -. owns / starts .-> HC
+  ENG -. owns / starts .-> B
+  ENG -. hosts .-> TM
 ```
+
+The graph uses solid arrows for process launch or control, dotted arrows for ownership or cross-boundary control, and marks in-process domains explicitly. There is no single fixed process count: a quiet host has one daemon and, where installed and running, at most one host-control service; each authorized request may add a local `ai` child, a host TUI or a sandbox launcher/worker; each sandbox contributes one broker and one tmux server, while each active run contributes a pane/run script and a sandbox TUI. Helper processes outside these repository-controlled boundaries are not counted.
+
+For environments that do not render Mermaid, the matrix and control-path sections below provide the same process, cardinality, authority, and lifecycle facts in text.
 
 These are separate boundaries:
 
@@ -70,17 +113,17 @@ These are separate boundaries:
 | Entity | Start / stop | Communication | Permission and trust boundary | State and persistence | Failure and recovery |
 | --- | --- | --- | --- | --- | --- |
 | `ai server` daemon | `ai server start` launches a foreground or detached daemon; signals stop adapters and clean up | Local child processes, adapter contexts, heartbeat, and logs | Runs as the local OS user; an IM identity must pass adapter-qualified role checks first | Project/checkout-scoped PID identity, server log, and merged server configuration | Stale or mismatched PID records are not used to kill another process; adapter and command failures are isolated. |
-| IM adapter / long connection | Loaded and started by the daemon; stopped in reverse order | Provider WebSocket/API and normalized inbound/outbound messages | `<adapter>:<userId>` is an application identity, not an OS identity | Connection state is process-local; configuration comes from committed, local, and environment layers | Malformed messages are discarded; one adapter's credential or connection failure does not stop the daemon. |
+| IM adapter / long connection (in-process) | Loaded and started by the daemon; stopped in reverse order | Provider WebSocket/API and normalized inbound/outbound messages | `<adapter>:<userId>` is an application identity, not an OS identity | Connection state is process-local; configuration comes from committed, local, and environment layers | Malformed messages are discarded; one adapter's credential or connection failure does not stop the daemon. |
 | Per-message local `ai` child | Spawned for an authorized command and exits when that command ends | stdout/stderr → runner/streamer → adapter reply | Inherits the daemon's local OS context; does not itself grant task authority | Exit code, signal, and redacted stream events are message-level evidence | Spawn, non-zero exit, and reply failures are reported separately; unknown accepted work is not blindly replayed. |
 | Host-side AI TUI child | `create-task` starts the selected Claude, Codex, Antigravity, OpenCode, or Trae CLI process and waits for close | stdin ignored; stdout/stderr inherited | Runs in the host user's context; a host create path is not a sandbox boundary | Process result plus task-create/lifecycle records | Startup and non-zero failures return to the caller; a TUI exit is not silently converted into task success. |
-| Sandbox capture launcher | A task skill invokes `docker exec` to create the `work` tmux session, an `ai-<run-id>` window, and the run script | Docker exec, container shell, and tmux launcher | Constrained by sandbox/container and task/generation identity; it does not replace broker authority | Run metadata, run directory, status files, and output log | Failure before window creation is dispatch failure; after creation, inspect status, exit code, and output. |
-| Sandbox tmux TUI/skill process | The run script starts the actual TUI in the `ai-<run-id>` window within the `work` session; the pane remains attachable after the command records its result | Container tmux pane, TUI stdio, and run script | Executes in the task-bound container and its runtime projection | `started_at`, `status`, `exit_code`, `finished_at`, and `output.log` | `completed`/`failed` is separate from task state; attach with `ai sandbox enter` to observe the run. |
-| Host-control service and worker | A systemd user service or macOS launchd service accepts requests and spawns controlled workers | Private endpoint/socket and worker stdio | Endpoint ownership, token, user permission, and worker identity | Endpoint/token files and audit records | Accepted work is not cancelled by client disconnect; dispatch failure is reported as unknown. |
-| Task Control Authority / lifecycle domain | Called by host workers, sandbox executors, or local CLI paths; not a separate long-lived service | Domain calls and control requests | Validates task, generation, operation, recovery, and artifact authority | `task.md`, active/blocked/completed directories, journals, short IDs, and receipts | Multi-step writes and directory moves require final-state verification. |
+| Sandbox capture launcher (transient process) | A task skill invokes `docker exec` to create the `work` tmux session, an `ai-<run-id>` window, and the run script | Docker exec, container shell, and tmux launcher | Constrained by sandbox/container and task/generation identity; it does not replace broker authority | Run metadata, run directory, status files, and output log | Failure before window creation is dispatch failure; after creation, inspect status, exit code, and output. |
+| Sandbox tmux server, pane/run script, and TUI (multiple processes) | The run script starts the actual TUI in the `ai-<run-id>` window within the `work` session; the pane remains attachable after the command records its result | Container tmux pane, TUI stdio, and run script | Executes in the task-bound container and its runtime projection | `started_at`, `status`, `exit_code`, `finished_at`, and `output.log` | `completed`/`failed` is separate from task state; attach with `ai sandbox enter` to observe the run. |
+| Host-control service and worker (service + transient process) | A systemd user service or macOS launchd service accepts requests and spawns controlled workers | Private endpoint/socket and worker stdio | Endpoint ownership, token, user permission, and worker identity | Endpoint/token files and audit records | Accepted work is not cancelled by client disconnect; dispatch failure is reported as unknown. |
+| Task Control Authority / lifecycle domain (in-process; not a process) | Called by host workers, sandbox executors, or local CLI paths; not a separate long-lived service | Domain calls and control requests | Validates task, generation, operation, recovery, and artifact authority | `task.md`, active/blocked/completed directories, journals, short IDs, and receipts | Multi-step writes and directory moves require final-state verification. |
 | Sandbox broker / executor | Recovery starts the broker; each authorized request gets a short-lived executor | Control channel and request/response/status records | Manifest, lease, controller binding, and attestation gates | Owner, lease, execution audit, and status records | Broker restart is distinct from request retry; accepted unknown side effects are not automatically replayed. |
 | Codex controller / App Server | Lifecycle adapters start and stop them on demand | Controller binding; App Server line-delimited JSON-RPC over stdio | Provides Codex lifecycle evidence, not IM or task authority | Thread, turn, settings, reroute, and terminal evidence in the lifecycle store | Invalid child output, early exit, timeout, or binding mismatch invalidates evidence and closes the bridge. |
-| Container engine and OS service manager | Docker/BuildKit/Colima/OrbStack/Docker Desktop and systemd/launchd own their external lifecycles | Docker API/CLI and OS service-manager APIs | Infrastructure boundary only; neither replaces task authority | Container, unit/plist, and engine runtime state | An available engine or service manager does not prove the complete task-bound chain is available. |
-| Platform sync boundary | Invoked by lifecycle, worker, or CLI paths as needed | GitHub/platform APIs or provider adapters | Platform credentials remain separate from IM and local task authority | Issue/PR/label state and local receipts are separate facts | Remote failure must not be reported as local lifecycle success. |
+| Container engine and OS service manager (external infrastructure) | Docker/BuildKit/Colima/OrbStack/Docker Desktop and systemd/launchd own their external lifecycles | Docker API/CLI and OS service-manager APIs | Infrastructure boundary only; neither replaces task authority | Container, unit/plist, and engine runtime state | An available engine or service manager does not prove the complete task-bound chain is available. |
+| Platform sync boundary (external boundary; not a process) | Invoked by lifecycle, worker, or CLI paths as needed | GitHub/platform APIs or provider adapters | Platform credentials remain separate from IM and local task authority | Issue/PR/label state and local receipts are separate facts | Remote failure must not be reported as local lifecycle success. |
 
 ## Control Paths
 
