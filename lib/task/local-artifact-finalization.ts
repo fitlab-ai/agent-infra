@@ -5,6 +5,7 @@ import { scanVisibleMarkdown } from './markdown.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import {
   hasOpenArtifactRound,
+  parseCodePlanInputReference,
   validateArtifactPublication,
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
@@ -450,14 +451,6 @@ function reopenLocalArtifactFinalizationUnlocked(
   } catch (error) {
     return fail('LOCAL_REOPEN_RECEIPT_INVALID', String(error));
   }
-  let intent: ArtifactRepairIntent | null;
-  try { intent = readArtifactRepairIntent(repoRoot, resolvedTaskId, request.family, request.artifact); }
-  catch (error) { return fail('LOCAL_REOPEN_PROVENANCE_INVALID', String(error)); }
-  if (!intent || intent.state !== 'passed'
-    || intent.artifactSha256 !== request.expectedSha256
-    || intent.semanticDigest !== request.expectedSemanticDigest) {
-    return fail('LOCAL_REOPEN_PROVENANCE_MISMATCH', 'expected provenance does not match the previously passed finalizer intent');
-  }
   const validation = validateLocalArtifact(artifactContent, {
     family: request.family, taskContent, artifact: request.artifact
   });
@@ -467,9 +460,28 @@ function reopenLocalArtifactFinalizationUnlocked(
     });
   }
   const artifactSha256 = sha256Content(artifactContent);
+  let intent: ArtifactRepairIntent | null;
+  try { intent = readArtifactRepairIntent(repoRoot, resolvedTaskId, request.family, request.artifact); }
+  catch (error) { return fail('LOCAL_REOPEN_PROVENANCE_INVALID', String(error)); }
+  if (intent && (!['passed', 'awaiting-repair'].includes(intent.state)
+    || intent.artifactSha256 !== request.expectedSha256
+    || intent.semanticDigest !== request.expectedSemanticDigest)) {
+    return fail('LOCAL_REOPEN_PROVENANCE_MISMATCH', 'expected provenance does not match the previously passed or reopened finalizer intent');
+  }
+  if (!intent
+    && (artifactSha256 !== request.expectedSha256 || validation.semanticDigest !== request.expectedSemanticDigest)
+    && !(request.family === 'code' && parseCodePlanInputReference(artifactContent) !== null)) {
+    return fail('LOCAL_REOPEN_PROVENANCE_MISMATCH', 'without a finalizer intent, current artifact digests or canonical code input must match the supplied finalizer result');
+  }
   const timestamp = Date.now();
   const reopened: ArtifactRepairIntent = {
-    ...intent,
+    ...(intent ?? {
+      version: 2,
+      taskId: resolvedTaskId,
+      family: request.family,
+      artifact: request.artifact,
+      createdAt: timestamp
+    }),
     state: 'awaiting-repair',
     baselineSemanticDigest: validation.semanticDigest,
     artifactSha256,
@@ -477,7 +489,7 @@ function reopenLocalArtifactFinalizationUnlocked(
     recoveryOperationId: null,
     phase: null,
     authorityDigest: null,
-    requestId: `local-reopen:${resolvedTaskId}:${request.artifact}`,
+    requestId: intent?.requestId ?? `local-reopen:${resolvedTaskId}:${request.artifact}`,
     updatedAt: timestamp
   };
   try {
