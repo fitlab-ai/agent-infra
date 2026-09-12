@@ -62,6 +62,7 @@ import {
   SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES
 } from '../../task/control-recovery.ts';
 import { readRun } from '../../task/orchestration.ts';
+import { readLifecycleRecoveryDomainEvidence } from '../../task/lifecycle-recovery.ts';
 import { captureRepositorySnapshot } from '../../task/workspace-snapshot.ts';
 import { parseTypedTaskFrontmatter } from '../../task/frontmatter.ts';
 import { readLifecycleJournalEvidence } from '../../task/lifecycle.ts';
@@ -504,6 +505,21 @@ function readRecoveryDomain(
   }
 
   if (operation.family === 'task-lifecycle') {
+    if (operation.intent === 'recover-started') {
+      try {
+        if (!('args' in request)) return { domain: null };
+        const parsed = parseTaskControlOperation('task-lifecycle', request.args);
+        if (parsed.family !== 'task-lifecycle' || parsed.request.intent !== 'recover-started') {
+          return { domain: null };
+        }
+        return {
+          domain: readLifecycleRecoveryDomainEvidence(manifest.repoRoot, parsed.request, terminalResult),
+          journal: readLifecycleJournalEvidence(manifest.repoRoot, taskRef!)
+        };
+      } catch {
+        return { domain: null };
+      }
+    }
     if (!taskRef || !terminalResult.targetState) return { domain: null };
     const journal = readLifecycleJournalEvidence(manifest.repoRoot, taskRef);
     try {

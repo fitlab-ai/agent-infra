@@ -107,6 +107,12 @@ function domainEvidenceMatches(
       && snapshot.worktreeTree === completion.worktreeTree
       && lastReviewedCommit === completion.lastReviewedCommit;
   }
+  if (operation.family === 'task-lifecycle' && operation.intent === 'recover-started') {
+    return result.targetState === 'active'
+      && ['applied', 'no-op'].includes(String(result.status))
+      && domain.recovery === true
+      && domain.targetState === 'active';
+  }
   if (operation.class === 'read-only') return result.changed === false && domain.snapshotValid === true;
   return true;
 }

@@ -205,7 +205,8 @@ test('Codex lifecycle store preserves and releases a recovery-owned stop-ready c
   });
 
   const consumer = 'lifecycle-recovery:TASK-20260101-000001:receipt-1';
-  assert.equal(store.consume('child', consumer, 'hash').consumer, consumer);
+  assert.throws(() => store.consume('child', consumer, 'hash'), /require claimRecovery/);
+  assert.equal(store.claimRecovery('child', 'TASK-20260101-000001', 'receipt-1', 'hash').consumer, consumer);
 
   now = '2026-08-15T00:00:00.000Z';
   assert.equal(store.expireBefore('2026-08-14T12:00:00.000Z'), 0);

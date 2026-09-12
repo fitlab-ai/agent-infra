@@ -223,7 +223,7 @@ function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
   if (receipt.status === 'aborted') {
     return Number.isSafeInteger(host.stopRevision)
       && (host.stopRevision as number) > host.startRevision
-      && host.consumer?.startsWith('lifecycle-recovery:') === true
+      && host.consumer === `lifecycle-recovery:${receipt.taskId}:${receipt.id}`
       && exactText(host.consumedAt);
   }
   return host.stopRevision === null && host.consumer === null && host.consumedAt === null;
@@ -301,7 +301,7 @@ function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
       && host !== undefined
       && Number.isSafeInteger(host.stopRevision)
       && (host.stopRevision as number) > host.startRevision
-      && host.consumer?.startsWith('lifecycle-recovery:') === true
+      && host.consumer === `lifecycle-recovery:${receipt.taskId}:${receipt.id}`
       && exactText(host.consumedAt);
   }
 

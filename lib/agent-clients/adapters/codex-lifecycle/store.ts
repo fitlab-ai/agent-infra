@@ -43,9 +43,21 @@ type ActiveCodexLifecycleEvidenceQuery = Readonly<{
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 1_000;
 const LOCK_STALE_MS = 30_000;
+const RECOVERY_CONSUMER_RE = /^lifecycle-recovery:([^:\r\n]+):([^:\r\n]+)$/u;
 
 function digest(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function isRecoveryConsumer(value: string): boolean {
+  return RECOVERY_CONSUMER_RE.test(value);
+}
+
+function recoveryConsumer(taskId: string, receiptId: string): string {
+  if (!/^[^:\r\n]+$/u.test(taskId) || !/^[^:\r\n]+$/u.test(receiptId)) {
+    throw new Error('Codex lifecycle recovery claim identity is invalid');
+  }
+  return `lifecycle-recovery:${taskId}:${receiptId}`;
 }
 
 function readRecord(file: string): StoredCodexLifecycle {
@@ -254,7 +266,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     return readRecord(matches[0]!);
   }
 
-  function consume(
+  function consumeInternal(
     childThreadId: string,
     consumer: string,
     expectedHookDefinitionHash?: string
@@ -292,6 +304,31 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     });
   }
 
+  function consume(
+    childThreadId: string,
+    consumer: string,
+    expectedHookDefinitionHash?: string
+  ): StoredCodexLifecycle {
+    if (!consumer.trim()) throw new Error('Codex lifecycle consumer is required');
+    if (consumer.startsWith('lifecycle-recovery:')) {
+      throw new Error('Codex lifecycle recovery claims require claimRecovery');
+    }
+    return consumeInternal(childThreadId, consumer, expectedHookDefinitionHash);
+  }
+
+  function claimRecovery(
+    childThreadId: string,
+    taskId: string,
+    receiptId: string,
+    expectedHookDefinitionHash?: string
+  ): StoredCodexLifecycle {
+    return consumeInternal(
+      childThreadId,
+      recoveryConsumer(taskId, receiptId),
+      expectedHookDefinitionHash
+    );
+  }
+
   function releaseRecovery(childThreadId: string, consumer: string): boolean {
     if (!/^lifecycle-recovery:[^:\r\n]+:[^:\r\n]+$/.test(consumer)) return false;
     return withWriteLock(() => {
@@ -311,7 +348,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       for (const file of recordFiles(root)) {
         const current = readRecord(file);
         if (current.updatedAt >= cutoff) continue;
-        if (current.consumer?.startsWith('lifecycle-recovery:')) continue;
+        if (current.consumer && isRecoveryConsumer(current.consumer)) continue;
         if (current.consumer || ['invalid', 'expired', 'stop-ready'].includes(current.state.status)) {
           fs.unlinkSync(file);
           changed += 1;
@@ -331,7 +368,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     });
   }
 
-  return Object.freeze({ root, apply, applyToSpawn, consume, releaseRecovery, expireBefore, findByParent, read });
+  return Object.freeze({ root, apply, applyToSpawn, consume, claimRecovery, releaseRecovery, expireBefore, findByParent, read });
 }
 
 export { createCodexLifecycleStore, hasActiveCodexLifecycleEvidence };

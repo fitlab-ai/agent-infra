@@ -48,6 +48,7 @@ type RecoveryWarning = Readonly<{ code: string; message: string; action: string 
 type LifecycleRecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'owner-unknown' | 'conflict';
   changed: boolean;
+  targetState: 'active';
   requestRef: string;
   intent: 'recover-started';
   taskId: string | null;
@@ -149,6 +150,7 @@ function result(
   return {
     status,
     changed: status === 'applied',
+    targetState: 'active',
     requestRef: request.taskRef,
     intent: request.intent,
     taskId: null,
@@ -433,6 +435,61 @@ function verifyRecoveryCommit(
   }
 }
 
+function recoveryDomainFailure(): Readonly<Record<string, unknown>> {
+  return { consistent: false, recovery: true, targetState: 'active' };
+}
+
+export function readLifecycleRecoveryDomainEvidence(
+  repoRoot: string,
+  requestInput: LifecycleRecoveryRequest,
+  terminalResult: Readonly<{ status: string; changed: boolean | null; targetState: string | null }>,
+  options: Pick<LifecycleRecoveryOptions, 'lifecycleStore' | 'now'> = {}
+): Readonly<Record<string, unknown>> {
+  const normalized = normalizeRequest(requestInput);
+  if ('code' in normalized || terminalResult.targetState !== 'active'
+    || !['applied', 'no-op'].includes(terminalResult.status)
+    || terminalResult.changed !== (terminalResult.status === 'applied')) return recoveryDomainFailure();
+  const request = normalized;
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot });
+  if (!resolved.ok) return recoveryDomainFailure();
+  try {
+    const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    parseTypedTaskFrontmatter(content);
+    const section = locateActivityLog(content);
+    if (!section) return recoveryDomainFailure();
+    const targets = targetRows(section.entries, request.stage, request.round);
+    const paired = targets.rows.filter((row) => row.started !== '' && row.done !== '');
+    if (targets.recoveryEntries.length !== 1 || paired.length !== 1
+      || paired[0]!.done !== targets.recoveryEntries[0]!.time) return recoveryDomainFailure();
+    const note = parseRecoveryNote(targets.recoveryEntries[0]!.note);
+    if (!note || note.taskId !== resolved.taskId || note.stage !== request.stage
+      || note.round !== request.round || note.artifact !== request.artifact
+      || note.startedAgent !== request.agent || note.reason !== request.reason) return recoveryDomainFailure();
+    const run = readRun(resolved.taskDir);
+    if (!run || run.status !== 'running' || run.pendingDelegation !== null) return recoveryDomainFailure();
+    const receipts = matchingPostActivationAbortedReceipts(run, resolved.taskId, request);
+    if (receipts.length !== 1 || receipts[0]!.id !== note.receiptId) return recoveryDomainFailure();
+    const receipt = receipts[0]!;
+    const consumer = recoveryConsumer(resolved.taskId, receipt.id);
+    if (receipt.childId !== note.childId || note.consumer !== consumer
+      || receipt.hostEvidence?.stopRevision !== note.stopRevision
+      || receipt.hostEvidence.consumer !== consumer
+      || receipt.hostEvidence.consumedAt !== note.consumedAt) return recoveryDomainFailure();
+    const store = readLifecycleStore(options, repoRoot);
+    const stored = readStoredEvidence(store, note.childId);
+    if ('error' in stored) return recoveryDomainFailure();
+    if ('missing' in stored) return { consistent: true, recovery: true, targetState: 'active' };
+    if (stored.consumer !== consumer || !stored.consumedAt) return recoveryDomainFailure();
+    const evidence = validateStopRecord(stored, receipt, consumer);
+    if (!evidence.ok || evidence.stopRevision !== note.stopRevision || evidence.consumedAt !== note.consumedAt) {
+      return recoveryDomainFailure();
+    }
+    return { consistent: true, recovery: true, targetState: 'active' };
+  } catch {
+    return recoveryDomainFailure();
+  }
+}
+
 function recoverStartedLifecycleUnderLock(
   requestInput: LifecycleRecoveryRequest,
   options: LifecycleRecoveryOptions = {}
@@ -538,7 +595,7 @@ function recoverStartedLifecycleUnderLock(
   if (!evidence.ok) return failure(request, evidence.code === 'RECOVERY_CONSUMER_CONFLICT' ? 'conflict' : 'owner-unknown', evidence.code, evidence.message, { taskId, receiptId: receipt.id, childId: receipt.childId });
   let claimed = stored;
   if (stored.consumer === null) {
-    try { claimed = store.consume(receipt.childId!, consumer, receipt.hostEvidence?.hookDefinitionHash); }
+    try { claimed = store.claimRecovery(receipt.childId!, taskId, receipt.id, receipt.hostEvidence?.hookDefinitionHash); }
     catch (error) { return failure(request, 'owner-unknown', 'RECOVERY_CLAIM_FAILED', error instanceof Error ? error.message : String(error), { taskId, receiptId: receipt.id, childId: receipt.childId }); }
   }
   const stopRevision = claimed.revision;

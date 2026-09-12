@@ -69,20 +69,39 @@ test('every registered mutation requires a matching domain contract', () => {
     );
     const result = {
       requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId,
-      intentDigest: binding.intentDigest, status: 'completed', changed: true
+      intentDigest: binding.intentDigest, status: operation.intent === 'recover-started' ? 'applied' : 'completed',
+      changed: true,
+      ...(operation.intent === 'recover-started' ? { targetState: 'active' } : {})
     };
+    const domain = operation.intent === 'recover-started'
+      ? { consistent: true, recovery: true, targetState: 'active' }
+      : { consistent: true };
     assert.equal(classifySandboxControlRecovery({
       operation,
       binding,
       startedCommitted: true,
       terminalResult: result,
-      domain: { consistent: true },
+      domain,
       criticalPhases,
     }).outcome, 'success', operation.intent);
     assert.equal(classifySandboxControlRecovery({
       operation, binding, startedCommitted: true, terminalResult: result
     }).outcome, 'unknown', `${operation.family}:${operation.intent} missing domain`);
   }
+});
+
+test('recover-started response-loss recovery requires durable target and domain evidence', () => {
+  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'recover-started')!;
+  const binding = operationRecoveryBinding('f'.repeat(32), 'generation-7', 'TASK-20260904-002407', operation.family, operation.intent);
+  const result = {
+    requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId,
+    intentDigest: binding.intentDigest, status: 'applied', changed: true, targetState: 'active'
+  };
+  const valid = { consistent: true, recovery: true, targetState: 'active' };
+  assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: result, domain: valid, criticalPhases }).outcome, 'success');
+  assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: result, domain: { consistent: true }, criticalPhases }).outcome, 'unknown');
+  assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: { ...result, targetState: null }, domain: valid, criticalPhases }).outcome, 'unknown');
+  assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: { ...result, status: 'no-op', changed: false }, domain: valid, criticalPhases }).outcome, 'success');
 });
 
 test('recovery matrix distinguishes explicit failure, journal partial state, and read-only changes', () => {

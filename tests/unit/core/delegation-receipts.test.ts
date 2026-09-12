@@ -227,6 +227,14 @@ test('activated Codex receipts support only controller-bound recovery aborts', (
   assert.equal(aborted.receipt.status, 'aborted');
   assert.equal(aborted.receipt.agent, null);
   assert.equal(isDelegationReceipt(aborted.receipt), true);
+  assert.equal(isDelegationReceipt({
+    ...aborted.receipt,
+    hostEvidence: { ...aborted.receipt.hostEvidence!, consumer: 'lifecycle-recovery:TASK-20260101-000001:other-receipt' }
+  }), false);
+  assert.equal(isDelegationReceipt({
+    ...aborted.receipt,
+    hostEvidence: { ...aborted.receipt.hostEvidence!, consumer: 'lifecycle-recovery:TASK-20260101-000002:delegation-recovery' }
+  }), false);
   assert.equal(abortActivatedDelegation(activated.receipt, {
     childId: 'child-recovery', stopRevision: 7, consumer: 'ordinary-consumer', consumedAt: '2099-01-01T00:00:02.000Z'
   }).ok, false);
