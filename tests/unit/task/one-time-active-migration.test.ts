@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { migrateActiveTaskMetadata } from '../../../lib/task/one-time-active-migration.ts';
+import { transitionBuildAttestation } from '../../../lib/task/task-execution-lock.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -38,19 +39,37 @@ function fixture(): { root: string; taskPath: string; migrationRoot: string } {
   return { root, taskPath, migrationRoot };
 }
 
-test('one-time active migration converts legacy identity and PR fact with a completed manifest', () => {
+function migrationOptions(f: ReturnType<typeof fixture>, overrides: Record<string, unknown> = {}) {
+  const build = transitionBuildAttestation();
+  const provider = {
+    name: 'test-provider',
+    identity: { issue: 'number' as const, 'pull-request': 'number' as const },
+    capabilities: { authenticated: true, triage: true, push: false, admin: false },
+    verifyIssueIdentity: async () => true,
+    verifyPullRequestFact: async () => true,
+    ...(overrides.provider as Record<string, unknown> | undefined)
+  };
+  return {
+    authority: {
+      mode: 'direct-host' as const,
+      repositoryRoot: f.root,
+      repository: 'acme/widgets',
+      provider: 'test-provider',
+      authenticated: true,
+      transitionBuild: build
+    },
+    repository: 'acme/widgets',
+    provider,
+    ...overrides,
+    ...(overrides.provider ? { provider } : {})
+  };
+}
+
+test('one-time active migration converts legacy identity and PR fact with a completed manifest', async () => {
   const f = fixture();
   try {
-    const result = migrateActiveTaskMetadata(f.root, {
-      authority: 'direct-host',
-      repository: 'acme/widgets',
-      provider: {
-        name: 'test-provider',
-        canRead: true,
-        canWrite: true,
-        verifyIssueIdentity: () => true,
-        verifyPullRequestFact: () => true
-      },
+    const result = await migrateActiveTaskMetadata(f.root, {
+      ...migrationOptions(f),
       manifestPath: path.join(f.migrationRoot, 'pr-delivery-fact-v1-to-v2.json')
     });
     assert.equal(result.status, 'completed');
@@ -67,14 +86,13 @@ test('one-time active migration converts legacy identity and PR fact with a comp
   }
 });
 
-test('migration fails closed before writing when direct-host authority is missing', () => {
+test('migration fails closed before writing when direct-host authority is missing', async () => {
   const f = fixture();
   try {
-    assert.throws(
+    await assert.rejects(
       () => migrateActiveTaskMetadata(f.root, {
-        authority: 'task-bound',
-        repository: 'acme/widgets',
-        provider: { name: 'test-provider', canRead: true, canWrite: true }
+        ...migrationOptions(f),
+        authority: { ...migrationOptions(f).authority, mode: 'task-bound' }
       }),
       (error: unknown) => error instanceof Error && error.message.includes('direct-host')
     );
@@ -84,22 +102,20 @@ test('migration fails closed before writing when direct-host authority is missin
   }
 });
 
-test('completed migration manifest is scoped to the same repository and provider', () => {
+test('completed migration manifest is scoped to the same repository and provider', async () => {
   const f = fixture();
   const manifestPath = path.join(f.migrationRoot, 'pr-delivery-fact-v1-to-v2.json');
   try {
-    const first = migrateActiveTaskMetadata(f.root, {
-      authority: 'direct-host',
-      repository: 'acme/widgets',
-      provider: { name: 'test-provider', canRead: true, canWrite: true },
+    const first = await migrateActiveTaskMetadata(f.root, {
+      ...migrationOptions(f),
       manifestPath,
       now: () => '2026-01-01T00:00:00Z'
     });
     assert.equal(first.status, 'completed');
-    assert.throws(() => migrateActiveTaskMetadata(f.root, {
-      authority: 'direct-host',
+    await assert.rejects(() => migrateActiveTaskMetadata(f.root, {
+      ...migrationOptions(f),
+      authority: { ...migrationOptions(f).authority, repository: 'other/widgets' },
       repository: 'other/widgets',
-      provider: { name: 'test-provider', canRead: true, canWrite: true },
       manifestPath,
       now: () => '2026-01-01T00:00:00Z'
     }), (error: unknown) => error instanceof Error
@@ -110,15 +126,13 @@ test('completed migration manifest is scoped to the same repository and provider
   }
 });
 
-test('migration rejects conflicting legacy Issue identities before writing', () => {
+test('migration rejects conflicting legacy Issue identities before writing', async () => {
   const f = fixture();
   try {
     const content = fs.readFileSync(f.taskPath, 'utf8').replace(/issueNumber\\":7/u, 'issueNumber\\":8');
     fs.writeFileSync(f.taskPath, content);
-    assert.throws(() => migrateActiveTaskMetadata(f.root, {
-      authority: 'direct-host',
-      repository: 'acme/widgets',
-      provider: { name: 'test-provider', canRead: true, canWrite: true },
+    await assert.rejects(() => migrateActiveTaskMetadata(f.root, {
+      ...migrationOptions(f),
       manifestPath: path.join(f.migrationRoot, 'pr-delivery-fact-v1-to-v2.json')
     }), (error: unknown) => error instanceof Error
       && 'code' in error && error.code === 'MIGRATION_IDENTITY_CONFLICT');

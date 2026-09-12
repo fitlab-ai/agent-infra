@@ -582,7 +582,7 @@ async function syncPlatformCommentUnlocked(taskRef: string, options: SyncOptions
 }
 
 async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
-  if (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld()) {
+  if (transitionLeaseHeld()) {
     return syncPlatformCommentUnlocked(taskRef, options);
   }
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});

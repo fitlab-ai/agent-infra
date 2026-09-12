@@ -55,7 +55,7 @@ export async function executeTaskWorkflow(
     if (command === 'task-artifact' && 'operation' in input && input.operation === 'inspect') {
       return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot }));
     }
-    if ('operation' in input && (input.operation === 'init' || input.operation === 'repair' || input.operation === 'reopen-finalization')) {
+    if ('operation' in input && (input.operation === 'init' || input.operation === 'repair')) {
       return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot, artifactDir: taskDir }));
     }
     return await withTaskExecutionLock(manifest.repoRoot, request.taskId, `sandbox-control.${request.operation}`, async () => {

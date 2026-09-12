@@ -15,6 +15,15 @@ function taskIssueIdentity(frontmatter: Record<string, string | number | boolean
       return null;
     }
   }
+  // TODO(compat): Remove this transition-only legacy reader once the active migration manifest is completed and the current-only build is deployed.
+  if (process.env.AGENT_INFRA_TRANSITION_BUILD === '1') {
+    const legacy = frontmatter.issue_number;
+    if (typeof legacy === 'number' && Number.isSafeInteger(legacy) && legacy > 0) return { kind: 'number', value: legacy };
+    if (typeof legacy === 'string' && /^[1-9]\d*$/u.test(legacy)) {
+      const value = Number(legacy);
+      if (Number.isSafeInteger(value) && value > 0) return { kind: 'number', value };
+    }
+  }
   return null;
 }
 

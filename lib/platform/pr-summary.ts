@@ -737,7 +737,7 @@ async function syncPullRequestSummary(
         result: null, warnings: [], ...info
       };
     };
-    return await (options.lockAlreadyHeld && (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld())
+    return await (options.lockAlreadyHeld && transitionLeaseHeld()
       ? execute()
       : withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, execute));
   } catch (error) {

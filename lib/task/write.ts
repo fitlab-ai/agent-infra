@@ -486,7 +486,7 @@ function writeTaskUnlocked(request: TaskWriteRequest, options: TaskWriteOptions 
 }
 
 function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
-  if (process.env.AGENT_INFRA_TRANSITION_BUILD === '1' && !transitionLeaseHeld()) {
+  if (!transitionLeaseHeld()) {
     const resolved = options.taskLocation
       ? { ok: true as const, repoRoot: options.taskLocation.repoRoot, taskId: options.taskLocation.taskId }
       : resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });

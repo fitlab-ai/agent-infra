@@ -401,7 +401,7 @@ export function applyPrReviewActivityIntent(intent: PrReviewActivityIntent, opti
   if (resolved.state !== 'active' && !allowsManualOverride(options.manualOverride, 'activity-intent', 'TASK_STATE_MISMATCH')) {
     return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   }
-  if (options.lockAlreadyHeld && (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld())) {
+  if (options.lockAlreadyHeld && transitionLeaseHeld()) {
     return applyLocked(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot });
   }
   try {

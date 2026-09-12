@@ -398,7 +398,7 @@ async function withPullRequestWriterLock<T>(
   callback: () => Promise<T>,
   onBusy: (taskId: string, error: TaskExecutionLockError) => T
 ): Promise<T> {
-  if (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld()) return callback();
+  if (transitionLeaseHeld()) return callback();
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return callback();
   try {
@@ -1450,7 +1450,7 @@ async function syncPlatformPullRequestUnlocked(taskRef: string, options: SyncOpt
 
 async function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
   const cwd = path.resolve(options.cwd || process.cwd());
-  if (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld() || options.dryRun) {
+  if (transitionLeaseHeld() || options.dryRun) {
     return syncPlatformPullRequestInLabelsUnlocked(prNumber, options);
   }
   try {

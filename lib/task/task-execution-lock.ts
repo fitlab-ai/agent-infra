@@ -7,6 +7,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { getProcessStartTime, processIdentityMatches } from '../server/process-state.ts';
 import type { ProcessIdentity } from '../server/process-state.ts';
 import { writeDurableFile } from '../fs/durable-write.ts';
+import { VERSION } from '../version.ts';
 
 type TaskExecutionLockErrorCode =
   | 'ORCHESTRATION_LOCK_BUSY'
@@ -34,7 +35,6 @@ type TaskExecutionLockOptions = Readonly<{
   getStartTime?: (pid: number) => number | null;
   identityMatches?: (identity: ProcessIdentity) => boolean;
   linkSync?: (existingPath: string, newPath: string) => void;
-  transitionAdmission?: boolean;
   skipTransitionAdmission?: boolean;
   transitionLockRoot?: string;
   transitionTimeoutMs?: number;
@@ -65,6 +65,55 @@ type TransitionLease = Readonly<{
   token: string;
   release: () => void;
 }>;
+
+type TransitionBuildAttestation = Readonly<{
+  version: 1;
+  build: 'transition';
+  agentInfraVersion: string;
+  writerInventoryDigest: string;
+  writerCount: number;
+}>;
+
+const TRANSITION_WRITER_INVENTORY = Object.freeze([
+  'lib/platform/issues.ts',
+  'lib/platform/pull-requests.ts',
+  'lib/task/activity-intent.ts',
+  'lib/task/commit-operation.ts',
+  'lib/task/decision-intents.ts',
+  'lib/task/delivery.ts',
+  'lib/task/events.ts',
+  'lib/task/human-override.ts',
+  'lib/task/invalidation-command.ts',
+  'lib/task/ledger-intents.ts',
+  'lib/task/lifecycle.ts',
+  'lib/task/qualification-confirmation.ts',
+  'lib/task/qualification-intents.ts',
+  'lib/task/workflow-warning-intents.ts',
+  'lib/task/write.ts',
+  'lib/task/create.ts',
+  'lib/task/short-id.ts',
+  'lib/task/orchestration.ts',
+  'lib/internal/task-event.ts',
+  'lib/internal/manual-validation.ts',
+  'lib/task/manual-validation-transaction.ts',
+  'lib/task/manual-validation-receipt.ts',
+  'lib/task/finalization.ts',
+  'lib/task/artifact-operations.ts',
+  'lib/task/review-finalization.ts',
+  'lib/task/commit-intent.ts',
+  'lib/task/artifact-repair-intent.ts',
+  'lib/sandbox/workspace-view.ts'
+] as const);
+
+function transitionBuildAttestation(): TransitionBuildAttestation {
+  return {
+    version: 1,
+    build: 'transition',
+    agentInfraVersion: VERSION,
+    writerInventoryDigest: createHash('sha256').update(JSON.stringify(TRANSITION_WRITER_INVENTORY)).digest('hex'),
+    writerCount: TRANSITION_WRITER_INVENTORY.length
+  };
+}
 
 const transitionContext = new AsyncLocalStorage<boolean>();
 
@@ -389,10 +438,24 @@ function acquireTransitionSharedLease(
   }, { ...options, lockRoot: transitionRoot(options) });
   const owner = lease!;
   const file = path.join(lockRoot, `${paths.sharedPrefix}${owner.token}.json`);
+  let released = false;
   return {
     generation: owner.generation,
     token: owner.token,
-    release: () => unlinkIfPresent(file)
+    release: () => {
+      if (released) return;
+      released = true;
+      withCoordinationLock(repoRoot, `${ownerName}.release`, () => {
+        unlinkIfPresent(file);
+        const state = readTransitionState(paths.state, owner.canonicalRepoRoot);
+        if (state.exclusive === null && state.admission === 'open') {
+          cleanStaleTransitionLeases(lockRoot, paths.sharedPrefix, options.identityMatches ?? processIdentityMatches);
+          if (transitionSharedLeases(lockRoot, paths.sharedPrefix, Number.MAX_SAFE_INTEGER, options.identityMatches ?? processIdentityMatches).length === 0) {
+            unlinkIfPresent(paths.state);
+          }
+        }
+      }, { ...options, lockRoot: transitionRoot(options) });
+    }
   };
 }
 
@@ -421,7 +484,11 @@ function clearTransitionExclusive(repoRoot: string, owner: TransitionOwner, opti
   withCoordinationLock(repoRoot, `${owner.owner}.release`, () => {
     const state = readTransitionState(paths.state, owner.canonicalRepoRoot);
     if (state.exclusive?.token !== owner.token) return;
-    writeTransitionState(paths.state, { ...state, admission: 'open', exclusive: null });
+    const reopened = { ...state, admission: 'open' as const, exclusive: null };
+    writeTransitionState(paths.state, reopened);
+    if (transitionSharedLeases(lockRoot, paths.sharedPrefix, Number.MAX_SAFE_INTEGER, options.identityMatches ?? processIdentityMatches).length === 0) {
+      unlinkIfPresent(paths.state);
+    }
   }, { ...options, lockRoot: transitionRoot(options) });
 }
 
@@ -478,10 +545,6 @@ function acquireTransitionExclusiveLease(
   }
 }
 
-function transitionAdmissionEnabled(options: TaskExecutionLockOptions): boolean {
-  return options.transitionAdmission ?? process.env.AGENT_INFRA_TRANSITION_BUILD === '1';
-}
-
 function transitionLeaseHeld(): boolean {
   return transitionContext.getStore() === true;
 }
@@ -532,7 +595,7 @@ function withTaskExecutionLock<T>(
     acquiredAt: (options.now ?? (() => new Date().toISOString()))()
   };
   const serialized = `${JSON.stringify(owner)}\n`;
-  const transitionLease = transitionAdmissionEnabled(options) && !options.skipTransitionAdmission
+  const transitionLease = !options.skipTransitionAdmission
     ? acquireTransitionSharedLease(repoRoot, ownerName, options)
     : null;
   let ownsFixed = false;
@@ -684,6 +747,8 @@ export {
   TaskExecutionLockError,
   lockKey,
   mapLinkError,
+  transitionBuildAttestation,
+  TRANSITION_WRITER_INVENTORY,
   transitionStatePath,
   DEFAULT_TRANSITION_LOCK_ROOT,
   withRepositoryMutationLock,
@@ -699,6 +764,7 @@ export type {
   TaskExecutionLockOptions,
   TaskExecutionLockOwner,
   TransitionLease,
+  TransitionBuildAttestation,
   TransitionOwner,
   TransitionState
 };

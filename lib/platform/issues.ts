@@ -106,7 +106,7 @@ async function withIssueWriterLock(
   owner: string,
   callback: () => Promise<IssueResult>
 ): Promise<IssueResult> {
-  if (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld()) return callback();
+  if (transitionLeaseHeld()) return callback();
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return callback();
   try {

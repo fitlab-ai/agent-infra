@@ -80,6 +80,27 @@ test('transition exclusive admission atomically rejects new writers', () => {
   }
 });
 
+test('ordinary writers cannot overlap migration when transition build admission is unset', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
+  const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
+  const previous = process.env.AGENT_INFRA_TRANSITION_BUILD;
+  try {
+    delete process.env.AGENT_INFRA_TRANSITION_BUILD;
+    assert.throws(
+      () => withTransitionMigrationLock(root, 'migration', () => {
+        withTaskExecutionLock(root, 'TASK-20260101-000001', 'ordinary-writer', () => undefined, { lockRoot });
+      }, { lockRoot, transitionTimeoutMs: 100, transitionPollMs: 1 }),
+      (error: unknown) => error instanceof TaskExecutionLockError
+        && error.code === 'ORCHESTRATION_LOCK_BUSY'
+    );
+  } finally {
+    if (previous === undefined) delete process.env.AGENT_INFRA_TRANSITION_BUILD;
+    else process.env.AGENT_INFRA_TRANSITION_BUILD = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(lockRoot, { recursive: true, force: true });
+  }
+});
+
 test('transition writers hold a shared lease before the task lock', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-repo-'));
   const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));

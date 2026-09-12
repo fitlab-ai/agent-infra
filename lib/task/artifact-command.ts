@@ -6,12 +6,12 @@ import { resolveArtifactContext, hasOpenArtifactRound } from './artifact-lifecyc
 import { parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
-import { finalizeLocalArtifact, reopenLocalArtifactFinalization } from './local-artifact-finalization.ts';
+import { finalizeLocalArtifact } from './local-artifact-finalization.ts';
 import { applyArtifactRepair, initializeArtifactSkeleton, inspectArtifactStructure } from './artifact-operations.ts';
 
 export type ArtifactCommand = Readonly<{
   taskRef: string;
-  operation: 'inspect' | 'init' | 'repair' | 'finalize-local' | 'reopen-finalization';
+  operation: 'inspect' | 'init' | 'repair' | 'finalize-local';
   family: string;
   artifact: string;
   locale?: 'zh-CN' | 'en';
@@ -22,7 +22,7 @@ export type ArtifactCommand = Readonly<{
 /** One option contract for the CLI and trusted projection executor. */
 export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   const [taskRef, operation] = args;
-  if (!taskRef || !['inspect', 'init', 'repair', 'finalize-local', 'reopen-finalization'].includes(operation ?? '')) {
+  if (!taskRef || !['inspect', 'init', 'repair', 'finalize-local'].includes(operation ?? '')) {
     throw new Error('task ref and a supported artifact operation are required');
   }
   const fields: Record<string, string> = {};
@@ -30,8 +30,7 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
     inspect: ['--family'],
     init: ['--family', '--artifact', '--locale'],
     repair: ['--family', '--artifact', '--expected-sha256', '--expected-semantic-digest'],
-    'finalize-local': ['--family', '--artifact'],
-    'reopen-finalization': ['--family', '--artifact', '--expected-sha256', '--expected-semantic-digest']
+    'finalize-local': ['--family', '--artifact']
   }[operation as ArtifactCommand['operation']];
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
@@ -45,7 +44,7 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   if (operation !== 'inspect' && !fields['--artifact']) throw new Error("option '--artifact' is required");
   const locale = fields['--locale'];
   if (locale !== undefined && locale !== 'zh-CN' && locale !== 'en') throw new Error("option '--locale' must be 'zh-CN' or 'en'");
-  if ((operation === 'repair' || operation === 'reopen-finalization')
+  if (operation === 'repair'
     && !['--expected-sha256', '--expected-semantic-digest'].every((flag) => /^[a-f0-9]{64}$/u.test(fields[flag] ?? ''))) {
     throw new Error(`${operation} requires lowercase 64-character digests`);
   }
@@ -98,12 +97,6 @@ export function executeArtifactCommand(
         artifact, family, diagnostics: inspection.diagnostics };
     }
     return { ...applyArtifactRepair({ ...input, expectedSha256, expectedSemanticDigest, operation: inspection.repair }), ...identity };
-  }
-  if (operation === 'reopen-finalization') {
-    return { ...reopenLocalArtifactFinalization({
-      taskRef, family: family as 'analysis' | 'plan' | 'code', artifact,
-      expectedSha256, expectedSemanticDigest, repoRoot: resolved.repoRoot
-    }), ...identity };
   }
   if (family !== 'analysis' && family !== 'plan' && family !== 'code') {
     return fail('ARTIFACT_PAYLOAD_INVALID', "finalize-local only supports 'analysis', 'plan', and 'code'");

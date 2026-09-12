@@ -12,11 +12,9 @@ import {
 import { resolveTaskRef } from './resolve-ref.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
-import { receiptForOutput } from './artifact-receipts.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { readArtifactRepairIntent, writeArtifactRepairIntent } from './artifact-repair-intent.ts';
 import type { ArtifactRepairIntent } from './artifact-repair-intent.ts';
-import { withTaskExecutionLock } from './task-execution-lock.ts';
 import {
   consumeLifecycleRecoveryAttestation,
   lifecycleRecoveryAttestationDigest,
@@ -78,15 +76,6 @@ type LocalArtifactFinalizationRequest = {
   requiredSections?: readonly string[];
 };
 
-type LocalArtifactReopenRequest = {
-  taskRef: string;
-  family: LocalArtifactFamily;
-  artifact: string;
-  expectedSha256: string;
-  expectedSemanticDigest: string;
-  repoRoot?: string;
-};
-
 type LocalArtifactFinalizationResult = {
   status: 'passed' | 'failed';
   changed: false;
@@ -98,18 +87,6 @@ type LocalArtifactFinalizationResult = {
   semanticDigest: string | null;
   repairable: boolean;
   diagnostics: readonly LocalArtifactDiagnostic[];
-  error: { code: string; message: string } | null;
-};
-
-type LocalArtifactReopenResult = {
-  status: 'applied' | 'failed';
-  changed: boolean;
-  taskId: string | null;
-  taskDir: string | null;
-  family: LocalArtifactFamily;
-  artifact: string;
-  artifactSha256: string | null;
-  semanticDigest: string | null;
   error: { code: string; message: string } | null;
 };
 
@@ -398,132 +375,10 @@ function finalizeLocalArtifact(
   return result;
 }
 
-function failedReopen(
-  request: LocalArtifactReopenRequest,
-  error: { code: string; message: string },
-  extra: Partial<LocalArtifactReopenResult> = {}
-): LocalArtifactReopenResult {
-  return {
-    status: 'failed', changed: false,
-    taskId: null, taskDir: null,
-    family: request.family, artifact: request.artifact,
-    artifactSha256: null, semanticDigest: null, error, ...extra
-  };
-}
-
-function reopenLocalArtifactFinalizationUnlocked(
-  request: LocalArtifactReopenRequest,
-  repoRoot: string,
-  resolvedTaskId: string,
-  resolvedTaskDir: string,
-  taskMdPath: string,
-  taskState: string
-): LocalArtifactReopenResult {
-  const fail = (code: string, message: string, extra: Partial<LocalArtifactReopenResult> = {}) =>
-    failedReopen(request, { code, message }, { taskId: resolvedTaskId, taskDir: resolvedTaskDir, ...extra });
-  const parsed = parseArtifactName(request.artifact);
-  if (!parsed || parsed.family !== request.family) {
-    return fail('ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${request.family}`);
-  }
-  if (!/^[a-f0-9]{64}$/u.test(request.expectedSha256) || !/^[a-f0-9]{64}$/u.test(request.expectedSemanticDigest)) {
-    return fail('LOCAL_REOPEN_PROVENANCE_INVALID', 'reopen requires lowercase 64-character digests');
-  }
-  if (request.family !== 'analysis' && request.family !== 'plan' && request.family !== 'code') {
-    return fail('LOCAL_REOPEN_FAMILY_INVALID', 'reopen-finalization only supports analysis, plan, and code artifacts');
-  }
-  let taskContent: string;
-  let artifactContent: string;
-  try {
-    taskContent = fs.readFileSync(taskMdPath, 'utf8');
-    const completed = validateCompletedArtifact(resolvedTaskDir, request.family, request.artifact, parsed.round);
-    if (!completed.ok) return fail('LOCAL_REOPEN_ARTIFACT_INVALID', completed.error.message);
-    artifactContent = fs.readFileSync(completed.artifact.path, 'utf8');
-  } catch (error) {
-    return fail('LOCAL_REOPEN_NOT_READABLE', String(error));
-  }
-  if (taskState !== 'active' || !hasOpenArtifactRound(taskContent, request.family, parsed.round)) {
-    return fail('LOCAL_REOPEN_CONTEXT_INVALID', 'reopen requires an active task with exactly one open started round');
-  }
-  try {
-    if (receiptForOutput(taskContent, request.artifact)) {
-      return fail('LOCAL_REOPEN_ALREADY_COMPLETED', `completion receipt already exists for ${request.artifact}`);
-    }
-  } catch (error) {
-    return fail('LOCAL_REOPEN_RECEIPT_INVALID', String(error));
-  }
-  const validation = validateLocalArtifact(artifactContent, {
-    family: request.family, taskContent, artifact: request.artifact
-  });
-  if (!validation.ok) {
-    return fail('LOCAL_REOPEN_ARTIFACT_INVALID', validation.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), {
-      artifactSha256: sha256Content(artifactContent), semanticDigest: validation.semanticDigest
-    });
-  }
-  const artifactSha256 = sha256Content(artifactContent);
-  let intent: ArtifactRepairIntent | null;
-  try { intent = readArtifactRepairIntent(repoRoot, resolvedTaskId, request.family, request.artifact); }
-  catch (error) { return fail('LOCAL_REOPEN_PROVENANCE_INVALID', String(error)); }
-  if (intent && (!['passed', 'awaiting-repair'].includes(intent.state)
-    || intent.artifactSha256 !== request.expectedSha256
-    || intent.semanticDigest !== request.expectedSemanticDigest)) {
-    return fail('LOCAL_REOPEN_PROVENANCE_MISMATCH', 'expected provenance does not match the previously passed or reopened finalizer intent');
-  }
-  if (!intent
-    && (artifactSha256 !== request.expectedSha256 || validation.semanticDigest !== request.expectedSemanticDigest)
-    && !(request.family === 'code' && parseCodePlanInputReference(artifactContent) !== null)) {
-    return fail('LOCAL_REOPEN_PROVENANCE_MISMATCH', 'without a finalizer intent, current artifact digests or canonical code input must match the supplied finalizer result');
-  }
-  const timestamp = Date.now();
-  const reopened: ArtifactRepairIntent = {
-    ...(intent ?? {
-      version: 2,
-      taskId: resolvedTaskId,
-      family: request.family,
-      artifact: request.artifact,
-      createdAt: timestamp
-    }),
-    state: 'awaiting-repair',
-    baselineSemanticDigest: validation.semanticDigest,
-    artifactSha256,
-    semanticDigest: validation.semanticDigest,
-    recoveryOperationId: null,
-    phase: null,
-    authorityDigest: null,
-    requestId: intent?.requestId ?? `local-reopen:${resolvedTaskId}:${request.artifact}`,
-    updatedAt: timestamp
-  };
-  try {
-    writeArtifactRepairIntent(repoRoot, reopened, { expected: intent });
-  } catch (error) {
-    return fail('LOCAL_REOPEN_PROVENANCE_WRITE_FAILED', String(error), { artifactSha256, semanticDigest: validation.semanticDigest });
-  }
-  return {
-    status: 'applied', changed: true,
-    taskId: resolvedTaskId, taskDir: resolvedTaskDir,
-    family: request.family, artifact: request.artifact,
-    artifactSha256, semanticDigest: validation.semanticDigest, error: null
-  };
-}
-
-function reopenLocalArtifactFinalization(request: LocalArtifactReopenRequest): LocalArtifactReopenResult {
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: request.repoRoot });
-  if (!resolved.ok) return failedReopen(request, { code: resolved.code, message: resolved.message });
-  try {
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-artifact.reopen-finalization', () => (
-      reopenLocalArtifactFinalizationUnlocked(request, resolved.repoRoot, resolved.taskId, resolved.taskDir, resolved.taskMdPath, resolved.state)
-    ));
-  } catch (error) {
-    return failedReopen(request, { code: 'LOCAL_REOPEN_LOCK_FAILED', message: String(error) }, {
-      taskId: resolved.taskId, taskDir: resolved.taskDir
-    });
-  }
-}
-
 export {
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
   consumeLocalArtifactFinalizationIntent,
   finalizeLocalArtifact,
-  reopenLocalArtifactFinalization,
   prepareLocalArtifact,
   commitLocalArtifactProvenance,
   readArtifactRepairIntent as readLocalArtifactFinalizationIntent,
@@ -537,8 +392,6 @@ export type {
   LocalArtifactFamily,
   LocalArtifactFinalizationRequest,
   LocalArtifactFinalizationResult,
-  LocalArtifactReopenRequest,
-  LocalArtifactReopenResult,
   LocalArtifactFinalizationIntent,
   LocalArtifactPreparation,
   LocalArtifactValidationOptions,

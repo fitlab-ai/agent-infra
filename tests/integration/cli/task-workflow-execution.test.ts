@@ -176,7 +176,7 @@ for (const operation of ['finalize-local', 'repair'] as const) {
         import { createTaskWorkflowRequest } from ${JSON.stringify(new URL('../../../lib/sandbox/control/task-workflow.ts', import.meta.url).href)};
         const manifest = ${JSON.stringify(f.manifest)};
         const args = [${JSON.stringify(taskId)}, ${JSON.stringify(operation)}, '--family', 'plan', '--artifact', 'plan.md'];
-        if (${JSON.stringify(operation)} === 'repair' || ${JSON.stringify(operation)} === 'reopen-finalization') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
+        if (${JSON.stringify(operation)} === 'repair') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
         const rejected = await executeTaskWorkflow(manifest, createTaskWorkflowRequest('task-artifact', args, manifest.taskId, manifest.generation));
         fs.unlinkSync(${JSON.stringify(candidate)});
         fs.writeFileSync(${JSON.stringify(candidate)}, ${JSON.stringify(content('plan'))});

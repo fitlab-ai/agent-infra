@@ -15,21 +15,34 @@ import {
 } from '../platform/resource-identity.ts';
 import type { ResourceIdentity } from '../platform/resource-identity.ts';
 import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from './frontmatter.ts';
-import { withTransitionMigrationLock } from './task-execution-lock.ts';
+import { transitionBuildAttestation, withTransitionMigrationLock } from './task-execution-lock.ts';
+import type { TransitionBuildAttestation } from './task-execution-lock.ts';
+import type { PlatformCapabilities } from '../platform/provider-contract.ts';
+import type { ProviderIdentityDeclaration } from '../platform/resource-identity.ts';
+import { primaryIdentityKind } from '../platform/resource-identity.ts';
 
 const ACTIVE_TASK_ID = /^TASK-\d{8}-\d{6}$/u;
 const MANIFEST_NAME = 'pr-delivery-fact-v1-to-v2.json';
 
 type MigrationProvider = Readonly<{
   name: string;
-  canRead: boolean;
-  canWrite: boolean;
-  verifyIssueIdentity?: (input: Readonly<{ taskId: string; identity: ResourceIdentity; fact: PrDeliveryFact | null }>) => boolean;
-  verifyPullRequestFact?: (input: Readonly<{ taskId: string; fact: PrDeliveryFact }>) => boolean;
+  identity: Pick<ProviderIdentityDeclaration, 'issue' | 'pull-request'>;
+  capabilities: Pick<PlatformCapabilities, 'authenticated' | 'triage' | 'push' | 'admin'>;
+  verifyIssueIdentity: (input: Readonly<{ taskId: string; identity: ResourceIdentity; fact: PrDeliveryFact | null }>) => boolean | Promise<boolean>;
+  verifyPullRequestFact: (input: Readonly<{ taskId: string; fact: PrDeliveryFact }>) => boolean | Promise<boolean>;
+}>;
+
+type MigrationAuthority = Readonly<{
+  mode: 'direct-host' | 'task-bound' | 'partial';
+  repositoryRoot: string;
+  repository: string;
+  provider: string;
+  authenticated: boolean;
+  transitionBuild: TransitionBuildAttestation;
 }>;
 
 type ActiveTaskMigrationOptions = Readonly<{
-  authority: 'direct-host' | 'task-bound' | 'partial';
+  authority: MigrationAuthority;
   repository: string;
   provider: MigrationProvider;
   manifestPath?: string;
@@ -56,6 +69,7 @@ type MigrationManifest = {
   root: string;
   scope: 'active';
   inventoryDigest: string;
+  transitionBuild: TransitionBuildAttestation;
   startedAt: string;
   updatedAt: string;
   items: MigrationItem[];
@@ -217,12 +231,12 @@ function oldIssueNumber(value: unknown): number | null {
   throw new ActiveTaskMigrationError('MIGRATION_IDENTITY_INVALID', 'issue_number must be a positive integer');
 }
 
-function issueIdentityFor(
+async function issueIdentityFor(
   taskId: string,
   metadata: Record<string, string | number | boolean | null>,
   fact: PrDeliveryFact | null,
   provider: MigrationProvider
-): ResourceIdentity | null {
+): Promise<ResourceIdentity | null> {
   const current = parseOptionalIssueIdentity(metadata.platform_issue_identity);
   const old = oldIssueNumber(metadata.issue_number);
   const fromFact = fact?.state === 'bound' ? fact.binding.issueIdentity : null;
@@ -236,7 +250,7 @@ function issueIdentityFor(
     throw new ActiveTaskMigrationError('MIGRATION_IDENTITY_CONFLICT', `task ${taskId} has conflicting PR and Issue identities`);
   }
   const result = current ?? (old === null ? fromFact : { kind: 'number', value: old });
-  if (result && provider.verifyIssueIdentity && !provider.verifyIssueIdentity({ taskId, identity: result, fact })) {
+  if (result && !(await provider.verifyIssueIdentity({ taskId, identity: result, fact }))) {
     throw new ActiveTaskMigrationError('MIGRATION_PROVIDER_IDENTITY_REJECTED', `provider rejected Issue identity for ${taskId}`);
   }
   return result;
@@ -287,18 +301,38 @@ function validateCompletedManifest(
     || manifest.provider !== options.provider.name
     || manifest.scope !== 'active'
     || typeof manifest.inventoryDigest !== 'string'
+    || JSON.stringify(manifest.transitionBuild) !== JSON.stringify(transitionBuildAttestation())
   ) throw new ActiveTaskMigrationError('MIGRATION_MANIFEST_SCOPE_INVALID', 'completed migration manifest does not match the requested scope');
 }
 
-function validateOptions(options: ActiveTaskMigrationOptions): void {
-  if (options.authority !== 'direct-host') throw new ActiveTaskMigrationError('MIGRATION_AUTHORITY_REQUIRED', 'active migration requires direct-host authority');
+function validateOptions(repoRoot: string, options: ActiveTaskMigrationOptions): void {
+  if (options.authority.mode !== 'direct-host') throw new ActiveTaskMigrationError('MIGRATION_AUTHORITY_REQUIRED', 'active migration requires direct-host authority');
+  if (fs.realpathSync.native(options.authority.repositoryRoot) !== repoRoot
+    || options.authority.repository !== options.repository
+    || options.authority.provider !== options.provider.name
+    || !options.authority.authenticated) {
+    throw new ActiveTaskMigrationError('MIGRATION_AUTHORITY_INVALID', 'migration authority does not match the repository and provider context');
+  }
   if (!options.repository.trim()) throw new ActiveTaskMigrationError('MIGRATION_REPOSITORY_REQUIRED', 'active migration requires a repository identity');
-  if (!options.provider || !options.provider.name.trim() || !options.provider.canRead || !options.provider.canWrite) {
-    throw new ActiveTaskMigrationError('MIGRATION_PROVIDER_UNAVAILABLE', 'active migration requires a provider with read and write permission');
+  if (!options.provider || !options.provider.name.trim()
+    || !options.provider.capabilities.authenticated
+    || !(options.provider.capabilities.triage || options.provider.capabilities.push || options.provider.capabilities.admin)
+    || typeof options.provider.verifyIssueIdentity !== 'function'
+    || typeof options.provider.verifyPullRequestFact !== 'function') {
+    throw new ActiveTaskMigrationError('MIGRATION_PROVIDER_UNAVAILABLE', 'active migration requires an authenticated provider with verified repository access');
+  }
+  try {
+    primaryIdentityKind(options.provider.identity, 'issue');
+    primaryIdentityKind(options.provider.identity, 'pull-request');
+  } catch (error) {
+    throw new ActiveTaskMigrationError('MIGRATION_PROVIDER_IDENTITY_INVALID', error instanceof Error ? error.message : String(error));
+  }
+  if (JSON.stringify(options.authority.transitionBuild) !== JSON.stringify(transitionBuildAttestation())) {
+    throw new ActiveTaskMigrationError('MIGRATION_TRANSITION_BUILD_INVALID', 'migration requires the current transition build and complete writer enrollment');
   }
 }
 
-function runMigration(repoRoot: string, options: ActiveTaskMigrationOptions, manifestPath: string): ActiveTaskMigrationResult {
+async function runMigration(repoRoot: string, options: ActiveTaskMigrationOptions, manifestPath: string): Promise<ActiveTaskMigrationResult> {
   const existing = readExistingManifest(manifestPath);
   if (existing?.status === 'completed') {
     validateCompletedManifest(existing, fs.realpathSync.native(repoRoot), options);
@@ -313,7 +347,8 @@ function runMigration(repoRoot: string, options: ActiveTaskMigrationOptions, man
   const prepared: MigrationManifest = {
     version: 1, status: 'prepared', authority: 'direct-host', repository: options.repository,
     provider: options.provider.name, root: fs.realpathSync.native(repoRoot), scope: 'active',
-    inventoryDigest: scopeDigest, startedAt, updatedAt: startedAt, items: []
+    inventoryDigest: scopeDigest, transitionBuild: options.authority.transitionBuild,
+    startedAt, updatedAt: startedAt, items: []
   };
   try {
     for (const item of items) {
@@ -323,10 +358,10 @@ function runMigration(repoRoot: string, options: ActiveTaskMigrationOptions, man
       if (fact?.state === 'bound' && fact.identity.repository !== options.repository) {
         throw new ActiveTaskMigrationError('MIGRATION_REPOSITORY_CONFLICT', `PR repository for ${item.taskId} does not match migration repository`);
       }
-      if (fact && options.provider.verifyPullRequestFact && !options.provider.verifyPullRequestFact({ taskId: item.taskId, fact })) {
+      if (fact && !(await options.provider.verifyPullRequestFact({ taskId: item.taskId, fact }))) {
         throw new ActiveTaskMigrationError('MIGRATION_PROVIDER_FACT_REJECTED', `provider rejected PR fact for ${item.taskId}`);
       }
-      const issueIdentity = issueIdentityFor(item.taskId, metadata, fact, options.provider);
+      const issueIdentity = await issueIdentityFor(item.taskId, metadata, fact, options.provider);
       const set: Record<string, string> = {};
       if (fact) set.pr_delivery_fact = encodePrDeliveryFact(fact);
       if (issueIdentity) set.platform_issue_identity = serializeResourceIdentity(issueIdentity);
@@ -349,10 +384,10 @@ function runMigration(repoRoot: string, options: ActiveTaskMigrationOptions, man
       }
       const target = updateTaskFrontmatter(
         current,
-        (() => {
+        await (async () => {
           const metadata = parseTypedTaskFrontmatter(current);
           const fact = parseFactValue(metadata.pr_delivery_fact);
-          const issueIdentity = issueIdentityFor(item.taskId, metadata, fact, options.provider);
+          const issueIdentity = await issueIdentityFor(item.taskId, metadata, fact, options.provider);
           const set: Record<string, string> = {};
           if (fact) set.pr_delivery_fact = encodePrDeliveryFact(fact);
           if (issueIdentity) set.platform_issue_identity = serializeResourceIdentity(issueIdentity);
@@ -389,11 +424,11 @@ function runMigration(repoRoot: string, options: ActiveTaskMigrationOptions, man
   }
 }
 
-function migrateActiveTaskMetadata(repoRoot: string, options: ActiveTaskMigrationOptions): ActiveTaskMigrationResult {
-  validateOptions(options);
+async function migrateActiveTaskMetadata(repoRoot: string, options: ActiveTaskMigrationOptions): Promise<ActiveTaskMigrationResult> {
   const canonicalRoot = fs.realpathSync.native(repoRoot);
+  validateOptions(canonicalRoot, options);
   const manifestPath = options.manifestPath ?? path.join(canonicalRoot, '.agents', 'workspace', 'migrations', MANIFEST_NAME);
-  return withTransitionMigrationLock(
+  return await withTransitionMigrationLock(
     canonicalRoot,
     options.ownerName ?? 'active-task-migration',
     () => runMigration(canonicalRoot, options, manifestPath),

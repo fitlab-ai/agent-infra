@@ -63,7 +63,7 @@ function routeKeysFromHandlerBranches(): Set<string> {
     if (command === 'task-artifact') {
       const args = ['TASK-20260101-000001', selector, '--family', 'plan'];
       if (selector !== 'inspect') args.push('--artifact', 'plan.md');
-      if (selector === 'repair' || selector === 'reopen-finalization') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
+      if (selector === 'repair') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
       keys.add(routeKey(command, parseArtifactCommand(args).operation));
     } else if (command === 'task-review') {
       parseReviewCommand(['TASK-20260101-000001', selector, '--stage', 'analysis', '--artifact', 'review-analysis.md']);

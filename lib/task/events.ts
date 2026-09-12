@@ -1065,7 +1065,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
 function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
   const invalid = validateTaskEventRequest(request);
   if (invalid) return failed(request, invalid);
-  if (options.lockAlreadyHeld && (request.dryRun || process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld())) {
+  if (options.lockAlreadyHeld && (request.dryRun || transitionLeaseHeld())) {
     return applyTaskEventUnlocked(request, options);
   }
   if (request.dryRun) {

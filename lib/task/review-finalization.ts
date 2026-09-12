@@ -295,7 +295,7 @@ function finalizeReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
-  if (request.dryRun || (options.lockAlreadyHeld && (process.env.AGENT_INFRA_TRANSITION_BUILD !== '1' || transitionLeaseHeld()))) {
+  if (request.dryRun || (options.lockAlreadyHeld && transitionLeaseHeld())) {
     return finalizeReviewSummaryUnlocked(request, options);
   }
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
