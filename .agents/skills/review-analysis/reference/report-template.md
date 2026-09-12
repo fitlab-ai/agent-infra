@@ -16,6 +16,12 @@
 
 ## 审查摘要
 
+- **审查者**：{reviewer-name}
+- **审查时间**：{timestamp}
+- **审查范围**：{file-count and major modules}
+- **总体结论**：{通过 / 需要修改 / 拒绝}
+- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要 / **人工校验**：0
+
 ## 资格审计复核
 
 > 按 `.agents/rules/decision-qualification.md` 复核：约束依赖、候选资格、分类结果、上游关系和依赖快照五张表。
@@ -39,12 +45,6 @@
 ### 依赖快照
 | task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
 | --- | --- | --- |
-
-- **审查者**：{reviewer-name}
-- **审查时间**：{timestamp}
-- **审查范围**：{file-count and major modules}
-- **总体结论**：{通过 / 需要修改 / 拒绝}
-- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要 / **人工校验**：0
 
 ## 检视覆盖声明
 

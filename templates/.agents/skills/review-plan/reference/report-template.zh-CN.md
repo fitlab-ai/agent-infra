@@ -7,7 +7,7 @@
 ## 输出模板
 
 ```markdown
-# 代码审查报告
+# 技术方案审查报告
 
 - **审查轮次**：第 {review-round} 轮
 - **产物文件**：`{review-artifact}`
@@ -15,6 +15,12 @@
   - `{plan-artifact}`（本轮实际检视的最高轮技术方案产物，如 `plan-r2.md`；无法可靠取得则留空）
 
 ## 审查摘要
+
+- **审查者**：{reviewer-name}
+- **审查时间**：{timestamp}
+- **审查范围**：{file-count and major modules}
+- **总体结论**：{通过 / 需要修改 / 拒绝}
+- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要 / **人工校验**：0
 
 ## 资格审计复核
 
@@ -39,12 +45,6 @@
 ### 依赖快照
 | task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
 | --- | --- | --- |
-
-- **审查者**：{reviewer-name}
-- **审查时间**：{timestamp}
-- **审查范围**：{file-count and major modules}
-- **总体结论**：{通过 / 需要修改 / 拒绝}
-- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要 / **人工校验**：0
 
 ## 检视覆盖声明
 

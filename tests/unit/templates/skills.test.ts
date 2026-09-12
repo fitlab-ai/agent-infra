@@ -35,10 +35,14 @@ function sectionContent(content: string, heading: string): string {
   return content.slice(start, end).trim();
 }
 
-function reportSampleHeadings(content: string): string[] {
+function reportSample(content: string): string {
   const sample = content.match(/```markdown\n([\s\S]*)\n```\s*$/);
   assert.ok(sample, "report template should include a markdown sample");
-  return [...sample[1]!.matchAll(/^## (.+)$/gm)].map((match) => match[1]!);
+  return sample[1]!;
+}
+
+function reportSampleHeadings(content: string): string[] {
+  return [...reportSample(content).matchAll(/^## (.+)$/gm)].map((match) => match[1]!);
 }
 
 test("all SKILL.md files have valid frontmatter", () => {
@@ -630,6 +634,51 @@ test("report templates preserve the registry-defined section order", () => {
       [...positions].sort((left, right) => left - right),
       `${relativePath} should keep required sections in registry order`
     );
+  });
+});
+
+test("review report samples match registry titles and keep summary fields before qualification audit", () => {
+  const templates: Array<{ family: "review-analysis" | "review-plan" | "review-code"; locale: "zh" | "en"; relativePath: string }> = [
+    { family: "review-analysis", locale: "zh", relativePath: ".agents/skills/review-analysis/reference/report-template.md" },
+    { family: "review-analysis", locale: "zh", relativePath: "templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md" },
+    { family: "review-analysis", locale: "en", relativePath: "templates/.agents/skills/review-analysis/reference/report-template.en.md" },
+    { family: "review-plan", locale: "zh", relativePath: ".agents/skills/review-plan/reference/report-template.md" },
+    { family: "review-plan", locale: "zh", relativePath: "templates/.agents/skills/review-plan/reference/report-template.zh-CN.md" },
+    { family: "review-plan", locale: "en", relativePath: "templates/.agents/skills/review-plan/reference/report-template.en.md" },
+    { family: "review-code", locale: "zh", relativePath: ".agents/skills/review-code/reference/report-template.md" },
+    { family: "review-code", locale: "zh", relativePath: "templates/.agents/skills/review-code/reference/report-template.zh-CN.md" },
+    { family: "review-code", locale: "en", relativePath: "templates/.agents/skills/review-code/reference/report-template.en.md" }
+  ];
+
+  templates.forEach(({ family, locale, relativePath }) => {
+    const schema = getArtifactSchema(family);
+    assert.ok(schema, `${relativePath} should map to an artifact schema`);
+    const sample = reportSample(read(relativePath));
+    const expectedTitle = schema.title[locale];
+    assert.equal(sample.match(/^# (.+)$/m)?.[1], expectedTitle, `${relativePath} should use the registry title`);
+
+    const summaryHeading = locale === "zh" ? "审查摘要" : "Review Summary";
+    const qualificationHeading = locale === "zh" ? "资格审计复核" : "Qualification Audit Review";
+    const summaryIndex = sample.indexOf(`## ${summaryHeading}`);
+    const qualificationIndex = sample.indexOf(`## ${qualificationHeading}`);
+    assert.ok(summaryIndex >= 0, `${relativePath} should define its summary heading`);
+    assert.ok(qualificationIndex > summaryIndex, `${relativePath} should place qualification audit after summary`);
+
+    const fieldLabels = locale === "zh"
+      ? ["审查者", "审查时间", "审查范围", "总体结论", "发现（AI 可处理）"]
+      : ["Reviewer", "Review Time", "Scope", "Overall Verdict", "Findings (AI-actionable)"];
+    fieldLabels.forEach((label) => {
+      const fieldIndex = sample.indexOf(`**${label}**`);
+      assert.ok(fieldIndex > summaryIndex && fieldIndex < qualificationIndex, `${relativePath} should keep ${label} inside the summary`);
+    });
+
+    if (family === "review-code") {
+      const verdictLine = sample.split("\n").find((line) => line.includes(`**${locale === "zh" ? "总体结论" : "Overall Verdict"}**`));
+      assert.match(verdictLine ?? "", locale === "zh"
+        ? /^- \*\*总体结论\*\*：\{[^}\n]+\}\s*$/
+        : /^- \*\*Overall Verdict\*\*: \{[^}\n]+\}\s*$/,
+        `${relativePath} should keep guidance outside the machine verdict value`);
+    }
   });
 });
 

@@ -16,6 +16,18 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## Review Summary
 
+- **Reviewer**: {reviewer-name}
+- **Review Time**: {timestamp}
+- **Scope**: {file-count and major modules}
+- **Review Target Commit**: {target branch SHA M read once from the task-bound remote/base at review start; never overwritten by a later live target}
+- **Reviewed Head**: {local HEAD R captured once for this round; must equal this round's HEAD}
+- **Review Baseline Commit**: {compatibility display of R; must equal Reviewed Head}
+- **Reviewed Diff Base**: {D used for the complete diff/fingerprint; must equal merge-base(R, saved M)}
+- **Reviewed Diff Fingerprint**: {fingerprint field from git-workflow snapshot}
+- **Reviewed Snapshot Tree**: {tree field from git-workflow snapshot}
+- **Overall Verdict**: {Approved / Changes Requested / Rejected}
+- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors / **Manual validation**: 0
+
 ## Qualification Audit Review
 
 > Use `.agents/rules/decision-qualification.md` to review the five tables: constraint dependencies, candidate qualification, classification results, upstream relations, and dependency snapshot.
@@ -39,18 +51,6 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 ### Dependency Snapshot
 | task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
 | --- | --- | --- |
-
-- **Reviewer**: {reviewer-name}
-- **Review Time**: {timestamp}
-- **Scope**: {file-count and major modules}
-- **Review Target Commit**: {target branch SHA M read once from the task-bound remote/base at review start; never overwritten by a later live target}
-- **Reviewed Head**: {local HEAD R captured once for this round; must equal this round's HEAD}
-- **Review Baseline Commit**: {compatibility display of R; must equal Reviewed Head}
-- **Reviewed Diff Base**: {D used for the complete diff/fingerprint; must equal merge-base(R, saved M)}
-- **Reviewed Diff Fingerprint**: {fingerprint field from git-workflow snapshot}
-- **Reviewed Snapshot Tree**: {tree field from git-workflow snapshot}
-- **Overall Verdict**: {Approved / Changes Requested / Rejected} (pick exactly one; combined phrases will fail the verify gate)
-- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors / **Manual validation**: 0
 
 ## Inspection Coverage
 
