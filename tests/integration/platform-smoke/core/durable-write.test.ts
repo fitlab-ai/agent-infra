@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { writeDurableFile } from '../../../lib/fs/durable-write.ts';
-import { onPlatforms } from '../../helpers.ts';
+import { writeDurableFile } from '../../../../lib/fs/durable-write.ts';
+import { onPlatforms } from '../../../helpers.ts';
 
 test('durable publication distinguishes replacement from immutable creation', onPlatforms('linux', 'darwin'), (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'durable-write-'));
