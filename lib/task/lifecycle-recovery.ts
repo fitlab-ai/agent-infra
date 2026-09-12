@@ -435,6 +435,20 @@ function recoveryRunIsStable(run: OrchestrationRun | null): run is Orchestration
   return run !== null && run.status === 'running' && run.pendingDelegation === null;
 }
 
+function recoveryTerminalFailureStatus(code: string): 'owner-unknown' | 'conflict' {
+  switch (code) {
+    case 'RECOVERY_LOG_CONFLICT':
+    case 'RECOVERY_NOTE_INVALID':
+    case 'RECOVERY_ORCHESTRATION_INVALID':
+    case 'RECOVERY_RECEIPT_INVALID':
+    case 'RECOVERY_REFERENCE_CONFLICT':
+    case 'RECOVERY_CONSUMER_CONFLICT':
+      return 'conflict';
+    default:
+      return 'owner-unknown';
+  }
+}
+
 function readRecoveryTerminalFacts(
   section: Readonly<{ entries: readonly LogEntry[] }>,
   taskId: string,
@@ -580,7 +594,7 @@ function recoverStartedLifecycleUnderLock(
     const store = readLifecycleStore(options, resolved.repoRoot);
     const facts = readRecoveryTerminalFacts(section, taskId, request, run, store);
     if (!facts.ok) {
-      return failure(request, facts.code === 'RECOVERY_CONSUMER_CONFLICT' ? 'conflict' : 'owner-unknown', facts.code, facts.message, { taskId });
+      return failure(request, recoveryTerminalFailureStatus(facts.code), facts.code, facts.message, { taskId });
     }
     const { note, receipt, consumer, stored } = facts.facts;
     if (!stored) return result(request, 'no-op', { taskId, receiptId: receipt.id, childId: receipt.childId });

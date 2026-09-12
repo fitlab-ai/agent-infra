@@ -113,18 +113,19 @@ test('recover-started claims, aborts, logs, releases, and replays as no-op', () 
 });
 
 test('recover-started fails closed for selector, ownership, orchestration, and ambiguity conflicts', () => {
-  const cases: readonly [string, (f: ReturnType<typeof fixture>) => void, string][] = [
-    ['selector mismatch', () => undefined, 'RECOVERY_SELECTOR_MISMATCH'],
-    ['other consumer', (f) => { f.store.consume('child', 'other-consumer'); }, 'RECOVERY_CONSUMER_CONFLICT'],
-    ['orchestration missing', (f) => { fs.rmSync(path.join(f.taskDir, 'orchestration.json')); }, 'RECOVERY_ORCHESTRATION_MISSING'],
-    ['ambiguous selector', (f) => { fs.appendFileSync(path.join(f.taskDir, 'task.md'), '- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n'); }, 'RECOVERY_SELECTOR_AMBIGUOUS']
+  const cases: readonly [string, (f: ReturnType<typeof fixture>) => void, string, 'owner-unknown' | 'conflict'][] = [
+    ['selector mismatch', () => undefined, 'RECOVERY_SELECTOR_MISMATCH', 'conflict'],
+    ['other consumer', (f) => { f.store.consume('child', 'other-consumer'); }, 'RECOVERY_CONSUMER_CONFLICT', 'conflict'],
+    ['orchestration missing', (f) => { fs.rmSync(path.join(f.taskDir, 'orchestration.json')); }, 'RECOVERY_ORCHESTRATION_MISSING', 'owner-unknown'],
+    ['ambiguous selector', (f) => { fs.appendFileSync(path.join(f.taskDir, 'task.md'), '- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n'); }, 'RECOVERY_SELECTOR_AMBIGUOUS', 'conflict']
   ];
-  for (const [name, run, expected] of cases) {
+  for (const [name, run, expected, expectedStatus] of cases) {
     const f = fixture();
     try {
       run(f);
       const result = name === 'selector mismatch' ? recover(f, undefined, { agent: 'claude' }) : recover(f);
       assert.equal(result.error?.code, expected, name);
+      assert.equal(result.status, expectedStatus, name);
     } finally {
       fs.rmSync(f.root, { recursive: true, force: true });
     }
@@ -132,13 +133,13 @@ test('recover-started fails closed for selector, ownership, orchestration, and a
 });
 
 test('recover-started rejects expired, invalid, and tampered durable evidence', () => {
-  const cases: readonly [string, (f: ReturnType<typeof fixture>) => void, string][] = [
-    ['expired stop evidence', (f) => { assert.equal(f.store.expireBefore('2099-01-01T00:00:00.000Z'), 1); }, 'RECOVERY_STOP_EVIDENCE_MISSING'],
+  const cases: readonly [string, (f: ReturnType<typeof fixture>) => void, string, 'owner-unknown' | 'conflict'][] = [
+    ['expired stop evidence', (f) => { assert.equal(f.store.expireBefore('2099-01-01T00:00:00.000Z'), 1); }, 'RECOVERY_STOP_EVIDENCE_MISSING', 'owner-unknown'],
     ['invalid store record', (f) => {
       const file = fs.readdirSync(f.store.root).find((entry) => /^[a-f0-9]{64}\.json$/u.test(entry));
       assert.ok(file);
       fs.writeFileSync(path.join(f.store.root, file!), '{invalid\n');
-    }, 'RECOVERY_STORE_UNKNOWN'],
+    }, 'RECOVERY_STORE_UNKNOWN', 'owner-unknown'],
     ['duplicate terminal', (f) => {
       const first = recover(f);
       assert.equal(first.status, 'applied');
@@ -146,14 +147,15 @@ test('recover-started rejects expired, invalid, and tampered durable evidence', 
       const line = updated.split('\n').find((entry) => entry.includes(' [aborted]') && entry.includes('lifecycle-recovery:v1 '));
       assert.ok(line);
       fs.appendFileSync(path.join(f.taskDir, 'task.md'), `${line}\n`);
-    }, 'RECOVERY_SELECTOR_AMBIGUOUS']
+    }, 'RECOVERY_SELECTOR_AMBIGUOUS', 'conflict']
   ];
-  for (const [name, setup, expected] of cases) {
+  for (const [name, setup, expected, expectedStatus] of cases) {
     const f = fixture();
     try {
       setup(f);
       const result = recover(f);
       assert.equal(result.error?.code, expected, name);
+      assert.equal(result.status, expectedStatus, name);
     } finally {
       fs.rmSync(f.root, { recursive: true, force: true });
     }
@@ -309,7 +311,7 @@ test('recover-started reports every durable recovery failure code', () => {
     error: { code: 'TASK_READ_FAILED', message: 'log write failed' }
   } as ReturnType<typeof writeTask>;
   type RecoveryTestOptions = Pick<LifecycleRecoveryOptions, 'lifecycleStore' | 'writeTask' | 'verifyRecoveryCommit'>;
-  const cases: readonly [string, (f: ReturnType<typeof fixture>) => void, string, ((f: ReturnType<typeof fixture>) => RecoveryTestOptions)?][] = [
+  const cases: readonly [string, (f: ReturnType<typeof fixture>) => void, string, 'owner-unknown' | 'conflict', ((f: ReturnType<typeof fixture>) => RecoveryTestOptions)?][] = [
     ['invalid stop evidence', (f) => {
       const file = fs.readdirSync(f.store.root).find((entry) => /^[a-f0-9]{64}\.json$/u.test(entry));
       assert.ok(file);
@@ -318,8 +320,8 @@ test('recover-started reports every durable recovery failure code', () => {
       };
       record.state.stopEvidence.hookStopObserved = false;
       fs.writeFileSync(path.join(f.store.root, file!), `${JSON.stringify(record)}\n`);
-    }, 'RECOVERY_STOP_EVIDENCE_INVALID'],
-    ['unknown orchestration', (f) => { fs.writeFileSync(path.join(f.taskDir, 'orchestration.json'), '{invalid\n'); }, 'RECOVERY_ORCHESTRATION_UNKNOWN'],
+    }, 'RECOVERY_STOP_EVIDENCE_INVALID', 'owner-unknown'],
+    ['unknown orchestration', (f) => { fs.writeFileSync(path.join(f.taskDir, 'orchestration.json'), '{invalid\n'); }, 'RECOVERY_ORCHESTRATION_UNKNOWN', 'owner-unknown'],
     ['delegation unavailable', (f) => {
       const file = path.join(f.taskDir, 'orchestration.json');
       const run = JSON.parse(fs.readFileSync(file, 'utf8')) as {
@@ -329,15 +331,15 @@ test('recover-started reports every durable recovery failure code', () => {
       run.pendingDelegation = null;
       run.receipts = [];
       fs.writeFileSync(file, `${JSON.stringify(run)}\n`);
-    }, 'RECOVERY_DELEGATION_UNAVAILABLE'],
-    ['claim failed', () => undefined, 'RECOVERY_CLAIM_FAILED', (f) => ({
+    }, 'RECOVERY_DELEGATION_UNAVAILABLE', 'owner-unknown'],
+    ['claim failed', () => undefined, 'RECOVERY_CLAIM_FAILED', 'owner-unknown', (f) => ({
       lifecycleStore: {
         ...f.store,
         claimRecovery: () => { throw new Error('claim failed'); }
       } as ReturnType<typeof createCodexLifecycleStore>
     })],
-    ['log write failed', () => undefined, 'RECOVERY_LOG_WRITE_FAILED', () => ({ writeTask: () => failedWrite })],
-    ['commit verification failed', () => undefined, 'RECOVERY_COMMIT_VERIFY_FAILED', () => ({
+    ['log write failed', () => undefined, 'RECOVERY_LOG_WRITE_FAILED', 'owner-unknown', () => ({ writeTask: () => failedWrite })],
+    ['commit verification failed', () => undefined, 'RECOVERY_COMMIT_VERIFY_FAILED', 'owner-unknown', () => ({
       verifyRecoveryCommit: () => ({ ok: false, message: 'commit verification failed' })
     })],
     ['reference conflict', (f) => {
@@ -349,14 +351,15 @@ test('recover-started reports every durable recovery failure code', () => {
       };
       run.receipts[0]!.hostEvidence.stopRevision = 999;
       fs.writeFileSync(file, `${JSON.stringify(run)}\n`);
-    }, 'RECOVERY_REFERENCE_CONFLICT']
+    }, 'RECOVERY_REFERENCE_CONFLICT', 'conflict']
   ];
-  for (const [name, setup, expected, optionsForFixture] of cases) {
+  for (const [name, setup, expected, expectedStatus, optionsForFixture] of cases) {
     const f = fixture();
     try {
       setup(f);
       const result = recover(f, undefined, {}, optionsForFixture?.(f));
       assert.equal(result.error?.code, expected, name);
+      assert.equal(result.status, expectedStatus, name);
     } finally {
       fs.rmSync(f.root, { recursive: true, force: true });
     }
