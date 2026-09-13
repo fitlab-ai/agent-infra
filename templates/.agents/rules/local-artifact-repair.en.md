@@ -8,6 +8,7 @@ This rule covers the pre-completion gate for `analyze-task`, `plan-task`, and `c
 - When artifact content is invalid, the finalizer returns a controlled `recovery` with a `recoveryId`, `candidatePath`, and baseline digests. The formal artifact remains unchanged until recovery commit.
 - After the mechanical safety gates pass, the model may edit only the returned `candidatePath`. After each byte-changing edit, rerun the complete finalizer with the same task, stage/family, artifact, and `--recovery-id`. Never edit the formal artifact directly and call it a candidate.
 - A successful finalizer commits through `finalize-ready → commit-started → passed`; completed events accept only matching `passed` final digests and consume the intent under the task lock.
+- Before `finalize-ready`, the recovery core seals the validated final bytes in the controlled `final.md`; later commit ignores the editable `candidate.md` and validates/publishes only that sealed snapshot, so a post-prepare candidate replacement cannot be published.
 
 ## Authorization boundary
 

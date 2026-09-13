@@ -21,6 +21,7 @@ import {
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+import { readArtifactRecoveryIntent } from '../../../lib/task/artifact-repair-intent.ts';
 
 function enableQualification(taskPath: string) {
   fs.appendFileSync(taskPath, `\n## \u7ea6\u675f\n\n| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| C-1 | Keep recovery bounded | derived | task-input | task.md | task.md#\u7ea6\u675f |  |  |\n\n## \u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848\n\n| candidate_id | statement | status | constraint_ids | impact | evidence |\n| --- | --- | --- | --- | --- | --- |\n| A | Rebuild the earliest stale stage | qualified | C-1 | bounded recovery | task.md#\u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848 |\n`);
@@ -161,7 +162,7 @@ function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env)
 
 function finalizeReview(
   f: ReturnType<typeof fixture>,
-  scenario: (typeof reviewScenarios)[number]
+  scenario: { stage: string; artifact: string }
 ) {
   return spawnSync('node', [
     INTERNAL_CLI_PATH, 'task-review', f.id, 'finalize-summary', '--stage', scenario.stage,
@@ -631,6 +632,7 @@ test('local recovery provenance rejects a formal mutation before completion', ()
   const secondResult = JSON.parse(second.stdout);
   assert.equal(secondResult.status, 'passed');
 
+  fs.chmodSync(artifact, 0o644);
   fs.writeFileSync(artifact, `${fs.readFileSync(artifact, 'utf8')}\nexternal mutation\n`);
   const before = fs.readFileSync(f.file);
   const local = validateLocalArtifact(fs.readFileSync(artifact, 'utf8'), { family: 'plan' });
@@ -1203,6 +1205,11 @@ for (const scenario of [
     assert.equal(startedResult.artifact, scenario.second);
 
     fs.writeFileSync(path.join(f.dir, scenario.second), reviewArtifact(scenario.title, scenario.input));
+    const finalized = finalizeReview(f, {
+      stage: scenario.family === 'review-analysis' ? 'analysis' : 'plan',
+      artifact: scenario.second
+    });
+    assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
     const completed = run(f.root, [
       f.id, `${scenario.family}.completed`, '--agent', 'codex', '--artifact', scenario.second,
       '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
@@ -1237,6 +1244,8 @@ test('review-code event completes the regular code review path', () => {
   assert.equal(JSON.parse(started.stdout).status, 'applied');
 
   fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
+  const finalized = finalizeReview(f, reviewScenarios[2]);
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
   const completed = run(f.root, [
     f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code.md',
     '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
@@ -1269,8 +1278,11 @@ for (const scenario of reviewScenarios) {
     assert.match(startedContent, /^review_input_artifact: /m);
     assert.match(startedContent, /^review_input_sha256: [a-f0-9]{64}$/m);
     assert.match(startedContent, /^qualification_input_relations: /m);
+    const finalized = finalizeReview(f, scenario);
+    assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
     const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
     assert.equal(completed.status, 0, completed.stderr);
+    assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'consumed');
     const digest = sha256File(path.join(f.dir, scenario.input));
     const content = fs.readFileSync(f.file, 'utf8');
     assert.match(content, new RegExp(`\\| ${scenario.family}\\.completed \\| ${scenario.artifact} \\| ${scenario.input} \\| ${digest} \\|`));
@@ -1444,6 +1456,8 @@ test('approved review completion reports an invalid ledger as an invalid task do
 test('completed approved review remains a no-op after the ledger changes', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);
+  const finalized = finalizeReview(f, scenario);
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
   const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
   assert.equal(completed.status, 0, completed.stderr);
 
@@ -1489,6 +1503,8 @@ test('review-code event completes a supplemental round against the latest code a
   assert.equal(startedResult.artifact, 'review-code-r2.md');
 
   fs.writeFileSync(path.join(f.dir, 'review-code-r2.md'), reviewCodeArtifact());
+  const finalized = finalizeReview(f, { stage: 'code', artifact: 'review-code-r2.md' });
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
   const completed = run(f.root, [
     f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code-r2.md',
     '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
@@ -1661,4 +1677,93 @@ test('code completion requires current finalizer provenance and rejects a semant
   assert.equal(changed.status, 1);
   assert.equal(JSON.parse(changed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
   assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('code-r7 recovery keeps task.md unchanged until the repaired finalizer is consumed', () => {
+  const f = fixture('code');
+  const planPath = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(planPath, localArtifact('plan'));
+  const planSha256 = sha256File(planPath);
+  fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+  addReceipt(f.file, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: planSha256, completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  fs.appendFileSync(f.file, '- 2026-01-01 00:00:00+00:00 — **Review Plan (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-plan.md\n');
+  for (let round = 1; round <= 6; round += 1) {
+    const suffix = round === 1 ? '' : `-r${round}`;
+    const codeArtifact = `code${suffix}.md`;
+    const reviewArtifactName = `review-code${suffix}.md`;
+    fs.writeFileSync(path.join(f.dir, codeArtifact), codeReport());
+    fs.writeFileSync(
+      path.join(f.dir, reviewArtifactName),
+      round === 6
+        ? reviewCodeArtifact(codeArtifact)
+          .replace('- **总体结论**：通过', '- **总体结论**：需要修改')
+          .replace('### 审查决定\n通过', '### 审查决定\n需要修改')
+        : reviewCodeArtifact(codeArtifact)
+    );
+  }
+  addReceipt(f.file, {
+    event: 'code.completed', output: 'code-r6.md', input: 'plan.md',
+    inputSha256: planSha256, completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f.file, {
+    event: 'review-code.completed', output: 'review-code-r6.md', input: 'code-r6.md',
+    inputSha256: sha256File(path.join(f.dir, 'code-r6.md')), completedAt: '2026-01-01 01:06:00+00:00'
+  });
+  fs.appendFileSync(f.file, [
+    ...Array.from({ length: 6 }, (_, index) => {
+      const round = index + 1;
+      const suffix = round === 1 ? '' : `-r${round}`;
+      return `- 2026-01-01 00:0${round}:00+00:00 — **Code Task (Round ${round})** by codex — Code implemented, 1 files modified, 1 tests passed → code${suffix}.md`;
+    }),
+    ...Array.from({ length: 6 }, (_, index) => {
+      const round = index + 1;
+      const suffix = round === 1 ? '' : `-r${round}`;
+      return `- 2026-01-01 01:0${round}:00+00:00 — **Review Code (Round ${round})** by codex — Verdict: ${round === 6 ? 'Changes Requested' : 'Approved'}, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code${suffix}.md`;
+    })
+  ].join('\n') + '\n');
+
+  const started = run(f.root, [f.id, 'code.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  assert.equal(JSON.parse(started.stdout).artifact, 'code-r7.md');
+  const beforeRecovery = fs.readFileSync(f.file);
+  const artifactPath = path.join(f.dir, 'code-r7.md');
+  const malformed = codeReport().replace(/## 实现输入[\s\S]*?(?=## 变更文件)/, '');
+  fs.writeFileSync(artifactPath, malformed);
+
+  const first = finalizeLocalArtifact({
+    taskRef: f.id, repoRoot: f.root, family: 'code', artifact: 'code-r7.md'
+  });
+  assert.equal(first.status, 'failed');
+  assert.ok(first.recovery?.recoveryId);
+  assert.deepEqual(fs.readFileSync(f.file), beforeRecovery);
+  fs.writeFileSync(first.recovery!.candidatePath, codeReport());
+
+  const finalized = finalizeLocalArtifact({
+    taskRef: f.id, repoRoot: f.root, family: 'code', artifact: 'code-r7.md',
+    recoveryId: first.recovery!.recoveryId
+  });
+  assert.equal(finalized.status, 'passed', finalized.error?.message);
+  assert.deepEqual(fs.readFileSync(f.file), beforeRecovery);
+  assert.equal(fs.readFileSync(artifactPath, 'utf8'), codeReport());
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, 'code', 'code-r7.md')?.state, 'passed');
+
+  const completedArgs = [
+    f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r7.md',
+    '--fix-for', 'review-code-r6.md', '--blockers', '0', '--major', '0', '--minor', '0',
+    '--manual-validation', '0', '--artifact-sha256', finalized.artifactSha256!,
+    '--semantic-digest', finalized.semanticDigest!
+  ];
+  const completed = run(f.root, completedArgs);
+  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+  const afterCompletion = fs.readFileSync(f.file, 'utf8');
+  assert.equal((afterCompletion.match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\)\*\* by codex — Fixed /gm) ?? []).length, 1);
+  assert.equal((afterCompletion.match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\) \[started\]\*\* by codex — started$/gm) ?? []).length, 1);
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, 'code', 'code-r7.md')?.state, 'consumed');
+  const replayed = run(f.root, completedArgs);
+  assert.equal(replayed.status, 0, replayed.stdout || replayed.stderr);
+  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+  assert.equal((fs.readFileSync(f.file, 'utf8').match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\)\*\* by codex — Fixed /gm) ?? []).length, 1);
 });

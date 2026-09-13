@@ -171,30 +171,6 @@ function prepareReviewSummaryCandidate(
   let repairIntent;
   try { repairIntent = readArtifactRecoveryIntent(resolved.repoRoot, taskId!, spec.family, request.artifact); }
   catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), digests); }
-  const schema = getArtifactSchema(spec.family)!;
-  const structure = inspectArtifactContract(artifactContent, schema);
-  if (!structure.ok) {
-    if (!recovery && !request.dryRun && options.startRecovery) {
-      try {
-        recovery = beginArtifactRecovery({
-          taskId: taskId!, family: spec.family, artifact: request.artifact, round: parsed.round,
-          requestId: `review-finalize:${taskId!}:${stage}:${parsed.round}`
-        }, Buffer.from(artifactContent, 'utf8'), { repoRoot: resolved.repoRoot, taskDir: resolved.taskDir, lockAlreadyHeld: options.lockAlreadyHeld });
-      } catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), digests); }
-    }
-    return {
-      ...reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), {
-        artifactSha256, semanticDigest: structure.semanticDigest,
-        ...(recovery ? { recovery: {
-          recoveryId: recovery.recoveryId,
-          candidatePath: recovery.stagingPath,
-          baselineSha256: recovery.baselineSha256,
-          baselineSemanticDigest: recovery.baselineSemanticDigest
-        } } : {})
-      }),
-      ...(recovery ? { recovery } : {})
-    };
-  }
   if (repairIntent?.state === 'passed' || repairIntent?.state === 'consumed') {
     if (repairIntent.finalArtifactSha256 !== artifactSha256 || repairIntent.finalSemanticDigest !== semanticDigest) {
       return reject('REVIEW_PROVENANCE_INVALID', 'the review artifact changed after its finalization provenance was recorded', digests);
@@ -220,6 +196,30 @@ function prepareReviewSummaryCandidate(
   } catch (error) { return reject('REVIEW_LEDGER_INVALID', String(error)); }
   const detail = inspectDecisionDetailDuplicates(artifactContent);
   if (!detail.ok) return reject('REVIEW_DECISION_DETAIL_INVALID', `${detail.code}: ${detail.message}`);
+  const schema = getArtifactSchema(spec.family)!;
+  const structure = inspectArtifactContract(artifactContent, schema);
+  if (!structure.ok) {
+    if (!recovery && !request.dryRun && options.startRecovery) {
+      try {
+        recovery = beginArtifactRecovery({
+          taskId: taskId!, family: spec.family, artifact: request.artifact, round: parsed.round,
+          requestId: `review-finalize:${taskId!}:${stage}:${parsed.round}`
+        }, Buffer.from(artifactContent, 'utf8'), { repoRoot: resolved.repoRoot, taskDir: resolved.taskDir, lockAlreadyHeld: options.lockAlreadyHeld });
+      } catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), digests); }
+    }
+    return {
+      ...reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), {
+        artifactSha256, semanticDigest: structure.semanticDigest,
+        ...(recovery ? { recovery: {
+          recoveryId: recovery.recoveryId,
+          candidatePath: recovery.stagingPath,
+          baselineSha256: recovery.baselineSha256,
+          baselineSemanticDigest: recovery.baselineSemanticDigest
+        } } : {})
+      }),
+      ...(recovery ? { recovery } : {})
+    };
+  }
   const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts);
   if (!transformed.ok) return reject(transformed.code, transformed.message);
   const finalDigests = { artifactSha256: sha256Content(transformed.content), semanticDigest: canonicalSemanticDigest(transformed.content) };

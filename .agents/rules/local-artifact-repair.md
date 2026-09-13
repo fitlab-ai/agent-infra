@@ -8,6 +8,7 @@
 - finalizer 发现 artifact 内容错误时，返回受控 `recovery`（`recoveryId`、`candidatePath`、baseline 指纹）。正式 artifact 在 recovery commit 前必须保持不变。
 - 只有在机械安全门通过后，模型才可编辑返回的 `candidatePath`；每次实际字节变化后，用同一 task、stage/family、artifact 和 `--recovery-id` 完整重跑 finalizer。不得直接编辑正式 artifact 后假设它属于候选。
 - finalizer 通过后，recovery core 按 `finalize-ready → commit-started → passed` 提交候选；completed event 只接受匹配的 `passed`/final digest，并在任务锁内消费 intent。
+- `finalize-ready` 前 recovery core 会把已校验的最终字节封存为受控 `final.md`；后续 commit 忽略可编辑的 `candidate.md`，只校验并发布该封存快照，避免候选在准备后被替换。
 
 ## 授权边界
 

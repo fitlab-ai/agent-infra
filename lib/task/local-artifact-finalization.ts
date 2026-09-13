@@ -338,6 +338,8 @@ function prepareLocalArtifact(
       const context = recordArtifactRecoveryPassed(tupleFor(request, resolved.taskId, authority), {
         repoRoot: resolved.repoRoot,
         taskDir: resolved.taskDir,
+        expectedFinalSha256: artifactSha256,
+        expectedFinalSemanticDigest: validation.semanticDigest,
         ...(authority ? { recoveryId: authority.operationId } : {}),
         lockAlreadyHeld: request.lockAlreadyHeld
       });

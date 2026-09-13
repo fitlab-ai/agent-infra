@@ -9,7 +9,10 @@ import {
   commitArtifactRecovery,
   consumeArtifactRecovery,
   prepareArtifactRecoveryCommit,
+  recordArtifactRecoveryPassed,
+  reconcileArtifactRecovery,
   readArtifactRecoveryIntent,
+  sha256Content,
   stageArtifactCandidate
 } from '../../../lib/task/artifact-recovery.ts';
 
@@ -80,4 +83,134 @@ test('artifact recovery refuses a formal target changed after staging', () => {
   );
   assert.equal(fs.readFileSync(artifact, 'utf8'), 'external\n');
   assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'commit-started');
+});
+
+test('artifact recovery publishes the validated snapshot when the candidate changes after preparation', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const taskId = 'TASK-20260101-000003';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const artifact = path.join(taskDir, 'code.md');
+  const baseline = Buffer.from('baseline\n');
+  const candidate = Buffer.from('validated\n');
+  fs.writeFileSync(artifact, baseline);
+
+  const context = beginArtifactRecovery(
+    { taskId, family: 'code', artifact: 'code.md', round: 1, requestId: 'recovery-test-3' },
+    baseline,
+    { repoRoot, taskDir, recoveryId: 'abcde-00000000003' }
+  );
+  const staged = stageArtifactCandidate(context, candidate);
+  prepareArtifactRecoveryCommit(context, staged.candidateSha256, staged.semanticDigest);
+  fs.writeFileSync(context.stagingPath, 'unvalidated-race\n');
+
+  const committed = commitArtifactRecovery(context);
+  assert.equal(committed.state, 'passed');
+  assert.deepEqual(fs.readFileSync(artifact), candidate);
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'passed');
+});
+
+test('artifact recovery rejects a symlinked recovery-root ancestor before creating outside files', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-external-'));
+  const taskId = 'TASK-20260101-000004';
+  const workspace = path.join(repoRoot, '.agents', 'workspace');
+  const taskDir = path.join(workspace, 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const artifact = path.join(taskDir, 'code.md');
+  const baseline = Buffer.from('baseline\n');
+  fs.writeFileSync(artifact, baseline);
+  fs.symlinkSync(external, path.join(workspace, '.local-artifact-recovery'), 'dir');
+
+  assert.throws(
+    () => beginArtifactRecovery(
+      { taskId, family: 'code', artifact: 'code.md', round: 1, requestId: 'recovery-test-4' },
+      baseline,
+      { repoRoot, taskDir, recoveryId: 'abcde-00000000004' }
+    ),
+    /ARTIFACT_RECOVERY_PATH_INVALID/
+  );
+  assert.equal(fs.existsSync(path.join(external, taskId)), false);
+});
+
+test('artifact recovery binds the fast-path provenance to the finalizer bytes', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const taskId = 'TASK-20260101-000007';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const artifact = path.join(taskDir, 'analysis.md');
+  const validated = Buffer.from('validated\n');
+  fs.writeFileSync(artifact, 'stale\n');
+
+  assert.throws(
+    () => recordArtifactRecoveryPassed(
+      { taskId, family: 'analysis', artifact: 'analysis.md', round: 1, requestId: 'recovery-test-7' },
+      {
+        repoRoot,
+        taskDir,
+        expectedFinalSha256: sha256Content(validated.toString('utf8')),
+        expectedFinalSemanticDigest: sha256Content(validated.toString('utf8'))
+      }
+    ),
+    /ARTIFACT_RECOVERY_CANDIDATE_MISMATCH/
+  );
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'analysis', 'analysis.md'), null);
+});
+
+test('artifact recovery reconciles a commit-started transaction and pauses on a third target fingerprint', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const taskId = 'TASK-20260101-000005';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const artifact = path.join(taskDir, 'plan.md');
+  const baseline = Buffer.from('baseline\n');
+  const candidate = Buffer.from('candidate\n');
+  fs.writeFileSync(artifact, baseline);
+
+  const context = beginArtifactRecovery(
+    { taskId, family: 'plan', artifact: 'plan.md', round: 1, requestId: 'recovery-test-5' },
+    baseline,
+    { repoRoot, taskDir, recoveryId: 'abcde-00000000005' }
+  );
+  const staged = stageArtifactCandidate(context, candidate);
+  prepareArtifactRecoveryCommit(context, staged.candidateSha256, staged.semanticDigest);
+  const originalRename = fs.renameSync;
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to) === artifact) throw new Error('injected rename failure');
+    return originalRename(from, to);
+  }) as typeof fs.renameSync;
+  try {
+    assert.throws(() => commitArtifactRecovery(context), /lifecycle task lock operation failed/);
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'commit-started');
+  const retried = reconcileArtifactRecovery(context);
+  assert.equal(retried.status, 'passed');
+  assert.deepEqual(fs.readFileSync(artifact), candidate);
+  consumeArtifactRecovery(context);
+
+  const secondContext = beginArtifactRecovery(
+    { taskId, family: 'plan', artifact: 'plan.md', round: 1, requestId: 'recovery-test-5b' },
+    candidate,
+    { repoRoot, taskDir, recoveryId: 'abcde-00000000006' }
+  );
+  const second = stageArtifactCandidate(secondContext, Buffer.from('candidate-2\n'));
+  prepareArtifactRecoveryCommit(secondContext, second.candidateSha256, second.semanticDigest);
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to) === artifact) throw new Error('injected rename failure');
+    return originalRename(from, to);
+  }) as typeof fs.renameSync;
+  try {
+    assert.throws(() => commitArtifactRecovery(secondContext), /lifecycle task lock operation failed/);
+  } finally {
+    fs.renameSync = originalRename;
+  }
+  fs.chmodSync(artifact, 0o644);
+  fs.writeFileSync(artifact, 'third-fingerprint\n');
+  const paused = reconcileArtifactRecovery(secondContext);
+  assert.equal(paused.status, 'indeterminate');
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'commit-started');
+  assert.equal(fs.readFileSync(artifact, 'utf8'), 'third-fingerprint\n');
 });

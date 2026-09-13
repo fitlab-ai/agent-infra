@@ -313,6 +313,28 @@ test('review finalizer rejects a missing schema pattern before summary mutation'
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });
 
+test('review finalizer does not create a recovery candidate before lifecycle gates pass', () => {
+  const f = domainFixture();
+  const taskPath = path.join(f.dir, 'task.md');
+  fs.writeFileSync(
+    taskPath,
+    fs.readFileSync(taskPath, 'utf8').replace(/- 2026-01-01 00:00:00\+00:00 — \*\*Review Analysis \(Round 1\) \[started\]\*\* by codex — started\n/u, '')
+  );
+  const invalid = fs.readFileSync(f.artifactPath, 'utf8').replace('\n### 审查决定\n通过\n', '\n');
+  fs.writeFileSync(f.artifactPath, invalid);
+
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
+  assert.equal(result.recovery, undefined);
+  assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
+  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
+});
+
 test('projection review preparation enforces the same artifact contract without publishing', () => {
   const f = domainFixture();
   try {

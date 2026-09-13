@@ -15,18 +15,18 @@ import {
   type TaskFinalizationReceipt
 } from './finalization.ts';
 import {
-  readLocalArtifactFinalizationIntent,
   semanticDigest,
-  sha256Content,
-  type LocalArtifactFinalizationIntent
+  sha256Content
 } from './local-artifact-finalization.ts';
 import { artifactRecoveryRoot, readArtifactRecoveryIntent } from './artifact-repair-intent.ts';
+import type { ArtifactRecoveryIntent } from './artifact-repair-intent.ts';
 import { parseArtifactName } from './artifact-name.ts';
+import type { ArtifactSchemaFamily } from './artifact-schema.ts';
 import { enumerateAllTaskDirs, type TaskWorkspaceState } from './resolve-ref.ts';
 import type { TaskControlBindingEvidence } from './finalization-state.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
-const LOCAL_INTENT_RE = /^(TASK-\d{8}-\d{6})-(analysis|plan|code)-(.+\.md)\.json$/;
+const LOCAL_INTENT_RE = /^(TASK-\d{8}-\d{6})-(analysis|review-analysis|plan|review-plan|code|review-code)-(.+\.md)\.json$/;
 const COMMIT_INTENT_RE = /^(TASK-\d{8}-\d{6})\.json$/;
 const AUXILIARY_ROOTS = [
   '.local-artifact-finalization-intents',
@@ -162,7 +162,7 @@ function localIntentCandidate(
   task: TaskRecord | undefined,
   filePath: string,
   taskId: string,
-  family: 'analysis' | 'plan' | 'code',
+  family: ArtifactSchemaFamily,
   artifact: string,
   identity: FileIdentity,
   options: ScanOptions
@@ -173,8 +173,8 @@ function localIntentCandidate(
     || !parseArtifactName(artifact)?.family || parseArtifactName(artifact)!.family !== family) {
     return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity);
   }
-  let intent: LocalArtifactFinalizationIntent | null;
-  try { intent = readLocalArtifactFinalizationIntent(repoRoot, taskId, family, artifact); }
+  let intent: ArtifactRecoveryIntent | null;
+  try { intent = readArtifactRecoveryIntent(repoRoot, taskId, family, artifact); }
   catch { return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'LFAI_SCHEMA_INVALID', identity); }
   if (!intent || intent.state !== 'consumed') {
     return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'LFAI_STATE_PROTECTED', identity);
@@ -312,7 +312,7 @@ function cleanupConsumedRecoveryFiles(repoRoot: string, candidate: IntermediateC
   const match = LOCAL_INTENT_RE.exec(path.basename(candidate.path));
   if (!match) return false;
   let intent: ReturnType<typeof readArtifactRecoveryIntent>;
-  try { intent = readArtifactRecoveryIntent(repoRoot, candidate.taskId, match[2] as 'analysis' | 'plan' | 'code', match[3]!); }
+  try { intent = readArtifactRecoveryIntent(repoRoot, candidate.taskId, match[2] as ArtifactSchemaFamily, match[3]!); }
   catch { return false; }
   if (!intent || intent.state !== 'consumed') return false;
 
@@ -326,7 +326,7 @@ function cleanupConsumedRecoveryFiles(repoRoot: string, candidate: IntermediateC
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(recovery, { withFileTypes: true }); } catch { return false; }
   for (const entry of entries) {
-    if (entry.isSymbolicLink() || !entry.isFile() || !['baseline.md', 'candidate.md'].includes(entry.name)) return false;
+    if (entry.isSymbolicLink() || !entry.isFile() || !['baseline.md', 'candidate.md', 'final.md'].includes(entry.name)) return false;
   }
   try {
     for (const entry of entries) fs.unlinkSync(path.join(recovery, entry.name));

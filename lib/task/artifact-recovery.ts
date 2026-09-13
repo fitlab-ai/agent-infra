@@ -39,6 +39,7 @@ export type ArtifactRecoveryContext = Readonly<ArtifactRecoveryTuple & {
   formalPath: string;
   stagingPath: string;
   baselinePath: string;
+  finalPath: string;
   baselineSha256: string;
   baselineSemanticDigest: string;
 }>;
@@ -48,6 +49,8 @@ export type ArtifactRecoveryOptions = Readonly<{
   taskDir: string;
   recoveryId?: string;
   lockAlreadyHeld?: boolean;
+  expectedFinalSha256?: string;
+  expectedFinalSemanticDigest?: string;
 }>;
 
 export type StagedArtifactCandidate = Readonly<{
@@ -125,6 +128,40 @@ function assertRegular(file: string, label: string): fs.Stats {
   return stat!;
 }
 
+function ensureOwnedDirectoryTree(rootInput: string, targetInput: string): void {
+  const root = path.resolve(rootInput);
+  const target = path.resolve(targetInput);
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    fail('ARTIFACT_RECOVERY_PATH_INVALID', 'recovery staging must remain inside the repository');
+  }
+  assertDirectory(root, 'repository root');
+  let current = root;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        fail('ARTIFACT_RECOVERY_PATH_INVALID', `recovery directory is unavailable: ${String(error)}`);
+      }
+      try { fs.mkdirSync(current, { mode: 0o700 }); }
+      catch (mkdirError) { fail('ARTIFACT_RECOVERY_PATH_INVALID', `recovery directory could not be created: ${String(mkdirError)}`); }
+      try { stat = fs.lstatSync(current); }
+      catch (lstatError) { fail('ARTIFACT_RECOVERY_PATH_INVALID', `recovery directory could not be verified: ${String(lstatError)}`); }
+    }
+    if (stat!.isSymbolicLink() || !stat!.isDirectory()) fail('ARTIFACT_RECOVERY_PATH_INVALID', 'recovery directory must be a real directory');
+    if (process.platform !== 'win32' && typeof process.getuid === 'function' && stat!.uid !== process.getuid()) {
+      fail('ARTIFACT_RECOVERY_PATH_INVALID', 'recovery directory is not owned by the current user');
+    }
+  }
+}
+
+function assertRecoveryRoot(context: ArtifactRecoveryContext): void {
+  ensureOwnedDirectoryTree(context.repoRoot, path.dirname(context.stagingPath));
+}
+
 function writeBytes(target: string, bytes: Buffer): void {
   if (bytes.length > MAX_ARTIFACT_BYTES) fail('ARTIFACT_RECOVERY_SIZE_LIMIT', 'candidate exceeds the bounded artifact size limit');
   writeDurableFile(target, bytes.toString('utf8'), { mode: 0o600, replace: true });
@@ -145,6 +182,7 @@ function contextPaths(
     formalPath: path.join(path.resolve(options.taskDir), tuple.artifact),
     stagingPath: path.join(root, 'candidate.md'),
     baselinePath: path.join(root, 'baseline.md'),
+    finalPath: path.join(root, 'final.md'),
     baselineSha256: '',
     baselineSemanticDigest: ''
   };
@@ -208,12 +246,13 @@ export function beginArtifactRecovery(
   assertRecoveryId(context.recoveryId);
   const targetStat = assertRegular(context.formalPath, 'formal artifact');
   const rootParent = path.dirname(context.stagingPath);
-  fs.mkdirSync(rootParent, { recursive: true, mode: 0o700 });
-  assertDirectory(path.dirname(rootParent), 'recovery task directory');
-  if (fs.statSync(rootParent).dev !== targetStat.dev) fail('ARTIFACT_RECOVERY_PATH_INVALID', 'recovery staging must share the formal artifact file system');
+  ensureOwnedDirectoryTree(options.repoRoot, rootParent);
+  const stagingStat = fs.lstatSync(rootParent);
+  if (stagingStat.dev !== targetStat.dev) fail('ARTIFACT_RECOVERY_PATH_INVALID', 'recovery staging must share the formal artifact file system');
   const baselineSha256 = sha256Content(baselineBytes.toString('utf8'));
   const prepared = { ...context, baselineSha256, baselineSemanticDigest: canonicalSemanticDigest(baselineBytes.toString('utf8')) };
   return runLocked(prepared, 'task-artifact.recovery.begin', () => {
+    assertRecoveryRoot(prepared);
     const current = readStableFileSync(prepared.formalPath, { maxBytes: MAX_ARTIFACT_BYTES }).bytes;
     if (sha256Content(current.toString('utf8')) !== baselineSha256 || !current.equals(baselineBytes)) {
       fail('ARTIFACT_RECOVERY_BASELINE_MISMATCH', 'formal artifact does not match the recovery baseline');
@@ -222,7 +261,6 @@ export function beginArtifactRecovery(
     if (existing && existing.state !== 'aborted' && existing.state !== 'consumed') {
       fail('ARTIFACT_RECOVERY_CONFLICT', 'an active recovery journal already exists for this artifact');
     }
-    fs.mkdirSync(path.dirname(prepared.stagingPath), { recursive: true, mode: 0o700 });
     writeBytes(prepared.baselinePath, baselineBytes);
     writeBytes(prepared.stagingPath, baselineBytes);
     writeArtifactRecoveryIntent(prepared.repoRoot, createIntent(prepared, Date.now()), { expected: existing });
@@ -246,6 +284,13 @@ export function recordArtifactRecoveryPassed(
       baselineSha256: current.sha256,
       baselineSemanticDigest: canonicalSemanticDigest(current.bytes.toString('utf8'))
     };
+    if ((options.expectedFinalSha256 !== undefined) !== (options.expectedFinalSemanticDigest !== undefined)) {
+      fail('ARTIFACT_RECOVERY_CANDIDATE_MISMATCH', 'fast-path provenance requires both finalizer digests');
+    }
+    if (options.expectedFinalSha256 !== undefined && options.expectedFinalSemanticDigest !== undefined
+      && (current.sha256 !== options.expectedFinalSha256 || prepared.baselineSemanticDigest !== options.expectedFinalSemanticDigest)) {
+      fail('ARTIFACT_RECOVERY_CANDIDATE_MISMATCH', 'formal artifact does not match the finalizer digests');
+    }
     const existing = readArtifactRecoveryIntent(prepared.repoRoot, prepared.taskId, prepared.family, prepared.artifact);
     if (existing && (existing.state === 'passed' || existing.state === 'consumed')
       && existing.finalArtifactSha256 === prepared.baselineSha256
@@ -274,6 +319,7 @@ export function stageArtifactCandidate(
   options: Readonly<{ lockAlreadyHeld?: boolean }> = {}
 ): StagedArtifactCandidate {
   return runLocked(context, 'task-artifact.recovery.stage', () => {
+    assertRecoveryRoot(context);
     const intent = readIntentForContext(context);
     if (intent.state !== 'awaiting-recovery') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot stage a candidate from '${intent.state}'`);
     const candidateSha256 = sha256Content(candidateBytes.toString('utf8'));
@@ -296,9 +342,16 @@ export function prepareArtifactRecoveryCommit(
   return runLocked(context, 'task-artifact.recovery.prepare', () => {
     const intent = readIntentForContext(context);
     if (intent.state !== 'awaiting-recovery') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot prepare a commit from '${intent.state}'`);
+    assertRecoveryRoot(context);
     const staged = readStableFileSync(context.stagingPath, { maxBytes: MAX_ARTIFACT_BYTES });
     if (staged.sha256 !== finalSha256 || canonicalSemanticDigest(staged.bytes.toString('utf8')) !== finalSemanticDigest) {
       fail('ARTIFACT_RECOVERY_CANDIDATE_MISMATCH', 'staged candidate does not match the finalizer digest');
+    }
+    writeBytes(context.finalPath, staged.bytes);
+    fs.chmodSync(context.finalPath, 0o400);
+    const sealed = readStableFileSync(context.finalPath, { maxBytes: MAX_ARTIFACT_BYTES });
+    if (sealed.sha256 !== finalSha256 || canonicalSemanticDigest(sealed.bytes.toString('utf8')) !== finalSemanticDigest) {
+      fail('ARTIFACT_RECOVERY_CANDIDATE_MISMATCH', 'sealed candidate does not match the finalizer digest');
     }
     const next: ArtifactRecoveryIntent = {
       ...intent,
@@ -330,6 +383,7 @@ export function commitArtifactRecovery(
   return runLocked(context, 'task-artifact.recovery.commit', () => {
     let intent = readIntentForContext(context);
     if (intent.state === 'passed' || intent.state === 'consumed') return intent;
+    assertRecoveryRoot(context);
     intent = markCommitStarted(context, intent);
     const target = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
     if (target.sha256 === intent.finalArtifactSha256) {
@@ -338,8 +392,14 @@ export function commitArtifactRecovery(
       return passed;
     }
     if (target.sha256 !== intent.baselineSha256) fail('ARTIFACT_RECOVERY_CONFLICT', 'formal artifact changed outside the recovery baseline');
-    assertRegular(context.stagingPath, 'staged candidate');
-    fs.renameSync(context.stagingPath, context.formalPath);
+    const sealed = readStableFileSync(context.finalPath, {
+      maxBytes: MAX_ARTIFACT_BYTES,
+      expectedSha256: intent.finalArtifactSha256!
+    });
+    if (canonicalSemanticDigest(sealed.bytes.toString('utf8')) !== intent.finalSemanticDigest) {
+      fail('ARTIFACT_RECOVERY_CONFLICT', 'sealed artifact does not match the staged final semantic digest');
+    }
+    fs.renameSync(context.finalPath, context.formalPath);
     const published = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
     if (published.sha256 !== intent.finalArtifactSha256) fail('ARTIFACT_RECOVERY_CONFLICT', 'formal artifact does not match the staged final digest');
     const passed: ArtifactRecoveryIntent = { ...intent, state: 'passed', updatedAt: Date.now() };

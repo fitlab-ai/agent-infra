@@ -38,8 +38,9 @@ import {
   readLocalArtifactFinalizationIntent,
   validateLocalArtifact
 } from './local-artifact-finalization.ts';
-import { writeArtifactRecoveryIntent } from './artifact-repair-intent.ts';
+import { writeArtifactRecoveryIntent, readArtifactRecoveryIntent } from './artifact-repair-intent.ts';
 import { reconcileArtifactRecovery, recoveryContextFromIntent } from './artifact-recovery.ts';
+import type { ArtifactRecoveryIntent } from './artifact-repair-intent.ts';
 import type { LocalArtifactFamily, LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
 import { buildLifecycleFacts, canStart } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
@@ -49,7 +50,7 @@ import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, 
 import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
 import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
-import { inspectArtifactContract } from './artifact-operations.ts';
+import { canonicalSemanticDigest, inspectArtifactContract } from './artifact-operations.ts';
 import {
   consumeLifecycleRecoveryAttestation,
   lifecycleRecoveryAttestationDigest,
@@ -721,6 +722,8 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const row = manual ? openRows.at(-1) : matchingRows[0];
   let completedArtifact: ArtifactIdentity | null = null;
   let localFinalizationIntent: LocalArtifactFinalizationIntent | null = null;
+  let reviewFinalizationIntent: ArtifactRecoveryIntent | null = null;
+  let reviewContent: string | null = null;
   if (eventIdentity.phase === 'started' && row) {
     if (row.agent !== normalized.agent) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     if (manual && normalized.transactionId !== undefined) {
@@ -750,7 +753,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       if (validationError) return failed(normalized, validationError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
     if (eventIdentity.family.startsWith('review-')) {
-      let reviewContent: string;
       try { reviewContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
       catch (error) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read qualification audit from ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
@@ -872,6 +874,49 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     completedArtifact?.path ?? null
   );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+  if (eventIdentity.phase === 'completed' && eventIdentity.family.startsWith('review-') && completedArtifact && reviewContent !== null) {
+    try {
+      reviewFinalizationIntent = readArtifactRecoveryIntent(
+        resolved.repoRoot,
+        resolved.taskId,
+        eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code',
+        completedArtifact.name
+      );
+      if (reviewFinalizationIntent?.state === 'commit-started') {
+        const reconciled = reconcileArtifactRecovery(
+          recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, reviewFinalizationIntent),
+          { lockAlreadyHeld: true }
+        );
+        if (reconciled.status === 'passed' || reconciled.status === 'consumed') reviewFinalizationIntent = reconciled.intent;
+      }
+      if (!reviewFinalizationIntent || !['passed', 'consumed'].includes(reviewFinalizationIntent.state)) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `review finalizer provenance is missing or incomplete for ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+      const reviewStage = eventIdentity.family === 'review-analysis'
+        ? 'analysis'
+        : eventIdentity.family === 'review-plan' ? 'plan' : 'code';
+      const actualSha256 = sha256File(completedArtifact.path);
+      const actualSemanticDigest = canonicalSemanticDigest(reviewContent);
+      const expectedRequestId = `review-finalize:${resolved.taskId}:${reviewStage}:${normalized.round}`;
+      if (reviewFinalizationIntent.round !== normalized.round
+        || reviewFinalizationIntent.requestId !== expectedRequestId
+        || reviewFinalizationIntent.finalArtifactSha256 !== actualSha256
+        || reviewFinalizationIntent.finalSemanticDigest !== actualSemanticDigest) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `review finalizer provenance does not match ${completedArtifact.name}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+    } catch (error) {
+      return failed(normalized, {
+        code: 'EVENT_ARTIFACT_CONFLICT',
+        message: `review finalizer recovery could not be reconciled for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
+      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+    }
+  }
   let orchestrationCompletion: OrchestrationStageCompletion | null = null;
   if (eventIdentity.phase === 'completed' && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
     const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
@@ -1022,6 +1067,31 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       });
     }
   }
+  if (!normalized.dryRun && reviewFinalizationIntent && completedArtifact && reviewFinalizationIntent.state === 'passed') {
+    try {
+      const expectedIntent = reviewFinalizationIntent;
+      reviewFinalizationIntent = {
+        ...reviewFinalizationIntent,
+        state: 'commit-started',
+        phase: 'task-event.completed',
+        updatedAt: Date.now()
+      };
+      writeArtifactRecoveryIntent(resolved.repoRoot, reviewFinalizationIntent, { expected: expectedIntent });
+    } catch (error) {
+      return failed(normalized, {
+        code: 'EVENT_ARTIFACT_CONFLICT',
+        message: `review finalizer provenance could not be advanced before task write for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
+      }, {
+        taskId: resolved.taskId,
+        taskMdPath: resolved.taskMdPath,
+        fromStep: currentStep,
+        toStep: step,
+        action: eventIdentity.action,
+        phase: eventIdentity.phase,
+        artifactContext
+      });
+    }
+  }
   const sourceCompletion = eventIdentity.phase === 'completed'
     && ['analyze', 'plan', 'code'].includes(eventIdentity.family);
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: stateOverride ? resolved.state : 'active', dryRun: normalized.dryRun, mutations }, { ...options, invalidationContext: sourceCompletion ? 'source-completion' : 'standard', metadataProvider: () => metadata });
@@ -1034,6 +1104,19 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       return failed(normalized, {
         code: 'EVENT_ARTIFACT_CONFLICT',
         message: `task completion was written but lifecycle recovery consumption is incomplete: ${error instanceof Error ? error.message : String(error)}`
+      }, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
+    }
+  }
+  if (!normalized.dryRun && reviewFinalizationIntent && completedArtifact) {
+    try {
+      if (reviewFinalizationIntent.state === 'commit-started') {
+        const consumed = { ...reviewFinalizationIntent, state: 'consumed' as const, updatedAt: Date.now() };
+        writeArtifactRecoveryIntent(resolved.repoRoot, consumed, { expected: reviewFinalizationIntent });
+      }
+    } catch (error) {
+      return failed(normalized, {
+        code: 'EVENT_ARTIFACT_CONFLICT',
+        message: `review finalizer recovery consumption is incomplete: ${error instanceof Error ? error.message : String(error)}`
       }, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
     }
   }
