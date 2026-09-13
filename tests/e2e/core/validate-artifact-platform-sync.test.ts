@@ -39,7 +39,7 @@ import {
   writeJson
 } from "./validate-artifact-helpers.ts";
 import { CONTROL_MARKER_PATTERN, sanitizeMarkdownDocument } from "../../../lib/platform/comment-safety.ts";
-import { renderTaskComment } from "../../../lib/platform/issue-comments.ts";
+import { COMMENT_BYTE_LIMIT, renderTaskComment } from "../../../lib/platform/issue-comments.ts";
 
 const taskId = "TASK-20260328-000001";
 const summaryComment = "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good.";
@@ -218,6 +218,27 @@ test("platform-sync compares task comments after the same sanitization used by c
         GH_FAKE_ISSUE_PATH: ctx.issuePath,
         GH_FAKE_COMMENTS_PATH: ctx.commentsPath
       }
+    );
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+  });
+});
+
+test("platform-sync skips task comment verification when task content is too large", async () => {
+  await withTempRoot("agent-infra-platform-sync-large-task-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}`;
+    write(path.join(ctx.taskDir, "task.md"), taskContent);
+    write(path.join(ctx.taskDir, "code.md"), "# 实现报告\n\n通过");
+    writeJson(ctx.issuePath, buildIssuePayload());
+    writeJson(ctx.commentsPath, [
+      { body: buildArtifactComment(taskId, "code.md", "实现报告", "# 实现报告\n\n通过") }
+    ]);
+
+    const result = await runValidatorWithFakeGh(
+      ["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"],
+      ctx,
+      { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
     );
     assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
     assertPayloadStatus(result, { type: "platform-sync", status: "pass" });

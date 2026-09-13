@@ -6,6 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import {
+  COMMENT_BYTE_LIMIT,
   MARKERS,
   chunkArtifactComment,
   findMarkerComments,
@@ -260,6 +261,32 @@ test('comment sync rejects malformed content before reading or writing remote co
   });
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'COMMENT_PAYLOAD_INVALID');
+  assert.equal(calls, 0);
+});
+
+test('comment sync skips oversized task content before any remote operation', async () => {
+  const root = syncFixture();
+  fs.appendFileSync(
+    path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
+    `\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}\n`
+  );
+  let calls = 0;
+  const client = {
+    version() { calls += 1; throw new Error('remote read must not be attempted'); },
+    json() { calls += 1; throw new Error('remote read must not be attempted'); },
+    text() { calls += 1; throw new Error('remote write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = await syncPlatformComment('TASK-20260101-000001', {
+    kind: 'task', agent: 'codex', cwd: root, client
+  });
+  assert.equal(result.status, 'no-op');
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.operations, [{
+    name: `comment:${MARKERS.task('TASK-20260101-000001')}`,
+    status: 'skipped',
+    reasonCode: 'COMMENT_PAYLOAD_TOO_LARGE'
+  }]);
   assert.equal(calls, 0);
 });
 

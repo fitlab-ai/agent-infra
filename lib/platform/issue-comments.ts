@@ -50,6 +50,7 @@ const MARKERS = {
   summary: (taskId: string) => `<!-- sync-issue:${taskId}:summary -->`,
   cancel: (taskId: string) => `<!-- sync-issue:${taskId}:cancel -->`
 };
+const COMMENT_BYTE_LIMIT = 60_000;
 
 const ARTIFACT_TITLES: Record<string, string> = {
   analysis: '需求分析',
@@ -65,6 +66,10 @@ const ARTIFACT_TITLES: Record<string, string> = {
 
 function normalizeCommentContent(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
+}
+
+function isTaskCommentTooLarge(content: string): boolean {
+  return Buffer.byteLength(content, 'utf8') > COMMENT_BYTE_LIMIT;
 }
 
 function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
@@ -269,7 +274,7 @@ function chunkArtifactComment(input: {
   byteLimit?: number;
   backfill?: boolean;
 }): RenderedChunk[] {
-  const byteLimit = input.byteLimit || 60_000;
+  const byteLimit = input.byteLimit || COMMENT_BYTE_LIMIT;
   const identity = artifactIdentity(input.artifact);
   const safeBody = sanitizeCommentBody(input.body, 'artifact body');
   const single = buildArtifactChunk(
@@ -453,6 +458,13 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
     });
   }
+  if (options.kind === 'task' && isTaskCommentTooLarge(taskContent)) {
+    return platformResult('no-op', {
+      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask), identity: issueIdentityFromTask },
+      operations: [{ name: `comment:${MARKERS.task(resolved.taskId)}`, status: 'skipped', reasonCode: 'COMMENT_PAYLOAD_TOO_LARGE' }],
+      error: null
+    });
+  }
   let desired: RenderedChunk[];
   try {
     desired = expectedComments(resolved.taskId, taskContent, resolved.taskDir, options);
@@ -634,6 +646,7 @@ async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: strin
 }
 
 export {
+  COMMENT_BYTE_LIMIT,
   MARKERS,
   chunkArtifactComment,
   findMarkerComments,
@@ -642,6 +655,7 @@ export {
   listPlatformComments,
   normalizeCommentContent,
   renderTaskComment,
+  isTaskCommentTooLarge,
   syncPlatformComment,
   validateRelatedMarkerSet,
   writeComment

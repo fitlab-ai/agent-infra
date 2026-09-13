@@ -12,6 +12,7 @@ import { planInLabelUpdate, validateInLabelMapping } from "./in-label-sync.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
+import { isTaskCommentTooLarge } from "./issue-comments.ts";
 import {
   CONTROL_MARKER_PATTERN,
   canonicalizeCommentBody,
@@ -539,6 +540,9 @@ function checkCommentContent(context: any, remoteData: any, shared: Verification
 
 function checkTaskCommentContent(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_task_comment_content) {
+    return null;
+  }
+  if (isTaskCommentTooLarge(context.task.content)) {
     return null;
   }
 

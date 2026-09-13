@@ -33,6 +33,7 @@ agent-infra-internal platform-comment sync <task-ref> \
 
 - `applied|no-op|degraded` → exit 0；`failed` → exit 1；`blocked` → exit 2。
 - task 评论保持 `<details>` frontmatter 可逆格式；artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
+- task 内容超过平台评论字节上限时不上传，返回 `COMMENT_PAYLOAD_TOO_LARGE` 的 skipped 操作；本地 task 文件保持不变，platform verification 同样跳过 task marker/content 检查。
 - 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
 - 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 
