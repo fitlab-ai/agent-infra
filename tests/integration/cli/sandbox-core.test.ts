@@ -749,6 +749,68 @@ test("sandbox rm --unbound removes completed rows while preserving evidenced pro
   }
 });
 
+test("sandbox rm --unbound hard-blocks a completed digest mismatch before deleting any row", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-mismatch-preflight-"));
+  const mismatchTaskId = "TASK-20260101-000017";
+  const mismatchBranch = "completed-mismatch";
+  const branchOnly = "branch-only-after-mismatch";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-mismatch", mismatchBranch, "demo", "task-bound", mismatchTaskId),
+        sandboxRow("sb-branch-only", branchOnly)
+      ].join("\n")
+    });
+    writeCompletedTaskWithConsumedPlan(fixture.repoDir, mismatchTaskId, mismatchBranch);
+    fs.writeFileSync(
+      path.join(fixture.repoDir, ".agents", "workspace", "completed", mismatchTaskId, "plan.md"),
+      "# Plan changed\n",
+      "utf8"
+    );
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-mismatch", mismatchTaskId, mismatchBranch);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED/);
+    assert.equal(fs.existsSync(path.join(tmpDir, ".agent-infra", "sandbox-control", "demo")), true);
+    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --purge hard-blocks a completed digest mismatch before removing project resources", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-purge-mismatch-preflight-"));
+  const taskId = "TASK-20260101-000018";
+  const branch = "purge-mismatch";
+  const container = "sb-purge-mismatch";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow(container, branch, "demo", "task-bound", taskId)
+    });
+    writeCompletedTaskWithConsumedPlan(fixture.repoDir, taskId, branch);
+    fs.writeFileSync(
+      path.join(fixture.repoDir, ".agents", "workspace", "completed", taskId, "plan.md"),
+      "# Plan changed\n",
+      "utf8"
+    );
+    const controlRoot = writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", container, taskId, branch);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--purge"]);
+
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/);
+    assert.equal(fs.existsSync(controlRoot), true);
+    assert.equal(fs.existsSync(path.join(fixture.repoDir, ".agents", "workspace", ".local-artifact-finalization-intents", `${taskId}-plan-plan.md.json`)), true);
+    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound cleans auxiliary state only for successful task-bound groups", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-partial-task-cleanup-"));
   const failedTaskId = "TASK-20260101-000011";

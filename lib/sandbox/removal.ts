@@ -52,6 +52,7 @@ import {
   cleanupIntermediateUnderRemovalCoordinator,
   protectIntermediateCleanupReport,
   mergeIntermediateCleanupReports,
+  type IntermediateCleanupMismatchRisk,
   type IntermediateCleanupReport,
   scanIntermediateCleanup
 } from '../task/intermediate-cleanup.ts';
@@ -816,24 +817,14 @@ function projectSandboxControlBindingEvidence(
   return createSandboxControlBindingEvidence(config.repoRoot, controlRoots, removalJournals);
 }
 
-// Reasons that mean "intentionally preserved", not "cleanup is unsafe". A task
-// that is still active keeps its auxiliary intents by design, so preserving
-// them must not make its sandbox unremovable. Every other protected reason
-// signals tampering or an unreadable path and still blocks, as does any
-// failure, so unknown reasons stay fail-closed.
-const REMOVAL_PRESERVED_REASONS: ReadonlySet<string> = new Set([
-  'TASK_STATE_PROTECTED',
-  'TASK_NOT_FOUND',
-  'LFAI_STATE_PROTECTED',
-  'LFAI_RETRY_OR_WARNING_OPEN',
-  'FINALIZATION_RECEIPT_MISSING',
-  'FINALIZATION_RECEIPT_PENDING',
-  'AUXILIARY_ROOT_NOT_EMPTY'
-]);
-
-function assertIntermediateCleanupPreflight(report: IntermediateCleanupReport): void {
+function assertIntermediateCleanupPreflight(
+  report: IntermediateCleanupReport,
+  { allowMismatchRisk = false }: { allowMismatchRisk?: boolean } = {}
+): void {
   const blockers = report.items.filter((candidate) => candidate.disposition === 'failed'
-    || (candidate.disposition === 'protected' && !REMOVAL_PRESERVED_REASONS.has(candidate.reason)));
+    || (candidate.disposition === 'protected' && !(allowMismatchRisk
+      && candidate.reason === 'ARTIFACT_DIGEST_MISMATCH'
+      && candidate.mismatchRisk)));
   if (blockers.length === 0) return;
   throw new Error([
     'SANDBOX_AUXILIARY_PREFLIGHT_FAILED:',
@@ -841,6 +832,58 @@ function assertIntermediateCleanupPreflight(report: IntermediateCleanupReport): 
       `${candidate.kind} ${candidate.path} (${candidate.taskId ?? 'unbound'}; ${candidate.reason})`
     ))
   ].join('\n'));
+}
+
+function mismatchRisks(report: IntermediateCleanupReport): IntermediateCleanupMismatchRisk[] {
+  return report.items
+    .flatMap((candidate) => candidate.mismatchRisk ? [candidate.mismatchRisk] : [])
+    .sort((left, right) => left.intentPath.localeCompare(right.intentPath));
+}
+
+function assertMismatchRisksMatch(
+  expected: readonly IntermediateCleanupMismatchRisk[],
+  actual: readonly IntermediateCleanupMismatchRisk[]
+): void {
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+    throw new Error('SANDBOX_AUXILIARY_PREFLIGHT_CHANGED');
+  }
+}
+
+function mismatchConfirmationMessage(
+  risks: readonly IntermediateCleanupMismatchRisk[],
+  target: SandboxRemovalTargetCommit
+): string {
+  const removed = [
+    ...(target.removeWorktree ? target.worktreePaths : []),
+    ...(target.removeBranch ? [`branch '${target.branch}'`] : []),
+    ...(target.removeShare ? [target.sharePath] : []),
+    ...target.workspaceViewPaths,
+    ...target.toolPaths,
+    ...target.shellPaths,
+    target.controlRoot
+  ];
+  const preserved = [
+    ...(target.removeWorktree ? [] : target.worktreePaths),
+    ...(target.removeBranch ? [] : [`branch '${target.branch}'`]),
+    ...(target.removeShare ? [] : [target.sharePath]),
+    ...risks.map((risk) => risk.artifactPath),
+    ...risks.map((risk) => risk.intentPath)
+  ];
+  return [
+    'Artifact digest mismatch requires explicit confirmation.',
+    ...risks.map((risk) => [
+      `Task: ${risk.taskId}`,
+      `Intent: ${risk.intentPath}`,
+      `Artifact: ${risk.artifactPath}`,
+      `Artifact SHA-256: recorded ${risk.recordedArtifactSha256}; current ${risk.currentArtifactSha256}`,
+      `Semantic digest: recorded ${risk.recordedSemanticDigest}; current ${risk.currentSemanticDigest}`,
+      `Finalization receipt: ${risk.receiptState}`,
+      `Control binding: ${risk.controlBinding}`
+    ].join('\n')),
+    `Resources to remove: ${removed.length > 0 ? removed.join(', ') : 'none'}`,
+    `Resources to preserve: ${preserved.length > 0 ? preserved.join(', ') : 'none'}`,
+    'Mismatch provenance sidecar(s) will be preserved.'
+  ].join('\n');
 }
 
 
@@ -1343,13 +1386,17 @@ async function rmOneCore(
   const { workspace, controlRoots, workspaceViewRoots } = target;
   preflightRmTarget(config, target);
   const auxiliaryTaskId = workspace.mode === 'task-bound' ? workspace.taskId : null;
+  const confirm = options.prompt?.confirm ?? p.confirm;
+  const isCancel = options.prompt?.isCancel ?? p.isCancel;
+  const interactive = options.interactive ?? Boolean(process.stdin.isTTY);
+  let initialMismatchRisks: IntermediateCleanupMismatchRisk[] = [];
   if (auxiliaryTaskId) {
     const targetJournals = listSandboxRemovalJournals({
       branch: effectiveBranch,
       project: config.project,
       targetDigest: removalTargetDigest(config, target)
     });
-    assertIntermediateCleanupPreflight(scanIntermediateCleanup(config.repoRoot, {
+    const auxiliaryPreview = scanIntermediateCleanup(config.repoRoot, {
       preflight: true,
       taskIds: [auxiliaryTaskId],
       controlBindingEvidence: projectSandboxControlBindingEvidence(
@@ -1357,10 +1404,12 @@ async function rmOneCore(
         controlRoots,
         targetJournals
       )
-    }));
+    });
+    initialMismatchRisks = mismatchRisks(auxiliaryPreview);
+    const canConfirmMismatch = initialMismatchRisks.length > 0
+      && !options.quiet && interactive && !options.assumeYes;
+    assertIntermediateCleanupPreflight(auxiliaryPreview, { allowMismatchRisk: canConfirmMismatch });
   }
-  const confirm = options.prompt?.confirm ?? p.confirm;
-  const isCancel = options.prompt?.isCancel ?? p.isCancel;
 
   if (!options.quiet) {
     p.intro(pc.cyan(`Removing sandbox for ${branch}`));
@@ -1476,6 +1525,48 @@ async function rmOneCore(
         Boolean(shouldRemoveShare)
       );
   if (persistedTarget) assertRemovalSelectionMatches(persistedTarget, committedTarget);
+
+  if (initialMismatchRisks.length > 0) {
+    const confirmed = await confirm({
+      message: mismatchConfirmationMessage(initialMismatchRisks, committedTarget),
+      initialValue: false
+    });
+    if (isCancel(confirmed) || !confirmed) {
+      p.outro('Cancelled');
+      return null;
+    }
+
+    const refreshedAuxiliaryPreview = scanIntermediateCleanup(config.repoRoot, {
+      preflight: true,
+      taskIds: [auxiliaryTaskId!],
+      controlBindingEvidence: projectSandboxControlBindingEvidence(
+        config,
+        controlRoots,
+        listSandboxRemovalJournals({
+          branch: effectiveBranch,
+          project: config.project,
+          targetDigest
+        })
+      )
+    });
+    assertIntermediateCleanupPreflight(refreshedAuxiliaryPreview, { allowMismatchRisk: true });
+    assertMismatchRisksMatch(initialMismatchRisks, mismatchRisks(refreshedAuxiliaryPreview));
+    preflightRmTarget(config, target);
+    const refreshedTarget = removalTargetCommit(
+      config,
+      target,
+      permits,
+      Boolean(shouldRemoveWorktree),
+      Boolean(shouldDeleteBranch),
+      Boolean(shouldRemoveShare)
+    );
+    assertRemovalSelectionMatches(committedTarget, refreshedTarget);
+    for (const worktree of existingWorktrees) {
+      const permit = permits.get(path.resolve(worktree));
+      if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
+      verifyWorktreePermit(permit);
+    }
+  }
 
   const coordinatedManifests = controlRoots
     .filter((candidate) => fs.existsSync(candidate))
@@ -1934,6 +2025,17 @@ async function rmUnboundCore(
 
   p.intro(pc.cyan(`Removing sandboxes not bound to an active task for ${config.project}`));
   const intermediatePreview = scanIntermediateCleanup(config.repoRoot, { controlBindingEvidence });
+  const mismatchCandidates = intermediatePreview.items.filter((candidate) => (
+    candidate.reason === 'ARTIFACT_DIGEST_MISMATCH'
+  ));
+  if (mismatchCandidates.length > 0) {
+    throw new Error([
+      'SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED:',
+      ...mismatchCandidates.map((candidate) => (
+        `${candidate.kind} ${candidate.path} (${candidate.taskId ?? 'unbound'}; ${candidate.reason})`
+      ))
+    ].join('\n'));
+  }
 
   const candidates: CleanupCandidate[] = [];
   const protectedCandidates: ProtectedCleanupCandidate[] = [];

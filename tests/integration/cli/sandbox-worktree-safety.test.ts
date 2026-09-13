@@ -403,6 +403,18 @@ function writeTaskBoundCleanupEvidence(
   };
 }
 
+function makeCompletedUnboundDigestMismatch(config: SandboxConfig, taskId: string): void {
+  const receiptPath = path.join(config.repoRoot, ".agents", "workspace", ".task-finalization", `${taskId}.json`);
+  const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as Record<string, unknown>;
+  delete receipt.controlBinding;
+  fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`, "utf8");
+  fs.writeFileSync(
+    path.join(config.repoRoot, ".agents", "workspace", "completed", taskId, "plan.md"),
+    "# Plan changed\n",
+    "utf8"
+  );
+}
+
 async function cleanRmOneFixture(
   rm: RmModule,
   safety: SafetyModule,
@@ -1236,7 +1248,116 @@ test("sandbox rm rejects malformed auxiliary evidence before destructive cleanup
   }
 });
 
-test("sandbox rm proceeds when auxiliary intents are preserved for a still-active task", onPlatforms("linux", "darwin", "win32"), async () => {
+test("sandbox rm confirms an eligible mismatch only after committing the final removal target", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-mismatch-confirm-"));
+  const branch = "feature/auxiliary-mismatch-confirm";
+  const taskId = "TASK-20260824-000015";
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    makeCompletedUnboundDigestMismatch(config, taskId);
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
+    fs.mkdirSync(share, { recursive: true });
+    const prompts: string[] = [];
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      interactive: true,
+      cleanupTarget: {
+        requestedRef: taskId,
+        branch,
+        workspace: { mode: "task-bound", taskId },
+        taskState: "completed"
+      },
+      target: { ...evidence.target, existingWorktrees: [worktree] },
+      prompt: {
+        confirm: async (options) => {
+          prompts.push(options.message);
+          if (options.message.includes("Artifact digest mismatch requires explicit confirmation")) {
+            assert.equal(options.initialValue, false);
+            assert.equal(fs.existsSync(worktree), true);
+            assert.equal(fs.existsSync(share), true);
+            assert.match(git(fixture.repoDir, "branch", "--list", branch), new RegExp(branch));
+            assert.equal(fs.existsSync(evidence.controlRoot), true);
+            assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), []);
+          }
+          return true;
+        },
+        isCancel: (value): value is symbol => false
+      }
+    }));
+
+    assert.equal(prompts.length, 4);
+    assert.match(prompts.at(-1)!, /Artifact digest mismatch requires explicit confirmation/);
+    assert.match(prompts.at(-1)!, /Resources to remove:/);
+    assert.match(prompts.at(-1)!, /Resources to preserve:/);
+    assert.match(prompts.at(-1)!, /Mismatch provenance sidecar\(s\) will be preserved/);
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
+    assert.equal(fs.existsSync(share), false);
+    assert.equal(fs.existsSync(evidence.controlRoot), false);
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+    assert.equal(listSandboxRemovalJournals({ branch, project: "demo" }).some((journal) => journal.phase === "completed"), true);
+    assert.equal(fs.readFileSync(path.join(config.repoRoot, ".agents", "workspace", "completed", taskId, "plan.md"), "utf8"), "# Plan changed\n");
+  } finally {
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm cancellation for an eligible mismatch preserves every resource", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-mismatch-cancel-"));
+  const branch = "feature/auxiliary-mismatch-cancel";
+  const taskId = "TASK-20260824-000016";
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    makeCompletedUnboundDigestMismatch(config, taskId);
+    const intentBytes = fs.readFileSync(evidence.intentPath);
+    const artifactPath = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId, "plan.md");
+    const artifactBytes = fs.readFileSync(artifactPath);
+    const prompts: string[] = [];
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      interactive: true,
+      cleanupTarget: {
+        requestedRef: taskId,
+        branch,
+        workspace: { mode: "task-bound", taskId },
+        taskState: "completed"
+      },
+      target: evidence.target,
+      prompt: {
+        confirm: async (options) => {
+          prompts.push(options.message);
+          return false;
+        },
+        isCancel: (value): value is symbol => false
+      }
+    }));
+
+    assert.equal(prompts.length, 1);
+    assert.equal(fs.existsSync(evidence.controlRoot), true);
+    assert.deepEqual(fs.readFileSync(evidence.intentPath), intentBytes);
+    assert.deepEqual(fs.readFileSync(artifactPath), artifactBytes);
+    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), []);
+  } finally {
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm fails closed for a still-active task before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-active-"));
   const branch = "feature/auxiliary-preflight-active";
@@ -1263,20 +1384,23 @@ test("sandbox rm proceeds when auxiliary intents are preserved for a still-activ
 
     const intentBytes = fs.readFileSync(evidence.intentPath);
     const taskBytes = fs.readFileSync(path.join(activeDir, "task.md"));
-    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
-      assumeYes: true,
-      cleanupTarget: {
-        requestedRef: taskId,
-        branch,
-        workspace: { mode: "task-bound", taskId },
-        taskState: "active"
-      },
-      target: evidence.target
-    }));
-    assert.equal(fs.existsSync(evidence.controlRoot), false);
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        cleanupTarget: {
+          requestedRef: taskId,
+          branch,
+          workspace: { mode: "task-bound", taskId },
+          taskState: "active"
+        },
+        target: evidence.target
+      })),
+      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
+    );
+    assert.equal(fs.existsSync(evidence.controlRoot), true);
     assert.deepEqual(fs.readFileSync(evidence.intentPath), intentBytes);
     assert.deepEqual(fs.readFileSync(path.join(activeDir, "task.md")), taskBytes);
-    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "rm"), [["rm", FIXTURE_CONTAINER_ID]]);
+    assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "rm"), []);
   } finally {
     if (previousRemovalUpdates === undefined) delete process.env.DOCKER_REMOVAL_UPDATES_INSPECT;
     else process.env.DOCKER_REMOVAL_UPDATES_INSPECT = previousRemovalUpdates;
