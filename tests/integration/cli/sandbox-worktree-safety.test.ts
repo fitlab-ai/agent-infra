@@ -1426,6 +1426,96 @@ test("sandbox rm disclosure contains only existing canonical and legacy removal 
   }
 });
 
+test("sandbox rm mismatch disclosure includes an owned finalizing tombstone", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovery-disclosure-"));
+  const branch = "feature/recovery-disclosure";
+  const taskId = "TASK-20260824-000018";
+  const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+  const originalWriteFileSync = fs.writeFileSync;
+  let injected = true;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    const manifestPath = path.join(evidence.controlRoot, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, any>;
+    manifest.containerIdentity.id = "d".repeat(64);
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
+    const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
+    fs.mkdirSync(share, { recursive: true });
+    fs.writeFileSync(path.join(share, "original.txt"), "original\n", "utf8");
+    const target = {
+      ...evidence.target,
+      controlRoots: [evidence.controlRoot]
+    };
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    fs.writeFileSync = ((targetPath, data, options) => {
+      const result = originalWriteFileSync(targetPath, data, options);
+      if (injected && String(targetPath).includes(".tmp") && String(data).includes('"phase":"share-removed"')) {
+        injected = false;
+        throw new Error("INJECTED_CRASH_AFTER_SHARE_FINALIZING");
+      }
+      return result;
+    }) as typeof fs.writeFileSync;
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, { assumeYes: true, target })),
+      /INJECTED_CRASH_AFTER_SHARE_FINALIZING/
+    );
+    fs.writeFileSync = originalWriteFileSync;
+
+    const journal = listSandboxRemovalJournals({ branch, project: config.project })[0];
+    assert.ok(journal);
+    assert.equal(journal.phase, "share-finalizing");
+    const journalPath = path.join(
+      os.homedir(), ".agent-infra", "sandbox-removal-journal", journal.lockDomain,
+      `${journal.carrierIdentityDigest}.json`
+    );
+    const persisted = JSON.parse(fs.readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+    persisted.owner = { pid: 999_999_999, startTime: 0, leaseNonce: "dead-owner" };
+    fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
+    const tombstone = fs.readdirSync(path.dirname(share))
+      .map((entry) => path.join(path.dirname(share), entry))
+      .find((entry) => path.basename(entry).startsWith(".agent-infra-removal-"));
+    assert.ok(tombstone);
+    makeCompletedUnboundDigestMismatch(config, taskId);
+
+    const prompts: string[] = [];
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      interactive: true,
+      target,
+      prompt: {
+        confirm: async (options) => {
+          prompts.push(options.message);
+          if (options.message.includes("Artifact digest mismatch requires explicit confirmation")) {
+            assert.equal(options.initialValue, false);
+            const removeLine = options.message.split("\n").find((line) => line.startsWith("Resources to remove: "))!;
+            assert.deepEqual(JSON.parse(removeLine.slice("Resources to remove: ".length)), [
+              { kind: "share dir", path: path.resolve(share) }
+            ]);
+          }
+          return true;
+        },
+        isCancel: (value): value is symbol => false
+      }
+    }));
+
+    assert.equal(prompts.length, 1);
+    assert.equal(fs.existsSync(share), false);
+    assert.equal(fs.existsSync(tombstone), false);
+    assert.equal(fs.existsSync(evidence.intentPath), true);
+    assert.equal(listSandboxRemovalJournals({ branch, project: config.project })[0]?.phase, "completed");
+  } finally {
+    fs.writeFileSync = originalWriteFileSync;
+    if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+    else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    for (const journal of listSandboxRemovalJournals({ branch, project: "demo" })) {
+      clearSandboxRemovalJournalRecord(journal);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm cancellation for an eligible mismatch preserves every resource", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-mismatch-cancel-"));

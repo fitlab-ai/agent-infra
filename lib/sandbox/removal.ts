@@ -890,6 +890,89 @@ function addResource(
   resources.push({ kind, path: source });
 }
 
+function hasOwnedManagedRecoveryTombstone(
+  root: string,
+  source: string,
+  kind: RemovalActionKind,
+  journals: readonly SandboxRemovalJournal[],
+  finalizingPhase: SandboxRemovalJournal['phase'],
+  completedPhase: SandboxRemovalJournal['phase']
+): boolean {
+  const resolved = path.resolve(source);
+  return journals.some((journal) => {
+    const index = sandboxRemovalPhaseIndex(journal.phase);
+    if (index < sandboxRemovalPhaseIndex(finalizingPhase)
+      || index >= sandboxRemovalPhaseIndex(completedPhase)) return false;
+    const ownership = {
+      version: 1 as const,
+      targetDigest: journal.target.targetDigest,
+      permitDigest: journal.target.permitDigest,
+      kind,
+      source: resolved
+    };
+    return isOwnedRemovalPayload(
+      root,
+      removalTombstonePath(journal.target.targetDigest, kind, resolved),
+      ownership
+    );
+  });
+}
+
+function addManagedResource(
+  resources: SandboxRemovalResource[],
+  kind: RemovalResourceKind,
+  source: string,
+  root: string,
+  selected: boolean,
+  pending: boolean,
+  journals: readonly SandboxRemovalJournal[],
+  actionKind: RemovalActionKind,
+  finalizingPhase: SandboxRemovalJournal['phase'],
+  completedPhase: SandboxRemovalJournal['phase']
+): void {
+  if (!selected || !pending) return;
+  const resolved = path.resolve(source);
+  if (fs.existsSync(resolved)
+    || hasOwnedManagedRecoveryTombstone(
+      root, resolved, actionKind, journals, finalizingPhase, completedPhase
+    )) {
+    resources.push({ kind, path: resolved });
+  }
+}
+
+function journalTargetPaths(
+  journals: readonly SandboxRemovalJournal[],
+  select: (target: SandboxRemovalTargetCommit) => readonly string[]
+): string[] {
+  return journals.flatMap((journal) => select(journal.target));
+}
+
+function branchRecoveryTombstoneExists(
+  config: SandboxConfig,
+  branch: string,
+  journals: readonly SandboxRemovalJournal[],
+  finalizingPhase: SandboxRemovalJournal['phase'],
+  completedPhase: SandboxRemovalJournal['phase']
+): boolean {
+  return journals.some((journal) => {
+    const index = sandboxRemovalPhaseIndex(journal.phase);
+    if (index < sandboxRemovalPhaseIndex(finalizingPhase)
+      || index >= sandboxRemovalPhaseIndex(completedPhase)) return false;
+    const target = journal.target;
+    if (target.branch !== branch || !target.removeWorktree || !target.removeBranch) return false;
+    const expectedHead = branchPermitHead(branch, new Map(
+      target.permits.map((permit) => [path.resolve(permit.path), {
+        mode: permit.mode,
+        snapshot: permit.snapshot
+      }])
+    ));
+    const tombstone = branchRemovalTombstoneRef(target.targetDigest);
+    return expectedHead !== null
+      && runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', tombstone])
+      && runSafe('git', ['-C', config.repoRoot, 'rev-parse', tombstone]) === expectedHead;
+  });
+}
+
 export function buildRemovalResourceDisclosure(
   config: SandboxConfig,
   target: RemovalDisclosureTarget,
@@ -899,44 +982,86 @@ export function buildRemovalResourceDisclosure(
 ): SandboxRemovalResourceDisclosure {
   const remove: SandboxRemovalResource[] = [];
   const preserve: SandboxRemovalResource[] = [];
-  const addSelected = (
-    kind: RemovalResourceKind,
-    source: string,
-    selected: boolean,
-    pending = true
-  ): void => {
-    if (!pending) return;
-    addExistingResource(selected ? remove : preserve, kind, source);
-  };
-
-  for (const root of target.controlRoots) addExistingResource(remove, 'control-root', root);
+  const journalTargets = journals.map((journal) => journal.target);
+  const controlRoots = [...new Set([
+    ...target.controlRoots,
+    ...journalTargets.map((journalTarget) => journalTarget.controlRoot)
+  ])];
+  const workspaceViewRoots = [...new Set([
+    ...target.workspaceViewRoots,
+    ...journalTargetPaths(journals, (journalTarget) => journalTarget.workspaceViewPaths)
+  ])];
+  const worktrees = [...new Set([
+    ...target.existingWorktrees,
+    ...journalTargetPaths(journals, (journalTarget) => journalTarget.worktreePaths)
+  ])];
+  const toolPaths = [...new Set([
+    ...target.toolCandidates.flatMap(({ candidates }) => candidates),
+    ...journalTargetPaths(journals, (journalTarget) => journalTarget.toolPaths)
+  ])];
+  const shellPaths = [...new Set([
+    ...shellConfigDirCandidates(config, target.effectiveBranch),
+    ...journalTargetPaths(journals, (journalTarget) => journalTarget.shellPaths)
+  ])];
+  const sharePaths = [...new Set([
+    shareBranchDir(config, target.effectiveBranch),
+    ...journalTargets.map((journalTarget) => journalTarget.sharePath)
+  ])];
+  for (const root of controlRoots) {
+    addManagedResource(
+      remove, 'control-root', root, path.join(config.controlBase, config.project), true,
+      removalPhasePending(journals, 'workspace-removed'), journals, 'workspace',
+      'workspace-finalizing', 'workspace-removed'
+    );
+  }
 
   const workspacePending = removalPhasePending(journals, 'workspace-removed');
-  for (const root of target.workspaceViewRoots) addSelected('workspace-view', root, true, workspacePending);
-  for (const worktree of target.existingWorktrees) {
-    addSelected('worktree', worktree, selection.removeWorktree, workspacePending);
+  for (const root of workspaceViewRoots) {
+    addManagedResource(
+      remove, 'workspace-view', root, path.join(config.workspaceViewBase, config.project), true,
+      workspacePending, journals, 'workspace', 'workspace-finalizing', 'workspace-removed'
+    );
+  }
+  for (const worktree of worktrees) {
+    const resources = selection.removeWorktree ? remove : preserve;
+    addManagedResource(
+      resources, 'worktree', worktree, config.worktreeBase, true, workspacePending,
+      journals, 'worktree', 'workspace-finalizing', 'workspace-removed'
+    );
   }
 
   const branchExists = runOk('git', [
     '-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${target.effectiveBranch}`
   ]);
-  if (branchExists) {
-    const branchResources = selection.removeWorktree && selection.removeBranch ? remove : preserve;
-    if (removalPhasePending(journals, 'branch-removed')) {
-      addResource(branchResources, 'branch', target.effectiveBranch);
-    }
+  const branchResources = selection.removeWorktree && selection.removeBranch ? remove : preserve;
+  if (removalPhasePending(journals, 'branch-removed') && (branchExists
+    || branchRecoveryTombstoneExists(
+      config, target.effectiveBranch, journals, 'branch-finalizing', 'branch-removed'
+    ))) {
+    addResource(branchResources, 'branch', target.effectiveBranch);
   }
 
   const toolPending = removalPhasePending(journals, 'tool-removed');
-  for (const { candidates } of target.toolCandidates) {
-    for (const candidate of candidates) addSelected('tool', candidate, true, toolPending);
+  for (const candidate of toolPaths) {
+    addManagedResource(
+      remove, 'tool', candidate, config.home, true, toolPending, journals,
+      'tool', 'tool-finalizing', 'tool-removed'
+    );
   }
   const shellPending = removalPhasePending(journals, 'shell-removed');
-  for (const candidate of shellConfigDirCandidates(config, target.effectiveBranch)) {
-    addSelected('shell', candidate, true, shellPending);
+  for (const candidate of shellPaths) {
+    addManagedResource(
+      remove, 'shell', candidate, config.shellConfigBase, true, shellPending, journals,
+      'shell', 'shell-finalizing', 'shell-removed'
+    );
   }
-  addSelected('share', shareBranchDir(config, target.effectiveBranch), selection.removeShare,
-    removalPhasePending(journals, 'share-removed'));
+  const sharePending = removalPhasePending(journals, 'share-removed');
+  for (const candidate of sharePaths) {
+    addManagedResource(
+      selection.removeShare ? remove : preserve, 'share', candidate, config.shareBase,
+      true, sharePending, journals, 'share', 'share-finalizing', 'share-removed'
+    );
+  }
 
   for (const risk of risks) {
     addExistingResource(preserve, 'artifact', risk.artifactPath);
