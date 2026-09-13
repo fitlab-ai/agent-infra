@@ -24,7 +24,7 @@
       "expected_action_pattern": "Review PR \\(Round \\d+\\)"
     },
     "platform-sync": {
-      "when": "issue_number_exists",
+      "when": "platform_issue_identity_exists",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
       "verify_comment_content": true,
       "verify_task_comment_content": true,

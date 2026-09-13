@@ -50,6 +50,7 @@ const MARKERS = {
   summary: (taskId: string) => `<!-- sync-issue:${taskId}:summary -->`,
   cancel: (taskId: string) => `<!-- sync-issue:${taskId}:cancel -->`
 };
+const COMMENT_BYTE_LIMIT = 60_000;
 
 const ARTIFACT_TITLES: Record<string, string> = {
   analysis: '需求分析',
@@ -65,6 +66,10 @@ const ARTIFACT_TITLES: Record<string, string> = {
 
 function normalizeCommentContent(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
+}
+
+function isTaskCommentTooLarge(content: string): boolean {
+  return Buffer.byteLength(content, 'utf8') > COMMENT_BYTE_LIMIT;
 }
 
 function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
@@ -269,7 +274,7 @@ function chunkArtifactComment(input: {
   byteLimit?: number;
   backfill?: boolean;
 }): RenderedChunk[] {
-  const byteLimit = input.byteLimit || 60_000;
+  const byteLimit = input.byteLimit || COMMENT_BYTE_LIMIT;
   const identity = artifactIdentity(input.artifact);
   const safeBody = sanitizeCommentBody(input.body, 'artifact body');
   const single = buildArtifactChunk(
@@ -321,12 +326,6 @@ function flattenComments(value: unknown): RemoteComment[] {
   return flattened.filter((entry): entry is RemoteComment =>
     Boolean(entry && typeof entry === 'object' && (typeof entry.id === 'number' || typeof entry.id === 'string') && typeof entry.body === 'string')
   );
-}
-
-function issueNumberFromTask(content: string): number | null {
-  const value = parseTaskFrontmatter(content).issue_number;
-  const number = Number(value);
-  return Number.isInteger(number) && number > 0 ? number : null;
 }
 
 function listRemoteComments(client: PlatformClient, repo: string, issue: number, cwd: string) {
@@ -452,11 +451,18 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   }
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   let issueIdentityFromTask: ReturnType<typeof taskIssueIdentity>;
-  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent), undefined, options.runtimeVersion); }
+  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent)); }
   catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
   if (!issueIdentityFromTask) {
     return platformResult('no-op', {
-      error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid issue_number', retryable: false }
+      error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
+    });
+  }
+  if (options.kind === 'task' && isTaskCommentTooLarge(taskContent)) {
+    return platformResult('no-op', {
+      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask), identity: issueIdentityFromTask },
+      operations: [{ name: `comment:${MARKERS.task(resolved.taskId)}`, status: 'skipped', reasonCode: 'COMMENT_PAYLOAD_TOO_LARGE' }],
+      error: null
     });
   }
   let desired: RenderedChunk[];
@@ -614,7 +620,7 @@ async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: strin
   if (!resolved.ok) return platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } });
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
   let issueIdentity: ReturnType<typeof taskIssueIdentity>;
-  try { issueIdentity = taskIssueIdentity(parseTaskFrontmatter(content), undefined, options.runtimeVersion); }
+  try { issueIdentity = taskIssueIdentity(parseTaskFrontmatter(content)); }
   catch (error) { return platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } }); }
   if (!issueIdentity) return platformResult('no-op', { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false } });
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
@@ -640,6 +646,7 @@ async function checkPlatformCommentOwner(taskRef: string, options: { cwd?: strin
 }
 
 export {
+  COMMENT_BYTE_LIMIT,
   MARKERS,
   chunkArtifactComment,
   findMarkerComments,
@@ -648,6 +655,7 @@ export {
   listPlatformComments,
   normalizeCommentContent,
   renderTaskComment,
+  isTaskCommentTooLarge,
   syncPlatformComment,
   validateRelatedMarkerSet,
   writeComment

@@ -35,7 +35,7 @@ type TaskMetaCase = {
 
 type ActivityLogCase = {
   name: string;
-  issueNumber: number | string;
+  issueIdentity: number | string;
   activityLines(now: string): string[];
   assertResult(result: Awaited<ReturnType<typeof runValidator>>): void;
 };
@@ -140,7 +140,7 @@ const taskMetaCases: TaskMetaCase[] = [
         "",
         "## 活动日志",
         "",
-        `- ${now} — **Task Created** by codex — Task created from description`
+        `- ${now} — **Create Task** by codex — Task created from description`
       ].join("\n");
     },
     assertResult(result) {
@@ -315,7 +315,7 @@ for (const c of taskMetaCases) {
 const activityLogCases: ActivityLogCase[] = [
   {
     name: "validate-artifact activity-log passes for create-task happy path with Issue created",
-    issueNumber: 296,
+    issueIdentity: 296,
     activityLines(now) {
       return [`- ${now} — **Create Task** by codex — Task created from description`];
     },
@@ -324,21 +324,11 @@ const activityLogCases: ActivityLogCase[] = [
     }
   },
   {
-    name: "validate-artifact activity-log accepts legacy create-task step name during transition",
-    issueNumber: 296,
-    activityLines(now) {
-      return [`- ${now} — **Task Created** by codex — Task created from description`];
-    },
-    assertResult(result) {
-      assert.equal(result.status, 0, result.stderr);
-    }
-  },
-  {
     name: "validate-artifact activity-log fails for create-task when Create Issue entry is appended",
-    issueNumber: 296,
+    issueIdentity: 296,
     activityLines(now) {
       return [
-        `- ${now} — **Task Created** by codex — Task created from description`,
+        `- ${now} — **Create Task** by codex — Task created from description`,
         `- ${now} — **Create Issue** by codex — Created GitHub Issue #296`
       ];
     },
@@ -349,10 +339,10 @@ const activityLogCases: ActivityLogCase[] = [
   },
   {
     name: "validate-artifact activity-log fails for create-task when Issue Creation Skipped entry is appended",
-    issueNumber: "N/A",
+    issueIdentity: "N/A",
     activityLines(now) {
       return [
-        `- ${now} — **Task Created** by codex — Task created from description`,
+        `- ${now} — **Create Task** by codex — Task created from description`,
         `- ${now} — **Issue Creation Skipped** by codex — GitHub Issue creation failed`
       ];
     },
@@ -370,7 +360,9 @@ for (const c of activityLogCases) {
     writeCreateTaskDocument(taskDir, {
       branch: "agent-infra-refactor-create-task-gate",
       current_step: "requirement-analysis",
-      issue_number: c.issueNumber,
+      ...(c.issueIdentity === "N/A" ? {} : {
+        platform_issue_identity: `'{"kind":"number","value":${c.issueIdentity}}'`
+      }),
       updated_at: now
     }, c.activityLines(now));
     c.assertResult(await runValidator(["check", "activity-log", taskDir, "--skill", "create-task"]));

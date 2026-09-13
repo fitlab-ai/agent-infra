@@ -16,7 +16,7 @@
 
 `prSummary` 属于 `.agents/rules/pr-sync.md`，本规则不实现 PR 聚合。
 
-`pr-review` 原文只通过 `artifact` / `artifactChunk` marker 同步为 Issue artifact 评论，不作为 `restore-task` 恢复来源；恢复仍只接受 Issue 编号并只读注册的 Issue marker，不新增 PR 来源。
+`pr-review` 原文只通过 `artifact` / `artifactChunk` marker 同步为 Issue artifact 评论，不作为 `restore-task` 恢复来源；恢复仍只接受 Issue 原始 token 并只读注册的 Issue marker，不新增 PR 来源。
 
 ## 平台 intent
 
@@ -24,7 +24,7 @@
 
 ```bash
 agent-infra-internal platform-context resolve [--cwd <path>]
-agent-infra-internal platform-comment list --issue <N> [--cwd <path>]
+agent-infra-internal platform-comment list --issue <issue-token> [--cwd <path>]
 agent-infra-internal platform-comment owner <task-ref>
 agent-infra-internal platform-comment sync <task-ref> \
   --kind task|artifact|summary|cancel --agent {standard-agent-token} \
@@ -33,6 +33,7 @@ agent-infra-internal platform-comment sync <task-ref> \
 
 - `applied|no-op|degraded` → exit 0；`failed` → exit 1；`blocked` → exit 2。
 - task 评论保持 `<details>` frontmatter 可逆格式；artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
+- task 内容超过平台评论字节上限时不上传，返回 `COMMENT_PAYLOAD_TOO_LARGE` 的 skipped 操作；本地 task 文件保持不变，platform verification 同样跳过 task marker/content 检查。
 - 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
 - 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 
@@ -59,7 +60,7 @@ agent-infra-internal task-warning {task-id} add \
 ```bash
 agent-infra-internal platform-issue inspect {task-id}
 agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
-agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {standard-agent-token}
+agent-infra-internal platform-issue bind {task-id} --issue {issue-token} --agent {standard-agent-token}
 agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} {desired-state-flags}
 ```
 

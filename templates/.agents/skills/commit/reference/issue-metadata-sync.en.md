@@ -4,7 +4,7 @@
 
 Run this step only when all of the following are true:
 - `{task-id}` is valid
-- `task.md` frontmatter contains a valid `issue_number`
+- `task.md` frontmatter contains a valid `platform_issue_identity`
 
 If either condition is missing, skip this step.
 

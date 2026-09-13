@@ -26,7 +26,7 @@ const commandSpecs: Record<string, CommandSpec> = {
     zh: "导入 Dependabot 告警 #$1。"
   },
   "import-issue": {
-    usage: "<issue-number>",
+    usage: "<issue-token>",
     en: "Import Issue #$1.",
     zh: "导入 Issue #$1。"
   },
@@ -153,7 +153,7 @@ const commandSpecs: Record<string, CommandSpec> = {
     zh: "运行任务生命周期 $ARGUMENTS。"
   },
   "restore-task": {
-    usage: "<issue-number> [task-id]",
+    usage: "<issue-token> [task-id]",
     en: "Restore task from Issue: $ARGUMENTS",
     zh: "从 Issue 还原任务：$ARGUMENTS"
   },

@@ -14,7 +14,7 @@
         "assigned_to"
       ],
       "expected_status": "active",
-      "require_issue_number": true
+      "require_platform_issue_identity": true
     },
     "activity-log": {
       "expected_action_pattern": "Restore Task"

@@ -139,7 +139,7 @@ automatically. Recover with the original request or inspect host task state firs
 The host service owns platform cascading. The compatibility recovery commands remain visible in the host warning and are not run from the sandbox:
 
 ```bash
-agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number"
+agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and run platform-issue bind"
 agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}
 ```
 
@@ -177,7 +177,7 @@ Task information:
 - Title: {title}
 - Type: {type}
 - Workflow: {workflow}
-- Issue: #{issue_number} {issue_url}
+- Issue: #{issue-number} {issue_url}
 
 Output file:
 - Task file: .agents/workspace/active/{task-id}/task.md
@@ -228,10 +228,10 @@ Output file:
 Next step - run requirements analysis:
 {next-step-commands}
 
-For later platform sync: after fixing auth / network / template issues, manually run the Issue creation flow in `.agents/rules/create-issue.md` for this task; or manually create/find an Issue and write `issue_number` into task.md so later skills can take over cascade sync.
+For later platform sync: after fixing auth / network / template issues, manually run the Issue creation flow in `.agents/rules/create-issue.md` for this task; or manually create/find an Issue and run `platform-issue bind`, which resolves the token through the provider and writes `platform_issue_identity` so later skills can take over cascade sync.
 
 [ACTION REQUIRED] Workflow warnings are open:
-  - WW-N ISSUE_CREATE_FAILED (issue): Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number
+  - WW-N ISSUE_CREATE_FAILED (issue): Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and run `platform-issue bind`
 ```
 
 
@@ -256,7 +256,7 @@ Wait for the user to run the `analyze-task` skill.
 1. **Clarity**: if the user description is vague or missing key information, ask for clarification first
 2. **Difference from `import-issue`**: `import-issue` imports from an Issue; `create-task` creates from a free-form description
 3. **Workflow order**: after creating a task, typically run `analyze-task` before `plan-task`
-4. **Issue cascade failure**: if the rule fails, task.md remains; when platform sync is needed later, manually write `issue_number` and continue the workflow
+4. **Issue cascade failure**: if the rule fails, task.md remains; when platform sync is needed later, run `platform-issue bind` and do not hand-write the legacy Issue field
 
 ## Error Handling
 

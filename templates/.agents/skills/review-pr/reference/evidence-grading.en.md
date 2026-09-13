@@ -17,13 +17,13 @@ Evidence scenario classification (S1/S2/S3) → freshness/alignment → risk gra
 
 - Exactly one hit → `unique`; multiple without a unique winner → `ambiguous` (candidate list); zero hits → `none`.
 - Ambiguous hosts fail closed and never enter evidence classification. `pr-review-grade resolve-host --pr <N>` returns a typed `HostResolution`, and `decide` explicitly rejects `ambiguous`.
-- `Closes/Fixes #N` in the PR body (case-insensitive, comma/space separated, lists supported) is parsed by `extractClosingIssueNumbers`; a local `active/*/task.md` verified `pr_delivery_fact.identity.number` hit takes priority over the `issue_number` reverse lookup, and a task hit via both paths deduplicates to a single candidate.
+- `Closes/Fixes #N` in the PR body (case-insensitive, comma/space separated, lists supported) is parsed by `extractClosingIssueNumbers`; a local `active/*/task.md` canonical `platform_issue_identity` numeric projection and verified `pr_delivery_fact.identity.number` are used for matching, and a task hit via both paths deduplicates to a single candidate.
 
 ## Evidence Scenario Classification (S1 → S2 → S3)
 
 | Scenario | Criteria |
 |----------|----------|
-| S1 complete & trusted | unique task with matching issue_number + complete `analysis`/`plan`/`code` and all three review families + latest `pr-review*` reviewed head == current head + trusted source |
+| S1 complete & trusted | unique task with a canonical Issue identity whose numeric projection matches + complete `analysis`/`plan`/`code` and all three review families + latest `pr-review*` reviewed head == current head + trusted source |
 | S2 partial / suspect | task exists but key artifacts are missing, or the head drifted, or the source is untrusted / cannot prove alignment with the current head |
 | S3 PR-only | no host; or unique task with no lifecycle artifacts at all and no prior `pr-review*` |
 
@@ -33,7 +33,7 @@ Evidence scenario classification (S1/S2/S3) → freshness/alignment → risk gra
 ## Freshness and Alignment
 
 - Freshness benchmark = the reviewed head SHA recorded by the latest `pr-review*`, compared character-for-character with the current head: match → `fresh`, otherwise → `stale`.
-- Alignment = freshness is `fresh` and the `issue_number` / verified `pr_delivery_fact.identity.number` match the resolution result.
+- Alignment = freshness is `fresh` and the canonical Issue identity numeric projection / verified `pr_delivery_fact.identity.number` match the resolution result.
 - No prior `pr-review*` → `n/a` / `n/a` (first-review special case).
 
 ## Risk Grading (pure evidence)

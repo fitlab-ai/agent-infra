@@ -14,7 +14,10 @@ test('concurrent platform checks retain their own repository utilities across aw
       fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'none' } }));
       return check({ taskDir: repoRoot, config: {} }, {
         repoRoot,
-        loadTask: () => ({ ok: true, content: '', metadata: { id: 'TASK-20260101-000001', issue_number: '42' } }),
+        loadTask: () => ({ ok: true, content: '', metadata: {
+          id: 'TASK-20260101-000001',
+          platform_issue_identity: '{"kind":"number","value":42}'
+        } }),
         passResult: (type: string) => ({ type, status: 'pass' as const, message: name }),
         failResult: (type: string, message: string) => ({ type, status: 'fail' as const, message }),
         blockedResult: (type: string, message: string) => ({ type, status: 'blocked' as const, message }),
@@ -23,8 +26,6 @@ test('concurrent platform checks retain their own repository utilities across aw
         isBlank: (value: unknown) => value == null || value === '',
         escapeRegExp: (value: string) => value,
         safeStat: () => null,
-        parseIssueNumber: () => null,
-        parsePrNumber: () => null
       });
     }));
     assert.deepEqual(results.map(({ status, message }) => ({ status, message })), [

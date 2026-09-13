@@ -16,6 +16,8 @@ import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
 import { providerError, providerOperationContext, providerStatus, providerResourceToken, resourceIdentityNumber, unsupportedProviderOperation } from './provider-bridge.ts';
+import { resourceIdentityEquals } from './resource-identity.ts';
+import type { ResourceIdentity } from './resource-identity.ts';
 import type { PlatformChangeRequestSnapshot } from './snapshots.ts';
 import type { ChangeRequestSnapshot } from './provider-contract.ts';
 import {
@@ -102,12 +104,17 @@ function taskReportPath(taskDir: string): string {
   return path.join(taskDir, 'pr-change-report.json');
 }
 
-function readBoundTaskSnapshot(taskMdPath: string): { taskContent: string; boundFact: Extract<PrDeliveryFact, { state: 'bound' }> | null } {
+function readBoundTaskSnapshot(taskMdPath: string): {
+  taskContent: string;
+  boundFact: Extract<PrDeliveryFact, { state: 'bound' }> | null;
+  factError: { code: string; message: string } | null;
+} {
   const taskContent = fs.readFileSync(taskMdPath, 'utf8');
   const frontmatter = parseTypedTaskFrontmatter(taskContent);
   const fact = readPrDeliveryFact(frontmatter);
   const boundFact = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact : null;
-  return { taskContent, boundFact };
+  const factError = fact.status === 'invalid' ? { code: fact.error.code, message: fact.error.message } : null;
+  return { taskContent, boundFact, factError };
 }
 
 function boundPrNumberForWarning(taskMdPath: string): number | null {
@@ -189,7 +196,7 @@ function inspectionError(error: { code: string; message: string; retryable: bool
 async function inspectBoundPullRequest(
   context: PlatformResult,
   repoRoot: string,
-  prNumber: number,
+  prIdentity: ResourceIdentity,
   loadedContext?: LoadedContext
 ): Promise<{ ok: true; value: PlatformChangeRequestSnapshot } | { ok: false; error: PlatformResult['error']; status: PlatformResult['status'] }> {
   if (!context.platform.repository) {
@@ -199,16 +206,15 @@ async function inspectBoundPullRequest(
     ? { ok: true as const, value: loadedContext }
     : await resolvePlatformProviderContext({ cwd: repoRoot });
   if (!loaded.ok) return { ok: false, status: loaded.context.status, error: loaded.context.error };
-  const target = providerResourceToken(loaded.value.provider, 'pull-request', String(prNumber));
   const inspected = loaded.value.provider.changeRequests?.inspect
-    ? await loaded.value.provider.changeRequests.inspect({ context: providerOperationContext(loaded.value), target })
+    ? await loaded.value.provider.changeRequests.inspect({ context: providerOperationContext(loaded.value), target: prIdentity })
     : unsupportedProviderOperation(loaded.value.provider, 'changeRequests.inspect');
   if (!inspected.ok) {
     const error = providerError(inspected.error, 'PLATFORM_PROVIDER_OPERATION_FAILED');
     return { ok: false, status: inspectionError(error), error };
   }
   const remote: ChangeRequestSnapshot = inspected.value;
-  const number = remote.number ?? resourceIdentityNumber(remote.identity) ?? prNumber;
+  const number = remote.number ?? resourceIdentityNumber(remote.identity) ?? resourceIdentityNumber(prIdentity) ?? 0;
   const head = remote.head || { repository: context.platform.repository, ref: '', sha: remote.headSha || '' };
   const base = remote.base || { repository: context.platform.repository, ref: '', sha: remote.baseSha || '' };
   return {
@@ -216,6 +222,7 @@ async function inspectBoundPullRequest(
     value: {
       repository: context.platform.repository,
       number,
+      identity: remote.identity ?? prIdentity,
       nodeId: remote.id,
       url: remote.displayUrl || '',
       state: remote.state === 'closed' ? 'closed' : 'open',
@@ -237,21 +244,22 @@ async function inspectBoundPullRequest(
 function sameIdentity(left: PlatformChangeRequestSnapshot, right: PlatformChangeRequestSnapshot): boolean {
   return JSON.stringify({
     repository: left.repository,
-    number: left.number,
+    identity: left.identity ?? null,
     base: left.base,
     head: left.head
   }) === JSON.stringify({
     repository: right.repository,
-    number: right.number,
+    identity: right.identity ?? null,
     base: right.base,
     head: right.head
   });
 }
 
 function identityFromSnapshot(snapshot: PlatformChangeRequestSnapshot) {
+  if (!snapshot.identity) throw new Error('pull-request snapshot has no canonical identity');
   return {
     repository: snapshot.repository,
-    number: snapshot.number,
+    resource: snapshot.identity,
     base: { ...snapshot.base },
     head: { ...snapshot.head }
   };
@@ -286,7 +294,7 @@ function currentReportCheck(
   const digest = taskIntentDigest(taskContent);
   if (!digest.ok) return { ok: false, error: platformError(digest.error) };
   const reportIdentity = report.identity;
-  if (reportIdentity.repository !== snapshot.repository || reportIdentity.number !== snapshot.number ||
+  if (reportIdentity.repository !== snapshot.repository || !resourceIdentityEquals(reportIdentity.resource, snapshot.identity) ||
       JSON.stringify(reportIdentity.base) !== JSON.stringify(snapshot.base) || JSON.stringify(reportIdentity.head) !== JSON.stringify(snapshot.head)) return {
     ok: false,
     error: { code: 'PR_CHANGE_REPORT_STALE', message: 'Change report identity does not match the authoritative pull request snapshot', retryable: false }
@@ -343,14 +351,22 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
   };
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   const frontmatter = parseTypedTaskFrontmatter(taskContent);
-  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
-  const prNumber = fact.status === 'valid' && fact.fact.state === 'bound' ? resourceIdentityNumber(fact.fact.identity.resource) : null;
   const reportPath = taskReportPath(resolved.taskDir);
+  const fact = readPrDeliveryFact(frontmatter, options.runtimeVersion);
+  if (fact.status === 'invalid') return {
+    ...platformResult('failed', { error: { code: fact.error.code, message: fact.error.message, retryable: false } }),
+    task: { id: resolved.taskId, prNumber: null },
+    pullRequest: null,
+    changeReport: { status: 'invalid', path: reportPath, taskIntentSha256: null, reason: fact.error.message },
+    artifacts: []
+  };
+  const prIdentity = fact.status === 'valid' && fact.fact.state === 'bound' ? fact.fact.identity.resource : null;
+  const prNumber = resourceIdentityNumber(prIdentity);
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   let pullRequest: PlatformChangeRequestSnapshot | null = null;
-  if (loaded.ok && prNumber && context.platform.repository && ['no-op', 'degraded'].includes(context.status)) {
-    const inspected = await inspectBoundPullRequest(context, resolved.repoRoot, prNumber, loaded.value);
+  if (loaded.ok && prIdentity && context.platform.repository && ['no-op', 'degraded'].includes(context.status)) {
+    const inspected = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
     if (inspected.ok) pullRequest = inspected.value;
   }
   const report = summaryReportStatus(reportPath, pullRequest, taskContent, resolved.repoRoot);
@@ -370,12 +386,13 @@ async function summaryContext(taskRef: string, options: SummaryOptions = {}): Pr
 
 async function summaryCommentState(taskRef: string, options: SummaryOptions = {}): Promise<SummaryCommentStateResult> {
   const context = await summaryContext(taskRef, options);
-  if (!context.task.prNumber || !context.pullRequest) return { ...context, comment: null };
+  const prIdentity = context.pullRequest?.identity;
+  if (!prIdentity) return { ...context, comment: null };
   const loaded = await resolvePlatformProviderContext({ cwd: options.cwd, client: options.client });
   if (!loaded.ok || !loaded.value.provider.comments?.list) return { ...context, comment: null };
   const listed = await loaded.value.provider.comments.list({
     context: providerOperationContext(loaded.value),
-    parent: providerResourceToken(loaded.value.provider, 'pull-request', String(context.task.prNumber))
+    parent: prIdentity
   });
   if (!listed.ok) return { ...context, comment: null };
   const matches = listed.value.filter((comment) => comment.body.includes(summaryMarker(context.task.id!)));
@@ -397,24 +414,38 @@ type ReportWriteOptions = {
 async function reportWrite(taskRef: string, options: ReportWriteOptions): Promise<ReportWriteResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ...platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }), report: null };
+  let preflight: ReturnType<typeof readBoundTaskSnapshot>;
+  try {
+    preflight = readBoundTaskSnapshot(resolved.taskMdPath);
+  } catch (error) {
+    return {
+      ...platformResult('failed', { error: { code: 'PR_CHANGE_REPORT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false } }),
+      report: null
+    };
+  }
+  if (preflight.factError) return {
+    ...platformResult('failed', { error: { code: preflight.factError.code, message: preflight.factError.message, retryable: false } }),
+    report: null
+  };
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!loaded.ok || !context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ...context, report: null };
   let knownPrNumber: number | null = null;
   try {
     return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, options.agent, async () => {
-      const { taskContent, boundFact } = readBoundTaskSnapshot(resolved.taskMdPath);
+      const { taskContent, boundFact, factError } = readBoundTaskSnapshot(resolved.taskMdPath);
+      if (factError) return {
+        ...basePlatformResult('failed', context, resolved.taskId, null, { code: factError.code, message: factError.message, retryable: false }),
+        report: null
+      };
       if (!boundFact) return {
         ...basePlatformResult('failed', context, resolved.taskId, null, { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false }),
         report: null
       };
-      const boundPrNumber = resourceIdentityNumber(boundFact.identity.resource);
-      if (!boundPrNumber) return {
-        ...basePlatformResult('failed', context, resolved.taskId, null, { code: 'PR_NUMBER_INVALID', message: 'Bound pull request has no numeric identifier', retryable: false }),
-        report: null
-      };
+      const boundPrIdentity = boundFact.identity.resource;
+      const boundPrNumber = resourceIdentityNumber(boundPrIdentity);
       knownPrNumber = boundPrNumber;
-      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
+      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrIdentity, loaded.value);
       if (!initial.ok) return { ...basePlatformResult(initial.status, context, resolved.taskId, boundPrNumber, initial.error), report: null };
       const digest = taskIntentDigest(taskContent);
       if (!digest.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, platformError(digest.error)), report: null };
@@ -438,7 +469,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
       };
       const built = buildPrChangeReport(identityFromSnapshot(initial.value), digest.value.sha256, mechanical.value, candidate.value);
       if (!built.ok) return { ...basePlatformResult('failed', context, resolved.taskId, boundPrNumber, platformError(built.error)), report: null };
-      const final = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
+      const final = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrIdentity, loaded.value);
       if (!final.ok) return { ...basePlatformResult(final.status, context, resolved.taskId, boundPrNumber, final.error), report: null };
       if (!sameIdentity(initial.value, final.value)) return {
         ...basePlatformResult('blocked', context, resolved.taskId, boundPrNumber, { code: 'PR_CHANGE_REPORT_HEAD_RACE', message: 'Pull request identity changed while generating the change report', retryable: true }),
@@ -535,26 +566,27 @@ async function syncPullRequestSummary(
   }
   try {
     const execute = async (): Promise<PullRequestSummaryResult> => {
-      const { taskContent, boundFact } = readBoundTaskSnapshot(resolved.taskMdPath);
+      const { taskContent, boundFact, factError } = readBoundTaskSnapshot(resolved.taskMdPath);
+      if (factError) return {
+        ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: factError.code, message: factError.message, retryable: false } }),
+        result: null, warnings: []
+      };
       if (!boundFact) return {
         ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NOT_LINKED', message: 'Task has no verified bound pull request', retryable: false } }),
         result: null, warnings: []
       };
       const prIdentity = boundFact.identity.resource;
       const boundPrNumber = resourceIdentityNumber(prIdentity);
-      if (!boundPrNumber) return {
-        ...platformResult('failed', { resource: { kind: 'pull-request', number: null }, error: { code: 'PR_NUMBER_INVALID', message: 'Bound pull request has no numeric identifier', retryable: false } }),
-        result: null, warnings: []
-      };
       knownPrNumber = boundPrNumber;
       const prNumber = boundPrNumber;
-      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
+      const initial = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
       if (!initial.ok) return fail(initial.status, context, initial.error);
       const manual = options.manualValidation;
       const hasFinalManualValidation = /###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)/u.test(options.body);
       if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
       if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
       if (manual) {
+        if (prNumber === null) return fail('failed', context, { code: 'MANUAL_VALIDATION_PR_NUMBER_REQUIRED', message: 'manual-validation summary requires a numeric pull-request identity', retryable: false }, prNumber);
         if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
         if (manual.phase === 'final') {
           if (manual.authority !== 'coordinator') return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires coordinator authority', retryable: false }, prNumber);
@@ -621,7 +653,7 @@ async function syncPullRequestSummary(
         ? listed.value.find((comment) => comment.id === reconciliation.commentId)?.body ?? null
         : null;
       const info = { precheckVerdict: report.value.precheck.verdict, nextAction: report.value.precheck.route } as const;
-      const beforeWrite = await inspectBoundPullRequest(context, resolved.repoRoot, boundPrNumber, loaded.value);
+      const beforeWrite = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
       if (!beforeWrite.ok) return fail(beforeWrite.status, context, beforeWrite.error, prNumber);
       if (!sameIdentity(initial.value, beforeWrite.value)) return fail('blocked', context, {
         code: 'PR_SUMMARY_HEAD_RACE',
@@ -651,7 +683,7 @@ async function syncPullRequestSummary(
         })
         : unsupportedProviderOperation(loaded.value.provider, 'comments.write');
       if (!written.ok) return fail(providerStatus(written.error) === 'blocked' ? 'blocked' : 'failed', context, providerError(written.error, 'PLATFORM_PROVIDER_OPERATION_FAILED'), prNumber);
-      const after = await inspectBoundPullRequest(context, resolved.repoRoot, prNumber, loaded.value);
+      const after = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
       const id = /^\d+$/.test(written.value.remoteId) ? Number(written.value.remoteId) : written.value.remoteId;
       const compensateWrittenSummary = async () => reconciliation.action === 'create'
         ? written.value.remoteId && loaded.value.provider.comments?.delete

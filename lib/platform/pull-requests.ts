@@ -376,7 +376,7 @@ async function resolvedContext(taskRef: string, options: InspectionOptions) {
   }) };
   const fact = factRead.status === 'valid' ? factRead.fact : null;
   let issueIdentity: ResourceIdentity | null;
-  try { issueIdentity = taskIssueIdentity(frontmatter, undefined, options.runtimeVersion); }
+  try { issueIdentity = taskIssueIdentity(frontmatter); }
   catch (error) { return { ok: false as const, output: result('failed', resolved.taskId, null, null, { error: { ...taskIssueIdentityError(error), retryable: false } }) }; }
   const issueNumber = resourceIdentityNumber(issueIdentity);
   const prIdentity = fact?.state === 'bound' ? fact.identity.resource : null;
@@ -941,7 +941,7 @@ async function resolveExternalPullRequest(taskRef: string, options: ResolveExter
   if (!base.issueIdentity) return externalResult(result('failed', base.resolved.taskId, null, base.prNumber, {
     platform: base.context.platform,
     capabilities: base.context.capabilities,
-    error: { code: 'EXTERNAL_DELIVERY_ISSUE_REQUIRED', message: 'External delivery requires a valid issue_number', retryable: false }
+    error: { code: 'EXTERNAL_DELIVERY_ISSUE_REQUIRED', message: 'External delivery requires a valid platform issue identity', retryable: false }
   }));
   const inspected = base.provider.changeRequests?.listClosing
     ? await base.provider.changeRequests.listClosing({
@@ -1430,7 +1430,7 @@ function skipPlatformPullRequestFactUnlocked(
     });
   }
   let issueIdentity: ResourceIdentity | null;
-  try { issueIdentity = taskIssueIdentity(frontmatter, undefined, options.runtimeVersion); }
+  try { issueIdentity = taskIssueIdentity(frontmatter); }
   catch (error) { return result('failed', resolved.taskId, null, null, { error: { ...taskIssueIdentityError(error), retryable: false } }); }
   const issueNumber = resourceIdentityNumber(issueIdentity);
   const existing = readPrDeliveryFact(frontmatter, options.runtimeVersion);

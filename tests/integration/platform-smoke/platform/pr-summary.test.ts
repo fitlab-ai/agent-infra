@@ -9,6 +9,7 @@ import {
   buildPullRequestSummary,
   reportWrite,
   reconcileSummaryComment,
+  summaryContext,
   syncPullRequestSummary,
   warningResultForPrimary
 } from '../../../../lib/platform/pr-summary.ts';
@@ -84,7 +85,7 @@ function summaryFixture(): { root: string; taskId: string; reportPath: string; b
   const mechanical = runMechanicalChangeReport(root, baseSha, headSha);
   const candidateValue = candidate(digest.value.sha256);
   const report = buildPrChangeReport({
-    repository: 'acme/widgets', number: 42,
+    repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
     base: { repository: 'acme/widgets', ref: 'main', sha: baseSha },
     head: { repository: 'acme/widgets', ref: 'feature', sha: headSha }
   }, digest.value.sha256, mechanical, candidateValue);
@@ -188,7 +189,7 @@ test('PR summary warning result preserves the primary lifecycle outcome', () => 
   assert.equal(warningResultForPrimary('no_op'), 'no_op_with_warnings');
 });
 
-test('PR summary preserves the structured legacy cutoff error from a persisted fact', async () => {
+test('PR summary preserves the structured v1 unsupported error from a persisted fact', async () => {
   const fixture = summaryFixture();
   try {
     const legacy = JSON.stringify({ version: 1, state: 'unbound', reason: 'initial' });
@@ -203,6 +204,42 @@ test('PR summary preserves the structured legacy cutoff error from a persisted f
     });
     assert.equal(result.status, 'failed');
     assert.equal(result.error?.code, 'PLATFORM_IDENTITY_LEGACY_UNSUPPORTED');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('PR summary passes an opaque bound identity through context and summary validation', async () => {
+  const fixture = summaryFixture();
+  try {
+    const taskPath = path.join(fixture.root, '.agents', 'workspace', 'active', fixture.taskId, 'task.md');
+    const opaqueFact = encodePrDeliveryFact(buildBoundFact({
+      identity: {
+        resource: { kind: 'id', value: 'pr-42' }, repository: 'opaque/project', url: 'https://opaque.example/changes/pr-42',
+        head: { repository: 'opaque/project', ref: 'feature', sha: fixture.headSha },
+        base: { repository: 'opaque/project', ref: 'main', sha: fixture.baseSha }
+      }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open'
+    }));
+    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^pr_delivery_fact: .*$/m, `pr_delivery_fact: ${JSON.stringify(opaqueFact)}`));
+    const providerSource = path.resolve('tests/fixtures/platform-providers/opaque-identity-provider.mjs');
+    fs.writeFileSync(path.join(fixture.root, '.agents', '.airc.json'), JSON.stringify({
+      platform: { type: 'trae', providers: { trae: { source: providerSource, config: {} } } }
+    }));
+
+    const context = await summaryContext(fixture.taskId, { cwd: fixture.root });
+    assert.deepEqual(context.pullRequest?.identity, { kind: 'id', value: 'pr-42' });
+    assert.equal(context.task.prNumber, null);
+
+    const result = await syncPullRequestSummary(fixture.taskId, {
+      cwd: fixture.root,
+      agent: 'codex',
+      body: `Summary\n<!-- canonical-pr-change-report -->`,
+      changeReportFile: fixture.reportPath,
+      primaryResult: 'no_op',
+      strict: true
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PR_CHANGE_REPORT_STALE');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

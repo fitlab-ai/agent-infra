@@ -41,7 +41,7 @@ test("restore-task verify configs declare the expected checks", () => {
       ["task-meta", "activity-log", "platform-sync"],
       `${relativePath} should declare the restore-task checks`
     );
-    assert.equal(verify.checks["task-meta"].require_issue_number, true);
+    assert.equal(verify.checks["task-meta"].require_platform_issue_identity, true);
     assert.equal(verify.checks["activity-log"].expected_action_pattern, "Restore Task");
     assert.equal(verify.checks["platform-sync"], null);
   });
@@ -49,7 +49,7 @@ test("restore-task verify configs declare the expected checks", () => {
 
 test("restore-task Claude command exists", () => {
   assert.ok(exists(localClaudeCommandPath), `${localClaudeCommandPath} should exist`);
-  assert.match(read(localClaudeCommandPath), /\/restore-task <issue-number> \[task-id\]/);
+  assert.match(read(localClaudeCommandPath), /\/restore-task <issue-token> \[task-id\]/);
 });
 
 test("restore-task stem mapping includes pr-review artifacts and keeps the Issue-only contract", () => {
@@ -60,7 +60,7 @@ test("restore-task stem mapping includes pr-review artifacts and keeps the Issue
   });
   [localVerifyPath, templateVerifyPath].forEach((relativePath) => {
     const verify = JSON.parse(read(relativePath));
-    assert.equal(verify.checks["task-meta"].require_issue_number, true,
+    assert.equal(verify.checks["task-meta"].require_platform_issue_identity, true,
       `${relativePath} should keep the Issue-only restore contract`);
   });
 });

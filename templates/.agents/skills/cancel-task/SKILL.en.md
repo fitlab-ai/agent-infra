@@ -14,7 +14,7 @@ description: >
 
 - This command terminates a task that no longer needs to continue and moves it into `completed/`
 - Cancel only when the task no longer needs implementation, review, or follow-up work
-- When a valid `issue_number` exists, Issue sync is required
+- When a valid `platform_issue_identity` exists, Issue sync is required
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
@@ -74,9 +74,9 @@ Confirm the task directory was moved successfully.
 
 ### 6. Sync to Issue
 
-Check whether `task.md` contains a valid `issue_number`. If not, skip this step.
+Check whether `task.md` contains a valid `platform_issue_identity`. If not, skip this step.
 
-If a valid `issue_number` exists:
+If a valid `platform_issue_identity` exists:
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
 - Write the cancellation body to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`

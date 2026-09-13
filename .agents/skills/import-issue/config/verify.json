@@ -15,13 +15,13 @@
         "assigned_to"
       ],
       "expected_step": "requirement-analysis",
-      "require_issue_number": true
+      "require_platform_issue_identity": true
     },
     "activity-log": {
       "expected_action_pattern": "Import Issue"
     },
     "platform-sync": {
-      "when": "issue_number_exists",
+      "when": "platform_issue_identity_exists",
       "issue_must_exist": true,
       "verify_task_comment_content": true
     }

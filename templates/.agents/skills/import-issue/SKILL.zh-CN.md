@@ -9,7 +9,7 @@ description: >
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
 
-导入指定的 Issue 并创建任务。参数：issue 编号。
+导入指定的 Issue 并创建任务。参数：Issue 原始 token，由选定 provider 解析。
 
 ## 行为边界 / 关键规则
 
@@ -43,7 +43,7 @@ description: >
 
 执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的前置步骤完成认证和代码托管平台检测；随后按其中的 “读取 Issue” 命令获取 Issue 信息。
 
-提取：issue 编号、标题、描述、标签。
+提取：Issue identity、标题、描述、标签。
 
 从 Issue 标题派生任务标题：按下方契约剥掉可选的单层前导 Conventional Commits 前缀，其余描述原文与原始语言保持不变。下方 fenced 契约是权威的、与语言无关的规则——在所有 `import-issue` 变体中保持逐字节一致：
 
@@ -67,7 +67,7 @@ example-single-layer: "feat: add A: B" => "add A: B"
 - 如果找到，**默认复用现有任务**（场景 A），不询问用户；在最终告知中明确「已复用现有任务 `{task-id}`，未重新导入」。若用户希望重新导入，需要先手动归档/删除已有任务再次执行本技能
 - 如果未找到，继续执行 2.2
 
-2.2 调用 `agent-infra-internal platform-comment list --issue {issue-number}` 扫描注册 marker，查找可恢复的历史任务 ID。
+2.2 调用 `agent-infra-internal platform-comment list --issue {issue-token}` 扫描注册 marker，查找可恢复的历史任务 ID。
 
 该命令内部解析 upstream、认证与分页。
 
@@ -101,7 +101,7 @@ date +%Y%m%d-%H%M%S
 任务元数据：
 ```yaml
 id: {task-id}
-issue_number: <issue-number>
+platform_issue_identity: <provider 返回的 canonical identity JSON 字符串>
 type: feature|bugfix|refactor|docs|chore
 branch: <project>-<type>-<slug>
 workflow: feature-development|bug-fix|refactoring
@@ -146,8 +146,8 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 
 ### 5. 绑定并同步 Issue
 
-如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 调用 `agent-infra-internal platform-issue bind {task-id} --issue {issue-number} --agent {standard-agent-token}` 校验并原子绑定
+创建 task.md 后始终执行以下绑定和同步操作（任一平台失败则跳过并继续）：
+- 调用 `agent-infra-internal platform-issue bind {task-id} --issue {issue-token} --agent {standard-agent-token}`，由 provider 解析并原子写入 `platform_issue_identity`
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --assignees current --milestone initial`
 - 所有场景结束后，必须调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
@@ -202,7 +202,7 @@ Issue #{number} 已导入。
 ## 完成检查清单
 
 - [ ] 创建了任务文件 `.agents/workspace/active/{task-id}/task.md`
-- [ ] 在 task.md 中记录了 issue_number
+- [ ] 已由 provider 将 Issue identity 写入 task.md 的 `platform_issue_identity`
 - [ ] 更新了 `current_step` 为 requirement-analysis
 - [ ] 更新了 `updated_at` 为当前时间
 - [ ] 追加了 Activity Log 条目到 task.md
@@ -224,6 +224,6 @@ Issue #{number} 已导入。
 
 ## 错误处理
 
-- Issue 未找到：提示 "Issue #{number} not found, please check the issue number"
+- Issue 未找到：提示 "Issue {issue-token} not found, please check the Issue token"
 - 网络错误：提示 "Cannot connect to the platform, please check network"
 - 权限错误：提示 "No access to this repository"

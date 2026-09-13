@@ -3,9 +3,11 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { escapeHtmlText } from './comment-safety.ts';
+import { isResourceIdentity } from './resource-identity.ts';
+import type { ResourceIdentity } from './resource-identity.ts';
 
 const REPORT_FILE_NAME = 'pr-change-report.json';
-const REPORT_VERSION = 1 as const;
+const REPORT_VERSION = 2 as const;
 const CANONICAL_REPORT_PLACEHOLDER = '<!-- canonical-pr-change-report -->';
 const CANONICAL_REPORT_HEADING = '### PR 代码增减';
 const PRECHECK_IDS = [
@@ -83,7 +85,7 @@ type PrecheckCandidate = {
 
 type PullRequestIdentity = {
   repository: string;
-  number: number;
+  resource: ResourceIdentity;
   base: { repository: string; ref: string; sha: string };
   head: { repository: string; ref: string; sha: string };
 };
@@ -279,8 +281,8 @@ function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport
   }
   const identity = value.identity;
   const identityRepository = identity.repository;
-  const identityNumber = identity.number;
-  if (!isNonEmptyString(identityRepository) || typeof identityNumber !== 'number' || !Number.isSafeInteger(identityNumber) || identityNumber <= 0) return invalid('change report identity is invalid');
+  const identityResource = identity.resource;
+  if (!isNonEmptyString(identityRepository) || !isResourceIdentity(identityResource)) return invalid('change report identity is invalid');
   const parseIdentityPart = (part: unknown, name: string): ValidationResult<{ repository: string; ref: string; sha: string }> => {
     if (!isRecord(part) || !isNonEmptyString(part.repository) || !isNonEmptyString(part.ref) || !isSha(part.sha)) return invalid(`change report identity.${name} is invalid`);
     return { ok: true, value: { repository: part.repository, ref: part.ref, sha: part.sha } };
@@ -315,7 +317,7 @@ function validatePrChangeReport(value: unknown): ValidationResult<PrChangeReport
       version: REPORT_VERSION,
       identity: {
         repository: identityRepository,
-        number: identityNumber,
+        resource: identityResource,
         base: base.value,
         head: head.value
       },

@@ -97,7 +97,7 @@ The intent atomically finalizes the report summary and returns the same ledger s
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
-If task.md has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`.
+If task.md has a valid `platform_issue_identity`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`.
 
 Before writing the summary, the finalization intent checks decision-detail ids; any visible duplicate returns a structured failure and preserves the artifact bytes, while the model decides whether a minimal edit is safe under the shared rule. If the safety gates fail, diagnostics repeat, no byte-level progress occurs, or the emergency cap is reached, stop before the completion event; the stop path must still show the existing review result instead of hiding the artifact.
 

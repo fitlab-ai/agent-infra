@@ -9,7 +9,7 @@ description: >
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
 
-Import the specified Issue and create a task. Argument: issue number.
+Import the specified Issue and create a task. Argument: a raw Issue token, parsed after the provider is selected.
 
 ## Boundary / Critical Rules
 
@@ -43,7 +43,7 @@ This skill **creates** task.md, so there is no file to write at the start. Captu
 
 Read `.agents/rules/issue-pr-commands.md` first, follow its prerequisite steps to complete authentication and code-hosting platform detection, then load the Issue data with its "Read an Issue" command.
 
-Extract: issue number, title, description, and labels.
+Extract: Issue identity, title, description, and labels.
 
 Derive the task title from the Issue title by stripping an optional single leading Conventional Commits prefix, following the contract below; preserve the rest of the description verbatim and in its original language. This fenced contract is the authoritative, language-neutral rule — keep it byte-for-byte identical across every `import-issue` variant:
 
@@ -67,7 +67,7 @@ Strip only the first layer, and only when the leading token is a `prefix-types` 
 - If found, **reuse the existing task by default** (Scenario A); do not ask the user. State clearly in the final notice: "Reused existing task `{task-id}`; not re-imported." If the user wants to re-import, they must first archive or delete the existing task and run this skill again
 - If not found, continue to 2.2
 
-2.2 Run `agent-infra-internal platform-comment list --issue {issue-number}` to scan registered markers for a recoverable historical task ID.
+2.2 Run `agent-infra-internal platform-comment list --issue {issue-token}` to scan registered markers for a recoverable historical task ID.
 
 This command depends on `$upstream_repo` being set in step 1.
 
@@ -101,7 +101,7 @@ date +%Y%m%d-%H%M%S
 Task metadata:
 ```yaml
 id: {task-id}
-issue_number: <issue-number>
+platform_issue_identity: <canonical identity JSON string returned by the provider>
 type: feature|bugfix|refactor|docs|chore
 branch: <project>-<type>-<slug>
 workflow: feature-development|bug-fix|refactoring
@@ -146,8 +146,8 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 
 ### 5. Bind and Sync the Issue
 
-If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Run `agent-infra-internal platform-issue bind {task-id} --issue {issue-number} --agent {standard-agent-token}`
+After creating task.md, always perform the following binding and sync actions (skip and continue on any platform failure):
+- Run `agent-infra-internal platform-issue bind {task-id} --issue {issue-token} --agent {standard-agent-token}`; the provider parses the token and atomically writes `platform_issue_identity`
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --assignees current --milestone initial`
 - After every scenario, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
@@ -202,7 +202,7 @@ Next step - run requirements analysis:
 ## Completion Checklist
 
 - [ ] Created the task file `.agents/workspace/active/{task-id}/task.md`
-- [ ] Recorded `issue_number` in task.md
+- [ ] Provider wrote the Issue identity to `platform_issue_identity` in task.md
 - [ ] Updated `current_step` to requirement-analysis
 - [ ] Updated `updated_at` to the current time
 - [ ] Appended an Activity Log entry to task.md
@@ -224,6 +224,6 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 ## Error Handling
 
-- Issue not found: output "Issue #{number} not found, please check the issue number"
+- Issue not found: output "Issue {issue-token} not found, please check the Issue token"
 - Network error: output "Cannot connect to the platform, please check network"
 - Permission error: output "No access to this repository"

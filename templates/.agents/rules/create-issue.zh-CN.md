@@ -8,7 +8,7 @@
 agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
 ```
 
-命令只从已落盘 task.md 读取身份、标题、类型、描述与需求，并复用 `ai task issue-body` 的确定性正文渲染。它负责模板选择、upstream/capability、已有绑定检查、非幂等 POST 边界、响应身份校验及通过任务写入内核回写 `issue_number`。
+命令只从已落盘 task.md 读取身份、标题、类型、描述与需求，并复用 `ai task issue-body` 的确定性正文渲染。它负责模板选择、upstream/capability、已有绑定检查、非幂等 POST 边界、响应身份校验及通过任务写入内核回写 `platform_issue_identity`。
 
 创建后的初始元数据使用同一适配层同步：
 

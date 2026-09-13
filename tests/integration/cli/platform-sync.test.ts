@@ -51,7 +51,7 @@ test('platform-sync obtains computed in-label repository metadata from the selec
       'updated_at: 2026-09-06T00:00:00+00:00',
       'agent_infra_version: v0.9.13',
       'current_step: code-review',
-      'issue_number: 7',
+      'platform_issue_identity: \'{"kind":"number","value":7}\'',
       `delivery_base_ref: ${baseRef}`,
       '---',
       '',

@@ -11,8 +11,6 @@ export type VerificationShared = {
   failResult: (type: string, message: string, failType?: string) => VerificationCheckResult;
   blockedResult: (type: string, message: string, failType?: string) => VerificationCheckResult;
   safeStat: (filePath: string) => fs.Stats | null;
-  parseIssueNumber: (value: unknown) => number | null;
-  parsePrNumber: (value: unknown) => number | null;
 };
 
 type VerificationStatus = 'pass' | 'fail' | 'blocked';

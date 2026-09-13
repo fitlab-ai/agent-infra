@@ -48,6 +48,7 @@ import { manualValidationFinalSummaryProjectionMatches } from "./manual-validati
 import { readManualValidationCompletion } from "./manual-validation-completion.ts";
 import { sha256File } from "./artifact-receipts.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
+import { taskIssueIdentity } from "../platform/task-identities.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -100,8 +101,6 @@ const sharedUtils = {
   failResult,
   blockedResult,
   safeStat,
-  parseIssueNumber,
-  parsePrNumber
 };
 
 async function runCheck(type: any, context: any, shared: any): Promise<any> {
@@ -361,8 +360,8 @@ function checkTaskMeta({ taskDir, config, repositoryRoot }: any): any {
     );
   }
 
-  if (config.require_issue_number && !parseIssueNumber(metadata.issue_number)) {
-    return failResult("task-meta", "Expected a valid issue_number in task metadata");
+  if (config.require_platform_issue_identity && !taskIssueIdentity(metadata)) {
+    return failResult("task-meta", "Expected a valid platform_issue_identity in task metadata");
   }
 
   if (config.require_completed_at && isBlank(metadata.completed_at)) {
@@ -1374,19 +1373,6 @@ function getCheckedRequirements(content: any): any {
     .map((line: any) => line.match(/^- \[x\] (.+)$/i))
     .filter(Boolean)
     .map((match: any) => match[1].trim());
-}
-
-function parseIssueNumber(value: any): any {
-  if (isBlank(value) || value === "N/A") {
-    return null;
-  }
-
-  const match = String(value).match(/\d+/);
-  return match ? Number(match[0]) : null;
-}
-
-function parsePrNumber(value: any): any {
-  return parseIssueNumber(value);
 }
 
 // === Utilities ===

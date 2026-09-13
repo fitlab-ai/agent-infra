@@ -12,6 +12,7 @@ import { planInLabelUpdate, validateInLabelMapping } from "./in-label-sync.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
+import { isTaskCommentTooLarge } from "./issue-comments.ts";
 import {
   CONTROL_MARKER_PATTERN,
   canonicalizeCommentBody,
@@ -113,8 +114,8 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any, shared: 
   }
   const prIdentity = fact.status === "valid" && fact.fact.state === "bound" ? fact.fact.identity.resource : null;
   const prNumber = resourceIdentityNumber(prIdentity);
-  if (config.when === "issue_number_exists" && !issueIdentity) {
-    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no issue_number") };
+  if (config.when === "platform_issue_identity_exists" && !issueIdentity) {
+    return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no platform_issue_identity") };
   }
   if (config.when === "pr_fact_bound" && !prIdentity) {
     return { earlyReturn: shared.passResult(CHECK_TYPE, "Skipped: task has no verified bound pull request") };
@@ -539,6 +540,9 @@ function checkCommentContent(context: any, remoteData: any, shared: Verification
 
 function checkTaskCommentContent(context: any, remoteData: any, shared: VerificationShared): any {
   if (!context.config.verify_task_comment_content) {
+    return null;
+  }
+  if (isTaskCommentTooLarge(context.task.content)) {
     return null;
   }
 

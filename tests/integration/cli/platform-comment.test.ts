@@ -17,7 +17,7 @@ function fixture() {
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ntype: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\nissue_number: 7\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ntype: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\nplatform_issue_identity: '{"kind":"number","value":7}'\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const commentsPath = path.join(root, 'comments.json');
   fs.writeFileSync(commentsPath, '[]');
   const fakeGhPath = path.join(root, 'fake-gh.cjs');
@@ -191,7 +191,7 @@ test('platform-comment backfill syncs only completion artifacts and resolves onl
   try {
     const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
     fs.writeFileSync(taskMd, [
-      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'agent_infra_version: v0.9.11-alpha.0', 'issue_number: 7', '---', '',
+      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'agent_infra_version: v0.9.11-alpha.0', 'platform_issue_identity: \'{"kind":"number","value":7}\'', '---', '',
       '# Task', '', '## Review Disagreement Ledger', '',
       '| id | stage | round | severity | status | evidence |',
       '|----|-------|-------|----------|--------|----------|', '', '## Workflow Warnings', '',
@@ -233,7 +233,7 @@ test('platform-comment backfill leaves warnings open when an artifact comment fa
   try {
     const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
     fs.writeFileSync(taskMd, [
-      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'agent_infra_version: v0.9.11-alpha.0', 'issue_number: 7', '---', '',
+      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'agent_infra_version: v0.9.11-alpha.0', 'platform_issue_identity: \'{"kind":"number","value":7}\'', '---', '',
       '# Task', '', '## Review Disagreement Ledger', '',
       '| id | stage | round | severity | status | evidence |',
       '|----|-------|-------|----------|--------|----------|', '', '## Workflow Warnings', '',
