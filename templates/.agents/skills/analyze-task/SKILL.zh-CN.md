@@ -143,7 +143,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {standard-agen
 agent-infra-internal task-artifact {task-id} init --family analysis --artifact {analysis-artifact}
 ```
 
-骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实分析内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑 `task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact} --recovery-id {recovery-id}`。
+骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实分析内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑 `task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact} --recovery-id {recovery-id}`。candidate-only 是协议授权边界，不是操作系统隔离；同 UID 的任意宿主写入者不在本协议的防护承诺内，异常由指纹/状态校验失败关闭。
 
 > 步骤 6–9 属**场景 A（正常产出）**路径。**场景 B（提问早退）**已在步骤 4 内完成状态更新、task 评论同步与校验并 STOP，不进入这些步骤。
 

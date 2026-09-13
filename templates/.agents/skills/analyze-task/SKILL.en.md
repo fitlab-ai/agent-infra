@@ -140,7 +140,7 @@ Before writing this round's `{analysis-artifact}`, create the controlled report 
 agent-infra-internal task-artifact {task-id} init --family analysis --artifact {analysis-artifact} --locale en
 ```
 
-The skeleton contains identity metadata, stable section markers, and required headings only; real analysis content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, it returns a controlled recovery candidate; edit only its `candidatePath`, then rerun `task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact} --recovery-id {recovery-id}` with the same `recoveryId`.
+The skeleton contains identity metadata, stable section markers, and required headings only; real analysis content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, it returns a controlled recovery candidate; edit only its `candidatePath`, then rerun `task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact} --recovery-id {recovery-id}` with the same `recoveryId`. Candidate-only is a protocol authorization boundary, not OS isolation; arbitrary same-UID host writers are outside the protocol's protection claim, and fingerprint/state checks fail closed on anomalies.
 
 > Steps 6–9 are the **Scenario A (normal output)** path. **Scenario B (ask and early-exit)** already finished its state update, task-comment sync, and verification inside step 4 and STOPped, so it does not enter these steps.
 

@@ -9,6 +9,7 @@ This rule covers the pre-completion gate for `analyze-task`, `plan-task`, and `c
 - After the mechanical safety gates pass, the model may edit only the returned `candidatePath`. After each byte-changing edit, rerun the complete finalizer with the same task, stage/family, artifact, and `--recovery-id`. Never edit the formal artifact directly and call it a candidate.
 - A successful finalizer commits through `finalize-ready → commit-started → passed`; completed events accept only matching `passed` final digests and consume the intent under the task lock.
 - Before `finalize-ready`, the recovery core seals the validated final bytes in the controlled `final.md`; later commit ignores the editable `candidate.md` and validates/publishes only that sealed snapshot, so a post-prepare candidate replacement cannot be published.
+- Candidate-only is a protocol authorization boundary, not OS isolation: a same-UID process with arbitrary host filesystem write access may tamper with recovery internals. Identity, fingerprint, and state checks detect such anomalies and fail closed, but the protocol does not claim an independent security principal or cross-platform isolation.
 
 ## Authorization boundary
 

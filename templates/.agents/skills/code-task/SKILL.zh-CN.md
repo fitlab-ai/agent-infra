@@ -162,7 +162,7 @@ checkpoint 成功后，若任务存在 `platform_issue_identity`，调用 `agent
 agent-infra-internal task-artifact {task-id} init --family code --artifact {code-artifact}
 ```
 
-骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实实现与验证内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑 `task-artifact {task-id} finalize-local --family code --artifact {code-artifact} --recovery-id {recovery-id}`。
+骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实实现与验证内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑 `task-artifact {task-id} finalize-local --family code --artifact {code-artifact} --recovery-id {recovery-id}`。candidate-only 是协议授权边界，不是操作系统隔离；同 UID 的任意宿主写入者不在本协议的防护承诺内，异常由指纹/状态校验失败关闭。
 
 创建 `.agents/workspace/active/{task-id}/{code-artifact}`。
 
@@ -179,7 +179,7 @@ echo "$finalizer"
 ```
 
 - `status=0` 且 `finalizer.status="passed"`：绑定这一次返回的 `{artifact-sha256}` 和 `{semantic-digest}`。
-- `status=1` 且返回 recovery context：确认任务、轮次、产物、baseline 和 request identity 未变化后，只编辑返回的 `candidatePath` 一次，确认字节确实变化，再使用同一个 `recoveryId` 完整重跑同一 finalizer。
+- `status=1` 且返回 recovery context：确认任务、轮次、产物、baseline 和 request identity 未变化后，只编辑返回的 `candidatePath` 一次，确认字节确实变化，再使用同一个 `recoveryId` 完整重跑同一 finalizer；candidate、baseline、final、publish 和 intent 均属于框架内部状态，不得编辑。
 - 其他失败、formal artifact 外部变化、无进展或 recovery identity 不匹配：停止，不发布 `code.completed`。
 
 不得重新扫描或手工补写摘要；完成事件必须携带本次 `passed` 结果的 `--artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}`。

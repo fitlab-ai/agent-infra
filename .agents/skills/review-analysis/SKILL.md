@@ -78,7 +78,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 agent-infra-internal task-artifact {task-id} init --family review-analysis --artifact {review-artifact}
 ```
 
-骨架不生成审查结论、发现或计数；完成审查内容后才能进入 summary finalizer。结构 finalizer 返回可证明的单个错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑原 finalizer。
+骨架不生成审查结论、发现或计数；完成审查内容后才能进入 summary finalizer。结构 finalizer 返回可证明的单个错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑原 finalizer。candidate-only 是协议授权边界，不是操作系统隔离；同 UID 的任意宿主写入者不在本协议的防护承诺内，异常由指纹/状态校验失败关闭。
 
 创建 `.agents/workspace/active/{task-id}/{review-artifact}`。
 

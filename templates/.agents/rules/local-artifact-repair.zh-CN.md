@@ -9,6 +9,7 @@
 - 只有在机械安全门通过后，模型才可编辑返回的 `candidatePath`；每次实际字节变化后，用同一 task、stage/family、artifact 和 `--recovery-id` 完整重跑 finalizer。不得直接编辑正式 artifact 后假设它属于候选。
 - finalizer 通过后，recovery core 按 `finalize-ready → commit-started → passed` 提交候选；completed event 只接受匹配的 `passed`/final digest，并在任务锁内消费 intent。
 - `finalize-ready` 前 recovery core 会把已校验的最终字节封存为受控 `final.md`；后续 commit 忽略可编辑的 `candidate.md`，只校验并发布该封存快照，避免候选在准备后被替换。
+- candidate-only 是协议授权边界，不是操作系统隔离：拥有同一 UID 且可任意写入宿主文件系统的进程可能篡改 recovery 内部文件；协议会通过身份、指纹和状态校验发现异常并失败关闭，但不承诺独立权限主体或跨平台隔离。
 
 ## 授权边界
 
