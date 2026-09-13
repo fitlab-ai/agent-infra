@@ -179,7 +179,7 @@ echo "$finalizer"
 ```
 
 - `status=0` 且 `finalizer.status="passed"`：绑定这一次返回的 `{artifact-sha256}` 和 `{semantic-digest}`。
-- `status=1` 且返回 recovery context：确认任务、轮次、产物、baseline 和 request identity 未变化后，只编辑返回的 `candidatePath` 一次，确认字节确实变化，再使用同一个 `recoveryId` 完整重跑同一 finalizer；candidate、baseline、final、publish 和 intent 均属于框架内部状态，不得编辑。
+- `status=1` 且返回 recovery context：确认任务、轮次、产物、baseline 和 request identity 未变化后，只编辑返回的 `candidatePath` 一次，确认字节确实变化，再使用同一个 `recoveryId` 完整重跑同一 finalizer；baseline、final、publish 和 intent 均属于框架内部状态，不得编辑。
 - 其他失败、formal artifact 外部变化、无进展或 recovery identity 不匹配：停止，不发布 `code.completed`。
 
 不得重新扫描或手工补写摘要；完成事件必须携带本次 `passed` 结果的 `--artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}`。
