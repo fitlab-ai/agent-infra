@@ -749,6 +749,25 @@ type RmTarget = {
   workspaceViewRoots: string[];
 };
 
+type RemovalResourceKind = 'control-root' | 'workspace-view' | 'worktree' | 'branch' | 'tool' | 'shell' | 'share' | 'artifact' | 'intent';
+
+export type SandboxRemovalResource = Readonly<{
+  kind: RemovalResourceKind;
+  path: string;
+}>;
+
+export type SandboxRemovalResourceDisclosure = Readonly<{
+  remove: readonly SandboxRemovalResource[];
+  preserve: readonly SandboxRemovalResource[];
+}>;
+
+type RemovalDisclosureTarget = Readonly<Pick<
+  RmTarget,
+  'branch' | 'effectiveBranch' | 'existingWorktrees' | 'toolCandidates' | 'controlRoots' | 'workspaceViewRoots'
+>>;
+
+type RemovalSelection = Pick<SandboxRemovalTargetCommit, 'removeWorktree' | 'removeBranch' | 'removeShare'>;
+
 type RemovalActionKind = 'workspace' | 'worktree' | 'tool' | 'shell' | 'share';
 
 type RemovalActionPreparation = Readonly<{
@@ -840,6 +859,105 @@ function mismatchRisks(report: IntermediateCleanupReport): IntermediateCleanupMi
     .sort((left, right) => left.intentPath.localeCompare(right.intentPath));
 }
 
+function removalPhasePending(
+  journals: readonly SandboxRemovalJournal[],
+  completedPhase: SandboxRemovalJournal['phase']
+): boolean {
+  return journals.length === 0 || journals.some((journal) => (
+    sandboxRemovalPhaseIndex(journal.phase) < sandboxRemovalPhaseIndex(completedPhase)
+  ));
+}
+
+function sortedUniqueResources(resources: SandboxRemovalResource[]): SandboxRemovalResource[] {
+  return [...new Map(resources.map((resource) => [`${resource.kind}\0${resource.path}`, resource] as const)).values()]
+    .sort((left, right) => `${left.kind}\0${left.path}`.localeCompare(`${right.kind}\0${right.path}`));
+}
+
+function addExistingResource(
+  resources: SandboxRemovalResource[],
+  kind: RemovalResourceKind,
+  source: string
+): void {
+  const resolved = path.resolve(source);
+  if (fs.existsSync(resolved)) resources.push({ kind, path: resolved });
+}
+
+function addResource(
+  resources: SandboxRemovalResource[],
+  kind: RemovalResourceKind,
+  source: string
+): void {
+  resources.push({ kind, path: source });
+}
+
+export function buildRemovalResourceDisclosure(
+  config: SandboxConfig,
+  target: RemovalDisclosureTarget,
+  selection: RemovalSelection,
+  journals: readonly SandboxRemovalJournal[] = [],
+  risks: readonly IntermediateCleanupMismatchRisk[] = []
+): SandboxRemovalResourceDisclosure {
+  const remove: SandboxRemovalResource[] = [];
+  const preserve: SandboxRemovalResource[] = [];
+  const addSelected = (
+    kind: RemovalResourceKind,
+    source: string,
+    selected: boolean,
+    pending = true
+  ): void => {
+    if (!pending) return;
+    addExistingResource(selected ? remove : preserve, kind, source);
+  };
+
+  for (const root of target.controlRoots) addExistingResource(remove, 'control-root', root);
+
+  const workspacePending = removalPhasePending(journals, 'workspace-removed');
+  for (const root of target.workspaceViewRoots) addSelected('workspace-view', root, true, workspacePending);
+  for (const worktree of target.existingWorktrees) {
+    addSelected('worktree', worktree, selection.removeWorktree, workspacePending);
+  }
+
+  const branchExists = runOk('git', [
+    '-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${target.effectiveBranch}`
+  ]);
+  if (branchExists) {
+    const branchResources = selection.removeWorktree && selection.removeBranch ? remove : preserve;
+    if (removalPhasePending(journals, 'branch-removed')) {
+      addResource(branchResources, 'branch', target.effectiveBranch);
+    }
+  }
+
+  const toolPending = removalPhasePending(journals, 'tool-removed');
+  for (const { candidates } of target.toolCandidates) {
+    for (const candidate of candidates) addSelected('tool', candidate, true, toolPending);
+  }
+  const shellPending = removalPhasePending(journals, 'shell-removed');
+  for (const candidate of shellConfigDirCandidates(config, target.effectiveBranch)) {
+    addSelected('shell', candidate, true, shellPending);
+  }
+  addSelected('share', shareBranchDir(config, target.effectiveBranch), selection.removeShare,
+    removalPhasePending(journals, 'share-removed'));
+
+  for (const risk of risks) {
+    addExistingResource(preserve, 'artifact', risk.artifactPath);
+    addExistingResource(preserve, 'intent', risk.intentPath);
+  }
+
+  return {
+    remove: sortedUniqueResources(remove),
+    preserve: sortedUniqueResources(preserve)
+  };
+}
+
+function assertRemovalResourceDisclosureMatches(
+  expected: SandboxRemovalResourceDisclosure,
+  actual: SandboxRemovalResourceDisclosure
+): void {
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+    throw new Error('SANDBOX_CONTROL_REMOVAL_RESOURCE_DISCLOSURE_CHANGED');
+  }
+}
+
 function assertMismatchRisksMatch(
   expected: readonly IntermediateCleanupMismatchRisk[],
   actual: readonly IntermediateCleanupMismatchRisk[]
@@ -851,24 +969,19 @@ function assertMismatchRisksMatch(
 
 function mismatchConfirmationMessage(
   risks: readonly IntermediateCleanupMismatchRisk[],
-  target: SandboxRemovalTargetCommit
+  disclosure: SandboxRemovalResourceDisclosure
 ): string {
-  const removed = [
-    ...(target.removeWorktree ? target.worktreePaths : []),
-    ...(target.removeBranch ? [`branch '${target.branch}'`] : []),
-    ...(target.removeShare ? [target.sharePath] : []),
-    ...target.workspaceViewPaths,
-    ...target.toolPaths,
-    ...target.shellPaths,
-    target.controlRoot
-  ];
-  const preserved = [
-    ...(target.removeWorktree ? [] : target.worktreePaths),
-    ...(target.removeBranch ? [] : [`branch '${target.branch}'`]),
-    ...(target.removeShare ? [] : [target.sharePath]),
-    ...risks.map((risk) => risk.artifactPath),
-    ...risks.map((risk) => risk.intentPath)
-  ];
+  const labels: Record<RemovalResourceKind, string> = {
+    'control-root': 'control root',
+    'workspace-view': 'workspace view',
+    worktree: 'worktree',
+    branch: 'branch',
+    tool: 'tool state',
+    shell: 'shell config',
+    share: 'share dir',
+    artifact: 'artifact',
+    intent: 'intent'
+  };
   return [
     'Artifact digest mismatch requires explicit confirmation.',
     ...risks.map((risk) => [
@@ -880,8 +993,12 @@ function mismatchConfirmationMessage(
       `Finalization receipt: ${risk.receiptState}`,
       `Control binding: ${risk.controlBinding}`
     ].join('\n')),
-    `Resources to remove: ${removed.length > 0 ? removed.join(', ') : 'none'}`,
-    `Resources to preserve: ${preserved.length > 0 ? preserved.join(', ') : 'none'}`,
+    `Resources to remove: ${JSON.stringify(disclosure.remove.map((resource) => ({
+      kind: labels[resource.kind], path: resource.path
+    })))}`,
+    `Resources to preserve: ${JSON.stringify(disclosure.preserve.map((resource) => ({
+      kind: labels[resource.kind], path: resource.path
+    })))}`,
     'Mismatch provenance sidecar(s) will be preserved.'
   ].join('\n');
 }
@@ -1527,8 +1644,15 @@ async function rmOneCore(
   if (persistedTarget) assertRemovalSelectionMatches(persistedTarget, committedTarget);
 
   if (initialMismatchRisks.length > 0) {
+    const initialDisclosure = buildRemovalResourceDisclosure(
+      config,
+      target,
+      committedTarget,
+      existingJournals,
+      initialMismatchRisks
+    );
     const confirmed = await confirm({
-      message: mismatchConfirmationMessage(initialMismatchRisks, committedTarget),
+      message: mismatchConfirmationMessage(initialMismatchRisks, initialDisclosure),
       initialValue: false
     });
     if (isCancel(confirmed) || !confirmed) {
@@ -1550,7 +1674,8 @@ async function rmOneCore(
       )
     });
     assertIntermediateCleanupPreflight(refreshedAuxiliaryPreview, { allowMismatchRisk: true });
-    assertMismatchRisksMatch(initialMismatchRisks, mismatchRisks(refreshedAuxiliaryPreview));
+    const refreshedMismatchRisks = mismatchRisks(refreshedAuxiliaryPreview);
+    assertMismatchRisksMatch(initialMismatchRisks, refreshedMismatchRisks);
     preflightRmTarget(config, target);
     const refreshedTarget = removalTargetCommit(
       config,
@@ -1561,6 +1686,20 @@ async function rmOneCore(
       Boolean(shouldRemoveShare)
     );
     assertRemovalSelectionMatches(committedTarget, refreshedTarget);
+    assertRemovalResourceDisclosureMatches(
+      initialDisclosure,
+      buildRemovalResourceDisclosure(
+        config,
+        target,
+        refreshedTarget,
+        listSandboxRemovalJournals({
+          branch: effectiveBranch,
+          project: config.project,
+          targetDigest
+        }),
+        refreshedMismatchRisks
+      )
+    );
     for (const worktree of existingWorktrees) {
       const permit = permits.get(path.resolve(worktree));
       if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);

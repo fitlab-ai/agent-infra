@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
+import { containerNameCandidates } from "../../../lib/sandbox/constants.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
 import {
@@ -413,6 +414,31 @@ function makeCompletedUnboundDigestMismatch(config: SandboxConfig, taskId: strin
     "# Plan changed\n",
     "utf8"
   );
+}
+
+function addControlRootVariant(
+  sourceRoot: string,
+  config: SandboxConfig,
+  taskId: string,
+  container: string,
+  containerId: string
+): string {
+  const root = sandboxControlPaths({
+    base: config.controlBase,
+    project: config.project,
+    container,
+    identity: { mode: "task-bound", taskId }
+  }).root;
+  fs.cpSync(sourceRoot, root, { recursive: true });
+  const manifestPath = path.join(root, "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, any>;
+  manifest.container = container;
+  manifest.containerIdentity = { ...manifest.containerIdentity, id: containerId };
+  for (const field of ["channelDir", "publicStatusDir", "processingDir", "runtimeDir"]) {
+    manifest[field] = path.join(root, path.basename(manifest[field]));
+  }
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
+  return root;
 }
 
 async function cleanRmOneFixture(
@@ -1259,9 +1285,25 @@ test("sandbox rm confirms an eligible mismatch only after committing the final r
     const config = rmOneConfig(fixture, tmpDir);
     const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
     makeCompletedUnboundDigestMismatch(config, taskId);
+    const legacyContainer = containerNameCandidates(config, branch)[1]!;
+    const legacyRoot = addControlRootVariant(
+      evidence.controlRoot, config, taskId, legacyContainer, "e".repeat(64)
+    );
     const worktree = addFixtureWorktree(fixture, tmpDir, branch);
     const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
     fs.mkdirSync(share, { recursive: true });
+    const shell = path.join(config.shellConfigBase, branch.replaceAll("/", ".."));
+    fs.mkdirSync(shell, { recursive: true });
+    const target = {
+      ...evidence.target,
+      existingWorktrees: [worktree],
+      controlRoots: [evidence.controlRoot, legacyRoot]
+    };
+    const expectedDisclosure = rm.buildRemovalResourceDisclosure(config, target, {
+      removeWorktree: true,
+      removeBranch: true,
+      removeShare: true
+    });
     const prompts: string[] = [];
     process.env.DOCKER_INSPECT_NOT_FOUND = "1";
 
@@ -1273,7 +1315,7 @@ test("sandbox rm confirms an eligible mismatch only after committing the final r
         workspace: { mode: "task-bound", taskId },
         taskState: "completed"
       },
-      target: { ...evidence.target, existingWorktrees: [worktree] },
+      target,
       prompt: {
         confirm: async (options) => {
           prompts.push(options.message);
@@ -1281,6 +1323,8 @@ test("sandbox rm confirms an eligible mismatch only after committing the final r
             assert.equal(options.initialValue, false);
             assert.equal(fs.existsSync(worktree), true);
             assert.equal(fs.existsSync(share), true);
+            assert.equal(fs.existsSync(legacyRoot), true);
+            assert.equal(fs.existsSync(shell), true);
             assert.match(git(fixture.repoDir, "branch", "--list", branch), new RegExp(branch));
             assert.equal(fs.existsSync(evidence.controlRoot), true);
             assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "stop" || call[0] === "rm"), []);
@@ -1292,20 +1336,92 @@ test("sandbox rm confirms an eligible mismatch only after committing the final r
     }));
 
     assert.equal(prompts.length, 4);
-    assert.match(prompts.at(-1)!, /Artifact digest mismatch requires explicit confirmation/);
-    assert.match(prompts.at(-1)!, /Resources to remove:/);
-    assert.match(prompts.at(-1)!, /Resources to preserve:/);
+    const mismatchPrompt = prompts.at(-1)!;
+    assert.match(mismatchPrompt, /Artifact digest mismatch requires explicit confirmation/);
+    const removeLine = mismatchPrompt.split("\n").find((line) => line.startsWith("Resources to remove: "))!;
+    const preserveLine = mismatchPrompt.split("\n").find((line) => line.startsWith("Resources to preserve: "))!;
+    assert.deepEqual(JSON.parse(removeLine.slice("Resources to remove: ".length)), expectedDisclosure.remove.map((resource) => ({
+      kind: {
+        "control-root": "control root",
+        "workspace-view": "workspace view",
+        worktree: "worktree",
+        branch: "branch",
+        tool: "tool state",
+        shell: "shell config",
+        share: "share dir",
+        artifact: "artifact",
+        intent: "intent"
+      }[resource.kind],
+      path: resource.path
+    })));
+    assert.deepEqual(JSON.parse(preserveLine.slice("Resources to preserve: ".length)), [
+      {
+        kind: "artifact",
+        path: path.resolve(config.repoRoot, ".agents", "workspace", "completed", taskId, "plan.md")
+      },
+      { kind: "intent", path: path.resolve(evidence.intentPath) }
+    ]);
     assert.match(prompts.at(-1)!, /Mismatch provenance sidecar\(s\) will be preserved/);
     assert.equal(fs.existsSync(worktree), false);
     assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
     assert.equal(fs.existsSync(share), false);
     assert.equal(fs.existsSync(evidence.controlRoot), false);
+    assert.equal(fs.existsSync(legacyRoot), false);
+    assert.equal(fs.existsSync(shell), false);
     assert.equal(fs.existsSync(evidence.intentPath), true);
     assert.equal(listSandboxRemovalJournals({ branch, project: "demo" }).some((journal) => journal.phase === "completed"), true);
     assert.equal(fs.readFileSync(path.join(config.repoRoot, ".agents", "workspace", "completed", taskId, "plan.md"), "utf8"), "# Plan changed\n");
   } finally {
     if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
     else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm disclosure contains only existing canonical and legacy removal resources", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-resource-disclosure-"));
+  const branch = "feature/resource-disclosure";
+  const taskId = "TASK-20260824-000017";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    const legacyContainer = containerNameCandidates(config, branch)[1]!;
+    const legacyRoot = addControlRootVariant(
+      evidence.controlRoot, config, taskId, legacyContainer, "e".repeat(64)
+    );
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    const share = path.join(config.shareBase, "branches", branch.replaceAll("/", ".."));
+    fs.mkdirSync(share, { recursive: true });
+    const shell = path.join(config.shellConfigBase, branch.replaceAll("/", ".."));
+    fs.mkdirSync(shell, { recursive: true });
+    const target = {
+      ...evidence.target,
+      existingWorktrees: [worktree],
+      controlRoots: [evidence.controlRoot, legacyRoot]
+    };
+    assert.match(git(fixture.repoDir, "show-ref", "--verify", `refs/heads/${branch}`), new RegExp(branch));
+
+    assert.deepEqual(
+      rm.buildRemovalResourceDisclosure(config, target, {
+        removeWorktree: true,
+        removeBranch: true,
+        removeShare: true
+      }),
+      {
+        remove: [
+          { kind: "branch", path: branch },
+          { kind: "control-root", path: path.resolve(legacyRoot) },
+          { kind: "control-root", path: path.resolve(evidence.controlRoot) },
+          { kind: "share", path: path.resolve(share) },
+          { kind: "shell", path: path.resolve(shell) },
+          { kind: "worktree", path: path.resolve(worktree) }
+        ],
+        preserve: []
+      }
+    );
+  } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
