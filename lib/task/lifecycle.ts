@@ -253,7 +253,7 @@ function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent:
     const frontmatter = parseTypedTaskFrontmatter(fs.readFileSync(taskFile, 'utf8'));
     const issueIdentity = taskIssueIdentity(frontmatter);
     const requestedIssueIdentity = { kind: 'number' as const, value: request.issueNumber };
-    if (frontmatter.id !== taskId || !issueIdentity || (issueIdentity.kind === 'number' && !resourceIdentityEquals(issueIdentity, requestedIssueIdentity)) || frontmatter.current_step === 'completed') {
+    if (frontmatter.id !== taskId || !issueIdentity || !resourceIdentityEquals(issueIdentity, requestedIssueIdentity) || frontmatter.current_step === 'completed') {
       return { code: 'LIFECYCLE_STAGING_IDENTITY_INVALID', message: 'restore task identity, platform issue identity, or current_step is invalid' };
     }
   } catch (error) {

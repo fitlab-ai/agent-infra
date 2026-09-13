@@ -198,7 +198,7 @@ function createFixture(): Fixture {
   if (!digest.ok) throw new Error(digest.error.message);
   const mechanical = runMechanicalChangeReport(root, baseSha, headSha);
   const report = buildPrChangeReport({
-    repository: 'acme/widgets', number: 42,
+    repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
     base: { repository: 'acme/widgets', ref: 'main', sha: baseSha },
     head: { repository: 'acme/widgets', ref: 'feature', sha: headSha }
   }, digest.value.sha256, mechanical, candidate(digest.value.sha256));

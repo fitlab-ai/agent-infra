@@ -112,7 +112,7 @@ function representativeMechanical(base = sha('b'), head = sha('c')): MechanicalC
 
 function identity(): PullRequestIdentity {
   return {
-    repository: 'acme/widgets', number: 42,
+    repository: 'acme/widgets', resource: { kind: 'number', value: 42 },
     base: { repository: 'acme/widgets', ref: 'main', sha: sha('b') },
     head: { repository: 'acme/widgets', ref: 'feature', sha: sha('c') }
   };

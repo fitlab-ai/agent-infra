@@ -109,6 +109,17 @@ test('task-lifecycle CLI restore applies staging for a task that does not exist 
   assert.equal(fs.existsSync(f.staging), false);
 });
 
+test('task-lifecycle CLI restore rejects a non-numeric staging identity instead of skipping the comparison', () => {
+  const f = stagingFixture();
+  const taskPath = path.join(f.staging, 'task.md');
+  fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace('"kind":"number","value":42', '"kind":"id","value":"wrong-opaque-id"'));
+  const result = run(f.root, [RESTORE_TASK_ID, 'restore', '--agent', 'codex', '--staging-dir', f.staging, '--issue-number', '42']);
+  assert.equal(result.status, 1);
+  assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_STAGING_IDENTITY_INVALID');
+  assert.equal(fs.existsSync(f.staging), true);
+  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'active', RESTORE_TASK_ID)), false);
+});
+
 test('task-lifecycle CLI restore rejects short ids and malformed TASK-ids with LIFECYCLE_IDENTITY_INVALID', () => {
   const f = stagingFixture();
   for (const ref of ['1', 'not-a-task-id']) {
