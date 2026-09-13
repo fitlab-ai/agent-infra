@@ -39,6 +39,7 @@ test('artifact recovery publishes a staged candidate through durable states', ()
   );
 
   assert.deepEqual(fs.readFileSync(artifact), baseline);
+  assert.equal(context.stagingPath, path.join(taskDir, '.local-artifact-recovery', 'abcde-00000000001', 'candidate.md'));
   assert.deepEqual(fs.readFileSync(context.stagingPath), baseline);
   assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'awaiting-recovery');
 
@@ -157,7 +158,7 @@ test('artifact recovery rejects a symlinked recovery-root ancestor before creati
   const artifact = path.join(taskDir, 'code.md');
   const baseline = Buffer.from('baseline\n');
   fs.writeFileSync(artifact, baseline);
-  fs.symlinkSync(external, path.join(workspace, '.local-artifact-recovery'), 'dir');
+  fs.symlinkSync(external, path.join(taskDir, '.local-artifact-recovery'), 'dir');
 
   assert.throws(
     () => beginArtifactRecovery(

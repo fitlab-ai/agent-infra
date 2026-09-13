@@ -307,8 +307,9 @@ function scanIntermediateCleanup(repoRoot: string, options: ScanOptions = {}): I
   return buildIntermediateCleanupReport(candidates, true);
 }
 
-function cleanupConsumedRecoveryFiles(repoRoot: string, candidate: IntermediateCleanupItem): boolean {
+function cleanupConsumedRecoveryFiles(repoRoot: string, task: TaskRecord | undefined, candidate: IntermediateCleanupItem): boolean {
   if (candidate.kind !== 'LFAI-CONSUMED' || !candidate.taskId) return true;
+  if (!task) return false;
   const match = LOCAL_INTENT_RE.exec(path.basename(candidate.path));
   if (!match) return false;
   let intent: ReturnType<typeof readArtifactRecoveryIntent>;
@@ -316,7 +317,7 @@ function cleanupConsumedRecoveryFiles(repoRoot: string, candidate: IntermediateC
   catch { return false; }
   if (!intent || intent.state !== 'consumed') return false;
 
-  const recovery = artifactRecoveryRoot(repoRoot, candidate.taskId, intent.recoveryOperationId);
+  const recovery = artifactRecoveryRoot(task.taskDir, intent.recoveryOperationId);
   let stat: fs.Stats | null = null;
   try { stat = fs.lstatSync(recovery); } catch (error) {
     if (errorCode(error) === 'ENOENT') return true;
@@ -331,9 +332,7 @@ function cleanupConsumedRecoveryFiles(repoRoot: string, candidate: IntermediateC
   try {
     for (const entry of entries) fs.unlinkSync(path.join(recovery, entry.name));
     fs.rmdirSync(recovery);
-    const taskRecoveryRoot = path.dirname(recovery);
-    if (fs.readdirSync(taskRecoveryRoot).length === 0) fs.rmdirSync(taskRecoveryRoot);
-    const recoveryRoot = path.dirname(taskRecoveryRoot);
+    const recoveryRoot = path.dirname(recovery);
     if (fs.readdirSync(recoveryRoot).length === 0) fs.rmdirSync(recoveryRoot);
     return true;
   } catch (error) {
@@ -341,7 +340,7 @@ function cleanupConsumedRecoveryFiles(repoRoot: string, candidate: IntermediateC
   }
 }
 
-function removeCandidate(repoRoot: string, candidate: IntermediateCleanupItem): IntermediateCleanupItem {
+function removeCandidate(repoRoot: string, candidate: IntermediateCleanupItem, task?: TaskRecord): IntermediateCleanupItem {
   if (candidate.disposition !== 'planned') return candidate;
   const root = candidate.kind === 'EMPTY-AUX-PARENT'
     ? path.dirname(path.dirname(candidate.path))
@@ -358,7 +357,7 @@ function removeCandidate(repoRoot: string, candidate: IntermediateCleanupItem): 
   const actual = safeLstat(root, candidate.path, candidate.kind === 'EMPTY-AUX-PARENT' ? 'directory' : 'file');
   if (!actual) return { ...candidate, disposition: 'protected', reason: 'PATH_IDENTITY_CHANGED' };
   if (!sameFileIdentity(expected, actual)) return { ...candidate, disposition: 'protected', reason: 'PATH_IDENTITY_CHANGED' };
-  if (!cleanupConsumedRecoveryFiles(repoRoot, candidate)) {
+  if (!cleanupConsumedRecoveryFiles(repoRoot, task, candidate)) {
     return { ...candidate, disposition: 'protected', reason: 'RECOVERY_STAGING_NOT_SAFE_TO_REMOVE' };
   }
   try {
@@ -405,6 +404,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
     indexes.push(index);
     byTask.set(candidate.taskId, indexes);
   }
+  const tasks = inspectTaskRecords(repoRoot, new Set(byTask.keys()));
 
   for (const taskId of [...byTask.keys()].sort()) {
     const execute = (): void => {
@@ -418,7 +418,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
         if (initialCandidate.disposition !== 'planned') continue;
         const current = refreshedByKey.get(intermediateCleanupKey(initialCandidate));
         items[index] = current
-          ? removeCandidate(repoRoot, current)
+          ? removeCandidate(repoRoot, current, tasks.get(taskId))
           : { ...initialCandidate, disposition: 'protected', reason: 'CANDIDATE_NO_LONGER_ELIGIBLE' };
       }
     };

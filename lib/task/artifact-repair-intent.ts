@@ -44,8 +44,8 @@ export function artifactRecoveryIntentRoot(repoRoot: string): string {
   return path.join(repoRoot, '.agents', 'workspace', '.local-artifact-finalization-intents');
 }
 
-export function artifactRecoveryRoot(repoRoot: string, taskId: string, stagingId: string): string {
-  return path.join(repoRoot, '.agents', 'workspace', '.local-artifact-recovery', taskId, stagingId);
+export function artifactRecoveryRoot(taskDir: string, stagingId: string): string {
+  return path.join(taskDir, '.local-artifact-recovery', stagingId);
 }
 
 function intentPath(repoRoot: string, taskId: string, family: ArtifactSchemaFamily, artifact: string): string {

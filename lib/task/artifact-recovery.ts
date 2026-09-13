@@ -172,14 +172,15 @@ function contextPaths(
   options: ArtifactRecoveryOptions,
   recoveryId: string
 ): ArtifactRecoveryContext {
-  const root = artifactRecoveryRoot(options.repoRoot, tuple.taskId, recoveryId);
+  const taskDir = path.resolve(options.taskDir);
+  const root = artifactRecoveryRoot(taskDir, recoveryId);
   return {
     ...tuple,
     repoRoot: options.repoRoot,
-    taskDir: path.resolve(options.taskDir),
+    taskDir,
     recoveryId,
     stagingId: recoveryId,
-    formalPath: path.join(path.resolve(options.taskDir), tuple.artifact),
+    formalPath: path.join(taskDir, tuple.artifact),
     stagingPath: path.join(root, 'candidate.md'),
     baselinePath: path.join(root, 'baseline.md'),
     finalPath: path.join(root, 'final.md'),

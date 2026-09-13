@@ -100,7 +100,7 @@ function writeConsumedIntent(
   const intentDir = path.join(root, '.agents', 'workspace', '.local-artifact-finalization-intents');
   fs.mkdirSync(intentDir, { recursive: true });
   fs.writeFileSync(path.join(intentDir, `${TASK_ID}-${family}-${artifact}.json`), `${JSON.stringify(intent)}\n`);
-  const recoveryDir = path.join(root, '.agents', 'workspace', '.local-artifact-recovery', TASK_ID, recoveryId);
+  const recoveryDir = path.join(taskDir, '.local-artifact-recovery', recoveryId);
   fs.mkdirSync(recoveryDir, { recursive: true });
   fs.writeFileSync(path.join(recoveryDir, 'baseline.md'), content);
   fs.writeFileSync(path.join(recoveryDir, 'candidate.md'), content);
@@ -230,7 +230,7 @@ test('intermediate cleanup deletes only a receipt-backed consumed artifact inten
     const result = cleanupIntermediateFiles(fixture.root);
     assert.equal(result.items.some((item) => item.kind === 'LFAI-CONSUMED' && item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
-    assert.equal(fs.existsSync(path.join(fixture.root, '.agents', 'workspace', '.local-artifact-recovery', TASK_ID)), false);
+    assert.equal(fs.existsSync(path.join(fixture.taskDir, '.local-artifact-recovery')), false);
     assert.equal(fs.existsSync(path.join(fixture.taskDir, 'plan.md')), true);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
