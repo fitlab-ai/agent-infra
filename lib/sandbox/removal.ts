@@ -1797,7 +1797,7 @@ async function rmOneCore(
     const refreshedMismatchRisks = mismatchRisks(refreshedAuxiliaryPreview);
     assertMismatchRisksMatch(initialMismatchRisks, refreshedMismatchRisks);
     preflightRmTarget(config, target);
-    const refreshedTarget = removalTargetCommit(
+    let refreshedTarget = removalTargetCommit(
       config,
       target,
       permits,
@@ -1805,6 +1805,19 @@ async function rmOneCore(
       Boolean(shouldDeleteBranch),
       Boolean(shouldRemoveShare)
     );
+    // A resolved retry omits worktrees already removed by the persisted operation.
+    // Restore only that completed authorization scope, never newly discovered paths.
+    if (persistedTarget && existingJournals.every((journal) => (
+      sandboxRemovalPhaseIndex(journal.phase) >= sandboxRemovalPhaseIndex('workspace-removed')
+    ))) {
+      refreshedTarget = {
+        ...refreshedTarget,
+        worktreePaths: [...new Set([
+          ...refreshedTarget.worktreePaths,
+          ...committedTarget.worktreePaths.filter((worktree) => !fs.existsSync(worktree))
+        ])].sort()
+      };
+    }
     assertRemovalSelectionMatches(committedTarget, refreshedTarget);
     assertRemovalResourceDisclosureMatches(
       initialDisclosure,

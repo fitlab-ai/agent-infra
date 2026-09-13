@@ -1681,10 +1681,34 @@ test("sandbox rm mismatch disclosure includes an owned removed-phase branch ref"
     fs.writeFileSync(journalPath, `${JSON.stringify(persisted)}\n`);
     makeCompletedUnboundDigestMismatch(config, taskId);
 
+    assert.equal(fs.existsSync(worktree), false);
+    for (const drift of ["additional-path", "reappeared-worktree"]) {
+      const retryTarget = { ...target, existingWorktrees: target.existingWorktrees.filter((entry) => fs.existsSync(entry)) };
+      await assert.rejects(
+        () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+          interactive: true,
+          target: retryTarget,
+          prompt: {
+            confirm: async () => {
+              if (drift === "additional-path") retryTarget.existingWorktrees.push(path.join(tmpDir, "unexpected-worktree"));
+              else fs.mkdirSync(worktree);
+              return true;
+            },
+            isCancel: (value): value is symbol => false
+          }
+        })),
+        /SANDBOX_CONTROL_REMOVAL_TARGET_MISMATCH/
+      );
+      assert.equal(git(fixture.repoDir, "show-ref", "--verify", tombstone).endsWith(` ${tombstone}`), true);
+      assert.equal(fs.existsSync(evidence.intentPath), true);
+      assert.equal(listSandboxRemovalJournals({ branch, project: config.project })[0]?.phase, "branch-removed");
+      if (drift === "reappeared-worktree") fs.rmdirSync(worktree);
+    }
+
     const prompts: string[] = [];
     await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
       interactive: true,
-      target,
+      target: { ...target, existingWorktrees: target.existingWorktrees.filter((entry) => fs.existsSync(entry)) },
       prompt: {
         confirm: async (options) => {
           prompts.push(options.message);
