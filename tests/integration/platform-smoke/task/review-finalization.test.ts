@@ -6,8 +6,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { finalizeReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
-import { renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
-import { applyArtifactRepair } from '../../../../lib/task/artifact-operations.ts';
+import { getArtifactSchema, renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
+import { applyArtifactRepair, inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
 import { readArtifactRepairIntent } from '../../../../lib/task/artifact-repair-intent.ts';
 import {
   finalizeReviewSummaryContent,
@@ -18,6 +18,101 @@ import {
 
 const counts = { blocker: 1, major: 2, minor: 3 };
 const TASK_ID = 'TASK-20260101-000001';
+const REPOSITORY_ROOT = path.resolve(import.meta.dirname, '../../../..');
+const TEMPLATE_CASES = [
+  { stage: 'analysis', family: 'review-analysis', locale: 'zh', relativePath: '.agents/skills/review-analysis/reference/report-template.md' },
+  { stage: 'analysis', family: 'review-analysis', locale: 'en', relativePath: 'templates/.agents/skills/review-analysis/reference/report-template.en.md' },
+  { stage: 'plan', family: 'review-plan', locale: 'zh', relativePath: '.agents/skills/review-plan/reference/report-template.md' },
+  { stage: 'plan', family: 'review-plan', locale: 'en', relativePath: 'templates/.agents/skills/review-plan/reference/report-template.en.md' },
+  { stage: 'code', family: 'review-code', locale: 'zh', relativePath: '.agents/skills/review-code/reference/report-template.md' },
+  { stage: 'code', family: 'review-code', locale: 'en', relativePath: 'templates/.agents/skills/review-code/reference/report-template.en.md' }
+] as const;
+
+function officialTemplateSample(relativePath: string): string {
+  const content = fs.readFileSync(path.join(REPOSITORY_ROOT, relativePath), 'utf8');
+  const sample = content.match(/```markdown\n([\s\S]*)\n```\s*$/);
+  assert.ok(sample, `${relativePath} should include an official markdown sample`);
+  return sample[1]!;
+}
+
+function filledOfficialReviewSample(
+  family: 'review-analysis' | 'review-plan' | 'review-code',
+  locale: 'zh' | 'en',
+  relativePath: string,
+  artifact: string
+): string {
+  const schema = getArtifactSchema(family);
+  assert.ok(schema, `${relativePath} should map to an artifact schema`);
+  const values: Record<string, string> = {
+    '{review-round}': '1',
+    '{review-artifact}': artifact,
+    '{analysis-artifact}': 'analysis.md',
+    '{plan-artifact}': 'plan.md',
+    '{code-artifact}': 'code.md',
+    '{reviewer-name}': 'codex',
+    '{timestamp}': '2026-01-01 00:00:00+00:00',
+    '{file-count and major modules}': '3 review modules',
+    '{scope actually reviewed}': '3 review modules',
+    '{本遍实际范围}': '3 个 review 模块',
+    '{本轮实际范围}': '3 个 review 模块',
+    '{通过 / 需要修改 / 拒绝}': '通过',
+    '{Approved / Changes Requested / Rejected}': 'Approved',
+    '{命令}': 'git status --short',
+    '{command}': 'git status --short',
+    '{本轮一次性从任务绑定 remote/base 读取的目标分支 SHA M；不可被后续实时目标覆盖}': 'a'.repeat(40),
+    '{本轮一次性捕获的本地 HEAD R；必须等于本轮 HEAD}': 'a'.repeat(40),
+    '{R 的兼容显示字段；必须与审查已检视提交相同}': 'a'.repeat(40),
+    '{用于完整 diff/fingerprint 的 D；必须等于 merge-base(R, saved M)}': 'b'.repeat(40),
+    '{git-workflow snapshot 输出的 fingerprint 字段}': `sha256:${'c'.repeat(64)}`,
+    '{git-workflow snapshot 输出的 tree 字段}': 'd'.repeat(40),
+    '{target branch SHA M read once from the task-bound remote/base at review start; never overwritten by a later live target}': 'a'.repeat(40),
+    '{local HEAD R captured once for this round; must equal this round\'s HEAD}': 'a'.repeat(40),
+    '{compatibility display of R; must equal Reviewed Head}': 'a'.repeat(40),
+    '{D used for the complete diff/fingerprint; must equal merge-base(R, saved M)}': 'b'.repeat(40),
+    '{fingerprint field from git-workflow snapshot}': `sha256:${'c'.repeat(64)}`,
+    '{tree field from git-workflow snapshot}': 'd'.repeat(40)
+  };
+  let report = officialTemplateSample(relativePath);
+  for (const [placeholder, value] of Object.entries(values)) report = report.replaceAll(placeholder, value);
+  report = `<!-- artifact-context:${TASK_ID}:${family}:1 -->\n${report}`;
+  for (const section of schema.sections) {
+    const heading = locale === 'zh' ? section.headings.zh : section.headings.en;
+    const marker = `<!-- ${section.marker} -->`;
+    const headingLine = `## ${heading}\n`;
+    assert.equal(report.includes(`${headingLine}${marker}`), false, `${relativePath} should not already have ${marker}`);
+    assert.ok(report.includes(headingLine), `${relativePath} should include ${heading}`);
+    report = report.replace(headingLine, `${headingLine}${marker}\n`);
+  }
+  return report;
+}
+
+function officialTemplateDomainFixture(stage: 'analysis' | 'plan' | 'code', artifact: string, report: string) {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'official-review-template-')));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  const dir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const input of ['analysis.md', 'plan.md', 'code.md']) fs.writeFileSync(path.join(dir, input), '# input\n');
+  const step = stage === 'analysis' ? 'Review Analysis' : stage === 'plan' ? 'Review Plan' : 'Review Code';
+  fs.writeFileSync(path.join(dir, 'task.md'), `---
+id: ${TASK_ID}
+status: active
+---
+
+# Task
+
+## Review Disagreement Ledger
+
+| id | stage | round | severity | status | evidence |
+|----|-------|-------|----------|--------|----------|
+
+## Activity Log
+
+- 2026-01-01 00:00:00+00:00 — **${step} (Round 1) [started]** by codex — started
+`);
+  const artifactPath = path.join(dir, artifact);
+  fs.writeFileSync(artifactPath, report);
+  return { root, dir, artifactPath };
+}
 
 function domainFixture() {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'review-finalization-')));
@@ -79,6 +174,44 @@ test('review summary parser distinguishes canonical placeholders and numeric cou
     assert.deepEqual(numeric.summary.counts, counts);
     assert.equal(numeric.summary.verdict, 'Changes Requested');
     assert.equal(numeric.summary.manualValidation, 0);
+  }
+});
+
+test('official review template samples finalize for every stage and locale', () => {
+  assert.equal(TEMPLATE_CASES.length, 6);
+
+  for (const { stage, family, locale, relativePath } of TEMPLATE_CASES) {
+    const artifact = `${family}.md`;
+    const report = filledOfficialReviewSample(family, locale, relativePath, artifact);
+    const schema = getArtifactSchema(family);
+    assert.ok(schema);
+
+    const structure = inspectArtifactContract(report, schema);
+    assert.equal(
+      structure.ok,
+      true,
+      `${relativePath}: ${structure.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
+    );
+
+    const parsed = parseReviewSummary(report);
+    assert.equal(parsed.ok, true, `${relativePath} should parse before finalization`);
+
+    const fixture = officialTemplateDomainFixture(stage, artifact, report);
+    try {
+      const result = finalizeReviewSummary({ taskRef: TASK_ID, stage, artifact }, { repoRoot: fixture.root });
+      assert.equal(result.status, 'applied', `${relativePath} should finalize`);
+      assert.equal(result.error, null);
+
+      const finalized = fs.readFileSync(fixture.artifactPath, 'utf8');
+      const finalizedSummary = parseReviewSummary(finalized);
+      assert.equal(finalizedSummary.ok, true, `${relativePath} should remain parseable after finalization`);
+      if (finalizedSummary.ok) {
+        assert.equal(finalizedSummary.summary.countState, 'numeric');
+        assert.deepEqual(finalizedSummary.summary.counts, { blocker: 0, major: 0, minor: 0 });
+      }
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
   }
 });
 

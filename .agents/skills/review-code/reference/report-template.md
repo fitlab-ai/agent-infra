@@ -16,6 +16,18 @@
 
 ## 审查摘要
 
+- **审查者**：{reviewer-name}
+- **审查时间**：{timestamp}
+- **审查范围**：{file-count and major modules}
+- **审查目标提交**：{本轮一次性从任务绑定 remote/base 读取的目标分支 SHA M；不可被后续实时目标覆盖}
+- **审查已检视提交**：{本轮一次性捕获的本地 HEAD R；必须等于本轮 HEAD}
+- **审查基线提交**：{R 的兼容显示字段；必须与审查已检视提交相同}
+- **审查差异基线**：{用于完整 diff/fingerprint 的 D；必须等于 merge-base(R, saved M)}
+- **审查差异指纹**：{git-workflow snapshot 输出的 fingerprint 字段}
+- **审查快照树**：{git-workflow snapshot 输出的 tree 字段}
+- **总体结论**：{通过 / 需要修改 / 拒绝}
+- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要 / **人工校验**：0
+
 ## 资格审计复核
 
 > 按 `.agents/rules/decision-qualification.md` 复核：约束依赖、候选资格、分类结果、上游关系和依赖快照五张表。
@@ -39,18 +51,6 @@
 ### 依赖快照
 | task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
 | --- | --- | --- |
-
-- **审查者**：{reviewer-name}
-- **审查时间**：{timestamp}
-- **审查范围**：{file-count and major modules}
-- **审查目标提交**：{本轮一次性从任务绑定 remote/base 读取的目标分支 SHA M；不可被后续实时目标覆盖}
-- **审查已检视提交**：{本轮一次性捕获的本地 HEAD R；必须等于本轮 HEAD}
-- **审查基线提交**：{R 的兼容显示字段；必须与审查已检视提交相同}
-- **审查差异基线**：{用于完整 diff/fingerprint 的 D；必须等于 merge-base(R, saved M)}
-- **审查差异指纹**：{git-workflow snapshot 输出的 fingerprint 字段}
-- **审查快照树**：{git-workflow snapshot 输出的 tree 字段}
-- **总体结论**：{通过 / 需要修改 / 拒绝}（恰取一个；禁止写组合短语，否则 verify gate 失败）
-- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要 / **人工校验**：0
 
 ## 检视覆盖声明
 

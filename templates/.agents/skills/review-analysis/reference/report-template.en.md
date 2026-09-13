@@ -7,7 +7,7 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 ## Output Template
 
 ```markdown
-# Requirement Analysis Review Report
+# Analysis Review Report
 
 - **Review Round**: Round {review-round}
 - **Artifact File**: `{review-artifact}`
@@ -15,6 +15,12 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
   - `{analysis-artifact}` (the highest-round requirement-analysis artifact actually reviewed, e.g. `analysis-r2.md`; leave blank if it cannot be reliably determined)
 
 ## Review Summary
+
+- **Reviewer**: {reviewer-name}
+- **Review Time**: {timestamp}
+- **Scope**: {file-count and major modules}
+- **Overall Verdict**: {Approved / Changes Requested / Rejected}
+- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors / **Manual validation**: 0
 
 ## Qualification Audit Review
 
@@ -39,12 +45,6 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 ### Dependency Snapshot
 | task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
 | --- | --- | --- |
-
-- **Reviewer**: {reviewer-name}
-- **Review Time**: {timestamp}
-- **Scope**: {file-count and major modules}
-- **Overall Verdict**: {Approved / Changes Requested / Rejected}
-- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors / **Manual validation**: 0
 
 ## Inspection Coverage
 
