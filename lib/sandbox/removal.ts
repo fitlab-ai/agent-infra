@@ -895,14 +895,12 @@ function hasOwnedManagedRecoveryTombstone(
   source: string,
   kind: RemovalActionKind,
   journals: readonly SandboxRemovalJournal[],
-  finalizingPhase: SandboxRemovalJournal['phase'],
-  completedPhase: SandboxRemovalJournal['phase']
+  finalizingPhase: SandboxRemovalJournal['phase']
 ): boolean {
   const resolved = path.resolve(source);
   return journals.some((journal) => {
     const index = sandboxRemovalPhaseIndex(journal.phase);
-    if (index < sandboxRemovalPhaseIndex(finalizingPhase)
-      || index >= sandboxRemovalPhaseIndex(completedPhase)) return false;
+    if (index < sandboxRemovalPhaseIndex(finalizingPhase)) return false;
     const ownership = {
       version: 1 as const,
       targetDigest: journal.target.targetDigest,
@@ -927,14 +925,13 @@ function addManagedResource(
   pending: boolean,
   journals: readonly SandboxRemovalJournal[],
   actionKind: RemovalActionKind,
-  finalizingPhase: SandboxRemovalJournal['phase'],
-  completedPhase: SandboxRemovalJournal['phase']
+  finalizingPhase: SandboxRemovalJournal['phase']
 ): void {
-  if (!selected || !pending) return;
+  if (!selected) return;
   const resolved = path.resolve(source);
-  if (fs.existsSync(resolved)
+  if ((pending && fs.existsSync(resolved))
     || hasOwnedManagedRecoveryTombstone(
-      root, resolved, actionKind, journals, finalizingPhase, completedPhase
+      root, resolved, actionKind, journals, finalizingPhase
     )) {
     resources.push({ kind, path: resolved });
   }
@@ -951,13 +948,11 @@ function branchRecoveryTombstoneExists(
   config: SandboxConfig,
   branch: string,
   journals: readonly SandboxRemovalJournal[],
-  finalizingPhase: SandboxRemovalJournal['phase'],
-  completedPhase: SandboxRemovalJournal['phase']
+  finalizingPhase: SandboxRemovalJournal['phase']
 ): boolean {
   return journals.some((journal) => {
     const index = sandboxRemovalPhaseIndex(journal.phase);
-    if (index < sandboxRemovalPhaseIndex(finalizingPhase)
-      || index >= sandboxRemovalPhaseIndex(completedPhase)) return false;
+    if (index < sandboxRemovalPhaseIndex(finalizingPhase)) return false;
     const target = journal.target;
     if (target.branch !== branch || !target.removeWorktree || !target.removeBranch) return false;
     const expectedHead = branchPermitHead(branch, new Map(
@@ -1011,7 +1006,7 @@ export function buildRemovalResourceDisclosure(
     addManagedResource(
       remove, 'control-root', root, path.join(config.controlBase, config.project), true,
       removalPhasePending(journals, 'workspace-removed'), journals, 'workspace',
-      'workspace-finalizing', 'workspace-removed'
+      'workspace-finalizing'
     );
   }
 
@@ -1019,14 +1014,14 @@ export function buildRemovalResourceDisclosure(
   for (const root of workspaceViewRoots) {
     addManagedResource(
       remove, 'workspace-view', root, path.join(config.workspaceViewBase, config.project), true,
-      workspacePending, journals, 'workspace', 'workspace-finalizing', 'workspace-removed'
+      workspacePending, journals, 'workspace', 'workspace-finalizing'
     );
   }
   for (const worktree of worktrees) {
     const resources = selection.removeWorktree ? remove : preserve;
     addManagedResource(
       resources, 'worktree', worktree, config.worktreeBase, true, workspacePending,
-      journals, 'worktree', 'workspace-finalizing', 'workspace-removed'
+      journals, 'worktree', 'workspace-finalizing'
     );
   }
 
@@ -1034,9 +1029,9 @@ export function buildRemovalResourceDisclosure(
     '-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${target.effectiveBranch}`
   ]);
   const branchResources = selection.removeWorktree && selection.removeBranch ? remove : preserve;
-  if (removalPhasePending(journals, 'branch-removed') && (branchExists
+  if ((removalPhasePending(journals, 'branch-removed') && branchExists
     || branchRecoveryTombstoneExists(
-      config, target.effectiveBranch, journals, 'branch-finalizing', 'branch-removed'
+      config, target.effectiveBranch, journals, 'branch-finalizing'
     ))) {
     addResource(branchResources, 'branch', target.effectiveBranch);
   }
@@ -1045,21 +1040,21 @@ export function buildRemovalResourceDisclosure(
   for (const candidate of toolPaths) {
     addManagedResource(
       remove, 'tool', candidate, config.home, true, toolPending, journals,
-      'tool', 'tool-finalizing', 'tool-removed'
+      'tool', 'tool-finalizing'
     );
   }
   const shellPending = removalPhasePending(journals, 'shell-removed');
   for (const candidate of shellPaths) {
     addManagedResource(
       remove, 'shell', candidate, config.shellConfigBase, true, shellPending, journals,
-      'shell', 'shell-finalizing', 'shell-removed'
+      'shell', 'shell-finalizing'
     );
   }
   const sharePending = removalPhasePending(journals, 'share-removed');
   for (const candidate of sharePaths) {
     addManagedResource(
       selection.removeShare ? remove : preserve, 'share', candidate, config.shareBase,
-      true, sharePending, journals, 'share', 'share-finalizing', 'share-removed'
+      true, sharePending, journals, 'share', 'share-finalizing'
     );
   }
 
@@ -1828,7 +1823,20 @@ async function rmOneCore(
     for (const worktree of existingWorktrees) {
       const permit = permits.get(path.resolve(worktree));
       if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
-      verifyWorktreePermit(permit);
+      const workspacePhasePending = existingJournals.some((journal) => (
+        sandboxRemovalPhaseIndex(journal.phase) < sandboxRemovalPhaseIndex('workspace-removed')
+      ));
+      const worktreeTombstone = removalTombstonePath(targetDigest, 'worktree', worktree);
+      if (fs.existsSync(worktree)
+        || (workspacePhasePending && !isOwnedRemovalTombstone(config.worktreeBase, worktreeTombstone, {
+          version: 1,
+          targetDigest,
+          permitDigest: removalPermitDigest(permits),
+          kind: 'worktree',
+          source: worktree
+        }))) {
+        verifyWorktreePermit(permit);
+      }
     }
   }
 
