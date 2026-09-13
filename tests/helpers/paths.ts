@@ -2,20 +2,36 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const rootDir = fileURLToPath(new URL("../..", import.meta.url));
+const runtimeRootDir = fileURLToPath(new URL("../..", import.meta.url));
+const compiled = path.basename(runtimeRootDir) === "dist";
+const projectRootDir = compiled ? path.dirname(runtimeRootDir) : runtimeRootDir;
 
 function filePath(relativePath: string): string {
-  const directPath = path.join(rootDir, relativePath);
+  const directPath = path.join(projectRootDir, relativePath);
   if (fs.existsSync(directPath)) {
     return directPath;
   }
   if (relativePath.endsWith(".js")) {
-    const tsPath = path.join(rootDir, `${relativePath.slice(0, -3)}.ts`);
+    const tsPath = path.join(projectRootDir, `${relativePath.slice(0, -3)}.ts`);
     if (fs.existsSync(tsPath)) {
       return tsPath;
     }
   }
   return directPath;
+}
+
+function modulePath(relativePath: string): string {
+  if (!compiled) return filePath(relativePath);
+  const normalized = relativePath.replaceAll("\\", "/");
+  if (normalized.startsWith("lib/") || normalized.startsWith("bin/")) {
+    const compiledRelativePath = normalized.endsWith(".ts")
+      ? `${normalized.slice(0, -3)}.js`
+      : normalized;
+    if (compiledRelativePath.endsWith(".js")) {
+      return path.join(projectRootDir, "dist", compiledRelativePath);
+    }
+  }
+  return filePath(relativePath);
 }
 
 function exists(relativePath: string): boolean {
@@ -50,5 +66,6 @@ export {
   filePath,
   listFilesRecursive,
   listSkillNames,
+  modulePath,
   read
 };

@@ -14,6 +14,7 @@ import {
   filePath,
   gitSafeEnv,
   initIsolatedGitRepo,
+  modulePath,
   pathWithPrependedBin,
   read,
   writeNodeCommandShim
@@ -432,7 +433,7 @@ async function runPlatformSyncAdapter(
   }
 
   try {
-    const adapter = await import(pathToFileURL(filePath("lib/platform/verification-sync.ts")).href);
+    const adapter = await import(pathToFileURL(modulePath("lib/platform/verification-sync.ts")).href);
     return await adapter.check({ taskDir, config, artifactFile: undefined }, {
       repoRoot: repositoryRoot,
       loadTask(dir: string) {

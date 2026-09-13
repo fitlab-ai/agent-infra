@@ -7,6 +7,7 @@ import path from 'node:path';
 import semver from 'semver';
 
 import { classifyGitHubFailure, createGitHubClient, MINIMUM_GITHUB_CLI_VERSION, parseIncludedResponse } from '../../../lib/platform/github-client.ts';
+import { filePath } from '../../helpers.ts';
 
 test('GitHub client reads the CLI version without shell parsing', () => {
   const calls: string[][] = [];
@@ -112,7 +113,7 @@ test('the declared gh floor covers every gh flag the platform layer uses', () =>
     '--slurp': '2.48.0',
     closingIssuesReferences: '2.72.0'
   };
-  const dir = path.join(import.meta.dirname, '..', '..', '..', 'lib', 'platform');
+  const dir = filePath('lib/platform');
   // github-client.ts declares the floor itself; scanning it would match its own annotation.
   const callers = fs.readdirSync(dir).filter((entry) => entry.endsWith('.ts') && entry !== 'github-client.ts');
   assert.ok(callers.length > 0);

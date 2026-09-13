@@ -6,7 +6,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { CLI_PATH, INTERNAL_CLI_PATH, filePath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { CLI_PATH, INTERNAL_CLI_PATH, filePath, modulePath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import {
   createDirectHostExecutionContext,
   createSandboxExecutorExecutionContext,
@@ -441,7 +441,7 @@ function runSandboxClient(
 }
 
 function startSandboxFixtureBroker(fixture: SandboxFixture): ReturnType<typeof spawn> {
-  const serverModule = pathToFileURL(path.resolve('lib/sandbox/control/server.ts')).href;
+  const serverModule = pathToFileURL(modulePath('lib/sandbox/control/server.ts')).href;
   const script = [
     `import { serveSandboxControl } from '${serverModule}';`,
     'process.argv[1] = process.env.TEST_INTERNAL_CLI;',

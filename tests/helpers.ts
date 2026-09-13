@@ -1,4 +1,4 @@
-export { filePath, exists, read, listFilesRecursive, listSkillNames } from "./helpers/paths.ts";
+export { filePath, exists, read, listFilesRecursive, listSkillNames, modulePath } from "./helpers/paths.ts";
 export { CLI_PATH, INTERNAL_CLI_PATH, cliArgs, internalCliArgs, pathWithPrependedBin, envWithPrependedPath, sandboxControlSafeEnv } from "./helpers/cli.ts";
 export { gitSafeEnv, withGitSafeProcessEnv, initIsolatedGitRepo, listTrackedFiles } from "./helpers/git.ts";
 export { onPlatforms, supportsPosixModeBits, assertModeBits } from "./helpers/platform.ts";

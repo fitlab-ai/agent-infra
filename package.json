@@ -31,6 +31,9 @@
   "files": [
     "dist/",
     "!dist/**/*.map",
+    "!dist/scripts/",
+    "!dist/tests/",
+    "!dist/test-build-manifest.json",
     "bin/cli.ts",
     "bin/internal-cli.sh",
     "lib/",
@@ -63,6 +66,7 @@
   },
   "scripts": {
     "build": "node scripts/run-build.js",
+    "build:test": "node scripts/run-test-build.js",
     "demo:regen": "sh scripts/demo-regen.sh",
     "prepare": "git config core.hooksPath .git-hooks || true",
     "typecheck": "tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.jschecks.json --noEmit",

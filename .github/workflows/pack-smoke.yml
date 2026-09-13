@@ -40,8 +40,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Build test artifacts
+        run: npm run build:test
+
       - name: Verify native lock process lifecycle
-        run: node --experimental-strip-types --test tests/e2e/sandbox/native-file-lock.test.ts
+        run: node scripts/run-tests.js --skip-build "tests/e2e/sandbox/native-file-lock.test.ts"
 
       - name: Pack tarball
         shell: bash

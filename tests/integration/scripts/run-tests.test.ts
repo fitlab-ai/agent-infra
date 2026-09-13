@@ -9,6 +9,8 @@ import { EventEmitter } from 'node:events';
 import { filePath, onPlatforms } from '../../helpers.ts';
 import { sandboxControlSafeEnv } from '../../../lib/sandbox/control/server.ts';
 import { terminateProcessTree } from '../../../scripts/process-tree.js';
+import { validateManifest } from '../../../scripts/test-build-manifest.js';
+import { mapTestArguments } from '../../../scripts/run-tests.js';
 import {
   acquireTestRunLock,
   releaseTestRunLock,
@@ -56,6 +58,34 @@ test('fast smoke skips the build without changing the unit-test selection', () =
   assert.match(smoke, /tests\/unit\/\*\*\/\*\.test\.ts/);
 });
 
+test('test runner maps logical test selections to compiled tests at one boundary', () => {
+  assert.deepEqual(mapTestArguments([
+    'tests/unit/**/*.test.ts',
+    'tests/integration/scripts/run-tests.test.ts',
+    '--test-coverage-exclude=tests/**',
+    '--test-coverage-exclude', 'tests/fixtures/**',
+    'dist/tests/already-compiled.test.js',
+    '/tmp/external.test.ts',
+    'tests/fixtures/example.test.ts'
+  ]), {
+    args: [
+      'dist/tests/unit/**/*.test.js',
+      'dist/tests/integration/scripts/run-tests.test.js',
+      '--test-coverage-exclude=dist/tests/**',
+      '--test-coverage-exclude', 'tests/fixtures/**',
+      'dist/tests/already-compiled.test.js',
+      '/tmp/external.test.ts',
+      'tests/fixtures/example.test.ts'
+    ],
+    requiresTestBuild: true
+  });
+});
+
+test('test build manifest is current before compiled skip-build execution', () => {
+  const result = validateManifest(filePath('.'));
+  assert.equal(result.ok, true, result.ok ? '' : result.message);
+});
+
 test('test runner forwards the configured concurrency to node test', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-concurrency-'));
   const fixture = path.join(root, 'concurrency.test.mjs');
@@ -81,6 +111,7 @@ test('test runner forwards the configured concurrency to node test', () => {
     const index = execArgv.indexOf('--test-concurrency');
     assert.notEqual(index, -1);
     assert.equal(execArgv[index + 1], '7');
+    assert.equal(execArgv.includes('--experimental-strip-types'), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

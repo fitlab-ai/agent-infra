@@ -7,12 +7,12 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { acquireSandboxResourceLock } from '../../../lib/sandbox/control/native-file-lock.ts';
-import { filePath } from '../../helpers.ts';
+import { modulePath } from '../../helpers.ts';
 
 for (const termination of ['release', 'kill'] as const) {
   test(`native lock excludes other processes and recovers after ${termination}`, { timeout: 15_000 }, async (t) => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-lock-process-'));
-    const moduleUrl = pathToFileURL(filePath('dist/lib/sandbox/control/native-file-lock.js')).href;
+    const moduleUrl = pathToFileURL(modulePath('lib/sandbox/control/native-file-lock.ts')).href;
     const child = spawn(process.execPath, ['--input-type=module', '-e', `
       const { acquireSandboxResourceLock } = await import(process.argv[1]);
       const lock = acquireSandboxResourceLock('process-lock', { home: process.argv[2] });

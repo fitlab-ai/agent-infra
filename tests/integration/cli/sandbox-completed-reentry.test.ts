@@ -8,6 +8,7 @@ import { completedReentryView, prepareCompletedReentry, publishCompletedReentry 
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { mergeSandboxTaskView, taskViewAfterFinalization } from '../../../lib/sandbox/control/task-view.ts';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
+import { modulePath } from '../../helpers.ts';
 
 function fixture(t: TestContext) {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'completed-reentry-')));
@@ -89,8 +90,8 @@ for (const field of ['id', 'status'] as const) {
 for (const scenario of ['valid', 'task-id', 'source', 'missing-evidence', 'stale'] as const) {
   test(`broker restart revalidates completed identity: ${scenario}`, async (t) => {
     const f = fixture(t);
-    const { captureSandboxAuthority } = await import('../../../lib/sandbox/engines/authority.ts');
-    const { serveSandboxControl } = await import('../../../lib/sandbox/control/server.ts');
+    const { captureSandboxAuthority } = await import(modulePath('lib/sandbox/engines/authority.ts'));
+    const { serveSandboxControl } = await import(modulePath('lib/sandbox/control/server.ts'));
     const evidence = await prepareCompletedReentry(f.manifest, f.inspect);
     if (scenario !== 'stale') publishCompletedReentry(f.manifest, evidence);
     const statusPath = path.join(f.manifest.publicStatusDir, 'status.json');
@@ -112,7 +113,7 @@ for (const scenario of ['valid', 'task-id', 'source', 'missing-evidence', 'stale
     }
     const authorityEvidence = captureSandboxAuthority('native', {
       env: { DOCKER_CONTEXT: 'default' }, lockDomain: 'a'.repeat(64),
-      probe: (_cmd, args) => ({ status: 0, signal: null,
+      probe: (_cmd: string, args: string[]) => ({ status: 0, signal: null,
         stdout: JSON.stringify(args.at(-1) === '{{json .ID}}' ? 'fixture-daemon-id' : { ApiVersion: '1.50' }),
         stderr: '', pid: 1, output: [] })
     });

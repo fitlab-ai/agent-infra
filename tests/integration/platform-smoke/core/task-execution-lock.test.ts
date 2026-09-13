@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
-import { onPlatforms } from '../../../helpers.ts';
+import { modulePath, onPlatforms } from '../../../helpers.ts';
 import {
   TaskExecutionLockError,
   lockKey,
@@ -136,7 +137,7 @@ test('two processes cannot overlap callbacks for the same task key', async () =>
   const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lock-state-'));
   const ready = path.join(lockRoot, 'ready');
   const release = path.join(lockRoot, 'release');
-  const moduleUrl = new URL('../../../../lib/task/task-execution-lock.ts', import.meta.url).href;
+  const moduleUrl = pathToFileURL(modulePath('lib/task/task-execution-lock.ts')).href;
   const childCode = `
     import fs from 'node:fs';
     import { withTaskExecutionLock } from ${JSON.stringify(moduleUrl)};

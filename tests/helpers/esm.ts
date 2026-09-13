@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { filePath } from "./paths.ts";
+import { filePath, modulePath } from "./paths.ts";
 
 type RegistryEntry = {
   entry: string;
@@ -90,7 +90,7 @@ type PlatformSyncModule = {
 };
 
 async function loadFreshEsm<T = Record<string, unknown>>(relativePath: string): Promise<T> {
-  const moduleUrl = pathToFileURL(filePath(relativePath));
+  const moduleUrl = pathToFileURL(modulePath(relativePath));
   moduleUrl.searchParams.set("v", `${Date.now()}-${Math.random().toString(16).slice(2)}`);
   return import(moduleUrl.href) as Promise<T>;
 }
