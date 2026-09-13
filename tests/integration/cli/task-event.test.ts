@@ -196,6 +196,11 @@ function sha256File(filePath: string) {
   return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+function testTimestamp(offsetSeconds: number): string {
+  const value = new Date(Date.now() + offsetSeconds * 1000).toISOString();
+  return `${value.slice(0, 10)} ${value.slice(11, 19)}+00:00`;
+}
+
 function localArtifact(family: LocalArtifactFamily, suffix = '') {
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
@@ -1475,6 +1480,61 @@ test('completed approved review remains a no-op after the ledger changes', () =>
   assert.equal(replayed.status, 0, replayed.stderr);
   assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
+});
+
+test('review completion replay consumes a journal left after task write', () => {
+  const scenario = reviewScenarios[2];
+  const f = prepareReview(scenario, []);
+  const finalized = finalizeReview(f, scenario);
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+
+  const request = {
+    taskRef: f.id,
+    event: 'review-code.completed' as const,
+    agent: 'codex',
+    artifact: scenario.artifact,
+    verdict: 'approved' as const,
+    blockers: 0,
+    major: 0,
+    minor: 0,
+    manualValidation: 0,
+    initiator: 'model' as const,
+    requestId: `${f.id}:review-code-replay`,
+    reasonCode: 'user-request' as const
+  };
+  const intentPath = path.join(
+    f.root,
+    '.agents',
+    'workspace',
+    '.local-artifact-finalization-intents',
+    `${f.id}-${scenario.family}-${scenario.artifact}.json`
+  );
+  const originalRename = fs.renameSync;
+  let intentRenames = 0;
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to) === intentPath && ++intentRenames === 2) throw new Error('injected review intent consume failure');
+    return originalRename(from, to);
+  }) as typeof fs.renameSync;
+  let first;
+  try {
+    first = applyTaskEvent(request, {
+      repoRoot: f.root,
+      metadataProvider: () => ({ timestamp: testTimestamp(2), agentInfraVersion: 'v0.9.11-alpha.0' })
+    });
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.equal(first.status, 'failed');
+  assert.match(fs.readFileSync(f.file, 'utf8'), /Review Code \(Round 1\).*review-code\.md/);
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'commit-started');
+
+  const replayed = applyTaskEvent(request, {
+    repoRoot: f.root,
+    metadataProvider: () => ({ timestamp: testTimestamp(3), agentInfraVersion: 'v0.9.11-alpha.0' })
+  });
+  assert.equal(replayed.status, 'no-op');
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'consumed');
 });
 
 test('review-code event completes a supplemental round against the latest code artifact', () => {

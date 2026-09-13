@@ -326,7 +326,7 @@ function cleanupConsumedRecoveryFiles(repoRoot: string, candidate: IntermediateC
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(recovery, { withFileTypes: true }); } catch { return false; }
   for (const entry of entries) {
-    if (entry.isSymbolicLink() || !entry.isFile() || !['baseline.md', 'candidate.md', 'final.md'].includes(entry.name)) return false;
+    if (entry.isSymbolicLink() || !entry.isFile() || !['baseline.md', 'candidate.md', 'final.md', 'publish.md'].includes(entry.name)) return false;
   }
   try {
     for (const entry of entries) fs.unlinkSync(path.join(recovery, entry.name));

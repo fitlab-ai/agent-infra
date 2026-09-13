@@ -399,7 +399,20 @@ export function commitArtifactRecovery(
     if (canonicalSemanticDigest(sealed.bytes.toString('utf8')) !== intent.finalSemanticDigest) {
       fail('ARTIFACT_RECOVERY_CONFLICT', 'sealed artifact does not match the staged final semantic digest');
     }
-    fs.renameSync(context.finalPath, context.formalPath);
+    // Publish the bytes that were validated above. The sealed path is only a
+    // recovery input; renaming it directly would reopen a same-uid path swap
+    // between validation and publication.
+    const publishPath = path.join(path.dirname(context.finalPath), 'publish.md');
+    writeBytes(publishPath, sealed.bytes);
+    fs.chmodSync(publishPath, 0o400);
+    const publish = readStableFileSync(publishPath, {
+      maxBytes: MAX_ARTIFACT_BYTES,
+      expectedSha256: intent.finalArtifactSha256!
+    });
+    if (canonicalSemanticDigest(publish.bytes.toString('utf8')) !== intent.finalSemanticDigest) {
+      fail('ARTIFACT_RECOVERY_CONFLICT', 'publish artifact does not match the staged final semantic digest');
+    }
+    fs.renameSync(publishPath, context.formalPath);
     const published = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
     if (published.sha256 !== intent.finalArtifactSha256) fail('ARTIFACT_RECOVERY_CONFLICT', 'formal artifact does not match the staged final digest');
     const passed: ArtifactRecoveryIntent = { ...intent, state: 'passed', updatedAt: Date.now() };

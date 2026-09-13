@@ -110,6 +110,43 @@ test('artifact recovery publishes the validated snapshot when the candidate chan
   assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'passed');
 });
 
+test('artifact recovery publishes sealed bytes when final.md is swapped before rename', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const taskId = 'TASK-20260101-000008';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const artifact = path.join(taskDir, 'code.md');
+  const baseline = Buffer.from('baseline\n');
+  const candidate = Buffer.from('validated-final\n');
+  fs.writeFileSync(artifact, baseline);
+
+  const context = beginArtifactRecovery(
+    { taskId, family: 'code', artifact: 'code.md', round: 1, requestId: 'recovery-test-8' },
+    baseline,
+    { repoRoot, taskDir, recoveryId: 'abcde-00000000008' }
+  );
+  const staged = stageArtifactCandidate(context, candidate);
+  prepareArtifactRecoveryCommit(context, staged.candidateSha256, staged.semanticDigest);
+
+  const originalRename = fs.renameSync;
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to) === artifact) {
+      fs.chmodSync(context.finalPath, 0o644);
+      fs.writeFileSync(context.finalPath, 'unvalidated-final-race\n');
+    }
+    return originalRename(from, to);
+  }) as typeof fs.renameSync;
+  try {
+    const committed = commitArtifactRecovery(context);
+    assert.equal(committed.state, 'passed');
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.deepEqual(fs.readFileSync(artifact), candidate);
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'passed');
+});
+
 test('artifact recovery rejects a symlinked recovery-root ancestor before creating outside files', () => {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
   const external = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-external-'));
