@@ -798,7 +798,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   if (eventIdentity.phase === 'started' && !manual && completedRows.length > 0) return failed(normalized, { code: 'EVENT_ALREADY_COMPLETED', message: 'event identity is already completed' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
   const done = completedRows.find((item) => item.note === eventIdentity.note);
   if (eventIdentity.phase === 'completed' && done) {
-    if (eventIdentity.family.startsWith('review-') && normalized.artifact && normalized.round) {
+    if (!normalized.dryRun && eventIdentity.family.startsWith('review-') && normalized.artifact && normalized.round) {
       const recoveryError = reconcileReviewCompletionReplay(
         resolved.repoRoot,
         resolved.taskDir,
@@ -956,7 +956,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
         eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code',
         completedArtifact.name
       );
-      if (reviewFinalizationIntent?.state === 'commit-started') {
+      if (!normalized.dryRun && reviewFinalizationIntent?.state === 'commit-started') {
         const reconciled = reconcileArtifactRecovery(
           recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, reviewFinalizationIntent),
           { lockAlreadyHeld: true }

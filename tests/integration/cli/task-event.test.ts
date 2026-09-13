@@ -1537,6 +1537,93 @@ test('review completion replay consumes a journal left after task write', () => 
   assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'consumed');
 });
 
+test('review completion dry-run does not consume a passed recovery journal', () => {
+  const scenario = reviewScenarios[2];
+  const f = prepareReview(scenario, []);
+  const finalized = finalizeReview(f, scenario);
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+
+  const intentPath = path.join(
+    f.root,
+    '.agents',
+    'workspace',
+    '.local-artifact-finalization-intents',
+    `${f.id}-${scenario.family}-${scenario.artifact}.json`
+  );
+  const beforeTask = fs.readFileSync(f.file);
+  const beforeIntent = fs.readFileSync(intentPath);
+  const beforeMtime = fs.statSync(intentPath).mtimeMs;
+
+  const planned = completeReview(
+    f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 }, ['--dry-run']
+  );
+  assert.equal(planned.status, 0, planned.stderr || planned.stdout);
+  assert.equal(JSON.parse(planned.stdout).status, 'planned');
+  assert.deepEqual(fs.readFileSync(f.file), beforeTask);
+  assert.deepEqual(fs.readFileSync(intentPath), beforeIntent);
+  assert.equal(fs.statSync(intentPath).mtimeMs, beforeMtime);
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'passed');
+});
+
+test('review completion dry-run does not reconcile a commit-started recovery journal', () => {
+  const scenario = reviewScenarios[2];
+  const f = prepareReview(scenario, []);
+  const finalized = finalizeReview(f, scenario);
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+
+  const request = {
+    taskRef: f.id,
+    event: 'review-code.completed' as const,
+    agent: 'codex',
+    artifact: scenario.artifact,
+    verdict: 'approved' as const,
+    blockers: 0,
+    major: 0,
+    minor: 0,
+    manualValidation: 0,
+    initiator: 'model' as const,
+    requestId: `${f.id}:review-code-dry-run-commit-started`,
+    reasonCode: 'user-request' as const
+  };
+  const intentPath = path.join(
+    f.root,
+    '.agents',
+    'workspace',
+    '.local-artifact-finalization-intents',
+    `${f.id}-${scenario.family}-${scenario.artifact}.json`
+  );
+  const originalRename = fs.renameSync;
+  let intentRenames = 0;
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to) === intentPath && ++intentRenames === 2) throw new Error('injected review intent consume failure');
+    return originalRename(from, to);
+  }) as typeof fs.renameSync;
+  try {
+    const first = applyTaskEvent(request, {
+      repoRoot: f.root,
+      metadataProvider: () => ({ timestamp: testTimestamp(2), agentInfraVersion: 'v0.9.11-alpha.0' })
+    });
+    assert.equal(first.status, 'failed');
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'commit-started');
+  const beforeTask = fs.readFileSync(f.file);
+  const beforeIntent = fs.readFileSync(intentPath);
+  const beforeMtime = fs.statSync(intentPath).mtimeMs;
+
+  const replayed = applyTaskEvent({ ...request, dryRun: true }, {
+    repoRoot: f.root,
+    metadataProvider: () => ({ timestamp: testTimestamp(3), agentInfraVersion: 'v0.9.11-alpha.0' })
+  });
+  assert.equal(replayed.status, 'no-op');
+  assert.deepEqual(fs.readFileSync(f.file), beforeTask);
+  assert.deepEqual(fs.readFileSync(intentPath), beforeIntent);
+  assert.equal(fs.statSync(intentPath).mtimeMs, beforeMtime);
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'commit-started');
+});
+
 test('review-code event completes a supplemental round against the latest code artifact', () => {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
