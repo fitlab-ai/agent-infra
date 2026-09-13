@@ -19,7 +19,7 @@ import {
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 import { inspectCompletionArtifacts } from '../task/finalization-artifacts.ts';
-import { TaskExecutionLockError, transitionLeaseHeld, withRepositoryMutationLock, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { resolveDeliveryTarget } from '../task/delivery-target.ts';
 import { mergeOperationWarnings, type OperationWarning } from '../task/operation-outcome.ts';
 import {
@@ -391,24 +391,6 @@ async function resolvedContext(taskRef: string, options: InspectionOptions) {
   return { ok: true as const, resolved, content, frontmatter, fact, issueIdentity, issueNumber, prIdentity, prNumber, client, context, provider: loaded.value.provider, providerType: loaded.value.providerType, loadedContext: loaded.value };
 }
 
-async function withPullRequestWriterLock<T>(
-  taskRef: string,
-  options: SharedOptions,
-  owner: string,
-  callback: () => Promise<T>,
-  onBusy: (taskId: string, error: TaskExecutionLockError) => T
-): Promise<T> {
-  if (transitionLeaseHeld()) return callback();
-  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
-  if (!resolved.ok) return callback();
-  try {
-    return await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, owner, callback);
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    return onBusy(resolved.taskId, error);
-  }
-}
-
 function normalizeProviderPullRequest(
   remote: ProviderChangeRequestSnapshot,
   repository: string,
@@ -592,7 +574,7 @@ function inLabelResource(
   return { kind, number: resourceIdentityNumber(identity), identity, before: [...before].sort(), expected: [...expected].sort(), after: after ? [...after].sort() : null, effect };
 }
 
-async function syncPlatformPullRequestInLabelsUnlocked(prNumber: number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
+async function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
   const cwd = path.resolve(options.cwd || process.cwd());
   const loaded = await resolvePlatformProviderContext({ cwd, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
@@ -869,7 +851,7 @@ function bindIdentity(
   }, { repoRoot: base.resolved.repoRoot, metadataProvider: () => metadata });
 }
 
-async function bindPlatformPullRequestUnlocked(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
+async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.fact) return result('failed', base.resolved.taskId, base.issueNumber, null, {
@@ -931,7 +913,7 @@ function externalIdentityEvidenceNote(
   ].join('; ');
 }
 
-async function resolveExternalPullRequestUnlocked(taskRef: string, options: ResolveExternalOptions): Promise<ExternalPullRequestResult> {
+async function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOptions): Promise<ExternalPullRequestResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return externalResult(base.output);
   if (!base.fact) return externalResult(result('failed', base.resolved.taskId, base.issueNumber, null, {
@@ -1093,30 +1075,6 @@ async function resolveExternalPullRequestUnlocked(taskRef: string, options: Reso
     operations: [{ name: 'task:bind-external-pr', status: operationStatus, reasonCode: null }],
     error: null
   }), { mode: 'external', authorization: selected.source, candidates: selected.candidates, eligible: selected.eligible, selected: selectedPullRequest });
-}
-
-async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
-  return withPullRequestWriterLock(
-    taskRef,
-    options,
-    'platform-pr.bind',
-    () => bindPlatformPullRequestUnlocked(taskRef, options),
-    (taskId, error) => result('blocked', taskId, null, null, {
-      error: { code: error.code, message: error.message, retryable: true }
-    })
-  );
-}
-
-async function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOptions): Promise<ExternalPullRequestResult> {
-  return withPullRequestWriterLock(
-    taskRef,
-    options,
-    'platform-pr.resolve-external',
-    () => resolveExternalPullRequestUnlocked(taskRef, options),
-    (taskId, error) => externalResult(result('blocked', taskId, null, null, {
-      error: { code: error.code, message: error.message, retryable: true }
-    }))
-  );
 }
 
 async function createPlatformPullRequest(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
@@ -1284,7 +1242,7 @@ async function createExternalPullRequest(
   }), { kind: 'created', createdByCurrentOperation: true });
 }
 
-async function syncPlatformPullRequestUnlocked(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
+async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   const softenFailure = (output: PullRequestResult): PullRequestResult => {
     const authorityError = output.error?.code.startsWith('IN_LABEL_SYNC') || output.error?.code.startsWith('PR_IDENTITY');
@@ -1446,33 +1404,6 @@ async function syncPlatformPullRequestUnlocked(taskRef: string, options: SyncOpt
       error: null
     }));
   }
-}
-
-async function syncPlatformPullRequestInLabels(prNumber: number, options: SharedOptions & { dryRun?: boolean } = {}): Promise<PullRequestResult> {
-  const cwd = path.resolve(options.cwd || process.cwd());
-  if (transitionLeaseHeld() || options.dryRun) {
-    return syncPlatformPullRequestInLabelsUnlocked(prNumber, options);
-  }
-  try {
-    return await withRepositoryMutationLock(cwd, () => syncPlatformPullRequestInLabelsUnlocked(prNumber, options));
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    return result('blocked', null, null, prNumber, {
-      error: { code: error.code, message: error.message, retryable: true }
-    });
-  }
-}
-
-async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
-  return withPullRequestWriterLock(
-    taskRef,
-    options,
-    'platform-pr.sync',
-    () => syncPlatformPullRequestUnlocked(taskRef, options),
-    (taskId, error) => result('blocked', taskId, null, null, {
-      error: { code: error.code, message: error.message, retryable: true }
-    })
-  );
 }
 
 function readProjectPrFlow(repoRoot: string): 'required' | 'disabled' | undefined {
