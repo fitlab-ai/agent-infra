@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
-import { modulePath } from '../../helpers.ts';
 
 // picocolors freezes its color-support decision at module-load time, and
 // loadFreshEsm only cache-busts the target module (not the bare 'picocolors'
@@ -10,7 +8,7 @@ import { modulePath } from '../../helpers.ts';
 // fresh child process with color forced on (FORCE_COLOR=1, NO_COLOR removed).
 // This test fails if formatTable forgets to wrap even data rows in pc.dim.
 test('formatTable zebra: even data rows are dim-wrapped when color is forced on', () => {
-  const tableUrl = pathToFileURL(modulePath('lib/table.ts')).href;
+  const tableUrl = new URL('../../../lib/table.ts', import.meta.url).href;
   const script = [
     `import { formatTable } from ${JSON.stringify(tableUrl)};`,
     `const rows = [['1', 'a'], ['2', 'b'], ['3', 'c'], ['4', 'd']];`,

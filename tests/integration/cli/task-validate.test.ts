@@ -6,13 +6,13 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 import { gitSafeEnv, initIsolatedGitRepo } from '../../helpers/git.ts';
-import { envWithPrependedPath, modulePath, sandboxControlSafeEnv, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
+import { envWithPrependedPath, sandboxControlSafeEnv, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
 import { sandboxControlPaths } from '../../../lib/sandbox/workspace-view.ts';
 import { SANDBOX_CONTROL_STATUS_STALE_MS } from '../../../lib/sandbox/control/protocol.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 
 const SHORT_ID_SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
-const internalCli = modulePath('bin/internal-cli.ts');
+const internalCli = path.resolve('bin/internal-cli.ts');
 const CANONICAL_AGENT_CLIENTS = [
   'claude-code',
   'codex',

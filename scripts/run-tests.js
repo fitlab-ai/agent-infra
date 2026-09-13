@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from './process-tree.js';
 import { acquireTestRunLock, releaseTestRunLock, testRunLockEnv } from './test-run-lock.js';
 import { testConcurrencyFromEnv } from './test-concurrency.js';
-import { validateManifest } from './test-build-manifest.js';
 
 const env = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => {
@@ -21,6 +20,9 @@ const env = Object.fromEntries(
 );
 const testIsolationModule = fileURLToPath(new URL('./test-status-mount-isolation.cjs', import.meta.url));
 env.NODE_OPTIONS = [env.NODE_OPTIONS, `--require=${testIsolationModule}`].filter(Boolean).join(' ');
+const args = process.argv.slice(2);
+const skipBuild = args[0] === '--skip-build';
+if (skipBuild) args.shift();
 const signals = process.platform === 'win32'
   ? ['SIGINT', 'SIGTERM']
   : ['SIGHUP', 'SIGINT', 'SIGTERM'];
@@ -127,104 +129,35 @@ async function stopHostControlTestService() {
   hostControlReadyDir = undefined;
 }
 
-function normalizeArgument(value) {
-  return value.replaceAll('\\', '/');
-}
-
-function isLogicalTestSelection(value) {
-  const normalized = normalizeArgument(value);
-  return normalized.startsWith('tests/')
-    && !normalized.startsWith('tests/fixtures/')
-    && normalized.endsWith('.test.ts');
-}
-
-function mapLogicalTestSelection(value) {
-  const normalized = normalizeArgument(value);
-  if (!isLogicalTestSelection(normalized)) return value;
-  return `dist/${normalized.slice(0, -3)}.js`;
-}
-
-function mapCoverageValue(value) {
-  const normalized = normalizeArgument(value);
-  if ((normalized === 'tests' || normalized.startsWith('tests/')) && !normalized.startsWith('tests/fixtures/')) {
-    return `dist/${normalized}`;
-  }
-  return value;
-}
-
-function mapTestArguments(inputArgs) {
-  const mapped = [];
-  let requiresTestBuild = false;
-  for (let index = 0; index < inputArgs.length; index += 1) {
-    const value = inputArgs[index];
-    if (value === '--test-coverage-exclude') {
-      mapped.push(value);
-      const next = inputArgs[index + 1];
-      if (next !== undefined) {
-        mapped.push(mapCoverageValue(next));
-        requiresTestBuild ||= mapCoverageValue(next) !== next;
-        index += 1;
-      }
-      continue;
-    }
-    if (value.startsWith('--test-coverage-exclude=')) {
-      const coverageValue = value.slice('--test-coverage-exclude='.length);
-      mapped.push(`--test-coverage-exclude=${mapCoverageValue(coverageValue)}`);
-      requiresTestBuild ||= mapCoverageValue(coverageValue) !== coverageValue;
-      continue;
-    }
-    const next = mapLogicalTestSelection(value);
-    requiresTestBuild ||= next !== value || normalizeArgument(value).startsWith('dist/tests/');
-    mapped.push(next);
-  }
-  return { args: mapped, requiresTestBuild };
-}
-
-async function main() {
-  const args = process.argv.slice(2);
-  const skipBuild = args[0] === '--skip-build';
-  if (skipBuild) args.shift();
-  const mapped = mapTestArguments(args);
+try {
   const testConcurrency = testConcurrencyFromEnv(env);
   const projectRoot = fileURLToPath(new URL('..', import.meta.url));
   testRunLock = await acquireTestRunLock(projectRoot);
   Object.assign(env, testRunLockEnv(testRunLock));
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  if (skipBuild && mapped.requiresTestBuild) {
-    const manifest = validateManifest(projectRoot);
-    if (manifest.ok === false) throw new Error(manifest.message);
+  const buildSucceeded = skipBuild || finish(await run(npm, ['run', 'build']));
+  if (buildSucceeded) {
+    await startHostControlTestService(projectRoot);
+    finish(await run(process.execPath, [
+      '--experimental-strip-types',
+      '--no-warnings',
+      '--test',
+      '--test-concurrency',
+      String(testConcurrency),
+      ...args
+    ]));
   }
-  const buildSucceeded = skipBuild
-    ? true
-    : finish(await run(npm, ['run', 'build'])) && finish(await run(npm, ['run', 'build:test']));
-  if (!buildSucceeded) return;
-  await startHostControlTestService(projectRoot);
-  finish(await run(process.execPath, [
-    '--no-warnings',
-    '--test',
-    '--test-concurrency',
-    String(testConcurrency),
-    ...mapped.args
-  ]));
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    await main();
-  } catch (error) {
-    if (receivedSignal) {
-      finish({ code: null, signal: receivedSignal });
-    } else {
-      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-      process.exitCode = 1;
-    }
-  } finally {
-    await stopHostControlTestService();
-    releaseTestRunLock(testRunLock);
-    for (const signal of signals) {
-      process.off(signal, forwardSignal);
-    }
+} catch (error) {
+  if (receivedSignal) {
+    finish({ code: null, signal: receivedSignal });
+  } else {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+} finally {
+  await stopHostControlTestService();
+  releaseTestRunLock(testRunLock);
+  for (const signal of signals) {
+    process.off(signal, forwardSignal);
   }
 }
-
-export { isLogicalTestSelection, mapCoverageValue, mapLogicalTestSelection, mapTestArguments };

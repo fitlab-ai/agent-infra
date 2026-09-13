@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { filePath } from "./paths.ts";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = filePath(".");
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 // =====================================================================
 // CRITICAL: tests that spawn real `git` commands MUST use gitSafeEnv()

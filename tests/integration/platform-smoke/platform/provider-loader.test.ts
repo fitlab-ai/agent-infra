@@ -4,14 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   clearProviderSessions,
   loadPlatformProvider
 } from '../../../../lib/platform/provider-loader.ts';
-import { filePath } from '../../../helpers.ts';
 
-const fixtureRoot = filePath('tests/fixtures/platform-providers');
+const fixtureRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../fixtures/platform-providers');
 
 function repository(): string {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'platform-provider-')));

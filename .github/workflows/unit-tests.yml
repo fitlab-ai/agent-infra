@@ -43,9 +43,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Build test artifacts
-        run: npm run build:test
-
       - name: Typecheck
         run: npm run typecheck
 
@@ -99,9 +96,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Build test artifacts
-        run: npm run build:test
-
       - name: Run integration tests
         run: node scripts/run-tests.js --skip-build "tests/integration/**/*.test.ts"
 
@@ -131,9 +125,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      - name: Build test artifacts
-        run: npm run build:test
 
       - name: Run e2e tests
         run: node scripts/run-tests.js --skip-build "tests/e2e/**/*.test.ts"

@@ -84,9 +84,6 @@ test("package metadata supports scoped npm publishing", () => {
   assert.deepEqual(pkg.files, [
     "dist/",
     "!dist/**/*.map",
-    "!dist/scripts/",
-    "!dist/tests/",
-    "!dist/test-build-manifest.json",
     "bin/cli.ts",
     "bin/internal-cli.sh",
     "lib/",

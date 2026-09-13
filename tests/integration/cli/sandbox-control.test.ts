@@ -3,7 +3,6 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import test, { type TestContext } from 'node:test';
 import {
   requestCodexControllerClose,
@@ -48,7 +47,7 @@ import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
 import { taskCreateOutputUnavailableResult } from '../../../lib/task/create-service.ts';
 import { semanticDigest, sha256Content } from '../../../lib/task/local-artifact-finalization.ts';
-import { modulePath, onPlatforms } from '../../helpers.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 
 function waitForFile(filePath: string, timeoutMs: number): void {
@@ -271,9 +270,8 @@ function runTaskFinalizationClient(params: {
   generation: string;
   timeoutMs: number;
 }): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
-  const clientModule = pathToFileURL(modulePath('lib/sandbox/control/client.ts')).href;
   const script = [
-    `import { requestSandboxTaskFinalization } from ${JSON.stringify(clientModule)};`,
+    "import { requestSandboxTaskFinalization } from './lib/sandbox/control/client.ts';",
     'try {',
     '  const response = requestSandboxTaskFinalization({',
     "    agent: 'codex',",
@@ -1251,7 +1249,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
   writeSandboxControlIdentitySentinel(statusDir, {
     version: 1, mode: 'branch-only', taskId: null, generation: 'response-generation', controlRootId: 'a'.repeat(96)
   });
-  const clientModule = pathToFileURL(modulePath('lib/sandbox/control/client.ts')).href;
+  const clientModule = path.resolve('lib/sandbox/control/client.ts');
   const runClient = (): CollectedChild => {
     const script = `
       import { requestSandboxControl } from ${JSON.stringify(clientModule)};
@@ -1369,7 +1367,7 @@ test('task-finalization client exposes accepted result loss as a structured unkn
     version: 1, mode: 'task-bound', taskId: 'TASK-20260809-010203', generation, controlRootId: 'a'.repeat(96)
   });
   const client = collectChild(spawn(process.execPath, [
-    '--experimental-strip-types', '--no-warnings', modulePath('bin/internal-cli.ts'),
+    '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'),
     'sandbox-control', 'client', 'task-finalization', '08', 'complete', '--agent', 'codex'
   ], {
     cwd: path.resolve('.'),
@@ -1501,7 +1499,7 @@ test('task-bound finalization rejects a new request after accepted response loss
         manifestPath,
         request: JSON.parse(fs.readFileSync(requestPath, 'utf8')),
         requestPath,
-      internalCliPath: modulePath('bin/internal-cli.ts')
+        internalCliPath: path.resolve('bin/internal-cli.ts')
       });
       fs.writeFileSync(path.join(responsesDir, `${request.id}.accepted.json`), `${JSON.stringify({
         version: 2, id: request.id, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
@@ -1644,7 +1642,7 @@ test('task-finalization normal publication fails closed on a conflicting termina
       timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1_000 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
-      internalCliPath: modulePath('bin/internal-cli.ts')
+      internalCliPath: path.resolve('bin/internal-cli.ts')
     });
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     clientResult = runTaskFinalizationClient({
@@ -1689,7 +1687,7 @@ test('task-finalization normal publication retains processing when the receipt d
       timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
-      internalCliPath: modulePath('bin/internal-cli.ts')
+      internalCliPath: path.resolve('bin/internal-cli.ts')
     });
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     clientResult = runTaskFinalizationClient({
@@ -1732,7 +1730,7 @@ test('task-finalization settles and commits the canonical terminal before gracef
       timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
-      internalCliPath: modulePath('bin/internal-cli.ts')
+      internalCliPath: path.resolve('bin/internal-cli.ts')
     });
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     clientResult = runTaskFinalizationClient({
@@ -1777,7 +1775,7 @@ test('intermediate cleanup accepts the persistent terminal after broker processi
       timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
-      internalCliPath: modulePath('bin/internal-cli.ts')
+      internalCliPath: path.resolve('bin/internal-cli.ts')
     });
     await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     clientResult = runTaskFinalizationClient({
@@ -1831,7 +1829,7 @@ test('task-finalization graceful shutdown recovers a receipt before result evide
       timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
-      internalCliPath: modulePath('bin/internal-cli.ts'),
+      internalCliPath: path.resolve('bin/internal-cli.ts'),
       prepareExecution: async (params) => {
         const prepared = await prepareSandboxControlExecution(params);
         return {
@@ -1896,7 +1894,7 @@ test('task-finalization graceful shutdown retains recovery identity when executo
       timing: { ...DEFAULT_SANDBOX_CONTROL_TIMING, controlTickMs: 1 },
       inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
       bindingCheck: () => null,
-      internalCliPath: modulePath('bin/internal-cli.ts'),
+      internalCliPath: path.resolve('bin/internal-cli.ts'),
       prepareExecution: async (params) => {
         const prepared = await prepareSandboxControlExecution(params);
         return {
@@ -1946,7 +1944,7 @@ test('task-finalization graceful shutdown retains recovery identity when executo
 
 for (const shortIdLength of [2, 3]) {
 test(`sandbox control client and broker exchange a task-bound response with short-id width ${shortIdLength}`, async () => {
-  const internalCliPath = modulePath('bin/internal-cli.ts');
+  const internalCliPath = path.resolve('bin/internal-cli.ts');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
   const channelDir = path.join(root, 'channel');
   const manifestPath = path.join(root, 'manifest.json');
@@ -1999,7 +1997,7 @@ test(`sandbox control client and broker exchange a task-bound response with shor
   const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', '--input-type=module', '--eval', `
-      import { serveSandboxControl } from ${JSON.stringify(pathToFileURL(modulePath('lib/sandbox/control/server.ts')).href)};
+      import { serveSandboxControl } from ${JSON.stringify(new URL('../../../lib/sandbox/control/server.ts', import.meta.url).href)};
       await serveSandboxControl(${JSON.stringify(manifestPath)}, undefined, {
         internalCliPath: ${JSON.stringify(internalCliPath)},
         inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} })
@@ -2200,7 +2198,7 @@ exit 1
   });
   const child = spawn(
     process.execPath,
-    ['--experimental-strip-types', '--no-warnings', modulePath('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
+    ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
     { cwd: path.resolve('.'), stdio: 'ignore', env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}` } }
   );
   try {
@@ -2427,7 +2425,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   });
   const child = spawn(
     process.execPath,
-    ['--experimental-strip-types', '--no-warnings', modulePath('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
+    ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
     { cwd: path.resolve('.'), stdio: 'ignore' }
   );
   try {
@@ -2549,7 +2547,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   writeSandboxControlPayload(controlManifest, recoverableId, { stdout: 'lost output', stderr: '' });
   const child = spawn(
     process.execPath,
-    ['--experimental-strip-types', '--no-warnings', modulePath('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
+    ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
     { cwd: path.resolve('.'), stdio: 'ignore' }
   );
   try {
@@ -2634,7 +2632,7 @@ test('broker recovery returns inspectable task-create output when the payload is
     await server;
 
     const recovered = spawnSync(process.execPath, [
-      '--experimental-strip-types', '--no-warnings', modulePath('bin/internal-cli.ts'), 'sandbox-control', 'recover', requestId
+      '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'recover', requestId
     ], {
       cwd: path.resolve('.'),
       encoding: 'utf8',

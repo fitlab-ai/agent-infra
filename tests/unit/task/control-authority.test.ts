@@ -21,7 +21,6 @@ import {
   validateLifecycleRecoveryAttestation
 } from '../../../lib/task/control-authority.ts';
 import { writeArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
-import { modulePath } from '../../helpers.ts';
 
 const build = {
   protocolVersion: 3,
@@ -157,7 +156,7 @@ test('lifecycle recovery compensates a committed task event across processes wit
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   const taskPath = path.join(taskDir, 'task.md');
   const sourcePath = path.resolve('lib/task/control-authority.ts');
-  const capabilityStoreUrl = pathToFileURL(modulePath('lib/agent-clients/adapters/codex-lifecycle/capability-store.ts')).href;
+  const capabilityStoreUrl = pathToFileURL(path.resolve('lib/agent-clients/adapters/codex-lifecycle/capability-store.ts')).href;
   const sourceUrl = pathToFileURL(sourcePath).href;
   const initialTask = [
     '---',

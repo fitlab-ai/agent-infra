@@ -5,14 +5,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { modulePath } from '../../helpers.ts';
 
 import { canonicalTaskCreateCandidate, validateTaskCreateCandidate } from '../../../lib/task/create.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 
-const internalCli = modulePath('bin/internal-cli.ts');
+const internalCli = path.resolve('bin/internal-cli.ts');
 const hostEnvironment = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => !key.startsWith('AGENT_INFRA_CONTROL_')
     && key !== 'AGENT_INFRA_TASK_ID'

@@ -3,11 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
-import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
 import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
-import { modulePath } from '../../helpers.ts';
 
 const fixtureRoots = new Set<string>();
 after(() => {
@@ -398,7 +396,7 @@ test('Codex capability serializes concurrent attestation writers', async () => {
       });
     })().catch((error) => { throw error; });
   `;
-  const moduleUrl = pathToFileURL(modulePath('lib/agent-clients/adapters/codex-lifecycle/capability-store.ts')).href;
+  const moduleUrl = new URL('../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts', import.meta.url).href;
   const workers = [0, 1].map((index) => new Worker(workerSource, {
     eval: true,
         workerData: { root, capabilityRef: armed.capabilityRef, build, buffer: state.buffer, index, moduleUrl }

@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
@@ -13,7 +12,7 @@ import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../../li
 import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-executor.ts';
 import { createTaskWorkflowRequest } from '../../../lib/sandbox/control/task-workflow.ts';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
-import { modulePath, onPlatforms } from '../../helpers.ts';
+import { onPlatforms } from '../../helpers.ts';
 import { startHostControlServer } from '../../../lib/host-control/server.ts';
 
 const taskId = 'TASK-20260101-000001';
@@ -173,8 +172,8 @@ for (const operation of ['finalize-local', 'repair'] as const) {
       // A child bounds the regression itself: blocking open must not hang the test runner.
       const script = `
         import fs from 'node:fs';
-        import { executeTaskWorkflow } from ${JSON.stringify(pathToFileURL(modulePath('lib/sandbox/control/workflow-executor.ts')).href)};
-        import { createTaskWorkflowRequest } from ${JSON.stringify(pathToFileURL(modulePath('lib/sandbox/control/task-workflow.ts')).href)};
+        import { executeTaskWorkflow } from ${JSON.stringify(new URL('../../../lib/sandbox/control/workflow-executor.ts', import.meta.url).href)};
+        import { createTaskWorkflowRequest } from ${JSON.stringify(new URL('../../../lib/sandbox/control/task-workflow.ts', import.meta.url).href)};
         const manifest = ${JSON.stringify(f.manifest)};
         const args = [${JSON.stringify(taskId)}, ${JSON.stringify(operation)}, '--family', 'plan', '--artifact', 'plan.md'];
         if (${JSON.stringify(operation)} === 'repair') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
