@@ -51,9 +51,9 @@ import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-
 import { verifyTaskEvent } from './verification.ts';
 import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import {
-  findArtifactRepairIntentsByOperation,
-  writeArtifactRepairIntent,
-  type ArtifactRepairIntent
+  findArtifactRecoveryIntentsByOperation,
+  writeArtifactRecoveryIntent,
+  type ArtifactRecoveryIntent
 } from './artifact-repair-intent.ts';
 import {
   computeLifecycleBuildIdentity,
@@ -339,7 +339,7 @@ export function queryLifecycleRecoveryOperation(
   const store = options.capabilityStore ?? createCodexCapabilityStore();
   const registry = authorityOperationMap.get(store);
   const known = [...(registry?.values() ?? [])].filter((value) => value.operationId === operationId);
-  const intents = options.repoRoot ? findArtifactRepairIntentsByOperation(options.repoRoot, operationId) : [];
+  const intents = options.repoRoot ? findArtifactRecoveryIntentsByOperation(options.repoRoot, operationId) : [];
   const capabilities = store.findByRecoveryOperation(operationId);
   const phaseMap = new Map<string, LifecycleRecoveryOperationQueryV1['phases'][number]>();
   for (const capability of capabilities) {
@@ -422,7 +422,7 @@ function lifecycleRecoveryEventCommitted(
 }
 
 function lifecycleRecoveryIntentMatches(
-  intent: ArtifactRepairIntent,
+  intent: ArtifactRecoveryIntent,
   selector: LifecycleAuthorityRequestV1
 ): boolean {
   return intent.taskId === selector.taskId
@@ -479,19 +479,19 @@ export function recoverLifecycleRecoveryOperation(
   if (!phase) {
     throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_PHASE_MISSING', 'durable task completion phase is missing');
   }
-  const intents = findArtifactRepairIntentsByOperation(options.repoRoot, selector.operationId)
+  const intents = findArtifactRecoveryIntentsByOperation(options.repoRoot, selector.operationId)
     .filter((intent) => intent.taskId === selector.taskId
       && intent.family === selector.family
       && intent.artifact === selector.artifact);
   if (intents.length !== 1) {
-    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_INTENT_INVALID', 'durable artifact repair intent does not identify this task event');
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_INTENT_INVALID', 'durable artifact recovery intent does not identify this task event');
   }
   const intent = intents[0]!;
   if (!lifecycleRecoveryIntentMatches(intent, selector)
     || intent.phase !== selector.phase
     || intent.requestId !== selector.lifecycleRequestId
     || intent.authorityDigest === null) {
-    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_INTENT_INVALID', 'durable artifact repair intent does not match the recovery request');
+    throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_INTENT_INVALID', 'durable artifact recovery intent does not match the recovery request');
   }
   if (!lifecycleRecoveryEventCommitted(selector, options.repoRoot)) {
     throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_COMMIT_UNCONFIRMED', 'task completion is not durably present; compensation is not allowed');
@@ -505,7 +505,7 @@ export function recoverLifecycleRecoveryOperation(
     throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_STATE_INVALID', 'consumed capability has an unconsumed completion phase');
   }
   if (intent.state !== 'consumed') {
-    writeArtifactRepairIntent(options.repoRoot, {
+    writeArtifactRecoveryIntent(options.repoRoot, {
       ...intent,
       state: 'consumed',
       updatedAt: (options.now ?? Date.now)()

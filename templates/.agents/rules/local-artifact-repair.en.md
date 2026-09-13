@@ -1,57 +1,62 @@
-# General Rule - Model-Driven Local Artifact Repair
+# General Rule - Model-Driven Local Artifact Recovery
 
-This rule applies when `analyze-task`, `plan-task`, or `code-task` handles **the same controlled local artifact** before its completed event, and when `review-analysis`, `review-plan`, or `review-code` handles a finalizer failure for **the same controlled review artifact**. It does not apply to `task.md`, the ledger, receipts, source code, Git, platform resources, or lifecycle state.
+This rule covers the pre-completion gate for `analyze-task`, `plan-task`, and `code-task`, plus the summary finalizers for the three review skills. It handles one canonical artifact in the current task directory only. It does not authorize changes to `task.md`, ledgers, receipts, source code, Git, platform resources, or lifecycle state.
 
-## Pre-completion gate for analysis, plan, and code artifacts
+## Pre-completion gate
 
-- `analyze-task`, `plan-task`, and `code-task` must call `task-artifact ... finalize-local` before publishing a completed event; pass only that call's `artifactSha256` and `semanticDigest` to the completed event.
-- `finalize-local` does not modify the artifact or task state, but it writes a one-shot local provenance intent in the repository workspace. After `failed`, the model may make one minimal edit in the same artifact only when `repairable=true` and the diagnostic explicitly describes one provably safe structural operation (the current shared engine operations are `replace-line` and `insert-section`), then rerun the same call completely; count each byte-changing edit, up to 8.
-- The first repairable failure's semantic digest is retained in that intent; a later `passed` result must match the baseline, and the completed event must verify and atomically transition the same intent to `consumed` before writing `task.md` under the task lock. A consumption failure must not write the task; the consumed intent is durable and retryable, so no failure-prone post-write deletion is attempted. Do not replace a failed baseline with a newly computed digest or publish a completed event without the finalizer.
-- After `failed`, no progress, or a repeated diagnostic or fingerprint, do not publish a completed event. After `passed`, do not rescan or manually write summary data.
+- Run the applicable finalizer before a completed event; pass only that invocation's `artifactSha256` and `semanticDigest` to the event.
+- When artifact content is invalid, the finalizer returns a controlled `recovery` with a `recoveryId`, `candidatePath`, and baseline digests. The formal artifact remains unchanged until recovery commit.
+- After the mechanical safety gates pass, the model may edit only the returned `candidatePath`. After each byte-changing edit, rerun the complete finalizer with the same task, stage/family, artifact, and `--recovery-id`. Never edit the formal artifact directly and call it a candidate.
+- A successful finalizer commits through `finalize-ready → commit-started → passed`; completed events accept only matching `passed` final digests and consume the intent under the task lock.
 
-## Authorization Boundary
+## Authorization boundary
 
-- The finalizer only reads facts, validates state, normalizes successful results, and performs atomic writes. It does not maintain a recoverable-error allowlist, infer repairability, or choose report content to delete.
-- The initial finalizer call is not counted as a repair attempt. Editing is allowed only after the mechanical safety gates pass and the model explicitly determines that the current problem can be solved by a minimal, explainable artifact change.
-- The model may edit only the one ordinary local artifact declared by the current skill, and the file must be inside the current task directory. It must not edit `task.md`, the review disagreement ledger, receipts, source code, other reports, or remote resources.
-- `changed=false`, an error code, or a format shape is diagnostic evidence, not automatic authorization. The model must judge each case using the complete diagnostic, artifact content, and context.
+- The finalizer and recovery core validate identity, state, permissions, stable reads, complete artifact semantics, and fingerprints. They do not infer repairability or expose a text-operation allow-list.
+- The model may edit only the one ordinary artifact declared by the current skill. It must not edit `task.md`, ledgers, receipts, source code, other reports, or remote resources.
+- `changed=false`, an error code, or a format shape is diagnostic evidence, not edit authorization. Stop on unproven human-decision semantics, concurrency, permission, I/O, identity, provenance, or unknown state.
 
-## Non-bypassable Mechanical Safety Gates
+## Non-bypassable mechanical gates
 
-Before every model edit, confirm that:
+Before every candidate edit, confirm that:
 
-1. the finalizer returned a failure and no artifact operation was committed;
-2. the task, stage, artifact, review round, identity, and provenance still match;
-3. the target is an ordinary file inside the current task directory, with no concurrency conflict, permission error, I/O uncertainty, or target replacement;
-4. the change does not alter human-decision semantics, decision-detail or ledger identity, and does not involve task state, receipts, Git, platform, or any other external side effect. A known and verifiable pending human decision may remain when the model proves the edit is unrelated to that decision.
+1. the finalizer failed with the same controlled recovery context and nothing formal was committed;
+2. task, family/stage, round, artifact, request/authority, and baseline fingerprints still match;
+3. `candidatePath` is the ordinary file generated by the recovery core and the formal target has not changed externally;
+4. the edit does not change human-decision semantics, detail or ledger identity, and introduces no other side effect.
 
-If any condition fails, stop immediately without invoking a model edit. The model cannot bypass these gates.
+If any condition fails, stop without editing or publishing a completed event.
 
-## Dynamic Convergence Loop
+## Durable recovery states
 
-1. Run the initial finalizer with the fixed task, stage, artifact, and orchestrated intent.
-2. On success, use that complete result for the existing completion gates; do not rescan the ledger or write summary fields manually.
-3. On failure with the safety gates passed, let the model read the structured diagnostic, current artifact, and required context, then decide whether to repair or stop. It must explain the scope and reason for the proposed change.
-4. If the model continues, perform one minimal edit to the artifact. Increment `repairAttempts` only when the file bytes actually change, then rerun the same finalizer intent completely.
-5. Re-run every safety check after each retry. A new, independent problem still limited to the same artifact may be offered to the model for another decision; the previous repairability decision must not be reused automatically.
-6. Stop immediately when the model cannot establish safety or identifies an environment, permission, concurrency, identity, provenance, unknown-state, uncertain human-decision semantics/details, or other non-local problem. A known human decision is not itself a stop condition.
-7. Stop when the diagnostic or artifact fingerprint repeats, no byte-level progress occurs, or the model cannot propose a verifiable minimal change.
-8. Allow at most 8 actual artifact edits per skill invocation as an emergency circuit breaker. This cap only prevents infinite loops and resource exhaustion; it is not a normal business stop condition and does not mean that at most eight problems may be repaired. Preserve the final structured diagnostic when the cap is reached.
+| State | Formal artifact | Allowed action |
+| --- | --- | --- |
+| `awaiting-recovery` | baseline `B` | Edit only controlled candidate `S`; rerun the same finalizer |
+| `finalize-ready` | `B` | Recovery core starts the commit under the task lock |
+| `commit-started` | `B` or final `F` | Reconcile only; retry, confirm, or restore from verified `B/F` fingerprints |
+| `passed` | `F` | Completed event validates the final digest and consumes the intent |
+| `consumed` | `F` | Cleanup may reclaim the controlled staging and backup |
+| `aborted` | verified restored `B` | Preserve diagnostics; never fabricate success |
 
-The repair count exists only in the in-memory context of the current skill invocation. Do not write it to `task.md`, the ledger, or a public receipt. Do not create different normal budgets by error code, skill, or problem type.
+The intent is current-only schema version 3. Legacy schemas fail closed; do not add migration, adapters, or dual writes. Candidate, baseline, and intent files live in controlled repo-local directories and use canonical recovery IDs, regular-file checks, stable reads, the task lock, and expected-value CAS. No cross-file atomicity is claimed; unknown combinations remain indeterminate and retain their evidence.
 
-## Shared Structural Engine
+## Dynamic convergence loop
 
-The report skeleton is created by `agent-infra-internal task-artifact {task-id} init --family {family} --artifact {artifact}`. The skeleton writes only identity, headings, and `artifact-section:{family}:{section-id}` markers; it does not represent semantic completion. The current skill must fill each slot with real content. When the finalizer returns one provably safe structural operation, use that result's SHA and semantic digest with `task-artifact {task-id} repair --family {family} --artifact {artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`. Repair executes only the one operation from the shared engine, does not write `task.md`, the ledger, receipts, Git, or platform resources, and must be followed by a complete rerun of the original finalizer.
+1. Run the finalizer with the fixed invocation.
+2. If it fails and the gates pass, read the structured diagnostic and `candidatePath`, then make one minimal, explainable candidate edit.
+3. Confirm byte-level progress and rerun every finalizer check with the same `--recovery-id`.
+4. Stop on repeated diagnostics or fingerprints, no byte progress, unknown recovery state, or the eight-edit limit for the current invocation. Do not publish a completed event or generate a cross-stage next step.
 
-## Completion Events and User Output
+## Shared entry points
 
-- After the final complete finalizer result succeeds, publish the review completed event using that same result's provenance, ledger state, verdict, and counts. Generate cross-stage next-step commands only when `stageStatus.canAdvance=true` and the verdict is Approved; when `canAdvance=false`, still record the result and route to same-stage revision/review.
-- On failure, model stop, lack of progress, repeated diagnostics, or the emergency cap, do not publish a completed event, advance the lifecycle, generate cross-stage commands, or fabricate an approval.
-- Stopping advancement does not discard review results. User output must show the artifact path, the last safely readable summary/findings, actual `repairAttempts`, the last structured diagnostic, and the stop reason.
-- If the summary cannot be safely parsed, show only the artifact path and the raw structured diagnostic; do not infer counts or add a conclusion, and state that lifecycle advancement stopped while the artifact remains available.
-- A stop path may only suggest rerunning the current review skill or handling the issue manually. It must not invoke cross-stage helpers such as `code-task` or `complete-task`.
+The current entry points are `task-artifact ... inspect|init|finalize-local` and `task-review ... finalize-summary`. Recovery retries use the `recoveryId` returned by the finalizer, for example:
 
-## Lifecycle Isolation
+```text
+agent-infra-internal task-artifact {task-id} finalize-local --family code --artifact {code-artifact} --recovery-id {recovery-id}
+agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} --recovery-id {recovery-id}
+```
 
-`complete-task`, alert closing, task restoration, and other task-lifecycle/task-finalization entry points involve task state, receipts, remote results, or archival side effects and do not consume this rule. They retain their own hard-stop, same-intent retry, and unknown-state semantics.
+There is no `task-artifact repair`, `replace-line`, `insert-section`, or `repairable` authorization. The structural engine returns diagnostics and digests only; the current skill's gates and the model decide whether and how to edit the candidate.
+
+## Lifecycle isolation
+
+A completed event may legitimately modify `task.md`, but only after finalizer recovery is `passed` and digest, round, request, and authority all match. If authority consumption fails after the event write, retain the formal artifact and use the existing lifecycle recovery compensation; do not replay the completed write or roll back a passed artifact.

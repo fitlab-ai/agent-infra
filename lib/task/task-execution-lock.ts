@@ -293,7 +293,7 @@ function withTaskExecutionLock<T>(
     return value;
   } catch (error) {
     if (error instanceof TaskExecutionLockError) throw error;
-    if (error instanceof Error && error.name === 'OrchestrationStateError') throw error;
+    if (error instanceof Error && ['OrchestrationStateError', 'ArtifactRecoveryError'].includes(error.name)) throw error;
     throw new TaskExecutionLockError(
       'ORCHESTRATION_LOCK_FAILED',
       'lifecycle task lock operation failed',

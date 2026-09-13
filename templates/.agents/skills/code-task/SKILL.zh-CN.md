@@ -24,7 +24,7 @@ description: >
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 实现前读取 `.agents/rules/compatibility-policy.md`；只实现方案明确批准的兼容预算，不以“稳妥”为由保留旧分支、旧结果契约或迁移 shim
 - 修复模式逐条核实最新 `review-code` 的发现：成立则修复，判定为不成立/幻觉则在报告中反驳并记入 unresolved；不擅自扩大到审查未列出的问题；manual-validation 项不在修复范围
-- 实现报告在 `code.completed` 前必须通过 `task-artifact ... finalize-local --family code`；按 `.agents/rules/local-artifact-repair.md` 处理同一报告内可证明安全的最小结构修复，并只把同一次通过结果的摘要传给完成事件
+- 实现报告在 `code.completed` 前必须通过 `task-artifact ... finalize-local --family code`；按 `.agents/rules/local-artifact-repair.md` 使用受控 recovery candidate 处理同一报告内可证明安全的结构修复，并只把同一次通过结果的摘要传给完成事件
 - 实现中遇到方案未覆盖的关键设计决策时，先调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得 `HD-N`，按 `.agents/rules/human-decision-context.md` 写入实现报告的 `## 人工裁决待办` 详情块并判断是否需要实现，再调用 `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`；不得扫描编号、手写账本行、中途提问或擅自扩范围
 - 不调用 `commit` 技能，也不推送远端；测试通过后直接调用共享 commit core 的 `delivery: { mode: 'local' }` 创建本地 checkpoint。checkpoint 使用 durable intent，只有 checkpoint 与 task 状态同步成功后才发送 `code.completed`
 - 每轮实现都创建新的实现产物，不覆盖旧文件
@@ -162,7 +162,7 @@ checkpoint 成功后，若任务存在 `platform_issue_identity`，调用 `agent
 agent-infra-internal task-artifact {task-id} init --family code --artifact {code-artifact}
 ```
 
-骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实实现与验证内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，使用其 SHA 和 semantic digest 调用 `task-artifact {task-id} repair --family code --artifact {code-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`，然后完整重跑 finalizer。
+骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实实现与验证内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑 `task-artifact {task-id} finalize-local --family code --artifact {code-artifact} --recovery-id {recovery-id}`。
 
 创建 `.agents/workspace/active/{task-id}/{code-artifact}`。
 
@@ -179,8 +179,8 @@ echo "$finalizer"
 ```
 
 - `status=0` 且 `finalizer.status="passed"`：绑定这一次返回的 `{artifact-sha256}` 和 `{semantic-digest}`。
-- `status=1` 且返回 `repairable=true`、诊断明确为当前报告中的单行替换：确认任务、轮次、产物和 provenance 未变化后，只编辑该 `code*.md` 一次，确认字节确实变化，再完整重跑同一命令。
-- 其他失败、无进展、诊断重复或达到 8 次实际报告编辑：停止，不发布 `code.completed`。
+- `status=1` 且返回 recovery context：确认任务、轮次、产物、baseline 和 request identity 未变化后，只编辑返回的 `candidatePath` 一次，确认字节确实变化，再使用同一个 `recoveryId` 完整重跑同一 finalizer。
+- 其他失败、formal artifact 外部变化、无进展或 recovery identity 不匹配：停止，不发布 `code.completed`。
 
 不得重新扫描或手工补写摘要；完成事件必须携带本次 `passed` 结果的 `--artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}`。
 

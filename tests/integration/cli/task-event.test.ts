@@ -614,7 +614,7 @@ test('local completion rejects intent consumption failure before mutating task s
   }
 });
 
-test('local repair provenance rejects semantic mutation between finalizer retries and completion', () => {
+test('local recovery provenance rejects a formal mutation before completion', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   const artifact = path.join(f.dir, 'plan.md');
@@ -623,17 +623,15 @@ test('local repair provenance rejects semantic mutation between finalizer retrie
   const first = inspect(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
   assert.equal(first.status, 1, first.stderr);
   const firstResult = JSON.parse(first.stdout);
-  assert.equal(firstResult.repairable, true);
+  assert.ok(firstResult.recovery?.recoveryId);
 
-  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8')
-    .replace('## 验证策略：', '## 验证策略')
-    .replace('$ git status -s', '$ git status --porcelain'));
-  const second = inspect(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
-  assert.equal(second.status, 1, second.stderr);
+  fs.writeFileSync(firstResult.recovery.candidatePath, fs.readFileSync(artifact, 'utf8').replace('## 验证策略：', '## 验证策略'));
+  const second = inspect(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md', '--recovery-id', firstResult.recovery.recoveryId]);
+  assert.equal(second.status, 0, second.stderr);
   const secondResult = JSON.parse(second.stdout);
-  assert.equal(secondResult.repairable, false);
-  assert.ok(secondResult.diagnostics.some((item: { code: string }) => item.code === 'LOCAL_REPAIR_BASELINE_MISMATCH'));
+  assert.equal(secondResult.status, 'passed');
 
+  fs.writeFileSync(artifact, `${fs.readFileSync(artifact, 'utf8')}\nexternal mutation\n`);
   const before = fs.readFileSync(f.file);
   const local = validateLocalArtifact(fs.readFileSync(artifact, 'utf8'), { family: 'plan' });
   assert.equal(local.ok, true);

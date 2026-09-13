@@ -13,8 +13,18 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
-import { readArtifactRepairIntent, writeArtifactRepairIntent } from './artifact-repair-intent.ts';
-import type { ArtifactRepairIntent } from './artifact-repair-intent.ts';
+import { readArtifactRecoveryIntent } from './artifact-repair-intent.ts';
+import type { ArtifactRecoveryIntent } from './artifact-repair-intent.ts';
+import {
+  beginArtifactRecovery,
+  commitArtifactRecovery,
+  consumeArtifactRecovery,
+  prepareArtifactRecoveryCommit,
+  recordArtifactRecoveryPassed,
+  recoveryContextFromIntent,
+  stageArtifactCandidate
+} from './artifact-recovery.ts';
+import type { ArtifactRecoveryContext } from './artifact-recovery.ts';
 import {
   consumeLifecycleRecoveryAttestation,
   lifecycleRecoveryAttestationDigest,
@@ -39,18 +49,14 @@ type LocalArtifactDiagnosticCode =
   | 'LOCAL_REQUIRED_PATTERN_MISSING'
   | 'LOCAL_STRUCTURAL_INVALID'
   | 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION'
-  | 'LOCAL_REPAIR_PROVENANCE_CONFLICT'
-  | 'LOCAL_REPAIR_BASELINE_MISMATCH'
+  | 'LOCAL_RECOVERY_PROVENANCE_CONFLICT'
+  | 'LOCAL_RECOVERY_BASELINE_MISMATCH'
   | 'LOCAL_QUALIFICATION_AUDIT_INVALID';
 
 type LocalArtifactDiagnostic = {
   code: LocalArtifactDiagnosticCode;
   message: string;
-  repairable: boolean;
   line: number | null;
-  from?: string;
-  to?: string;
-  operation?: 'replace-line';
 };
 
 type LocalArtifactValidationOptions = {
@@ -64,7 +70,6 @@ type LocalArtifactValidationResult = {
   ok: boolean;
   family: LocalArtifactFamily;
   semanticDigest: string;
-  repairable: boolean;
   diagnostics: readonly LocalArtifactDiagnostic[];
 };
 
@@ -74,23 +79,32 @@ type LocalArtifactFinalizationRequest = {
   artifact: string;
   repoRoot?: string;
   requiredSections?: readonly string[];
+  recoveryId?: string;
+  lockAlreadyHeld?: boolean;
 };
+
+type LocalArtifactRecoveryInfo = Readonly<{
+  recoveryId: string;
+  candidatePath: string;
+  baselineSha256: string;
+  baselineSemanticDigest: string;
+}>;
 
 type LocalArtifactFinalizationResult = {
   status: 'passed' | 'failed';
-  changed: false;
+  changed: boolean;
   taskId: string | null;
   taskDir: string | null;
   family: LocalArtifactFamily;
   artifact: string;
   artifactSha256: string | null;
   semanticDigest: string | null;
-  repairable: boolean;
   diagnostics: readonly LocalArtifactDiagnostic[];
+  recovery?: LocalArtifactRecoveryInfo;
   error: { code: string; message: string } | null;
 };
 
-type LocalArtifactFinalizationIntent = ArtifactRepairIntent;
+type LocalArtifactFinalizationIntent = ArtifactRecoveryIntent;
 
 function authorityDigest(authority: LifecycleRecoveryAttestationV1): string {
   return lifecycleRecoveryAttestationDigest(authority);
@@ -114,18 +128,27 @@ function validFinalizerAuthority(
     && authority.operationId.length > 0;
 }
 
-function consumeLocalArtifactFinalizationIntent(
-  repoRoot: string,
-  intent: LocalArtifactFinalizationIntent
-): LocalArtifactFinalizationIntent {
-  if (intent.state === 'consumed') return intent;
-  if (intent.state !== 'passed') throw new Error('LOCAL_FINALIZATION_INTENT_INVALID: only passed provenance can be consumed');
-  const consumed = { ...intent, state: 'consumed' as const, updatedAt: Date.now() };
-  writeArtifactRepairIntent(repoRoot, consumed, { expected: intent });
-  return consumed;
+function recoveryInfo(context: ArtifactRecoveryContext): LocalArtifactRecoveryInfo {
+  return {
+    recoveryId: context.recoveryId,
+    candidatePath: context.stagingPath,
+    baselineSha256: context.baselineSha256,
+    baselineSemanticDigest: context.baselineSemanticDigest
+  };
 }
 
-function localDiagnosticCode(code: string): LocalArtifactDiagnosticCode | null {
+function consumeLocalArtifactFinalizationIntent(
+  repoRoot: string,
+  intent: LocalArtifactFinalizationIntent,
+  options: Readonly<{ lockAlreadyHeld?: boolean }> = {}
+): LocalArtifactFinalizationIntent {
+  if (intent.state === 'consumed') return intent;
+  const resolved = resolveTaskRef(intent.taskId, { repoRoot });
+  if (!resolved.ok) throw new Error(resolved.message);
+  return consumeArtifactRecovery(recoveryContextFromIntent(repoRoot, resolved.taskDir, intent), options);
+}
+
+function localDiagnosticCode(code: string): LocalArtifactDiagnosticCode {
   const map: Record<string, LocalArtifactDiagnosticCode> = {
     ARTIFACT_EMPTY: 'LOCAL_ARTIFACT_EMPTY',
     ARTIFACT_MISSING_SECTION: 'LOCAL_ARTIFACT_MISSING_SECTION',
@@ -135,20 +158,8 @@ function localDiagnosticCode(code: string): LocalArtifactDiagnosticCode | null {
   return map[code] ?? 'LOCAL_STRUCTURAL_INVALID';
 }
 
-function localDiagnostic(
-  item: { code: string; message: string; line: number | null; repairable: boolean; operation?: { kind: string; from: string; to: string } }
-): LocalArtifactDiagnostic | null {
-  const code = localDiagnosticCode(item.code);
-  if (!code) return null;
-  return {
-    code,
-    message: item.message,
-    repairable: item.repairable,
-    line: item.line,
-    ...(item.operation?.kind === 'replace-line'
-      ? { from: item.operation.from, to: item.operation.to, operation: 'replace-line' as const }
-      : {})
-  };
+function localDiagnostic(item: { code: string; message: string; line: number | null }): LocalArtifactDiagnostic {
+  return { code: localDiagnosticCode(item.code), message: item.message, line: item.line };
 }
 
 function isStatusPattern(pattern: string): boolean {
@@ -160,14 +171,10 @@ function validateLocalArtifact(
   options: LocalArtifactValidationOptions
 ): LocalArtifactValidationResult {
   const schema = getArtifactSchema(options.family)!;
-  const patterns = schema.requiredPatterns;
   const diagnostics: LocalArtifactDiagnostic[] = [];
   const scanned = scanVisibleMarkdown(content);
   const structure = inspectArtifactStructure(content, schema);
-  for (const item of structure.diagnostics) {
-    const mapped = localDiagnostic(item);
-    if (mapped) diagnostics.push(mapped);
-  }
+  for (const item of structure.diagnostics) diagnostics.push(localDiagnostic(item));
 
   const statusSection = schema.sections.find((section) => section.id === 'state-check');
   if (statusSection) {
@@ -179,9 +186,9 @@ function validateLocalArtifact(
     if (statusHeading) {
       const next = scanned.headings.find((candidate) => candidate.start > statusHeading.start && candidate.level <= 2);
       const body = content.slice(statusHeading.end, next?.start ?? content.length);
-      for (const pattern of patterns.filter(isStatusPattern)) {
+      for (const pattern of schema.requiredPatterns.filter(isStatusPattern)) {
         if (!new RegExp(pattern, 'm').test(body)) {
-          diagnostics.push({ code: 'LOCAL_STATUS_COMMAND_MISSING', message: `status section '${statusHeading.text}' is missing required command output`, repairable: false, line: content.slice(0, statusHeading.start).split('\n').length });
+          diagnostics.push({ code: 'LOCAL_STATUS_COMMAND_MISSING', message: `status section '${statusHeading.text}' is missing required command output`, line: content.slice(0, statusHeading.start).split('\n').length });
         }
       }
     }
@@ -189,40 +196,28 @@ function validateLocalArtifact(
 
   const patternInspection = inspectArtifactPatterns(content, {
     ...schema,
-    requiredPatterns: patterns.filter((item) => !isStatusPattern(item))
+    requiredPatterns: schema.requiredPatterns.filter((item) => !isStatusPattern(item))
   });
-  for (const item of patternInspection.diagnostics) {
-    diagnostics.push({ code: 'LOCAL_REQUIRED_PATTERN_MISSING', message: item.message, repairable: false, line: null });
-  }
+  for (const item of patternInspection.diagnostics) diagnostics.push({ code: 'LOCAL_REQUIRED_PATTERN_MISSING', message: item.message, line: null });
 
   const decisionDetails = inspectDecisionDetailDuplicates(content);
-  if (!decisionDetails.ok) {
-    diagnostics.push({ code: 'LOCAL_DECISION_DETAIL_DUPLICATE', message: decisionDetails.message, repairable: false, line: null });
-  }
+  if (!decisionDetails.ok) diagnostics.push({ code: 'LOCAL_DECISION_DETAIL_DUPLICATE', message: decisionDetails.message, line: null });
 
   if (options.taskContent !== undefined) {
     const expected = expectedQualificationRelations(options.taskContent, options.family);
-    if (!expected.ok) {
-      diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${expected.code}: ${expected.message}`, repairable: false, line: null });
-    }
+    if (!expected.ok) diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${expected.code}: ${expected.message}`, line: null });
     const qualification = validateQualificationAudit(options.taskContent, content, {
-      family: options.family === 'analysis' ? 'analysis' : options.family === 'plan' ? 'plan' : 'code',
+      family: options.family,
       artifact: options.artifact,
       expectedUpstreamRelations: expected.ok ? expected.relations : undefined
     });
-    if (!qualification.ok) {
-      diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${qualification.code}: ${qualification.message}`, repairable: false, line: null });
-    }
+    if (!qualification.ok) diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${qualification.code}: ${qualification.message}`, line: null });
   }
-
-  const repairable = structure.repair !== null && diagnostics.length === 1 && diagnostics[0]?.repairable === true;
-  const semanticDigestValue = canonicalSemanticDigest(content, structure.repair);
 
   return {
     ok: diagnostics.length === 0,
     family: options.family,
-    semanticDigest: semanticDigestValue,
-    repairable,
+    semanticDigest: canonicalSemanticDigest(content),
     diagnostics
   };
 }
@@ -237,7 +232,7 @@ function failedFinalization(
     taskId: null, taskDir: null,
     family: request.family, artifact: request.artifact,
     artifactSha256: null, semanticDigest: null,
-    repairable: false, diagnostics: [], error, ...extra
+    diagnostics: [], error, ...extra
   };
 }
 
@@ -245,114 +240,158 @@ type LocalArtifactPreparation = Readonly<{
   result: LocalArtifactFinalizationResult;
   content: string;
   repoRoot?: string;
-  provenance?: ArtifactRepairIntent;
-  expectedIntent?: ArtifactRepairIntent | null;
+  lockAlreadyHeld?: boolean;
+  recovery?: ArtifactRecoveryContext;
+  authority?: LifecycleRecoveryAttestationV1;
 }>;
 
-/** Read and validate once; callers publish this content before committing provenance. */
+function tupleFor(
+  request: LocalArtifactFinalizationRequest,
+  taskId: string,
+  authority?: LifecycleRecoveryAttestationV1
+) {
+  const round = parseArtifactName(request.artifact)?.round ?? 0;
+  return {
+    taskId,
+    family: request.family,
+    artifact: request.artifact,
+    round,
+    requestId: authority?.lifecycleRequestId ?? `local-finalize:${taskId}:${request.family}:${round}`,
+    phase: authority?.phase ?? 'artifact.finalize-local' as const,
+    authorityDigest: authority ? authorityDigest(authority) : null
+  };
+}
+
 function prepareLocalArtifact(
   request: LocalArtifactFinalizationRequest,
   candidate?: string,
   authority?: LifecycleRecoveryAttestationV1
 ): LocalArtifactPreparation {
-  const failed = (code: string, message: string): LocalArtifactPreparation => ({
-    result: failedFinalization(request, { code, message }), content: candidate ?? ''
+  const failed = (code: string, message: string, extra: Partial<LocalArtifactFinalizationResult> = {}): LocalArtifactPreparation => ({
+    result: failedFinalization(request, { code, message }, extra), content: candidate ?? ''
   });
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: request.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message);
   const parsed = parseArtifactName(request.artifact);
   if (!parsed || parsed.family !== request.family) return failed('ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${request.family}`);
-  let content: string;
+  if (authority && !validFinalizerAuthority(authority, request, resolved.taskId)) {
+    return failed('LOCAL_EXECUTION_AUTHORITY_INVALID', 'finalizer authority does not match the artifact tuple');
+  }
+
   let taskContent: string;
+  let content: string;
+  let recovery: ArtifactRecoveryContext | undefined;
   try {
     taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-    if (candidate !== undefined) {
-      const error = validateArtifactPublication(resolved.taskDir, request.family, request.artifact);
-      if (error) return failed(error.code, error.message);
-      if (resolved.state !== 'active' || !hasOpenArtifactRound(taskContent, request.family, parsed.round)) {
-        return failed('ARTIFACT_IDENTITY_INVALID', 'candidate must match one open started round in an active task');
-      }
-      content = candidate;
+    if (request.recoveryId) {
+      const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
+      if (!intent || intent.recoveryOperationId !== request.recoveryId) return failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', 'recovery id does not match the artifact journal');
+      if (!['awaiting-recovery', 'finalize-ready', 'commit-started'].includes(intent.state)) return failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', `recovery journal is in '${intent.state}' state`);
+      recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
+      content = fs.existsSync(recovery.stagingPath)
+        ? fs.readFileSync(recovery.stagingPath, 'utf8')
+        : fs.readFileSync(recovery.formalPath, 'utf8');
     } else {
       const validated = validateCompletedArtifact(resolved.taskDir, request.family, request.artifact, parsed.round);
       if (!validated.ok) return failed(validated.error.code, validated.error.message);
-      content = fs.readFileSync(validated.artifact.path, 'utf8');
+      content = candidate ?? fs.readFileSync(validated.artifact.path, 'utf8');
     }
   } catch (error) { return failed('ARTIFACT_NOT_READABLE', String(error)); }
+
+  if (resolved.state !== 'active' || !hasOpenArtifactRound(taskContent, request.family, parsed.round)) {
+    return failed('ARTIFACT_IDENTITY_INVALID', 'candidate must match one open started round in an active task');
+  }
   const validation = validateLocalArtifact(content, {
     family: request.family, requiredSections: request.requiredSections, taskContent, artifact: request.artifact
   });
   const artifactSha256 = sha256Content(content);
-  const { semanticDigest, repairable, diagnostics } = validation;
   const result = failedFinalization(request, {
-    code: 'LOCAL_ARTIFACT_INVALID', message: diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
-  }, { taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256, semanticDigest, repairable, diagnostics });
-  const preparedBase = { result, content, repoRoot: resolved.repoRoot };
-  if (authority !== undefined && !validFinalizerAuthority(authority, request, resolved.taskId)) {
+    code: 'LOCAL_ARTIFACT_INVALID',
+    message: validation.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
+  }, {
+    taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256,
+    semanticDigest: validation.semanticDigest, diagnostics: validation.diagnostics
+  });
+
+  if (request.recoveryId) {
+    if (!validation.ok) return { result, content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld };
     return {
-      ...preparedBase,
-      result: { ...result, repairable: false, error: {
-        code: 'LOCAL_EXECUTION_AUTHORITY_INVALID',
-        message: 'finalizer authority does not match the artifact tuple'
-      }, diagnostics: [] }
+      result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(recovery!) },
+      content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld
     };
   }
-  const reject = (code: LocalArtifactDiagnosticCode, message: string): LocalArtifactPreparation => ({
-    ...prepared, result: { ...result, repairable: false, error: { code, message },
-      diagnostics: [{ code, message, repairable: false, line: null }] }
-  });
-  let intent: ArtifactRepairIntent | null;
-  try { intent = readArtifactRepairIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact); }
-  catch (error) {
-    return { ...preparedBase, result: { ...result, repairable: false, diagnostics: [],
-      error: { code: 'LOCAL_FINALIZATION_INTENT_INVALID', message: String(error) } } };
-  }
-  const prepared = { ...preparedBase, expectedIntent: intent };
-  if (intent && intent.recoveryOperationId !== null
-    && (!authority || intent.recoveryOperationId !== authority.operationId)) {
-    return reject('LOCAL_REPAIR_PROVENANCE_CONFLICT', 'local repair provenance is owned by another recovery operation');
-  }
-  if (repairable) {
-    if (intent && (intent.state !== 'awaiting-repair' || intent.baselineSemanticDigest !== semanticDigest)) {
-      return reject('LOCAL_REPAIR_PROVENANCE_CONFLICT', 'a different local repair baseline is already recorded for this artifact');
+
+  const existing = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
+  if (existing?.state === 'passed' || existing?.state === 'consumed') {
+    if (existing.finalArtifactSha256 !== artifactSha256 || existing.finalSemanticDigest !== validation.semanticDigest) {
+      return { ...failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', 'formal artifact does not match its completed recovery journal'), content, repoRoot: resolved.repoRoot, authority, lockAlreadyHeld: request.lockAlreadyHeld };
     }
-    if (intent && !authority) return prepared;
-  } else {
-    if (!validation.ok) return prepared;
-    if (intent?.state === 'awaiting-repair' && intent.baselineSemanticDigest !== semanticDigest) {
-      return reject('LOCAL_REPAIR_BASELINE_MISMATCH', 'the repaired artifact semantic digest does not match the recorded repair baseline');
-    }
-    if ((intent?.state === 'passed' || intent?.state === 'consumed')
-      && (intent.artifactSha256 !== artifactSha256 || intent.semanticDigest !== semanticDigest)) {
-      return reject('LOCAL_REPAIR_PROVENANCE_CONFLICT', 'the artifact changed after its finalization provenance was recorded');
-    }
-    prepared.result = { ...result, status: 'passed', error: null };
-    if (intent?.state === 'consumed') return prepared;
+    const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
+    return {
+      result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) },
+      content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
+    };
   }
-  const timestamp = Date.now();
-  return { ...prepared, provenance: {
-    version: 2, taskId: resolved.taskId, family: request.family, artifact: request.artifact,
-    state: repairable ? 'awaiting-repair' : 'passed',
-    baselineSemanticDigest: repairable ? semanticDigest : intent?.baselineSemanticDigest ?? null,
-    artifactSha256, semanticDigest,
-    recoveryOperationId: authority?.operationId ?? intent?.recoveryOperationId ?? null,
-    phase: authority?.phase ?? intent?.phase ?? null,
-    authorityDigest: authority ? authorityDigest(authority) : intent?.authorityDigest ?? null,
-    requestId: authority?.lifecycleRequestId ?? intent?.requestId ?? `local-finalize:${resolved.taskId}`,
-    createdAt: intent?.createdAt ?? timestamp,
-    updatedAt: timestamp
-  } };
+
+  try {
+    if (validation.ok) {
+      const context = recordArtifactRecoveryPassed(tupleFor(request, resolved.taskId, authority), {
+        repoRoot: resolved.repoRoot,
+        taskDir: resolved.taskDir,
+        ...(authority ? { recoveryId: authority.operationId } : {}),
+        lockAlreadyHeld: request.lockAlreadyHeld
+      });
+      recovery = context;
+      return { result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) }, content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld };
+    }
+    const context = beginArtifactRecovery(tupleFor(request, resolved.taskId, authority), Buffer.from(content, 'utf8'), {
+      repoRoot: resolved.repoRoot,
+      taskDir: resolved.taskDir,
+      ...(authority ? { recoveryId: authority.operationId } : {}),
+      lockAlreadyHeld: request.lockAlreadyHeld
+    });
+    recovery = context;
+    return {
+      result: { ...result, recovery: recoveryInfo(context) },
+      content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld
+    };
+  } catch (error) {
+    return { ...failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', String(error)), content, repoRoot: resolved.repoRoot, authority, lockAlreadyHeld: request.lockAlreadyHeld };
+  }
 }
 
 function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): LocalArtifactFinalizationResult {
+  if (!prepared.recovery || !prepared.repoRoot || prepared.result.status === 'failed' && !prepared.result.recovery) return prepared.result;
+  if (prepared.result.status === 'failed') return prepared.result;
   try {
-    if (prepared.provenance) {
-      writeArtifactRepairIntent(prepared.repoRoot!, prepared.provenance, { expected: prepared.expectedIntent ?? null });
+    const intent = readArtifactRecoveryIntent(prepared.repoRoot, prepared.recovery.taskId, prepared.recovery.family, prepared.recovery.artifact);
+    if (!intent) throw new Error('ARTIFACT_RECOVERY_INTENT_MISSING');
+    let committed;
+    if (intent.state === 'passed' || intent.state === 'consumed') {
+      return {
+        ...prepared.result,
+        artifactSha256: intent.finalArtifactSha256,
+        semanticDigest: intent.finalSemanticDigest,
+        error: null
+      };
+    } else if (intent.state === 'finalize-ready' || intent.state === 'commit-started') {
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+    } else {
+      const staged = stageArtifactCandidate(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
+      prepareArtifactRecoveryCommit(prepared.recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
     }
-    return prepared.result;
+    if (committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed.state}'`);
+    return {
+      ...prepared.result,
+      status: 'passed',
+      artifactSha256: committed.finalArtifactSha256,
+      semanticDigest: committed.finalSemanticDigest,
+      error: null
+    };
   } catch (error) {
     return { ...prepared.result, status: 'failed', error: {
-      code: 'LOCAL_FINALIZATION_INTENT_WRITE_FAILED', message: String(error)
+      code: 'LOCAL_RECOVERY_COMMIT_FAILED', message: String(error)
     } };
   }
 }
@@ -362,7 +401,8 @@ function finalizeLocalArtifact(
   authority?: LifecycleRecoveryAttestationV1,
   options: Readonly<{ deferLifecycleRecoveryConsumption?: boolean }> = {}
 ): LocalArtifactFinalizationResult {
-  const result = commitLocalArtifactProvenance(prepareLocalArtifact(request, undefined, authority));
+  const prepared = prepareLocalArtifact(request, undefined, authority);
+  const result = commitLocalArtifactProvenance(prepared);
   if (authority && !options.deferLifecycleRecoveryConsumption && result.status === 'passed') {
     try { consumeLifecycleRecoveryAttestation(authority); }
     catch (error) {
@@ -381,7 +421,7 @@ export {
   finalizeLocalArtifact,
   prepareLocalArtifact,
   commitLocalArtifactProvenance,
-  readArtifactRepairIntent as readLocalArtifactFinalizationIntent,
+  readArtifactRecoveryIntent as readLocalArtifactFinalizationIntent,
   canonicalSemanticDigest as semanticDigest,
   sha256Content,
   validateLocalArtifact
@@ -395,5 +435,6 @@ export type {
   LocalArtifactFinalizationIntent,
   LocalArtifactPreparation,
   LocalArtifactValidationOptions,
-  LocalArtifactValidationResult
+  LocalArtifactValidationResult,
+  LocalArtifactRecoveryInfo
 };

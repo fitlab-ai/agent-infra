@@ -410,15 +410,17 @@ test("lifecycle report producers reference the shared evidence rule", () => {
   });
 });
 
-test("local artifact repair rules enumerate the shared structural operations", () => {
+test("local artifact recovery rules declare the shared transaction contract", () => {
   for (const relativePath of [
     ".agents/rules/local-artifact-repair.md",
     "templates/.agents/rules/local-artifact-repair.en.md",
     "templates/.agents/rules/local-artifact-repair.zh-CN.md"
   ]) {
     const content = read(relativePath);
-    assert.ok(content.includes("replace-line"), `${relativePath} should authorize replace-line`);
-    assert.ok(content.includes("insert-section"), `${relativePath} should authorize insert-section`);
+    assert.ok(content.includes("candidatePath"), `${relativePath} should expose the controlled candidate path`);
+    assert.ok(content.includes("finalize-ready"), `${relativePath} should describe the durable commit state`);
+    assert.ok(content.includes("commit-started"), `${relativePath} should describe crash recovery`);
+    assert.ok(content.includes("--recovery-id"), `${relativePath} should document recovery binding`);
   }
 });
 

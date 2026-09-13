@@ -24,7 +24,7 @@ Before generating the implementation report, read `.agents/rules/evidence-report
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”
 - Fix mode verifies each finding of the latest `review-code` one by one: fix it if it holds, or rebut it and record it under unresolved if it is unfounded/hallucinated; do not expand to issues the review did not list; manual-validation items are out of scope
-- Before `code.completed`, the implementation report must pass `task-artifact ... finalize-local --family code`; follow `.agents/rules/local-artifact-repair.md` for any provably safe minimal structural repair in that same report, and pass only that successful call's digests to the completion event
+- Before `code.completed`, the implementation report must pass `task-artifact ... finalize-local --family code`; follow `.agents/rules/local-artifact-repair.md` for controlled recovery candidates in that same report, and pass only that successful call's digests to the completion event
 - If implementation encounters a key design decision not covered by the plan, run `agent-infra-internal task-ledger {task-id} decision-next-id`, write the returned `HD-N` detail block per `.agents/rules/human-decision-context.md` and determine whether implementation is required, then run `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`. Do not scan ids, assemble ledger rows, ask mid-flow, or silently expand scope
 - Do not invoke the `commit` skill or push to a remote; after tests pass, call the shared commit core with `delivery: { mode: 'local' }` to create the local checkpoint. The durable intent must close only after the checkpoint and task state sync succeed; only then emit `code.completed`
 - Create a new code artifact for each round and never overwrite an older one
@@ -122,7 +122,7 @@ Before writing this round's `{code-artifact}`, create the controlled report skel
 agent-infra-internal task-artifact {task-id} init --family code --artifact {code-artifact} --locale en
 ```
 
-The skeleton contains identity metadata, stable section markers, and required headings only; real implementation and verification content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, call `task-artifact {task-id} repair --family code --artifact {code-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`, then rerun the same finalizer.
+The skeleton contains identity metadata, stable section markers, and required headings only; real implementation and verification content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, it returns a controlled recovery candidate; edit only its `candidatePath`, then rerun `task-artifact {task-id} finalize-local --family code --artifact {code-artifact} --recovery-id {recovery-id}` with the same `recoveryId`.
 
 Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
@@ -139,8 +139,8 @@ echo "$finalizer"
 ```
 
 - `status=0` with `finalizer.status="passed"`: bind `{artifact-sha256}` and `{semantic-digest}` from this result.
-- `status=1` with `repairable=true` and a diagnostic explicitly describing a one-line replacement: confirm task, round, artifact, and provenance are unchanged; edit only that `code*.md` once, confirm the bytes changed, then rerun the same command completely.
-- For any other failure, lack of progress, repeated diagnostic, or eight actual report edits, stop without publishing `code.completed`.
+- `status=1` with recovery context: confirm task, round, artifact, baseline, and request identity are unchanged; edit only the returned `candidatePath` once, confirm the bytes changed, then rerun the same finalizer completely with the same `recoveryId`.
+- For any other failure, external formal-artifact change, lack of progress, or recovery identity mismatch, stop without publishing `code.completed`.
 
 Do not rescan or manually write digest data; the completion event must include `--artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}` from the successful finalizer result.
 

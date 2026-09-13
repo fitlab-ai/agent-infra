@@ -20,7 +20,7 @@ import {
   validateLifecycleAuthorityRequest,
   validateLifecycleRecoveryAttestation
 } from '../../../lib/task/control-authority.ts';
-import { writeArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
+import { writeArtifactRecoveryIntent } from '../../../lib/task/artifact-repair-intent.ts';
 
 const build = {
   protocolVersion: 3,
@@ -189,19 +189,25 @@ test('lifecycle recovery compensates a committed task event across processes wit
     capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => 1_000
   });
   assert.equal(issued.status, 'issued');
-  writeArtifactRepairIntent(repoRoot, {
-    version: 2,
+  writeArtifactRecoveryIntent(repoRoot, {
+    version: 3,
     taskId,
     family: 'code',
     artifact: 'code.md',
+    round: 1,
     state: 'commit-started',
-    baselineSemanticDigest: null,
-    artifactSha256: 'e'.repeat(64),
-    semanticDigest: 'f'.repeat(64),
+    baselineSha256: 'e'.repeat(64),
+    baselineSemanticDigest: 'e'.repeat(64),
+    stagingId: selector.operationId,
+    candidateSha256: 'e'.repeat(64),
+    finalArtifactSha256: 'e'.repeat(64),
+    finalSemanticDigest: 'f'.repeat(64),
     recoveryOperationId: selector.operationId,
     phase: selector.phase,
     authorityDigest: digest(issued.attestation),
     requestId: selector.lifecycleRequestId,
+    errorCode: null,
+    errorMessage: null,
     createdAt: 1_000,
     updatedAt: 1_000
   });
@@ -287,11 +293,13 @@ test('lifecycle recovery requires the persisted task event before consuming a re
   const issued = issueLifecycleRecoveryAttestation(selector, {
     capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => 1_000
   });
-  writeArtifactRepairIntent(repoRoot, {
-    version: 2, taskId, family: 'code', artifact: 'code.md', state: 'commit-started',
-    baselineSemanticDigest: null, artifactSha256: 'e'.repeat(64), semanticDigest: 'f'.repeat(64),
+  writeArtifactRecoveryIntent(repoRoot, {
+    version: 3, taskId, family: 'code', artifact: 'code.md', round: 1, state: 'commit-started',
+    baselineSha256: 'e'.repeat(64), baselineSemanticDigest: 'e'.repeat(64), stagingId: selector.operationId,
+    candidateSha256: 'e'.repeat(64), finalArtifactSha256: 'e'.repeat(64), finalSemanticDigest: 'f'.repeat(64),
     recoveryOperationId: selector.operationId, phase: selector.phase,
     authorityDigest: digest(issued.attestation), requestId: selector.lifecycleRequestId,
+    errorCode: null, errorMessage: null,
     createdAt: 1_000, updatedAt: 1_000
   });
   assert.throws(() => recoverLifecycleRecoveryOperation(selector, {
@@ -345,19 +353,25 @@ test('lifecycle recovery compensates a retained expired capability tombstone aft
     capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => now
   });
   assert.equal(issued.status, 'issued');
-  writeArtifactRepairIntent(repoRoot, {
-    version: 2,
+  writeArtifactRecoveryIntent(repoRoot, {
+    version: 3,
     taskId,
     family: 'code',
     artifact: 'code.md',
+    round: 1,
     state: 'consumed',
-    baselineSemanticDigest: null,
-    artifactSha256: 'e'.repeat(64),
-    semanticDigest: 'f'.repeat(64),
+    baselineSha256: 'e'.repeat(64),
+    baselineSemanticDigest: 'e'.repeat(64),
+    stagingId: selector.operationId,
+    candidateSha256: 'e'.repeat(64),
+    finalArtifactSha256: 'e'.repeat(64),
+    finalSemanticDigest: 'f'.repeat(64),
     recoveryOperationId: selector.operationId,
     phase: selector.phase,
     authorityDigest: digest(issued.attestation),
     requestId: selector.lifecycleRequestId,
+    errorCode: null,
+    errorMessage: null,
     createdAt: now,
     updatedAt: now
   });

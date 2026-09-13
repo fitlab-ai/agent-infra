@@ -140,7 +140,7 @@ Before writing this round's `{analysis-artifact}`, create the controlled report 
 agent-infra-internal task-artifact {task-id} init --family analysis --artifact {analysis-artifact} --locale en
 ```
 
-The skeleton contains identity metadata, stable section markers, and required headings only; real analysis content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, call `task-artifact {task-id} repair --family analysis --artifact {analysis-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`, then rerun the same finalizer.
+The skeleton contains identity metadata, stable section markers, and required headings only; real analysis content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, it returns a controlled recovery candidate; edit only its `candidatePath`, then rerun `task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact} --recovery-id {recovery-id}` with the same `recoveryId`.
 
 > Steps 6–9 are the **Scenario A (normal output)** path. **Scenario B (ask and early-exit)** already finished its state update, task-comment sync, and verification inside step 4 and STOPped, so it does not enter these steps.
 
@@ -223,8 +223,8 @@ agent-infra-internal task-artifact {task-id} finalize-local --family analysis --
 ```
 
 - On `status=passed`, save that result's `artifactSha256` and `semanticDigest`; the finalizer has recorded the matching one-shot local provenance intent.
-- On `status=failed` with `repairable=true`, apply only the diagnostic's `replace-line` operation once, then rerun the same command completely; count an attempt only after bytes change, up to 8 attempts.
-- The first repairable failure's `semanticDigest` is retained as the baseline; a retried `status=passed` result must match it. On baseline mismatch, any other failure, no progress, or a repeated diagnostic, stop without publishing a completed event.
+- On `status=failed` with recovery context, edit only the returned `candidatePath` once after the completion gates pass, then rerun the finalizer completely with the same `recoveryId`; the formal artifact must remain unchanged until commit.
+- The recovery candidate must match the recorded task, round, artifact, baseline, and request identity. On baseline conflict, unknown state, no progress, or repeated failure, stop without publishing a completed event.
 
 Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}

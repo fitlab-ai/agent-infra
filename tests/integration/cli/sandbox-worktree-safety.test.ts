@@ -286,23 +286,30 @@ function writeTaskBoundCleanupEvidence(
 
   const artifact = "plan.md";
   const content = "# Plan\n";
+  const recoveryId = "c".repeat(16);
   fs.writeFileSync(path.join(taskDir, artifact), content, "utf8");
   const intentDir = path.join(config.repoRoot, ".agents", "workspace", ".local-artifact-finalization-intents");
   fs.mkdirSync(intentDir, { recursive: true });
   const intentPath = path.join(intentDir, `${taskId}-plan-${artifact}.json`);
   fs.writeFileSync(intentPath, `${JSON.stringify({
-    version: 2,
+    version: 3,
     taskId,
     family: "plan",
     artifact,
+    round: 1,
     state: "consumed",
-    baselineSemanticDigest: null,
-    artifactSha256: sha256Content(content),
-    semanticDigest: semanticDigest(content),
-    recoveryOperationId: null,
+    baselineSha256: sha256Content(content),
+    baselineSemanticDigest: semanticDigest(content),
+    stagingId: recoveryId,
+    candidateSha256: sha256Content(content),
+    finalArtifactSha256: sha256Content(content),
+    finalSemanticDigest: semanticDigest(content),
+    recoveryOperationId: recoveryId,
     phase: null,
     authorityDigest: null,
     requestId: "sandbox-fixture",
+    errorCode: null,
+    errorMessage: null,
     createdAt: 1,
     updatedAt: 1
   })}\n`, "utf8");

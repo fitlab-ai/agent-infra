@@ -38,7 +38,8 @@ import {
   readLocalArtifactFinalizationIntent,
   validateLocalArtifact
 } from './local-artifact-finalization.ts';
-import { writeArtifactRepairIntent } from './artifact-repair-intent.ts';
+import { writeArtifactRecoveryIntent } from './artifact-repair-intent.ts';
+import { reconcileArtifactRecovery, recoveryContextFromIntent } from './artifact-recovery.ts';
 import type { LocalArtifactFamily, LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
 import { buildLifecycleFacts, canStart } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
@@ -776,6 +777,23 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       const localFamily = eventIdentity.family === 'analyze'
         ? 'analysis'
         : eventIdentity.family === 'plan' ? 'plan' : 'code';
+      try {
+        localFinalizationIntent = readLocalArtifactFinalizationIntent(
+          resolved.repoRoot, resolved.taskId, localFamily, completedArtifact.name
+        );
+        if (localFinalizationIntent?.state === 'commit-started') {
+          const reconciled = reconcileArtifactRecovery(
+            recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, localFinalizationIntent),
+            { lockAlreadyHeld: true }
+          );
+          if (reconciled.status === 'passed' || reconciled.status === 'consumed') localFinalizationIntent = reconciled.intent;
+        }
+      } catch (error) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `local finalizer recovery could not be reconciled for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
       let artifactContent: string;
       try { artifactContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
       catch (error) {
@@ -805,34 +823,23 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
           message: `semantic digest does not match finalizer result for ${completedArtifact.name}`
         }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
-      try {
-        localFinalizationIntent = readLocalArtifactFinalizationIntent(
-          resolved.repoRoot, resolved.taskId, localFamily, completedArtifact.name
-        );
-      } catch (error) {
-        return failed(normalized, {
-          code: 'EVENT_ARTIFACT_CONFLICT',
-          message: `cannot read local finalizer provenance for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
-        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-      if (!localFinalizationIntent || !['passed', 'consumed', 'finalize-ready', 'commit-started'].includes(localFinalizationIntent.state)) {
+      if (!localFinalizationIntent || !['passed', 'consumed'].includes(localFinalizationIntent.state)) {
         return failed(normalized, {
           code: 'EVENT_ARTIFACT_CONFLICT',
           message: `local finalizer provenance is missing or incomplete for ${completedArtifact.name}`
         }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
-      if (localFinalizationIntent.artifactSha256 !== actualSha256 || localFinalizationIntent.semanticDigest !== local.semanticDigest) {
+      if (localFinalizationIntent.finalArtifactSha256 !== actualSha256 || localFinalizationIntent.finalSemanticDigest !== local.semanticDigest) {
         return failed(normalized, {
           code: 'EVENT_ARTIFACT_CONFLICT',
           message: `local finalizer provenance does not match ${completedArtifact.name}`
         }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
-      if (localFinalizationIntent.recoveryOperationId !== null) {
+      if (localFinalizationIntent.authorityDigest !== null) {
         if (!lifecycleAuthority
           || localFinalizationIntent.recoveryOperationId !== lifecycleAuthority.operationId
           || localFinalizationIntent.requestId !== lifecycleAuthority.lifecycleRequestId
-          || (localFinalizationIntent.phase !== 'artifact.finalize-local'
-            && localFinalizationIntent.authorityDigest !== lifecycleRecoveryAttestationDigest(lifecycleAuthority))) {
+          || localFinalizationIntent.authorityDigest !== lifecycleRecoveryAttestationDigest(lifecycleAuthority)) {
           return failed(normalized, {
             code: 'EVENT_ARTIFACT_CONFLICT',
             message: `local finalizer provenance does not match lifecycle completion authority for ${completedArtifact.name}`
@@ -996,9 +1003,9 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
           requestId: lifecycleAuthority.lifecycleRequestId,
           updatedAt: Date.now()
         };
-        writeArtifactRepairIntent(resolved.repoRoot, localFinalizationIntent, { expected: expectedIntent });
+        writeArtifactRecoveryIntent(resolved.repoRoot, localFinalizationIntent, { expected: expectedIntent });
       } else if (!lifecycleAuthority && localFinalizationIntent.state === 'passed') {
-        localFinalizationIntent = consumeLocalArtifactFinalizationIntent(resolved.repoRoot, localFinalizationIntent);
+        localFinalizationIntent = consumeLocalArtifactFinalizationIntent(resolved.repoRoot, localFinalizationIntent, { lockAlreadyHeld: options.lockAlreadyHeld });
       }
     } catch (error) {
       return failed(normalized, {
@@ -1022,7 +1029,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   if (!normalized.dryRun && lifecycleAuthority && localFinalizationIntent && completedArtifact) {
     try {
       if (!options.deferLifecycleRecoveryConsumption) consumeLifecycleRecoveryAttestation(lifecycleAuthority);
-      writeArtifactRepairIntent(resolved.repoRoot, { ...localFinalizationIntent, state: 'consumed', updatedAt: Date.now() }, { expected: localFinalizationIntent });
+      writeArtifactRecoveryIntent(resolved.repoRoot, { ...localFinalizationIntent, state: 'consumed', updatedAt: Date.now() }, { expected: localFinalizationIntent });
     } catch (error) {
       return failed(normalized, {
         code: 'EVENT_ARTIFACT_CONFLICT',
@@ -1077,7 +1084,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
       resolved.repoRoot,
       resolved.taskId,
       `task-event.${request.event}`,
-      () => applyTaskEventUnlocked(request, options)
+      () => applyTaskEventUnlocked(request, { ...options, lockAlreadyHeld: true })
     );
   } catch (error) {
     if (!(error instanceof TaskExecutionLockError)) throw error;

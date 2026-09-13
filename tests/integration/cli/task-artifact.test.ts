@@ -78,7 +78,7 @@ test('task-artifact init rejects an existing historical artifact before no-op', 
   assert.deepEqual(fs.readFileSync(artifact), before);
 });
 
-test('task-artifact repair requires the finalizer baseline and changes one heading only', () => {
+test('task-artifact recovery requires the journal id and publishes a corrected candidate', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
   let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: path.basename(artifact) }).replaceAll('<!-- artifact-slot:empty -->', 'content');
@@ -87,14 +87,14 @@ test('task-artifact repair requires the finalizer baseline and changes one headi
   const finalizer = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
   assert.equal(finalizer.status, 1, finalizer.stdout);
   const failed = JSON.parse(finalizer.stdout);
+  fs.writeFileSync(failed.recovery.candidatePath, content);
   const repaired = run(f.root, [
-    f.id, 'repair', '--family', 'plan', '--artifact', 'plan.md',
-    '--expected-sha256', failed.artifactSha256,
-    '--expected-semantic-digest', failed.semanticDigest
+    f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md',
+    '--recovery-id', failed.recovery.recoveryId
   ]);
   assert.equal(repaired.status, 0, `${repaired.stderr}\n${repaired.stdout}`);
   const result = JSON.parse(repaired.stdout);
-  assert.equal(result.status, 'applied');
+  assert.equal(result.status, 'passed');
   assert.equal(fs.readFileSync(artifact, 'utf8').includes('## 问题理解：'), false);
 });
 
@@ -146,46 +146,45 @@ test('task-artifact finalize-local uses repository config from a nested working 
   assert.deepEqual(result.diagnostics, []);
 });
 
-test('task-artifact finalize-local reports one-line heading repair and revalidates after the edit', () => {
+test('task-artifact finalize-local reports one-line heading diagnostics and revalidates a staged edit', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'analysis.md');
+  fs.appendFileSync(path.join(f.dir, 'task.md'), '- 2026-01-01 00:01:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n');
   fs.writeFileSync(artifact, localArtifact('analysis').replace('## 需求来源\n', '## 需求来源：\n'));
 
   const failed = run(f.root, [f.id, 'finalize-local', '--family', 'analysis', '--artifact', 'analysis.md']);
   assert.equal(failed.status, 1);
   const failure = JSON.parse(failed.stdout);
   assert.equal(failure.status, 'failed');
-  assert.equal(failure.repairable, true);
   assert.equal(failure.diagnostics[0].code, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
-  assert.equal(failure.diagnostics[0].operation, 'replace-line');
-  assert.equal(failure.diagnostics[0].from, '需求来源：');
-  assert.equal(failure.diagnostics[0].to, '需求来源');
+  assert.ok(failure.recovery?.recoveryId);
 
-  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('## 需求来源：\n', '## 需求来源\n'));
-  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'analysis', '--artifact', 'analysis.md']);
+  fs.writeFileSync(failure.recovery.candidatePath, fs.readFileSync(artifact, 'utf8').replace('## 需求来源：\n', '## 需求来源\n'));
+  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'analysis', '--artifact', 'analysis.md', '--recovery-id', failure.recovery.recoveryId]);
   assert.equal(passed.status, 0, passed.stderr);
   const success = JSON.parse(passed.stdout);
   assert.equal(success.status, 'passed');
-  assert.equal(success.semanticDigest, failure.semanticDigest);
+  assert.notEqual(success.semanticDigest, failure.semanticDigest);
 });
 
-test('task-artifact finalize-local supports code reports and preserves the repair baseline', () => {
+test('task-artifact finalize-local supports code reports through staged recovery', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'code.md');
+  fs.appendFileSync(path.join(f.dir, 'task.md'), '- 2026-01-01 00:01:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n');
   fs.writeFileSync(artifact, localArtifact('code').replace('## 测试结果\n', '## 测试结果：\n'));
 
   const failed = run(f.root, [f.id, 'finalize-local', '--family', 'code', '--artifact', 'code.md']);
   assert.equal(failed.status, 1);
   const failure = JSON.parse(failed.stdout);
-  assert.equal(failure.repairable, true);
   assert.equal(failure.diagnostics[0].code, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
+  assert.ok(failure.recovery?.recoveryId);
 
-  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('## 测试结果：', '## 测试结果'));
-  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'code', '--artifact', 'code.md']);
+  fs.writeFileSync(failure.recovery.candidatePath, fs.readFileSync(artifact, 'utf8').replace('## 测试结果：', '## 测试结果'));
+  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'code', '--artifact', 'code.md', '--recovery-id', failure.recovery.recoveryId]);
   assert.equal(passed.status, 0, passed.stderr);
   const success = JSON.parse(passed.stdout);
   assert.equal(success.status, 'passed');
-  assert.equal(success.semanticDigest, failure.semanticDigest);
+  assert.notEqual(success.semanticDigest, failure.semanticDigest);
 });
 
 test('task-artifact finalize-local ignores fenced headings and commands', () => {
@@ -217,6 +216,5 @@ test('task-artifact finalize-local ignores fenced headings and commands', () => 
   const out = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
   assert.equal(out.status, 1);
   const result = JSON.parse(out.stdout);
-  assert.equal(result.repairable, false);
   assert.ok(result.diagnostics.some((item: { code: string }) => item.code === 'LOCAL_ARTIFACT_MISSING_SECTION'));
 });

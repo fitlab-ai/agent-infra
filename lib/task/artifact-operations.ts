@@ -1,33 +1,20 @@
 import fs from 'node:fs';
-import { parseArtifactName } from './artifact-name.ts';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readStableFileSync } from '../host-control/secure-fs.ts';
+import { parseArtifactName } from './artifact-name.ts';
 
 import { scanVisibleMarkdown, type VisibleMarkdown, type VisibleHeading } from './markdown.ts';
-import { hasOpenArtifactRound } from './artifact-lifecycle.ts';
-import { readArtifactRepairIntent } from './artifact-repair-intent.ts';
-import { resolveTaskRef } from './resolve-ref.ts';
 import {
   getArtifactSchema,
   renderArtifactSkeleton
 } from './artifact-schema.ts';
+import { withTaskExecutionLock } from './task-execution-lock.ts';
 import type {
   ArtifactSchema,
   ArtifactSchemaFamily,
   ArtifactSection
 } from './artifact-schema.ts';
-import { withTaskExecutionLock } from './task-execution-lock.ts';
-
-type ArtifactRepairOperation = Readonly<{
-  kind: 'replace-line' | 'insert-section';
-  sectionId: string;
-  line: number;
-  from: string;
-  to: string;
-  start: number;
-  end: number;
-}>;
 
 type ArtifactStructuralDiagnosticCode =
   | 'ARTIFACT_EMPTY'
@@ -47,8 +34,6 @@ type ArtifactStructuralDiagnostic = Readonly<{
   message: string;
   sectionId: string | null;
   line: number | null;
-  repairable: boolean;
-  operation?: ArtifactRepairOperation;
 }>;
 
 type ArtifactStructureResult = Readonly<{
@@ -56,7 +41,6 @@ type ArtifactStructureResult = Readonly<{
   family: ArtifactSchemaFamily;
   semanticDigest: string;
   diagnostics: readonly ArtifactStructuralDiagnostic[];
-  repair: ArtifactRepairOperation | null;
 }>;
 
 type ArtifactFileResult = Readonly<{
@@ -64,19 +48,7 @@ type ArtifactFileResult = Readonly<{
   changed: boolean;
   artifactSha256: string | null;
   semanticDigest: string | null;
-  operation: ArtifactRepairOperation | null;
   error: { code: string; message: string } | null;
-}>;
-
-type ArtifactRepairRequest = Readonly<{
-  repoRoot: string;
-  taskId: string;
-  taskDir: string;
-  family: ArtifactSchemaFamily;
-  artifact: string;
-  expectedSha256: string;
-  expectedSemanticDigest: string;
-  operation: ArtifactRepairOperation;
 }>;
 
 type ArtifactInitRequest = Readonly<{
@@ -147,71 +119,17 @@ function diagnostic(
   code: ArtifactStructuralDiagnosticCode,
   message: string,
   sectionId: string | null,
-  line: number | null,
-  repairable = false,
-  operation?: ArtifactRepairOperation
+  line: number | null
 ): ArtifactStructuralDiagnostic {
-  return {
-    code, message, sectionId, line, repairable,
-    ...(operation ? { operation } : {})
-  };
+  return { code, message, sectionId, line };
 }
 
 function sectionHeadings(schema: ArtifactSchema, section: ArtifactSection): readonly string[] {
   return [section.headings.zh, section.headings.en];
 }
 
-function createHeadingRepair(
-  content: string,
-  section: ArtifactSection,
-  heading: { start: number; end: number; text: string }
-): ArtifactRepairOperation {
-  const to = heading.text.slice(0, -1);
-  return {
-    kind: 'replace-line',
-    sectionId: section.id,
-    line: lineNumber(content, heading.start),
-    from: heading.text,
-    to,
-    start: heading.start,
-    end: heading.end
-  };
-}
-
-function createSectionInsertionRepair(
-  content: string,
-  section: ArtifactSection,
-  marker: { start: number; line: number },
-  locale: 'zh-CN' | 'en'
-): ArtifactRepairOperation {
-  return {
-    kind: 'insert-section',
-    sectionId: section.id,
-    line: marker.line,
-    from: '',
-    to: `## ${section.headings[locale === 'en' ? 'en' : 'zh']}\n`,
-    start: marker.start,
-    end: marker.start
-  };
-}
-
-function applyRepairOperation(content: string, operation: ArtifactRepairOperation): string | null {
-  if (operation.start < 0 || operation.end < operation.start || operation.end > content.length) return null;
-  if (operation.kind === 'insert-section') {
-    if (operation.from !== '' || operation.start !== operation.end || !operation.to) return null;
-    return `${content.slice(0, operation.start)}${operation.to}${content.slice(operation.end)}`;
-  }
-  const raw = content.slice(operation.start, operation.end);
-  const offset = raw.indexOf(operation.from);
-  if (!operation.from || offset < 0 || raw.indexOf(operation.from, offset + operation.from.length) >= 0) return null;
-  return `${content.slice(0, operation.start)}${raw.slice(0, offset)}${operation.to}${raw.slice(offset + operation.from.length)}${content.slice(operation.end)}`;
-}
-
-function canonicalContent(content: string, operation: ArtifactRepairOperation | null = null): string {
+function canonicalContent(content: string): string {
   let normalized = content;
-  if (operation) {
-    normalized = applyRepairOperation(normalized, operation) ?? normalized;
-  }
   normalized = normalized.replace(/\r\n/g, '\n');
   normalized = normalized.replace(/^<!--\s*artifact-context:[^\n]+-->\s*\n?/gm, '');
   normalized = normalized.replace(/^\s*<!--\s*artifact-section:[^\n]+-->\s*\n?/gm, '');
@@ -219,8 +137,8 @@ function canonicalContent(content: string, operation: ArtifactRepairOperation | 
   return normalized;
 }
 
-function canonicalSemanticDigest(content: string, operation: ArtifactRepairOperation | null = null): string {
-  return sha256Content(canonicalContent(content, operation));
+function canonicalSemanticDigest(content: string): string {
+  return sha256Content(canonicalContent(content));
 }
 
 function inspectArtifactStructure(
@@ -229,7 +147,6 @@ function inspectArtifactStructure(
 ): ArtifactStructureResult {
   const diagnostics: ArtifactStructuralDiagnostic[] = [];
   const scanned = scanVisibleMarkdown(content);
-  const repairCandidates: ArtifactRepairOperation[] = [];
   if (!content.trim()) diagnostics.push(diagnostic('ARTIFACT_EMPTY', 'artifact is empty', null, null));
   if (scanned.hasUnclosedFence) diagnostics.push(diagnostic('ARTIFACT_UNCLOSED_FENCE', 'artifact contains an unclosed Markdown fence', null, null));
 
@@ -238,7 +155,7 @@ function inspectArtifactStructure(
     const aliases = sectionHeadings(schema, section);
     const exact = scanned.headings.filter((heading) => heading.level === 2 && aliases.includes(heading.text));
     const punctuated = scanned.headings.filter((heading) => heading.level === 2 && aliases.some((alias) => heading.text === `${alias}:` || heading.text === `${alias}：`));
-    headingsBySection.set(section.id, exact.length === 0 && punctuated.length === 1 ? punctuated : exact);
+    headingsBySection.set(section.id, exact.length > 0 ? exact : punctuated);
     if (exact.length > 1 || punctuated.length > 0 && exact.length > 0 || punctuated.length > 1) {
       const first = exact[1] ?? punctuated[0] ?? exact[0];
       diagnostics.push(diagnostic(
@@ -248,16 +165,18 @@ function inspectArtifactStructure(
         first ? lineNumber(content, first.start) : null
       ));
     } else if (exact.length === 0 && punctuated.length === 1) {
-      repairCandidates.push(createHeadingRepair(content, section, punctuated[0]!));
+      diagnostics.push(diagnostic(
+        'ARTIFACT_HEADING_TRAILING_PUNCTUATION',
+        `visible required H2 '${punctuated[0]!.text}' has trailing punctuation`,
+        section.id,
+        lineNumber(content, punctuated[0]!.start)
+      ));
     } else if (exact.length === 0) {
       diagnostics.push(diagnostic('ARTIFACT_MISSING_SECTION', `required section '${aliases[0]}' is missing`, section.id, null));
     }
   }
 
   const markers = markerEntries(content, scanned);
-  const englishHeadings = scanned.headings.filter((heading) => heading.level === 2 && schema.sections.some((section) => section.headings.en === heading.text)).length;
-  const chineseHeadings = scanned.headings.filter((heading) => heading.level === 2 && schema.sections.some((section) => section.headings.zh === heading.text)).length;
-  const locale = englishHeadings > chineseHeadings ? 'en' : 'zh-CN';
   for (const section of schema.sections) {
     const matches = markers.filter((entry) => entry.marker === section.marker);
     if (matches.length === 0) {
@@ -281,9 +200,7 @@ function inspectArtifactStructure(
     if (marker && !heading && marker.standalone) {
       const nextHeading = scanned.headings.find((candidate) => candidate.start > marker.start && candidate.level <= 2);
       const body = stripHtmlComments(content.slice(marker.end, nextHeading?.start ?? content.length)).trim();
-      if (body && repairCandidates.length === 0) {
-        repairCandidates.push(createSectionInsertionRepair(content, section, marker, locale));
-      } else if (!body) {
+      if (!body) {
         diagnostics.push(diagnostic('ARTIFACT_EMPTY_SECTION', `section '${section.headings.zh}' has no semantic body`, section.id, marker.line));
       }
     }
@@ -291,32 +208,6 @@ function inspectArtifactStructure(
   for (const marker of markers) {
     if (!schema.sections.some((section) => markerPattern(section.marker).test(`<!-- ${marker.marker} -->`))) {
       diagnostics.push(diagnostic('ARTIFACT_MARKER_MISMATCH', `unknown section marker '${marker.marker}'`, null, marker.line));
-    }
-  }
-
-  for (const candidate of repairCandidates) {
-    if (candidate.kind === 'replace-line') {
-      diagnostics.push(diagnostic(
-        'ARTIFACT_HEADING_TRAILING_PUNCTUATION',
-        `visible required H2 '${candidate.from}' may be normalized to '${candidate.to}'`,
-        candidate.sectionId,
-        candidate.line,
-        true,
-        candidate
-      ));
-      continue;
-    }
-    const missing = diagnostics.findIndex((item) => item.code === 'ARTIFACT_MISSING_SECTION' && item.sectionId === candidate.sectionId);
-    if (missing >= 0) {
-      const section = schema.sections.find((item) => item.id === candidate.sectionId)!;
-      diagnostics.splice(missing, 1, diagnostic(
-        'ARTIFACT_MISSING_SECTION',
-        `required section '${section.headings.zh}' is missing and can be inserted at its unique marker`,
-        candidate.sectionId,
-        candidate.line,
-        true,
-        candidate
-      ));
     }
   }
 
@@ -335,16 +226,11 @@ function inspectArtifactStructure(
     diagnostics.push(diagnostic('ARTIFACT_SECTION_ORDER_INVALID', 'section markers are not in schema order', null, null));
   }
 
-  const repair = repairCandidates.length === 1 && (
-    diagnostics.length === 0 ||
-    (diagnostics.length === 1 && diagnostics[0]?.operation?.kind === repairCandidates[0]?.kind)
-  ) ? repairCandidates[0]! : null;
   return {
     ok: diagnostics.length === 0,
     family: schema.family,
-    semanticDigest: canonicalSemanticDigest(content, repair),
-    diagnostics,
-    repair
+    semanticDigest: canonicalSemanticDigest(content),
+    diagnostics
   };
 }
 
@@ -364,8 +250,7 @@ function inspectArtifactPatterns(
     ok: diagnostics.length === 0,
     family: schema.family,
     semanticDigest: canonicalSemanticDigest(content),
-    diagnostics,
-    repair: null
+    diagnostics
   };
 }
 
@@ -376,18 +261,16 @@ function inspectArtifactContract(
   const structure = inspectArtifactStructure(content, schema);
   const patterns = inspectArtifactPatterns(content, schema);
   const diagnostics = [...structure.diagnostics, ...patterns.diagnostics];
-  const repair = patterns.diagnostics.length === 0 ? structure.repair : null;
   return {
     ok: diagnostics.length === 0,
     family: schema.family,
-    semanticDigest: canonicalSemanticDigest(content, repair),
-    diagnostics,
-    repair
+    semanticDigest: canonicalSemanticDigest(content),
+    diagnostics
   };
 }
 
 function resultFailure(code: string, message: string): ArtifactFileResult {
-  return { status: 'failed', changed: false, artifactSha256: null, semanticDigest: null, operation: null, error: { code, message } };
+  return { status: 'failed', changed: false, artifactSha256: null, semanticDigest: null, error: { code, message } };
 }
 
 function resultNoOp(content: string): ArtifactFileResult {
@@ -396,122 +279,13 @@ function resultNoOp(content: string): ArtifactFileResult {
     changed: false,
     artifactSha256: sha256Content(content),
     semanticDigest: canonicalSemanticDigest(content),
-    operation: null,
     error: null
   };
-}
-
-function validateRepairContext(request: ArtifactRepairRequest, content: string): { ok: true } | { ok: false; code: string; message: string } {
-  const round = artifactRound(request.family, request.artifact);
-  if (round === null) return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'artifact round is not canonical' };
-  const contextPattern = /^<!--\s*artifact-context:([^:\s]+):([^:\s]+):(\d+)\s*-->\s*$/;
-  const contexts = scanVisibleMarkdown(content).lines
-    .map((line) => line.text.trim().match(contextPattern))
-    .filter((match): match is RegExpMatchArray => match !== null);
-  if (contexts.length !== 1
-    || contexts[0]![1] !== request.taskId
-    || contexts[0]![2] !== request.family
-    || Number(contexts[0]![3]) !== round) {
-    return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: 'artifact context marker does not match the requested task, family, and round' };
-  }
-  let taskContent: string;
-  const resolved = resolveTaskRef(request.taskId, { repoRoot: request.repoRoot });
-  if (!resolved.ok) return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: resolved.message };
-  try { taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
-  catch (error) { return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: `cannot read task lifecycle context: ${String(error)}` }; }
-  if (!hasOpenArtifactRound(taskContent, request.family, round)) {
-    return { ok: false, code: 'ARTIFACT_REPAIR_CONTEXT_INVALID', message: `artifact '${request.artifact}' does not have exactly one matching open started lifecycle event` };
-  }
-  let intent;
-  try { intent = readArtifactRepairIntent(request.repoRoot, request.taskId, request.family, request.artifact); }
-  catch (error) { return { ok: false, code: 'ARTIFACT_REPAIR_PROVENANCE_INVALID', message: String(error) }; }
-  if (!intent || intent.state !== 'awaiting-repair') {
-    return { ok: false, code: 'ARTIFACT_REPAIR_PROVENANCE_INVALID', message: 'artifact has no awaiting-repair finalization provenance' };
-  }
-  if (intent.artifactSha256 !== request.expectedSha256 || intent.semanticDigest !== request.expectedSemanticDigest) {
-    return { ok: false, code: 'ARTIFACT_REPAIR_PROVENANCE_INVALID', message: 'repair request does not match the current finalization provenance' };
-  }
-  return { ok: true };
 }
 
 function artifactRound(family: ArtifactSchemaFamily, artifact: string): number | null {
   const identity = parseArtifactName(artifact);
   return identity?.family === family ? identity.round : null;
-}
-
-function validateTarget(taskDir: string, family: ArtifactSchemaFamily, artifact: string): { path: string } | ArtifactFileResult {
-  if (path.basename(artifact) !== artifact || artifactRound(family, artifact) === null || !artifact.endsWith('.md')) return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', 'artifact must be a canonical top-level Markdown file');
-  if (!/^TASK-\d{8}-\d{6}$/.test(path.basename(path.resolve(taskDir)))) return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', 'target directory is not a task directory');
-  const target = path.join(taskDir, artifact);
-  if (path.dirname(path.resolve(target)) !== path.resolve(taskDir)) return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', 'artifact must be inside the current task directory');
-  let stat: fs.Stats;
-  try { stat = fs.lstatSync(target); }
-  catch (error) { return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', `artifact cannot be read: ${String(error)}`); }
-  if (stat.isSymbolicLink() || !stat.isFile()) return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', 'artifact is not a regular file');
-  try { fs.accessSync(target, fs.constants.R_OK | fs.constants.W_OK); }
-  catch (error) { return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', `artifact is not readable and writable: ${String(error)}`); }
-  return { path: target };
-}
-
-function applyRepairUnlocked(request: ArtifactRepairRequest): ArtifactFileResult {
-  const schema = getArtifactSchema(request.family);
-  if (!schema) return resultFailure('ARTIFACT_FAMILY_UNKNOWN', `unknown artifact family '${request.family}'`);
-  const target = validateTarget(request.taskDir, request.family, request.artifact);
-  if ('status' in target) return target;
-  let content: string;
-  try { content = readStableFileSync(target.path, { maxBytes: 1024 * 1024 }).bytes.toString('utf8'); }
-  catch (error) { return resultFailure('ARTIFACT_REPAIR_TARGET_INVALID', String(error)); }
-  const actualSha256 = sha256Content(content);
-  if (actualSha256 !== request.expectedSha256) return resultFailure('ARTIFACT_REPAIR_BASELINE_MISMATCH', 'artifact SHA-256 does not match the expected repair baseline');
-  const context = validateRepairContext(request, content);
-  if (!context.ok) return resultFailure(context.code, context.message);
-  const inspection = inspectArtifactStructure(content, schema);
-  if (!inspection.repair || inspection.diagnostics.length !== 1) {
-    return resultFailure('ARTIFACT_REPAIR_UNSAFE', inspection.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ') || 'no deterministic structural repair is available');
-  }
-  if (inspection.repair.kind !== request.operation.kind
-    || inspection.repair.sectionId !== request.operation.sectionId
-    || inspection.repair.from !== request.operation.from
-    || inspection.repair.to !== request.operation.to
-    || inspection.repair.start !== request.operation.start
-    || inspection.repair.end !== request.operation.end) {
-    return resultFailure('ARTIFACT_REPAIR_OPERATION_MISMATCH', 'repair operation does not match the current artifact structure');
-  }
-  if (inspection.semanticDigest !== request.expectedSemanticDigest) return resultFailure('ARTIFACT_REPAIR_BASELINE_MISMATCH', 'artifact semantic digest does not match the expected repair baseline');
-  const transformed = applyRepairOperation(content, inspection.repair);
-  if (transformed === null) return resultFailure('ARTIFACT_REPAIR_OPERATION_MISMATCH', 'repair operation does not match the current artifact bytes');
-  if (transformed === content) return resultFailure('ARTIFACT_REPAIR_NO_PROGRESS', 'repair operation produced no byte change');
-  const tempPath = path.join(request.taskDir, `.${request.artifact}.repair-${process.pid}-${Date.now()}.tmp`);
-  let mode = 0o600;
-  try {
-    mode = fs.statSync(target.path).mode & 0o777;
-    fs.writeFileSync(tempPath, transformed, { encoding: 'utf8', mode, flag: 'wx' });
-    const currentStat = fs.lstatSync(target.path);
-    if (currentStat.isSymbolicLink() || !currentStat.isFile() || readStableFileSync(target.path, { maxBytes: 1024 * 1024 }).sha256 !== actualSha256) {
-      fs.unlinkSync(tempPath);
-      return resultFailure('ARTIFACT_REPAIR_CONFLICT', 'artifact changed or was replaced during repair');
-    }
-    fs.renameSync(tempPath, target.path);
-  } catch (error) {
-    try { fs.unlinkSync(tempPath); } catch { /* preserve primary error */ }
-    return resultFailure('ARTIFACT_REPAIR_WRITE_FAILED', String(error));
-  }
-  return {
-    status: 'applied',
-    changed: true,
-    artifactSha256: sha256Content(transformed),
-    semanticDigest: canonicalSemanticDigest(transformed),
-    operation: inspection.repair,
-    error: null
-  };
-}
-
-function applyArtifactRepair(request: ArtifactRepairRequest): ArtifactFileResult {
-  try {
-    return withTaskExecutionLock(request.repoRoot, request.taskId, 'task-artifact.repair', () => applyRepairUnlocked(request));
-  } catch (error) {
-    return resultFailure('ARTIFACT_REPAIR_LOCK_FAILED', String(error));
-  }
 }
 
 function initializeArtifactSkeleton(request: ArtifactInitRequest): ArtifactFileResult {
@@ -551,7 +325,6 @@ function initializeArtifactSkeleton(request: ArtifactInitRequest): ArtifactFileR
         changed: true,
         artifactSha256: sha256Content(content),
         semanticDigest: canonicalSemanticDigest(content),
-        operation: null,
         error: null
       };
     });
@@ -561,7 +334,6 @@ function initializeArtifactSkeleton(request: ArtifactInitRequest): ArtifactFileR
 }
 
 export {
-  applyArtifactRepair,
   canonicalSemanticDigest,
   initializeArtifactSkeleton,
   inspectArtifactContract,
@@ -572,8 +344,6 @@ export {
 export type {
   ArtifactFileResult,
   ArtifactInitRequest,
-  ArtifactRepairOperation,
-  ArtifactRepairRequest,
   ArtifactStructuralDiagnostic,
   ArtifactStructuralDiagnosticCode,
   ArtifactStructureResult
