@@ -43,15 +43,24 @@ function printFailure(format: OutputFormat, error: { code: string; message: stri
   process.exitCode = 1;
 }
 
+const MANUAL_VALIDATION_STATUS_SECTION = /^###\s+(?:⚠️\s+(?:需人工校验|Manual Validation Required)|✅\s+(?:人工验证已通过|无需人工校验|Manual Validation Passed|No Manual Validation Required)|⏳\s+(?:人工验证待收尾|Manual Validation Pending))\s*$[\s\S]*?(?=^#{1,3}\s|(?![\s\S]))/gmu;
+
 function manualSummaryBody(body: string, phase: 'pending' | 'final', transactionId: string, receiptDigest = '', evidenceDigest = '', prHeadSha = ''): string {
-  const withoutPrevious = body
-    .replace(/^###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)\s*$/gmu, '')
-    .replace(/^###\s+⏳\s+(?:Manual Validation Pending|人工验证待收尾)\s*$/gmu, '')
-    .replace(/Manual validation passed(?:\s+→)?/giu, 'Manual validation pending');
+  const chinese = /###\s+(?:⚠️\s+需人工校验|✅\s+(?:人工验证已通过|无需人工校验)|⏳\s+人工验证待收尾)\s*$/mu.test(body);
   const section = phase === 'pending'
-    ? `### ⏳ Manual Validation Pending\n\nManual validation evidence is staged; transaction ${transactionId} is awaiting final promotion.`
-    : `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${transactionId}; receipt=${receiptDigest}; evidence=${evidenceDigest}; head=${prHeadSha}.`;
-  return `${withoutPrevious.replace(/\s+$/u, '')}\n\n${section}\n`;
+    ? chinese
+      ? `### ⏳ 人工验证待收尾\n\n人工验证证据已暂存；事务 ${transactionId} 正在等待最终完成。`
+      : `### ⏳ Manual Validation Pending\n\nManual validation evidence is staged; transaction ${transactionId} is awaiting final promotion.`
+    : chinese
+      ? `### ✅ 人工验证已通过\n\n人工验证已通过；transaction=${transactionId}; receipt=${receiptDigest}; evidence=${evidenceDigest}; head=${prHeadSha}.`
+      : `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${transactionId}; receipt=${receiptDigest}; evidence=${evidenceDigest}; head=${prHeadSha}.`;
+  let inserted = false;
+  const updated = body.replace(MANUAL_VALIDATION_STATUS_SECTION, () => {
+    if (inserted) return '';
+    inserted = true;
+    return `${section}\n\n`;
+  });
+  return inserted ? `${updated.replace(/\s+$/u, '')}\n` : `${body.replace(/\s+$/u, '')}\n\n${section}\n`;
 }
 
 function openManualValidationStarted(taskMdPath: string): { present: boolean; transactionId: string | null } {
@@ -246,7 +255,7 @@ async function executeManualValidationTransactionLocked(
     });
     if (!['applied', 'no-op'].includes(promoted.status)) transactionFailure(promoted.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary promotion failed' });
     const postWrite = await summaryCommentState(taskRef, { cwd, client: options.client });
-    if (!postWrite.comment?.body.includes('### ✅ Manual Validation Passed') || postWrite.pullRequest?.head.sha !== receipt.prHeadSha || !manualValidationFinalSummaryProjectionMatches(postWrite.comment.body, receipt)) transactionFailure({ code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary post-write verification failed' });
+    if (!/^###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)\s*$/mu.test(postWrite.comment?.body ?? '') || postWrite.pullRequest?.head.sha !== receipt.prHeadSha || !manualValidationFinalSummaryProjectionMatches(postWrite.comment?.body ?? '', receipt)) transactionFailure({ code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary post-write verification failed' });
     transitionAndPersist('committed', { postWriteVerified: true });
     return result('applied', null, { transaction, receipt, idempotent: false });
   } catch (error) {

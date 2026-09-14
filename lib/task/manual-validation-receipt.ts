@@ -68,7 +68,11 @@ function manualValidationReceiptDigest(receipt: ManualValidationReceipt | Manual
 
 function manualValidationFinalSummaryDigest(body: string): string {
   const heading = /^###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)\s*$/mu.exec(body);
-  const projection = heading ? body.slice(heading.index).replace(/\s+$/u, '') : body;
+  const afterHeading = heading ? body.slice(heading.index + heading[0].length) : '';
+  const nextSection = heading ? /^#{1,3}\s/mu.exec(afterHeading) : null;
+  const projection = heading
+    ? body.slice(heading.index, heading.index + heading[0].length + (nextSection?.index ?? afterHeading.length)).replace(/\s+$/u, '')
+    : body;
   const preimage = projection.replace(/receipt=(?:[a-f0-9]{64}|<receipt>)/gu, 'receipt=<receipt>');
   return createHash('sha256').update(preimage, 'utf8').digest('hex');
 }

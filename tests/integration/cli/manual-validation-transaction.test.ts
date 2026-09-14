@@ -394,3 +394,32 @@ test('actual coordinator execution converges on replay without repeated remote w
   assert.equal(state.writes, writesAfterFirst);
   assert.equal(countStarted(fixture.taskPath), 1);
 });
+
+test('coordinator replaces the Chinese manual-validation status section in place', async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  fs.writeFileSync(fixture.summaryPath, [
+    '## 审查摘要',
+    '',
+    '### ⚠️ 需人工校验',
+    '',
+    '- 在生产环境完成权限校验。',
+    '',
+    '### 关键技术决策',
+    '',
+    '- 保持最小权限。',
+    '',
+    '<!-- canonical-pr-change-report -->',
+    ''
+  ].join('\n'));
+  const state: FakeGitHubState = { comments: [], writes: 0 };
+
+  const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
+    client: fakeClient(fixture.baseSha, fixture.headSha, state)
+  });
+
+  assert.equal(result.status, 'applied', JSON.stringify(result));
+  const body = state.comments[0]?.body ?? '';
+  assert.match(body, /## 审查摘要\n\n### ✅ 人工验证已通过\n\n人工验证已通过；transaction=.*\n\n### 关键技术决策/m);
+  assert.equal((body.match(/^###\s+(?:⚠️\s+需人工校验|✅\s+人工验证已通过|⏳\s+人工验证待收尾)\s*$/gmu) ?? []).length, 1);
+});
