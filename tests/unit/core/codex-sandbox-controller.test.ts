@@ -115,6 +115,7 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
     control: {
       token: 'control-token',
       generation: 'generation',
+      rootId: 'control-root-id',
       channelDir: '/control',
       statusDir: '/status',
       runtimeDir: f.runtimeDir
@@ -138,6 +139,7 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
   assert.equal(prepared.env.HOME, prepared.home);
   assert.equal(prepared.env.UNRELATED_CONTROLLER_SECRET, undefined);
   assert.equal(prepared.env.AGENT_INFRA_CONTROL_TOKEN, 'control-token');
+  assert.equal(prepared.env.AGENT_INFRA_CONTROL_ROOT_ID, 'control-root-id');
   assert.equal(prepared.env.PATH?.split(path.delimiter)[0], path.join(prepared.home, 'bin'));
   const shim = fs.readFileSync(path.join(prepared.home, 'bin', 'agent-infra-internal'), 'utf8');
   const expectedExecutable = path.resolve(process.argv[1] ?? path.join(f.root, 'bin', 'internal-cli.ts'));

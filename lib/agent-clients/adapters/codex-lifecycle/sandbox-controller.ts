@@ -26,6 +26,7 @@ import {
 type ControllerControl = Readonly<{
   token: string;
   generation: string;
+  rootId?: string;
   channelDir: string;
   statusDir: string;
   runtimeDir: string;
@@ -83,13 +84,14 @@ function copyRegular(source: string, destination: string, mode: number): void {
 function controlFromEnvironment(): ControllerControl {
   const token = process.env.AGENT_INFRA_CONTROL_TOKEN;
   const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
+  const rootId = process.env.AGENT_INFRA_CONTROL_ROOT_ID;
   const channelDir = process.env.AGENT_INFRA_CONTROL_DIR;
   const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR;
   const runtimeDir = process.env.AGENT_INFRA_RUNTIME_DIR;
-  if (!token || !generation || !channelDir || !statusDir || !runtimeDir) {
+  if (!token || !generation || !rootId || !channelDir || !statusDir || !runtimeDir) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTROL_MISSING');
   }
-  return { token, generation, channelDir, statusDir, runtimeDir };
+  return { token, generation, rootId, channelDir, statusDir, runtimeDir };
 }
 
 function verifyRuntime(runtimeDir: string): void {
@@ -255,6 +257,9 @@ function isolatedEnvironment(
     AGENT_INFRA_TASK_ID: taskId,
     AGENT_INFRA_CONTROL_TOKEN: control.token,
     AGENT_INFRA_CONTROL_GENERATION: control.generation,
+    ...(control.rootId || sourceEnvironment.AGENT_INFRA_CONTROL_ROOT_ID
+      ? { AGENT_INFRA_CONTROL_ROOT_ID: control.rootId ?? sourceEnvironment.AGENT_INFRA_CONTROL_ROOT_ID }
+      : {}),
     AGENT_INFRA_CONTROL_DIR: control.channelDir,
     AGENT_INFRA_CONTROL_STATUS_DIR: control.statusDir,
     AGENT_INFRA_RUNTIME_DIR: control.runtimeDir,
