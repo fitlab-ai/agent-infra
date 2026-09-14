@@ -16,8 +16,12 @@ import {
   stageArtifactCandidate
 } from '../../../lib/task/artifact-recovery.ts';
 
+function makeTempDir(prefix: string): string {
+  return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), prefix));
+}
+
 test('artifact recovery publishes a staged candidate through durable states', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const repoRoot = makeTempDir('agent-infra-recovery-');
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
@@ -61,7 +65,7 @@ test('artifact recovery publishes a staged candidate through durable states', ()
 });
 
 test('artifact recovery refuses a formal target changed after staging', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const repoRoot = makeTempDir('agent-infra-recovery-');
   const taskId = 'TASK-20260101-000002';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
@@ -87,7 +91,7 @@ test('artifact recovery refuses a formal target changed after staging', () => {
 });
 
 test('artifact recovery publishes the validated snapshot when the candidate changes after preparation', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const repoRoot = makeTempDir('agent-infra-recovery-');
   const taskId = 'TASK-20260101-000003';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
@@ -112,7 +116,7 @@ test('artifact recovery publishes the validated snapshot when the candidate chan
 });
 
 test('artifact recovery publishes sealed bytes when final.md is swapped before rename', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const repoRoot = makeTempDir('agent-infra-recovery-');
   const taskId = 'TASK-20260101-000008';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
@@ -149,8 +153,8 @@ test('artifact recovery publishes sealed bytes when final.md is swapped before r
 });
 
 test('artifact recovery rejects a symlinked recovery-root ancestor before creating outside files', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
-  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-external-'));
+  const repoRoot = makeTempDir('agent-infra-recovery-');
+  const external = makeTempDir('agent-infra-recovery-external-');
   const taskId = 'TASK-20260101-000004';
   const workspace = path.join(repoRoot, '.agents', 'workspace');
   const taskDir = path.join(workspace, 'active', taskId);
@@ -172,7 +176,7 @@ test('artifact recovery rejects a symlinked recovery-root ancestor before creati
 });
 
 test('artifact recovery binds the fast-path provenance to the finalizer bytes', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const repoRoot = makeTempDir('agent-infra-recovery-');
   const taskId = 'TASK-20260101-000007';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
@@ -196,7 +200,7 @@ test('artifact recovery binds the fast-path provenance to the finalizer bytes', 
 });
 
 test('artifact recovery reconciles a commit-started transaction and pauses on a third target fingerprint', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-recovery-'));
+  const repoRoot = makeTempDir('agent-infra-recovery-');
   const taskId = 'TASK-20260101-000005';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
