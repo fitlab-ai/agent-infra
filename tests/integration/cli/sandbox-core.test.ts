@@ -479,6 +479,7 @@ test("sandbox rm --unbound --yes removes task-bound sandboxes regardless of task
   const tasks = [
     { state: "active", taskId: "TASK-20260101-000101", branch: "feature/remove-active", container: "sb-remove-active" },
     { state: "blocked", taskId: "TASK-20260101-000102", branch: "feature/remove-blocked", container: "sb-remove-blocked" },
+    { state: "completed", taskId: "TASK-20260101-000104", branch: "feature/remove-completed", container: "sb-remove-completed" },
     { state: "archive", taskId: "TASK-20260101-000103", branch: "feature/remove-archive", container: "sb-remove-archive" }
   ] as const;
   try {
