@@ -9,7 +9,7 @@ import { dispatchHostControlCommand } from '../../host-control/command.ts';
 import { assertSandboxTaskSource } from '../workspace-view.ts';
 import { appendDiagnosticAudit } from './audit.ts';
 import {
-  readTaskArtifact, writeTaskArtifact, type TaskWorkflowRequest
+  readTaskArtifact, type TaskWorkflowRequest
 } from './task-workflow.ts';
 import type { SandboxControlManifest } from './protocol.ts';
 import type { SandboxControlExecutionResult } from './executor.ts';
@@ -55,7 +55,7 @@ export async function executeTaskWorkflow(
     if (command === 'task-artifact' && 'operation' in input && input.operation === 'inspect') {
       return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot }));
     }
-    if ('operation' in input && (input.operation === 'init' || input.operation === 'repair')) {
+    if ('operation' in input && input.operation === 'init') {
       return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot, artifactDir: taskDir }));
     }
     return await withTaskExecutionLock(manifest.repoRoot, request.taskId, `sandbox-control.${request.operation}`, async () => {
@@ -65,27 +65,17 @@ export async function executeTaskWorkflow(
       if ('operation' in input) {
         const { family } = input;
         if (family !== 'analysis' && family !== 'plan' && family !== 'code') throw new Error('ARTIFACT_IDENTITY_INVALID');
-        const local = { taskRef: request.taskId, family, artifact: input.artifact, repoRoot: manifest.repoRoot } as const;
+        const local = { taskRef: request.taskId, family, artifact: input.artifact, repoRoot: manifest.repoRoot, recoveryId: input.recoveryId, lockAlreadyHeld: true } as const;
         const prepared = prepareLocalArtifact(local, content, lifecycleRecoveryAttestation ?? undefined);
         if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared));
         publicationStarted = true;
-        await writeTaskArtifact(taskDir, {
-          artifact: artifact.artifact,
-          bytes: artifact.bytes,
-          expectedSha256: artifact.sha256
-        });
         result = commitLocalArtifactProvenance(prepared);
       } else {
         if (input.overrideTicket) throw new Error('TASK_WORKFLOW_OVERRIDE_UNSUPPORTED');
-        const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot });
+        const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true, startRecovery: true });
         if (input.dryRun || prepared.result.status === 'planned') return executionResult(prepared.result);
         if (prepared.result.status === 'failed') return executionResult(commitReviewSummaryProvenance(prepared, manifest.repoRoot));
         publicationStarted = true;
-        await writeTaskArtifact(taskDir, {
-          artifact: input.artifact,
-          bytes: Buffer.from(prepared.content, 'utf8'),
-          expectedSha256: artifact.sha256
-        });
         result = commitReviewSummaryProvenance(prepared, manifest.repoRoot);
       }
       if (result.status !== 'failed') appendDiagnosticAudit(manifest, 'task-workflow-artifact-finalized', {

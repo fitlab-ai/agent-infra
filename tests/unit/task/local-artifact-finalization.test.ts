@@ -54,22 +54,19 @@ test('local artifact validation ignores fenced headings and commands', () => {
   const result = validateLocalArtifact(content, { family: 'plan' });
 
   const missing = diagnostic(result, 'LOCAL_ARTIFACT_MISSING_SECTION');
-  assert.equal(missing.repairable, false);
+  assert.equal(missing.line !== undefined, true);
 });
 
-test('one visible required H2 with one trailing colon is repairable and preserves semantic digest', () => {
+test('one visible required H2 with one trailing colon is diagnosed without normalization', () => {
   const malformed = artifact().replace('## 验证策略\n', '## 验证策略：\n');
   const failed = validateLocalArtifact(malformed, { family: 'plan' });
   const repair = diagnostic(failed, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
 
-  assert.equal(repair.repairable, true);
-  assert.equal(repair.from, '验证策略：');
-  assert.equal(repair.to, '验证策略');
   assert.equal(repair.line, 28);
 
   const repaired = validateLocalArtifact(malformed.replace('## 验证策略：', '## 验证策略'), { family: 'plan' });
   assert.equal(repaired.ok, true);
-  assert.equal(repaired.semanticDigest, failed.semanticDigest);
+  assert.notEqual(repaired.semanticDigest, failed.semanticDigest);
 });
 
 test('non-whitelisted content changes and ambiguous candidates fail closed', () => {
@@ -92,22 +89,17 @@ test('non-whitelisted content changes and ambiguous candidates fail closed', () 
     '## 验证策略：\n验证方法\n\n## 状态核对\n'
   );
   const duplicate = validateLocalArtifact(duplicateCandidate, { family: 'plan' });
-  const duplicateDiagnostic = diagnostic(duplicate, 'LOCAL_ARTIFACT_DUPLICATE_SECTION');
-  assert.equal(duplicateDiagnostic.repairable, false);
+  diagnostic(duplicate, 'LOCAL_ARTIFACT_DUPLICATE_SECTION');
 });
 
-test('code reports support the same one-line heading repair and semantic baseline', () => {
+test('code reports diagnose the same one-line heading issue without normalizing the digest', () => {
   const malformed = artifact('code').replace('## 测试结果\n', '## 测试结果：\n');
   const failed = validateLocalArtifact(malformed, { family: 'code' });
   const repair = diagnostic(failed, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
 
-  assert.equal(repair.repairable, true);
-  assert.equal(repair.from, '测试结果：');
-  assert.equal(repair.to, '测试结果');
-
   const repaired = validateLocalArtifact(malformed.replace('## 测试结果：', '## 测试结果'), { family: 'code' });
   assert.equal(repaired.ok, true);
-  assert.equal(repaired.semanticDigest, failed.semanticDigest);
+  assert.notEqual(repaired.semanticDigest, failed.semanticDigest);
 });
 
 test('code report validation binds qualification relations to the started input', () => {

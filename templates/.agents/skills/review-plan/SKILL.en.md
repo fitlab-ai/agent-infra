@@ -75,7 +75,7 @@ Before writing this round's `{review-artifact}`, create the controlled review sk
 agent-infra-internal task-artifact {task-id} init --family review-plan --artifact {review-artifact} --locale en
 ```
 
-The skeleton contains identity metadata, stable section markers, and required headings only; complete review content is required before summary finalization. If structural finalization returns one provably safe error, call `task-artifact {task-id} repair --family review-plan --artifact {review-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`, then rerun the original finalizer.
+The skeleton contains identity metadata, stable section markers, and required headings only; complete review content is required before summary finalization. If structural finalization returns one provably safe error, it returns a controlled recovery candidate; edit only its `candidatePath`, then rerun the original finalizer with the same `recoveryId`. Candidate-only is a protocol authorization boundary, not OS isolation; arbitrary same-UID host writers are outside the protocol's protection claim, and fingerprint/state checks fail closed on anomalies.
 
 Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 

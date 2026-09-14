@@ -1,57 +1,64 @@
-# 通用规则 - 模型驱动的本地产物修复
+# 通用规则 - 模型驱动的本地产物恢复
 
-本规则适用于 `analyze-task`、`plan-task`、`code-task` 在 completed 事件前处理**同一个受控本地产物**，以及 `review-analysis`、`review-plan`、`review-code` 在 finalizer 失败后处理**同一个受控 review artifact** 的场景。它不适用于 task.md、账本、receipt、源码、Git、平台资源或生命周期状态。
+本规则适用于 `analyze-task`、`plan-task`、`code-task` 的本地产物完成前门禁，以及三个 review skill 的 summary finalizer。它只处理当前 task 目录内的一个 canonical artifact；不适用于 `task.md`、账本、receipt、源码、Git、平台资源或生命周期状态。
 
-## 分析、方案和代码产物完成前门禁
+## 完成前门禁
 
-- `analyze-task`、`plan-task` 和 `code-task` 必须在发布 completed 事件前调用 `task-artifact ... finalize-local`；只有同一次返回的 `artifactSha256` 和 `semanticDigest` 才能传给 completed 事件。
-- `finalize-local` 不修改产物或任务状态，但会在仓库工作区写入一次性的本地 provenance intent。返回 `failed` 时，只有 `repairable=true` 且诊断明确为一个可证明安全的结构操作（当前共享引擎操作为 `replace-line` 或 `insert-section`），模型才可在同一产物中执行一次最小编辑，然后完整重跑同一调用；每次实际字节修改计一次，最多 8 次。
-- 首次可修复失败的 semantic digest 会保存在该 intent 中；后续 `passed` 必须匹配该基线，completed event 还必须在任务锁内验证并在写 task.md 前原子转换为 `consumed` 状态。消费失败时不得写任务；转换后的 intent 是可重试的 durable 记录，成功写入后不再执行可能失败的后置删除。不得用重新计算的新摘要替换失败基线，也不得绕过 finalizer 直接发布 completed event。
-- 返回 `failed`、无进展、诊断或指纹重复时不得发布 completed 事件；返回 `passed` 后也不得重新扫描或手工补写摘要。
+- 完成事件前必须运行对应 finalizer；只有同一次返回的 `artifactSha256` 和 `semanticDigest` 才能传给 completed event。
+- finalizer 发现 artifact 内容错误时，返回受控 `recovery`（`recoveryId`、`candidatePath`、baseline 指纹）。正式 artifact 在 recovery commit 前必须保持不变。
+- 只有在机械安全门通过后，模型才可编辑返回的 `candidatePath`；每次实际字节变化后，用同一 task、stage/family、artifact 和 `--recovery-id` 完整重跑 finalizer。不得直接编辑正式 artifact 后假设它属于候选。
+- finalizer 通过后，recovery core 按 `finalize-ready → commit-started → passed` 提交候选；completed event 只接受匹配的 `passed`/final digest，并在任务锁内消费 intent。
+- `finalize-ready` 前 recovery core 会把已校验的最终字节封存为受控 `final.md`；后续 commit 忽略可编辑的 `candidate.md`，只校验并发布该封存快照，避免候选在准备后被替换。
+- candidate-only 是协议授权边界，不是操作系统隔离：拥有同一 UID 且可任意写入宿主文件系统的进程可能篡改 recovery 内部文件；协议会通过身份、指纹和状态校验发现异常并失败关闭，但不承诺独立权限主体或跨平台隔离。
 
 ## 授权边界
 
-- finalizer 只负责读取事实、校验状态、规范化成功结果和原子写入；它不维护可修复错误码白名单，不推断 repairability，也不自动选择要删除的报告内容。
-- 首次 finalizer 调用不计入修复次数。只有在机械安全门通过后，模型明确判断当前问题能通过最小、可解释的 artifact 修改解决时，才允许编辑。
-- 模型只能修改当前 skill 声明的一个普通本地产物，且该文件必须位于当前 task 目录。不得修改 task.md、审查分歧账本、receipt、源码、其他报告或远端资源。
-- `changed=false`、错误码或某个格式形状只是诊断事实，不是自动批准。模型必须结合完整诊断、artifact 内容和上下文逐例判断。
+- finalizer 和 recovery core 只校验身份、状态、权限、稳定读取、完整 artifact 语义和指纹；不根据错误码猜测“可修复”，也不提供文本操作白名单。
+- 模型只能修改当前 skill 声明的一个普通 artifact。不得修改 task.md、账本、receipt、源码、其他报告或远端资源。
+- `changed=false`、错误码和格式形状只是诊断事实，不是编辑授权。人工裁决、并发、权限、I/O、身份、provenance 或未知状态无法证明安全时，立即停止。
 
 ## 不可绕过的机械安全门
 
-在每次模型编辑前确认：
+每次编辑候选前确认：
 
-1. finalizer 返回失败，且没有已提交的 artifact operation；
-2. 任务、stage、artifact、review round、身份和 provenance 仍然一致；
-3. 目标是当前 task 目录内的普通文件，没有并发冲突、权限错误、I/O 不确定性或目标被替换；
-4. 不改变人工裁决语义、裁决详情或账本身份，也不涉及任务状态、receipt、Git、平台或其他外部副作用；已知且可核验的 pending 人工裁决可以保留，但模型必须证明本次修改与该裁决无关。
+1. finalizer 返回失败并提供同一 recovery context，且没有正式提交；
+2. task、family/stage、round、artifact、request/authority 和 baseline 指纹仍匹配；
+3. `candidatePath` 是 recovery core 生成的受控普通文件，formal target 没有外部变化；
+4. 修改不改变人工裁决语义、详情或账本身份，也不引入其他副作用。
 
-任一条件不满足，立即停止，不调用模型编辑。安全门不能被模型的语义判断绕过。
+任一条件不满足，停止，不编辑、不发布 completed。
+
+## Durable recovery 状态
+
+| 状态 | formal artifact | 允许动作 |
+| --- | --- | --- |
+| `awaiting-recovery` | baseline `B` | 只编辑受控 candidate `S`，重跑同一 finalizer |
+| `finalize-ready` | `B` | recovery core 在锁内开始提交 |
+| `commit-started` | `B` 或 final `F` | 只允许 reconcile；按 `B/F` 指纹重试、确认或回滚 |
+| `passed` | `F` | completed event 校验 final digest 后消费 |
+| `consumed` | `F` | 可由中间产物清理流程回收受控 staging/backup |
+| `aborted` | 已确认恢复的 `B` | 只保留诊断，不得伪造成功 |
+
+intent 使用 current-only schema version 3。旧 schema 直接失败关闭；不添加迁移、adapter 或双写。candidate、baseline 和 intent 位于 repo-local 受控目录，使用 canonical recovery ID、普通文件检查、stable read、task lock 和 expected-value CAS。跨文件不宣称原子性；未知组合返回 indeterminate 并保留现场。
 
 ## 动态收敛循环
 
-1. 使用固定的 task、stage、artifact 和 orchestrated intent 执行首次 finalizer。
-2. 成功时使用这一次完整结果进入既有完成前门禁；不得重新扫描账本或手工补写摘要。
-3. 失败且安全门通过时，模型读取结构化诊断、当前 artifact 和必要上下文，决定继续修复或停止，并说明修改范围和理由。
-4. 模型选择继续时，只做一次最小 artifact 编辑。只有文件字节实际发生变化，才增加一次 `repairAttempts`，然后完整重跑同一个 finalizer intent。
-5. 每次重跑都重新执行全部安全校验。修复后出现新的、独立且仍局限于该 artifact 的问题，可以再次交给模型判断；不能沿用上一次“可修复”的结论。
-6. 模型无法证明下一步安全，或判断问题属于环境、权限、并发、身份、provenance、状态未知、人工裁决语义/详情不确定或其他非本地问题时，立即停止。已知人工裁决本身不是停止条件。
-7. 诊断重复、artifact 指纹重复、没有实际字节进展或模型没有提出可验证的最小修改时，立即停止。
-8. 每次 skill invocation 最多允许 8 次实际 artifact 修改作为紧急熔断。该上限只防止死循环和资源失控，不是正常业务停止条件，也不表示最多只能修复 8 个问题。达到上限时保留最后结构化诊断并停止。
+1. 用固定 invocation 运行 finalizer。
+2. 失败且安全门通过时，读取结构化诊断和 `candidatePath`，只作一次最小、可解释的候选编辑。
+3. 确认字节变化后，使用同一 `--recovery-id` 完整重跑全部 finalizer 校验。
+4. 诊断或指纹重复、无字节进展、恢复状态未知或达到当前 invocation 的 8 次编辑上限时停止；不发布 completed，不生成跨阶段 next-step。
 
-修复次数只存在于当前 skill invocation 的内存上下文，不写入 task.md、ledger 或公共 receipt。不得按错误码、技能或问题类型设置不同的正常预算。
+## 共享入口
 
-## 共享结构引擎
+`task-artifact ... inspect|init|finalize-local` 和 `task-review ... finalize-summary` 是当前入口。恢复重试使用 finalizer 返回的 `recoveryId`，例如：
 
-报告骨架由 `agent-infra-internal task-artifact {task-id} init --family {family} --artifact {artifact}` 创建。骨架只写身份、标题和 `artifact-section:{family}:{section-id}` marker，不代表语义完成；槽位必须由当前 skill 填入真实内容。finalizer 返回单一可证明结构操作时，使用同一返回值的 SHA 和 semantic digest 调用 `task-artifact {task-id} repair --family {family} --artifact {artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`。repair 只执行共享引擎给出的一个结构操作，不写 task.md、ledger、receipt、Git 或平台资源，之后必须完整重跑原 finalizer。
+```text
+agent-infra-internal task-artifact {task-id} finalize-local --family code --artifact {code-artifact} --recovery-id {recovery-id}
+agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} --recovery-id {recovery-id}
+```
 
-## 完成事件与用户输出
-
-- 最终一次完整 finalizer 成功后，必须使用同一次返回的 provenance、账本状态、verdict 和计数发布 review completed 事件；`stageStatus.canAdvance=true` 且结论为 Approved 时才可生成跨阶段 next-step 命令，`canAdvance=false` 时仍须登记结果并路由到同阶段修订/复审。
-- 失败、模型停止、无进展、诊断重复或紧急熔断时，不发布 completed 事件，不推进生命周期，不生成跨阶段命令，也不伪造通过结论。
-- 停止推进不等于丢弃审查结果。用户输出必须展示 artifact 路径、已安全读取的最后有效 summary/findings、实际 `repairAttempts`、最后结构化诊断和停止原因。
-- summary 无法安全解析时，只展示 artifact 路径和原始结构化诊断，不推算计数、不补写结论，并明确生命周期推进已停止但产物仍可查看。
-- 停止路径只提示重新运行当前 review skill 或进行人工处理；不能调用 `code-task`、`complete-task` 等跨阶段 helper。
+不再存在 `task-artifact repair`、`replace-line`、`insert-section` 或 `repairable` 授权。结构引擎只返回诊断和 digest；候选是否安全、如何修改以及何时停止由当前 skill 的机械门和模型逐例判断。
 
 ## 生命周期隔离
 
-`complete-task`、告警关闭、恢复任务和其他 task-lifecycle/task-finalization 入口涉及任务状态、receipt、远端结果或归档副作用，不消费本规则。它们继续使用各自的硬失败、同一 intent 重试和状态未知语义。
+completed event 合法地修改 task.md，但必须发生在 finalizer recovery 已 `passed` 且 digest、round、request/authority 全部匹配之后。若 event 写入后 authority 消费失败，保留正式 artifact，使用既有 lifecycle recovery compensation；不得重放 completed 写入或回滚已通过的 artifact。

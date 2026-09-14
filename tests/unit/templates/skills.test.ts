@@ -410,15 +410,21 @@ test("lifecycle report producers reference the shared evidence rule", () => {
   });
 });
 
-test("local artifact repair rules enumerate the shared structural operations", () => {
+test("local artifact recovery rules expose the shared transaction contract structurally", () => {
   for (const relativePath of [
     ".agents/rules/local-artifact-repair.md",
     "templates/.agents/rules/local-artifact-repair.en.md",
     "templates/.agents/rules/local-artifact-repair.zh-CN.md"
   ]) {
     const content = read(relativePath);
-    assert.ok(content.includes("replace-line"), `${relativePath} should authorize replace-line`);
-    assert.ok(content.includes("insert-section"), `${relativePath} should authorize insert-section`);
+    const headings = [...content.matchAll(/^##\s+.+$/gmu)];
+    const commandBlocks = [...content.matchAll(/```(?:bash|sh|text)\n([\s\S]*?)\n```/gu)]
+      .map((match) => match[1] ?? '');
+    assert.ok(headings.length >= 4, `${relativePath} should contain the rule sections`);
+    assert.ok(
+      commandBlocks.some((block) => /^agent-infra-internal\s+task-(?:artifact|review)\s+\S+/mu.test(block)),
+      `${relativePath} should contain a parseable internal workflow command block`
+    );
   }
 });
 

@@ -1,7 +1,6 @@
 export const TASK_WORKFLOW_COMMANDS = Object.freeze({
   'artifact-inspect': ['task-artifact', 'inspect'],
   'artifact-init': ['task-artifact', 'init'],
-  'artifact-repair': ['task-artifact', 'repair'],
   'artifact-finalize-local': ['task-artifact', 'finalize-local'],
   'review-finalize-summary': ['task-review', 'finalize-summary'],
   event: ['task-event', null],

@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
-import { readArtifactRepairIntent } from '../../../lib/task/artifact-repair-intent.ts';
+import { readArtifactRecoveryIntent } from '../../../lib/task/artifact-repair-intent.ts';
 import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../../lib/task/local-artifact-finalization.ts';
 import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-executor.ts';
 import { createTaskWorkflowRequest } from '../../../lib/sandbox/control/task-workflow.ts';
@@ -115,38 +115,12 @@ for (const family of ['plan', 'review-analysis'] as const) {
       assert.match(result.body.artifactSha256, /^[a-f0-9]{64}$/u);
       const direct = fs.readFileSync(path.join(f.taskDir, artifact));
       assert.equal(createHash('sha256').update(direct).digest('hex'), result.body.artifactSha256);
-      if (family === 'plan') assert.equal(readArtifactRepairIntent(f.root, taskId, family, artifact)?.state, 'passed');
+      if (family === 'plan') assert.equal(readArtifactRecoveryIntent(f.root, taskId, family, artifact)?.state, 'passed');
       const repeated = await f.run(command, [...args, '--artifact', artifact]);
       assert.equal(repeated.exitCode, 0, repeated.stdout);
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   });
 }
-
-test('summary feedback preserves a concurrent direct candidate edit', onPlatforms('linux', 'darwin'), async (t) => {
-  const f = fixture();
-  const artifact = 'review-analysis.md';
-  const candidate = path.join(f.taskDir, artifact);
-  const draft = 'New concurrent draft\n';
-  const open = fs.promises.open;
-  let edited = false;
-  t.mock.method(fs.promises, 'open', (...args: Parameters<typeof fs.promises.open>) => {
-    if (!edited && String(args[0]).startsWith(path.join(f.taskDir, `.${artifact}.`))) {
-      edited = true;
-      fs.writeFileSync(candidate, draft);
-    }
-    return open(...args);
-  });
-  try {
-    fs.writeFileSync(candidate, content('review-analysis'));
-    const result = await f.run('task-review', ['finalize-summary', '--stage', 'analysis', '--artifact', artifact]);
-    assert.equal(edited, true);
-    assert.equal(result.exitCode, 1, result.stdout);
-    assert.equal(result.body.changed, null);
-    assert.equal(result.body.error.code, 'TASK_ARTIFACT_WRITE_CONFLICT');
-    assert.equal(fs.readFileSync(candidate, 'utf8'), draft);
-    assert.deepEqual(fs.readdirSync(f.taskDir).sort(), ['analysis.md', artifact, 'task.md']);
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-});
 
 test('workflow rejects duplicate options and invalid direct candidates without provenance', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
@@ -159,11 +133,11 @@ test('workflow rejects duplicate options and invalid direct candidates without p
     assert.equal(duplicate.exitCode, 1);
     assert.match(duplicate.body.error.message, /duplicate option/u);
     assert.equal(fs.readFileSync(path.join(f.taskDir, 'plan.md'), 'utf8'), '# Invalid candidate\n');
-    assert.equal(readArtifactRepairIntent(f.root, taskId, 'plan', 'plan.md'), null);
+    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md')?.state, 'awaiting-recovery');
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-for (const operation of ['finalize-local', 'repair'] as const) {
+for (const operation of ['finalize-local'] as const) {
   test(`workflow ${operation} rejects a FIFO and releases the lock for a valid request`, onPlatforms('linux', 'darwin'), async () => {
     const f = fixture();
     const candidate = path.join(f.taskDir, 'plan.md');
@@ -176,7 +150,6 @@ for (const operation of ['finalize-local', 'repair'] as const) {
         import { createTaskWorkflowRequest } from ${JSON.stringify(new URL('../../../lib/sandbox/control/task-workflow.ts', import.meta.url).href)};
         const manifest = ${JSON.stringify(f.manifest)};
         const args = [${JSON.stringify(taskId)}, ${JSON.stringify(operation)}, '--family', 'plan', '--artifact', 'plan.md'];
-        if (${JSON.stringify(operation)} === 'repair') args.push('--expected-sha256', 'a'.repeat(64), '--expected-semantic-digest', 'b'.repeat(64));
         const rejected = await executeTaskWorkflow(manifest, createTaskWorkflowRequest('task-artifact', args, manifest.taskId, manifest.generation));
         fs.unlinkSync(${JSON.stringify(candidate)});
         fs.writeFileSync(${JSON.stringify(candidate)}, ${JSON.stringify(content('plan'))});
@@ -188,14 +161,14 @@ for (const operation of ['finalize-local', 'repair'] as const) {
       const { rejected, valid } = JSON.parse(result.stdout);
       assert.equal(rejected.exitCode, 1);
       assert.equal(JSON.parse(rejected.stdout).changed, false);
-      assert.equal(JSON.parse(rejected.stdout).error.code, operation === 'repair' ? 'ARTIFACT_REPAIR_TARGET_INVALID' : 'TASK_ARTIFACT_WRITE_CONFLICT');
+      assert.equal(JSON.parse(rejected.stdout).error.code, 'TASK_ARTIFACT_WRITE_CONFLICT');
       assert.equal(valid.exitCode, 0, valid.stdout);
       assert.equal(fs.readFileSync(path.join(f.taskDir, 'plan.md'), 'utf8'), content('plan'));
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   });
 }
 
-test('workflow initializes and repairs candidates in the direct task directory', onPlatforms('linux', 'darwin'), async () => {
+test('workflow initializes and retries invalid candidates through the recovery journal', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   try {
     const initialized = await f.run('task-artifact', ['init', '--family', 'plan', '--artifact', 'plan.md']);
@@ -204,9 +177,10 @@ test('workflow initializes and repairs candidates in the direct task directory',
     assert.ok(fs.existsSync(candidate));
     fs.writeFileSync(candidate, content('plan').replace('## 问题理解\n', '## 问题理解：\n'));
     const invalid = await f.run('task-artifact', ['finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
-    assert.equal(invalid.body.repairable, true, invalid.stdout);
-    const repaired = await f.run('task-artifact', ['repair', '--family', 'plan', '--artifact', 'plan.md',
-      '--expected-sha256', invalid.body.artifactSha256, '--expected-semantic-digest', invalid.body.semanticDigest]);
+    assert.equal(invalid.body.status, 'failed', invalid.stdout);
+    assert.ok(invalid.body.recovery?.recoveryId, invalid.stdout);
+    fs.writeFileSync(invalid.body.recovery.candidatePath, content('plan'));
+    const repaired = await f.run('task-artifact', ['finalize-local', '--family', 'plan', '--artifact', 'plan.md', '--recovery-id', invalid.body.recovery.recoveryId]);
     assert.equal(repaired.exitCode, 0, repaired.stdout);
     assert.equal(fs.readFileSync(candidate, 'utf8'), content('plan'));
     assert.equal(fs.existsSync(path.join(f.taskDir, 'plan.md')), true);
@@ -225,7 +199,7 @@ test('workflow rejects candidates outside the authoritative round and inventory'
       assert.equal(result.exitCode, 1, result.stdout);
       assert.equal(result.body.changed, false);
       assert.equal(fs.existsSync(path.join(f.taskDir, artifact)), true);
-      assert.equal(readArtifactRepairIntent(f.root, taskId, family, artifact), null);
+      assert.equal(readArtifactRecoveryIntent(f.root, taskId, family, artifact), null);
     }
     fs.writeFileSync(path.join(f.taskDir, 'plan.md'), content('plan'));
     const taskPath = path.join(f.taskDir, 'task.md');
@@ -243,25 +217,24 @@ test('workflow returns a failed receipt when the candidate cannot be read', onPl
     assert.equal(result.exitCode, 1, result.stdout);
     assert.equal(result.body.changed, false);
     assert.equal(result.body.error.code, 'TASK_ARTIFACT_WRITE_CONFLICT');
-    assert.equal(readArtifactRepairIntent(f.root, taskId, 'plan', 'plan.md'), null);
+    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md'), null);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('local artifact preparation defers both success and repair provenance until commit', () => {
-  for (const repairable of [false, true]) {
+test('local artifact preparation stages the baseline and commits only after validation', () => {
+  for (const invalid of [false, true]) {
     const f = fixture();
     try {
-      const candidate = repairable ? content('plan').replace('## 问题理解\n', '## 问题理解：\n') : content('plan');
+      const candidate = invalid ? content('plan').replace('## 问题理解\n', '## 问题理解：\n') : content('plan');
+      fs.writeFileSync(path.join(f.taskDir, 'plan.md'), candidate);
       const prepared = prepareLocalArtifact({ taskRef: taskId, family: 'plan', artifact: 'plan.md', repoRoot: f.root }, candidate);
-      assert.equal(prepared.result.repairable, repairable);
-      assert.equal(prepared.result.status, repairable ? 'failed' : 'passed');
+      assert.equal(prepared.result.status, invalid ? 'failed' : 'passed');
       assert.equal(prepared.content, candidate);
-      assert.equal(fs.existsSync(path.join(f.taskDir, 'plan.md')), false);
-      assert.equal(readArtifactRepairIntent(f.root, taskId, 'plan', 'plan.md'), null);
-      assert.deepEqual(commitLocalArtifactProvenance(prepared), prepared.result);
-      const intent = readArtifactRepairIntent(f.root, taskId, 'plan', 'plan.md');
-      assert.equal(intent?.state, repairable ? 'awaiting-repair' : 'passed');
-      assert.equal(intent?.artifactSha256, prepared.result.artifactSha256);
+      assert.equal(fs.readFileSync(path.join(f.taskDir, 'plan.md'), 'utf8'), candidate);
+      if (!invalid) assert.equal(commitLocalArtifactProvenance(prepared).status, 'passed');
+      const intent = readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md');
+      assert.equal(intent?.state, invalid ? 'awaiting-recovery' : 'passed');
+      assert.equal(intent?.candidateSha256, invalid ? intent?.baselineSha256 : prepared.result.artifactSha256);
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   }
 });

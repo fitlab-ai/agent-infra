@@ -18,10 +18,7 @@ import {
   writeCheckpointIntent,
   type CheckpointIntent
 } from '../../../../lib/task/commit-intent.ts';
-import {
-  semanticDigest,
-  sha256Content
-} from '../../../../lib/task/local-artifact-finalization.ts';
+import { canonicalSemanticDigest, sha256Content } from '../../../../lib/task/artifact-recovery.ts';
 import { withTaskExecutionLock } from '../../../../lib/task/task-execution-lock.ts';
 import { onPlatforms } from '../../../helpers.ts';
 
@@ -68,31 +65,46 @@ function taskFixture(): { root: string; taskDir: string } {
   return { root, taskDir };
 }
 
-function writeConsumedIntent(root: string, taskDir: string): string {
-  const artifact = 'plan.md';
+function writeConsumedIntent(
+  root: string,
+  taskDir: string,
+  family: 'plan' | 'review-analysis' | 'review-plan' | 'review-code' = 'plan'
+): string {
+  const artifact = `${family}.md`;
   const content = '# Plan\n';
+  const recoveryId = `${'c'.repeat(15)}${family === 'plan' ? '0' : family === 'review-analysis' ? '1' : family === 'review-plan' ? '2' : '3'}`;
   const artifactPath = path.join(taskDir, artifact);
   fs.writeFileSync(artifactPath, content);
   const intent = {
-    version: 2,
+    version: 3,
     taskId: TASK_ID,
-    family: 'plan',
+    family,
     artifact,
+    round: 1,
     state: 'consumed',
-    baselineSemanticDigest: null,
-    artifactSha256: sha256Content(content),
-    semanticDigest: semanticDigest(content),
-    recoveryOperationId: null,
+    baselineSha256: sha256Content(content),
+    baselineSemanticDigest: canonicalSemanticDigest(content),
+    stagingId: recoveryId,
+    candidateSha256: sha256Content(content),
+    finalArtifactSha256: sha256Content(content),
+    finalSemanticDigest: canonicalSemanticDigest(content),
+    recoveryOperationId: recoveryId,
     phase: null,
     authorityDigest: null,
     requestId: 'sandbox-fixture',
+    errorCode: null,
+    errorMessage: null,
     createdAt: 1,
     updatedAt: 1
   };
   const intentDir = path.join(root, '.agents', 'workspace', '.local-artifact-finalization-intents');
   fs.mkdirSync(intentDir, { recursive: true });
-  fs.writeFileSync(path.join(intentDir, `${TASK_ID}-plan-${artifact}.json`), `${JSON.stringify(intent)}\n`);
-  return path.join(intentDir, `${TASK_ID}-plan-${artifact}.json`);
+  fs.writeFileSync(path.join(intentDir, `${TASK_ID}-${family}-${artifact}.json`), `${JSON.stringify(intent)}\n`);
+  const recoveryDir = path.join(taskDir, '.local-artifact-recovery', recoveryId);
+  fs.mkdirSync(recoveryDir, { recursive: true });
+  fs.writeFileSync(path.join(recoveryDir, 'baseline.md'), content);
+  fs.writeFileSync(path.join(recoveryDir, 'candidate.md'), content);
+  return path.join(intentDir, `${TASK_ID}-${family}-${artifact}.json`);
 }
 
 function writeBoundControlEvidence(root: string): string {
@@ -218,7 +230,21 @@ test('intermediate cleanup deletes only a receipt-backed consumed artifact inten
     const result = cleanupIntermediateFiles(fixture.root);
     assert.equal(result.items.some((item) => item.kind === 'LFAI-CONSUMED' && item.disposition === 'deleted'), true);
     assert.equal(fs.existsSync(target), false);
+    assert.equal(fs.existsSync(path.join(fixture.taskDir, '.local-artifact-recovery')), false);
     assert.equal(fs.existsSync(path.join(fixture.taskDir, 'plan.md')), true);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('intermediate cleanup removes consumed recovery intents for review artifact families', () => {
+  const fixture = taskFixture();
+  try {
+    const targets = (['review-analysis', 'review-plan', 'review-code'] as const)
+      .map((family) => writeConsumedIntent(fixture.root, fixture.taskDir, family));
+    const result = cleanupIntermediateFiles(fixture.root);
+    for (const target of targets) assert.equal(fs.existsSync(target), false);
+    assert.equal(result.items.filter((item) => item.kind === 'LFAI-CONSUMED' && item.disposition === 'deleted').length, 3);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

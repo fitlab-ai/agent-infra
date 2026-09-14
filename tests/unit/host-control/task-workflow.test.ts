@@ -36,8 +36,8 @@ test('task-workflow preserves arguments for the shared domain parser', () => {
   assert.throws(() => parseArtifactCommand(request.args), /duplicate option/u);
 });
 
-test('task-workflow routes candidate initialization and repair with task binding', () => {
-  for (const operation of ['init', 'repair']) {
+test('task-workflow routes candidate initialization and finalization with task binding', () => {
+  for (const operation of ['init', 'finalize-local']) {
     const args = ['TASK-20260904-002407', operation, '--family', 'plan', '--artifact', 'plan.md'];
     assert.equal(createTaskWorkflowRequest('task-artifact', args, args[0]!, 'g1').operation, `artifact-${operation}`);
     assert.throws(() => createTaskWorkflowRequest('task-artifact', args, 'TASK-20260904-002408', 'g1'), /TASK_WORKFLOW_REQUEST_INVALID/u);

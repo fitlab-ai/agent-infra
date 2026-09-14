@@ -7,8 +7,8 @@ import { spawnSync } from 'node:child_process';
 
 import { finalizeReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
-import { applyArtifactRepair, inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
-import { readArtifactRepairIntent } from '../../../../lib/task/artifact-repair-intent.ts';
+import { inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
+import { readArtifactRecoveryIntent } from '../../../../lib/task/artifact-repair-intent.ts';
 import {
   finalizeReviewSummaryContent,
   parseReviewSummary,
@@ -313,6 +313,28 @@ test('review finalizer rejects a missing schema pattern before summary mutation'
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });
 
+test('review finalizer does not create a recovery candidate before lifecycle gates pass', () => {
+  const f = domainFixture();
+  const taskPath = path.join(f.dir, 'task.md');
+  fs.writeFileSync(
+    taskPath,
+    fs.readFileSync(taskPath, 'utf8').replace(/- 2026-01-01 00:00:00\+00:00 — \*\*Review Analysis \(Round 1\) \[started\]\*\* by codex — started\n/u, '')
+  );
+  const invalid = fs.readFileSync(f.artifactPath, 'utf8').replace('\n### 审查决定\n通过\n', '\n');
+  fs.writeFileSync(f.artifactPath, invalid);
+
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
+  assert.equal(result.recovery, undefined);
+  assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
+  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
+});
+
 test('projection review preparation enforces the same artifact contract without publishing', () => {
   const f = domainFixture();
   try {
@@ -326,15 +348,16 @@ test('projection review preparation enforces the same artifact contract without 
     assert.equal(prepared.result.status, 'failed');
     assert.equal(prepared.result.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
     assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
-    assert.equal(readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
+    assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
-test('review finalizer exposes a repair baseline and the shared repair can restore the artifact', () => {
+test('review finalizer stages an invalid baseline and retries from the explicit recovery candidate', () => {
   const f = domainFixture();
-  const malformed = fs.readFileSync(f.artifactPath, 'utf8').replace('## 检视覆盖声明\n', '');
+  const valid = fs.readFileSync(f.artifactPath, 'utf8');
+  const malformed = valid.replace('## 检视覆盖声明\n', '');
   fs.writeFileSync(f.artifactPath, malformed);
 
   const failed = finalizeReviewSummary(
@@ -344,34 +367,21 @@ test('review finalizer exposes a repair baseline and the shared repair can resto
 
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
-  assert.match(failed.artifactSha256 ?? '', /^[a-f0-9]{64}$/);
-  assert.match(failed.semanticDigest ?? '', /^[a-f0-9]{64}$/);
-  assert.equal(failed.repairable, true);
-  assert.equal(failed.operation?.kind, 'insert-section');
-  const intent = readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
-  assert.equal(intent?.state, 'awaiting-repair');
-  assert.equal(intent?.artifactSha256, failed.artifactSha256);
-  assert.equal(intent?.semanticDigest, failed.semanticDigest);
-
-  const repaired = applyArtifactRepair({
-    repoRoot: f.root,
-    taskId: TASK_ID,
-    taskDir: f.dir,
-    family: 'review-analysis',
-    artifact: 'review-analysis.md',
-    expectedSha256: failed.artifactSha256!,
-    expectedSemanticDigest: failed.semanticDigest!,
-    operation: failed.operation!
-  });
-  assert.equal(repaired.status, 'applied');
-  assert.match(fs.readFileSync(f.artifactPath, 'utf8'), /^## 检视覆盖声明$/m);
+  assert.match(failed.recovery?.baselineSha256 ?? '', /^[a-f0-9]{64}$/);
+  assert.ok(failed.recovery?.candidatePath);
+  const intent = readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
+  assert.equal(intent?.state, 'awaiting-recovery');
+  assert.equal(intent?.baselineSha256, intent?.candidateSha256);
+  const formalBeforeRecovery = fs.readFileSync(f.artifactPath, 'utf8');
+  fs.writeFileSync(failed.recovery!.candidatePath, valid);
+  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), formalBeforeRecovery);
 
   const finalized = finalizeReviewSummary(
-    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md', recoveryId: failed.recovery!.recoveryId },
     { repoRoot: f.root }
   );
   assert.equal(finalized.status, 'applied');
-  assert.equal(readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md')?.state, 'passed');
+  assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md')?.state, 'passed');
 
   const retry = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
@@ -380,7 +390,7 @@ test('review finalizer exposes a repair baseline and the shared repair can resto
   assert.equal(retry.status, 'no-op');
 });
 
-test('review finalizer rejects a semantic mutation across a repair retry', () => {
+test('review finalizer keeps the formal artifact unchanged while a recovery candidate remains invalid', () => {
   const f = domainFixture();
   const malformed = fs.readFileSync(f.artifactPath, 'utf8').replace('## 检视覆盖声明\n', '');
   fs.writeFileSync(f.artifactPath, malformed);
@@ -390,24 +400,23 @@ test('review finalizer rejects a semantic mutation across a repair retry', () =>
     { repoRoot: f.root }
   );
   assert.equal(first.status, 'failed');
-  assert.equal(first.repairable, true);
+  assert.ok(first.recovery?.candidatePath);
   const beforeRetry = fs.readFileSync(f.artifactPath, 'utf8');
-  const firstIntent = readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
+  const firstIntent = readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
 
   fs.writeFileSync(
-    f.artifactPath,
+    first.recovery!.candidatePath,
     beforeRetry.replace('- **总体结论**：通过', '- **总体结论**：需要修改')
   );
   const second = finalizeReviewSummary(
-    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md', recoveryId: first.recovery!.recoveryId },
     { repoRoot: f.root }
   );
 
   assert.equal(second.status, 'failed');
-  assert.equal(second.error?.code, 'REVIEW_PROVENANCE_INVALID');
-  assert.equal(second.repairable, false);
-  assert.equal(second.operation, null);
-  assert.deepEqual(readArtifactRepairIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), firstIntent);
+  assert.equal(second.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
+  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), beforeRetry);
+  assert.deepEqual(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), firstIntent);
 });
 
 test('review summary finalization is idempotent and rejects mismatched numeric counts', () => {
@@ -477,7 +486,7 @@ test('review finalization fails closed and preserves a clearly informal duplicat
   const before = fs.readFileSync(f.artifactPath);
   const result = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
-    { repoRoot: f.root, randomSuffix: () => 'safe-detail-repair' }
+    { repoRoot: f.root }
   );
 
   assert.equal(result.status, 'failed');
@@ -494,7 +503,7 @@ test('review finalization preserves anchored informal duplicates byte-for-byte',
   const before = fs.readFileSync(f.artifactPath);
   const result = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
-    { repoRoot: f.root, randomSuffix: () => 'anchored-detail' }
+    { repoRoot: f.root }
   );
 
   assert.equal(result.status, 'failed');
@@ -511,7 +520,7 @@ test('review finalization fails closed and preserves ambiguous decision-detail d
   const before = fs.readFileSync(f.artifactPath, 'utf8');
   const result = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
-    { repoRoot: f.root, randomSuffix: () => 'ambiguous-detail' }
+    { repoRoot: f.root }
   );
 
   assert.equal(result.status, 'failed');
@@ -528,7 +537,7 @@ test('review finalization preserves substantive unmarked duplicate details byte-
   const before = fs.readFileSync(f.artifactPath);
   const result = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
-    { repoRoot: f.root, randomSuffix: () => 'substantive-detail' }
+    { repoRoot: f.root }
   );
 
   assert.equal(result.status, 'failed');
@@ -545,7 +554,7 @@ test('review finalization preserves summary-marked substantive duplicates byte-f
   const before = fs.readFileSync(f.artifactPath);
   const result = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
-    { repoRoot: f.root, randomSuffix: () => 'summary-substantive-detail' }
+    { repoRoot: f.root }
   );
 
   assert.equal(result.status, 'failed');
@@ -561,60 +570,9 @@ test('review finalization ignores fenced examples but preserves visible duplicat
   );
   const result = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
-    { repoRoot: f.root, randomSuffix: () => 'fenced-detail' }
+    { repoRoot: f.root }
   );
 
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'REVIEW_DECISION_DETAIL_INVALID');
-});
-
-test('review finalization preserves the artifact when atomic rename fails', () => {
-  const f = domainFixture();
-  const before = fs.readFileSync(f.artifactPath);
-  const result = finalizeReviewSummary(
-    {
-      taskRef: TASK_ID,
-      stage: 'analysis',
-      artifact: 'review-analysis.md'
-    },
-    {
-      repoRoot: f.root,
-      randomSuffix: () => 'rename-failure',
-      fileSystem: { renameSync: () => { throw new Error('rename failed'); } }
-    }
-  );
-
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'REVIEW_RENAME_FAILED');
-  assert.deepEqual(fs.readFileSync(f.artifactPath), before);
-  assert.equal(fs.readdirSync(f.dir).some((name) => name.includes('.tmp-')), false);
-});
-
-test('review finalization detects a target conflict and removes its temporary file', () => {
-  const f = domainFixture();
-  const before = fs.readFileSync(f.artifactPath, 'utf8');
-  let artifactReads = 0;
-  const result = finalizeReviewSummary(
-    {
-      taskRef: TASK_ID,
-      stage: 'analysis',
-      artifact: 'review-analysis.md'
-    },
-    {
-      repoRoot: f.root,
-      randomSuffix: () => 'target-conflict',
-      fileSystem: {
-        readFileSync: (file) => {
-          const content = fs.readFileSync(file, 'utf8');
-          if (file === f.artifactPath && ++artifactReads === 2) return `${content}\nchanged`;
-          return content;
-        }
-      }
-    }
-  );
-
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_CONFLICT');
-  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
-  assert.equal(fs.readdirSync(f.dir).some((name) => name.includes('.tmp-')), false);
 });

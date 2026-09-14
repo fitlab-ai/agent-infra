@@ -70,7 +70,7 @@ test('all six schema families validate filled skeletons in both locales', () => 
   }
 });
 
-test('structure scanner ignores fenced headings and proposes one safe punctuation repair', () => {
+test('structure scanner ignores fenced headings and reports visible punctuation', () => {
   const content = [
     '```markdown',
     '## 需求来源',
@@ -82,8 +82,6 @@ test('structure scanner ignores fenced headings and proposes one safe punctuatio
   const structure = inspectArtifactStructure(content, getArtifactSchema('analysis')!);
 
   assert.equal(structure.ok, false);
-  assert.equal(structure.repair?.kind, 'replace-line');
-  assert.equal(structure.repair?.from, '需求来源：');
-  assert.equal(structure.repair?.to, '需求来源');
+  assert.equal(structure.diagnostics.some((item) => item.code === 'ARTIFACT_HEADING_TRAILING_PUNCTUATION'), true);
   assert.equal(structure.diagnostics.filter((item) => item.code === 'ARTIFACT_MISSING_SECTION').length, 0);
 });

@@ -143,7 +143,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {standard-agen
 agent-infra-internal task-artifact {task-id} init --family analysis --artifact {analysis-artifact}
 ```
 
-骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实分析内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，使用其 SHA 和 semantic digest 调用 `task-artifact {task-id} repair --family analysis --artifact {analysis-artifact} --expected-sha256 {artifact-sha256} --expected-semantic-digest {semantic-digest}`，然后完整重跑 finalizer。
+骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实分析内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑 `task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact} --recovery-id {recovery-id}`。candidate-only 是协议授权边界，不是操作系统隔离；同 UID 的任意宿主写入者不在本协议的防护承诺内，异常由指纹/状态校验失败关闭。
 
 > 步骤 6–9 属**场景 A（正常产出）**路径。**场景 B（提问早退）**已在步骤 4 内完成状态更新、task 评论同步与校验并 STOP，不进入这些步骤。
 
@@ -226,8 +226,8 @@ agent-infra-internal task-artifact {task-id} init --family analysis --artifact {
   agent-infra-internal task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact}
   ```
   - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`；finalizer 已记录对应的一次性本地 provenance intent。
-  - `status=failed` 且 `repairable=true`：仅按诊断中的 `replace-line` 操作做一次最小修改，然后完整重跑同一命令；实际字节发生变化才计一次 `repairAttempts`，最多 8 次。
-  - 首次可修复失败的 `semanticDigest` 由 finalizer 保留为基线；重试后的 `status=passed` 必须匹配该基线。基线不匹配、其他失败、无进展或重复诊断：停止，不发布 completed 事件。
+  - `status=failed` 且返回 recovery context：完成门禁通过后，只编辑返回的 `candidatePath` 一次，然后使用同一个 `recoveryId` 完整重跑 finalizer；formal artifact 在 commit 前必须保持不变。
+  - recovery candidate 必须与记录的任务、轮次、产物、baseline 和 request identity 匹配；基线冲突、未知状态、无进展或重复失败：停止，不发布 completed 事件。
 - 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `platform_issue_identity`，执行以下同步操作（任一失败则跳过并继续）：
