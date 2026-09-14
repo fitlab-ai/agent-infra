@@ -162,6 +162,14 @@ function assertRecoveryRoot(context: ArtifactRecoveryContext): void {
   ensureOwnedDirectoryTree(context.repoRoot, path.dirname(context.stagingPath));
 }
 
+function unlinkIfPresent(file: string): void {
+  try {
+    fs.unlinkSync(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+
 function writeBytes(target: string, bytes: Buffer): void {
   if (bytes.length > MAX_ARTIFACT_BYTES) fail('ARTIFACT_RECOVERY_SIZE_LIMIT', 'candidate exceeds the bounded artifact size limit');
   writeDurableFile(target, bytes.toString('utf8'), { mode: 0o600, replace: true });
@@ -404,6 +412,7 @@ export function commitArtifactRecovery(
     // recovery input; renaming it directly would reopen a same-uid path swap
     // between validation and publication.
     const publishPath = path.join(path.dirname(context.finalPath), 'publish.md');
+    unlinkIfPresent(publishPath);
     writeBytes(publishPath, sealed.bytes);
     fs.chmodSync(publishPath, 0o400);
     const publish = readStableFileSync(publishPath, {
