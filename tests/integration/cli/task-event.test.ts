@@ -64,9 +64,13 @@ function appendReviewContract(content: string, family: string): string {
   return result;
 }
 
+function makeTempDir(prefix: string): string {
+  return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), prefix));
+}
+
 function fixture(step = 'requirement-analysis-review') {
   const explicitStep = arguments.length > 0;
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-'));
+  const root = makeTempDir('task-event-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
@@ -375,7 +379,7 @@ test('internal task-event accepts the human manual-executor token', () => {
 });
 
 test('internal task-event consumes a producer-qualified override under one task lock', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-override-'));
+  const root = makeTempDir('task-event-override-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000002';
   const dir = path.join(root, '.agents', 'workspace', 'blocked', id);
@@ -404,7 +408,7 @@ test('internal task-event consumes a producer-qualified override under one task 
 });
 
 test('task-event rejects combining dry-run with an override before any task mutation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-override-dry-run-'));
+  const root = makeTempDir('task-event-override-dry-run-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000003';
   const dir = path.join(root, '.agents', 'workspace', 'blocked', id);
