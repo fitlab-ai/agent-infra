@@ -243,6 +243,6 @@ test("sandbox create inherits host proxy variables only when explicitly requeste
       "http_proxy=http://lower-proxy.example:8080"
     ]);
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 });
