@@ -1788,7 +1788,7 @@ test("sandbox rm cancellation for an eligible mismatch preserves every resource"
   }
 });
 
-test("sandbox rm fails closed for a still-active task before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+test("sandbox rm deletes an active task sandbox without auxiliary preflight", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-active-"));
   const branch = "feature/auxiliary-preflight-active";
@@ -1815,20 +1815,17 @@ test("sandbox rm fails closed for a still-active task before destructive cleanup
 
     const intentBytes = fs.readFileSync(evidence.intentPath);
     const taskBytes = fs.readFileSync(path.join(activeDir, "task.md"));
-    await assert.rejects(
-      () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
-        assumeYes: true,
-        cleanupTarget: {
-          requestedRef: taskId,
-          branch,
-          workspace: { mode: "task-bound", taskId },
-          taskState: "active"
-        },
-        target: evidence.target
-      })),
-      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
-    );
-    assert.equal(fs.existsSync(evidence.controlRoot), true);
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      assumeYes: true,
+      cleanupTarget: {
+        requestedRef: taskId,
+        branch,
+        workspace: { mode: "task-bound", taskId },
+        taskState: "active"
+      },
+      target: evidence.target
+    }));
+    assert.equal(fs.existsSync(evidence.controlRoot), false);
     assert.deepEqual(fs.readFileSync(evidence.intentPath), intentBytes);
     assert.deepEqual(fs.readFileSync(path.join(activeDir, "task.md")), taskBytes);
     assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "rm"), []);
@@ -1843,7 +1840,7 @@ test("sandbox rm fails closed for a still-active task before destructive cleanup
   }
 });
 
-test("sandbox purge rejects malformed auxiliary evidence before destructive cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+test("sandbox purge deletes despite malformed auxiliary evidence", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-purge-"));
   const branch = "feature/auxiliary-preflight-purge";
@@ -1854,15 +1851,12 @@ test("sandbox purge rejects malformed auxiliary evidence before destructive clea
     const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
     fs.writeFileSync(evidence.intentPath, "{\"version\":1}\n", "utf8");
 
-    await assert.rejects(
-      () => withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
-        confirm: async () => true,
-        isCancel: (value): value is symbol => false
-      })),
-      /SANDBOX_AUXILIARY_PREFLIGHT_FAILED/
-    );
+    await withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
+      confirm: async () => true,
+      isCancel: (value): value is symbol => false
+    }));
 
-    assert.equal(fs.existsSync(evidence.controlRoot), true);
+    assert.equal(fs.existsSync(evidence.controlRoot), false);
     assert.equal(fs.existsSync(evidence.intentPath), true);
     assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
   } finally {

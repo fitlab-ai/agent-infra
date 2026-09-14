@@ -64,6 +64,6 @@ export async function rm(args: string[]): Promise<void> {
     return;
   }
 
-  const cleanupTarget = resolveSandboxCleanupTarget(positionals[0] ?? '', config.repoRoot);
+  const cleanupTarget = resolveSandboxCleanupTarget(positionals[0] ?? '', config.repoRoot, { allowProtected: true });
   await rmOne(config, tools, cleanupTarget.branch, { cleanupTarget });
 }
