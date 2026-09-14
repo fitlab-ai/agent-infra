@@ -10,7 +10,7 @@
     "baseRef": "main"
   },
   "prFlow": "required",
-  "templateVersion": "v0.10.0",
+  "templateVersion": "v0.10.1-alpha.0",
   "sandbox": {
     "engine": {
       "darwin": "orbstack"
@@ -147,12 +147,12 @@
       ".claude/commands/create-task.md": "sha256:02950cdbb38a053029b1deb79b78be5a48ca8d3296dcb794774fe690cd565bbe",
       ".claude/commands/import-codescan.md": "sha256:73a667b4152b0dfd88c61c05369eedc80ffa4a91eb2fef628ba13d28c61d36db",
       ".claude/commands/import-dependabot.md": "sha256:daa6f6de1175931f280116b558c418813cf9fb24e5adca4aa474e258ce1f8155",
-      ".claude/commands/import-issue.md": "sha256:b3fd637fd02920f0f384bb613984ba7bc8068a874b9b4bdd780f7935b2f29ac6",
+      ".claude/commands/import-issue.md": "sha256:db90746f60981134daccc75c0b2a8ab1aea161bce5ad63d163e93872d398fa88",
       ".claude/commands/init-labels.md": "sha256:5f830fe9a3eef533f6abcb98ea24caf37830825e55a1df39ac27cff67ae58d66",
       ".claude/commands/init-milestones.md": "sha256:9a7ffd3670158e4e34e31c7dcb9987d6eb4e2d3e2ddd6b7e5b1454791688f034",
       ".claude/commands/plan-task.md": "sha256:e0d12ffac1ad65fb568a5219895ef28012719dd71de4c63c153dababe153e41d",
       ".claude/commands/refine-title.md": "sha256:cd63b17f0c151b21ac85bd0700a52f6e3c81e3ae6aa22e0b6c11036e2b0d4cdd",
-      ".claude/commands/restore-task.md": "sha256:30d3d63317b4dae986cc8c0c21ac024746375082a76907286b6e03a4a13bca6a",
+      ".claude/commands/restore-task.md": "sha256:34780525602bf4399f086d4bf84067706fda7b81a812aa9dd92be3cdd360bf1a",
       ".claude/commands/review-analysis.md": "sha256:e31ea897e3fb28c864fb9e95888a21dcf95acb7db8713a70edd69737dc15ebdf",
       ".claude/commands/review-code.md": "sha256:4d7958f04237241006cdaf63ac47bd9547c8c04b66b75fc8bc27b2a18ae48898",
       ".claude/commands/review-plan.md": "sha256:fba112f44958401915aa44372f58e6dff899f8f410b22fc8488ef228a867c6c5",
