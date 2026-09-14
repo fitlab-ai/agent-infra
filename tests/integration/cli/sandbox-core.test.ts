@@ -192,8 +192,7 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
   assert.match(output, /^\s+refresh\s+Sync host Claude Code credentials/m);
   assert.match(output, /^\s+rebuild \[--quiet\] \[--refresh\]\s+Rebuild the sandbox image/m);
   assert.match(output, /prune \[--dry-run\]/);
-  assert.match(output, /completed task-bound and branch-only sandboxes/);
-  assert.match(output, /active, blocked, and archive tasks are protected/);
+  assert.match(output, /rm <branch \| TASK-id> \| --unbound \| --purge/);
 });
 
 test("sandbox rm help documents task-state and identity boundaries", () => {
@@ -203,8 +202,7 @@ test("sandbox rm help documents task-state and identity boundaries", () => {
 
   assert.match(output, /full TASK-id for a task-bound sandbox/);
   assert.match(output, /branch for branch-only sandboxes/);
-  assert.match(output, /completed task-bound and branch-only sandboxes/);
-  assert.match(output, /active, blocked, and archive tasks are protected/);
+  assert.match(output, /rm --unbound \[--dry-run\] \[--yes\]/);
 });
 
 test("sandbox create help documents the host aliases file", () => {
@@ -275,6 +273,19 @@ function writeActiveTaskBranch(repoDir: string, taskId: string, branch: string):
   const taskDir = path.join(repoDir, ".agents", "workspace", "active", taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nbranch: ${branch}\n---\n# body\n`);
+}
+
+function writeTaskBranch(
+  repoDir: string,
+  state: "active" | "completed" | "blocked" | "archive",
+  taskId: string,
+  branch: string
+): void {
+  const taskDir = state === "archive"
+    ? path.join(repoDir, ".agents", "workspace", "archive", "2026", "01", "01", taskId)
+    : path.join(repoDir, ".agents", "workspace", state, taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nstatus: ${state === "archive" ? "completed" : state}\nbranch: ${branch}\n---\n# body\n`);
 }
 
 function sandboxRow(
@@ -458,6 +469,37 @@ test("sandbox rm --unbound --yes routes each unbound branch through rmOne cleanu
     assert.equal(fs.existsSync(removedBranchDir), false);
     // A different branch's dir is untouched (batch only targeted the unbound one).
     assert.equal(fs.existsSync(keptBranchDir), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound --yes removes task-bound sandboxes regardless of task state", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-task-states-"));
+  const tasks = [
+    { state: "active", taskId: "TASK-20260101-000101", branch: "feature/remove-active", container: "sb-remove-active" },
+    { state: "blocked", taskId: "TASK-20260101-000102", branch: "feature/remove-blocked", container: "sb-remove-blocked" },
+    { state: "archive", taskId: "TASK-20260101-000103", branch: "feature/remove-archive", container: "sb-remove-archive" }
+  ] as const;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: tasks.map(({ container, branch, taskId }) => (
+        sandboxRow(container, branch, "demo", "task-bound", taskId)
+      )).join("\n")
+    });
+    for (const task of tasks) {
+      writeTaskBranch(fixture.repoDir, task.state, task.taskId, task.branch);
+      fs.mkdirSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", "..")), { recursive: true });
+    }
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    for (const task of tasks) {
+      assert.equal(fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", ".."))), false);
+      assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === task.container), true);
+    }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

@@ -237,6 +237,23 @@ test('intermediate cleanup deletes only a receipt-backed consumed artifact inten
   }
 });
 
+test('intermediate cleanup keeps archive tasks eligible for consumed intent cleanup', () => {
+  const fixture = taskFixture();
+  try {
+    const archiveDir = path.join(fixture.root, '.agents', 'workspace', 'archive', '2026', '01', '01', TASK_ID);
+    fs.mkdirSync(path.dirname(archiveDir), { recursive: true });
+    fs.renameSync(fixture.taskDir, archiveDir);
+    const target = writeConsumedIntent(fixture.root, archiveDir);
+
+    const result = cleanupIntermediateFiles(fixture.root);
+
+    assert.equal(result.items.some((item) => item.path === target && item.disposition === 'deleted'), true);
+    assert.equal(fs.existsSync(target), false);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('intermediate cleanup removes consumed recovery intents for review artifact families', () => {
   const fixture = taskFixture();
   try {

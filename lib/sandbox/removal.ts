@@ -52,7 +52,6 @@ import {
   cleanupIntermediateUnderRemovalCoordinator,
   protectIntermediateCleanupReport,
   mergeIntermediateCleanupReports,
-  type IntermediateCleanupMismatchRisk,
   type IntermediateCleanupReport,
   scanIntermediateCleanup
 } from '../task/intermediate-cleanup.ts';

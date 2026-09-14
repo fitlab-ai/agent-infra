@@ -37,18 +37,6 @@ type CleanupKind = 'LFAI-CONSUMED' | 'COMMIT-SYNCED' | 'EMPTY-AUX-PARENT';
 type CleanupDisposition = 'planned' | 'protected' | 'skipped' | 'deleted' | 'failed';
 type FileIdentity = Readonly<{ dev: string; ino: string; size: number; mtimeMs: number }>;
 
-type IntermediateCleanupMismatchRisk = Readonly<{
-  taskId: string;
-  intentPath: string;
-  artifactPath: string;
-  recordedArtifactSha256: string;
-  currentArtifactSha256: string;
-  recordedSemanticDigest: string;
-  currentSemanticDigest: string;
-  receiptState: 'complete';
-  controlBinding: 'unbound' | 'terminal';
-}>;
-
 type IntermediateCleanupItem = Readonly<{
   kind: CleanupKind | 'AUXILIARY-UNKNOWN';
   taskId: string | null;
@@ -56,7 +44,6 @@ type IntermediateCleanupItem = Readonly<{
   disposition: CleanupDisposition;
   reason: string;
   identity: FileIdentity | null;
-  mismatchRisk?: IntermediateCleanupMismatchRisk;
 }>;
 
 type IntermediateCleanupReport = Readonly<{
@@ -134,23 +121,14 @@ function item(
   filePath: string,
   disposition: CleanupDisposition,
   reason: string,
-  identity: FileIdentity | null = null,
-  mismatchRisk?: IntermediateCleanupMismatchRisk
+  identity: FileIdentity | null = null
 ): IntermediateCleanupItem {
-  return {
-    kind,
-    taskId,
-    path: path.resolve(filePath),
-    disposition,
-    reason,
-    identity,
-    ...(mismatchRisk ? { mismatchRisk } : {})
-  };
+  return { kind, taskId, path: path.resolve(filePath), disposition, reason, identity };
 }
 
 function taskGate(task: TaskRecord | undefined): string | null {
   if (!task) return 'TASK_NOT_FOUND';
-  if (task.state !== 'completed') return 'TASK_STATE_PROTECTED';
+  if (task.state !== 'completed' && task.state !== 'archive') return 'TASK_STATE_PROTECTED';
   if (task.frontmatter.id !== task.taskId || task.frontmatter.status !== 'completed') return 'TASK_STATE_PROTECTED';
   if (!task.frontmatter.branch) return 'TASK_IDENTITY_INVALID';
   return null;
@@ -509,7 +487,6 @@ export type {
   CleanupDisposition,
   CleanupKind,
   FileIdentity,
-  IntermediateCleanupMismatchRisk,
   IntermediateCleanupItem,
   IntermediateCleanupOptions,
   IntermediateCleanupReport

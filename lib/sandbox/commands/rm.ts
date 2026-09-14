@@ -6,7 +6,7 @@ import { rmOne, rmPurge, rmUnbound } from '../removal.ts';
 
 const USAGE = `Usage:
   ai sandbox rm <branch | TASK-id | short id> Remove one sandbox; use a full TASK-id for a task-bound sandbox and a branch for branch-only sandboxes
-  ai sandbox rm --unbound [--dry-run] [--yes] Remove completed task-bound and branch-only sandboxes and verified auxiliary state; active, blocked, and archive tasks are protected
+  ai sandbox rm --unbound [--dry-run] [--yes] Remove discovered task-bound and branch-only sandboxes
   ai sandbox rm --purge                     Tear down ALL sandboxes for the project (containers, worktrees, image, VM)`;
 export async function rm(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
