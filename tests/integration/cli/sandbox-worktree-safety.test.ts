@@ -988,6 +988,83 @@ test("sandbox rm clean path uses injectable default-yes confirmations and remove
   }
 });
 
+test("sandbox rm releases a stale short id after task-bound cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-stale-short-id-"));
+  const branch = "feature/stale-short-id";
+  const taskId = "TASK-20260824-000015";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    const registryPath = path.join(config.repoRoot, ".agents", "workspace", "active", ".short-ids.json");
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    fs.writeFileSync(
+      registryPath,
+      `${JSON.stringify({ version: 1, ids: { "07": taskId, "08": "TASK-20260824-000016" } })}\n`,
+      "utf8"
+    );
+
+    await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+      assumeYes: true,
+      cleanupTarget: {
+        requestedRef: taskId,
+        branch,
+        workspace: { mode: "task-bound", taskId },
+        taskState: "unknown"
+      },
+      target: evidence.target
+    }));
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, "utf8")).ids, {
+      "08": "TASK-20260824-000016"
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm preserves a stale short id when container removal cannot be confirmed", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unconfirmed-short-id-"));
+  const branch = "feature/unconfirmed-short-id";
+  const taskId = "TASK-20260824-000017";
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const previousRmId = process.env.DOCKER_EXIT_FOR_RM_ID;
+  try {
+    process.env.DOCKER_EXIT_FOR_RM_ID = container;
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: `${container}\tUp 1 minute\tdemo.sandbox=true\n`
+    });
+    const config = rmOneConfig(fixture, tmpDir);
+    const evidence = writeTaskBoundCleanupEvidence(config, taskId, branch);
+    const registryPath = path.join(config.repoRoot, ".agents", "workspace", "active", ".short-ids.json");
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { "07": taskId } })}\n`, "utf8");
+
+    await assert.rejects(
+      withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        cleanupTarget: {
+          requestedRef: taskId,
+          branch,
+          workspace: { mode: "task-bound", taskId },
+          taskState: "unknown"
+        },
+        target: { ...evidence.target, matchedContainers: [container] }
+      })),
+      /SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT/
+    );
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, "utf8")).ids, { "07": taskId });
+  } finally {
+    if (previousRmId === undefined) delete process.env.DOCKER_EXIT_FOR_RM_ID;
+    else process.env.DOCKER_EXIT_FOR_RM_ID = previousRmId;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm deletes an active task sandbox without auxiliary preflight", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-auxiliary-preflight-active-"));
@@ -1007,11 +1084,7 @@ test("sandbox rm deletes an active task sandbox without auxiliary preflight", on
     const activeDir = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
     fs.mkdirSync(path.dirname(activeDir), { recursive: true });
     fs.renameSync(completedDir, activeDir);
-    fs.writeFileSync(
-      path.join(activeDir, "task.md"),
-      `---\nid: ${taskId}\nstatus: active\nbranch: ${branch}\n---\n`,
-      "utf8"
-    );
+    addActiveTask(config.repoRoot, taskId, branch, "07");
 
     const intentBytes = fs.readFileSync(evidence.intentPath);
     const taskBytes = fs.readFileSync(path.join(activeDir, "task.md"));
@@ -1028,6 +1101,10 @@ test("sandbox rm deletes an active task sandbox without auxiliary preflight", on
     assert.equal(fs.existsSync(evidence.controlRoot), false);
     assert.deepEqual(fs.readFileSync(evidence.intentPath), intentBytes);
     assert.deepEqual(fs.readFileSync(path.join(activeDir, "task.md")), taskBytes);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(config.repoRoot, ".agents", "workspace", "active", ".short-ids.json"), "utf8")).ids,
+      { "07": taskId }
+    );
     assert.deepEqual(fixture.readDockerCalls().filter((call) => call[0] === "rm"), []);
   } finally {
     if (previousRemovalUpdates === undefined) delete process.env.DOCKER_REMOVAL_UPDATES_INSPECT;

@@ -46,6 +46,7 @@ import { acquireSandboxResourceLock, type SandboxResourceLock } from './control/
 import { toolConfigDirCandidates, toolProjectDirCandidates } from './tools.ts';
 import type { SandboxTool } from './tools.ts';
 import { getProcessStartTime } from '../server/process-state.ts';
+import { releaseStaleShortIdRegistry } from '../task/short-id.ts';
 import { fetchSandboxRows, type SandboxRow } from './commands/list-running.ts';
 import {
   formatIntermediateCleanupReport,
@@ -866,6 +867,14 @@ function assertRemoved(target: string, label: string): void {
   if (fs.existsSync(target)) throw new Error(`${label} still exists after removal: ${target}`);
 }
 
+function sandboxContainersRemoved(engine: string, containers: readonly string[]): boolean {
+  if (containers.length === 0) return true;
+  const remaining = new Set(runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}'])
+    .split('\n')
+    .filter(Boolean));
+  return containers.every((container) => !remaining.has(container));
+}
+
 function removeEmptyManagedParent(base: string, directory: string): void {
   const parent = path.dirname(directory);
   if (path.resolve(parent) === path.resolve(base)) return;
@@ -1006,6 +1015,12 @@ async function removeUncheckedSandbox(
     runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
   }
   if (shouldDeleteBranch) runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch]);
+  if (!sandboxContainersRemoved(engine, matchedContainers)) {
+    throw new Error(`SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT: ${matchedContainers.join(', ')}`);
+  }
+  if (target.workspace.mode === 'task-bound') {
+    releaseStaleShortIdRegistry(config.repoRoot, target.workspace.taskId);
+  }
 
   if (!options.quiet) p.outro('Sandbox removed');
   return null;

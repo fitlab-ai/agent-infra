@@ -329,14 +329,18 @@ function mutateShortIdRegistryAt(
   activeDir: string,
   width: number,
   taskId: string,
-  requested: ShortIdMutationEffect
+  requested: ShortIdMutationEffect,
+  onlyReleaseWhenInactive = false,
+  pruneOrphans = true
 ): ShortIdMutationResult {
   const registryPath = path.join(activeDir, REGISTRY_NAME);
   return withRegistryLock(activeDir, () => {
     const registry = readRegistryStrict(registryPath, width);
     const original = JSON.stringify(registry.ids);
-    for (const [key, candidate] of Object.entries(registry.ids)) {
-      if (candidate !== taskId && !fs.existsSync(path.join(activeDir, candidate, 'task.md'))) delete registry.ids[key];
+    if (pruneOrphans) {
+      for (const [key, candidate] of Object.entries(registry.ids)) {
+        if (candidate !== taskId && !fs.existsSync(path.join(activeDir, candidate, 'task.md'))) delete registry.ids[key];
+      }
     }
     const existing = Object.entries(registry.ids).find(([, candidate]) => candidate === taskId);
     let result: ShortIdMutationResult;
@@ -356,13 +360,30 @@ function mutateShortIdRegistryAt(
         result = { effect: 'allocated', shortId: key, changed: true };
       }
     } else if (requested === 'release') {
-      if (!existing) result = { effect: 'unchanged', shortId: null, changed: false };
-      else { delete registry.ids[existing[0]]; result = { effect: 'released', shortId: existing[0], changed: true }; }
+      const taskIsActive = fs.existsSync(path.join(activeDir, taskId, 'task.md'));
+      if (!existing || (onlyReleaseWhenInactive && taskIsActive)) {
+        result = { effect: 'unchanged', shortId: existing?.[0] ?? null, changed: false };
+      } else {
+        delete registry.ids[existing[0]];
+        result = { effect: 'released', shortId: existing[0], changed: true };
+      }
     } else result = { effect: 'unchanged', shortId: existing ? existing[0] : null, changed: false };
     const changed = original !== JSON.stringify(registry.ids);
     if (changed) writeRegistry(registryPath, registry);
     return { ...result, changed };
   });
+}
+
+function releaseStaleShortIdRegistry(repoRoot: string, taskId: string): ShortIdMutationResult {
+  const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
+  return mutateShortIdRegistryAt(
+    activeDir,
+    configuredShortIdLength(repoRoot),
+    taskId,
+    'release',
+    true,
+    false
+  );
 }
 
 function executeShortIdCommand(request: ShortIdCommandRequest): ShortIdCommandResult {
@@ -550,6 +571,7 @@ export {
   inspectShortIdRegistry,
   configuredShortIdLength,
   mutateShortIdRegistry,
+  releaseStaleShortIdRegistry,
   executeShortIdCommand
 };
 export type {
