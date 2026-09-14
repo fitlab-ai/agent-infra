@@ -474,6 +474,48 @@ test("sandbox rm --unbound --yes routes each unbound branch through rmOne cleanu
   }
 });
 
+test("sandbox rm resolves a missing task record from a unique task-bound container", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-missing-task-record-"));
+  const taskId = "TASK-20260101-000105";
+  const branch = "feature/missing-task-record";
+  const container = "demo-dev-feature..missing-task-record";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow(container, branch, "demo", "task-bound", taskId)
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", taskId]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === container), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm rejects a missing task record with multiple sandbox branches", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-ambiguous-task-record-"));
+  const taskId = "TASK-20260101-000106";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("demo-dev-feature..first", "feature/first", "demo", "task-bound", taskId),
+        sandboxRow("demo-dev-feature..second", "feature/second", "demo", "task-bound", taskId)
+      ].join("\n")
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", taskId]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /SANDBOX_CLEANUP_TASK_ID_AMBIGUOUS/);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound --yes removes task-bound sandboxes regardless of task state", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-task-states-"));
   const tasks = [

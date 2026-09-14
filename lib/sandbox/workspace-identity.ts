@@ -23,7 +23,7 @@ export type SandboxCleanupTarget = Readonly<{
   requestedRef: string;
   branch: string;
   workspace: SandboxWorkspaceKey;
-  taskState: TaskWorkspaceState | 'branch-only';
+  taskState: TaskWorkspaceState | 'branch-only' | 'unknown';
 }>;
 
 export type SandboxContainerWorkspaceIdentity =
@@ -147,14 +147,30 @@ export function resolveSandboxReentryContext(params: Readonly<{
 export function resolveSandboxCleanupTarget(
   requestedRef: string,
   repoRoot: string,
-  options: Readonly<{ allowProtected?: boolean }> = {}
+  options: Readonly<{
+    allowProtected?: boolean;
+    resolveMissingTask?: (taskId: string) => string | null;
+  }> = {}
 ): SandboxCleanupTarget {
   if (isRemovedHashShortIdInput(requestedRef)) {
     throw new Error(`Invalid task short id '${requestedRef}': task short ids must use bare digits`);
   }
 
   if (TASK_ID_RE.test(requestedRef)) {
-    const task = resolveTaskWorkspace(requestedRef, repoRoot);
+    let task: ReturnType<typeof resolveTaskWorkspace>;
+    try {
+      task = resolveTaskWorkspace(requestedRef, repoRoot);
+    } catch (error) {
+      if (!(error instanceof Error && error.message === `Task not found: ${requestedRef}`)) throw error;
+      const branch = options.resolveMissingTask?.(requestedRef);
+      if (!branch) throw error;
+      return {
+        requestedRef,
+        branch,
+        workspace: { mode: 'task-bound', taskId: requestedRef },
+        taskState: 'unknown'
+      };
+    }
     if (!options.allowProtected && (task.state === 'blocked' || task.state === 'archive')) {
       throw new Error(`SANDBOX_CLEANUP_STATE_UNSUPPORTED: task ${requestedRef} is ${task.state}`);
     }

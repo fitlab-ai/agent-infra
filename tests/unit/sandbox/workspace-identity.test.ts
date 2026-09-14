@@ -114,6 +114,20 @@ test('resolveSandboxCleanupTarget keeps completed task identity after short-id r
   });
 });
 
+test('resolveSandboxCleanupTarget uses the supplied sandbox branch when the task record is unavailable', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260809-010210';
+
+  assert.deepEqual(resolveSandboxCleanupTarget(taskId, root, {
+    resolveMissingTask: (candidate) => candidate === taskId ? 'agent-infra-fix-missing-record' : null
+  }), {
+    requestedRef: taskId,
+    branch: 'agent-infra-fix-missing-record',
+    workspace: { mode: 'task-bound', taskId },
+    taskState: 'unknown'
+  });
+});
+
 test('resolveSandboxCleanupTarget rejects protected task states unless explicitly inspecting them', () => {
   const root = fixture();
   const taskId = 'TASK-20260809-010206';
