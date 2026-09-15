@@ -49,6 +49,117 @@ test('process identity state distinguishes a missing process from an uninspectab
   assert.equal(getProcessIdentityState({ pid: process.pid, startTime: -1 }, process.platform), 'dead');
 });
 
+type ProcessIdentityRuntimeForTest = {
+  probePid(pid: number): void;
+  execFileSync(command: string, args: readonly string[], options: unknown): string;
+};
+
+const getProcessIdentityStateWithRuntime = getProcessIdentityState as unknown as (
+  identity: { pid: number; startTime: number },
+  platform: NodeJS.Platform,
+  runtime: ProcessIdentityRuntimeForTest
+) => 'alive' | 'dead' | 'unknown';
+
+function errno(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(code), { code });
+}
+
+test('macOS identity state confirms exit after an unobservable start-time query', () => {
+  const probes: number[] = [];
+  const queries: Array<{ command: string; args: readonly string[] }> = [];
+
+  const state = getProcessIdentityStateWithRuntime({ pid: 4321, startTime: 1 }, 'darwin', {
+    probePid(pid) {
+      probes.push(pid);
+      if (probes.length === 2) throw errno('ESRCH');
+    },
+    execFileSync(command, args) {
+      queries.push({ command, args });
+      return '';
+    }
+  });
+
+  assert.equal(state, 'dead');
+  assert.deepEqual(probes, [4321, 4321]);
+  assert.deepEqual(queries, [{ command: 'ps', args: ['-p', '4321', '-o', 'lstart='] }]);
+});
+
+test('macOS identity state keeps unconfirmed query failures fail-closed', () => {
+  for (const recheck of [undefined, 'EPERM', 'EACCES'] as const) {
+    const probes: number[] = [];
+    const state = getProcessIdentityStateWithRuntime({ pid: 4321, startTime: 1 }, 'darwin', {
+      probePid(pid) {
+        probes.push(pid);
+        if (probes.length === 2 && recheck) throw errno(recheck);
+      },
+      execFileSync() {
+        return 'not a Darwin process start time';
+      }
+    });
+
+    assert.equal(state, 'unknown');
+    assert.deepEqual(probes, [4321, 4321]);
+  }
+});
+
+test('macOS identity state confirms exit after a start-time query error', () => {
+  const probes: number[] = [];
+  const state = getProcessIdentityStateWithRuntime({ pid: 4321, startTime: 1 }, 'darwin', {
+    probePid(pid) {
+      probes.push(pid);
+      if (probes.length === 2) throw errno('ESRCH');
+    },
+    execFileSync() { throw errno('EIO'); }
+  });
+
+  assert.equal(state, 'dead');
+  assert.deepEqual(probes, [4321, 4321]);
+});
+
+test('identity state does not recheck after a valid start-time observation or on Windows', () => {
+  const startTime = Date.UTC(2026, 8, 1, 0, 25, 12);
+  const darwinProbes: number[] = [];
+  const darwinState = getProcessIdentityStateWithRuntime({ pid: 4321, startTime }, 'darwin', {
+    probePid(pid) { darwinProbes.push(pid); },
+    execFileSync() { return 'Tue Sep  1 00:25:12 2026'; }
+  });
+  assert.equal(darwinState, 'alive');
+  assert.deepEqual(darwinProbes, [4321]);
+
+  const mismatchProbes: number[] = [];
+  const mismatchState = getProcessIdentityStateWithRuntime({ pid: 4321, startTime: startTime + 1 }, 'darwin', {
+    probePid(pid) { mismatchProbes.push(pid); },
+    execFileSync() { return 'Tue Sep  1 00:25:12 2026'; }
+  });
+  assert.equal(mismatchState, 'dead');
+  assert.deepEqual(mismatchProbes, [4321]);
+
+  const windowsProbes: number[] = [];
+  const windowsState = getProcessIdentityStateWithRuntime({ pid: 4321, startTime }, 'win32', {
+    probePid(pid) { windowsProbes.push(pid); },
+    execFileSync() { throw errno('ENOENT'); }
+  });
+  assert.equal(windowsState, 'unknown');
+  assert.deepEqual(windowsProbes, [4321]);
+});
+
+test('Linux identity state does not invoke injected macOS observers', () => {
+  let probeCalls = 0;
+  let queryCalls = 0;
+
+  const state = getProcessIdentityStateWithRuntime({ pid: 999_999_999, startTime: 1 }, 'linux', {
+    probePid() { probeCalls += 1; },
+    execFileSync() {
+      queryCalls += 1;
+      return '';
+    }
+  });
+
+  assert.equal(state, 'dead');
+  assert.equal(probeCalls, 0);
+  assert.equal(queryCalls, 0);
+});
+
 test('readProcessState classifies missing, invalid, legacy, mismatch, and matching records', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-process-state-'));
   const pidFile = path.join(dir, 'server.pid');
