@@ -12,6 +12,11 @@ export type ProcessIdentity = Readonly<{
 export type ProcessIdentityState = 'alive' | 'dead' | 'unknown';
 export type ProcessIdentityProbe = (identity: ProcessIdentity) => ProcessIdentityState;
 
+type ProcessIdentityRuntime = Readonly<{
+  probePid?: (pid: number) => void;
+  execFileSync?: typeof execFileSync;
+}>;
+
 export type PidRecord = ProcessIdentity & {
   version: 2;
 };
@@ -132,7 +137,8 @@ export function getProcessStartTime(
 
 export function getProcessIdentityState(
   identity: ProcessIdentity,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  runtime: ProcessIdentityRuntime = {}
 ): ProcessIdentityState {
   if (!Number.isInteger(identity.pid) || identity.pid <= 0 || !Number.isSafeInteger(identity.startTime)) {
     return 'dead';
@@ -147,8 +153,9 @@ export function getProcessIdentityState(
       return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'dead' : 'unknown';
     }
   }
+  const probePid = runtime.probePid ?? ((pid: number) => process.kill(pid, 0));
   try {
-    process.kill(identity.pid, 0);
+    probePid(identity.pid);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ESRCH') return 'dead';
@@ -157,20 +164,34 @@ export function getProcessIdentityState(
   const query = buildProcessStartTimeQuery(identity.pid, platform);
   if (query === null) return 'unknown';
   try {
-    const output = execFileSync(query.command, query.args, {
+    const output = (runtime.execFileSync ?? execFileSync)(query.command, query.args, {
       encoding: 'utf8',
       env: platform === 'darwin' ? { ...process.env, LC_ALL: 'C', LANG: 'C', TZ: 'UTC' } : process.env
     }).trim();
-    if (output.length === 0) return 'unknown';
+    if (output.length === 0) return recheckDarwinProcessExit(identity.pid, platform, probePid);
     const startTime = platform === 'win32'
       ? new Date(output).getTime()
       : platform === 'darwin'
         ? parseDarwinStartTime(output)
         : null;
-    if (startTime === null || Number.isNaN(startTime)) return 'unknown';
+    if (startTime === null || Number.isNaN(startTime)) return recheckDarwinProcessExit(identity.pid, platform, probePid);
     return startTime === identity.startTime ? 'alive' : 'dead';
   } catch {
+    return recheckDarwinProcessExit(identity.pid, platform, probePid);
+  }
+}
+
+function recheckDarwinProcessExit(
+  pid: number,
+  platform: NodeJS.Platform,
+  probePid: (pid: number) => void
+): ProcessIdentityState {
+  if (platform !== 'darwin') return 'unknown';
+  try {
+    probePid(pid);
     return 'unknown';
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'unknown';
   }
 }
 
