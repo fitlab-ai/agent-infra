@@ -67,20 +67,12 @@ flowchart LR
     IM --> D
   end
 
-  subgraph H["HOST OS · host boundary"]
-    HC["PROCESS<br/>host-control service<br/>[1 / supported host]"]:::process
-  end
-
   subgraph F["SANDBOX FLEET · repeated per sandbox"]
     C["CONTAINER INSTANCES<br/>[0..N / host]"]:::boundary
     B["PROCESS × N<br/>sandbox broker<br/>[1 / sandbox]"]:::process
     C --> B
   end
 
-  B -. "broker invokes host-control for host-side workflow" .-> HC
-
-  CLI -. host or sandbox request .-> HC
-  D -. host or sandbox request .-> HC
   CLI -. task-bound request .-> C
   D -. task-bound request .-> C
 ```
@@ -89,20 +81,19 @@ This is the primary architecture picture:
 
 - `local user / CLI` and `IM provider` are the two entry families.
 - `ai server daemon` is an optional IM entry process: at most one per checkout. A local CLI does not require it.
-- `host-control service` is one required host-level service on a supported host: `[1 / supported host]`. If it is absent, the host control boundary is unavailable; that is not a valid zero-process runtime.
+- Direct-host lifecycle and workflow commands execute in the current CLI process. They do not require a host service, socket, or worker token.
 - `CONTAINER INSTANCES` means one Docker container per sandbox, `[0..N / host]`. It is a sandbox boundary and count, not another project process.
 - Every sandbox has one `sandbox broker`, `[1 / sandbox]`. The broker is the sandbox's long-lived control process.
-- One supported host's `host-control service` is a sibling control boundary to the sandbox fleet: it corresponds to `[0..N]` sandbox containers and one broker per existing sandbox. For a sandbox task workflow, the broker invokes host-control for host-side work; host-control does not call or proxy the broker. The dashed arrow shows that call direction, while the separate multiplicity labels show the boundary/cardinality relationship.
+- A sandbox broker is the task-bound control boundary. It validates request, manifest, generation, owner, lease, and controller before it starts a one-request executor.
 - Dashed arrows show which control route an entry may select. They are not a fixed parent-child process chain. The transient dispatch implementation is intentionally hidden here.
 
 The container engine and OS service manager own infrastructure around this picture, but they are not one process per sandbox and are not included in the core process count. User-created programs inside a sandbox are also outside this architecture view.
 
 | Core item | Multiplicity | Meaning |
 | --- | --- | --- |
-| Local CLI entry | `0..N / invocation` | A user-facing entry; it may select a host or task-bound sandbox route. |
+| Local CLI entry | `0..N / invocation` | A user-facing entry; a direct-host command uses this current process, while a task-bound request uses its sandbox broker. |
 | IM provider entry | `0..N / provider` | An external message source. |
 | `ai server daemon` | `0..1 / checkout` | The optional process that admits IM traffic for one checkout. |
-| `host-control service` | `1 / supported host` | The required host-side control service and direct-host authority. |
 | Docker sandbox container | `0..N / host` | One isolated container instance per sandbox. |
 | `sandbox broker` | `1 / sandbox` | One control broker inside each sandbox container. |
 
@@ -111,24 +102,22 @@ The container engine and OS service manager own infrastructure around this pictu
 ```mermaid
 flowchart TD
   REQUEST["one accepted control request"]
-  HOST["host-control service<br/>[1 / supported host]"]
-  HW["temporary host-control worker<br/>[0..1 / request]"]
   BROKER["sandbox broker<br/>[1 / sandbox]"]
   EXEC["temporary sandbox executor<br/>[0..1 / accepted request]"]
 
-  REQUEST -->|host request| HOST --> HW
+  REQUEST -->|direct-host request| DIRECT["current CLI process"]
   REQUEST -->|task-bound request| BROKER --> EXEC
 ```
 
-The `sandbox executor` is not another sandbox and not another broker. It is a short-lived project-controlled worker created only after a broker accepts one authorized control request; it performs that request and then exits. With no accepted request, there is no executor. The host-control worker has the same relationship to one host-side request.
+The `sandbox executor` is not another sandbox and not another broker. It is a short-lived project-controlled worker created only after a broker accepts one authorized control request; it performs that request and then exits. With no accepted request, there is no executor. A direct-host request stays in its current CLI process.
 
 This lower view does not enumerate the programs a user starts inside the container. Those programs are variable, user-owned, and outside the project's fixed process topology.
 
 ### Entry and request boundaries
 
-- A local CLI is a direct entry family. It can select host control or a task-bound sandbox without requiring the IM daemon.
+- A local CLI is a direct entry family. Its direct-host commands run in the current process, and its task-bound requests use the matching sandbox broker without requiring the IM daemon.
 - An IM message enters through the optional `ai server daemon`, which admits the request and selects the same host or sandbox control boundary.
-- Host control and the sandbox broker are separate control boundaries. Host control owns host-side authorization and workers; the broker owns sandbox-side authorization and the executor for one accepted request.
+- The sandbox broker owns sandbox-side authorization and the executor for one accepted request. Direct-host commands use the same domain handlers after the transport guard confirms they are not running in a sandbox.
 - The task lifecycle logic that validates task files and transitions is in-process domain logic, not a process and not part of the highest-level process count.
 
 ## Core Component Matrix
@@ -138,8 +127,8 @@ This lower view does not enumerate the programs a user starts inside the contain
 | Local CLI entry | Started by a user invocation; ends with that invocation | Local process arguments and standard streams | Host user entry; `0..N / invocation` | Command result and any task receipt | The command result does not prove that a remote or sandbox operation completed. |
 | IM provider entry | External provider delivers messages; the provider owns its connection lifecycle | Provider API or long-lived adapter connection | External identity; not an OS process in this repository | Provider message and reply evidence | Provider, credential, and connection failures remain outside local task authority. |
 | `ai server` daemon | `ai server start` starts at most one daemon per checkout; signals stop it | Provider adapter and admitted request dispatch | Host user process; `0..1 / checkout` | Checkout-scoped PID identity and daemon logs | Stale identity or adapter failure must not be confused with task success. |
-| `host-control` service | OS user service manager starts/stops one service per supported host | Private host endpoint and request/response records | Host user boundary; `1 / supported host` | Endpoint, token, audit, and worker records | Missing authority fails closed; accepted work is not silently replayed after an uncertain result. Direct-host `create-task` is a separate in-process path. |
-| Docker sandbox container | Container engine creates/stops one container per sandbox | Container runtime and mounted task projection | Sandbox boundary; `0..N / host` | Container identity, generation, and sandbox control records | Container availability alone does not prove host-control or task-lifecycle readiness. |
+| Direct-host CLI command | A user invocation starts and ends the current CLI process | Local arguments and standard streams | Host user boundary; `0..N / invocation` | Operation-local task facts, receipts, and journals | No daemon or token is required. A mounted sandbox status directory without valid broker configuration fails closed. |
+| Docker sandbox container | Container engine creates/stops one container per sandbox | Container runtime and mounted task projection | Sandbox boundary; `0..N / host` | Container identity, generation, and sandbox control records | Container availability alone does not prove broker or task-lifecycle readiness. |
 | Sandbox broker | Starts with its sandbox control state and stops with that sandbox | Sandbox control channel and request records | One broker inside each sandbox; `[1 / sandbox]` | Manifest, lease, owner, generation, and execution audit | Stale identity, lease, or admission failure is rejected before execution. |
 
 ## Detailed Runtime and Evidence Matrix
@@ -157,11 +146,10 @@ The following lower-level matrix covers project-managed runtime entities and the
 | Per-run tmux window / pane | Project-managed runtime endpoint; `0..N / sandbox`, one window/pane per accepted run | Launcher creates the window, pipes pane output, and sends the run command | Run ID, task ref, and sandbox-local command | Window, pane, and session files under the run directory | Window/pane creation failure is a dispatch failure; pane existence does not mean the TUI or skill finished. |
 | Generated `run.sh` | One generated shell script and one executing shell per run; not a resident service | Runs the selected TUI command and writes run state files | Generated from the task-bound request with shell-quoted argv | `started_at`, `finished_at`, `status`, `exit_code`, and `output.log` | It records `completed` or `failed` from the command exit code, then leaves the pane shell available; missing files require run-directory inspection. |
 | Sandbox AI TUI + skill invocation | Temporary TUI child; one selected client per run; the skill itself is in-process workflow logic, not a process | TUI stdio through the pane, internal CLI, task projection, and lifecycle records | Sandbox task identity, TUI command policy, and skill authority | TUI exit code, skill receipt/artifact/status, task journal, and output metadata | TUI exit, skill completion, and task completion are separate; reconcile the task receipt when output or status is unknown. |
-| Host-control worker | Temporary host process; `0..1 / host request` | Private host endpoint and request/response records | Host-control token, OS user, and lifecycle authority | Accepted/completed audit and worker result | Accepted-but-unknown work is reconciled by request identity; it is not silently replayed. |
-| Sandbox executor | Temporary sandbox-side worker; `0..1 / accepted broker request` | Broker request channel and isolated CLI worker | Manifest, owner, lease, controller, and task authority gates | Request, executor, terminal response, and execution audit | Rejection prevents execution; dispatch/transport uncertainty remains unknown and requires broker recovery. |
+| Sandbox executor | Temporary host-side worker; `0..1 / accepted broker request` | Broker request channel and isolated CLI worker | Manifest, owner, lease, controller, and task authority gates | Request, executor, terminal response, and execution audit | Rejection prevents execution; dispatch/transport uncertainty remains unknown and requires broker recovery. |
 | Task Control Authority | In-process domain logic, not a process | Typed control request, task files, journals, receipts, and lifecycle APIs | Task identity, authority caller, lease, and controller checks | Task state, receipt, journal, artifact provenance, and completion evidence | Invalid identity or missing authority fails closed; it does not become a process node. |
 | Codex lifecycle controller / App Server | Controller logic with a short-lived `codex app-server --stdio` child when evidence is collected | Hooks plus line-delimited JSON-RPC and rollout metadata | Fresh child identity, parent, role, model, effort, and terminal checks | Hook records, App Server responses, and lifecycle evidence | Missing/conflicting evidence fails closed; App Server evidence does not replace task completion. |
-| Container engine / OS service manager | External infrastructure; host-level services, not one process per sandbox | launchd/systemd service control and Docker/WSL2 runtime | Host user/service boundary and container identity | Service identity, container identity, generation, and readiness checks | Backend availability does not establish task authority or add a second broker. |
+| Container engine / OS service manager | External infrastructure, not one process per sandbox | Docker/WSL2 runtime and optional user-managed services | Host user/service boundary and container identity | Container identity, generation, and readiness checks | Backend availability does not establish task authority or add a second broker. |
 | Platform synchronization boundary | External integration boundary, not a process | Platform API and synchronization receipts | Configured provider/repository identity | Synchronization receipt and platform response | Publication failure is distinct from local task state; retry only with its recorded identity. |
 
 This matrix includes entities the project creates and manages for a task-bound run. It still excludes arbitrary programs a user starts inside the sandbox. In particular, a skill is workflow logic rather than a separate process, while `tmux`, `run.sh`, the selected TUI, and their status/output files are included because the project creates them and uses them to observe a run.
@@ -174,13 +162,11 @@ These views describe requests and state, not additional processes. They are deli
 flowchart TD
   ENTRY["local CLI or IM entry"] --> ROUTE{"selected boundary"}
   ROUTE -->|create-task without task ref| CREATE["host-side task-create path"]
-  ROUTE -->|direct-host task control| HC["host-control service"]
+  ROUTE -->|direct-host task control| DIRECT["current CLI domain handler"]
   ROUTE -->|task-bound sandbox| SB["sandbox container + broker"]
   CREATE --> DOMAIN["task-create domain logic"]
-  HC --> HW["one host request worker, when needed"]
   SB --> EX["one sandbox executor, when an accepted request needs it"]
   DOMAIN --> STATE["task lifecycle state and receipt"]
-  HW --> STATE
   EX --> STATE
 ```
 
@@ -188,8 +174,8 @@ flowchart TD
 
 | Operation | Selected boundary | Authoritative result | Recovery rule |
 | --- | --- | --- | --- |
-| Create | Direct-host task-create domain when no broker transport is selected; broker-client request when sandbox transport is selected | `task.md`, task directory, short ID, and create receipt | Reconcile partial writes before retrying. Direct-host create does not require an existing host-control service; broker-client create requires the sandbox control boundary. |
-| Task event or artifact | Host-control or sandbox broker path | Event/artifact provenance and task state | Preserve the receipt; do not guess after an accepted unknown result. |
+| Create | Direct-host task-create domain when no broker transport is selected; broker-client request when sandbox transport is selected | `task.md`, task directory, short ID, and create receipt | Reconcile partial writes before retrying. Broker-client create requires the sandbox control boundary. |
+| Task event or artifact | Current direct-host CLI process or sandbox broker path | Event/artifact provenance and task state | Preserve the receipt; do not guess after an accepted unknown result. |
 | Restore | Lifecycle request boundary | Task directory, journal, registry, and final state | Reconcile journal and final directory before retrying. |
 | Block or cancel | Authorized lifecycle boundary | Status, reason, journal, and released resources | Stop at the first unknown side effect. |
 | Complete | Lifecycle and artifact gates | Completed state, receipts, review, and platform evidence | Missing evidence keeps completion closed. |
@@ -199,7 +185,7 @@ flowchart TD
 - The IM adapter admits a message to the optional daemon, which may create a temporary local `ai` child. A local CLI invocation can enter `ai run` directly and bypass the daemon.
 - The `ai run` launcher executes a no-task-reference request through the host-side TUI child. A task reference selects the matching sandbox route, checks readiness, and invokes the sandbox request launcher through the container engine.
 - The sandbox request launcher creates or reuses the project-managed `work` tmux session, creates one window/pane for the run, writes `run.sh`, and sends that script to the pane. The selected TUI then runs the requested skill inside the task-bound worktree.
-- `create-task` is a distinct conditional path. `resolveSandboxControlTransport()` selects the broker-client only when sandbox markers are present; otherwise the command calls the task-create domain directly in the host process. This direct-host create path is not the same thing as a long-lived host-control service and is not host-control-only.
+- `create-task` is a distinct conditional path. `resolveSandboxControlTransport()` selects the broker-client for a valid sandbox identity. A fixed sandbox status mount with missing or malformed broker configuration fails closed; only a host process without that mount can call the domain directly.
 
 ### Completion and recovery facts
 
@@ -215,16 +201,16 @@ flowchart TD
 
 | Execution context | Core capability | Important limitation |
 | --- | --- | --- |
-| macOS | `host-control` can be managed by a user-scoped launchd service; configured container engines may provide sandboxes | Container capability does not replace the host service or task-bound lifecycle. |
-| Linux | `host-control` can be managed by a user-scoped systemd service; configured container engines may provide sandboxes | The engine, broker, host-control, and task lifecycle remain separate boundaries. |
-| Native Windows | Some CLI/process and Docker Desktop container paths may exist | No equivalent native host-control service closes the complete host task-bound lifecycle. |
-| WSL2 Linux | Linux-side service and container behavior depends on the distribution and runtime configuration | WSL2 Linux behavior is not native Windows host-control support. |
-| Docker / WSL2 backend | A configured Docker or WSL2 backend may provide container execution for the sandbox fleet | Backend availability does not add a second broker per sandbox or establish host-control authority. |
+| macOS | Current-process direct-host CLI and configured container engines may provide sandboxes | No task-control service is required. |
+| Linux | Current-process direct-host CLI and configured container engines may provide sandboxes | The engine, broker, and task lifecycle remain separate boundaries. |
+| Native Windows | Some CLI/process and Docker Desktop container paths may exist | Direct-host commands do not depend on a platform service. |
+| WSL2 Linux | Linux-side container behavior depends on the distribution and runtime configuration | WSL2 behavior is not native Windows support. |
+| Docker / WSL2 backend | A configured Docker or WSL2 backend may provide container execution for the sandbox fleet | Backend availability does not add a second broker per sandbox or establish task authority. |
 
 ## Scope and Source Pointers
 
 This document describes the repository's fixed control-plane components, project-owned runtime details, and their boundaries. Short-lived implementation details are shown only where they explain a control or evidence path; they are not core long-lived processes. It intentionally does not enumerate user-created programs inside a sandbox.
 
-Detailed provider, sandbox, and platform contracts remain in [Feishu Bridge](./feishu-bridge.md), [Sandbox](./sandbox.md), and [Platform Support](./platform-support.md). This overview keeps the entry families, host-control count, sandbox count, broker count, and request-derived control processes understandable in one place.
+Detailed provider, sandbox, and platform contracts remain in [Feishu Bridge](./feishu-bridge.md), [Sandbox](./sandbox.md), and [Platform Support](./platform-support.md). This overview keeps the entry families, sandbox count, broker count, and request-derived control processes understandable in one place.
 
-It does not add a Windows host-control implementation, a new adapter, a compatibility shim, a migration, or a runtime state-machine change.
+It does not add a platform service, a new adapter, a compatibility shim, a migration, or a runtime state-machine change.

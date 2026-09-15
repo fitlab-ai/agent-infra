@@ -344,16 +344,6 @@ export function resolveSandboxControlTransport(
   const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
     || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
     || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
-  // A host process has no sandbox identity to validate. The previous service
-  // design treated a globally mounted status directory as implicit authority;
-  // that made an authorized broker child indistinguishable from a direct host
-  // command after its sandbox credentials were deliberately stripped.
-  if (!hasAnyMarker) return { kind: 'direct-host', reasonCode: null };
-  const hasCompleteConfig = TASK_CONTROL_CONFIG_KEYS.every((key) => Boolean(env[key]));
-  if (!hasCompleteConfig) {
-    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
-  }
-  const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
   const fixedStatusDir = options.statusMountPath
     ?? SANDBOX_CONTROL_STATUS_MOUNT;
   const fixedStatusProbe = path.isAbsolute(fixedStatusDir)
@@ -362,6 +352,19 @@ export function resolveSandboxControlTransport(
     return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_UNAVAILABLE' };
   }
   const fixedStatusMounted = fixedStatusProbe === 'present';
+  // A fixed status mount is installed only in a task-bound sandbox. Its
+  // presence is not mutable by the sandbox process, so marker removal must
+  // never make that process look like a direct host invocation.
+  if (!hasAnyMarker) {
+    return fixedStatusMounted
+      ? { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' }
+      : { kind: 'direct-host', reasonCode: null };
+  }
+  const hasCompleteConfig = TASK_CONTROL_CONFIG_KEYS.every((key) => Boolean(env[key]));
+  if (!hasCompleteConfig) {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
+  }
+  const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
   const configuredStatusProbe = configuredStatusDir && path.isAbsolute(configuredStatusDir)
     ? nativeDirectoryProbe(configuredStatusDir) : 'absent';
   if (configuredStatusProbe === 'unknown') {

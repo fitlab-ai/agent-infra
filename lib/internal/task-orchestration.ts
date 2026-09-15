@@ -20,11 +20,11 @@ function parseFailure(error: unknown): string {
 }
 
 async function taskOrchestration(args: string[] = []): Promise<void> {
-  if (!ensureInternalHandlerRoute('task-orchestration', args)) return;
   if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
     return;
   }
+  if (!ensureInternalHandlerRoute('task-orchestration', args)) return;
 
   const route = internalHandlerRoute('task-orchestration', 'status', args[1] ?? '')
     ? 'status'

@@ -25,6 +25,13 @@ const taskWorkflowCommand = command === 'task-artifact'
   || command === 'task-invalidation'
   || command === 'task-warning';
 const manualValidationWorkflowCommand = command === 'manual-validation';
+const taskControlMarkers = [
+  'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
+  'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
+  'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST'
+];
+const markerlessHelp = ['--help', '-h'].includes(process.argv[3] ?? '')
+  && taskControlMarkers.every((key) => !process.env[key]);
 let taskViewGuardFailed = false;
 try {
   const guard = guardTaskOperation('internal', command, process.argv.slice(3));
@@ -50,7 +57,7 @@ function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANS
 }
 
 let controlRouted = false;
-if (!taskViewGuardFailed && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand)) {
+if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand)) {
   const transport = resolveSandboxControlTransport(process.env);
   switch (transport.kind) {
     case 'fail-closed': {

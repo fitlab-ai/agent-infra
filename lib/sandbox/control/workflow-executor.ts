@@ -17,6 +17,17 @@ import type { LifecycleRecoveryAttestationV1 } from '../../task/control-authorit
 import { applyTaskEvent } from '../../task/events.ts';
 import { parseTaskEventRequest } from '../../internal/task-event.ts';
 
+export type TaskWorkflowFaultWindow =
+  | 'before-call'
+  | 'before-domain-write'
+  | 'after-atomic-rename'
+  | 'before-result-return';
+
+export type TaskWorkflowExecutionOptions = Readonly<{
+  /** Deterministic test seam; production callers leave this unset. */
+  faultWindow?: TaskWorkflowFaultWindow;
+}>;
+
 function executionResult(result: Record<string, unknown>): SandboxControlExecutionResult {
   return { exitCode: result.status === 'failed' || result.status === 'refused' ? 1 : 0, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
 }
@@ -25,10 +36,22 @@ function executionResult(result: Record<string, unknown>): SandboxControlExecuti
 export async function executeTaskWorkflow(
   manifest: SandboxControlManifest,
   request: TaskWorkflowRequest,
-  lifecycleRecoveryAttestation: LifecycleRecoveryAttestationV1 | null = null
+  lifecycleRecoveryAttestation: LifecycleRecoveryAttestationV1 | null = null,
+  options: TaskWorkflowExecutionOptions = {}
 ): Promise<SandboxControlExecutionResult> {
   let publicationStarted = false;
+  let faultTriggered = false;
+  const fault = (window: TaskWorkflowFaultWindow): void => {
+    if (faultTriggered || options.faultWindow !== window) return;
+    faultTriggered = true;
+    throw new Error(`TASK_WORKFLOW_FAULT_INJECTED:${window}`);
+  };
+  const response = (result: Record<string, unknown>): SandboxControlExecutionResult => {
+    fault('before-result-return');
+    return executionResult(result);
+  };
   try {
+    fault('before-call');
     const taskDir = assertSandboxTaskSource(manifest.repoRoot, request.taskId);
     const [command] = TASK_WORKFLOW_COMMANDS[request.operation];
     if (request.operation === 'event') {
@@ -36,30 +59,41 @@ export async function executeTaskWorkflow(
       const boundEventRequest = lifecycleRecoveryAttestation && eventRequest.requestId === undefined
         ? { ...eventRequest, requestId: lifecycleRecoveryAttestation.lifecycleRequestId }
         : eventRequest;
+      fault('before-domain-write');
       const result = applyTaskEvent(boundEventRequest, {
         repoRoot: manifest.repoRoot,
         lifecycleRecoveryAttestation,
         deferLifecycleRecoveryConsumption: true
       });
-      return executionResult(result);
+      fault('after-atomic-rename');
+      return response(result);
     }
     if (command !== 'task-artifact' && command !== 'task-review') {
       publicationStarted = true;
       // The broker owns this short-lived executor; no global service or worker
       // credential participates in the command's authority or recovery path.
-      const result = await dispatchWorkflowCommand(manifest.repoRoot, command, request.args);
-      return result;
+      fault('before-domain-write');
+      const result = dispatchWorkflowCommand(manifest.repoRoot, request.operation, request.args);
+      fault('after-atomic-rename');
+      return response(result);
     }
     const input = command === 'task-artifact' ? parseArtifactCommand(request.args) : parseReviewCommand(request.args);
     if (command === 'task-artifact' && 'operation' in input && input.operation === 'inspect') {
-      return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot }));
+      fault('before-domain-write');
+      const result = executeArtifactCommand(input, { repoRoot: manifest.repoRoot });
+      fault('after-atomic-rename');
+      return response(result);
     }
     if ('operation' in input && input.operation === 'init') {
-      return executionResult(executeArtifactCommand(input, { repoRoot: manifest.repoRoot, artifactDir: taskDir }));
+      fault('before-domain-write');
+      const result = executeArtifactCommand(input, { repoRoot: manifest.repoRoot, artifactDir: taskDir });
+      fault('after-atomic-rename');
+      return response(result);
     }
     return await withTaskExecutionLock(manifest.repoRoot, request.taskId, `sandbox-control.${request.operation}`, async () => {
       const artifact = await readTaskArtifact(taskDir, { artifact: input.artifact });
       const content = artifact.bytes.toString('utf8');
+      fault('before-domain-write');
       let result: Record<string, unknown>;
       if ('operation' in input) {
         const { family } = input;
@@ -86,7 +120,8 @@ export async function executeTaskWorkflow(
         requestId: request.id, sandboxTaskId: request.taskId, workflowOperation: request.operation,
         artifact: input.artifact, sha256: result.artifactSha256 as string, semanticDigest: result.semanticDigest as string
       });
-      return executionResult({ ...result, changed: true });
+      fault('after-atomic-rename');
+      return response({ ...result, changed: true });
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

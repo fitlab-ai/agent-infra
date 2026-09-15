@@ -12,6 +12,7 @@ import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../../li
 import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-executor.ts';
 import { createTaskWorkflowRequest } from '../../../lib/sandbox/control/task-workflow.ts';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
+import { TASK_WORKFLOW_COMMANDS, TASK_WORKFLOW_OPERATIONS } from '../../../lib/task/workflow-command.ts';
 import { onPlatforms } from '../../helpers.ts';
 
 const taskId = 'TASK-20260101-000001';
@@ -87,6 +88,47 @@ function content(family: 'plan' | 'review-analysis'): string {
   }
   return result;
 }
+
+function workflowArgs(operation: typeof TASK_WORKFLOW_OPERATIONS[number]): string[] {
+  switch (operation) {
+    case 'artifact-inspect': return [taskId, 'inspect', '--family', 'plan'];
+    case 'artifact-init': return [taskId, 'init', '--family', 'plan', '--artifact', 'plan.md'];
+    case 'artifact-finalize-local': return [taskId, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md'];
+    case 'review-finalize-summary': return [taskId, 'finalize-summary', '--stage', 'analysis', '--artifact', 'review-analysis.md'];
+    case 'event': return [taskId, 'plan.started', '--agent', 'codex', '--initiator', 'model', '--request-id', 'workflow-fault-event', '--reason-code', 'user-request'];
+    case 'ledger-finding-response': return [taskId, 'finding-respond', '--id', 'AN-1', '--round', '1', '--status', 'accepted', '--evidence', 'code-r2.md:1'];
+    case 'ledger-finding-review': return [taskId, 'finding-review', '--id', 'AN-1', '--status', 'confirmed', '--evidence', 'review-analysis.md#finding-1'];
+    case 'ledger-finding-upsert': return [taskId, 'finding-upsert', '--stage', 'analysis', '--review-artifact', 'review-analysis.md', '--ordinal', '1', '--severity', 'major', '--evidence', 'review-analysis.md#finding-1'];
+    case 'decision-next-id': return [taskId, 'decision-next-id'];
+    case 'decision-upsert': return [taskId, 'decision-upsert', '--id', 'HD-1', '--stage', 'plan', '--artifact', 'plan.md'];
+    case 'invalidation-reconcile': return [taskId, 'reconcile'];
+    case 'warning-add': return [taskId, 'add', '--step', 'code', '--severity', 'IMPORTANT', '--code', 'FAULT_MATRIX', '--target', 'workflow', '--message', 'fault test', '--action', 'retry'];
+  }
+}
+
+test('every workflow operation is isolated across the four termination windows', onPlatforms('linux', 'darwin'), async () => {
+  const windows = ['before-call', 'before-domain-write', 'after-atomic-rename', 'before-result-return'] as const;
+  for (const operation of TASK_WORKFLOW_OPERATIONS) {
+    for (const window of windows) {
+      const f = fixture();
+      try {
+        if (operation === 'artifact-finalize-local') fs.writeFileSync(path.join(f.taskDir, 'plan.md'), content('plan'));
+        if (operation === 'review-finalize-summary') fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), content('review-analysis'));
+        const [command] = TASK_WORKFLOW_COMMANDS[operation];
+        const request = createTaskWorkflowRequest(command, workflowArgs(operation), taskId, f.manifest.generation);
+        const before = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
+        const result = await executeTaskWorkflow(f.manifest, request, null, { faultWindow: window });
+        const body = JSON.parse(result.stdout);
+        assert.equal(result.exitCode, 1, `${operation}/${window}: ${result.stdout}`);
+        assert.equal(body.error.code, 'TASK_WORKFLOW_FAULT_INJECTED', `${operation}/${window}: ${result.stdout}`);
+        assert.match(body.error.message, new RegExp(`:${window}$`), `${operation}/${window}: ${result.stdout}`);
+        if (window === 'before-call' || window === 'before-domain-write') {
+          assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), before, `${operation}/${window} wrote before its fault point`);
+        }
+      } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+    }
+  }
+});
 
 for (const family of ['plan', 'review-analysis'] as const) {
   test(`workflow validates and publishes a direct task-directory ${family} artifact`, onPlatforms('linux', 'darwin'), async () => {

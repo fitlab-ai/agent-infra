@@ -194,7 +194,7 @@ tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/
 
 所有删除路径都会在破坏性清理前检查全部目标 worktree。存在 staged、unstaged、冲突或非 ignored untracked 修改时，批量删除、purge、prune、`--yes` 和其他非交互删除都会 fail closed。只有交互式 `ai sandbox rm <branch>` 可以在展示 dirty snapshot 后，通过一次默认否定的独立确认丢弃该 worktree。丢弃授权包含同一 worktree、同一分支内随后产生的修改；仅允许清理干净 worktree 的授权仍会在 snapshot 变化时失效。
 
-正常任务沙箱清理发生在 `complete-task` 成功、短号释放、任务移入 completed 目录之后。删除时使用完整 `TASK-id`，因为已释放的短号可能已指向另一任务。异常清理表示操作者明确决定丢弃选定沙箱并重建，允许终止其中运行。两种路径都保留精确容器 authority/身份、受管路径和归属检查，并在宿主清理前停止执行；不承诺抵御其他宿主程序在清理期间并发替换选定目录的源实例原子移动保证。不需要特权宿主服务；task-control 使用上文所述的用户级 host-control service。引擎不可达或删除结果未知仍保留可重试状态，不能报告成功。
+正常任务沙箱清理发生在 `complete-task` 成功、短号释放、任务移入 completed 目录之后。删除时使用完整 `TASK-id`，因为已释放的短号可能已指向另一任务。异常清理表示操作者明确决定丢弃选定沙箱并重建，允许终止其中运行。两种路径都保留精确容器 authority/身份、受管路径和归属检查，并在宿主清理前停止执行；不承诺抵御其他宿主程序在清理期间并发替换选定目录的源实例原子移动保证。不需要特权宿主服务；direct-host 命令使用当前 CLI 进程，任务绑定命令使用所属 broker。引擎不可达或删除结果未知仍保留可重试状态，不能报告成功。
 可先用 `ai sandbox prune --dry-run` 查看旧版本或异常中断遗留的孤儿 per-branch 状态目录，再用 `ai sandbox prune` 只删除没有活跃 sandbox 容器对应的目录。
 已有沙箱可通过 `ai sandbox start --recreate <task-ref-or-branch>` 加载托管挂载点变更，包括已移除的挂载。readiness 会先识别过期的 mount plan，再授权 container-only replacement，并保留 worktree。
 

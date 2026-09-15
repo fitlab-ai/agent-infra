@@ -295,6 +295,7 @@ test('task-bound marker requires its runtime binding before entering the client'
 });
 
 test('shared sandbox control transport selection is fail-closed and distinguishes workspace modes', () => {
+  const options = { statusMountPath: path.join(os.tmpdir(), `task-control-absent-${process.pid}`) };
   const base = {
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
@@ -302,13 +303,13 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
     AGENT_INFRA_CONTROL_DIR: '/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/status'
   };
-  assert.equal(resolveSandboxControlTransport(cleanEnv()).kind, 'direct-host');
-  assert.equal(resolveSandboxControlTransport(cleanEnv(base)).kind, 'broker-client');
+  assert.equal(resolveSandboxControlTransport(cleanEnv(), options).kind, 'direct-host');
+  assert.equal(resolveSandboxControlTransport(cleanEnv(base), options).kind, 'broker-client');
   assert.equal(resolveSandboxControlTransport(cleanEnv({
     ...base,
     AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_RUNTIME_DIR: '/runtime'
-  })).kind, 'broker-client');
+  }), options).kind, 'broker-client');
 
   for (const env of [
     { AGENT_INFRA_CONTROL_TOKEN: 'token' },
@@ -318,7 +319,7 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
     { ...base, AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest' },
     { ...base, AGENT_INFRA_CONTROL_CONTROLLER_BINDING: '{}' }
   ]) {
-    assert.equal(resolveSandboxControlTransport(cleanEnv(env)).kind, 'fail-closed');
+    assert.equal(resolveSandboxControlTransport(cleanEnv(env), options).kind, 'fail-closed');
   }
 });
 

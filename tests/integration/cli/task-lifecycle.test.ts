@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { filePath, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -21,7 +21,7 @@ function fixture() {
 }
 
 function run(root: string, args: string[], env: NodeJS.ProcessEnv = sandboxControlSafeEnv()) {
-  return spawnSync(filePath('bin/internal-cli.sh'), ['task-lifecycle', ...args], {
+  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-lifecycle', ...args], {
     cwd: root,
     encoding: 'utf8',
     env

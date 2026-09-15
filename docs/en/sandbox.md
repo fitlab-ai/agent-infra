@@ -240,7 +240,7 @@ operator decision to discard the selected sandbox and rebuild it, and may stop
 running executions. Both paths retain exact container authority/identity, managed
 path and ownership checks, and stop execution before host cleanup. They do not
 promise atomic source-instance moves against unrelated host programs replacing
-the selected directories concurrently. A privileged host service is not required; task-control uses the user-scoped host-control service described above.
+the selected directories concurrently. A privileged host service is not required; direct-host commands use the current CLI process, and task-bound commands use their broker.
 An unreachable engine or an unknown removal result remains retryable, not success.
 Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
 behind by older versions or interrupted cleanup, then `ai sandbox prune` to
