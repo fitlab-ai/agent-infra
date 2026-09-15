@@ -59,7 +59,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-activity': ['pr-review-inspect', 'pr-review-start', 'pr-review-complete', 'pr-review-terminate'],
   'task-artifact': ['inspect', 'init', 'preflight', 'finalize-local'],
   'task-orchestration': ['status', 'progress'],
-  'task-review': ['finalize-summary'],
+  'task-review': ['preflight', 'finalize-summary'],
   'task-event': ['event'],
   'task-invalidation': ['reconcile'],
   'task-override': ['diagnose', 'issue', 'consume'],

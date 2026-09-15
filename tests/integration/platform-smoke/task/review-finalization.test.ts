@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { finalizeReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
+import { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
 import { inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
 import { readArtifactRecoveryIntent } from '../../../../lib/task/artifact-repair-intent.ts';
@@ -209,6 +209,28 @@ test('official review template samples finalize for every stage and locale', () 
         assert.equal(finalizedSummary.summary.countState, 'numeric');
         assert.deepEqual(finalizedSummary.summary.counts, { blocker: 0, major: 0, minor: 0 });
       }
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('review preflight seals every review family before ledger writes', () => {
+  for (const { stage, family, locale, relativePath } of TEMPLATE_CASES) {
+    const artifact = `${family}.md`;
+    const fixture = officialTemplateDomainFixture(
+      stage,
+      artifact,
+      filledOfficialReviewSample(family, locale, relativePath, artifact)
+    );
+    try {
+      const taskBefore = fs.readFileSync(path.join(fixture.dir, 'task.md'), 'utf8');
+      const result = preflightReviewSummary({ taskRef: TASK_ID, stage, artifact }, { repoRoot: fixture.root });
+
+      assert.equal(result.status, 'passed', `${relativePath} should preflight`);
+      assert.equal(result.error, null);
+      assert.equal(fs.readFileSync(path.join(fixture.dir, 'task.md'), 'utf8'), taskBefore);
+      assert.equal(readArtifactRecoveryIntent(fixture.root, TASK_ID, family, artifact)?.state, 'preflight-ready');
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }

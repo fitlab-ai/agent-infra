@@ -74,6 +74,11 @@ type ReviewFinalizationResult = {
   }[];
   error: ReviewFinalizationError | null;
 };
+type ReviewPreflightResult = Omit<ReviewFinalizationResult, 'status' | 'intent' | 'stageStatus'> & {
+  status: 'passed' | 'failed';
+  intent: 'preflight';
+  stageStatus: null;
+};
 type ReviewFileSystem = {
   readFileSync: (file: string) => string;
 };
@@ -119,12 +124,147 @@ function failed(
   };
 }
 
+function preflightFailed(
+  request: ReviewFinalizationRequest,
+  code: ReviewFinalizationErrorCode,
+  message: string,
+  taskId: string | null = null,
+  extra: Partial<ReviewPreflightResult> = {}
+): ReviewPreflightResult {
+  const { status: _status, intent: _intent, stageStatus: _stageStatus, ...finalizationExtra } = extra;
+  return {
+    ...failed(request, code, message, taskId, null, finalizationExtra),
+    status: 'failed',
+    intent: 'preflight',
+    stageStatus: null
+  };
+}
+
+/** Validate and seal a review draft before any finding-ledger write. */
+function preflightReviewSummaryUnlocked(
+  request: ReviewFinalizationRequest,
+  options: ReviewFinalizationOptions = {}
+): ReviewPreflightResult {
+  const stage = request.stage as ReviewStage;
+  const spec = STAGES[stage];
+  if (!spec) return preflightFailed(request, 'REVIEW_STAGE_INVALID', `unsupported review stage '${request.stage}'`);
+  if (!request.taskRef || !request.artifact) return preflightFailed(request, 'REVIEW_PAYLOAD_INVALID', 'taskRef, stage, and artifact are required');
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return preflightFailed(request, resolved.code, resolved.message, resolved.taskId ?? null);
+  if (resolved.state !== 'active') return preflightFailed(request, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
+  const parsed = parseArtifactName(request.artifact);
+  if (!parsed || parsed.family !== spec.family) return preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${spec.family}`, resolved.taskId);
+  const publicationError = validateArtifactPublication(resolved.taskDir, spec.family, request.artifact);
+  if (publicationError) return preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', publicationError.message, resolved.taskId);
+
+  let taskContent: string;
+  let content: string;
+  let recovery: ArtifactRecoveryContext | undefined;
+  try {
+    taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    if (request.recoveryId) {
+      const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact);
+      if (!intent || intent.recoveryOperationId !== request.recoveryId) return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', 'recovery id does not match the artifact journal', resolved.taskId);
+      if (!['awaiting-preflight-recovery', 'preflight-ready'].includes(intent.state)) return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', `recovery journal is in '${intent.state}' state`, resolved.taskId);
+      recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
+      content = fs.existsSync(recovery.stagingPath)
+        ? fs.readFileSync(recovery.stagingPath, 'utf8')
+        : fs.readFileSync(recovery.formalPath, 'utf8');
+    } else {
+      const validated = validateCompletedArtifact(resolved.taskDir, spec.family, request.artifact);
+      if (!validated.ok) return preflightFailed(request, validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID', validated.error.message, resolved.taskId);
+      content = fs.readFileSync(validated.artifact.path, 'utf8');
+      const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact);
+      if (intent?.state === 'preflight-ready') recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
+      if (intent?.state === 'passed' || intent?.state === 'consumed') return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', 'review artifact was already finalized', resolved.taskId);
+    }
+  } catch (error) { return preflightFailed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
+
+  if (!hasOpenArtifactRound(taskContent, spec.family, parsed.round)) return preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', `${request.artifact} does not have one matching open started review event`, resolved.taskId);
+  const execution = validateLifecycleExecution(request.taskRef, {
+    mode: request.orchestrated ? 'orchestrated' : 'standalone',
+    identity: { stage: spec.family, round: parsed.round, artifact: request.artifact, role: 'reviewer' },
+    dryRun: request.dryRun
+  }, { repoRoot: options.repoRoot });
+  if (!execution.ok) return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`, resolved.taskId);
+
+  const artifactSha256 = sha256Content(content);
+  const semanticDigest = canonicalSemanticDigest(content);
+  const detail = inspectDecisionDetailDuplicates(content);
+  const structure = inspectArtifactContract(content, getArtifactSchema(spec.family)!);
+  if (!detail.ok || !structure.ok) {
+    if (!recovery && !request.dryRun) {
+      try {
+        recovery = beginArtifactRecovery({
+          taskId: resolved.taskId, family: spec.family, artifact: request.artifact, round: parsed.round,
+          requestId: `review-preflight:${resolved.taskId}:${stage}:${parsed.round}`
+        }, Buffer.from(content, 'utf8'), { repoRoot: resolved.repoRoot, taskDir: resolved.taskDir, lockAlreadyHeld: options.lockAlreadyHeld });
+      } catch (error) { return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', String(error), resolved.taskId); }
+    }
+    const diagnostics = [
+      ...(!detail.ok ? [`${detail.code}: ${detail.message}`] : []),
+      ...structure.diagnostics.map((item) => `${item.code}: ${item.message}`)
+    ].join('; ');
+    return preflightFailed(request, detail.ok ? 'REVIEW_ARTIFACT_STRUCTURE_INVALID' : 'REVIEW_DECISION_DETAIL_INVALID', diagnostics, resolved.taskId, {
+      artifactSha256, semanticDigest,
+      ...(recovery ? { recovery: recoveryInfo(recovery) } : {})
+    });
+  }
+  if (request.dryRun || recovery && readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact)?.state === 'preflight-ready') {
+    return {
+      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest, ...(recovery ? { recovery: recoveryInfo(recovery) } : {}) }),
+      status: 'passed', changed: false, error: null
+    };
+  }
+  try {
+    recovery ??= beginArtifactRecovery({
+      taskId: resolved.taskId, family: spec.family, artifact: request.artifact, round: parsed.round,
+      requestId: `review-preflight:${resolved.taskId}:${stage}:${parsed.round}`
+    }, Buffer.from(content, 'utf8'), { repoRoot: resolved.repoRoot, taskDir: resolved.taskDir, lockAlreadyHeld: options.lockAlreadyHeld });
+    const staged = stageArtifactCandidate(recovery, Buffer.from(content, 'utf8'), { lockAlreadyHeld: options.lockAlreadyHeld });
+    prepareArtifactRecoveryCommit(recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: options.lockAlreadyHeld });
+    return {
+      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest, recovery: recoveryInfo(recovery) }),
+      status: 'passed', changed: false, error: null
+    };
+  } catch (error) { return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', String(error), resolved.taskId, { artifactSha256, semanticDigest }); }
+}
+
+function preflightReviewSummary(
+  request: ReviewFinalizationRequest,
+  options: ReviewFinalizationOptions = {}
+): ReviewPreflightResult {
+  if (request.dryRun || options.lockAlreadyHeld) return preflightReviewSummaryUnlocked(request, options);
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return preflightReviewSummaryUnlocked(request, options);
+  try {
+    return withTaskExecutionLock(
+      resolved.repoRoot,
+      resolved.taskId,
+      'task-review.preflight',
+      () => preflightReviewSummaryUnlocked(request, { ...options, lockAlreadyHeld: true })
+    );
+  } catch (error) {
+    if (!(error instanceof TaskExecutionLockError)) throw error;
+    return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', `${error.code}: ${error.message}`, resolved.taskId);
+  }
+}
+
 type ReviewSummaryCandidatePreparation = Readonly<{
   result: ReviewFinalizationResult;
   content: string;
   recovery?: ArtifactRecoveryContext;
   lockAlreadyHeld?: boolean;
 }>;
+
+function recoveryInfo(recovery: ArtifactRecoveryContext): NonNullable<ReviewFinalizationResult['recovery']> {
+  return {
+    recoveryId: recovery.recoveryId,
+    candidatePath: recovery.stagingPath,
+    baselineSha256: recovery.baselineSha256,
+    baselineSemanticDigest: recovery.baselineSemanticDigest
+  };
+}
 
 /** Prepare domain validation, summary bytes and provenance before any publication. */
 function prepareReviewSummaryCandidate(
@@ -342,12 +482,13 @@ function finalizeReviewSummary(
   }
 }
 
-export { finalizeReviewSummary, prepareReviewSummaryCandidate, commitReviewSummaryProvenance };
+export { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate, commitReviewSummaryProvenance };
 export type {
   ReviewFinalizationError,
   ReviewFinalizationErrorCode,
   ReviewFinalizationOptions,
   ReviewFinalizationRequest,
   ReviewFinalizationResult,
+  ReviewPreflightResult,
   ReviewSummaryCandidatePreparation
 };

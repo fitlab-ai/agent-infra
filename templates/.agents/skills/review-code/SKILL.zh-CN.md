@@ -109,8 +109,9 @@ agent-infra-internal task-artifact {task-id} init --family review-code --artifac
 
 ### 6. 更新任务状态
 
-- 报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。升级为 `needs-human-decision` 时，按详情块中的判断追加 `--needs-implementation true|false`。不得扫描编号或手写账本行
-- 全部账本写入完成后首次调用 `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} {execution-flag}`；失败后是否继续编辑并重跑，必须遵循 `.agents/rules/local-artifact-repair.md`，不能把失败类型或 `changed=false` 当作自动授权
+- 报告完成后，先调用 `agent-infra-internal task-review {task-id} preflight --stage code --artifact {review-artifact} {execution-flag}`，不得先写入账本。失败后是否继续编辑并重跑，必须遵循 `.agents/rules/local-artifact-repair.md`；通过时从返回值绑定 `{recovery-id}`。
+- 只有 preflight 通过后，新 finding 才逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。升级为 `needs-human-decision` 时，按详情块中的判断追加 `--needs-implementation true|false`。不得扫描编号或手写账本行
+- 全部账本写入完成后调用 `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} --recovery-id {recovery-id} {execution-flag}`；不能把失败类型或 `changed=false` 当作自动授权
 
   从该次返回值绑定并复用以下结构化映射：
 
