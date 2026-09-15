@@ -224,7 +224,7 @@ test("platform-sync compares task comments after the same sanitization used by c
   });
 });
 
-test("platform-sync verifies a projected task comment when workflow history is too large", async () => {
+test("platform-sync rejects a task comment that exceeds the final rendered byte limit", async () => {
   await withTempRoot("agent-infra-platform-sync-large-task-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n## 活动日志\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}`;
@@ -241,8 +241,8 @@ test("platform-sync verifies a projected task comment when workflow history is t
       ctx,
       { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
     );
-    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    assert.equal(result.status, 1, `${result.stderr}\n${result.stdout}`);
+    assert.match(result.stdout, /Task comment exceeds the platform byte limit/);
   });
 });
 

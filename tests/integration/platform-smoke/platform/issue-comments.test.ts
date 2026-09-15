@@ -17,6 +17,7 @@ import {
 } from '../../../../lib/platform/issue-comments.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { sanitizeMarkdownDocument } from '../../../../lib/platform/comment-safety.ts';
+import { encodeRecoveryAction } from '../../../../lib/task/recovery-actions.ts';
 
 test('task comments preserve frontmatter and body in reversible details format', () => {
   const task = '---\nid: TASK-20260101-000001\ntype: feature\n---\n\n# Task\n\nBody | `code`\n';
@@ -25,6 +26,14 @@ test('task comments preserve frontmatter and body in reversible details format',
   assert.match(rendered, /<details><summary>元数据 \(frontmatter\)<\/summary>/);
   assert.match(rendered, /```yaml\n---\nid: TASK-20260101-000001\ntype: feature\n---\n```/);
   assert.match(rendered, /# Task\n\nBody \| `code`/);
+});
+
+test('task comment rendering and byte preflight are independent of the syncing agent', () => {
+  const task = `---\nid: TASK-20260101-000001\n---\n\n${'x'.repeat(59_600)}`;
+  const codex = renderTaskComment(task, 'TASK-20260101-000001', 'codex');
+  const antigravity = renderTaskComment(task, 'TASK-20260101-000001', 'antigravity');
+  assert.equal(codex, antigravity);
+  assert.ok(Buffer.byteLength(codex, 'utf8') < COMMENT_BYTE_LIMIT);
 });
 
 test('comment renderers encode mixed-case HTML while preserving fenced examples and markers', () => {
@@ -264,7 +273,7 @@ test('comment sync rejects malformed content before reading or writing remote co
   assert.equal(calls, 0);
 });
 
-test('comment sync measures the projected task comment rather than workflow history', async () => {
+test('comment sync keeps the complete task comment until structured recovery is available', async () => {
   const root = syncFixture();
   fs.appendFileSync(
     path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
@@ -290,10 +299,9 @@ test('comment sync measures the projected task comment rather than workflow hist
   const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'task', agent: 'codex', cwd: root, client
   });
-  assert.equal(result.status, 'applied');
-  assert.equal(result.changed, true);
-  assert.equal(comments.length, 1);
-  assert.equal(comments[0]!.body.includes('## 活动日志'), false);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'COMMENT_PAYLOAD_TOO_LARGE');
+  assert.equal(comments.length, 0);
 });
 
 test('comment sync transports safe artifact Markdown without changing its link syntax', async () => {
@@ -569,13 +577,54 @@ test('recovery comments are immutable and idempotent by stable marker', async ()
     text() { throw new Error('unexpected text request'); }
   } as unknown as GitHubClient;
   const options = {
-    kind: 'recovery-action' as const, recoveryId: 'action-1', body: '{"sequence":1}', agent: 'codex', cwd: root, client
+    kind: 'recovery-action' as const,
+    recoveryId: 'action-1',
+    body: JSON.stringify(encodeRecoveryAction({
+      taskId: 'TASK-20260101-000001', actionId: 'action-1', sequence: 1,
+      type: 'activity-log', payload: { entry: 'started' }, previousActionSha256: null
+    })),
+    agent: 'codex', cwd: root, client
   };
 
   assert.equal((await syncPlatformComment('TASK-20260101-000001', options)).status, 'applied');
   assert.equal((await syncPlatformComment('TASK-20260101-000001', options)).status, 'no-op');
-  const conflict = await syncPlatformComment('TASK-20260101-000001', { ...options, body: '{"sequence":2}' });
+  const conflict = await syncPlatformComment('TASK-20260101-000001', {
+    ...options,
+    body: JSON.stringify(encodeRecoveryAction({
+      taskId: 'TASK-20260101-000001', actionId: 'action-1', sequence: 2,
+      type: 'activity-log', payload: { entry: 'completed' }, previousActionSha256: null
+    }))
+  });
   assert.equal(conflict.status, 'failed');
   assert.equal(conflict.error?.code, 'RECOVERY_IMMUTABLE_CONFLICT');
   assert.equal(comments.length, 1);
+});
+
+test('recovery comments reject malformed or marker-mismatched payloads before writing', async () => {
+  const root = syncFixture();
+  const client = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[]) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      throw new Error('invalid recovery payload must not reach comment listing or writing');
+    },
+    text() { throw new Error('invalid recovery payload must not reach comment writing'); }
+  } as unknown as GitHubClient;
+  const malformed = await syncPlatformComment('TASK-20260101-000001', {
+    kind: 'recovery-action', recoveryId: 'action-1', body: '{"sequence":1}', agent: 'codex', cwd: root, client
+  });
+  assert.equal(malformed.status, 'failed');
+  assert.equal(malformed.error?.code, 'COMMENT_PAYLOAD_INVALID');
+
+  const mismatched = await syncPlatformComment('TASK-20260101-000001', {
+    kind: 'recovery-action', recoveryId: 'action-2', agent: 'codex', cwd: root, client,
+    body: JSON.stringify(encodeRecoveryAction({
+      taskId: 'TASK-20260101-000001', actionId: 'action-1', sequence: 1,
+      type: 'activity-log', payload: {}, previousActionSha256: null
+    }))
+  });
+  assert.equal(mismatched.status, 'failed');
+  assert.equal(mismatched.error?.code, 'COMMENT_PAYLOAD_INVALID');
 });

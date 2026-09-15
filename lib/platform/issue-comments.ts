@@ -16,7 +16,11 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityNumber } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
-import { projectTaskComment } from './task-comment-projection.ts';
+import {
+  canonicalJson,
+  decodeRecoveryAction,
+  decodeRecoveryManifest
+} from '../task/recovery-actions.ts';
 import {
   canonicalizeCommentBody,
   escapeHtmlText,
@@ -73,10 +77,6 @@ function normalizeCommentContent(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
 }
 
-function isTaskCommentTooLarge(content: string, taskId = 'TASK-UNKNOWN', agent = 'codex'): boolean {
-  return Buffer.byteLength(renderTaskComment(content, taskId, agent), 'utf8') > COMMENT_BYTE_LIMIT;
-}
-
 function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) return { frontmatter: null, body: content };
@@ -93,23 +93,32 @@ function footer(agent: string, taskId: string): string {
   return `---\n*由 ${agent} 自动生成 · 内部追踪：${taskId}*`;
 }
 
-function renderTaskComment(content: string, taskId: string, agent: string): string {
-  const projected = content.startsWith('---') ? projectTaskComment(content).content : content;
-  const split = splitFrontmatter(projected);
+function renderTaskCommentResult(content: string, taskId: string): { body: string; byteLength: number } {
+  const split = splitFrontmatter(content);
   const safeBody = sanitizeCommentBody(split.body, 'task body');
   const taskBody = split.frontmatter === null
     ? safeBody
     : `<details><summary>元数据 (frontmatter)</summary>\n\n${renderSafeCodeFence(`---\n${split.frontmatter}\n---`, 'yaml')}\n\n</details>\n\n${safeBody}`;
-  return normalizeCommentContent([
+  const body = normalizeCommentContent([
     MARKERS.task(taskId),
     '## 任务文件',
     '',
-    `> **${agent}** · ${taskId}`,
+    `> 任务同步 · ${taskId}`,
     '',
     taskBody.replace(/\n+$/, ''),
     '',
-    footer(agent, taskId)
+    '---',
+    `*由 agent-infra 自动生成 · 内部追踪：${taskId}*`
   ].join('\n'));
+  return { body, byteLength: Buffer.byteLength(body, 'utf8') };
+}
+
+function renderTaskComment(content: string, taskId: string, _agent: string): string {
+  return renderTaskCommentResult(content, taskId).body;
+}
+
+function isTaskCommentTooLarge(content: string, taskId = 'TASK-UNKNOWN', _agent = 'codex'): boolean {
+  return renderTaskCommentResult(content, taskId).byteLength > COMMENT_BYTE_LIMIT;
 }
 
 function artifactIdentity(artifact: string): { stem: string; title: string } {
@@ -393,13 +402,31 @@ function expectedComments(
   if (options.body === undefined) throw new Error(`${options.kind} sync requires a body`);
   if (options.kind.startsWith('recovery-')) {
     if (!options.recoveryId || /[\r\n]/.test(options.recoveryId)) throw new Error('recovery sync requires a stable recovery id');
+    let content: string;
+    try {
+      const parsed = JSON.parse(options.body);
+      if (options.kind === 'recovery-action') {
+        const action = decodeRecoveryAction(parsed);
+        if (action.taskId !== taskId || action.actionId !== options.recoveryId) throw new Error('recovery action identity does not match its marker');
+        content = canonicalJson(action);
+      } else {
+        const manifest = decodeRecoveryManifest(parsed);
+        const phase = options.kind === 'recovery-prepare' ? 'prepare' : 'commit';
+        if (manifest.taskId !== taskId || manifest.commitId !== options.recoveryId || manifest.phase !== phase) {
+          throw new Error('recovery manifest identity does not match its marker');
+        }
+        content = canonicalJson(manifest);
+      }
+    } catch (error) {
+      throw new Error(`recovery payload is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const marker = options.kind === 'recovery-action'
       ? MARKERS.recoveryAction(taskId, options.recoveryId)
       : options.kind === 'recovery-prepare'
         ? MARKERS.recoveryPrepare(taskId, options.recoveryId)
         : MARKERS.recoveryCommit(taskId, options.recoveryId);
     const title = options.kind === 'recovery-action' ? '恢复动作记录' : options.kind === 'recovery-prepare' ? '恢复提交准备' : '恢复提交完成';
-    return [{ marker, body: bodyEnvelope(marker, title, taskId, options.agent, options.body), content: options.body, part: 1, total: 1 }];
+    return [{ marker, body: bodyEnvelope(marker, title, taskId, options.agent, content), content, part: 1, total: 1 }];
   }
   const marker = options.kind === 'summary' ? MARKERS.summary(taskId) : MARKERS.cancel(taskId);
   const title = options.kind === 'summary' ? '交付摘要' : '任务取消';
@@ -680,6 +707,7 @@ export {
   listPlatformComments,
   normalizeCommentContent,
   renderTaskComment,
+  renderTaskCommentResult,
   isTaskCommentTooLarge,
   syncPlatformComment,
   validateRelatedMarkerSet,

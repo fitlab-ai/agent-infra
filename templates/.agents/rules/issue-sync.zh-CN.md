@@ -35,10 +35,10 @@ agent-infra-internal platform-comment sync <task-ref> \
 ```
 
 - `applied|no-op|degraded` → exit 0；`failed` → exit 1；`blocked` → exit 2。
-- task 评论保持 `<details>` frontmatter 可逆格式，并从完整本地 `task.md` 生成确定性的当前任务投影；artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
-- 长度预检与 platform verification 使用同一投影和最终渲染正文的 UTF-8 字节数。投影失败或投影后的正文超限时失败关闭；本地 task 文件不会被截断。
+- task 评论保持 `<details>` frontmatter 可逆格式，并同步完整本地 `task.md`；artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
+- 长度预检与 platform verification 使用同一最终渲染正文的 UTF-8 字节数。正文超限时失败关闭；本地 task 文件不会被截断。
 
-恢复评论使用 `recovery-action`、`recovery-prepare` 和 `recovery-commit` marker，并携带稳定 recovery id 和 body file。相同内容重放返回 `no-op`；已有恢复 marker 的正文不同返回 `RECOVERY_IMMUTABLE_CONFLICT`，不会覆盖已发布的恢复事实。
+恢复评论使用 `recovery-action`、`recovery-prepare` 和 `recovery-commit` marker，并携带稳定 recovery id 和 body file。写入边界验证 schema、摘要和 marker 身份。相同内容重放返回 `no-op`；已有恢复 marker 的正文不同返回 `RECOVERY_IMMUTABLE_CONFLICT`，不会覆盖已发布的恢复事实。在 coordinator 和 restore 回放落地前，它们不构成可恢复的流程事实。
 - 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
 - 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 

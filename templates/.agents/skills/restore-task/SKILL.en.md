@@ -52,7 +52,7 @@ Rules:
 - when `{task-id}` was omitted, infer it from the task comment marker first
 - if you cannot determine a unique task-id, stop and tell the user
 - ignore `summary` marker comments because they are complete-task aggregate output rather than restorable local task files
-- treat `recovery-action`, `recovery-prepare`, and `recovery-commit` comments as process-fact sources; they do not map to standalone files
+- ignore `recovery-action`, `recovery-prepare`, and `recovery-commit` comments; the coordinator and restore replay are not available, so the complete task comment remains the only process-fact source
 - map `{file-stem}` back to filenames:
   - `task` -> `task.md`
   - `analysis` / `analysis-r{N}` -> matching `.md`
@@ -73,11 +73,6 @@ For each file:
 - when a chunk marker includes part and total indexes, sort by part and verify the set is complete
 - extract the file body by removing the hidden marker, heading, and footer
 - concatenate chunk bodies into the final file content
-
-For recovery comments:
-- validate the trusted author, unique marker, schema, stable id, chunk completeness, and payload digest
-- select the highest-sequence prepare; replay process sections only when an identical commit, task snapshot, and complete action set exist
-- fail before staging for a missing final action or commit, mismatched prepare/commit, duplicate marker, author conflict, out-of-order action, unknown schema, or digest mismatch; never infer process state
 
 Before writing any file, verify that:
 - no formal active, blocked, or completed directory exists for the task id

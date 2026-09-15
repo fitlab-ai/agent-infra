@@ -12,8 +12,7 @@ import { planInLabelUpdate, validateInLabelMapping } from "./in-label-sync.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
-import { isTaskCommentTooLarge } from "./issue-comments.ts";
-import { projectTaskComment } from "./task-comment-projection.ts";
+import { renderTaskCommentResult } from "./issue-comments.ts";
 import {
   CONTROL_MARKER_PATTERN,
   canonicalizeCommentBody,
@@ -552,23 +551,21 @@ function checkTaskCommentContent(context: any, remoteData: any, shared: Verifica
     );
   }
 
-  let projectedContent: string;
+  let renderedTask: { body: string; byteLength: number };
   try {
-    projectedContent = projectTaskComment(context.task.content).content;
+    renderedTask = renderTaskCommentResult(context.task.content, context.task.metadata.id);
   } catch {
-    return shared.failResult(CHECK_TYPE, "Task content cannot be projected safely for comment verification", "check_failed");
+    return shared.failResult(CHECK_TYPE, "Task content cannot be rendered safely for comment verification", "check_failed");
   }
-  if (isTaskCommentTooLarge(context.task.content, context.task.metadata.id, 'codex')) {
-    return shared.failResult(CHECK_TYPE, "Projected task comment exceeds the platform byte limit", "check_failed");
+  if (renderedTask.byteLength > 60_000) {
+    return shared.failResult(CHECK_TYPE, "Task comment exceeds the platform byte limit", "check_failed");
   }
-  const expectedTaskBody = buildExpectedTaskBody(projectedContent, shared);
-  if (expectedTaskBody === null) {
-    return shared.failResult(CHECK_TYPE,
-      "Task content cannot be rendered safely for comment verification",
-      "check_failed"
-    );
-  }
-  const expectedBody = shared.normalizeContent(expectedTaskBody);
+  const expectedBody = shared.normalizeContent(
+    extractCommentBody(renderedTask.body).replace(
+      '<details><summary>元数据 (frontmatter)</summary>',
+      buildTaskFrontmatterSummary(shared)
+    )
+  );
   const commentBody = shared.normalizeContent(extractCommentBody(comment.body || ""));
 
   if (expectedBody === commentBody) {
@@ -839,7 +836,7 @@ function extractCommentBody(commentBody: any): any {
     start += 1;
   }
 
-  if (start < lines.length && /^> \*\*.+\*\* · .+$/.test(lines[start]!.trim())) {
+  if (start < lines.length && (/^> \*\*.+\*\* · .+$/.test(lines[start]!.trim()) || /^> 任务同步 · .+$/.test(lines[start]!.trim()))) {
     start += 1;
   }
 
