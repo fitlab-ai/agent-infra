@@ -370,7 +370,7 @@ test('review finalizer stages an invalid baseline and retries from the explicit 
   assert.match(failed.recovery?.baselineSha256 ?? '', /^[a-f0-9]{64}$/);
   assert.ok(failed.recovery?.candidatePath);
   const intent = readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
-  assert.equal(intent?.state, 'awaiting-recovery');
+  assert.equal(intent?.state, 'awaiting-preflight-recovery');
   assert.equal(intent?.baselineSha256, intent?.candidateSha256);
   const formalBeforeRecovery = fs.readFileSync(f.artifactPath, 'utf8');
   fs.writeFileSync(failed.recovery!.candidatePath, valid);

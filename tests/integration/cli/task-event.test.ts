@@ -153,7 +153,7 @@ function currentRun(taskId: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
+function run(root: string, args: string[], env: NodeJS.ProcessEnv = sandboxControlSafeEnv()) {
   const event = args[1] ?? '';
   const lifecycle = /^(?:analyze|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run)\.(?:started|completed)$/.test(event);
   const hasTrigger = ['--initiator', '--request-id', '--reason-code'].some((flag) => args.includes(flag));
@@ -171,11 +171,11 @@ function finalizeReview(
   return spawnSync('node', [
     INTERNAL_CLI_PATH, 'task-review', f.id, 'finalize-summary', '--stage', scenario.stage,
     '--artifact', scenario.artifact
-  ], { cwd: f.root, encoding: 'utf8' });
+  ], { cwd: f.root, encoding: 'utf8', env: sandboxControlSafeEnv() });
 }
 
 function inspect(root: string, args: string[]) {
-  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], { cwd: root, encoding: 'utf8' });
+  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], { cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv() });
 }
 
 function reviewCodeArtifact(input = 'code.md') {
@@ -390,13 +390,13 @@ test('internal task-event consumes a producer-qualified override under one task 
       '--failure-id', 'task-event:TASK_STATE_MISMATCH', '--target', 'continue-local',
       '--operator', 'codex', '--reason', 'operator approved local event recovery',
       '--scope', 'task-event', '--expires-at', '2099-01-01 00:00:00+00:00'
-    ], { cwd: root, encoding: 'utf8' });
+    ], { cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv() });
     assert.equal(issued.status, 0, issued.stderr || issued.stdout);
     const ticket = (JSON.parse(issued.stdout) as { ticketId: string }).ticketId;
     const applied = spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', id, 'analyze.started',
       '--agent', 'codex', '--initiator', 'model', '--request-id', `override:${id}:analyze`, '--reason-code', 'user-request',
       '--override-ticket', ticket, '--override-target', 'continue-local', '--override-scope', 'task-event'
-    ], { cwd: root, encoding: 'utf8' });
+    ], { cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv() });
     assert.equal(applied.status, 0, applied.stderr || applied.stdout);
     const result = JSON.parse(applied.stdout) as { status: string; humanOverride: { status: string } };
     assert.equal(result.status, 'applied');
@@ -419,14 +419,14 @@ test('task-event rejects combining dry-run with an override before any task muta
       '--failure-id', 'task-event:TASK_STATE_MISMATCH', '--target', 'continue-local',
       '--operator', 'codex', '--reason', 'verify dry-run does not consume',
       '--scope', 'task-event', '--expires-at', '2099-01-01 00:00:00+00:00'
-    ], { cwd: root, encoding: 'utf8' });
+    ], { cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv() });
     assert.equal(issued.status, 0, issued.stderr || issued.stdout);
     const ticket = (JSON.parse(issued.stdout) as { ticketId: string }).ticketId;
     const beforeRetry = fs.readFileSync(path.join(dir, 'task.md'));
     const retried = spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', id, 'analyze.started',
       '--agent', 'codex', '--dry-run', '--override-ticket', ticket,
       '--override-target', 'continue-local', '--override-scope', 'task-event'
-    ], { cwd: root, encoding: 'utf8' });
+    ], { cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv() });
     assert.equal(retried.status, 1, retried.stderr || retried.stdout);
     const result = JSON.parse(retried.stdout) as { status: string; error: { code: string } };
     assert.equal(result.status, 'failed');
@@ -534,7 +534,7 @@ test('task-event requires an explicit trigger for lifecycle events', () => {
   const f = fixture('technical-design');
   const before = fs.readFileSync(f.file);
   const out = spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', f.id, 'analyze.started', '--agent', 'codex'], {
-    cwd: f.root, encoding: 'utf8'
+    cwd: f.root, encoding: 'utf8', env: sandboxControlSafeEnv()
   });
   assert.equal(out.status, 1);
   assert.equal(JSON.parse(out.stdout).error.code, 'EVENT_TRIGGER_REQUIRED');
@@ -1094,7 +1094,7 @@ test('source completion records resumable invalidation and downstream writers fa
   assert.equal(blocked.status, 1);
   assert.equal(JSON.parse(blocked.stdout).error.code, 'TASK_INVALIDATION_BLOCKED');
 
-  const reconciled = spawnSync('node', [INTERNAL_CLI_PATH, 'task-invalidation', f.id, 'reconcile'], { cwd: f.root, encoding: 'utf8' });
+  const reconciled = spawnSync('node', [INTERNAL_CLI_PATH, 'task-invalidation', f.id, 'reconcile'], { cwd: f.root, encoding: 'utf8', env: sandboxControlSafeEnv() });
   assert.equal(reconciled.status, 0, reconciled.stdout || reconciled.stderr);
   const retried = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
   assert.equal(retried.status, 0, retried.stdout || retried.stderr);
@@ -1531,7 +1531,7 @@ test('review completion replay consumes a journal left after task write', () => 
 
   assert.equal(first.status, 'failed');
   assert.match(fs.readFileSync(f.file, 'utf8'), /Review Code \(Round 1\).*review-code\.md/);
-  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'commit-started');
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'consumption-started');
 
   const replayed = applyTaskEvent(request, {
     repoRoot: f.root,
@@ -1569,7 +1569,7 @@ test('review completion dry-run does not consume a passed recovery journal', () 
   assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'passed');
 });
 
-test('review completion dry-run does not reconcile a commit-started recovery journal', () => {
+test('review completion dry-run does not consume a consumption-started recovery journal', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);
   const finalized = finalizeReview(f, scenario);
@@ -1612,7 +1612,7 @@ test('review completion dry-run does not reconcile a commit-started recovery jou
     fs.renameSync = originalRename;
   }
 
-  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'commit-started');
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'consumption-started');
   const beforeTask = fs.readFileSync(f.file);
   const beforeIntent = fs.readFileSync(intentPath);
   const beforeMtime = fs.statSync(intentPath).mtimeMs;
@@ -1625,7 +1625,7 @@ test('review completion dry-run does not reconcile a commit-started recovery jou
   assert.deepEqual(fs.readFileSync(f.file), beforeTask);
   assert.deepEqual(fs.readFileSync(intentPath), beforeIntent);
   assert.equal(fs.statSync(intentPath).mtimeMs, beforeMtime);
-  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'commit-started');
+  assert.equal(readArtifactRecoveryIntent(f.root, f.id, scenario.family, scenario.artifact)?.state, 'consumption-started');
 });
 
 test('review-code event completes a supplemental round against the latest code artifact', () => {

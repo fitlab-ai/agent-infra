@@ -125,6 +125,25 @@ test('task-artifact finalize-local returns stable digests without mutating a val
   assert.deepEqual(fs.readFileSync(artifact), before);
 });
 
+test('task-artifact preflight seals a generation before the formal artifact is published', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, localArtifact('plan'));
+  const baseline = fs.readFileSync(artifact);
+
+  const preflight = run(f.root, [f.id, 'preflight', '--family', 'plan', '--artifact', 'plan.md']);
+
+  assert.equal(preflight.status, 0, `${preflight.stderr}\n${preflight.stdout}`);
+  const result = JSON.parse(preflight.stdout);
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(fs.readFileSync(artifact), baseline);
+  const journal = fs.readdirSync(path.join(f.root, '.agents', 'workspace', '.local-artifact-finalization-intents'));
+  assert.equal(journal.length, 1);
+  const intent = JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', '.local-artifact-finalization-intents', journal[0]!), 'utf8'));
+  assert.equal(intent.state, 'preflight-ready');
+  assert.equal(fs.existsSync(path.join(f.dir, '.local-artifact-recovery', intent.stagingId, 'generations', `${intent.activeGenerationSha256}.md`)), true);
+});
+
 test('task-artifact finalize-local uses repository config from a nested working directory', () => {
   const f = fixture();
   const configDir = path.join(f.root, '.agents', 'skills', 'plan-task', 'config');

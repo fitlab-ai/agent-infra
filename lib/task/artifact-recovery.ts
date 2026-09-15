@@ -39,7 +39,7 @@ export type ArtifactRecoveryContext = Readonly<ArtifactRecoveryTuple & {
   formalPath: string;
   stagingPath: string;
   baselinePath: string;
-  finalPath: string;
+  generationsPath: string;
   baselineSha256: string;
   baselineSemanticDigest: string;
 }>;
@@ -191,7 +191,7 @@ function contextPaths(
     formalPath: path.join(taskDir, tuple.artifact),
     stagingPath: path.join(root, 'candidate.md'),
     baselinePath: path.join(root, 'baseline.md'),
-    finalPath: path.join(root, 'final.md'),
+    generationsPath: path.join(root, 'generations'),
     baselineSha256: '',
     baselineSemanticDigest: ''
   };
@@ -221,16 +221,22 @@ function contextWithIntent(context: ArtifactRecoveryContext, intent: ArtifactRec
 
 function createIntent(context: ArtifactRecoveryContext, now: number): ArtifactRecoveryIntent {
   return {
-    version: 3,
+    version: 4,
     taskId: context.taskId,
     family: context.family,
     artifact: context.artifact,
     round: context.round,
-    state: 'awaiting-recovery',
+    state: 'awaiting-preflight-recovery',
     baselineSha256: context.baselineSha256,
     baselineSemanticDigest: context.baselineSemanticDigest,
     stagingId: context.stagingId,
     candidateSha256: context.baselineSha256,
+    preflightArtifactSha256: null,
+    preflightSemanticDigest: null,
+    activeGenerationSha256: null,
+    activeGenerationSemanticDigest: null,
+    pendingGenerationSha256: null,
+    pendingGenerationSemanticDigest: null,
     finalArtifactSha256: null,
     finalSemanticDigest: null,
     recoveryOperationId: context.recoveryId,
@@ -287,6 +293,7 @@ export function recordArtifactRecoveryPassed(
   assertRecoveryId(context.recoveryId);
   assertRegular(context.formalPath, 'formal artifact');
   return runLocked(context, 'task-artifact.recovery.record-passed', () => {
+    assertRecoveryRoot(context);
     const current = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
     const prepared = {
       ...context,
@@ -309,15 +316,15 @@ export function recordArtifactRecoveryPassed(
     if (existing && existing.state !== 'aborted') {
       fail('ARTIFACT_RECOVERY_CONFLICT', 'an active recovery journal already exists for this artifact');
     }
-    const now = Date.now();
-    const next: ArtifactRecoveryIntent = {
-      ...createIntent(prepared, now),
-      state: 'passed',
-      candidateSha256: prepared.baselineSha256,
-      finalArtifactSha256: prepared.baselineSha256,
-      finalSemanticDigest: prepared.baselineSemanticDigest
-    };
-    writeArtifactRecoveryIntent(prepared.repoRoot, next, { expected: existing });
+    const base = createIntent(prepared, Date.now());
+    writeBytes(prepared.baselinePath, current.bytes);
+    writeBytes(prepared.stagingPath, current.bytes);
+    writeArtifactRecoveryIntent(prepared.repoRoot, base, { expected: existing });
+    const staged = stageArtifactCandidate(prepared, current.bytes, { lockAlreadyHeld: true });
+    prepareArtifactRecoveryCommit(prepared, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: true });
+    commitArtifactRecovery(prepared, { lockAlreadyHeld: true });
+    prepareArtifactRecoveryFinal(prepared, current.bytes, { lockAlreadyHeld: true });
+    commitArtifactRecovery(prepared, { lockAlreadyHeld: true });
     return prepared;
   }, options.lockAlreadyHeld);
 }
@@ -330,7 +337,7 @@ export function stageArtifactCandidate(
   return runLocked(context, 'task-artifact.recovery.stage', () => {
     assertRecoveryRoot(context);
     const intent = readIntentForContext(context);
-    if (intent.state !== 'awaiting-recovery') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot stage a candidate from '${intent.state}'`);
+    if (intent.state !== 'awaiting-preflight-recovery') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot stage a candidate from '${intent.state}'`);
     const candidateSha256 = sha256Content(candidateBytes.toString('utf8'));
     const semanticDigest = canonicalSemanticDigest(candidateBytes.toString('utf8'));
     writeBytes(context.stagingPath, candidateBytes);
@@ -338,6 +345,49 @@ export function stageArtifactCandidate(
     writeArtifactRecoveryIntent(context.repoRoot, next, { expected: intent });
     return { recoveryId: context.recoveryId, candidateSha256, semanticDigest, path: context.stagingPath };
   }, options.lockAlreadyHeld);
+}
+
+function generationPath(context: ArtifactRecoveryContext, sha256: string): string {
+  assertDigest(sha256, 'generation digest');
+  return path.join(context.generationsPath, `${sha256}.md`);
+}
+
+/** Persist and verify an immutable digest-addressed snapshot before it is journaled. */
+function writeGeneration(context: ArtifactRecoveryContext, bytes: Buffer, sha256: string, semanticDigest: string): void {
+  ensureOwnedDirectoryTree(context.repoRoot, context.generationsPath);
+  const target = generationPath(context, sha256);
+  if (fs.existsSync(target)) {
+    const existing = readStableFileSync(target, { maxBytes: MAX_ARTIFACT_BYTES, expectedSha256: sha256 });
+    if (canonicalSemanticDigest(existing.bytes.toString('utf8')) !== semanticDigest) {
+      fail('ARTIFACT_RECOVERY_CONFLICT', 'existing generation does not match its semantic digest');
+    }
+    return;
+  }
+  writeBytes(target, bytes);
+  fs.chmodSync(target, 0o400);
+  const sealed = readStableFileSync(target, { maxBytes: MAX_ARTIFACT_BYTES, expectedSha256: sha256 });
+  if (canonicalSemanticDigest(sealed.bytes.toString('utf8')) !== semanticDigest) {
+    fail('ARTIFACT_RECOVERY_CANDIDATE_MISMATCH', 'generation does not match its validated semantic digest');
+  }
+}
+
+function publishGeneration(context: ArtifactRecoveryContext, sha256: string, semanticDigest: string, baselineSha256: string): void {
+  const target = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
+  if (target.sha256 === sha256) return;
+  if (target.sha256 !== baselineSha256) fail('ARTIFACT_RECOVERY_CONFLICT', 'formal artifact changed outside the expected generation');
+  const generation = readStableFileSync(generationPath(context, sha256), { maxBytes: MAX_ARTIFACT_BYTES, expectedSha256: sha256 });
+  if (canonicalSemanticDigest(generation.bytes.toString('utf8')) !== semanticDigest) {
+    fail('ARTIFACT_RECOVERY_CONFLICT', 'generation semantic digest does not match the journal');
+  }
+  const publishPath = path.join(path.dirname(context.stagingPath), 'publish.md');
+  unlinkIfPresent(publishPath);
+  writeBytes(publishPath, generation.bytes);
+  fs.chmodSync(publishPath, 0o400);
+  fs.renameSync(publishPath, context.formalPath);
+  const published = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES, expectedSha256: sha256 });
+  if (canonicalSemanticDigest(published.bytes.toString('utf8')) !== semanticDigest) {
+    fail('ARTIFACT_RECOVERY_CONFLICT', 'published artifact does not match its generation');
+  }
 }
 
 export function prepareArtifactRecoveryCommit(
@@ -350,24 +400,21 @@ export function prepareArtifactRecoveryCommit(
   assertDigest(finalSemanticDigest, 'final semantic digest');
   return runLocked(context, 'task-artifact.recovery.prepare', () => {
     const intent = readIntentForContext(context);
-    if (intent.state !== 'awaiting-recovery') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot prepare a commit from '${intent.state}'`);
+    if (intent.state !== 'awaiting-preflight-recovery') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot prepare a preflight from '${intent.state}'`);
     assertRecoveryRoot(context);
     const staged = readStableFileSync(context.stagingPath, { maxBytes: MAX_ARTIFACT_BYTES });
     if (staged.sha256 !== finalSha256 || canonicalSemanticDigest(staged.bytes.toString('utf8')) !== finalSemanticDigest) {
       fail('ARTIFACT_RECOVERY_CANDIDATE_MISMATCH', 'staged candidate does not match the finalizer digest');
     }
-    writeBytes(context.finalPath, staged.bytes);
-    fs.chmodSync(context.finalPath, 0o400);
-    const sealed = readStableFileSync(context.finalPath, { maxBytes: MAX_ARTIFACT_BYTES });
-    if (sealed.sha256 !== finalSha256 || canonicalSemanticDigest(sealed.bytes.toString('utf8')) !== finalSemanticDigest) {
-      fail('ARTIFACT_RECOVERY_CANDIDATE_MISMATCH', 'sealed candidate does not match the finalizer digest');
-    }
+    writeGeneration(context, staged.bytes, finalSha256, finalSemanticDigest);
     const next: ArtifactRecoveryIntent = {
       ...intent,
-      state: 'finalize-ready',
+      state: 'preflight-ready',
       candidateSha256: staged.sha256,
-      finalArtifactSha256: finalSha256,
-      finalSemanticDigest,
+      preflightArtifactSha256: finalSha256,
+      preflightSemanticDigest: finalSemanticDigest,
+      activeGenerationSha256: finalSha256,
+      activeGenerationSemanticDigest: finalSemanticDigest,
       errorCode: null,
       errorMessage: null,
       updatedAt: Date.now()
@@ -378,9 +425,9 @@ export function prepareArtifactRecoveryCommit(
 }
 
 function markCommitStarted(context: ArtifactRecoveryContext, intent: ArtifactRecoveryIntent): ArtifactRecoveryIntent {
-  if (intent.state === 'commit-started') return intent;
-  if (intent.state !== 'finalize-ready') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot commit from '${intent.state}'`);
-  const next: ArtifactRecoveryIntent = { ...intent, state: 'commit-started', updatedAt: Date.now() };
+  if (intent.state === 'preflight-commit-started' || intent.state === 'commit-started') return intent;
+  if (intent.state !== 'preflight-ready' && intent.state !== 'full-finalizer-ready') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot commit from '${intent.state}'`);
+  const next: ArtifactRecoveryIntent = { ...intent, state: intent.state === 'preflight-ready' ? 'preflight-commit-started' : 'commit-started', updatedAt: Date.now() };
   writeArtifactRecoveryIntent(context.repoRoot, next, { expected: intent });
   return next;
 }
@@ -394,40 +441,41 @@ export function commitArtifactRecovery(
     if (intent.state === 'passed' || intent.state === 'consumed') return intent;
     assertRecoveryRoot(context);
     intent = markCommitStarted(context, intent);
-    const target = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
-    if (target.sha256 === intent.finalArtifactSha256) {
-      const passed: ArtifactRecoveryIntent = { ...intent, state: 'passed', updatedAt: Date.now() };
+    if (intent.state === 'preflight-commit-started') {
+      publishGeneration(context, intent.activeGenerationSha256!, intent.activeGenerationSemanticDigest!, intent.baselineSha256);
+      const passed = { ...intent, state: 'preflight-passed' as const, updatedAt: Date.now() };
       writeArtifactRecoveryIntent(context.repoRoot, passed, { expected: intent });
       return passed;
     }
-    if (target.sha256 !== intent.baselineSha256) fail('ARTIFACT_RECOVERY_CONFLICT', 'formal artifact changed outside the recovery baseline');
-    const sealed = readStableFileSync(context.finalPath, {
-      maxBytes: MAX_ARTIFACT_BYTES,
-      expectedSha256: intent.finalArtifactSha256!
-    });
-    if (canonicalSemanticDigest(sealed.bytes.toString('utf8')) !== intent.finalSemanticDigest) {
-      fail('ARTIFACT_RECOVERY_CONFLICT', 'sealed artifact does not match the staged final semantic digest');
-    }
-    // Publish the bytes that were validated above. The sealed path is only a
-    // recovery input; renaming it directly would reopen a same-uid path swap
-    // between validation and publication.
-    const publishPath = path.join(path.dirname(context.finalPath), 'publish.md');
-    unlinkIfPresent(publishPath);
-    writeBytes(publishPath, sealed.bytes);
-    fs.chmodSync(publishPath, 0o400);
-    const publish = readStableFileSync(publishPath, {
-      maxBytes: MAX_ARTIFACT_BYTES,
-      expectedSha256: intent.finalArtifactSha256!
-    });
-    if (canonicalSemanticDigest(publish.bytes.toString('utf8')) !== intent.finalSemanticDigest) {
-      fail('ARTIFACT_RECOVERY_CONFLICT', 'publish artifact does not match the staged final semantic digest');
-    }
-    fs.renameSync(publishPath, context.formalPath);
-    const published = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
-    if (published.sha256 !== intent.finalArtifactSha256) fail('ARTIFACT_RECOVERY_CONFLICT', 'formal artifact does not match the staged final digest');
-    const passed: ArtifactRecoveryIntent = { ...intent, state: 'passed', updatedAt: Date.now() };
+    publishGeneration(context, intent.pendingGenerationSha256!, intent.pendingGenerationSemanticDigest!, intent.activeGenerationSha256!);
+    const passed: ArtifactRecoveryIntent = {
+      ...intent, state: 'passed', activeGenerationSha256: intent.pendingGenerationSha256,
+      activeGenerationSemanticDigest: intent.pendingGenerationSemanticDigest,
+      pendingGenerationSha256: null, pendingGenerationSemanticDigest: null, updatedAt: Date.now()
+    };
     writeArtifactRecoveryIntent(context.repoRoot, passed, { expected: intent });
     return passed;
+  }, options.lockAlreadyHeld);
+}
+
+export function prepareArtifactRecoveryFinal(
+  context: ArtifactRecoveryContext,
+  finalBytes: Buffer,
+  options: Readonly<{ lockAlreadyHeld?: boolean }> = {}
+): ArtifactRecoveryIntent {
+  return runLocked(context, 'task-artifact.recovery.finalize', () => {
+    const intent = readIntentForContext(context);
+    if (intent.state !== 'preflight-passed') fail('ARTIFACT_RECOVERY_STATE_INVALID', `cannot finalize from '${intent.state}'`);
+    const finalSha256 = sha256Content(finalBytes.toString('utf8'));
+    const finalSemanticDigest = canonicalSemanticDigest(finalBytes.toString('utf8'));
+    if (finalSha256 !== intent.activeGenerationSha256) writeGeneration(context, finalBytes, finalSha256, finalSemanticDigest);
+    const next: ArtifactRecoveryIntent = {
+      ...intent, state: 'full-finalizer-ready', pendingGenerationSha256: finalSha256,
+      pendingGenerationSemanticDigest: finalSemanticDigest, finalArtifactSha256: finalSha256,
+      finalSemanticDigest, updatedAt: Date.now()
+    };
+    writeArtifactRecoveryIntent(context.repoRoot, next, { expected: intent });
+    return next;
   }, options.lockAlreadyHeld);
 }
 
@@ -466,14 +514,17 @@ export function reconcileArtifactRecovery(
 ): ArtifactRecoveryReconcileResult {
   return runLocked(context, 'task-artifact.recovery.reconcile', () => {
     const intent = readIntentForContext(context);
-    if (intent.state !== 'commit-started') return { status: intent.state, intent };
+    if (intent.state !== 'preflight-commit-started' && intent.state !== 'commit-started') return { status: intent.state, intent };
     const target = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
-    if (target.sha256 === intent.finalArtifactSha256 && (options.validateFinal?.() ?? true)) {
-      const passed: ArtifactRecoveryIntent = { ...intent, state: 'passed', updatedAt: Date.now() };
-      writeArtifactRecoveryIntent(context.repoRoot, passed, { expected: intent });
-      return { status: 'passed', intent: passed };
+    const expected = intent.state === 'preflight-commit-started' ? intent.activeGenerationSha256! : intent.pendingGenerationSha256!;
+    if (target.sha256 === expected && (options.validateFinal?.() ?? true)) {
+      const next = intent.state === 'preflight-commit-started'
+        ? { ...intent, state: 'preflight-passed' as const, updatedAt: Date.now() }
+        : { ...intent, state: 'passed' as const, activeGenerationSha256: intent.pendingGenerationSha256, activeGenerationSemanticDigest: intent.pendingGenerationSemanticDigest, pendingGenerationSha256: null, pendingGenerationSemanticDigest: null, updatedAt: Date.now() };
+      writeArtifactRecoveryIntent(context.repoRoot, next, { expected: intent });
+      return { status: next.state, intent: next };
     }
-    if (target.sha256 === intent.baselineSha256) {
+    if (target.sha256 === (intent.state === 'preflight-commit-started' ? intent.baselineSha256 : intent.activeGenerationSha256)) {
       const retried = commitArtifactRecovery(context, { lockAlreadyHeld: true });
       return { status: retried.state, intent: retried };
     }

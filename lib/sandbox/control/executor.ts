@@ -188,7 +188,9 @@ export async function prepareSandboxControlExecution(params: {
         owner: gateOwner,
         requestId: params.request.id,
         operationId: authority?.operationId ?? params.request.id,
-        phase: authority?.phase ?? (params.request.family === 'task-workflow' ? 'artifact.finalize-local' : 'orchestration.prepare'),
+        phase: authority?.phase ?? (params.request.family === 'task-workflow'
+          && params.request.workflow?.operation === 'artifact-preflight' ? 'artifact.preflight'
+          : params.request.family === 'task-workflow' ? 'artifact.finalize-local' : 'orchestration.prepare'),
         authority
       } satisfies SandboxControlExecutorGateV2);
     },
@@ -235,7 +237,7 @@ function waitForGate(nonce: string, timeoutMs = 2_000): Promise<Readonly<{ owner
         return;
       }
       if (typeof value.requestId !== 'string' || typeof value.operationId !== 'string'
-        || !['orchestration.prepare', 'artifact.finalize-local', 'task-event.completed'].includes(value.phase as string)
+        || !['orchestration.prepare', 'artifact.preflight', 'artifact.finalize-local', 'task-event.completed'].includes(value.phase as string)
         || (value.authority !== null && value.authority !== undefined && (() => {
           try { validateLifecycleRecoveryAttestation(value.authority); return false; } catch { return true; }
         })())) {

@@ -190,7 +190,7 @@ test('lifecycle recovery compensates a committed task event across processes wit
   });
   assert.equal(issued.status, 'issued');
   writeArtifactRecoveryIntent(repoRoot, {
-    version: 3,
+    version: 4,
     taskId,
     family: 'code',
     artifact: 'code.md',
@@ -200,6 +200,9 @@ test('lifecycle recovery compensates a committed task event across processes wit
     baselineSemanticDigest: 'e'.repeat(64),
     stagingId: selector.operationId,
     candidateSha256: 'e'.repeat(64),
+    preflightArtifactSha256: 'e'.repeat(64), preflightSemanticDigest: 'e'.repeat(64),
+    activeGenerationSha256: 'e'.repeat(64), activeGenerationSemanticDigest: 'e'.repeat(64),
+    pendingGenerationSha256: 'e'.repeat(64), pendingGenerationSemanticDigest: 'f'.repeat(64),
     finalArtifactSha256: 'e'.repeat(64),
     finalSemanticDigest: 'f'.repeat(64),
     recoveryOperationId: selector.operationId,
@@ -294,9 +297,9 @@ test('lifecycle recovery requires the persisted task event before consuming a re
     capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => 1_000
   });
   writeArtifactRecoveryIntent(repoRoot, {
-    version: 3, taskId, family: 'code', artifact: 'code.md', round: 1, state: 'commit-started',
+    version: 4, taskId, family: 'code', artifact: 'code.md', round: 1, state: 'commit-started',
     baselineSha256: 'e'.repeat(64), baselineSemanticDigest: 'e'.repeat(64), stagingId: selector.operationId,
-    candidateSha256: 'e'.repeat(64), finalArtifactSha256: 'e'.repeat(64), finalSemanticDigest: 'f'.repeat(64),
+    candidateSha256: 'e'.repeat(64), preflightArtifactSha256: 'e'.repeat(64), preflightSemanticDigest: 'e'.repeat(64), activeGenerationSha256: 'e'.repeat(64), activeGenerationSemanticDigest: 'e'.repeat(64), pendingGenerationSha256: 'e'.repeat(64), pendingGenerationSemanticDigest: 'f'.repeat(64), finalArtifactSha256: 'e'.repeat(64), finalSemanticDigest: 'f'.repeat(64),
     recoveryOperationId: selector.operationId, phase: selector.phase,
     authorityDigest: digest(issued.attestation), requestId: selector.lifecycleRequestId,
     errorCode: null, errorMessage: null,
@@ -354,7 +357,7 @@ test('lifecycle recovery compensates a retained expired capability tombstone aft
   });
   assert.equal(issued.status, 'issued');
   writeArtifactRecoveryIntent(repoRoot, {
-    version: 3,
+    version: 4,
     taskId,
     family: 'code',
     artifact: 'code.md',
@@ -364,6 +367,9 @@ test('lifecycle recovery compensates a retained expired capability tombstone aft
     baselineSemanticDigest: 'e'.repeat(64),
     stagingId: selector.operationId,
     candidateSha256: 'e'.repeat(64),
+    preflightArtifactSha256: 'e'.repeat(64), preflightSemanticDigest: 'e'.repeat(64),
+    activeGenerationSha256: 'e'.repeat(64), activeGenerationSemanticDigest: 'e'.repeat(64),
+    pendingGenerationSha256: null, pendingGenerationSemanticDigest: null,
     finalArtifactSha256: 'e'.repeat(64),
     finalSemanticDigest: 'f'.repeat(64),
     recoveryOperationId: selector.operationId,

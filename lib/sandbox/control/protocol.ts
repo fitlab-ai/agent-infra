@@ -62,7 +62,7 @@ export type SandboxControlExecutorGateV2 = Readonly<{
   owner: SandboxControlBrokerOwner;
   requestId: string;
   operationId: string;
-  phase: 'orchestration.prepare' | 'artifact.finalize-local' | 'task-event.completed';
+  phase: 'orchestration.prepare' | 'artifact.preflight' | 'artifact.finalize-local' | 'task-event.completed';
   authority: LifecycleRecoveryAttestationV1 | null;
 }>;
 type RequestBase = Readonly<{

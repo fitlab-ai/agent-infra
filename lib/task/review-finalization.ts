@@ -18,6 +18,7 @@ import { readArtifactRecoveryIntent } from './artifact-repair-intent.ts';
 import {
   beginArtifactRecovery,
   commitArtifactRecovery,
+  prepareArtifactRecoveryFinal,
   prepareArtifactRecoveryCommit,
   recoveryContextFromIntent,
   stageArtifactCandidate
@@ -158,7 +159,7 @@ function prepareReviewSummaryCandidate(
     try {
       const intent = readArtifactRecoveryIntent(resolved.repoRoot, taskId!, spec.family, request.artifact);
       if (!intent || intent.recoveryOperationId !== request.recoveryId) return reject('REVIEW_PROVENANCE_INVALID', 'recovery id does not match the artifact journal');
-      if (!['awaiting-recovery', 'finalize-ready', 'commit-started'].includes(intent.state)) return reject('REVIEW_PROVENANCE_INVALID', `recovery journal is in '${intent.state}' state`);
+      if (!['awaiting-preflight-recovery', 'preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started'].includes(intent.state)) return reject('REVIEW_PROVENANCE_INVALID', `recovery journal is in '${intent.state}' state`);
       recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
       artifactContent = fs.existsSync(recovery.stagingPath)
         ? fs.readFileSync(recovery.stagingPath, 'utf8')
@@ -267,14 +268,20 @@ function commitReviewSummaryProvenance(
     const intent = readArtifactRecoveryIntent(prepared.recovery.repoRoot, prepared.recovery.taskId, prepared.recovery.family, prepared.recovery.artifact);
     if (!intent) throw new Error('ARTIFACT_RECOVERY_INTENT_MISSING');
     let committed;
-    if (intent.state === 'finalize-ready' || intent.state === 'commit-started') {
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
-    } else {
+    if (intent.state === 'awaiting-preflight-recovery') {
       const staged = stageArtifactCandidate(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
       prepareArtifactRecoveryCommit(prepared.recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: prepared.lockAlreadyHeld });
       committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+    } else if (intent.state === 'preflight-ready' || intent.state === 'preflight-commit-started') {
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
     }
-    if (committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed.state}'`);
+    if (committed?.state === 'preflight-passed' || intent.state === 'preflight-passed') {
+      prepareArtifactRecoveryFinal(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+    } else if (intent.state === 'full-finalizer-ready' || intent.state === 'commit-started') {
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+    }
+    if (!committed || committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed?.state ?? intent.state}'`);
     return {
       ...prepared.result,
       artifactSha256: committed.finalArtifactSha256,

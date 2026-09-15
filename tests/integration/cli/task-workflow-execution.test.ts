@@ -133,7 +133,27 @@ test('workflow rejects duplicate options and invalid direct candidates without p
     assert.equal(duplicate.exitCode, 1);
     assert.match(duplicate.body.error.message, /duplicate option/u);
     assert.equal(fs.readFileSync(path.join(f.taskDir, 'plan.md'), 'utf8'), '# Invalid candidate\n');
-    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md')?.state, 'awaiting-recovery');
+    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md')?.state, 'awaiting-preflight-recovery');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('workflow preflight seals an active generation without publishing or finalizer audit', onPlatforms('linux', 'darwin'), async () => {
+  const f = fixture();
+  try {
+    const artifact = path.join(f.taskDir, 'plan.md');
+    const baseline = content('plan');
+    fs.writeFileSync(artifact, baseline);
+
+    const result = await f.run('task-artifact', ['preflight', '--family', 'plan', '--artifact', 'plan.md']);
+
+    assert.equal(result.exitCode, 0, result.stdout);
+    assert.equal(result.body.status, 'passed');
+    assert.equal(result.body.changed, false);
+    assert.equal(fs.readFileSync(artifact, 'utf8'), baseline);
+    const intent = readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md');
+    assert.equal(intent?.state, 'preflight-ready');
+    assert.ok(intent?.activeGenerationSha256);
+    assert.equal(fs.existsSync(path.join(f.taskDir, '.local-artifact-recovery', intent!.stagingId, 'generations', `${intent!.activeGenerationSha256}.md`)), true);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -233,7 +253,7 @@ test('local artifact preparation stages the baseline and commits only after vali
       assert.equal(fs.readFileSync(path.join(f.taskDir, 'plan.md'), 'utf8'), candidate);
       if (!invalid) assert.equal(commitLocalArtifactProvenance(prepared).status, 'passed');
       const intent = readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md');
-      assert.equal(intent?.state, invalid ? 'awaiting-recovery' : 'passed');
+      assert.equal(intent?.state, invalid ? 'awaiting-preflight-recovery' : 'passed');
       assert.equal(intent?.candidateSha256, invalid ? intent?.baselineSha256 : prepared.result.artifactSha256);
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   }

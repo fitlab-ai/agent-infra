@@ -10,15 +10,19 @@ export type ArtifactRecoveryPhase =
   | 'artifact.finalize-local'
   | 'task-event.completed';
 export type ArtifactRecoveryState =
-  | 'awaiting-recovery'
-  | 'finalize-ready'
+  | 'awaiting-preflight-recovery'
+  | 'preflight-ready'
+  | 'preflight-commit-started'
+  | 'preflight-passed'
+  | 'full-finalizer-ready'
   | 'commit-started'
   | 'passed'
+  | 'consumption-started'
   | 'consumed'
   | 'aborted';
 
 export type ArtifactRecoveryIntent = Readonly<{
-  version: 3;
+  version: 4;
   taskId: string;
   family: ArtifactSchemaFamily;
   artifact: string;
@@ -28,6 +32,12 @@ export type ArtifactRecoveryIntent = Readonly<{
   baselineSemanticDigest: string;
   stagingId: string;
   candidateSha256: string | null;
+  preflightArtifactSha256: string | null;
+  preflightSemanticDigest: string | null;
+  activeGenerationSha256: string | null;
+  activeGenerationSemanticDigest: string | null;
+  pendingGenerationSha256: string | null;
+  pendingGenerationSemanticDigest: string | null;
   finalArtifactSha256: string | null;
   finalSemanticDigest: string | null;
   recoveryOperationId: string;
@@ -82,22 +92,28 @@ export function isArtifactRecoveryIntent(value: unknown): value is ArtifactRecov
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const intent = value as Record<string, unknown>;
   return exactKeys(intent, [
-    'artifact', 'authorityDigest', 'baselineSemanticDigest', 'baselineSha256', 'candidateSha256',
+    'activeGenerationSemanticDigest', 'activeGenerationSha256', 'artifact', 'authorityDigest', 'baselineSemanticDigest', 'baselineSha256', 'candidateSha256',
     'createdAt', 'errorCode', 'errorMessage', 'family', 'finalArtifactSha256', 'finalSemanticDigest',
-    'phase', 'recoveryOperationId', 'requestId', 'round', 'stagingId', 'state', 'taskId', 'updatedAt',
+    'pendingGenerationSemanticDigest', 'pendingGenerationSha256', 'phase', 'preflightArtifactSha256', 'preflightSemanticDigest', 'recoveryOperationId', 'requestId', 'round', 'stagingId', 'state', 'taskId', 'updatedAt',
     'version'
   ])
-    && intent.version === 3
+    && intent.version === 4
     && validTaskId(intent.taskId)
     && typeof intent.family === 'string'
     && ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'].includes(intent.family)
     && Number.isSafeInteger(intent.round) && (intent.round as number) > 0
     && validArtifact(intent.artifact, intent.family, intent.round)
-    && ['awaiting-recovery', 'finalize-ready', 'commit-started', 'passed', 'consumed', 'aborted'].includes(String(intent.state))
+    && ['awaiting-preflight-recovery', 'preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started', 'passed', 'consumption-started', 'consumed', 'aborted'].includes(String(intent.state))
     && validDigest(intent.baselineSha256)
     && validDigest(intent.baselineSemanticDigest)
     && validRecoveryId(intent.stagingId)
     && (intent.candidateSha256 === null || validDigest(intent.candidateSha256))
+    && (intent.preflightArtifactSha256 === null || validDigest(intent.preflightArtifactSha256))
+    && (intent.preflightSemanticDigest === null || validDigest(intent.preflightSemanticDigest))
+    && (intent.activeGenerationSha256 === null || validDigest(intent.activeGenerationSha256))
+    && (intent.activeGenerationSemanticDigest === null || validDigest(intent.activeGenerationSemanticDigest))
+    && (intent.pendingGenerationSha256 === null || validDigest(intent.pendingGenerationSha256))
+    && (intent.pendingGenerationSemanticDigest === null || validDigest(intent.pendingGenerationSemanticDigest))
     && (intent.finalArtifactSha256 === null || validDigest(intent.finalArtifactSha256))
     && (intent.finalSemanticDigest === null || validDigest(intent.finalSemanticDigest))
     && validRecoveryId(intent.recoveryOperationId)
@@ -109,11 +125,22 @@ export function isArtifactRecoveryIntent(value: unknown): value is ArtifactRecov
     && (intent.errorMessage === null || validToken(intent.errorMessage))
     && Number.isSafeInteger(intent.createdAt)
     && Number.isSafeInteger(intent.updatedAt)
-    && (intent.state === 'awaiting-recovery'
-      ? intent.finalArtifactSha256 === null && intent.finalSemanticDigest === null
+    && (intent.state === 'awaiting-preflight-recovery'
+      ? intent.preflightArtifactSha256 === null && intent.preflightSemanticDigest === null
+        && intent.activeGenerationSha256 === null && intent.activeGenerationSemanticDigest === null
+        && intent.pendingGenerationSha256 === null && intent.pendingGenerationSemanticDigest === null
+        && intent.finalArtifactSha256 === null && intent.finalSemanticDigest === null
       : true)
-    && (intent.state === 'finalize-ready' || intent.state === 'commit-started' || intent.state === 'passed' || intent.state === 'consumed'
-      ? validDigest(intent.candidateSha256) && validDigest(intent.finalArtifactSha256) && validDigest(intent.finalSemanticDigest)
+    && (intent.state === 'preflight-ready' || intent.state === 'preflight-commit-started' || intent.state === 'preflight-passed' || intent.state === 'full-finalizer-ready' || intent.state === 'commit-started' || intent.state === 'passed' || intent.state === 'consumed'
+      ? validDigest(intent.candidateSha256) && validDigest(intent.preflightArtifactSha256) && validDigest(intent.preflightSemanticDigest)
+        && validDigest(intent.activeGenerationSha256) && validDigest(intent.activeGenerationSemanticDigest)
+      : true)
+    && (intent.state === 'full-finalizer-ready' || intent.state === 'commit-started'
+      ? validDigest(intent.pendingGenerationSha256) && validDigest(intent.pendingGenerationSemanticDigest)
+        && validDigest(intent.finalArtifactSha256) && validDigest(intent.finalSemanticDigest)
+      : true)
+    && (intent.state === 'passed' || intent.state === 'consumption-started' || intent.state === 'consumed'
+      ? validDigest(intent.finalArtifactSha256) && validDigest(intent.finalSemanticDigest)
       : true)
     && (intent.state === 'aborted' ? intent.errorCode !== null && intent.errorMessage !== null : true);
 }

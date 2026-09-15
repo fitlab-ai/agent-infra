@@ -7,8 +7,8 @@ This rule covers the pre-completion gate for `analyze-task`, `plan-task`, and `c
 - Run the applicable finalizer before a completed event; pass only that invocation's `artifactSha256` and `semanticDigest` to the event.
 - When artifact content is invalid, the finalizer returns a controlled `recovery` with a `recoveryId`, `candidatePath`, and baseline digests. The formal artifact remains unchanged until recovery commit.
 - After the mechanical safety gates pass, the model may edit only the returned `candidatePath`. After each byte-changing edit, rerun the complete finalizer with the same task, stage/family, artifact, and `--recovery-id`. Never edit the formal artifact directly and call it a candidate.
-- A successful finalizer commits through `finalize-ready → commit-started → passed`; completed events accept only matching `passed` final digests and consume the intent under the task lock.
-- Before `finalize-ready`, the recovery core seals the validated final bytes in the controlled `final.md`; later commit ignores the editable `candidate.md` and validates/publishes only that sealed snapshot, so a post-prepare candidate replacement cannot be published.
+- Preflight stable-reads and validates candidate `S`, then seals immutable digest-addressed generation `R`; candidate SHA is an observation rather than an edit guard.
+- Preflight publishes active `R` through `preflight-ready → preflight-commit-started → preflight-passed`; the business finalizer publishes `F` through `full-finalizer-ready → commit-started → passed` and reuses `R` when `F=R`.
 - Candidate-only is a protocol authorization boundary, not OS isolation: a same-UID process with arbitrary host filesystem write access may tamper with recovery internals. Identity, fingerprint, and state checks detect such anomalies and fail closed, but the protocol does not claim an independent security principal or cross-platform isolation.
 
 ## Authorization boundary
@@ -32,14 +32,15 @@ If any condition fails, stop without editing or publishing a completed event.
 
 | State | Formal artifact | Allowed action |
 | --- | --- | --- |
-| `awaiting-recovery` | baseline `B` | Edit only controlled candidate `S`; rerun the same finalizer |
-| `finalize-ready` | `B` | Recovery core starts the commit under the task lock |
-| `commit-started` | `B` or final `F` | Reconcile only; retry, confirm, or restore from verified `B/F` fingerprints |
+| `awaiting-preflight-recovery` | baseline `B` | Edit `S`; stable-read, validate, and create `R` |
+| `preflight-ready` / `preflight-commit-started` | `B` or `R` | Reconcile/publish only active immutable `R` |
+| `preflight-passed` | `R` | Run the business finalizer for `F` |
+| `full-finalizer-ready` / `commit-started` | `R` or `F` | Reconcile/publish only pending immutable `F` |
 | `passed` | `F` | Completed event validates the final digest and consumes the intent |
 | `consumed` | `F` | Cleanup may reclaim the controlled staging and backup |
 | `aborted` | verified restored `B` | Preserve diagnostics; never fabricate success |
 
-The intent is current-only schema version 3. Legacy schemas fail closed; do not add migration, adapters, or dual writes. Candidate, baseline, and intent files live in controlled repo-local directories and use canonical recovery IDs, regular-file checks, stable reads, the task lock, and expected-value CAS. No cross-file atomicity is claimed; unknown combinations remain indeterminate and retain their evidence.
+The intent is current-only schema version 4. Legacy schemas fail closed; do not add migration, adapters, or dual writes. Candidate, baseline, generation, and intent files live in controlled repo-local directories and use canonical recovery IDs, regular-file checks, stable reads, the task lock, and expected-value CAS. No cross-file atomicity is claimed; unknown combinations remain indeterminate and retain their evidence.
 
 ## Dynamic convergence loop
 

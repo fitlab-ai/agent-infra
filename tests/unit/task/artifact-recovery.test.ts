@@ -9,6 +9,7 @@ import {
   commitArtifactRecovery,
   consumeArtifactRecovery,
   prepareArtifactRecoveryCommit,
+  prepareArtifactRecoveryFinal,
   recordArtifactRecoveryPassed,
   reconcileArtifactRecovery,
   readArtifactRecoveryIntent,
@@ -45,15 +46,18 @@ test('artifact recovery publishes a staged candidate through durable states', ()
   assert.deepEqual(fs.readFileSync(artifact), baseline);
   assert.equal(context.stagingPath, path.join(taskDir, '.local-artifact-recovery', 'abcde-00000000001', 'candidate.md'));
   assert.deepEqual(fs.readFileSync(context.stagingPath), baseline);
-  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'awaiting-recovery');
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'awaiting-preflight-recovery');
 
   const staged = stageArtifactCandidate(context, candidate);
   assert.equal(staged.candidateSha256.length, 64);
   assert.deepEqual(fs.readFileSync(artifact), baseline);
 
   prepareArtifactRecoveryCommit(context, staged.candidateSha256, staged.semanticDigest);
-  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'finalize-ready');
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'preflight-ready');
 
+  const preflight = commitArtifactRecovery(context);
+  assert.equal(preflight.state, 'preflight-passed');
+  prepareArtifactRecoveryFinal(context, candidate);
   const committed = commitArtifactRecovery(context);
   assert.equal(committed.state, 'passed');
   assert.deepEqual(fs.readFileSync(artifact), candidate);
@@ -87,7 +91,7 @@ test('artifact recovery refuses a formal target changed after staging', () => {
     /ARTIFACT_RECOVERY_CONFLICT/
   );
   assert.equal(fs.readFileSync(artifact, 'utf8'), 'external\n');
-  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'commit-started');
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'preflight-commit-started');
 });
 
 test('artifact recovery publishes the validated snapshot when the candidate changes after preparation', () => {
@@ -109,6 +113,9 @@ test('artifact recovery publishes the validated snapshot when the candidate chan
   prepareArtifactRecoveryCommit(context, staged.candidateSha256, staged.semanticDigest);
   fs.writeFileSync(context.stagingPath, 'unvalidated-race\n');
 
+  const preflight = commitArtifactRecovery(context);
+  assert.equal(preflight.state, 'preflight-passed');
+  prepareArtifactRecoveryFinal(context, candidate);
   const committed = commitArtifactRecovery(context);
   assert.equal(committed.state, 'passed');
   assert.deepEqual(fs.readFileSync(artifact), candidate);
@@ -136,20 +143,21 @@ test('artifact recovery publishes sealed bytes when final.md is swapped before r
   const originalRename = fs.renameSync;
   fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
     if (String(to) === artifact) {
-      fs.chmodSync(context.finalPath, 0o644);
-      fs.writeFileSync(context.finalPath, 'unvalidated-final-race\n');
+      const generation = path.join(context.generationsPath, `${staged.candidateSha256}.md`);
+      fs.chmodSync(generation, 0o644);
+      fs.writeFileSync(generation, 'unvalidated-final-race\n');
     }
     return originalRename(from, to);
   }) as typeof fs.renameSync;
   try {
     const committed = commitArtifactRecovery(context);
-    assert.equal(committed.state, 'passed');
+    assert.equal(committed.state, 'preflight-passed');
   } finally {
     fs.renameSync = originalRename;
   }
 
   assert.deepEqual(fs.readFileSync(artifact), candidate);
-  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'passed');
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'preflight-passed');
 });
 
 test('artifact recovery rejects a symlinked recovery-root ancestor before creating outside files', () => {
@@ -227,10 +235,12 @@ test('artifact recovery reconciles a commit-started transaction and pauses on a 
     fs.renameSync = originalRename;
   }
 
-  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'commit-started');
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'preflight-commit-started');
   const retried = reconcileArtifactRecovery(context);
-  assert.equal(retried.status, 'passed');
+  assert.equal(retried.status, 'preflight-passed');
   assert.deepEqual(fs.readFileSync(artifact), candidate);
+  prepareArtifactRecoveryFinal(context, candidate);
+  commitArtifactRecovery(context);
   consumeArtifactRecovery(context);
 
   const secondContext = beginArtifactRecovery(
@@ -253,6 +263,6 @@ test('artifact recovery reconciles a commit-started transaction and pauses on a 
   fs.writeFileSync(artifact, 'third-fingerprint\n');
   const paused = reconcileArtifactRecovery(secondContext);
   assert.equal(paused.status, 'indeterminate');
-  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'commit-started');
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'plan', 'plan.md')?.state, 'preflight-commit-started');
   assert.equal(fs.readFileSync(artifact, 'utf8'), 'third-fingerprint\n');
 });
