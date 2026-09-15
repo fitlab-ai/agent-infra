@@ -40,7 +40,7 @@ function recoverTaskFromComments(input: { taskId: string; comments: readonly Rec
     const prepareMatch = marker.match(preparePattern);
     const commitMatch = marker.match(commitPattern);
     if (!actionMatch && !prepareMatch && !commitMatch) continue;
-    if (comment.user?.login !== trustedAuthor) throw new Error('RECOVERY_EVIDENCE_MISSING: recovery comment author does not match task snapshot author');
+    if (comment.user?.login !== trustedAuthor) continue;
     if (seenMarkers.has(marker)) throw new Error('RECOVERY_EVIDENCE_MISSING: duplicate recovery marker');
     seenMarkers.add(marker);
     const content = recoveryEnvelopeContent(comment.body);

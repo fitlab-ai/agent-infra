@@ -396,16 +396,70 @@ test('comment sync creates once and becomes a no-op on replay', async () => {
     recoverTaskFromComments({ taskId: 'TASK-20260101-000001', comments }),
     fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), 'utf8')
   );
+  const untrustedDuplicate = {
+    ...comments.find((comment) => comment.body.includes(':recovery-action:'))!,
+    id: 99,
+    user: { login: 'mallory' }
+  };
+  assert.equal(
+    recoverTaskFromComments({ taskId: 'TASK-20260101-000001', comments: [...comments, untrustedDuplicate] }),
+    fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), 'utf8')
+  );
   const conflictingAuthor = comments.map((comment, index) => index === 0
     ? { ...comment, user: { login: 'mallory' } }
     : comment);
   assert.throws(
     () => recoverTaskFromComments({ taskId: 'TASK-20260101-000001', comments: conflictingAuthor }),
-    /author does not match/
+    /prepare/
   );
   const second = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
   assert.equal(second.status, 'no-op');
   assert.equal(second.changed, false);
+  assert.equal(comments.length, 4);
+});
+
+test('task sync rejects a different writer before publishing recovery records', async () => {
+  const root = syncFixture();
+  const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
+  let viewer = 'codex';
+  let writes = 0;
+  const client = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: viewer } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        writes += 1;
+        const id = comments.length + 1;
+        comments.push({ id, body: JSON.parse(options?.input || '{}').body, user: { login: viewer } });
+        return { ok: true, value: { id } };
+      }
+      if (args.includes('PATCH')) {
+        writes += 1;
+        const id = Number(endpoint.split('/').at(-1));
+        const current = comments.find((comment) => comment.id === id)!;
+        current.body = JSON.parse(options?.input || '{}').body;
+        return { ok: true, value: { id } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const first = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
+  assert.equal(first.status, 'applied');
+  assert.equal(comments.length, 4);
+  fs.appendFileSync(taskPath, '\n## Requirements\n\n- [ ] changed\n');
+  viewer = 'antigravity';
+  writes = 0;
+
+  const second = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
+  assert.equal(second.status, 'blocked');
+  assert.equal(second.error?.code, 'COMMENT_OWNER_CONFLICT');
+  assert.equal(writes, 0);
   assert.equal(comments.length, 4);
 });
 

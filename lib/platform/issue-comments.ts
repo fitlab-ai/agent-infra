@@ -610,6 +610,21 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     });
   }
 
+  if (options.kind === 'task' && existing.length === 1) {
+    const owner = existing[0]!.user?.login;
+    if (!owner || !context.platform.currentUser || owner !== context.platform.currentUser) {
+      return platformResult('blocked', {
+        ...contextFields(context),
+        resource: { kind: 'issue', number: issue, identity: issueIdentityFromTask },
+        error: {
+          code: 'COMMENT_OWNER_CONFLICT',
+          message: owner ? `Task comment is owned by '${owner}'` : 'Task comment owner is unavailable',
+          retryable: false
+        }
+      });
+    }
+  }
+
   if (transaction) {
     for (const [kind, value, recoveryId] of [
       ['recovery-prepare', transaction.prepare, transaction.prepare.commitId],
