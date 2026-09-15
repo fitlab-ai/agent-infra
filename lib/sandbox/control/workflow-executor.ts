@@ -39,7 +39,7 @@ export async function executeTaskWorkflow(
   lifecycleRecoveryAttestation: LifecycleRecoveryAttestationV1 | null = null,
   options: TaskWorkflowExecutionOptions = {}
 ): Promise<SandboxControlExecutionResult> {
-  let publicationStarted = false;
+  let publicationCommitted = false;
   let faultTriggered = false;
   const fault = (window: TaskWorkflowFaultWindow): void => {
     if (faultTriggered || options.faultWindow !== window) return;
@@ -65,15 +65,16 @@ export async function executeTaskWorkflow(
         lifecycleRecoveryAttestation,
         deferLifecycleRecoveryConsumption: true
       });
+      publicationCommitted = result.changed;
       fault('after-atomic-rename');
       return response(result);
     }
     if (command !== 'task-artifact' && command !== 'task-review') {
-      publicationStarted = true;
       // The broker owns this short-lived executor; no global service or worker
       // credential participates in the command's authority or recovery path.
       fault('before-domain-write');
       const result = dispatchWorkflowCommand(manifest.repoRoot, request.operation, request.args);
+      publicationCommitted = result.changed === true;
       fault('after-atomic-rename');
       return response(result);
     }
@@ -81,12 +82,14 @@ export async function executeTaskWorkflow(
     if (command === 'task-artifact' && 'operation' in input && input.operation === 'inspect') {
       fault('before-domain-write');
       const result = executeArtifactCommand(input, { repoRoot: manifest.repoRoot });
+      publicationCommitted = result.changed === true;
       fault('after-atomic-rename');
       return response(result);
     }
     if ('operation' in input && input.operation === 'init') {
       fault('before-domain-write');
       const result = executeArtifactCommand(input, { repoRoot: manifest.repoRoot, artifactDir: taskDir });
+      publicationCommitted = result.changed === true;
       fault('after-atomic-rename');
       return response(result);
     }
@@ -106,26 +109,25 @@ export async function executeTaskWorkflow(
         }
         const prepared = prepareLocalArtifact(local, content, lifecycleRecoveryAttestation ?? undefined);
         if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared));
-        publicationStarted = true;
         result = commitLocalArtifactProvenance(prepared);
       } else {
         if (input.overrideTicket) throw new Error('TASK_WORKFLOW_OVERRIDE_UNSUPPORTED');
         const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true, startRecovery: true });
         if (input.dryRun || prepared.result.status === 'planned') return executionResult(prepared.result);
         if (prepared.result.status === 'failed') return executionResult(commitReviewSummaryProvenance(prepared, manifest.repoRoot));
-        publicationStarted = true;
         result = commitReviewSummaryProvenance(prepared, manifest.repoRoot);
       }
+      publicationCommitted = result.changed === true;
       if (result.status !== 'failed') appendDiagnosticAudit(manifest, 'task-workflow-artifact-finalized', {
         requestId: request.id, sandboxTaskId: request.taskId, workflowOperation: request.operation,
         artifact: input.artifact, sha256: result.artifactSha256 as string, semanticDigest: result.semanticDigest as string
       });
       fault('after-atomic-rename');
-      return response({ ...result, changed: true });
+      return response(result);
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const code = (error as { code?: string })?.code ?? /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'TASK_WORKFLOW_REQUEST_INVALID';
-    return executionResult({ status: 'failed', changed: publicationStarted ? null : false, error: { code, message } });
+    return executionResult({ status: 'failed', changed: publicationCommitted ? null : false, error: { code, message } });
   }
 }

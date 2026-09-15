@@ -346,8 +346,8 @@ function prepareLocalArtifact(
   if (existing && ['preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started'].includes(existing.state)) {
     const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
     return {
-      result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) }, content,
-      repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
+      result: { ...result, status: 'passed', changed: false, error: null, recovery: recoveryInfo(context) },
+      content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
     };
   }
 
@@ -371,7 +371,7 @@ function prepareLocalArtifact(
         lockAlreadyHeld: request.lockAlreadyHeld
       });
       recovery = context;
-      return { result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) }, content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld };
+      return { result: { ...result, status: 'passed', changed: true, error: null, recovery: recoveryInfo(context) }, content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld };
     }
     const context = beginArtifactRecovery(tupleFor(request, resolved.taskId, authority), Buffer.from(content, 'utf8'), {
       repoRoot: resolved.repoRoot,
@@ -421,6 +421,7 @@ function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): Loca
     return {
       ...prepared.result,
       status: 'passed',
+      changed: true,
       artifactSha256: committed.finalArtifactSha256,
       semanticDigest: committed.finalSemanticDigest,
       error: null

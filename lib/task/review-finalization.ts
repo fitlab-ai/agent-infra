@@ -431,6 +431,16 @@ function commitReviewSummaryProvenance(
     const intent = readArtifactRecoveryIntent(prepared.recovery.repoRoot, prepared.recovery.taskId, prepared.recovery.family, prepared.recovery.artifact);
     if (!intent) throw new Error('ARTIFACT_RECOVERY_INTENT_MISSING');
     let committed;
+    if (intent.state === 'passed' || intent.state === 'consumed') {
+      return {
+        ...prepared.result,
+        status: 'no-op',
+        changed: false,
+        artifactSha256: intent.finalArtifactSha256,
+        semanticDigest: intent.finalSemanticDigest,
+        error: null
+      };
+    }
     if (intent.state === 'awaiting-preflight-recovery') {
       const staged = stageArtifactCandidate(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
       prepareArtifactRecoveryCommit(prepared.recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: prepared.lockAlreadyHeld });
@@ -447,6 +457,7 @@ function commitReviewSummaryProvenance(
     if (!committed || committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed?.state ?? intent.state}'`);
     return {
       ...prepared.result,
+      changed: true,
       artifactSha256: committed.finalArtifactSha256,
       semanticDigest: committed.finalSemanticDigest,
       error: null

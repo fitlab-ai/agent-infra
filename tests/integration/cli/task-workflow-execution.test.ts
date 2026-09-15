@@ -106,6 +106,21 @@ function workflowArgs(operation: typeof TASK_WORKFLOW_OPERATIONS[number]): strin
   }
 }
 
+function workflowStateSnapshot(root: string): string {
+  const stateRoot = path.join(root, '.agents');
+  const entries: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const absolute = path.join(directory, entry.name);
+      const relative = path.relative(stateRoot, absolute);
+      if (entry.isDirectory()) visit(absolute);
+      else if (entry.isFile()) entries.push(`${relative}:${createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')}`);
+    }
+  };
+  visit(stateRoot);
+  return entries.join('\n');
+}
+
 test('every workflow operation is isolated across the four termination windows', onPlatforms('linux', 'darwin'), async () => {
   const windows = ['before-call', 'before-domain-write', 'after-atomic-rename', 'before-result-return'] as const;
   for (const operation of TASK_WORKFLOW_OPERATIONS) {
@@ -116,15 +131,25 @@ test('every workflow operation is isolated across the four termination windows',
         if (operation === 'review-finalize-summary') fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), content('review-analysis'));
         const [command] = TASK_WORKFLOW_COMMANDS[operation];
         const request = createTaskWorkflowRequest(command, workflowArgs(operation), taskId, f.manifest.generation);
-        const before = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
+        const before = workflowStateSnapshot(f.root);
         const result = await executeTaskWorkflow(f.manifest, request, null, { faultWindow: window });
         const body = JSON.parse(result.stdout);
+        const afterFault = workflowStateSnapshot(f.root);
         assert.equal(result.exitCode, 1, `${operation}/${window}: ${result.stdout}`);
         assert.equal(body.error.code, 'TASK_WORKFLOW_FAULT_INJECTED', `${operation}/${window}: ${result.stdout}`);
         assert.match(body.error.message, new RegExp(`:${window}$`), `${operation}/${window}: ${result.stdout}`);
         if (window === 'before-call' || window === 'before-domain-write') {
-          assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), before, `${operation}/${window} wrote before its fault point`);
+          assert.equal(body.changed, false, `${operation}/${window} must be known not applied`);
+          assert.equal(afterFault, before, `${operation}/${window} wrote before its fault point`);
+          continue;
         }
+        const replay = await executeTaskWorkflow(f.manifest, request);
+        const replayBody = JSON.parse(replay.stdout);
+        const afterReplay = workflowStateSnapshot(f.root);
+        const published = afterFault !== before;
+        assert.equal(body.changed, published ? null : false, `${operation}/${window} must classify its native publication state`);
+        assert.equal(afterReplay, afterFault, `${operation}/${window} replay must reconcile the native terminal fact without rewriting it`);
+        assert.equal(replayBody.changed, false, `${operation}/${window} replay must not automatically publish again`);
       } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
     }
   }
