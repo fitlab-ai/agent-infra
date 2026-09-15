@@ -1042,7 +1042,9 @@ function computeExpectedInLabels(taskDir: any, repositoryLabels: string[], mappi
   if (!baseRef) {
     return { ok: false, type: "check_failed", message: "Task has no delivery_base_ref for in-label evidence" };
   }
-  const changedFilesResult = gitText(["diff", `${baseRef}...HEAD`, "--name-only"], taskDir);
+  const branch = typeof task.metadata?.branch === "string" ? task.metadata.branch.trim() : "";
+  const gitCwd = branch ? worktreeForBranch(shared.repoRoot, branch) ?? taskDir : taskDir;
+  const changedFilesResult = gitText(["diff", `${baseRef}...HEAD`, "--name-only"], gitCwd);
   if (!changedFilesResult.ok) {
     return { ...changedFilesResult, type: "network_error" };
   }
@@ -1067,6 +1069,25 @@ function computeExpectedInLabels(taskDir: any, repositoryLabels: string[], mappi
     return { ok: false, type: "check_failed", message: planned.error.message };
   }
   return { ok: true, labels: planned.target, mode: "mapped" };
+}
+
+function worktreeForBranch(repositoryRoot: string, branch: string): string | null {
+  try {
+    const records = execFileSync("git", ["worktree", "list", "--porcelain"], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim().split(/\r?\n\r?\n/);
+    const expectedRef = `refs/heads/${branch}`;
+    for (const record of records) {
+      const worktree = /^worktree (.+)$/m.exec(record)?.[1];
+      const branchRef = /^branch (.+)$/m.exec(record)?.[1];
+      if (worktree && branchRef === expectedRef) return worktree;
+    }
+  } catch {
+    // Fall back to taskDir so ordinary in-repository task workspaces retain their behavior.
+  }
+  return null;
 }
 
 function loadInLabelMapping(shared: VerificationShared): any {

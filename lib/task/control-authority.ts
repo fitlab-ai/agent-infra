@@ -428,7 +428,7 @@ function lifecycleRecoveryIntentMatches(
   return intent.taskId === selector.taskId
     && intent.family === selector.family
     && intent.artifact === selector.artifact
-    && (intent.state === 'commit-started' || intent.state === 'consumed');
+    && (intent.state === 'commit-started' || intent.state === 'consumption-started' || intent.state === 'consumed');
 }
 
 /**

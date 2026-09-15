@@ -111,8 +111,9 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 ### 6. Update Task Status
 
 Update task.md:
-- After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. When escalating to `needs-human-decision`, append `--needs-implementation true|false` using the judgment recorded in the detail block. Do not scan ids or edit ledger rows
-- After all ledger writes, make the initial call to `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} {execution-flag}`; after a failure, follow `.agents/rules/local-artifact-repair.md` to decide whether to edit and rerun, and never treat an error type or `changed=false` as automatic authorization
+- After the report, call `agent-infra-internal task-review {task-id} preflight --stage code --artifact {review-artifact} {execution-flag}` before any ledger write. On failure, follow `.agents/rules/local-artifact-repair.md`; on success, bind `{recovery-id}` from the response.
+- Only after preflight passes, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. When escalating to `needs-human-decision`, append `--needs-implementation true|false` using the judgment recorded in the detail block. Do not scan ids or edit ledger rows
+- After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} --recovery-id {recovery-id} {execution-flag}`; never treat an error type or `changed=false` as automatic authorization
 
   Bind and reuse this structured mapping from that one response:
 

@@ -76,7 +76,7 @@ function writeConsumedIntent(
   const artifactPath = path.join(taskDir, artifact);
   fs.writeFileSync(artifactPath, content);
   const intent = {
-    version: 3,
+    version: 4,
     taskId: TASK_ID,
     family,
     artifact,
@@ -86,6 +86,12 @@ function writeConsumedIntent(
     baselineSemanticDigest: canonicalSemanticDigest(content),
     stagingId: recoveryId,
     candidateSha256: sha256Content(content),
+    preflightArtifactSha256: sha256Content(content),
+    preflightSemanticDigest: canonicalSemanticDigest(content),
+    activeGenerationSha256: sha256Content(content),
+    activeGenerationSemanticDigest: canonicalSemanticDigest(content),
+    pendingGenerationSha256: null,
+    pendingGenerationSemanticDigest: null,
     finalArtifactSha256: sha256Content(content),
     finalSemanticDigest: canonicalSemanticDigest(content),
     recoveryOperationId: recoveryId,
@@ -104,6 +110,9 @@ function writeConsumedIntent(
   fs.mkdirSync(recoveryDir, { recursive: true });
   fs.writeFileSync(path.join(recoveryDir, 'baseline.md'), content);
   fs.writeFileSync(path.join(recoveryDir, 'candidate.md'), content);
+  const generationsDir = path.join(recoveryDir, 'generations');
+  fs.mkdirSync(generationsDir);
+  fs.writeFileSync(path.join(generationsDir, `${sha256Content(content)}.md`), content);
   return path.join(intentDir, `${TASK_ID}-${family}-${artifact}.json`);
 }
 

@@ -2,7 +2,7 @@ import { TASK_WORKFLOW_COMMANDS } from '../../task/workflow-command.ts';
 
 import { parseArtifactCommand, executeArtifactCommand } from '../../task/artifact-command.ts';
 import { parseReviewCommand } from '../../task/review-command.ts';
-import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../task/local-artifact-finalization.ts';
+import { prepareLocalArtifact, preflightLocalArtifact, commitLocalArtifactProvenance } from '../../task/local-artifact-finalization.ts';
 import { prepareReviewSummaryCandidate, commitReviewSummaryProvenance } from '../../task/review-finalization.ts';
 import { withTaskExecutionLock } from '../../task/task-execution-lock.ts';
 import { dispatchHostControlCommand } from '../../host-control/command.ts';
@@ -66,6 +66,11 @@ export async function executeTaskWorkflow(
         const { family } = input;
         if (family !== 'analysis' && family !== 'plan' && family !== 'code') throw new Error('ARTIFACT_IDENTITY_INVALID');
         const local = { taskRef: request.taskId, family, artifact: input.artifact, repoRoot: manifest.repoRoot, recoveryId: input.recoveryId, lockAlreadyHeld: true } as const;
+        if (input.operation === 'preflight') {
+          // Preflight only seals a verified generation. It must not publish the
+          // formal artifact, set publicationStarted, or append finalizer audit.
+          return executionResult(preflightLocalArtifact(local));
+        }
         const prepared = prepareLocalArtifact(local, content, lifecycleRecoveryAttestation ?? undefined);
         if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared));
         publicationStarted = true;

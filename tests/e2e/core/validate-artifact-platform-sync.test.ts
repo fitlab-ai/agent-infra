@@ -91,6 +91,35 @@ test("platform-sync reads Issue metadata through the shared REST snapshot adapte
   });
 });
 
+test("platform-sync computes in: labels from the repository when the task workspace is external", async () => {
+  await withTempRoot("agent-infra-platform-sync-external-workspace-", async (tempRoot) => {
+    const repositoryRoot = path.join(tempRoot, "repository");
+    const ctx = setupPlatformSyncEnv(repositoryRoot);
+    const externalTaskDir = path.join(tempRoot, "host-workspace", taskId);
+    write(path.join(repositoryRoot, ".agents", ".airc.json"), JSON.stringify({
+      platform: { type: "github" },
+      labels: { in: { cli: ["lib/"] } }
+    }));
+    write(path.join(repositoryRoot, "lib", "change.ts"), "export const changed = true;\n");
+    const added = spawnSync("git", ["add", "lib/change.ts"], { cwd: repositoryRoot, encoding: "utf8", env: gitSafeEnv() });
+    const committed = spawnSync("git", ["commit", "-qm", "test: add changed file"], { cwd: repositoryRoot, encoding: "utf8", env: gitSafeEnv() });
+    assert.equal(added.status, 0, added.stderr);
+    assert.equal(committed.status, 0, committed.stderr);
+    write(path.join(externalTaskDir, "task.md"), buildTaskContent({
+      branch: "fixture-head",
+      platform_issue_identity: '\'{"kind":"number","value":65}\''
+    }));
+    writeJson(ctx.issuePath, buildIssuePayload({ labels: [{ name: "in: cli" }] }));
+
+    const result = await runPlatformSyncAdapter(externalTaskDir, {
+      when: "platform_issue_identity_exists",
+      verify_in_labels_computed: true
+    }, ctx.env({ GH_FAKE_ISSUE_PATH: ctx.issuePath }), repositoryRoot);
+
+    assert.equal(result.status, "pass", result.message);
+  });
+});
+
 test("platform-sync performs no GitHub operation when the repository selects none", async () => {
   await withTempRoot("agent-infra-platform-sync-none-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { finalizeReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
+import { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
 import { inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
 import { readArtifactRecoveryIntent } from '../../../../lib/task/artifact-repair-intent.ts';
@@ -74,6 +74,10 @@ function filledOfficialReviewSample(
   };
   let report = officialTemplateSample(relativePath);
   for (const [placeholder, value] of Object.entries(values)) report = report.replaceAll(placeholder, value);
+  report = report.replace(
+    /\n## (?:资格审计复核|Qualification Audit Review)\n[\s\S]*?(?=\n## (?:检视覆盖声明|Inspection Coverage)\n)/u,
+    '\n'
+  );
   report = `<!-- artifact-context:${TASK_ID}:${family}:1 -->\n${report}`;
   for (const section of schema.sections) {
     const heading = locale === 'zh' ? section.headings.zh : section.headings.en;
@@ -209,6 +213,28 @@ test('official review template samples finalize for every stage and locale', () 
         assert.equal(finalizedSummary.summary.countState, 'numeric');
         assert.deepEqual(finalizedSummary.summary.counts, { blocker: 0, major: 0, minor: 0 });
       }
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('review preflight seals every review family before ledger writes', () => {
+  for (const { stage, family, locale, relativePath } of TEMPLATE_CASES) {
+    const artifact = `${family}.md`;
+    const fixture = officialTemplateDomainFixture(
+      stage,
+      artifact,
+      filledOfficialReviewSample(family, locale, relativePath, artifact)
+    );
+    try {
+      const taskBefore = fs.readFileSync(path.join(fixture.dir, 'task.md'), 'utf8');
+      const result = preflightReviewSummary({ taskRef: TASK_ID, stage, artifact }, { repoRoot: fixture.root });
+
+      assert.equal(result.status, 'passed', `${relativePath} should preflight`);
+      assert.equal(result.error, null);
+      assert.equal(fs.readFileSync(path.join(fixture.dir, 'task.md'), 'utf8'), taskBefore);
+      assert.equal(readArtifactRecoveryIntent(fixture.root, TASK_ID, family, artifact)?.state, 'preflight-ready');
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -370,7 +396,7 @@ test('review finalizer stages an invalid baseline and retries from the explicit 
   assert.match(failed.recovery?.baselineSha256 ?? '', /^[a-f0-9]{64}$/);
   assert.ok(failed.recovery?.candidatePath);
   const intent = readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
-  assert.equal(intent?.state, 'awaiting-recovery');
+  assert.equal(intent?.state, 'awaiting-preflight-recovery');
   assert.equal(intent?.baselineSha256, intent?.candidateSha256);
   const formalBeforeRecovery = fs.readFileSync(f.artifactPath, 'utf8');
   fs.writeFileSync(failed.recovery!.candidatePath, valid);
@@ -388,6 +414,29 @@ test('review finalizer stages an invalid baseline and retries from the explicit 
     { repoRoot: f.root }
   );
   assert.equal(retry.status, 'no-op');
+});
+
+test('review finalizer refinalizes a changed passed artifact through a new recovery journal', () => {
+  const f = domainFixture();
+  try {
+    const first = finalizeReviewSummary(
+      { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+      { repoRoot: f.root }
+    );
+    assert.equal(first.error, null);
+    fs.chmodSync(f.artifactPath, 0o600);
+    fs.appendFileSync(f.artifactPath, '\n补充审查证据\n');
+
+    const second = finalizeReviewSummary(
+      { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+      { repoRoot: f.root }
+    );
+    assert.equal(second.error, null);
+    assert.notEqual(second.artifactSha256, first.artifactSha256);
+    assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md')?.state, 'passed');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test('review finalizer keeps the formal artifact unchanged while a recovery candidate remains invalid', () => {

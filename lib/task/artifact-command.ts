@@ -4,12 +4,12 @@ import { resolveArtifactContext, hasOpenArtifactRound } from './artifact-lifecyc
 import { parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
-import { finalizeLocalArtifact } from './local-artifact-finalization.ts';
+import { finalizeLocalArtifact, preflightLocalArtifact } from './local-artifact-finalization.ts';
 import { initializeArtifactSkeleton } from './artifact-operations.ts';
 
 export type ArtifactCommand = Readonly<{
   taskRef: string;
-  operation: 'inspect' | 'init' | 'finalize-local';
+  operation: 'inspect' | 'init' | 'preflight' | 'finalize-local';
   family: string;
   artifact: string;
   locale?: 'zh-CN' | 'en';
@@ -19,13 +19,14 @@ export type ArtifactCommand = Readonly<{
 /** One option contract for the CLI and trusted projection executor. */
 export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   const [taskRef, operation] = args;
-  if (!taskRef || !['inspect', 'init', 'finalize-local'].includes(operation ?? '')) {
+  if (!taskRef || !['inspect', 'init', 'preflight', 'finalize-local'].includes(operation ?? '')) {
     throw new Error('task ref and a supported artifact operation are required');
   }
   const fields: Record<string, string> = {};
   const allowed = {
     inspect: ['--family'],
     init: ['--family', '--artifact', '--locale'],
+    'preflight': ['--family', '--artifact', '--recovery-id'],
     'finalize-local': ['--family', '--artifact', '--recovery-id']
   }[operation as ArtifactCommand['operation']];
   for (let index = 2; index < args.length; index += 1) {
@@ -79,7 +80,8 @@ export function executeArtifactCommand(
     return { ...initializeArtifactSkeleton({ ...input, ...(locale ? { locale } : {}) }), ...identity };
   }
   if (family !== 'analysis' && family !== 'plan' && family !== 'code') {
-    return fail('ARTIFACT_PAYLOAD_INVALID', "finalize-local only supports 'analysis', 'plan', and 'code'");
+    return fail('ARTIFACT_PAYLOAD_INVALID', "preflight and finalize-local only support 'analysis', 'plan', and 'code'");
   }
+  if (operation === 'preflight') return { ...preflightLocalArtifact({ taskRef, family, artifact, repoRoot: resolved.repoRoot, recoveryId }) };
   return { ...finalizeLocalArtifact({ taskRef, family, artifact, repoRoot: resolved.repoRoot, recoveryId }) };
 }

@@ -19,6 +19,7 @@ import {
   beginArtifactRecovery,
   commitArtifactRecovery,
   consumeArtifactRecovery,
+  prepareArtifactRecoveryFinal,
   prepareArtifactRecoveryCommit,
   recordArtifactRecoveryPassed,
   recoveryContextFromIntent,
@@ -265,7 +266,8 @@ function tupleFor(
 function prepareLocalArtifact(
   request: LocalArtifactFinalizationRequest,
   candidate?: string,
-  authority?: LifecycleRecoveryAttestationV1
+  authority?: LifecycleRecoveryAttestationV1,
+  preflightOnly = false
 ): LocalArtifactPreparation {
   const failed = (code: string, message: string, extra: Partial<LocalArtifactFinalizationResult> = {}): LocalArtifactPreparation => ({
     result: failedFinalization(request, { code, message }, extra), content: candidate ?? ''
@@ -281,12 +283,14 @@ function prepareLocalArtifact(
   let taskContent: string;
   let content: string;
   let recovery: ArtifactRecoveryContext | undefined;
+  let recoveryState: ArtifactRecoveryIntent['state'] | undefined;
   try {
     taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
     if (request.recoveryId) {
       const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
       if (!intent || intent.recoveryOperationId !== request.recoveryId) return failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', 'recovery id does not match the artifact journal');
-      if (!['awaiting-recovery', 'finalize-ready', 'commit-started'].includes(intent.state)) return failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', `recovery journal is in '${intent.state}' state`);
+      if (!['awaiting-preflight-recovery', 'preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started'].includes(intent.state)) return failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', `recovery journal is in '${intent.state}' state`);
+      recoveryState = intent.state;
       recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
       content = fs.existsSync(recovery.stagingPath)
         ? fs.readFileSync(recovery.stagingPath, 'utf8')
@@ -315,6 +319,10 @@ function prepareLocalArtifact(
 
   if (request.recoveryId) {
     if (!validation.ok) return { result, content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld };
+    if (preflightOnly && recovery && recoveryState === 'awaiting-preflight-recovery') {
+      const staged = stageArtifactCandidate(recovery, Buffer.from(content, 'utf8'), { lockAlreadyHeld: request.lockAlreadyHeld });
+      prepareArtifactRecoveryCommit(recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: request.lockAlreadyHeld });
+    }
     return {
       result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(recovery!) },
       content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld
@@ -323,18 +331,37 @@ function prepareLocalArtifact(
 
   const existing = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
   if (existing?.state === 'passed' || existing?.state === 'consumed') {
-    if (existing.finalArtifactSha256 !== artifactSha256 || existing.finalSemanticDigest !== validation.semanticDigest) {
+    if (existing.state === 'consumed' && (existing.finalArtifactSha256 !== artifactSha256 || existing.finalSemanticDigest !== validation.semanticDigest)) {
       return { ...failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', 'formal artifact does not match its completed recovery journal'), content, repoRoot: resolved.repoRoot, authority, lockAlreadyHeld: request.lockAlreadyHeld };
     }
+    if (existing.finalArtifactSha256 === artifactSha256 && existing.finalSemanticDigest === validation.semanticDigest) {
+      const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
+      return {
+        result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) },
+        content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
+      };
+    }
+  }
+
+  if (existing && ['preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started'].includes(existing.state)) {
     const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
     return {
-      result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) },
-      content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
+      result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) }, content,
+      repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
     };
   }
 
   try {
     if (validation.ok) {
+      if (preflightOnly) {
+        const context = beginArtifactRecovery(tupleFor(request, resolved.taskId, authority), Buffer.from(content, 'utf8'), {
+          repoRoot: resolved.repoRoot, taskDir: resolved.taskDir,
+          ...(authority ? { recoveryId: authority.operationId } : {}), lockAlreadyHeld: request.lockAlreadyHeld
+        });
+        const staged = stageArtifactCandidate(context, Buffer.from(content, 'utf8'), { lockAlreadyHeld: request.lockAlreadyHeld });
+        prepareArtifactRecoveryCommit(context, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: request.lockAlreadyHeld });
+        return { result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) }, content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld };
+      }
       const context = recordArtifactRecoveryPassed(tupleFor(request, resolved.taskId, authority), {
         repoRoot: resolved.repoRoot,
         taskDir: resolved.taskDir,
@@ -376,14 +403,21 @@ function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): Loca
         semanticDigest: intent.finalSemanticDigest,
         error: null
       };
-    } else if (intent.state === 'finalize-ready' || intent.state === 'commit-started') {
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
-    } else {
+    } else if (intent.state === 'awaiting-preflight-recovery') {
       const staged = stageArtifactCandidate(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
       prepareArtifactRecoveryCommit(prepared.recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: prepared.lockAlreadyHeld });
       committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
     }
-    if (committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed.state}'`);
+    if (intent.state === 'preflight-ready' || intent.state === 'preflight-commit-started') {
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+    }
+    if (committed?.state === 'preflight-passed' || intent.state === 'preflight-passed') {
+      prepareArtifactRecoveryFinal(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+    } else if (intent.state === 'full-finalizer-ready' || intent.state === 'commit-started') {
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+    }
+    if (!committed || committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed?.state ?? intent.state}'`);
     return {
       ...prepared.result,
       status: 'passed',
@@ -417,10 +451,20 @@ function finalizeLocalArtifact(
   return result;
 }
 
+/** Validate and seal an immutable preflight generation without publishing the formal artifact. */
+function preflightLocalArtifact(
+  request: LocalArtifactFinalizationRequest,
+  authority?: LifecycleRecoveryAttestationV1
+): LocalArtifactFinalizationResult {
+  const prepared = prepareLocalArtifact(request, undefined, authority, true);
+  return prepared.result;
+}
+
 export {
   LOCAL_ARTIFACT_REQUIRED_SECTIONS,
   consumeLocalArtifactFinalizationIntent,
   finalizeLocalArtifact,
+  preflightLocalArtifact,
   prepareLocalArtifact,
   commitLocalArtifactProvenance,
   readArtifactRecoveryIntent as readLocalArtifactFinalizationIntent,

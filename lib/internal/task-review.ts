@@ -1,17 +1,17 @@
 import { parseReviewCommand } from '../task/review-command.ts';
-import { finalizeReviewSummary } from '../task/review-finalization.ts';
+import { finalizeReviewSummary, preflightReviewSummary } from '../task/review-finalization.ts';
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-review <task-ref> finalize-summary --stage <analysis|plan|code> --artifact <review-*.md> [--recovery-id <id>] [--orchestrated] [--dry-run] [--override-ticket <ticket> --override-target <target> --override-scope <scope>]\n';
+const USAGE = 'Usage: agent-infra-internal task-review <task-ref> <preflight|finalize-summary> --stage <analysis|plan|code> --artifact <review-*.md> [--recovery-id <id>] [--orchestrated] [--dry-run] [--override-ticket <ticket> --override-target <target> --override-scope <scope>]\n';
 
 function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({
     status: 'failed',
     changed: false,
-    intent: 'finalize-summary',
+    intent: 'review-operation',
     error: { code: 'REVIEW_PAYLOAD_INVALID', message }
   })}\n`);
   process.stderr.write(USAGE);
@@ -28,6 +28,7 @@ async function taskReview(args: string[] = []): Promise<void> {
   try { request = parseReviewCommand(args); }
   catch (error) { failUsage(error instanceof Error ? error.message : String(error)); return; }
   const { stage, artifact, recoveryId, dryRun, orchestrated, overrideTicket, overrideTarget, overrideScope } = request;
+  const operation = args[1]!;
   const dryRunConflict = overrideDryRunConflict({ dryRun, overrideTicket, overrideTarget, overrideScope });
   if (dryRunConflict) { failUsage(dryRunConflict.message); return; }
   const resolved = resolveTaskRef(args[0]!);
@@ -35,8 +36,11 @@ async function taskReview(args: string[] = []): Promise<void> {
   let result;
   let humanOverride: unknown = null;
   try {
-    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-review.finalize-summary', async () => {
-      let current = finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, recoveryId, orchestrated, dryRun }, { lockAlreadyHeld: true });
+    result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-review.${operation}`, async () => {
+      let current = operation === 'preflight'
+        ? preflightReviewSummary({ taskRef: args[0]!, stage, artifact, recoveryId, orchestrated, dryRun }, { lockAlreadyHeld: true })
+        : finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, recoveryId, orchestrated, dryRun }, { lockAlreadyHeld: true });
+      if (operation === 'preflight') return current;
       if (current.status !== 'failed' || !overrideTicket) return current;
       if (!overrideTarget || !overrideScope) { failUsage('override ticket requires target and scope'); return current; }
       const consumed = await consumeHumanOverride({

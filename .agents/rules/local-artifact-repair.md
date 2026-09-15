@@ -5,10 +5,11 @@
 ## 完成前门禁
 
 - 完成事件前必须运行对应 finalizer；只有同一次返回的 `artifactSha256` 和 `semanticDigest` 才能传给 completed event。
-- finalizer 发现 artifact 内容错误时，返回受控 `recovery`（`recoveryId`、`candidatePath`、baseline 指纹）。正式 artifact 在 recovery commit 前必须保持不变。
+- preflight 先对当前 stable-read candidate 完整验证，并将验证的 `R` 写入 digest-addressed、只读的 generation；在 journal CAS 前正式 artifact 必须保持 baseline `B`。
+- candidate SHA 是 awaiting 状态的最后一次 stable-read 观测值，不是下一次编辑的 guard。合法 `S` 编辑必须重新验证并在成功后 CAS 为 `R`。
 - 只有在机械安全门通过后，模型才可编辑返回的 `candidatePath`；每次实际字节变化后，用同一 task、stage/family、artifact 和 `--recovery-id` 完整重跑 finalizer。不得直接编辑正式 artifact 后假设它属于候选。
-- finalizer 通过后，recovery core 按 `finalize-ready → commit-started → passed` 提交候选；completed event 只接受匹配的 `passed`/final digest，并在任务锁内消费 intent。
-- `finalize-ready` 前 recovery core 会把已校验的最终字节封存为受控 `final.md`；后续 commit 忽略可编辑的 `candidate.md`，只校验并发布该封存快照，避免候选在准备后被替换。
+- preflight 按 `preflight-ready → preflight-commit-started → preflight-passed` 发布 immutable `R`；业务 finalizer 再按 `full-finalizer-ready → commit-started → passed` 将 `F` 发布。`F=R` 复用 active generation。
+- preflight-ready 后 publish 只读取 active/pending generation，绝不再读取可编辑 candidate。
 - candidate-only 是协议授权边界，不是操作系统隔离：拥有同一 UID 且可任意写入宿主文件系统的进程可能篡改 recovery 内部文件；协议会通过身份、指纹和状态校验发现异常并失败关闭，但不承诺独立权限主体或跨平台隔离。
 
 ## 授权边界
@@ -32,14 +33,15 @@
 
 | 状态 | formal artifact | 允许动作 |
 | --- | --- | --- |
-| `awaiting-recovery` | baseline `B` | 只编辑受控 candidate `S`，重跑同一 finalizer |
-| `finalize-ready` | `B` | recovery core 在锁内开始提交 |
-| `commit-started` | `B` 或 final `F` | 只允许 reconcile；按 `B/F` 指纹重试、确认或回滚 |
+| `awaiting-preflight-recovery` | baseline `B` | 只编辑 candidate `S`，稳定读取、验证并生成 `R` |
+| `preflight-ready` / `preflight-commit-started` | `B` 或 `R` | 只可从 active immutable `R` reconcile/publish |
+| `preflight-passed` | `R` | 执行业务 finalizer，生成或复用 `F` |
+| `full-finalizer-ready` / `commit-started` | `R` 或 `F` | 只可从 pending immutable `F` reconcile/publish |
 | `passed` | `F` | completed event 校验 final digest 后消费 |
 | `consumed` | `F` | 可由中间产物清理流程回收受控 staging/backup |
 | `aborted` | 已确认恢复的 `B` | 只保留诊断，不得伪造成功 |
 
-intent 使用 current-only schema version 3。旧 schema 直接失败关闭；不添加迁移、adapter 或双写。candidate、baseline 和 intent 位于 repo-local 受控目录，使用 canonical recovery ID、普通文件检查、stable read、task lock 和 expected-value CAS。跨文件不宣称原子性；未知组合返回 indeterminate 并保留现场。
+intent 使用 current-only schema version 4。旧 schema 直接失败关闭；不添加迁移、adapter 或双写。candidate、baseline、generation 和 intent 位于 repo-local 受控目录，使用 canonical recovery ID、普通文件检查、stable read、task lock 和 expected-value CAS。跨文件不宣称原子性；未知组合返回 indeterminate 并保留现场。
 
 ## 动态收敛循环
 
@@ -50,7 +52,7 @@ intent 使用 current-only schema version 3。旧 schema 直接失败关闭；�
 
 ## 共享入口
 
-`task-artifact ... inspect|init|finalize-local` 和 `task-review ... finalize-summary` 是当前入口。恢复重试使用 finalizer 返回的 `recoveryId`，例如：
+`task-artifact ... inspect|init|preflight|finalize-local` 和 `task-review ... finalize-summary` 是当前入口。preflight 不发布 task metadata、ledger、formal provenance、completed event 或平台状态；恢复重试使用 finalizer 返回的 `recoveryId`，例如：
 
 ```text
 agent-infra-internal task-artifact {task-id} finalize-local --family code --artifact {code-artifact} --recovery-id {recovery-id}

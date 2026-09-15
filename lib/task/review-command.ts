@@ -3,7 +3,7 @@ import type { ReviewFinalizationRequest } from './review-finalization.ts';
 export function parseReviewCommand(args: readonly string[]): ReviewFinalizationRequest & {
   overrideTicket?: string; overrideTarget?: string; overrideScope?: string;
 } {
-  if (!args[0] || args[1] !== 'finalize-summary') throw new Error('task ref and finalize-summary are required');
+  if (!args[0] || !['preflight', 'finalize-summary'].includes(args[1] ?? '')) throw new Error('task ref and a supported review operation are required');
   const values: Record<string, string | boolean> = {};
   const flags = {
     '--stage': 'stage', '--artifact': 'artifact', '--orchestrated': 'orchestrated', '--dry-run': 'dryRun',

@@ -327,10 +327,26 @@ function cleanupConsumedRecoveryFiles(repoRoot: string, task: TaskRecord | undef
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(recovery, { withFileTypes: true }); } catch { return false; }
   for (const entry of entries) {
-    if (entry.isSymbolicLink() || !entry.isFile() || !['baseline.md', 'candidate.md', 'final.md', 'publish.md'].includes(entry.name)) return false;
+    if (entry.isSymbolicLink()) return false;
+    if (entry.isFile()) {
+      if (!['baseline.md', 'candidate.md', 'final.md', 'publish.md'].includes(entry.name)) return false;
+      continue;
+    }
+    if (!entry.isDirectory() || entry.name !== 'generations') return false;
+    let generations: fs.Dirent[];
+    try { generations = fs.readdirSync(path.join(recovery, entry.name), { withFileTypes: true }); } catch { return false; }
+    if (generations.some((generation) => generation.isSymbolicLink()
+      || !generation.isFile() || !/^[a-f0-9]{64}\.md$/u.test(generation.name))) return false;
   }
   try {
-    for (const entry of entries) fs.unlinkSync(path.join(recovery, entry.name));
+    for (const entry of entries) {
+      const target = path.join(recovery, entry.name);
+      if (entry.isFile()) fs.unlinkSync(target);
+      else {
+        for (const generation of fs.readdirSync(target, { withFileTypes: true })) fs.unlinkSync(path.join(target, generation.name));
+        fs.rmdirSync(target);
+      }
+    }
     fs.rmdirSync(recovery);
     const recoveryRoot = path.dirname(recovery);
     if (fs.readdirSync(recoveryRoot).length === 0) fs.rmdirSync(recoveryRoot);

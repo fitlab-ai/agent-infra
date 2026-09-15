@@ -426,9 +426,12 @@ function writeConsumedLocalIntent(root: string, taskId: string): string {
   fs.mkdirSync(intentDir, { recursive: true });
   const intentPath = path.join(intentDir, `${taskId}-plan-${artifact}.json`);
   fs.writeFileSync(intentPath, `${JSON.stringify({
-    version: 3, taskId, family: 'plan', artifact, round: 1, state: 'consumed',
+    version: 4, taskId, family: 'plan', artifact, round: 1, state: 'consumed',
     baselineSha256: sha256Content(content), baselineSemanticDigest: semanticDigest(content),
     stagingId: recoveryId, candidateSha256: sha256Content(content),
+    preflightArtifactSha256: sha256Content(content), preflightSemanticDigest: semanticDigest(content),
+    activeGenerationSha256: sha256Content(content), activeGenerationSemanticDigest: semanticDigest(content),
+    pendingGenerationSha256: null, pendingGenerationSemanticDigest: null,
     finalArtifactSha256: sha256Content(content), finalSemanticDigest: semanticDigest(content),
     recoveryOperationId: recoveryId, phase: null, authorityDigest: null,
     requestId: 'sandbox-fixture', errorCode: null, errorMessage: null, createdAt: 1, updatedAt: 1

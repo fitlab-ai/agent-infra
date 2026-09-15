@@ -402,7 +402,7 @@ function reconcileReviewCompletionReplay(
       }
       intent = reconciled.intent;
     }
-    if (!['passed', 'consumed'].includes(intent.state)) {
+    if (!['passed', 'consumption-started', 'consumed'].includes(intent.state)) {
       return {
         code: 'EVENT_ARTIFACT_CONFLICT',
         message: `review finalizer provenance is incomplete for ${artifact}`
@@ -423,7 +423,7 @@ function reconcileReviewCompletionReplay(
         message: `review finalizer provenance does not match ${artifact}`
       };
     }
-    if (intent.state === 'passed') {
+    if (intent.state === 'passed' || intent.state === 'consumption-started') {
       const consumed = { ...intent, state: 'consumed' as const, updatedAt: Date.now() };
       writeArtifactRecoveryIntent(repoRoot, consumed, { expected: intent });
     }
@@ -963,7 +963,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
         );
         if (reconciled.status === 'passed' || reconciled.status === 'consumed') reviewFinalizationIntent = reconciled.intent;
       }
-      if (!reviewFinalizationIntent || !['passed', 'consumed'].includes(reviewFinalizationIntent.state)) {
+      if (!reviewFinalizationIntent || !['passed', 'consumption-started', 'consumed'].includes(reviewFinalizationIntent.state)) {
         return failed(normalized, {
           code: 'EVENT_ARTIFACT_CONFLICT',
           message: `review finalizer provenance is missing or incomplete for ${completedArtifact.name}`
@@ -1116,7 +1116,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
         const expectedIntent = localFinalizationIntent;
         localFinalizationIntent = {
           ...localFinalizationIntent,
-          state: 'commit-started',
+          state: 'consumption-started',
           phase: 'task-event.completed',
           authorityDigest: lifecycleRecoveryAttestationDigest(lifecycleAuthority),
           requestId: lifecycleAuthority.lifecycleRequestId,
@@ -1146,7 +1146,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       const expectedIntent = reviewFinalizationIntent;
       reviewFinalizationIntent = {
         ...reviewFinalizationIntent,
-        state: 'commit-started',
+        state: 'consumption-started',
         phase: 'task-event.completed',
         updatedAt: Date.now()
       };
@@ -1183,7 +1183,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   }
   if (!normalized.dryRun && reviewFinalizationIntent && completedArtifact) {
     try {
-      if (reviewFinalizationIntent.state === 'commit-started') {
+      if (reviewFinalizationIntent.state === 'consumption-started') {
         const consumed = { ...reviewFinalizationIntent, state: 'consumed' as const, updatedAt: Date.now() };
         writeArtifactRecoveryIntent(resolved.repoRoot, consumed, { expected: reviewFinalizationIntent });
       }

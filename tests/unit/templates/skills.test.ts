@@ -467,6 +467,28 @@ test("review skills declare one initial finalizer before their completion event"
   }
 });
 
+test("review skills preflight before writing their ledgers", () => {
+  const stages = [
+    { skill: "review-analysis", stage: "analysis" },
+    { skill: "review-plan", stage: "plan" },
+    { skill: "review-code", stage: "code" }
+  ];
+
+  for (const { skill, stage } of stages) {
+    for (const relativePath of skillDocPaths(skill)) {
+      const content = read(relativePath);
+      const preflight = `agent-infra-internal task-review {task-id} preflight --stage ${stage} --artifact {review-artifact}`;
+      const ledger = `agent-infra-internal task-ledger {task-id} finding-upsert --stage ${stage}`;
+      const finalizer = `agent-infra-internal task-review {task-id} finalize-summary --stage ${stage} --artifact {review-artifact}`;
+
+      assert.equal(content.split(preflight).length - 1, 1, `${relativePath} should declare one review preflight`);
+      assert.ok(content.indexOf(preflight) < content.indexOf(ledger), `${relativePath} should preflight before ledger writes`);
+      assert.ok(content.indexOf(ledger) < content.indexOf(finalizer), `${relativePath} should finalize after ledger writes`);
+      assert.ok(content.includes(`${finalizer} --recovery-id {recovery-id}`), `${relativePath} should pass preflight recovery identity to finalization`);
+    }
+  }
+});
+
 test("review skills publish non-advancing finalizer results before same-stage routing", () => {
   const stages = [
     { skill: "review-analysis", stage: "analysis" },
