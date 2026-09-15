@@ -283,12 +283,14 @@ function prepareLocalArtifact(
   let taskContent: string;
   let content: string;
   let recovery: ArtifactRecoveryContext | undefined;
+  let recoveryState: ArtifactRecoveryIntent['state'] | undefined;
   try {
     taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
     if (request.recoveryId) {
       const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
       if (!intent || intent.recoveryOperationId !== request.recoveryId) return failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', 'recovery id does not match the artifact journal');
       if (!['awaiting-preflight-recovery', 'preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started'].includes(intent.state)) return failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', `recovery journal is in '${intent.state}' state`);
+      recoveryState = intent.state;
       recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
       content = fs.existsSync(recovery.stagingPath)
         ? fs.readFileSync(recovery.stagingPath, 'utf8')
@@ -317,7 +319,7 @@ function prepareLocalArtifact(
 
   if (request.recoveryId) {
     if (!validation.ok) return { result, content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld };
-    if (preflightOnly && recovery) {
+    if (preflightOnly && recovery && recoveryState === 'awaiting-preflight-recovery') {
       const staged = stageArtifactCandidate(recovery, Buffer.from(content, 'utf8'), { lockAlreadyHeld: request.lockAlreadyHeld });
       prepareArtifactRecoveryCommit(recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: request.lockAlreadyHeld });
     }
@@ -329,14 +331,16 @@ function prepareLocalArtifact(
 
   const existing = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, request.family, request.artifact);
   if (existing?.state === 'passed' || existing?.state === 'consumed') {
-    if (existing.finalArtifactSha256 !== artifactSha256 || existing.finalSemanticDigest !== validation.semanticDigest) {
+    if (existing.state === 'consumed' && (existing.finalArtifactSha256 !== artifactSha256 || existing.finalSemanticDigest !== validation.semanticDigest)) {
       return { ...failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', 'formal artifact does not match its completed recovery journal'), content, repoRoot: resolved.repoRoot, authority, lockAlreadyHeld: request.lockAlreadyHeld };
     }
-    const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
-    return {
-      result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) },
-      content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
-    };
+    if (existing.finalArtifactSha256 === artifactSha256 && existing.finalSemanticDigest === validation.semanticDigest) {
+      const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
+      return {
+        result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) },
+        content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
+      };
+    }
   }
 
   if (existing && ['preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started'].includes(existing.state)) {

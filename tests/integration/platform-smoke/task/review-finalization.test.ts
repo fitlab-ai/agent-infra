@@ -74,6 +74,10 @@ function filledOfficialReviewSample(
   };
   let report = officialTemplateSample(relativePath);
   for (const [placeholder, value] of Object.entries(values)) report = report.replaceAll(placeholder, value);
+  report = report.replace(
+    /\n## (?:资格审计复核|Qualification Audit Review)\n[\s\S]*?(?=\n## (?:检视覆盖声明|Inspection Coverage)\n)/u,
+    '\n'
+  );
   report = `<!-- artifact-context:${TASK_ID}:${family}:1 -->\n${report}`;
   for (const section of schema.sections) {
     const heading = locale === 'zh' ? section.headings.zh : section.headings.en;
@@ -410,6 +414,29 @@ test('review finalizer stages an invalid baseline and retries from the explicit 
     { repoRoot: f.root }
   );
   assert.equal(retry.status, 'no-op');
+});
+
+test('review finalizer refinalizes a changed passed artifact through a new recovery journal', () => {
+  const f = domainFixture();
+  try {
+    const first = finalizeReviewSummary(
+      { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+      { repoRoot: f.root }
+    );
+    assert.equal(first.error, null);
+    fs.chmodSync(f.artifactPath, 0o600);
+    fs.appendFileSync(f.artifactPath, '\n补充审查证据\n');
+
+    const second = finalizeReviewSummary(
+      { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+      { repoRoot: f.root }
+    );
+    assert.equal(second.error, null);
+    assert.notEqual(second.artifactSha256, first.artifactSha256);
+    assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md')?.state, 'passed');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test('review finalizer keeps the formal artifact unchanged while a recovery candidate remains invalid', () => {

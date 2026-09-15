@@ -165,6 +165,23 @@ test('task-artifact finalize-local uses repository config from a nested working 
   assert.deepEqual(result.diagnostics, []);
 });
 
+test('task-artifact refinalizes a changed passed artifact through a new recovery journal', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, localArtifact('plan'));
+
+  const first = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(first.status, 0, first.stderr);
+  const before = JSON.parse(first.stdout);
+  fs.appendFileSync(artifact, '\n补充证据\n');
+
+  const second = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(second.status, 0, second.stderr);
+  const after = JSON.parse(second.stdout);
+  assert.equal(after.status, 'passed');
+  assert.notEqual(after.artifactSha256, before.artifactSha256);
+});
+
 test('task-artifact finalize-local reports one-line heading diagnostics and revalidates a staged edit', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'analysis.md');

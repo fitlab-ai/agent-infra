@@ -68,6 +68,30 @@ test('artifact recovery publishes a staged candidate through durable states', ()
   assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'consumed');
 });
 
+test('artifact recovery refuses to pass when an F=R generation is missing', () => {
+  const repoRoot = makeTempDir('agent-infra-recovery-');
+  const taskId = 'TASK-20260101-000009';
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const artifact = path.join(taskDir, 'code.md');
+  const content = Buffer.from('same\n');
+  fs.writeFileSync(artifact, content);
+
+  const context = beginArtifactRecovery(
+    { taskId, family: 'code', artifact: 'code.md', round: 1, requestId: 'recovery-test-9' },
+    content,
+    { repoRoot, taskDir, recoveryId: 'abcde-00000000009' }
+  );
+  const staged = stageArtifactCandidate(context, content);
+  prepareArtifactRecoveryCommit(context, staged.candidateSha256, staged.semanticDigest);
+  commitArtifactRecovery(context);
+  fs.unlinkSync(path.join(context.generationsPath, `${staged.candidateSha256}.md`));
+  prepareArtifactRecoveryFinal(context, content);
+
+  assert.throws(() => commitArtifactRecovery(context, { lockAlreadyHeld: true }), /TASK_ARTIFACT_WRITE_CONFLICT/);
+  assert.equal(readArtifactRecoveryIntent(repoRoot, taskId, 'code', 'code.md')?.state, 'commit-started');
+});
+
 test('artifact recovery refuses a formal target changed after staging', () => {
   const repoRoot = makeTempDir('agent-infra-recovery-');
   const taskId = 'TASK-20260101-000002';

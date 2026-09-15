@@ -14,6 +14,7 @@ import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
+import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { readArtifactRecoveryIntent } from './artifact-repair-intent.ts';
 import {
   beginArtifactRecovery,
@@ -37,6 +38,7 @@ type ReviewFinalizationErrorCode =
   | 'REVIEW_SUMMARY_PLACEHOLDER_INVALID'
   | 'REVIEW_SUMMARY_COUNT_MISMATCH'
   | 'REVIEW_ARTIFACT_STRUCTURE_INVALID'
+  | 'REVIEW_ARTIFACT_QUALIFICATION_INVALID'
   | 'REVIEW_DECISION_DETAIL_INVALID'
   | 'REVIEW_ARTIFACT_CONFLICT'
   | 'REVIEW_PROVENANCE_INVALID'
@@ -160,6 +162,7 @@ function preflightReviewSummaryUnlocked(
   let taskContent: string;
   let content: string;
   let recovery: ArtifactRecoveryContext | undefined;
+  let existingIntent;
   try {
     taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
     if (request.recoveryId) {
@@ -175,8 +178,9 @@ function preflightReviewSummaryUnlocked(
       if (!validated.ok) return preflightFailed(request, validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID', validated.error.message, resolved.taskId);
       content = fs.readFileSync(validated.artifact.path, 'utf8');
       const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact);
+      existingIntent = intent;
       if (intent?.state === 'preflight-ready') recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
-      if (intent?.state === 'passed' || intent?.state === 'consumed') return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', 'review artifact was already finalized', resolved.taskId);
+      if (intent?.state === 'consumed') return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', 'review artifact was already finalized', resolved.taskId);
     }
   } catch (error) { return preflightFailed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
 
@@ -192,7 +196,15 @@ function preflightReviewSummaryUnlocked(
   const semanticDigest = canonicalSemanticDigest(content);
   const detail = inspectDecisionDetailDuplicates(content);
   const structure = inspectArtifactContract(content, getArtifactSchema(spec.family)!);
-  if (!detail.ok || !structure.ok) {
+  const expected = expectedQualificationRelations(taskContent, spec.family);
+  if (!expected.ok) return preflightFailed(request, 'REVIEW_ARTIFACT_QUALIFICATION_INVALID', `${expected.code}: ${expected.message}`, resolved.taskId, { artifactSha256, semanticDigest });
+  const qualification = validateQualificationAudit(taskContent, content, {
+    family: spec.family,
+    artifact: request.artifact,
+    expectedUpstreamRelations: expected.relations
+  });
+  const qualificationError = qualification.ok ? null : qualification;
+  if (!detail.ok || !structure.ok || qualificationError) {
     if (!recovery && !request.dryRun) {
       try {
         recovery = beginArtifactRecovery({
@@ -203,12 +215,19 @@ function preflightReviewSummaryUnlocked(
     }
     const diagnostics = [
       ...(!detail.ok ? [`${detail.code}: ${detail.message}`] : []),
-      ...structure.diagnostics.map((item) => `${item.code}: ${item.message}`)
+      ...structure.diagnostics.map((item) => `${item.code}: ${item.message}`),
+      ...(qualificationError ? [`${qualificationError.code}: ${qualificationError.message}`] : [])
     ].join('; ');
-    return preflightFailed(request, detail.ok ? 'REVIEW_ARTIFACT_STRUCTURE_INVALID' : 'REVIEW_DECISION_DETAIL_INVALID', diagnostics, resolved.taskId, {
+    return preflightFailed(request, !detail.ok ? 'REVIEW_DECISION_DETAIL_INVALID' : !structure.ok ? 'REVIEW_ARTIFACT_STRUCTURE_INVALID' : 'REVIEW_ARTIFACT_QUALIFICATION_INVALID', diagnostics, resolved.taskId, {
       artifactSha256, semanticDigest,
       ...(recovery ? { recovery: recoveryInfo(recovery) } : {})
     });
+  }
+  if (!recovery && existingIntent?.state === 'passed') {
+    return {
+      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest }),
+      status: 'passed', changed: false, error: null
+    };
   }
   if (request.dryRun || recovery && readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact)?.state === 'preflight-ready') {
     return {
@@ -312,10 +331,14 @@ function prepareReviewSummaryCandidate(
   let repairIntent;
   try { repairIntent = readArtifactRecoveryIntent(resolved.repoRoot, taskId!, spec.family, request.artifact); }
   catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), digests); }
-  if (repairIntent?.state === 'passed' || repairIntent?.state === 'consumed') {
+  if (repairIntent?.state === 'consumed') {
     if (repairIntent.finalArtifactSha256 !== artifactSha256 || repairIntent.finalSemanticDigest !== semanticDigest) {
       return reject('REVIEW_PROVENANCE_INVALID', 'the review artifact changed after its finalization provenance was recorded', digests);
     }
+  }
+  if (repairIntent?.state === 'passed'
+    && (repairIntent.finalArtifactSha256 !== artifactSha256 || repairIntent.finalSemanticDigest !== semanticDigest)) {
+    repairIntent = undefined;
   }
   if (!hasOpenArtifactRound(taskContent, spec.family, parsed.round)) {
     return reject('REVIEW_ARTIFACT_IDENTITY_INVALID', `${request.artifact} does not have one matching open started review event`);

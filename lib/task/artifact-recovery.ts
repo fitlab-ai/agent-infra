@@ -273,7 +273,7 @@ export function beginArtifactRecovery(
       fail('ARTIFACT_RECOVERY_BASELINE_MISMATCH', 'formal artifact does not match the recovery baseline');
     }
     const existing = readArtifactRecoveryIntent(prepared.repoRoot, prepared.taskId, prepared.family, prepared.artifact);
-    if (existing && existing.state !== 'aborted' && existing.state !== 'consumed') {
+    if (existing && !['aborted', 'consumed', 'passed'].includes(existing.state)) {
       fail('ARTIFACT_RECOVERY_CONFLICT', 'an active recovery journal already exists for this artifact');
     }
     writeBytes(prepared.baselinePath, baselineBytes);
@@ -313,7 +313,7 @@ export function recordArtifactRecoveryPassed(
       && existing.finalSemanticDigest === prepared.baselineSemanticDigest) {
       return recoveryContextFromIntent(prepared.repoRoot, prepared.taskDir, existing);
     }
-    if (existing && existing.state !== 'aborted') {
+    if (existing && existing.state !== 'aborted' && existing.state !== 'passed') {
       fail('ARTIFACT_RECOVERY_CONFLICT', 'an active recovery journal already exists for this artifact');
     }
     const base = createIntent(prepared, Date.now());
@@ -373,12 +373,12 @@ function writeGeneration(context: ArtifactRecoveryContext, bytes: Buffer, sha256
 
 function publishGeneration(context: ArtifactRecoveryContext, sha256: string, semanticDigest: string, baselineSha256: string): void {
   const target = readStableFileSync(context.formalPath, { maxBytes: MAX_ARTIFACT_BYTES });
-  if (target.sha256 === sha256) return;
-  if (target.sha256 !== baselineSha256) fail('ARTIFACT_RECOVERY_CONFLICT', 'formal artifact changed outside the expected generation');
   const generation = readStableFileSync(generationPath(context, sha256), { maxBytes: MAX_ARTIFACT_BYTES, expectedSha256: sha256 });
   if (canonicalSemanticDigest(generation.bytes.toString('utf8')) !== semanticDigest) {
     fail('ARTIFACT_RECOVERY_CONFLICT', 'generation semantic digest does not match the journal');
   }
+  if (target.sha256 === sha256) return;
+  if (target.sha256 !== baselineSha256) fail('ARTIFACT_RECOVERY_CONFLICT', 'formal artifact changed outside the expected generation');
   const publishPath = path.join(path.dirname(context.stagingPath), 'publish.md');
   unlinkIfPresent(publishPath);
   writeBytes(publishPath, generation.bytes);
