@@ -11,6 +11,9 @@
 | `artifactChunk` | `<!-- sync-issue:{task-id}:{artifact-stem}:{part}/{total} -->` |
 | `summary` | `<!-- sync-issue:{task-id}:summary -->` |
 | `cancel` | `<!-- sync-issue:{task-id}:cancel -->` |
+| `recoveryAction` | `<!-- sync-issue:{task-id}:recovery-action:{action-id} -->` |
+| `recoveryPrepare` | `<!-- sync-issue:{task-id}:recovery-prepare:{commit-id} -->` |
+| `recoveryCommit` | `<!-- sync-issue:{task-id}:recovery-commit:{commit-id} -->` |
 
 `pr-review` content is synced only as an Issue artifact comment (via the `artifact` / `artifactChunk` markers) and is never a `restore-task` recovery source; restore still accepts only an Issue token and reads only registered Issue markers, with no PR source.
 
@@ -25,7 +28,9 @@ agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token
 
 The core owns status/in labels, assignees, milestones, Issue Type, pinned fields, requirements, state, capabilities, dry-run, retries, errors, and idempotency. Omitted flags preserve values; `none` explicitly clears them. Status labels converge to at most one, and ambiguous requirement identity fails closed.
 
-Task content over the platform comment byte limit is not uploaded; the core returns a skipped operation with `COMMENT_PAYLOAD_TOO_LARGE`. The local task file is unchanged, and platform verification skips the task marker/content check for the same oversized input.
+The task comment is a deterministic current-task projection of the complete local `task.md`. Its byte preflight and platform verification use the same final rendered UTF-8 body. Projection failures and projected comments over the platform limit fail closed; the local task file is never truncated.
+
+Recovery comments use `recovery-action`, `recovery-prepare`, and `recovery-commit` markers with a stable recovery id and a body file. Replaying identical content is a no-op. Different content for an existing recovery marker fails with `RECOVERY_IMMUTABLE_CONFLICT` and never overwrites the published recovery fact.
 
 PR event `in:` synchronization uses `agent-infra-internal platform-pr sync-in-labels --pr <N> [--cwd <path>]`. PR files are the event evidence; a unique closing Issue is written and re-read before the PR. Zero or multiple closing Issues update only the PR and return `degraded`; unknown side effects or failed convergence return `blocked` with `IN_LABEL_SYNC_PARTIAL`.
 

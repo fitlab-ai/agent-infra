@@ -13,6 +13,7 @@ import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
 import { isTaskCommentTooLarge } from "./issue-comments.ts";
+import { projectTaskComment } from "./task-comment-projection.ts";
 import {
   CONTROL_MARKER_PATTERN,
   canonicalizeCommentBody,
@@ -542,10 +543,6 @@ function checkTaskCommentContent(context: any, remoteData: any, shared: Verifica
   if (!context.config.verify_task_comment_content) {
     return null;
   }
-  if (isTaskCommentTooLarge(context.task.content)) {
-    return null;
-  }
-
   const taskMarker = `<!-- sync-issue:${context.task.metadata.id}:task -->`;
   const comment = findCommentByMarker(remoteData.comments, taskMarker);
   if (!comment) {
@@ -555,7 +552,16 @@ function checkTaskCommentContent(context: any, remoteData: any, shared: Verifica
     );
   }
 
-  const expectedTaskBody = buildExpectedTaskBody(context.task.content, shared);
+  let projectedContent: string;
+  try {
+    projectedContent = projectTaskComment(context.task.content).content;
+  } catch {
+    return shared.failResult(CHECK_TYPE, "Task content cannot be projected safely for comment verification", "check_failed");
+  }
+  if (isTaskCommentTooLarge(context.task.content, context.task.metadata.id, 'codex')) {
+    return shared.failResult(CHECK_TYPE, "Projected task comment exceeds the platform byte limit", "check_failed");
+  }
+  const expectedTaskBody = buildExpectedTaskBody(projectedContent, shared);
   if (expectedTaskBody === null) {
     return shared.failResult(CHECK_TYPE,
       "Task content cannot be rendered safely for comment verification",

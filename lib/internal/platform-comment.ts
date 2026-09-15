@@ -15,7 +15,7 @@ import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-in
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment owner <task-ref> [--cwd <path>]
        agent-infra-internal platform-comment backfill <task-ref> --agent <agent> [--cwd <path>]
-       agent-infra-internal platform-comment sync <task-ref> --kind <kind> --agent <agent> [--artifact <file>] [--body-file <path|->] [--status-label <label>] [--backfill] [--cwd <path>]
+       agent-infra-internal platform-comment sync <task-ref> --kind <kind> --agent <agent> [--artifact <file>] [--body-file <path|->] [--recovery-id <id>] [--status-label <label>] [--backfill] [--cwd <path>]
 `;
 
 function fail(message: string): void {
@@ -35,7 +35,7 @@ function parseFlags(args: string[], start: number): { values: Record<string, str
   const seen = new Set<string>();
   for (let index = start; index < args.length; index += 1) {
     const flag = args[index]!;
-    if (!['--issue', '--cwd', '--kind', '--agent', '--artifact', '--body-file', '--status-label', '--backfill'].includes(flag)) {
+    if (!['--issue', '--cwd', '--kind', '--agent', '--artifact', '--body-file', '--recovery-id', '--status-label', '--backfill'].includes(flag)) {
       return { values, error: `unknown option '${flag}'` };
     }
     if (seen.has(flag)) return { values, error: `duplicate option '${flag}'` };
@@ -96,12 +96,13 @@ async function platformComment(args: string[] = []): Promise<void> {
   if (!internalHandlerRoute('platform-comment', 'sync', operation)) { fail('operation is not registered'); return; }
   const kind = parsed.values.kind;
   const agent = parsed.values.agent;
-  if (!['task', 'artifact', 'summary', 'cancel'].includes(String(kind))) { fail('sync requires a valid --kind'); return; }
+  if (!['task', 'artifact', 'summary', 'cancel', 'recovery-action', 'recovery-prepare', 'recovery-commit'].includes(String(kind))) { fail('sync requires a valid --kind'); return; }
   if (typeof agent !== 'string' || !agent) { fail('sync requires --agent'); return; }
   const normalizedAgent = normalizeAgentToken(agent);
   if (!normalizedAgent) { fail(`invalid --agent '${agent}': ${AGENT_USAGE_HINT}`); return; }
   if (kind === 'artifact' && typeof parsed.values.artifact !== 'string') { fail('artifact sync requires --artifact'); return; }
   if ((kind === 'summary' || kind === 'cancel') && typeof parsed.values.bodyFile !== 'string') { fail(`${kind} sync requires --body-file`); return; }
+  if (String(kind).startsWith('recovery-') && (typeof parsed.values.bodyFile !== 'string' || typeof parsed.values.recoveryId !== 'string')) { fail(`${kind} sync requires --body-file and --recovery-id`); return; }
   let body: string | undefined;
   try {
     if (typeof parsed.values.bodyFile === 'string') body = readBodyFile(parsed.values.bodyFile, cwd);
@@ -114,6 +115,7 @@ async function platformComment(args: string[] = []): Promise<void> {
     agent: normalizedAgent,
     artifact: typeof parsed.values.artifact === 'string' ? parsed.values.artifact : undefined,
     body,
+    recoveryId: typeof parsed.values.recoveryId === 'string' ? parsed.values.recoveryId : undefined,
     backfill: parsed.values.backfill === true,
     cwd
   }));

@@ -16,6 +16,7 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityNumber } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
+import { projectTaskComment } from './task-comment-projection.ts';
 import {
   canonicalizeCommentBody,
   escapeHtmlText,
@@ -26,12 +27,13 @@ import type { FenceRange } from './comment-safety.ts';
 
 type RemoteComment = { id: number | string; body: string; user?: { login?: string } };
 type RenderedChunk = { marker: string; body: string; content: string; part: number; total: number };
-type CommentKind = 'task' | 'artifact' | 'summary' | 'cancel';
+type CommentKind = 'task' | 'artifact' | 'summary' | 'cancel' | 'recovery-action' | 'recovery-prepare' | 'recovery-commit';
 type SyncOptions = {
   kind: CommentKind;
   agent: string;
   artifact?: string;
   body?: string;
+  recoveryId?: string;
   cwd?: string;
   backfill?: boolean;
   client?: PlatformClient;
@@ -48,7 +50,10 @@ const MARKERS = {
   artifactChunk: (taskId: string, stem: string, part: number, total: number) =>
     `<!-- sync-issue:${taskId}:${stem}:${part}/${total} -->`,
   summary: (taskId: string) => `<!-- sync-issue:${taskId}:summary -->`,
-  cancel: (taskId: string) => `<!-- sync-issue:${taskId}:cancel -->`
+  cancel: (taskId: string) => `<!-- sync-issue:${taskId}:cancel -->`,
+  recoveryAction: (taskId: string, actionId: string) => `<!-- sync-issue:${taskId}:recovery-action:${actionId} -->`,
+  recoveryPrepare: (taskId: string, commitId: string) => `<!-- sync-issue:${taskId}:recovery-prepare:${commitId} -->`,
+  recoveryCommit: (taskId: string, commitId: string) => `<!-- sync-issue:${taskId}:recovery-commit:${commitId} -->`
 };
 const COMMENT_BYTE_LIMIT = 60_000;
 
@@ -68,8 +73,8 @@ function normalizeCommentContent(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
 }
 
-function isTaskCommentTooLarge(content: string): boolean {
-  return Buffer.byteLength(content, 'utf8') > COMMENT_BYTE_LIMIT;
+function isTaskCommentTooLarge(content: string, taskId = 'TASK-UNKNOWN', agent = 'codex'): boolean {
+  return Buffer.byteLength(renderTaskComment(content, taskId, agent), 'utf8') > COMMENT_BYTE_LIMIT;
 }
 
 function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
@@ -89,7 +94,8 @@ function footer(agent: string, taskId: string): string {
 }
 
 function renderTaskComment(content: string, taskId: string, agent: string): string {
-  const split = splitFrontmatter(content);
+  const projected = content.startsWith('---') ? projectTaskComment(content).content : content;
+  const split = splitFrontmatter(projected);
   const safeBody = sanitizeCommentBody(split.body, 'task body');
   const taskBody = split.frontmatter === null
     ? safeBody
@@ -385,6 +391,16 @@ function expectedComments(
     });
   }
   if (options.body === undefined) throw new Error(`${options.kind} sync requires a body`);
+  if (options.kind.startsWith('recovery-')) {
+    if (!options.recoveryId || /[\r\n]/.test(options.recoveryId)) throw new Error('recovery sync requires a stable recovery id');
+    const marker = options.kind === 'recovery-action'
+      ? MARKERS.recoveryAction(taskId, options.recoveryId)
+      : options.kind === 'recovery-prepare'
+        ? MARKERS.recoveryPrepare(taskId, options.recoveryId)
+        : MARKERS.recoveryCommit(taskId, options.recoveryId);
+    const title = options.kind === 'recovery-action' ? '恢复动作记录' : options.kind === 'recovery-prepare' ? '恢复提交准备' : '恢复提交完成';
+    return [{ marker, body: bodyEnvelope(marker, title, taskId, options.agent, options.body), content: options.body, part: 1, total: 1 }];
+  }
   const marker = options.kind === 'summary' ? MARKERS.summary(taskId) : MARKERS.cancel(taskId);
   const title = options.kind === 'summary' ? '交付摘要' : '任务取消';
   const body = bodyEnvelope(marker, title, taskId, options.agent, options.body);
@@ -395,6 +411,9 @@ function markerPrefix(taskId: string, options: SyncOptions): string {
   if (options.kind === 'task') return `<!-- sync-issue:${taskId}:task`;
   if (options.kind === 'summary') return `<!-- sync-issue:${taskId}:summary`;
   if (options.kind === 'cancel') return `<!-- sync-issue:${taskId}:cancel`;
+  if (options.kind === 'recovery-action') return `<!-- sync-issue:${taskId}:recovery-action:${options.recoveryId}`;
+  if (options.kind === 'recovery-prepare') return `<!-- sync-issue:${taskId}:recovery-prepare:${options.recoveryId}`;
+  if (options.kind === 'recovery-commit') return `<!-- sync-issue:${taskId}:recovery-commit:${options.recoveryId}`;
   const stem = path.basename(options.artifact || '', '.md');
   return `<!-- sync-issue:${taskId}:${stem}`;
 }
@@ -458,13 +477,6 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
     });
   }
-  if (options.kind === 'task' && isTaskCommentTooLarge(taskContent)) {
-    return platformResult('no-op', {
-      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask), identity: issueIdentityFromTask },
-      operations: [{ name: `comment:${MARKERS.task(resolved.taskId)}`, status: 'skipped', reasonCode: 'COMMENT_PAYLOAD_TOO_LARGE' }],
-      error: null
-    });
-  }
   let desired: RenderedChunk[];
   try {
     desired = expectedComments(resolved.taskId, taskContent, resolved.taskDir, options);
@@ -472,6 +484,13 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     return platformResult('failed', {
       resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask) },
       error: { code: 'COMMENT_PAYLOAD_INVALID', message: error instanceof Error ? error.message : String(error), retryable: false }
+    });
+  }
+  if (options.kind === 'task' && Buffer.byteLength(desired[0]!.body, 'utf8') > COMMENT_BYTE_LIMIT) {
+    return platformResult('failed', {
+      resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask), identity: issueIdentityFromTask },
+      operations: [{ name: `comment:${MARKERS.task(resolved.taskId)}`, status: 'skipped', reasonCode: 'COMMENT_PAYLOAD_TOO_LARGE' }],
+      error: { code: 'COMMENT_PAYLOAD_TOO_LARGE', message: 'Projected task comment exceeds the platform byte limit', retryable: false }
     });
   }
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
@@ -536,6 +555,12 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       operations.push({ name: `comment:${item.marker}`, status: 'no-op', reasonCode: null });
       continue;
     }
+    if (current && options.kind.startsWith('recovery-')) {
+      return platformResult('failed', {
+        ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
+        error: { code: 'RECOVERY_IMMUTABLE_CONFLICT', message: `Recovery marker '${item.marker}' already has different content`, retryable: false }
+      });
+    }
     const written = loaded.value.provider.comments?.write
         ? await loaded.value.provider.comments.write({
           context: providerOperationContext(loaded.value),
@@ -561,7 +586,7 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   }
 
   const desiredMarkers = new Set(desired.map((item) => item.marker));
-  const stale = existing.filter((comment) => !desiredMarkers.has(normalizeCommentContent(comment.body).split('\n', 1)[0]!));
+  const stale = options.kind.startsWith('recovery-') ? [] : existing.filter((comment) => !desiredMarkers.has(normalizeCommentContent(comment.body).split('\n', 1)[0]!));
   for (const comment of stale) {
     const deleted = loaded.value.provider.comments?.delete
         ? await loaded.value.provider.comments.delete({

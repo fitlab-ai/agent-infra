@@ -264,30 +264,36 @@ test('comment sync rejects malformed content before reading or writing remote co
   assert.equal(calls, 0);
 });
 
-test('comment sync skips oversized task content before any remote operation', async () => {
+test('comment sync measures the projected task comment rather than workflow history', async () => {
   const root = syncFixture();
   fs.appendFileSync(
     path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
-    `\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}\n`
+    `\n## 活动日志\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}\n`
   );
-  let calls = 0;
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   const client = {
-    version() { calls += 1; throw new Error('remote read must not be attempted'); },
-    json() { calls += 1; throw new Error('remote read must not be attempted'); },
-    text() { calls += 1; throw new Error('remote write must not be attempted'); }
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        comments.push({ id: 10, body: JSON.parse(options?.input || '{}').body, user: { login: 'codex' } });
+        return { ok: true, value: { id: 10 } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
 
   const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'task', agent: 'codex', cwd: root, client
   });
-  assert.equal(result.status, 'no-op');
-  assert.equal(result.changed, false);
-  assert.deepEqual(result.operations, [{
-    name: `comment:${MARKERS.task('TASK-20260101-000001')}`,
-    status: 'skipped',
-    reasonCode: 'COMMENT_PAYLOAD_TOO_LARGE'
-  }]);
-  assert.equal(calls, 0);
+  assert.equal(result.status, 'applied');
+  assert.equal(result.changed, true);
+  assert.equal(comments.length, 1);
+  assert.equal(comments[0]!.body.includes('## 活动日志'), false);
 });
 
 test('comment sync transports safe artifact Markdown without changing its link syntax', async () => {
@@ -542,4 +548,34 @@ test('artifact sync refuses duplicate base markers without writing', async () =>
   });
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'COMMENT_MARKER_CONFLICT');
+});
+
+test('recovery comments are immutable and idempotent by stable marker', async () => {
+  const root = syncFixture();
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
+  const client = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        comments.push({ id: comments.length + 1, body: JSON.parse(options?.input || '{}').body, user: { login: 'codex' } });
+        return { ok: true, value: { id: comments.length } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('unexpected text request'); }
+  } as unknown as GitHubClient;
+  const options = {
+    kind: 'recovery-action' as const, recoveryId: 'action-1', body: '{"sequence":1}', agent: 'codex', cwd: root, client
+  };
+
+  assert.equal((await syncPlatformComment('TASK-20260101-000001', options)).status, 'applied');
+  assert.equal((await syncPlatformComment('TASK-20260101-000001', options)).status, 'no-op');
+  const conflict = await syncPlatformComment('TASK-20260101-000001', { ...options, body: '{"sequence":2}' });
+  assert.equal(conflict.status, 'failed');
+  assert.equal(conflict.error?.code, 'RECOVERY_IMMUTABLE_CONFLICT');
+  assert.equal(comments.length, 1);
 });

@@ -44,13 +44,14 @@ description: >
 
 ### 3. 确定 task-id 与待恢复文件
 
-按 `.agents/rules/issue-sync.md` 中定义的 task、artifact 和分片 artifact 标记筛选评论。
+按 `.agents/rules/issue-sync.md` 中定义的 task、artifact、分片 artifact 和 recovery 标记筛选评论。
 
 处理规则：
 - 用户提供了 `{task-id}` 时，仅匹配该任务
 - 未提供时，优先从 task 评论标记推断
 - 若找不到唯一 task-id，立即停止并告知用户
 - 忽略 `summary` 标记评论；它是 complete-task 的聚合产物，不对应本地任务文件
+- 将 `recovery-action`、`recovery-prepare` 和 `recovery-commit` 评论作为流程事实来源；它们不映射为独立文件
 - 将 `{file-stem}` 映射回文件名：
   - `task` -> `task.md`
   - `analysis` / `analysis-r{N}` -> 对应 `.md`
@@ -71,6 +72,11 @@ description: >
 - 如分片标记中存在 part 和 total 序号，按 part 升序排序并校验分片完整
 - 从评论正文中提取文件内容，去掉隐藏标记、标题和页脚
 - 拼接得到最终文件内容
+
+对 recovery 评论执行：
+- 验证可信作者、marker 唯一性、schema、稳定 ID、分片完整性和 payload 摘要
+- 选择最高 sequence 的 prepare；仅当存在完全匹配的 commit、task 快照和完整动作集合时，按 sequence 回放流程章节
+- 缺少最后一条动作或 commit、prepare/commit 不一致、重复 marker、作者冲突、乱序、未知 schema 或摘要不符时，在写 staging 前失败，不推测过程状态
 
 在写文件前检查：
 - `.agents/workspace/active/{task-id}/`、`blocked/{task-id}/`、`completed/{task-id}/` 均不存在

@@ -9,6 +9,8 @@ import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { buildBoundFact, buildSkippedFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 import { parseTypedTaskFrontmatter } from "../../../lib/task/frontmatter.ts";
 import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument } from "../../../lib/platform/comment-safety.ts";
+import { renderTaskComment } from "../../../lib/platform/issue-comments.ts";
+import { projectTaskComment } from "../../../lib/platform/task-comment-projection.ts";
 
 import {
   filePath,
@@ -285,6 +287,8 @@ function buildArtifactComment(taskId: string, artifactFile: string, title: strin
 }
 
 function buildTaskComment(taskId: string, taskContent: string, options: TaskCommentOptions = {}) {
+  if (!options.rawBody && !options.summaryText) return renderTaskComment(taskContent, taskId, "codex");
+  if (!options.rawBody) taskContent = projectTaskComment(taskContent).content;
   const match = taskContent.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   const body = match ? taskContent.slice(match[0].length).trim() : taskContent.trim();
   const summaryText = options.summaryText || "元数据 (frontmatter)";

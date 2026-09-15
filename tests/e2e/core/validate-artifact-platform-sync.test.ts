@@ -224,15 +224,16 @@ test("platform-sync compares task comments after the same sanitization used by c
   });
 });
 
-test("platform-sync skips task comment verification when task content is too large", async () => {
+test("platform-sync verifies a projected task comment when workflow history is too large", async () => {
   await withTempRoot("agent-infra-platform-sync-large-task-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
-    const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}`;
+    const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n## 活动日志\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}`;
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     write(path.join(ctx.taskDir, "code.md"), "# 实现报告\n\n通过");
     writeJson(ctx.issuePath, buildIssuePayload());
     writeJson(ctx.commentsPath, [
-      { body: buildArtifactComment(taskId, "code.md", "实现报告", "# 实现报告\n\n通过") }
+      { body: buildArtifactComment(taskId, "code.md", "实现报告", "# 实现报告\n\n通过") },
+      { body: buildTaskComment(taskId, taskContent) }
     ]);
 
     const result = await runValidatorWithFakeGh(
