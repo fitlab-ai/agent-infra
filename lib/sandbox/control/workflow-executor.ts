@@ -5,7 +5,7 @@ import { parseReviewCommand } from '../../task/review-command.ts';
 import { prepareLocalArtifact, preflightLocalArtifact, commitLocalArtifactProvenance } from '../../task/local-artifact-finalization.ts';
 import { prepareReviewSummaryCandidate, commitReviewSummaryProvenance } from '../../task/review-finalization.ts';
 import { withTaskExecutionLock } from '../../task/task-execution-lock.ts';
-import { dispatchHostControlCommand } from '../../host-control/command.ts';
+import { dispatchWorkflowCommand } from '../../task/workflow-dispatch.ts';
 import { assertSandboxTaskSource } from '../workspace-view.ts';
 import { appendDiagnosticAudit } from './audit.ts';
 import {
@@ -45,10 +45,9 @@ export async function executeTaskWorkflow(
     }
     if (command !== 'task-artifact' && command !== 'task-review') {
       publicationStarted = true;
-      // Inherit this executor's process group so its existing recovery owns the worker too.
-      const result = await dispatchHostControlCommand({
-        operation: command, payload: { workingDirectory: manifest.repoRoot, args: request.args }
-      });
+      // The broker owns this short-lived executor; no global service or worker
+      // credential participates in the command's authority or recovery path.
+      const result = await dispatchWorkflowCommand(manifest.repoRoot, command, request.args);
       return result;
     }
     const input = command === 'task-artifact' ? parseArtifactCommand(request.args) : parseReviewCommand(request.args);

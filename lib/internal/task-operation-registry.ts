@@ -56,10 +56,6 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'sandbox-control', 'execute', 'non-task', 'progress', 'none'),
     descriptor('internal', 'sandbox-control', 'recover', 'conditional', 'recovery', 'delegated'),
     descriptor('internal', 'sandbox-control', 'client', 'conditional', 'progress', 'delegated'),
-    descriptor('internal', 'host-control', 'serve', 'non-task', 'progress', 'none'),
-    descriptor('internal', 'host-control', 'status', 'non-task', 'diagnostic', 'none'),
-    descriptor('internal', 'host-control', 'install', 'non-task', 'progress', 'none'),
-    descriptor('internal', 'host-control', 'uninstall', 'non-task', 'progress', 'none'),
     descriptor('internal', 'agent-client', 'next-steps', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'agent-client', 'model-selection', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'codex-lifecycle', 'preflight', 'non-task', 'diagnostic', 'none'),
@@ -221,7 +217,7 @@ export const TASK_OPERATION_DESCRIPTORS = Object.freeze([
 ]);
 
 export const INTERNAL_DISPATCHER_ROUTES = Object.freeze([
-  'task-create', 'task-qualification', 'sandbox-control', 'host-control', 'agent-client', 'codex-lifecycle', 'codex-sandbox-controller',
+  'task-create', 'task-qualification', 'sandbox-control', 'agent-client', 'codex-lifecycle', 'codex-sandbox-controller',
   'git-workflow', 'task-delivery', 'release-workflow', 'platform-release-notes', 'platform-security', 'platform-metadata', 'platform-context',
   'platform-comment', 'platform-issue', 'platform-pr', 'platform-pr-review', 'pr-review-grade',
   'platform-checks', 'task-context', 'task-ledger', 'task-warning', 'task-activity', 'task-artifact',
@@ -345,13 +341,22 @@ export function resolveSandboxControlTransport(
   env: NodeJS.ProcessEnv = process.env,
   options: Readonly<{ statusMountPath?: string }> = {}
 ): SandboxControlTransportDecision {
-  const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
-  const fixedStatusDir = options.statusMountPath
-    ?? SANDBOX_CONTROL_STATUS_MOUNT;
   const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
     || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
     || Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
-  const fixedStatusProbe = !env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT && path.isAbsolute(fixedStatusDir)
+  // A host process has no sandbox identity to validate. The previous service
+  // design treated a globally mounted status directory as implicit authority;
+  // that made an authorized broker child indistinguishable from a direct host
+  // command after its sandbox credentials were deliberately stripped.
+  if (!hasAnyMarker) return { kind: 'direct-host', reasonCode: null };
+  const hasCompleteConfig = TASK_CONTROL_CONFIG_KEYS.every((key) => Boolean(env[key]));
+  if (!hasCompleteConfig) {
+    return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
+  }
+  const configuredStatusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR;
+  const fixedStatusDir = options.statusMountPath
+    ?? SANDBOX_CONTROL_STATUS_MOUNT;
+  const fixedStatusProbe = path.isAbsolute(fixedStatusDir)
     ? nativeDirectoryProbe(fixedStatusDir) : 'absent';
   if (fixedStatusProbe === 'unknown') {
     return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_UNAVAILABLE' };
@@ -362,11 +367,10 @@ export function resolveSandboxControlTransport(
   if (configuredStatusProbe === 'unknown') {
     return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_UNAVAILABLE' };
   }
-  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir) && configuredStatusProbe === 'present'
-    ? configuredStatusDir
+  const statusDir = configuredStatusDir && path.isAbsolute(configuredStatusDir)
+    ? configuredStatusProbe === 'present' ? configuredStatusDir : null
     : fixedStatusMounted ? fixedStatusDir : null;
   const statusMounted = statusDir !== null;
-  const hasCompleteConfig = TASK_CONTROL_CONFIG_KEYS.every((key) => Boolean(env[key]));
   if (env.AGENT_INFRA_EXECUTOR_MANIFEST || env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING) {
     return { kind: 'fail-closed', reasonCode: 'TASK_CONTROL_TRANSPORT_INVALID' };
   }

@@ -306,21 +306,21 @@ test('mounted sandbox control requires a matching identity sentinel', onPlatform
   }
 });
 
-test('fixed status mount fails closed after all control environment variables are cleared', () => {
+test('fixed status mount does not override a credential-free direct-host route', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-operation-fixed-mount-'));
   const statusDir = path.join(root, 'status');
   fs.mkdirSync(statusDir);
   try {
     assert.equal(SANDBOX_CONTROL_STATUS_MOUNT, '/run/agent-infra/control-status');
     assert.deepEqual(resolveSandboxControlTransport({}, { statusMountPath: statusDir }), {
-      kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_MISSING'
+      kind: 'direct-host', reasonCode: null
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('tampered native status probe fails closed instead of selecting direct-host', () => {
+test('a status probe does not affect a credential-free direct-host route', () => {
   const script = [
     "const realBinding = process.binding;",
     "process.binding = (name) => name === 'fs' ? { internalModuleStat: () => -2 } : realBinding(name);",
@@ -346,7 +346,7 @@ test('tampered native status probe fails closed instead of selecting direct-host
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
-    kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_UNAVAILABLE'
+    kind: 'direct-host', reasonCode: null
   });
 });
 

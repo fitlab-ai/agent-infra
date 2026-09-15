@@ -2,46 +2,41 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import type { HostControlRequest } from './client.ts';
-import { readHostControlWorkerToken, resolveHostControlEndpoint } from './path.ts';
-
-type HostCommandResult = Readonly<{
+export type WorkflowDispatchResult = Readonly<{
   stdout: string;
   stderr: string;
   exitCode: number;
 }>;
 
-export async function dispatchHostControlCommand(
-  request: Pick<HostControlRequest, 'operation' | 'payload'>
-): Promise<HostCommandResult> {
-  const { payload } = request;
+/**
+ * Runs a broker-authorized workflow command in a short-lived host process.
+ * The broker has already authenticated the request, manifest, generation,
+ * owner, and lease before this function is reached. The child receives no
+ * reusable authority credential and executes through the normal direct-host
+ * domain handlers.
+ */
+export async function dispatchWorkflowCommand(
+  repoRoot: string,
+  command: string,
+  args: readonly string[]
+): Promise<WorkflowDispatchResult> {
   const compiledEntry = fileURLToPath(new URL('../../bin/internal-cli.js', import.meta.url));
   const sourceEntry = fileURLToPath(new URL('../../bin/internal-cli.ts', import.meta.url));
   const entry = fs.existsSync(compiledEntry) ? compiledEntry : sourceEntry;
-  const payloadEnvironment = payload.environment ?? {};
-  const env = { ...process.env, ...payloadEnvironment };
+  const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (key.startsWith('AGENT_INFRA_CONTROL_')
       || key === 'AGENT_INFRA_TASK_ID'
       || key === 'AGENT_INFRA_RUNTIME_DIR'
-      || key === 'AGENT_INFRA_EXECUTOR_MANIFEST'
-      || key === 'AGENT_INFRA_HOST_CONTROL_SOCKET') {
-      delete env[key];
-    }
+      || key === 'AGENT_INFRA_EXECUTOR_MANIFEST') delete env[key];
   }
   delete env.NODE_OPTIONS;
   delete env.NODE_PATH;
-  delete env.AGENT_INFRA_HOST_CONTROL_WORKER;
-  delete env.AGENT_INFRA_HOST_CONTROL_WORKER_TOKEN;
-  env.AGENT_INFRA_HOST_CONTROL_WORKER = '1';
-  env.AGENT_INFRA_HOST_CONTROL_WORKER_TOKEN = readHostControlWorkerToken(
-    process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint()
-  );
 
-  return await new Promise<HostCommandResult>((resolve, reject) => {
+  return await new Promise<WorkflowDispatchResult>((resolve, reject) => {
     const runtimeArgs = entry.endsWith('.ts') ? ['--experimental-strip-types', '--no-warnings', entry] : [entry];
-    const child = spawn(process.execPath, [...runtimeArgs, request.operation, ...payload.args], {
-      cwd: payload.workingDirectory,
+    const child = spawn(process.execPath, [...runtimeArgs, command, ...args], {
+      cwd: repoRoot,
       env,
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -53,7 +48,7 @@ export async function dispatchHostControlCommand(
     child.stderr.on('data', (chunk: string) => { stderr += chunk; });
     child.once('error', reject);
     child.once('close', (code, signal) => {
-      if (signal) reject(new Error(`HOST_CONTROL_WORKER_TERMINATED: ${signal}`));
+      if (signal) reject(new Error(`TASK_WORKFLOW_EXECUTOR_TERMINATED: ${signal}`));
       else resolve({ stdout, stderr, exitCode: code ?? 1 });
     });
   });

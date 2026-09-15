@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { writeDurableFile } from '../fs/durable-write.ts';
-import { readStableFileSync } from '../host-control/secure-fs.ts';
+import { readStableFileSync } from './secure-fs.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import { canonicalSemanticDigest, sha256Content } from './artifact-operations.ts';
 import {

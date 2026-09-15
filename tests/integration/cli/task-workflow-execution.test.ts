@@ -13,7 +13,6 @@ import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-execu
 import { createTaskWorkflowRequest } from '../../../lib/sandbox/control/task-workflow.ts';
 import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
 import { onPlatforms } from '../../helpers.ts';
-import { startHostControlServer } from '../../../lib/host-control/server.ts';
 
 const taskId = 'TASK-20260101-000001';
 
@@ -52,21 +51,13 @@ current_step: requirement-analysis-review
   return { root, taskDir, manifest, run };
 }
 
-test('authorized workflow executor owns the command worker without redispatching to the service', onPlatforms('linux', 'darwin'), async () => {
+test('authorized workflow executor dispatches without a global host service', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
-  let dispatched = false;
-  const server = await startHostControlServer({
-    endpoint: path.join(f.root, 'service', 'control.sock'),
-    dispatch: async () => { dispatched = true; throw new Error('UNEXPECTED_REDISPATCH'); }
-  });
-  const previous = process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
-  process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = server.endpoint;
   try {
     const result = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
       'task-ledger', [taskId, 'decision-next-id'], taskId, f.manifest.generation
     ));
     assert.equal(result.exitCode, 0, result.stdout);
-    assert.equal(dispatched, false);
     assert.equal(JSON.parse(result.stdout).entityId, 'HD-1');
     fs.writeFileSync(path.join(f.taskDir, 'plan.md'), 'Unpublished draft\n');
     const mutation = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
@@ -82,9 +73,6 @@ test('authorized workflow executor owns the command worker without redispatching
     assert.equal(directMutation.exitCode, 0, directMutation.stdout);
     assert.match(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), /\| AN-2 \|/u);
   } finally {
-    if (previous === undefined) delete process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
-    else process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT = previous;
-    await server.close();
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });

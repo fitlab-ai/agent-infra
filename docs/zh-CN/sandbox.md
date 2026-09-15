@@ -144,7 +144,7 @@ request 做恢复。如果 broker 恢复时无法保留输出 payload，会返�
 `SANDBOX_CONTROL_OUTPUT_UNAVAILABLE` task 结果并标记
 `recovery: inspect-domain-state`；应先检查宿主任务状态，再判断后续重试是否安全。
 
-任务生命周期、完成收尾和编排统一使用一个 typed Task Control Authority，但入口承载分开。direct-host 命令通过固定 host-control service 进入，不创建沙箱 broker、manifest 或 authority 根目录。沙箱 client 只负责创建 control request；只有 broker 启动的 executor 依次通过 gate、current manifest、request、owner、lease 和 controller 校验后，才能成为 authority caller。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。
+任务生命周期、完成收尾和编排统一使用一个 typed Task Control Authority，但入口承载分开。direct-host 命令在当前 CLI 进程中调用领域 handler，不创建沙箱 broker、manifest 或 authority 根目录。沙箱 client 只负责创建 control request；只有 broker 启动的 executor 依次通过 gate、current manifest、request、owner、lease 和 controller 校验后，才能成为 authority caller。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。
 
 v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑有意不兼容。升级时，或回滚时旧代码访问较新的 per-state 容器，检查都会 fail closed；请执行一次 `ai sandbox start --recreate <task-ref-or-branch>`。容器内进程、tmux 会话、writable layer、普通 `/tmp` 和 RAM 状态可能丢失，但 worktree、本地分支以及宿主管理的任务/工具数据会保留。
 
@@ -152,9 +152,9 @@ v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑�
 
 控制时序集中在可注入的 policy 中：生产默认 control tick 为 250ms，慢速检查和容器 heartbeat 为 5s，parked 退避从 1s 增长到 5s，quiesce deadline 为 7s。测试可以注入更短的值，不需要改变安全状态机。canonical control manifest 只有一份 current、无 version 的 schema，包含精确 container identity、受控 labels 和 root-relative `runtimeDir`；request、response、status、lease、execution、broker owner 与 controller 记录继续保留各自独立的协议版本。materialize 阶段只创建 control 目录并保留内存 draft；完成 container identity 和 labels 检查后，finalize 才通过原子写入发布完整 manifest，随后才能启动 broker。缺失、带 version、字段不完整或未知的 manifest 会 fail closed，并给出 container-only recreation/rebuild 指引；不会按兼容格式解析或迁移。task-bound 容器会把 `runtimeDir` 以读写方式挂载到 `/run/agent-infra/runtime`，客户端状态位于 `runtime/clients/<client>/<store>`，direct-host 则使用仓库内 `.agents/workspace/.runtime/codex-*` fallback。替换失败或结果不确定时保留 control root 和证据。
 
-host-control service 是 direct-host 执行 task-control 和 workflow 写操作的唯一宿主 authority。Linux 固定端点为 `/run/user/<uid>/agent-infra/host-control.sock`；macOS 固定端点为 `/Users/<login>/Library/Application Support/agent-infra/run/host-control.sock`。端点根据宿主账户身份解析，绝不读取 `HOME`、`TMPDIR`、普通环境变量或命令参数。服务目录和 socket 必须属于宿主用户，权限分别为 `0700` 和 `0600`。安装脚本会管理 systemd 用户单元或 launchd 用户代理；`agent-infra-internal host-control status` 可检查端点。服务 authority 缺失或无效时返回 `SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE`，CLI 不会回退到进程内 task handler。
+CLI 与 broker 是 task-control 入口边界。direct-host 命令保留 operation 的 task lock、原子写入、durable receipt 与原生恢复规则。broker 只会在授权后启动一次性 executor，不传递可复用的宿主凭据。系统没有固定宿主端点、用户服务或 fallback 路径。
 
-task-bound workspace 挂载由宿主创建的可写 task projection，权威 task 目录保持在容器可写视图之外。workflow 传输层绑定 task、generation 和封闭操作目录，原样传递参数，由 CLI 共用的领域解析器解释。已授权 executor 直接调用共享产物操作，其他 workflow 命令复用隔离的 CLI worker。worker 继承 executor 的进程组，因此现有恢复流程也能终止实际命令，沙箱执行不再转交服务。direct-host worker 仍由服务持有。响应直接携带业务退出码，失败审计也使用该退出码。执行前拒绝表示未执行；执行失败或请求发出后的传输失败表示结果未知，不得自动重试。服务在端点整个生命周期持有原生文件锁，即使调用方断连，也会等已派发工作结束后再释放资源。重复关闭旧实例不会删除后续实例的资源。
+task-bound workspace 挂载由宿主创建的可写 task projection，权威 task 目录保持在容器可写视图之外。workflow 传输层绑定 task、generation 和封闭操作目录，原样传递参数，由 CLI 共用的领域解析器解释。已授权 executor 直接调用共享产物操作，其他 workflow 命令使用一次性 CLI worker。worker 只在 broker 授权后创建，且不会得到可复用的宿主凭据。响应直接携带业务退出码，失败审计也使用该退出码。执行前拒绝表示未执行；执行失败表示结果未知，不得自动重试。
 
 产物初始化和修复只修改候选文件。最终化读取权威任务元数据和产物目录，通过共享领域逻辑一次性准备已验证内容和待写凭据，发布缓冲区后提交凭据，不重复运行校验。宿主校验记录的 projection 拓扑，使用 `O_NOFOLLOW` 打开顶层规范候选文件，通过同一文件描述符读取并计算摘要，检查可观察的身份与元数据变化。发布时不重新打开候选文件；projection 中的编辑不会把 `task.md` 或任意文件复制回权威目录。恢复逻辑复用生命周期日志解析器和完整的编排完成证据契约，保留其中的 PR 字段。单个产物替换是原子的，但替换与 provenance 并非跨文件事务：发布后失败时，可能需要先检查领域状态再决定能否重试。
 

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { readStableFileSync } from '../host-control/secure-fs.ts';
+import { readStableFileSync } from './secure-fs.ts';
 import { parseArtifactName } from './artifact-name.ts';
 
 import { scanVisibleMarkdown, type VisibleMarkdown, type VisibleHeading } from './markdown.ts';
