@@ -28,6 +28,17 @@ test('task comments preserve frontmatter and body in reversible details format',
   assert.match(rendered, /# Task\n\nBody \| `code`/);
 });
 
+test('task comments publish only the current snapshot', () => {
+  const task = [
+    '---', 'id: TASK-20260101-000001', 'type: feature', '---', '',
+    '# Task', '', '## Requirements', '', '- [ ] current', '',
+    '## Activity Log', '', '- historic event'
+  ].join('\n');
+  const rendered = renderTaskComment(task, 'TASK-20260101-000001', 'codex');
+  assert.match(rendered, /## Requirements/);
+  assert.equal(rendered.includes('## Activity Log'), false);
+});
+
 test('task comment rendering and byte preflight are independent of the syncing agent', () => {
   const task = `---\nid: TASK-20260101-000001\n---\n\n${'x'.repeat(59_600)}`;
   const codex = renderTaskComment(task, 'TASK-20260101-000001', 'codex');
@@ -252,7 +263,7 @@ test('comment sync preserves source @ content', async () => {
   });
   assert.equal(result.status, 'applied');
   assert.equal(result.changed, true);
-  assert.equal(comments.length, 1);
+  assert.equal(comments.length, 4);
 });
 
 test('comment sync rejects malformed content before reading or writing remote comments', async () => {
@@ -273,7 +284,7 @@ test('comment sync rejects malformed content before reading or writing remote co
   assert.equal(calls, 0);
 });
 
-test('comment sync keeps the complete task comment until structured recovery is available', async () => {
+test('comment sync excludes oversized process history from the task snapshot', async () => {
   const root = syncFixture();
   fs.appendFileSync(
     path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
@@ -299,9 +310,9 @@ test('comment sync keeps the complete task comment until structured recovery is 
   const result = await syncPlatformComment('TASK-20260101-000001', {
     kind: 'task', agent: 'codex', cwd: root, client
   });
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'COMMENT_PAYLOAD_TOO_LARGE');
-  assert.equal(comments.length, 0);
+  assert.equal(result.status, 'applied');
+  assert.ok(comments.length >= 4);
+  assert.ok(comments.every((comment) => Buffer.byteLength(comment.body, 'utf8') <= COMMENT_BYTE_LIMIT));
 });
 
 test('comment sync transports safe artifact Markdown without changing its link syntax', async () => {
@@ -358,11 +369,11 @@ test('comment sync creates once and becomes a no-op on replay', async () => {
   const first = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
   assert.equal(first.status, 'applied');
   assert.equal(first.changed, true);
-  assert.equal(comments.length, 1);
+  assert.equal(comments.length, 4);
   const second = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
   assert.equal(second.status, 'no-op');
   assert.equal(second.changed, false);
-  assert.equal(comments.length, 1);
+  assert.equal(comments.length, 4);
 });
 
 test('comment sync refuses duplicate registered markers without writing', async () => {
@@ -627,4 +638,26 @@ test('recovery comments reject malformed or marker-mismatched payloads before wr
   });
   assert.equal(mismatched.status, 'failed');
   assert.equal(mismatched.error?.code, 'COMMENT_PAYLOAD_INVALID');
+});
+
+test('recovery actions split canonical records under the platform limit', async () => {
+  const root = syncFixture();
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
+  const client = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) { comments.push({ id: comments.length + 1, body: JSON.parse(options?.input || '{}').body, user: { login: 'codex' } }); return { ok: true, value: { id: comments.length } }; }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('unexpected text'); }
+  } as unknown as GitHubClient;
+  const action = encodeRecoveryAction({ taskId: 'TASK-20260101-000001', actionId: 'large-action', sequence: 1, type: 'task-document', payload: { content: 'x'.repeat(COMMENT_BYTE_LIMIT * 2) }, previousActionSha256: null });
+  const result = await syncPlatformComment('TASK-20260101-000001', { kind: 'recovery-action', recoveryId: action.actionId, body: JSON.stringify(action), agent: 'codex', cwd: root, client });
+  assert.equal(result.status, 'applied');
+  assert.ok(comments.length > 1);
+  assert.ok(comments.every((comment) => Buffer.byteLength(comment.body, 'utf8') <= COMMENT_BYTE_LIMIT));
 });

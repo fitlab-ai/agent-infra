@@ -42,3 +42,17 @@ test('recovery manifests bind the action head and task snapshot', () => {
     /manifestSha256/
   );
 });
+
+test('recovery identities only accept marker-safe canonical tokens', () => {
+  const base = {
+    taskId: 'TASK-20260101-000001', actionId: 'action-1', sequence: 1,
+    type: 'activity-log', payload: {}, previousActionSha256: null
+  };
+  for (const actionId of ['action -->', 'action/1', 'action 1', '-action', 'action\n1', 'a'.repeat(129)]) {
+    assert.throws(() => encodeRecoveryAction({ ...base, actionId }), /actionId is invalid/);
+  }
+  assert.throws(() => encodeRecoveryManifest({
+    taskId: base.taskId, commitId: 'commit -->', phase: 'prepare', actionCount: 0,
+    actionHeadSha256: 'a'.repeat(64), snapshotSha256: 'b'.repeat(64)
+  }), /commitId is invalid/);
+});

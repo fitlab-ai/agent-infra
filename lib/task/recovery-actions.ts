@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 const RECOVERY_SCHEMA_VERSION = 1;
 const SHA256 = /^[a-f0-9]{64}$/;
+const CANONICAL_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 type RecoveryActionInput = {
   taskId: string;
@@ -44,7 +45,7 @@ function sha256(value: unknown): string {
 }
 
 function validIdentity(value: string, name: string): void {
-  if (!value || /[\r\n]/.test(value)) throw new Error(`${name} is invalid`);
+  if (!CANONICAL_TOKEN.test(value)) throw new Error(`${name} is invalid`);
 }
 
 function encodeRecoveryAction(input: RecoveryActionInput): RecoveryAction {

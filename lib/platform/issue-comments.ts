@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
@@ -19,8 +20,11 @@ import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts'
 import {
   canonicalJson,
   decodeRecoveryAction,
-  decodeRecoveryManifest
+  decodeRecoveryManifest,
+  encodeRecoveryAction,
+  encodeRecoveryManifest
 } from '../task/recovery-actions.ts';
+import { projectTaskComment } from './task-comment-projection.ts';
 import {
   canonicalizeCommentBody,
   escapeHtmlText,
@@ -56,6 +60,8 @@ const MARKERS = {
   summary: (taskId: string) => `<!-- sync-issue:${taskId}:summary -->`,
   cancel: (taskId: string) => `<!-- sync-issue:${taskId}:cancel -->`,
   recoveryAction: (taskId: string, actionId: string) => `<!-- sync-issue:${taskId}:recovery-action:${actionId} -->`,
+  recoveryActionChunk: (taskId: string, actionId: string, part: number, total: number) =>
+    `<!-- sync-issue:${taskId}:recovery-action:${actionId}:${part}/${total} -->`,
   recoveryPrepare: (taskId: string, commitId: string) => `<!-- sync-issue:${taskId}:recovery-prepare:${commitId} -->`,
   recoveryCommit: (taskId: string, commitId: string) => `<!-- sync-issue:${taskId}:recovery-commit:${commitId} -->`
 };
@@ -95,10 +101,12 @@ function footer(agent: string, taskId: string): string {
 
 function renderTaskCommentResult(content: string, taskId: string): { body: string; byteLength: number } {
   const split = splitFrontmatter(content);
-  const safeBody = sanitizeCommentBody(split.body, 'task body');
-  const taskBody = split.frontmatter === null
+  const projectedContent = split.frontmatter === null ? content : projectTaskComment(content).content;
+  const projected = splitFrontmatter(projectedContent);
+  const safeBody = sanitizeCommentBody(projected.body, 'task body');
+  const taskBody = projected.frontmatter === null
     ? safeBody
-    : `<details><summary>元数据 (frontmatter)</summary>\n\n${renderSafeCodeFence(`---\n${split.frontmatter}\n---`, 'yaml')}\n\n</details>\n\n${safeBody}`;
+    : `<details><summary>元数据 (frontmatter)</summary>\n\n${renderSafeCodeFence(`---\n${projected.frontmatter}\n---`, 'yaml')}\n\n</details>\n\n${safeBody}`;
   const body = normalizeCommentContent([
     MARKERS.task(taskId),
     '## 任务文件',
@@ -115,6 +123,23 @@ function renderTaskCommentResult(content: string, taskId: string): { body: strin
 
 function renderTaskComment(content: string, taskId: string, _agent: string): string {
   return renderTaskCommentResult(content, taskId).body;
+}
+
+function recoveryTransaction(taskId: string, content: string) {
+  const snapshot = projectTaskComment(content);
+  const actionId = createHash('sha256').update(content, 'utf8').digest('hex');
+  const action = encodeRecoveryAction({
+    taskId, actionId, sequence: 1, type: 'task-document', payload: { taskContent: content }, previousActionSha256: null
+  });
+  const commitId = `${snapshot.sha256.slice(0, 32)}-${action.actionSha256.slice(0, 31)}`;
+  const input = {
+    taskId, commitId, actionCount: 1, actionHeadSha256: action.actionSha256, snapshotSha256: snapshot.sha256
+  };
+  return {
+    action,
+    prepare: encodeRecoveryManifest({ ...input, phase: 'prepare' }),
+    commit: encodeRecoveryManifest({ ...input, phase: 'commit' })
+  };
 }
 
 function isTaskCommentTooLarge(content: string, taskId = 'TASK-UNKNOWN', _agent = 'codex'): boolean {
@@ -426,6 +451,14 @@ function expectedComments(
         ? MARKERS.recoveryPrepare(taskId, options.recoveryId)
         : MARKERS.recoveryCommit(taskId, options.recoveryId);
     const title = options.kind === 'recovery-action' ? '恢复动作记录' : options.kind === 'recovery-prepare' ? '恢复提交准备' : '恢复提交完成';
+    if (options.kind === 'recovery-action') {
+      const pieces = chunkByUtf8(content, COMMENT_BYTE_LIMIT - 1_000);
+      if (pieces.length > 1) return pieces.map((piece, index) => {
+        const part = index + 1;
+        const chunkMarker = MARKERS.recoveryActionChunk(taskId, options.recoveryId!, part, pieces.length);
+        return { marker: chunkMarker, body: bodyEnvelope(chunkMarker, title, taskId, options.agent, piece.content), content: piece.content, part, total: pieces.length };
+      });
+    }
     return [{ marker, body: bodyEnvelope(marker, title, taskId, options.agent, content), content, part: 1, total: 1 }];
   }
   const marker = options.kind === 'summary' ? MARKERS.summary(taskId) : MARKERS.cancel(taskId);
@@ -520,6 +553,7 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       error: { code: 'COMMENT_PAYLOAD_TOO_LARGE', message: 'Projected task comment exceeds the platform byte limit', retryable: false }
     });
   }
+  const transaction = options.kind === 'task' ? recoveryTransaction(resolved.taskId, taskContent) : null;
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!hasResolvedPlatformContext(context) || !loaded.ok) return context;
@@ -549,6 +583,18 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       resource: { kind: 'issue', number: issue },
       error: { code: 'COMMENT_MARKER_CONFLICT', message: 'Multiple comments use the same registered marker', retryable: false }
     });
+  }
+
+  if (transaction) {
+    for (const [kind, value, recoveryId] of [
+      ['recovery-prepare', transaction.prepare, transaction.prepare.commitId],
+      ['recovery-action', transaction.action, transaction.action.actionId]
+    ] as const) {
+      const published = await syncPlatformComment(resolved.taskId, {
+        kind, agent: options.agent, body: canonicalJson(value), recoveryId, cwd: resolved.repoRoot, client: options.client
+      });
+      if (published.status === 'failed' || published.status === 'blocked') return published;
+    }
   }
 
   // Backfill only supplies missing artifact comments; valid existing marker sets stay untouched.
@@ -634,7 +680,7 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     operations.push({ name: `comment:${comment.id}`, status: 'applied', reasonCode: 'STALE_CHUNK_DELETED' });
   }
   const changed = operations.some((operation) => operation.status === 'applied');
-  return platformResult(changed ? 'applied' : 'no-op', {
+  const result = platformResult(changed ? 'applied' : 'no-op', {
     ...contextFields(context),
     changed,
     resource: { kind: 'issue', number: issue },
@@ -642,6 +688,12 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     comment: { kind: options.kind, marker: desired[0]!.marker, ids, parts: desired.length },
     error: null
   });
+  if (!transaction) return result;
+  const committed = await syncPlatformComment(resolved.taskId, {
+    kind: 'recovery-commit', agent: options.agent, body: canonicalJson(transaction.commit),
+    recoveryId: transaction.commit.commitId, cwd: resolved.repoRoot, client: options.client
+  });
+  return committed.status === 'failed' || committed.status === 'blocked' ? committed : result;
 }
 
 async function listPlatformComments(issue: string | number, cwd = process.cwd(), client?: PlatformClient): Promise<PlatformResult & { comments?: RemoteComment[] }> {
