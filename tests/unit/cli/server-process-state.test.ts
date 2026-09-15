@@ -143,6 +143,23 @@ test('identity state does not recheck after a valid start-time observation or on
   assert.deepEqual(windowsProbes, [4321]);
 });
 
+test('Linux identity state does not invoke injected macOS observers', () => {
+  let probeCalls = 0;
+  let queryCalls = 0;
+
+  const state = getProcessIdentityStateWithRuntime({ pid: 999_999_999, startTime: 1 }, 'linux', {
+    probePid() { probeCalls += 1; },
+    execFileSync() {
+      queryCalls += 1;
+      return '';
+    }
+  });
+
+  assert.equal(state, 'dead');
+  assert.equal(probeCalls, 0);
+  assert.equal(queryCalls, 0);
+});
+
 test('readProcessState classifies missing, invalid, legacy, mismatch, and matching records', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-process-state-'));
   const pidFile = path.join(dir, 'server.pid');
