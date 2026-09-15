@@ -165,7 +165,7 @@ for (const family of ['plan', 'review-analysis'] as const) {
       const command = family === 'plan' ? 'task-artifact' : 'task-review';
       const result = await f.run(command, [...args, '--artifact', artifact]);
       assert.equal(result.exitCode, 0, result.stdout);
-      assert.equal(result.body.changed, true);
+      assert.equal(result.body.changed, family === 'plan' ? false : true);
       assert.ok(fs.readFileSync(path.join(f.taskDir, artifact), 'utf8').length > 0);
       assert.match(result.body.artifactSha256, /^[a-f0-9]{64}$/u);
       const direct = fs.readFileSync(path.join(f.taskDir, artifact));

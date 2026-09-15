@@ -4,6 +4,7 @@ import { parseArtifactCommand, executeArtifactCommand } from '../../task/artifac
 import { parseReviewCommand } from '../../task/review-command.ts';
 import { prepareLocalArtifact, preflightLocalArtifact, commitLocalArtifactProvenance } from '../../task/local-artifact-finalization.ts';
 import { prepareReviewSummaryCandidate, commitReviewSummaryProvenance } from '../../task/review-finalization.ts';
+import { readArtifactRecoveryIntent } from '../../task/artifact-repair-intent.ts';
 import { withTaskExecutionLock } from '../../task/task-execution-lock.ts';
 import { dispatchWorkflowCommand } from '../../task/workflow-dispatch.ts';
 import { assertSandboxTaskSource } from '../workspace-view.ts';
@@ -40,6 +41,21 @@ export async function executeTaskWorkflow(
   options: TaskWorkflowExecutionOptions = {}
 ): Promise<SandboxControlExecutionResult> {
   let publicationCommitted = false;
+  let recoveryObservation: Readonly<{
+    family: 'analysis' | 'plan' | 'code' | 'review-analysis' | 'review-plan' | 'review-code';
+    artifact: string;
+    wasPassed: boolean;
+  }> | null = null;
+  const observeRecoveryPublication = (): void => {
+    if (!recoveryObservation || recoveryObservation.wasPassed) return;
+    const intent = readArtifactRecoveryIntent(
+      manifest.repoRoot,
+      request.taskId,
+      recoveryObservation.family,
+      recoveryObservation.artifact
+    );
+    publicationCommitted ||= intent?.state === 'passed';
+  };
   let faultTriggered = false;
   const fault = (window: TaskWorkflowFaultWindow): void => {
     if (faultTriggered || options.faultWindow !== window) return;
@@ -107,17 +123,31 @@ export async function executeTaskWorkflow(
           // formal artifact, set publicationStarted, or append finalizer audit.
           return executionResult(preflightLocalArtifact(local));
         }
+        recoveryObservation = {
+          family,
+          artifact: input.artifact,
+          wasPassed: readArtifactRecoveryIntent(manifest.repoRoot, request.taskId, family, input.artifact)?.state === 'passed'
+        };
         const prepared = prepareLocalArtifact(local, content, lifecycleRecoveryAttestation ?? undefined);
+        observeRecoveryPublication();
         if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared));
         result = commitLocalArtifactProvenance(prepared);
       } else {
         if (input.overrideTicket) throw new Error('TASK_WORKFLOW_OVERRIDE_UNSUPPORTED');
+        const family = `review-${input.stage}` as 'review-analysis' | 'review-plan' | 'review-code';
+        recoveryObservation = {
+          family,
+          artifact: input.artifact,
+          wasPassed: readArtifactRecoveryIntent(manifest.repoRoot, request.taskId, family, input.artifact)?.state === 'passed'
+        };
         const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true, startRecovery: true });
+        observeRecoveryPublication();
         if (input.dryRun || prepared.result.status === 'planned') return executionResult(prepared.result);
         if (prepared.result.status === 'failed') return executionResult(commitReviewSummaryProvenance(prepared, manifest.repoRoot));
         result = commitReviewSummaryProvenance(prepared, manifest.repoRoot);
       }
-      publicationCommitted = result.changed === true;
+      observeRecoveryPublication();
+      publicationCommitted ||= result.changed === true;
       if (result.status !== 'failed') appendDiagnosticAudit(manifest, 'task-workflow-artifact-finalized', {
         requestId: request.id, sandboxTaskId: request.taskId, workflowOperation: request.operation,
         artifact: input.artifact, sha256: result.artifactSha256 as string, semanticDigest: result.semanticDigest as string
@@ -126,6 +156,7 @@ export async function executeTaskWorkflow(
       return response(result);
     });
   } catch (error) {
+    observeRecoveryPublication();
     const message = error instanceof Error ? error.message : String(error);
     const code = (error as { code?: string })?.code ?? /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'TASK_WORKFLOW_REQUEST_INVALID';
     return executionResult({ status: 'failed', changed: publicationCommitted ? null : false, error: { code, message } });

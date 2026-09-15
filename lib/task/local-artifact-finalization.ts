@@ -324,7 +324,7 @@ function prepareLocalArtifact(
       prepareArtifactRecoveryCommit(recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: request.lockAlreadyHeld });
     }
     return {
-      result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(recovery!) },
+      result: { ...result, status: 'passed', changed: false, error: null, recovery: recoveryInfo(recovery!) },
       content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld
     };
   }
@@ -371,7 +371,7 @@ function prepareLocalArtifact(
         lockAlreadyHeld: request.lockAlreadyHeld
       });
       recovery = context;
-      return { result: { ...result, status: 'passed', changed: true, error: null, recovery: recoveryInfo(context) }, content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld };
+      return { result: { ...result, status: 'passed', changed: false, error: null, recovery: recoveryInfo(context) }, content, repoRoot: resolved.repoRoot, recovery, authority, lockAlreadyHeld: request.lockAlreadyHeld };
     }
     const context = beginArtifactRecovery(tupleFor(request, resolved.taskId, authority), Buffer.from(content, 'utf8'), {
       repoRoot: resolved.repoRoot,
@@ -399,6 +399,7 @@ function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): Loca
     if (intent.state === 'passed' || intent.state === 'consumed') {
       return {
         ...prepared.result,
+        changed: false,
         artifactSha256: intent.finalArtifactSha256,
         semanticDigest: intent.finalSemanticDigest,
         error: null
@@ -421,7 +422,7 @@ function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): Loca
     return {
       ...prepared.result,
       status: 'passed',
-      changed: true,
+      changed: false,
       artifactSha256: committed.finalArtifactSha256,
       semanticDigest: committed.finalSemanticDigest,
       error: null

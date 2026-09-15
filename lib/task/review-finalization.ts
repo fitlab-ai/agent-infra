@@ -457,7 +457,6 @@ function commitReviewSummaryProvenance(
     if (!committed || committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed?.state ?? intent.state}'`);
     return {
       ...prepared.result,
-      changed: true,
       artifactSha256: committed.finalArtifactSha256,
       semanticDigest: committed.finalSemanticDigest,
       error: null
