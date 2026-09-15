@@ -20,6 +20,9 @@
 Comments use `platform-comment`; Issue resources use `platform-issue`:
 
 ```bash
+agent-infra-internal platform-comment list --issue <issue-token> [--cwd <path>]
+agent-infra-internal platform-comment recover --issue <issue-token> --task-id <TASK-id> \
+  --output <.agents/workspace/.restore-staging-*/task.md> [--cwd <path>]
 agent-infra-internal platform-issue inspect {task-id}
 agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
 agent-infra-internal platform-issue bind {task-id} --issue {issue-token} --agent {standard-agent-token}
@@ -28,9 +31,9 @@ agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token
 
 The core owns status/in labels, assignees, milestones, Issue Type, pinned fields, requirements, state, capabilities, dry-run, retries, errors, and idempotency. Omitted flags preserve values; `none` explicitly clears them. Status labels converge to at most one, and ambiguous requirement identity fails closed.
 
-The task comment synchronizes the complete local `task.md` in a deterministic reversible form. Its byte preflight and platform verification use the same final rendered UTF-8 body. Comments over the platform limit fail closed; the local task file is never truncated.
+The task comment synchronizes only a deterministic current-task projection. Process sections such as the Activity Log, Artifact Lifecycle Receipts, and invalidation records are carried by the recovery transaction. Byte preflight and platform verification consume the same final rendered UTF-8 body.
 
-Recovery comments use `recovery-action`, `recovery-prepare`, and `recovery-commit` markers with a stable recovery id and a body file. The write boundary validates schema, digest, and marker identity. Replaying identical content is a no-op. Different content for an existing recovery marker fails with `RECOVERY_IMMUTABLE_CONFLICT` and never overwrites the published recovery fact. They are not restorable process facts until the coordinator and restore replay are available.
+Recovery comments use `recovery-action`, `recovery-prepare`, and `recovery-commit` markers with a stable recovery id and a body file. Task sync publishes prepare, action, a task snapshot that is written and re-read, and then commit. Replaying identical content is a no-op; conflicting immutable content fails with `RECOVERY_IMMUTABLE_CONFLICT`. Restore accepts only an author-consistent, complete, phase/digest/marker-valid transaction bound to the current task comment body SHA-256.
 
 PR event `in:` synchronization uses `agent-infra-internal platform-pr sync-in-labels --pr <N> [--cwd <path>]`. PR files are the event evidence; a unique closing Issue is written and re-read before the PR. Zero or multiple closing Issues update only the PR and return `degraded`; unknown side effects or failed convergence return `blocked` with `IN_LABEL_SYNC_PARTIAL`.
 

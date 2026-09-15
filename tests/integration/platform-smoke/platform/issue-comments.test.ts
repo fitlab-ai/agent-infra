@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 import {
   COMMENT_BYTE_LIMIT,
@@ -11,6 +12,7 @@ import {
   chunkArtifactComment,
   findMarkerComments,
   renderTaskComment,
+  renderTaskCommentResult,
   normalizeCommentContent,
   syncPlatformComment,
   validateRelatedMarkerSet
@@ -18,6 +20,7 @@ import {
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
 import { sanitizeMarkdownDocument } from '../../../../lib/platform/comment-safety.ts';
 import { encodeRecoveryAction } from '../../../../lib/task/recovery-actions.ts';
+import { recoverTaskFromComments } from '../../../../lib/platform/task-recovery.ts';
 
 test('task comments preserve frontmatter and body in reversible details format', () => {
   const task = '---\nid: TASK-20260101-000001\ntype: feature\n---\n\n# Task\n\nBody | `code`\n';
@@ -39,12 +42,31 @@ test('task comments publish only the current snapshot', () => {
   assert.equal(rendered.includes('## Activity Log'), false);
 });
 
+test('task comments exclude the canonical lifecycle receipt section', () => {
+  const task = [
+    '---', 'id: TASK-20260101-000001', 'type: feature', '---', '',
+    '# Task', '', '## Requirements', '', '- [ ] current', '',
+    '## 产物生命周期收据', '', '| event | output |', '| --- | --- |', '| code.completed | code.md |'
+  ].join('\n');
+  const rendered = renderTaskComment(task, 'TASK-20260101-000001', 'codex');
+  assert.match(rendered, /## Requirements/);
+  assert.equal(rendered.includes('## 产物生命周期收据'), false);
+});
+
 test('task comment rendering and byte preflight are independent of the syncing agent', () => {
   const task = `---\nid: TASK-20260101-000001\n---\n\n${'x'.repeat(59_600)}`;
   const codex = renderTaskComment(task, 'TASK-20260101-000001', 'codex');
   const antigravity = renderTaskComment(task, 'TASK-20260101-000001', 'antigravity');
   assert.equal(codex, antigravity);
   assert.ok(Buffer.byteLength(codex, 'utf8') < COMMENT_BYTE_LIMIT);
+});
+
+test('task comment renderer exposes the final body byte length and digest', () => {
+  const task = '---\nid: TASK-20260101-000001\n---\n\n# Task\n';
+  const rendered = renderTaskCommentResult(task, 'TASK-20260101-000001', 'en');
+  assert.equal(rendered.byteLength, Buffer.byteLength(rendered.body, 'utf8'));
+  assert.equal(rendered.sha256, createHash('sha256').update(rendered.body, 'utf8').digest('hex'));
+  assert.match(rendered.body, /<summary>Metadata \(frontmatter\)<\/summary>/);
 });
 
 test('comment renderers encode mixed-case HTML while preserving fenced examples and markers', () => {
@@ -370,10 +392,51 @@ test('comment sync creates once and becomes a no-op on replay', async () => {
   assert.equal(first.status, 'applied');
   assert.equal(first.changed, true);
   assert.equal(comments.length, 4);
+  assert.equal(
+    recoverTaskFromComments({ taskId: 'TASK-20260101-000001', comments }),
+    fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'), 'utf8')
+  );
+  const conflictingAuthor = comments.map((comment, index) => index === 0
+    ? { ...comment, user: { login: 'mallory' } }
+    : comment);
+  assert.throws(
+    () => recoverTaskFromComments({ taskId: 'TASK-20260101-000001', comments: conflictingAuthor }),
+    /author does not match/
+  );
   const second = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
   assert.equal(second.status, 'no-op');
   assert.equal(second.changed, false);
   assert.equal(comments.length, 4);
+});
+
+test('task recovery commit requires an exact task comment read-after-write', async () => {
+  const root = syncFixture();
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
+  const client = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        const body = JSON.parse(options?.input || '{}').body as string;
+        comments.push({
+          id: comments.length + 1,
+          body: body.startsWith(MARKERS.task('TASK-20260101-000001')) ? `${body}provider rewrite\n` : body,
+          user: { login: 'codex' }
+        });
+        return { ok: true, value: { id: comments.length } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = await syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'RECOVERY_SNAPSHOT_MISMATCH');
+  assert.equal(comments.some((comment) => comment.body.includes(':recovery-commit:')), false);
 });
 
 test('comment sync refuses duplicate registered markers without writing', async () => {

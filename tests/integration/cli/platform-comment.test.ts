@@ -22,15 +22,21 @@ function fixture() {
   fs.writeFileSync(commentsPath, '[]');
   const fakeGhPath = path.join(root, 'fake-gh.cjs');
   fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fakeGhPath);
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     AGENT_INFRA_GH_BIN: process.execPath,
     AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fakeGhPath]),
     GH_FAKE_COMMENTS_PATH: commentsPath,
     GH_FAKE_ISSUE_NUMBER: '7',
     GH_FAKE_USER: 'codex',
+    GH_FAKE_COMMENT_USER: 'codex',
     GH_FAKE_PERMISSIONS: JSON.stringify({ triage: true, push: true, admin: false })
   };
+  for (const key of [
+    'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
+    'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
+    'AGENT_INFRA_EXECUTOR_MANIFEST', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING'
+  ]) delete env[key];
   return { root, taskId, commentsPath, env };
 }
 
@@ -52,12 +58,25 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   const first = spawnSync(process.execPath, command, { cwd: f.root, env: f.env, encoding: 'utf8' });
   assert.equal(first.status, 0, first.stderr);
   assert.equal(JSON.parse(first.stdout).status, 'applied');
-  assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
 
   const second = spawnSync(process.execPath, command, { cwd: f.root, env: f.env, encoding: 'utf8' });
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(second.stdout).status, 'no-op');
-  assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+
+  const stagingDir = path.join(f.root, '.agents', 'workspace', '.restore-staging-cli-test');
+  const outputPath = path.join(stagingDir, 'task.md');
+  fs.mkdirSync(stagingDir, { recursive: true });
+  const recovered = runComment([
+    'recover', '--issue', '7', '--task-id', f.taskId, '--output', outputPath
+  ], f);
+  assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
+  assert.equal(JSON.parse(recovered.stdout).status, 'applied');
+  assert.equal(
+    fs.readFileSync(outputPath, 'utf8'),
+    fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md'), 'utf8')
+  );
 });
 
 test('platform-comment preserves source content including local-looking artifact links', () => {
@@ -68,7 +87,7 @@ test('platform-comment preserves source content including local-looking artifact
     const taskResult = runComment(['sync', taskFixture.taskId, '--kind', 'task', '--agent', 'codex'], taskFixture);
     assert.equal(taskResult.status, 0, taskResult.stderr || taskResult.stdout);
     assert.equal(JSON.parse(taskResult.stdout).status, 'applied');
-    assert.equal(JSON.parse(fs.readFileSync(taskFixture.commentsPath, 'utf8')).length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(taskFixture.commentsPath, 'utf8')).length, 4);
   } finally {
     fs.rmSync(taskFixture.root, { recursive: true, force: true });
   }
@@ -94,7 +113,9 @@ test('platform-comment CLI encodes mixed-case HTML and rejects malformed content
   const f = fixture();
   try {
     const taskPath = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
-    fs.appendFileSync(taskPath, [
+    const initialContent = fs.readFileSync(taskPath, 'utf8');
+    fs.writeFileSync(taskPath, initialContent.replace('## Review Disagreement Ledger', [
+      '## Requirements',
       '',
       '<TaBlE>unsafe</TaBlE>',
       '',
@@ -102,26 +123,31 @@ test('platform-comment CLI encodes mixed-case HTML and rejects malformed content
       '<TaBlE>example</TaBlE>',
       '<!-- sync-issue:TASK-1:task -->',
       '```',
-      ''
-    ].join('\n'));
+      '',
+      '## Review Disagreement Ledger'
+    ].join('\n')));
     const rendered = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
     assert.equal(rendered.status, 0, rendered.stderr || rendered.stdout);
     const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
-    assert.match(comments[0]!.body, /&lt;TaBlE&gt;unsafe&lt;\/TaBlE&gt;/);
-    assert.match(comments[0]!.body, /<TaBlE>example<\/TaBlE>/);
-    assert.match(comments[0]!.body, /&lt;!-- sync-issue:TASK-1:task --&gt;/);
+    const taskComment = comments.find(({ body }) => body.startsWith(`<!-- sync-issue:${f.taskId}:task -->`));
+    assert.ok(taskComment);
+    assert.match(taskComment.body, /&lt;TaBlE&gt;unsafe&lt;\/TaBlE&gt;/);
+    assert.match(taskComment.body, /<TaBlE>example<\/TaBlE>/);
+    assert.match(taskComment.body, /&lt;!-- sync-issue:TASK-1:task --&gt;/);
 
-    fs.writeFileSync(taskPath, `${fs.readFileSync(taskPath, 'utf8')}\n<BadTag\n`);
+    fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(
+      '## Review Disagreement Ledger', '<BadTag\n\n## Review Disagreement Ledger'
+    ));
     const rejected = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
     assert.equal(rejected.status, 1);
     assert.equal(JSON.parse(rejected.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
-    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
-test('platform task comment sync transports receipt evidence with the task document', () => {
+test('platform task comment sync excludes receipt evidence from the projection and preserves it for recovery', () => {
   const f = fixture();
   try {
     const taskDir = path.join(f.root, '.agents', 'workspace', 'active', f.taskId);
@@ -139,17 +165,35 @@ test('platform task comment sync transports receipt evidence with the task docum
     const synced = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
     assert.equal(synced.status, 0, synced.stderr || synced.stdout);
     const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
-    assert.equal(comments.length, 1);
-    assert.equal(receiptForOutput(comments[0]!.body, 'review-plan.md')?.input, 'plan.md');
-    assert.equal(receiptForOutput(comments[0]!.body, 'review-plan.md')?.inputSha256, sha256File(path.join(taskDir, 'plan.md')));
+    assert.equal(comments.length, 4);
+    const taskComment = comments.find(({ body }) => body.startsWith(`<!-- sync-issue:${f.taskId}:task -->`));
+    assert.ok(taskComment);
+    assert.equal(receiptForOutput(taskComment.body, 'review-plan.md'), null);
+
+    const stagingDir = path.join(f.root, '.agents', 'workspace', '.restore-staging-receipt-test');
+    const outputPath = path.join(stagingDir, 'task.md');
+    fs.mkdirSync(stagingDir, { recursive: true });
+    const recovered = runComment([
+      'recover', '--issue', '7', '--task-id', f.taskId, '--output', outputPath
+    ], f);
+    assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
+    const recoveredContent = fs.readFileSync(outputPath, 'utf8');
+    assert.equal(receiptForOutput(recoveredContent, 'review-plan.md')?.input, 'plan.md');
+    assert.equal(receiptForOutput(recoveredContent, 'review-plan.md')?.inputSha256, sha256File(path.join(taskDir, 'plan.md')));
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
 test('platform internal commands reject invalid payloads with exit code 1', () => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of [
+    'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
+    'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
+    'AGENT_INFRA_EXECUTOR_MANIFEST', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING'
+  ]) delete env[key];
   const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-comment', 'sync', 'TASK-20260101-000001'], {
-    encoding: 'utf8'
+    encoding: 'utf8', env
   });
   assert.equal(result.status, 1);
   assert.equal(JSON.parse(result.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');

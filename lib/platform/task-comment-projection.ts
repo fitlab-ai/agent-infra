@@ -6,13 +6,24 @@ const SNAPSHOT_FRONTMATTER = new Set([
   'platform_issue_identity', 'delivery_remote', 'delivery_base_ref', 'pr_delivery_fact'
 ]);
 
-const PROCESS_SECTION = /^(?:活动日志|activity log|产物收据|artifact receipts|审查分歧账本|review dispute ledger|人工裁决(?:待办)?|human decisions?(?: pending)?|实现输入|implementation inputs?|工作流告警|workflow warnings?|返工意图|rework intents?|产物失效记录|artifact invalidation records?|实现备注|implementation notes?|审查反馈|review feedback)$/i;
-
 type TaskCommentProjection = {
   content: string;
   byteLength: number;
   sha256: string;
 };
+
+const PROCESS_SECTION_ALIASES = new Set([
+  '活动日志', 'activity log',
+  '产物生命周期收据', 'artifact lifecycle receipts',
+  '审查分歧账本', 'review dispute ledger', 'review disagreement ledger',
+  '人工裁决', '人工裁决待办', 'human decisions', 'human decision pending', 'human decisions pending',
+  '实现输入', 'implementation input', 'implementation inputs',
+  '工作流告警', 'workflow warning', 'workflow warnings', 'warnings',
+  '返工意图', 'rework intent', 'rework intents',
+  '产物失效记录', 'artifact invalidation', 'artifact invalidation records',
+  '实现备注', 'implementation notes',
+  '审查反馈', 'review feedback'
+]);
 
 function normalize(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
@@ -44,7 +55,7 @@ function projectBody(body: string): string {
     if (heading) {
       const level = heading[1]!.length;
       if (excludedLevel !== null && level <= excludedLevel) excludedLevel = null;
-      if (PROCESS_SECTION.test(heading[2]!)) {
+      if (PROCESS_SECTION_ALIASES.has(heading[2]!.trim().toLowerCase())) {
         excludedLevel = level;
         continue;
       }

@@ -227,7 +227,7 @@ test("platform-sync compares task comments after the same sanitization used by c
 test("platform-sync rejects a task comment that exceeds the final rendered byte limit", async () => {
   await withTempRoot("agent-infra-platform-sync-large-task-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
-    const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n## 活动日志\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}`;
+    const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n## Requirements\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}`;
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     write(path.join(ctx.taskDir, "code.md"), "# 实现报告\n\n通过");
     writeJson(ctx.issuePath, buildIssuePayload());
@@ -354,7 +354,7 @@ const implementSyncCases = [
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
   },
@@ -383,11 +383,11 @@ const implementSyncCases = [
     comments(taskContent: string, artifactContent: string) {
       return [
         { body: buildArtifactComment(taskId, "code.md", "Code Report", artifactContent) },
-        { body: buildTaskComment(taskId, taskContent, { summaryText: "Metadata (frontmatter)" }) }
+        { body: renderTaskComment(taskContent, taskId, "codex", "en") }
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
   },

@@ -99,14 +99,20 @@ function footer(agent: string, taskId: string): string {
   return `---\n*由 ${agent} 自动生成 · 内部追踪：${taskId}*`;
 }
 
-function renderTaskCommentResult(content: string, taskId: string): { body: string; byteLength: number } {
+function taskFrontmatterSummary(language = ''): string {
+  return language === 'en' || language === 'en-US'
+    ? 'Metadata (frontmatter)'
+    : '元数据 (frontmatter)';
+}
+
+function renderTaskCommentResult(content: string, taskId: string, language = ''): { body: string; byteLength: number; sha256: string } {
   const split = splitFrontmatter(content);
   const projectedContent = split.frontmatter === null ? content : projectTaskComment(content).content;
   const projected = splitFrontmatter(projectedContent);
   const safeBody = sanitizeCommentBody(projected.body, 'task body');
   const taskBody = projected.frontmatter === null
     ? safeBody
-    : `<details><summary>元数据 (frontmatter)</summary>\n\n${renderSafeCodeFence(`---\n${projected.frontmatter}\n---`, 'yaml')}\n\n</details>\n\n${safeBody}`;
+    : `<details><summary>${taskFrontmatterSummary(language)}</summary>\n\n${renderSafeCodeFence(`---\n${projected.frontmatter}\n---`, 'yaml')}\n\n</details>\n\n${safeBody}`;
   const body = normalizeCommentContent([
     MARKERS.task(taskId),
     '## 任务文件',
@@ -118,22 +124,25 @@ function renderTaskCommentResult(content: string, taskId: string): { body: strin
     '---',
     `*由 agent-infra 自动生成 · 内部追踪：${taskId}*`
   ].join('\n'));
-  return { body, byteLength: Buffer.byteLength(body, 'utf8') };
+  return {
+    body,
+    byteLength: Buffer.byteLength(body, 'utf8'),
+    sha256: createHash('sha256').update(body, 'utf8').digest('hex')
+  };
 }
 
-function renderTaskComment(content: string, taskId: string, _agent: string): string {
-  return renderTaskCommentResult(content, taskId).body;
+function renderTaskComment(content: string, taskId: string, _agent: string, language = ''): string {
+  return renderTaskCommentResult(content, taskId, language).body;
 }
 
-function recoveryTransaction(taskId: string, content: string) {
-  const snapshot = projectTaskComment(content);
+function recoveryTransaction(taskId: string, content: string, snapshotSha256: string) {
   const actionId = createHash('sha256').update(content, 'utf8').digest('hex');
   const action = encodeRecoveryAction({
     taskId, actionId, sequence: 1, type: 'task-document', payload: { taskContent: content }, previousActionSha256: null
   });
-  const commitId = `${snapshot.sha256.slice(0, 32)}-${action.actionSha256.slice(0, 31)}`;
+  const commitId = `${snapshotSha256.slice(0, 32)}-${action.actionSha256.slice(0, 31)}`;
   const input = {
-    taskId, commitId, actionCount: 1, actionHeadSha256: action.actionSha256, snapshotSha256: snapshot.sha256
+    taskId, commitId, actionCount: 1, actionHeadSha256: action.actionSha256, snapshotSha256
   };
   return {
     action,
@@ -144,6 +153,15 @@ function recoveryTransaction(taskId: string, content: string) {
 
 function isTaskCommentTooLarge(content: string, taskId = 'TASK-UNKNOWN', _agent = 'codex'): boolean {
   return renderTaskCommentResult(content, taskId).byteLength > COMMENT_BYTE_LIMIT;
+}
+
+function taskCommentLanguage(repoRoot: string): string {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { language?: unknown };
+    return typeof config.language === 'string' ? config.language.trim() : '';
+  } catch {
+    return '';
+  }
 }
 
 function artifactIdentity(artifact: string): { stem: string; title: string } {
@@ -408,10 +426,11 @@ function expectedComments(
   taskId: string,
   taskContent: string,
   taskDir: string,
+  repoRoot: string,
   options: SyncOptions
 ): RenderedChunk[] {
   if (options.kind === 'task') {
-    const body = renderTaskComment(taskContent, taskId, options.agent);
+    const body = renderTaskComment(taskContent, taskId, options.agent, taskCommentLanguage(repoRoot));
     return [{ marker: MARKERS.task(taskId), body, content: taskContent, part: 1, total: 1 }];
   }
   if (options.kind === 'artifact') {
@@ -539,7 +558,7 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   }
   let desired: RenderedChunk[];
   try {
-    desired = expectedComments(resolved.taskId, taskContent, resolved.taskDir, options);
+    desired = expectedComments(resolved.taskId, taskContent, resolved.taskDir, resolved.repoRoot, options);
   } catch (error) {
     return platformResult('failed', {
       resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask) },
@@ -553,7 +572,13 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       error: { code: 'COMMENT_PAYLOAD_TOO_LARGE', message: 'Projected task comment exceeds the platform byte limit', retryable: false }
     });
   }
-  const transaction = options.kind === 'task' ? recoveryTransaction(resolved.taskId, taskContent) : null;
+  const transaction = options.kind === 'task'
+    ? recoveryTransaction(
+      resolved.taskId,
+      taskContent,
+      createHash('sha256').update(desired[0]!.body, 'utf8').digest('hex')
+    )
+    : null;
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!hasResolvedPlatformContext(context) || !loaded.ok) return context;
@@ -689,6 +714,36 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     error: null
   });
   if (!transaction) return result;
+  const reread = loaded.value.provider.comments?.list
+    ? await loaded.value.provider.comments.list({
+      context: providerOperationContext(loaded.value),
+      parent: issueIdentityFromTask
+    }).then((response) => response.ok
+      ? { ok: true as const, value: response.value.map((comment) => ({
+        id: providerCommentId(comment.id, loaded.value.provider),
+        body: comment.body,
+        user: comment.author?.name ? { login: comment.author.name } : undefined
+      })) }
+      : response)
+    : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
+  if (!reread.ok) {
+    return platformResult(reread.error.retryable ? 'blocked' : 'failed', {
+      ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: reread.error
+    });
+  }
+  const snapshots = findMarkerComments(reread.value, MARKERS.task(resolved.taskId));
+  const rereadBody = snapshots[0]?.body;
+  if (snapshots.length !== 1 || normalizeCommentContent(rereadBody || '') !== normalizeCommentContent(desired[0]!.body)
+    || createHash('sha256').update(normalizeCommentContent(rereadBody || ''), 'utf8').digest('hex') !== transaction.commit.snapshotSha256) {
+    return platformResult('failed', {
+      ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
+      error: {
+        code: 'RECOVERY_SNAPSHOT_MISMATCH',
+        message: 'Task comment read-after-write does not match the recovery snapshot identity',
+        retryable: false
+      }
+    });
+  }
   const committed = await syncPlatformComment(resolved.taskId, {
     kind: 'recovery-commit', agent: options.agent, body: canonicalJson(transaction.commit),
     recoveryId: transaction.commit.commitId, cwd: resolved.repoRoot, client: options.client

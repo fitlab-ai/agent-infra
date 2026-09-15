@@ -278,6 +278,9 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$
     : {};
   const nextId = comments.reduce((max, comment) => Math.max(max, Number(comment.id || 0)), 0) + 1;
   const comment = { id: nextId, body: payload.body || "" };
+  if (process.env.GH_FAKE_COMMENT_USER) {
+    comment.user = { login: process.env.GH_FAKE_COMMENT_USER };
+  }
 
   comments.push(comment);
   if (commentsPath) {

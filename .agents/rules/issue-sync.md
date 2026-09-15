@@ -28,6 +28,8 @@
 ```bash
 agent-infra-internal platform-context resolve [--cwd <path>]
 agent-infra-internal platform-comment list --issue <issue-token> [--cwd <path>]
+agent-infra-internal platform-comment recover --issue <issue-token> --task-id <TASK-id> \
+  --output <.agents/workspace/.restore-staging-*/task.md> [--cwd <path>]
 agent-infra-internal platform-comment owner <task-ref>
 agent-infra-internal platform-comment sync <task-ref> \
   --kind task|artifact|summary|cancel|recovery-action|recovery-prepare|recovery-commit --agent {standard-agent-token} \
@@ -35,9 +37,9 @@ agent-infra-internal platform-comment sync <task-ref> \
 ```
 
 - `applied|no-op|degraded` → exit 0；`failed` → exit 1；`blocked` → exit 2。
-- task 评论保持 `<details>` frontmatter 可逆格式，并同步完整本地 `task.md`；artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
+- task 评论保持 `<details>` frontmatter 可逆格式，只同步确定性的当前任务投影；活动日志、产物生命周期收据、失效记录等过程章节由 recovery 事务保存。artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
 - 长度预检与 platform verification 使用同一最终渲染正文的 UTF-8 字节数。正文超限时失败关闭；本地 `task.md` 不会被截断。
-- recovery 评论要求 `--body-file` 和 `--recovery-id`，并在写入前验证 schema、摘要和 marker 身份。相同 marker 且正文相同返回 `no-op`；正文不同返回 `RECOVERY_IMMUTABLE_CONFLICT`，不会覆盖已发布的恢复事实。它们在 coordinator 与 restore 回放落地前不构成可恢复流程事实。
+- recovery 评论要求 `--body-file` 和 `--recovery-id`，并在写入前验证 schema、摘要和 marker 身份。task 同步按 prepare、action、task snapshot 写入并复读、commit 的顺序发布；相同 marker 且正文相同返回 `no-op`，正文不同返回 `RECOVERY_IMMUTABLE_CONFLICT`。restore 只接受作者一致、分片完整、phase/摘要/marker 匹配且绑定当前 task 评论正文 SHA-256 的完整事务。
 - 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
 - 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 

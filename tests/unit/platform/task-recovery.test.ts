@@ -10,4 +10,6 @@ test('restore accepts only a complete snapshot-bound recovery transaction', () =
   const commit = encodeRecoveryManifest({ ...shared, phase: 'commit' });
   assert.equal(recoverTaskDocument({ taskId: action.taskId, snapshotSha256: shared.snapshotSha256, actions: [{ content: canonicalJson(action) }], prepares: [{ content: canonicalJson(prepare) }], commits: [{ content: canonicalJson(commit) }] }), '# Task\n');
   assert.throws(() => recoverTaskDocument({ taskId: action.taskId, snapshotSha256: shared.snapshotSha256, actions: [{ content: canonicalJson(action) }], prepares: [{ content: canonicalJson(prepare) }], commits: [] }), /RECOVERY_EVIDENCE_MISSING/);
+  assert.throws(() => recoverTaskDocument({ taskId: action.taskId, snapshotSha256: shared.snapshotSha256, actions: [{ content: canonicalJson(action) }], prepares: [{ content: canonicalJson(prepare) }], commits: [{ content: canonicalJson(prepare) }] }), /RECOVERY_EVIDENCE_MISSING/);
+  assert.throws(() => recoverTaskDocument({ taskId: action.taskId, snapshotSha256: shared.snapshotSha256, actions: [{ content: canonicalJson(action) }], prepares: [{ content: canonicalJson(commit) }], commits: [{ content: canonicalJson(commit) }] }), /RECOVERY_EVIDENCE_MISSING/);
 });

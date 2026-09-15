@@ -553,19 +553,18 @@ function checkTaskCommentContent(context: any, remoteData: any, shared: Verifica
 
   let renderedTask: { body: string; byteLength: number };
   try {
-    renderedTask = renderTaskCommentResult(context.task.content, context.task.metadata.id);
+    renderedTask = renderTaskCommentResult(
+      context.task.content,
+      context.task.metadata.id,
+      loadProjectLanguage(shared)
+    );
   } catch {
     return shared.failResult(CHECK_TYPE, "Task content cannot be rendered safely for comment verification", "check_failed");
   }
   if (renderedTask.byteLength > 60_000) {
     return shared.failResult(CHECK_TYPE, "Task comment exceeds the platform byte limit", "check_failed");
   }
-  const expectedBody = shared.normalizeContent(
-    extractCommentBody(renderedTask.body).replace(
-      '<details><summary>元数据 (frontmatter)</summary>',
-      buildTaskFrontmatterSummary(shared)
-    )
-  );
+  const expectedBody = shared.normalizeContent(extractCommentBody(renderedTask.body));
   const commentBody = shared.normalizeContent(extractCommentBody(comment.body || ""));
 
   if (expectedBody === commentBody) {
