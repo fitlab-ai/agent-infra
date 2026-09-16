@@ -324,6 +324,34 @@ test('task-orchestration CLI completes clean reviewed heads and stops on dirty h
   assert.equal(fs.existsSync(dirty.calls), false);
 });
 
+test('task-orchestration CLI preserves open lifecycle execution across process boundaries', () => {
+  for (const runState of ['missing', 'idle'] as const) {
+    const f = approvedRouteFixture('disabled');
+    const taskPath = path.join(f.dir, 'task.md');
+    fs.appendFileSync(
+      taskPath,
+      '\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
+    );
+    if (runState === 'idle') {
+      const begun = run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs], f.env);
+      assert.equal(begun.status, 0, begun.stderr);
+    }
+    const taskBefore = fs.readFileSync(taskPath);
+    const runPath = path.join(f.dir, 'orchestration.json');
+    const runBefore = runState === 'idle' ? fs.readFileSync(runPath) : null;
+
+    const routed = run(f.root, [f.id, 'route'], f.env);
+
+    assert.equal(routed.status, 1, routed.stderr);
+    const result = JSON.parse(routed.stdout);
+    assert.equal(result.changed, false);
+    assert.equal(result.next, null);
+    assert.equal(result.error.code, 'ORCHESTRATION_EXECUTION_BUSY');
+    assert.deepEqual(fs.readFileSync(taskPath), taskBefore);
+    if (runBefore) assert.deepEqual(fs.readFileSync(runPath), runBefore);
+  }
+});
+
 test('task-orchestration CLI does not inspect PRs for clean completion', () => {
   for (const prFlow of ['disabled', undefined] as const) {
     const f = approvedRouteFixture(prFlow);
