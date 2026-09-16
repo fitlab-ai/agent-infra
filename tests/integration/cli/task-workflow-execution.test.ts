@@ -133,7 +133,7 @@ function workflowStateSnapshot(root: string): string {
 test('every workflow operation is isolated across the four termination windows', onPlatforms('linux', 'darwin'), async () => {
   const windows = ['before-call', 'before-domain-write', 'after-atomic-rename', 'before-result-return'] as const;
   for (const operation of TASK_WORKFLOW_OPERATIONS) {
-    const operationWindows = operation === 'artifact-preflight'
+    const operationWindows = operation === 'artifact-preflight' || operation === 'review-preflight'
       ? windows.filter((window) => window !== 'after-atomic-rename')
       : windows;
     for (const window of operationWindows) {
@@ -178,6 +178,27 @@ test('every workflow operation is isolated across the four termination windows',
       } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
     }
   }
+});
+
+test('workflow review preflight seals the draft without finalizing its summary', onPlatforms('linux', 'darwin'), async () => {
+  const f = fixture();
+  try {
+    const artifact = 'review-analysis.md';
+    const candidate = content('review-analysis');
+    fs.writeFileSync(path.join(f.taskDir, artifact), candidate);
+
+    const result = await f.run('task-review', ['preflight', '--stage', 'analysis', '--artifact', artifact]);
+
+    assert.equal(result.exitCode, 0, result.stdout);
+    assert.equal(result.body.intent, 'preflight');
+    assert.equal(result.body.status, 'passed');
+    assert.equal(result.body.stageStatus, null);
+    assert.equal(fs.readFileSync(path.join(f.taskDir, artifact), 'utf8'), candidate);
+    assert.equal(
+      readArtifactRecoveryIntent(f.root, taskId, 'review-analysis', artifact)?.state,
+      'preflight-ready'
+    );
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
 test('workflow finalize-local reconciles an interrupted publication without a recovery id', onPlatforms('linux', 'darwin'), async () => {

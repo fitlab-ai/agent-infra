@@ -3,7 +3,11 @@ import { TASK_WORKFLOW_COMMANDS } from '../../task/workflow-command.ts';
 import { parseArtifactCommand, executeArtifactCommand } from '../../task/artifact-command.ts';
 import { parseReviewCommand } from '../../task/review-command.ts';
 import { prepareLocalArtifact, preflightLocalArtifact, commitLocalArtifactProvenance } from '../../task/local-artifact-finalization.ts';
-import { prepareReviewSummaryCandidate, commitReviewSummaryProvenance } from '../../task/review-finalization.ts';
+import {
+  prepareReviewSummaryCandidate,
+  commitReviewSummaryProvenance,
+  preflightReviewSummary
+} from '../../task/review-finalization.ts';
 import { readArtifactRecoveryIntent } from '../../task/artifact-repair-intent.ts';
 import { withTaskExecutionLock } from '../../task/task-execution-lock.ts';
 import { dispatchWorkflowCommand } from '../../task/workflow-dispatch.ts';
@@ -143,6 +147,12 @@ export async function executeTaskWorkflow(
       } else {
         if (input.overrideTicket) throw new Error('TASK_WORKFLOW_OVERRIDE_UNSUPPORTED');
         const family = `review-${input.stage}` as 'review-analysis' | 'review-plan' | 'review-code';
+        if (request.operation === 'review-preflight') {
+          const result = preflightReviewSummary(input, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true });
+          recoveryObservation = { family, artifact: input.artifact, wasPassed: false };
+          observeRecoveryPublication();
+          return response(result);
+        }
         recoveryObservation = {
           family,
           artifact: input.artifact,
