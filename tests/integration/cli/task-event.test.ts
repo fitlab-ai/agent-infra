@@ -1084,7 +1084,7 @@ test('analysis can restart from code when task requirements expand', () => {
   assert.match(content, /`analysis-r2\.md`/);
 });
 
-test('source completion records resumable invalidation and downstream writers fail closed until reconcile', () => {
+test('source completion records resumable invalidation and lifecycle starts reconcile before continuing', () => {
   const f = fixture('code');
   fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
   for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
@@ -1124,14 +1124,13 @@ test('source completion records resumable invalidation and downstream writers fa
   assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'approval').length, 3);
   assert.equal(invalidation.document.targets.filter((target) => target.targetKind === 'reviewed-snapshot').length, 1);
 
-  const blocked = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
-  assert.equal(blocked.status, 1);
-  assert.equal(JSON.parse(blocked.stdout).error.code, 'TASK_INVALIDATION_BLOCKED');
-
-  const reconciled = spawnSync('node', [INTERNAL_CLI_PATH, 'task-invalidation', f.id, 'reconcile'], { cwd: f.root, encoding: 'utf8', env: sandboxControlSafeEnv() });
-  assert.equal(reconciled.status, 0, reconciled.stdout || reconciled.stderr);
-  const retried = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
-  assert.equal(retried.status, 0, retried.stdout || retried.stderr);
+  const startedReview = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+  assert.equal(startedReview.status, 0, startedReview.stdout || startedReview.stderr);
+  const reconciled = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+  assert.equal(reconciled.ok, true);
+  if (!reconciled.ok) return;
+  assert.equal(reconciled.document.operations[0]?.status, 'completed');
+  assert.equal(reconciled.document.targets.every((target) => target.status === 'completed'), true);
 });
 
 test('late qualification graph fallback records upstream-replaced reason', () => {

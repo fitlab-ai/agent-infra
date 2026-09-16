@@ -57,8 +57,7 @@ import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, 
 import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
 import { buildLifecycleFacts, canStart, recommendNext } from './capabilities.ts';
 import { hasOpenLifecycleExecution } from './activity-log.ts';
-import { invalidationBlocks } from './invalidation.ts';
-import type { InvalidationDocument } from './invalidation.ts';
+import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 
@@ -678,22 +677,17 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   }
   let metadata: ReturnType<typeof parseTypedTaskFrontmatter>;
   let currentLedger: LedgerDocument | null = null;
-  let currentInvalidation: InvalidationDocument = { operations: [], targets: [] };
   if (resolved.state === 'active') {
     const contract = validateCurrentTaskContract(content);
     if (!contract.ok) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', contract.message, resolved.taskId);
     metadata = contract.metadata;
     currentLedger = contract.ledger;
-    currentInvalidation = contract.invalidation;
   } else {
     try {
       metadata = parseTypedTaskFrontmatter(content);
     } catch (error) {
       return failed('ORCHESTRATION_TASK_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
     }
-  }
-  if (invalidationBlocks(currentInvalidation)) {
-    return failed('ORCHESTRATION_INVALIDATION_INCOMPLETE', 'artifact invalidation is incomplete; reconcile task.md before routing downstream work', resolved.taskId);
   }
   let run: OrchestrationRun | null;
   try {
@@ -850,6 +844,14 @@ function prepareOrchestrationDelegationUnlocked(
     return failed('ORCHESTRATION_DELEGATION_BUSY', 'the repository already has a pending lifecycle delegation', resolved.taskId);
   }
   if (run.stepCount >= run.maxSteps) return pauseOrchestration(taskRef, 'ORCHESTRATION_MAX_STEPS', 'maximum orchestration steps reached', true, options);
+  const invalidation = reconcileTaskInvalidation(taskRef, { repoRoot: resolved.repoRoot });
+  if (invalidation.status === 'failed') {
+    return failed(
+      'ORCHESTRATION_INVALIDATION_RECONCILE_FAILED',
+      `${invalidation.error?.code ?? 'UNKNOWN'}: ${invalidation.error?.message ?? ''}`,
+      resolved.taskId
+    );
+  }
   const routed = routeOrchestration(taskRef, options);
   if (!routed.next) return routed;
   const next = routed.next;

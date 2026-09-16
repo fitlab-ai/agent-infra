@@ -187,7 +187,6 @@ function qualificationRecoveryAction(facts: LifecycleFacts): LifecycleAction | n
 }
 
 function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
-  if (invalidationBlocks(facts.invalidation)) return { action: null, reasonCode: 'INVALIDATION_INCOMPLETE', evidence: ['reconcile task invalidation before routing'] };
   if (facts.qualificationStale) {
     const action = qualificationRecoveryAction(facts);
     return {

@@ -43,14 +43,16 @@ test('recommendation facts cannot bypass a missing prerequisite', () => {
   assert.equal(result.reasonCode, 'ANALYSIS_ARTIFACT_REQUIRED');
 });
 
-test('pending invalidation blocks lifecycle authorization', () => {
-  const result = canStart('analysis', {
+test('pending invalidation blocks lifecycle authorization but preserves the logical next action', () => {
+  const pending = {
     ...facts('code'), invalidation: {
       operations: [{ status: 'pending' } as never], targets: []
     }
-  }, trigger);
+  };
+  const result = canStart('analysis', pending, trigger);
   assert.equal(result.allowed, false);
   assert.equal(result.reasonCode, 'INVALIDATION_INCOMPLETE');
+  assert.equal(recommendNext(pending).action, 'analysis');
 });
 
 test('lifecycle facts derive execution busy from an open lifecycle activity', () => {

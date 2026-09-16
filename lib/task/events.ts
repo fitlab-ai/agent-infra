@@ -46,6 +46,7 @@ import { buildLifecycleFacts, canStart } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
 import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
 import type { InvalidationTargetKind } from './invalidation.ts';
+import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
 import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
 import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
@@ -722,6 +723,20 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   let content: string;
   try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
   catch (error) { return failed(request, { code: 'TASK_READ_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
+  const initialParts = eventParts(request.event);
+  if (initialParts.phase === 'started' && !request.dryRun) {
+    const reconciled = reconcileTaskInvalidation(request.taskRef, { repoRoot: resolved.repoRoot });
+    if (reconciled.status === 'failed') {
+      return failed(request, {
+        code: 'EVENT_TRANSITION_INVALID',
+        message: `INVALIDATION_RECONCILE_FAILED: ${reconciled.error?.code ?? 'UNKNOWN'}: ${reconciled.error?.message ?? ''}`
+      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+    }
+    if (reconciled.changed) {
+      try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
+      catch (error) { return failed(request, { code: 'TASK_READ_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
+    }
+  }
   let frontmatter;
   try { frontmatter = parseTypedTaskFrontmatter(content); }
   catch (error) { return failed(request, { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
@@ -730,7 +745,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const rows = startedBackedRows(pairEntries(section.entries));
   let normalized = request;
   let artifactContext: ArtifactContextResult | null = null;
-  const initialParts = eventParts(request.event);
   if (initialParts.phase === 'started') {
     const openIdentity = openStartedIdentity(rows, initialParts.family);
     if (openIdentity && 'conflict' in openIdentity) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'artifact family has more than one open started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
@@ -1224,7 +1238,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   if (invalid) return failed(request, invalid);
   const parts = eventParts(request.event);
   if (options.lockAlreadyHeld) return applyTaskEventUnlocked(request, options);
-  if (request.dryRun || parts.phase !== 'completed' || parts.family === 'manual-validation') {
+  if (request.dryRun || !['started', 'completed'].includes(parts.phase)) {
     return applyTaskEventUnlocked(request, options);
   }
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
