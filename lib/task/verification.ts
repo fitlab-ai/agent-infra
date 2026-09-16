@@ -126,7 +126,7 @@ async function verifyTaskEvent(request: { taskRef: string; event: string; artifa
   } else {
     for (const check of spec.checks ?? []) {
       const payload = await engine({ mode: 'checks', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [check], repositoryRoot: resolved.repoRoot });
-      const status = payload.status as 'pass' | 'fail' | 'blocked';
+      const status = (payload.effectiveStatus ?? payload.status) as 'pass' | 'fail' | 'blocked';
       if (status !== 'pass' && allowsManualOverride(options.manualOverride, 'verification-engine', status === 'blocked' ? 'CHECK_BLOCKED' : 'CHECK_FAILED')) {
         invocations.push({ status: 'pass', exitCode: 0, payload: { ...payload, status: 'pass', humanOverride: 'human-approved', originalStatus: status } });
         break;
@@ -152,16 +152,21 @@ function renderPayload(payload: Record<string, unknown>): string {
   if (Array.isArray(payload.checks)) {
     lines.push(`Verification: ${payload.gate} | Skill: ${payload.skill}`, '');
     for (const check of payload.checks as Array<Record<string, unknown>>) {
-      lines.push(`  [${statusLabel(check.status)}] ${check.type} - ${check.message}`);
+      const raw = statusLabel(check.status);
+      const effective = statusLabel(check.effectiveStatus ?? check.status);
+      lines.push(`  [${effective}] ${check.checkId ?? check.type} (${check.classification ?? 'hard'}; raw ${raw}) - ${check.reason ?? check.message}; ${check.action ?? 'Review validation output'}`);
     }
     lines.push('', `Result: ${payload.summary} - ${payload.action}`);
   } else {
     lines.push(`Check: ${payload.status} | Skill: ${payload.skill} | Type: ${payload.type}`, '');
-    lines.push(`  [${statusLabel(payload.status)}] ${payload.type} - ${payload.message}`);
-    const summary = payload.status === 'pass' ? '1 passed, 0 failed'
-      : payload.status === 'blocked' ? '0 passed, 0 failed, 1 blocked' : '0 passed, 1 failed';
-    const action = payload.status === 'pass' ? 'Requested check passed'
-      : payload.status === 'blocked' ? `Resolve blocked ${payload.type} check and re-run check`
+    const raw = statusLabel(payload.status);
+    const effective = statusLabel(payload.effectiveStatus ?? payload.status);
+    lines.push(`  [${effective}] ${payload.checkId ?? payload.type} (${payload.classification ?? 'hard'}; raw ${raw}) - ${payload.reason ?? payload.message}; ${payload.action ?? 'Review validation output'}`);
+    const status = payload.effectiveStatus ?? payload.status;
+    const summary = status === 'pass' ? '1 passed, 0 failed'
+      : status === 'blocked' ? '0 passed, 0 failed, 1 blocked' : '0 passed, 1 failed';
+    const action = status === 'pass' ? 'Requested check passed'
+      : status === 'blocked' ? `Resolve blocked ${payload.type} check and re-run check`
         : `Fix ${payload.type} issues and re-run check`;
     lines.push('', `Result: ${summary} - ${action}`);
   }

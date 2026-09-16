@@ -1812,21 +1812,6 @@ test("import-issue requires task comment sync in local and template configs", ()
   });
 });
 
-test("create-pr enables Issue field verification in local and template configs", () => {
-  [
-    ".agents/skills/create-pr/config/verify.json",
-    "templates/.agents/skills/create-pr/config/verify.json"
-  ].forEach((relativePath) => {
-    const config = JSON.parse(read(relativePath));
-
-    assert.equal(
-      config.checks["platform-sync"]?.verify_issue_fields,
-      true,
-      `${relativePath} should require Issue field verification`
-    );
-  });
-});
-
 test("create-pr change reports keep one structured publication contract", () => {
   for (const relativePath of skillDocPaths("create-pr")) {
     assert.ok(read(relativePath).includes("reference/change-report.md"), `${relativePath} should reference the change-report contract`);
@@ -1861,9 +1846,6 @@ test("complete-task splits active preflight checks from completed-state checks",
       expected_comment_marker: "<!-- sync-issue:{task-id}:summary -->",
       verify_task_comment_content: false,
       sync_checked_requirements: true,
-      verify_issue_type: true,
-      verify_issue_fields: false,
-      verify_milestone: true,
       verify_closed_issue_has_no_status_labels: false,
       expected_comment_marker_key: "summary"
     });

@@ -44,6 +44,7 @@ import { validateQualificationAudit } from "./qualification-audit.ts";
 import { getArtifactSchema } from "./artifact-schema.ts";
 import { inspectArtifactContract } from "./artifact-operations.ts";
 import type { VerificationShared } from "./verification-types.ts";
+import { normalizeVerificationRecord } from './gate-policy.ts';
 import { manualValidationFinalSummaryProjectionMatches } from "./manual-validation-receipt.ts";
 import { readManualValidationCompletion } from "./manual-validation-completion.ts";
 import { sha256File } from "./artifact-receipts.ts";
@@ -1392,11 +1393,11 @@ function interpolate(template: any, taskDir: any, artifactFile: any): any {
 }
 
 function summarizeGate(checks: any): any {
-  if (checks.some((check: any) => check.status === "blocked")) {
+  if (checks.some((check: any) => check.effectiveStatus === "blocked")) {
     return "blocked";
   }
 
-  if (checks.some((check: any) => check.status === "fail")) {
+  if (checks.some((check: any) => check.effectiveStatus === "fail")) {
     return "fail";
   }
 
@@ -1405,9 +1406,9 @@ function summarizeGate(checks: any): any {
 
 function summarizeChecks(checks: any): any {
   const counts = {
-    pass: checks.filter((check: any) => check.status === "pass").length,
-    fail: checks.filter((check: any) => check.status === "fail").length,
-    blocked: checks.filter((check: any) => check.status === "blocked").length
+    pass: checks.filter((check: any) => check.effectiveStatus === "pass").length,
+    fail: checks.filter((check: any) => check.effectiveStatus === "fail").length,
+    blocked: checks.filter((check: any) => check.effectiveStatus === "blocked").length
   };
 
   if (counts.blocked > 0) {
@@ -1422,7 +1423,7 @@ function buildAction(gate: any, checks: any): any {
     return "All declared checks passed";
   }
 
-  const firstFailure = checks.find((check: any) => check.status !== "pass");
+  const firstFailure = checks.find((check: any) => check.effectiveStatus !== "pass");
   if (!firstFailure) {
     return "Review validation output";
   }
@@ -1484,16 +1485,16 @@ async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks:
     const checks = [];
     for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
       if (checkConfig === null) continue;
-      const result = await runCheck(type, {
+      const result = normalizeVerificationRecord(await runCheck(type, {
         mode,
         skillName,
         taskDir: path.resolve(taskDir),
         artifactFile,
         repositoryRoot: repoRoot,
         config: checkConfig
-      }, shared);
-      checks.push(result);
-      if (result.status === "blocked") break;
+      }, shared));
+      checks.push(...(result.subchecks?.map(normalizeVerificationRecord) ?? [result]));
+      if (checks.at(-1)?.effectiveStatus === "blocked") break;
     }
     const gate = summarizeGate(checks);
     return { gate, skill: skillName, checks, summary: summarizeChecks(checks), action: buildAction(gate, checks) };
@@ -1502,16 +1503,16 @@ async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks:
   const config = (verifyConfig.checks || {})[type];
   if (config === undefined) return { skill: skillName, ...failResult(type, `Unknown check type '${type}' for skill '${skillName}'.`) };
   if (config === null) return { skill: skillName, ...passResult(type, `Check '${type}' is disabled for skill '${skillName}'.`) };
-  return {
-    skill: skillName,
-    ...await runCheck(type, {
+  const result = normalizeVerificationRecord(await runCheck(type, {
       skillName,
       taskDir: path.resolve(taskDir),
       artifactFile,
       repositoryRoot: repoRoot,
       config
-    }, shared)
-  };
+    }, shared));
+  return result.subchecks?.length
+    ? { skill: skillName, ...result, checks: result.subchecks.map(normalizeVerificationRecord) }
+    : { skill: skillName, ...result };
 }
 
 export { verifyInProcess };

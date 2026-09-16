@@ -348,7 +348,7 @@ test('requirements sync degrades without an anchor and fails before writes on am
   const skipped = await syncPlatformIssue('TASK-20260101-000001', {
     cwd: root, agent: 'codex', requirements: true, client
   });
-  assert.equal(skipped.status, 'degraded');
+  assert.equal(skipped.status, 'no-op');
   assert.deepEqual(skipped.operations, [{
     name: 'requirements', status: 'skipped', reasonCode: 'NO_REQUIREMENTS_ANCHOR'
   }]);

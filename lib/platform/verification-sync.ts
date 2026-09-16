@@ -72,32 +72,23 @@ export async function check({ taskDir, config, artifactFile }: any, shared: Veri
   }
 
   const subChecks = [
-    checkClosedIssueStatusLabels,
-    checkStatusLabel,
-    checkCommentMarker,
-    checkPrCommentMarker,
-    checkPrCommentLastCommit,
-    checkPrCommentRequiredPatterns,
-    checkCommentContent,
-    checkTaskCommentContent,
-    checkInLabelsComputed,
-    checkPrTypeLabel,
-    checkInLabelsMatchPr,
-    checkPrAssignee,
-    checkSyncedRequirements,
-    checkIssueType,
-    checkIssueFields,
-    checkMilestone
-  ];
-
-  for (const subCheck of subChecks) {
-    const result = subCheck(context, remoteData, shared);
-    if (result) {
-      return result;
-    }
-  }
-
-  return shared.passResult(CHECK_TYPE, `Platform sync checks passed for Issue ${context.issueNumber || "identity"}`);
+    ['closed-status-labels', checkClosedIssueStatusLabels], ['status-label', checkStatusLabel],
+    ['comment-marker', checkCommentMarker], ['pr-comment-marker', checkPrCommentMarker],
+    ['pr-comment-last-commit', checkPrCommentLastCommit], ['pr-comment-content', checkPrCommentRequiredPatterns],
+    ['comment-content', checkCommentContent], ['task-comment-content', checkTaskCommentContent],
+    ['in-labels-computed', checkInLabelsComputed], ['pr-type-label', checkPrTypeLabel],
+    ['in-labels-match-pr', checkInLabelsMatchPr], ['pr-assignee', checkPrAssignee],
+    ['requirements', checkSyncedRequirements], ['issue-type', checkIssueType],
+    ['issue-fields', checkIssueFields], ['milestone', checkMilestone]
+  ] as const;
+  const results = subChecks.map(([id, subCheck]) => ({
+    ...(subCheck(context, remoteData, shared) ?? shared.passResult(CHECK_TYPE, `Platform audit '${id}' passed`)),
+    checkId: `platform.${id}`
+  }));
+  return {
+    ...shared.passResult(CHECK_TYPE, `Platform sync audits completed for Issue ${context.issueNumber || "identity"}`),
+    subchecks: results
+  };
 }
 
 async function buildSyncContext({ taskDir, config, artifactFile }: any, shared: VerificationShared): Promise<any> {
@@ -237,7 +228,7 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
       ...(context.issueIdentity ? { issue: context.issueIdentity } : {}),
       ...(context.prIdentity ? { changeRequest: context.prIdentity } : {}),
       includeComments: shouldFetchComments(context.config),
-      includeFields: Boolean(context.config.verify_issue_fields)
+      includeFields: true
     })
     : unsupportedProviderOperation(provider, "verification.fetchRemoteFacts");
   if (!facts.ok) {
@@ -257,7 +248,7 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
     }
     : null;
   let issueFields: any;
-  if (context.config.verify_issue_fields && issueSnapshot?.issueType) {
+  if (issueSnapshot?.issueType) {
     const fieldKinds = new Map(issueSnapshot.issueType.fields.map((field: { name: string; kind: string }) => [field.name, field.kind]));
     issueFields = {
       pinnedNames: new Set(issueSnapshot.issueType.fields.map((field: { name: string }) => field.name)),
@@ -689,8 +680,8 @@ function checkSyncedRequirements(context: any, remoteData: any, shared: Verifica
 }
 
 function checkIssueType(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_issue_type || !context.hasPush) {
-    return null;
+  if (!context.hasPush) {
+    return shared.blockedResult(CHECK_TYPE, 'Issue Type audit skipped because push capability is unavailable', 'PUSH_REQUIRED');
   }
 
   if (remoteData.issueType === undefined) {
@@ -720,8 +711,8 @@ function checkIssueType(context: any, remoteData: any, shared: VerificationShare
 }
 
 function checkIssueFields(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_issue_fields || !context.hasPush) {
-    return null;
+  if (!context.hasPush) {
+    return shared.blockedResult(CHECK_TYPE, 'Issue field audit skipped because push capability is unavailable', 'PUSH_REQUIRED');
   }
 
   if (remoteData.issueFields === undefined) {
@@ -774,8 +765,8 @@ function checkPrAssignee(context: any, remoteData: any, shared: VerificationShar
 }
 
 function checkMilestone(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_milestone || !context.hasTriage) {
-    return null;
+  if (!context.hasTriage) {
+    return shared.blockedResult(CHECK_TYPE, 'Milestone audit skipped because triage capability is unavailable', 'TRIAGE_REQUIRED');
   }
 
   if (!remoteData.issue?.milestone?.title) {

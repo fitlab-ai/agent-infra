@@ -39,9 +39,7 @@
       "expected_pr_comment_required_patterns": [
         "^### ✅ (?:人工验证已通过|Manual Validation Passed)$"
       ],
-      "verify_task_comment_content": true,
-      "verify_issue_type": true,
-      "verify_issue_fields": false
+      "verify_task_comment_content": true
     }
   }
 }
