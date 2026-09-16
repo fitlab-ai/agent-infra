@@ -53,15 +53,17 @@ jobs:
 
       - name: Wait for npm registry propagation
         run: |
-          for i in $(seq 1 30); do
-            if npm view "@fitlab-ai/agent-infra@${VERSION}" version >/dev/null 2>&1; then
+          for i in $(seq 1 90); do
+            TARBALL_URL=$(npm view "@fitlab-ai/agent-infra@${VERSION}" dist.tarball 2>/dev/null || true)
+            if [ -n "$TARBALL_URL" ] \
+              && curl -fsSL --range 0-0 -o /dev/null "$TARBALL_URL"; then
               echo "Package @fitlab-ai/agent-infra@${VERSION} available on npm"
               exit 0
             fi
-            echo "Waiting for npm registry... (attempt $i/30)"
+            echo "Waiting for npm registry... (attempt $i/90)"
             sleep 10
           done
-          echo "::error::Package not found on npm after 5 minutes"
+          echo "::error::Package not found on npm after 15 minutes"
           exit 1
 
       - name: Get tarball URL and SHA256
