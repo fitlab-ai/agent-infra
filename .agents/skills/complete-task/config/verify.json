@@ -27,18 +27,11 @@
     "manual-validation": {},
     "post-review-commit": {},
     "platform-sync-preflight": {
-      "when": "platform_issue_identity_exists",
-      "expected_comment_marker": "<!-- sync-issue:{task-id}:summary -->",
-      "verify_task_comment_content": false,
-      "sync_checked_requirements": true,
-      "verify_closed_issue_has_no_status_labels": false,
-      "expected_comment_marker_key": "summary"
+      "when": "platform_issue_identity_exists"
     },
     "required-pr-delivery": {},
     "platform-sync": {
-      "when": "platform_issue_identity_exists",
-      "verify_task_comment_content": true,
-      "verify_closed_issue_has_no_status_labels": true
+      "when": "platform_issue_identity_exists"
     },
     "artifact": {
       "file_pattern": "task.md",

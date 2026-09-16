@@ -69,8 +69,7 @@ test(
     writeJson(ctx.issuePath, buildIssuePayload());
 
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "platform_issue_identity_exists",
-      expected_status_label: "status: in-progress"
+      when: "platform_issue_identity_exists"
     }, ctx.env({
       AGENT_INFRA_GH_BIN: "gh",
       AGENT_INFRA_GH_ARGS_JSON: JSON.stringify(["--jq", "value | value"]),
@@ -94,8 +93,7 @@ test("platform-sync reads Issue metadata through the shared REST snapshot adapte
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     writeJson(ctx.issuePath, buildIssuePayload());
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "platform_issue_identity_exists",
-      expected_status_label: "status: in-progress"
+      when: "platform_issue_identity_exists"
     }, ctx.env({ GH_FAKE_ARGS_PATH: argsPath, GH_FAKE_ISSUE_PATH: ctx.issuePath }));
     assert.equal(result.status, "pass", result.message);
     const calls = fs.readFileSync(argsPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line) as string[]);
@@ -124,8 +122,7 @@ test("platform-sync computes in: labels from the repository when the task worksp
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [{ name: "in: cli" }] }));
 
     const result = await runPlatformSyncAdapter(externalTaskDir, {
-      when: "platform_issue_identity_exists",
-      verify_in_labels_computed: true
+      when: "platform_issue_identity_exists"
     }, ctx.env({ GH_FAKE_ISSUE_PATH: ctx.issuePath }), repositoryRoot);
 
     assert.equal(result.status, "pass", result.message);
@@ -139,8 +136,7 @@ test("platform-sync performs no GitHub operation when the repository selects non
     write(path.join(tempRoot, ".agents", ".airc.json"), '{"platform":{"type":"none"}}');
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "platform_issue_identity_exists",
-      expected_status_label: "status: in-progress"
+      when: "platform_issue_identity_exists"
     }, ctx.env({ GH_FAKE_ARGS_PATH: argsPath }), tempRoot);
 
     assert.equal(result.status, "pass", result.message);
@@ -303,7 +299,7 @@ const implementSyncCases = [
       const payload = parseValidatorPayload(result.stdout);
       assert.equal(payload.gate, "pass");
       assert.ok(payload.checks.length > 0);
-      assert.ok(payload.checks.every((check) => check.status === "pass"));
+      assert.ok(payload.checks.every((check) => check.effectiveStatus === "pass"));
     }
   },
   {
@@ -606,6 +602,30 @@ for (const c of implementSyncCases) {
     }));
   }));
 }
+
+test("validate-artifact platform-sync hard-fails malformed artifact comment input", async () => {
+  await withTempRoot("agent-infra-platform-sync-malformed-artifact-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const taskContent = buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' });
+    const artifactContent = "# 实现报告\n\n```text\nunterminated";
+    write(path.join(ctx.taskDir, "task.md"), taskContent);
+    write(path.join(ctx.taskDir, "code.md"), artifactContent);
+    writeJson(ctx.issuePath, buildIssuePayload());
+    writeJson(ctx.commentsPath, [
+      { body: `<!-- sync-issue:${taskId}:code -->\n# 实现报告\n\n${artifactContent}` },
+      { body: buildTaskComment(taskId, taskContent) }
+    ]);
+
+    const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"], ctx, {
+      GH_FAKE_ISSUE_PATH: ctx.issuePath,
+      GH_FAKE_COMMENTS_PATH: ctx.commentsPath
+    });
+    assert.equal(result.status, 1, result.stderr);
+    const check = parseValidatorPayload(result.stdout).checks.find((item) => item.checkId === "platform.comment-content");
+    assert.equal(check?.classification, "hard");
+    assert.equal(check?.effectiveStatus, "fail");
+  });
+});
 
 test("validate-artifact platform-sync preserves source @ content when comparing artifact data", () => withTempRoot("agent-infra-platform-sync-content-policy-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
@@ -1251,7 +1271,7 @@ for (const c of retryCases) {
   }));
 }
 
-test("platform-sync rejects status labels on closed issues without triage permission", async () => (
+test("platform-sync reports status labels on closed issues as a soft audit without triage permission", async () => (
   withTempRoot("agent-infra-platform-sync-closed-status-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
@@ -1261,8 +1281,7 @@ test("platform-sync rejects status labels on closed issues without triage permis
     }));
 
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "platform_issue_identity_exists",
-      verify_closed_issue_has_no_status_labels: true
+      when: "platform_issue_identity_exists"
     }, {
       PATH: pathWithPrependedBin(ctx.binDir),
       AGENT_INFRA_GH_BIN: process.execPath,
@@ -1271,9 +1290,10 @@ test("platform-sync rejects status labels on closed issues without triage permis
       GH_FAKE_PERMISSIONS: JSON.stringify({ triage: false, push: false })
     });
 
-    assert.equal(result.status, "fail");
-    assert.equal(result.fail_type, "check_failed");
-    assert.match(result.message, /status: in-progress/);
+    assert.equal(result.status, "pass");
+    const closedLabel = result.subchecks.find((check: { checkId?: string }) => check.checkId === "platform.closed-status-labels");
+    assert.equal(closedLabel?.status, "fail");
+    assert.equal(closedLabel?.classification, "soft");
   })
 ));
 
@@ -1288,8 +1308,7 @@ for (const issuePayload of [
       writeJson(ctx.issuePath, issuePayload);
 
       const result = await runPlatformSyncAdapter(ctx.taskDir, {
-        when: "platform_issue_identity_exists",
-        verify_closed_issue_has_no_status_labels: true
+        when: "platform_issue_identity_exists"
       }, {
         PATH: pathWithPrependedBin(ctx.binDir),
         AGENT_INFRA_GH_BIN: process.execPath,

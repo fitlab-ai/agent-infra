@@ -2,21 +2,49 @@
   "skill": "run-manual-validation",
   "checks": {
     "task-meta": {
-      "required_fields": ["id", "type", "workflow", "status", "created_at", "updated_at", "agent_infra_version", "current_step", "assigned_to"]
+      "required_fields": [
+        "id",
+        "type",
+        "workflow",
+        "status",
+        "created_at",
+        "updated_at",
+        "agent_infra_version",
+        "current_step",
+        "assigned_to"
+      ]
     },
     "artifact": {
       "file_pattern": "validation-run.md|validation-run-r{N}.md",
-      "required_sections": ["Input Mode", "State Check", "Validation Target", "Discovered Items", "Mode Decision", "Command Summary", "Structured Evidence", "Per-item Results", "Cleanup and Recovery", "Remaining Coverage", "Raw Evidence"],
-      "required_patterns": ["^\\$ "]
+      "required_sections": [
+        "Input Mode",
+        "State Check",
+        "Validation Target",
+        "Discovered Items",
+        "Mode Decision",
+        "Command Summary",
+        "Structured Evidence",
+        "Per-item Results",
+        "Cleanup and Recovery",
+        "Remaining Coverage",
+        "Raw Evidence"
+      ],
+      "required_patterns": [
+        "^\\$ "
+      ]
     },
-    "activity-log": { "expected_action_pattern": "Run Manual Validation \\(Round \\d+\\)" },
-    "review-ledger": { "stage_scope": ["analysis", "plan", "code"] },
+    "activity-log": {
+      "expected_action_pattern": "Run Manual Validation \\(Round \\d+\\)"
+    },
+    "review-ledger": {
+      "stage_scope": [
+        "analysis",
+        "plan",
+        "code"
+      ]
+    },
     "platform-sync": {
-      "when": "platform_issue_identity_exists",
-      "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
-      "verify_comment_content": true,
-      "verify_task_comment_content": true,
-      "expected_comment_marker_key": "artifact"
+      "when": "platform_issue_identity_exists"
     }
   }
 }

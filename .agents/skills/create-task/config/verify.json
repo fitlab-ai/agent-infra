@@ -22,9 +22,7 @@
     },
     "platform-sync": {
       "when": "platform_issue_identity_exists",
-      "issue_must_exist": true,
-      "verify_task_comment_content": true,
-      "expected_status_label_key": "waitingForTriage"
+      "issue_must_exist": true
     }
   }
 }

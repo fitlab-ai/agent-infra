@@ -31,15 +31,17 @@
       "expected_action_pattern": "Complete Manual Validation"
     },
     "review-ledger": {
-      "stage_scope": ["analysis", "plan", "code"]
+      "stage_scope": [
+        "analysis",
+        "plan",
+        "code"
+      ]
     },
     "platform-sync": {
       "when": "pr_fact_bound",
-      "expected_pr_comment_marker_key": "prSummary",
       "expected_pr_comment_required_patterns": [
         "^### ✅ (?:人工验证已通过|Manual Validation Passed)$"
-      ],
-      "verify_task_comment_content": true
+      ]
     }
   }
 }

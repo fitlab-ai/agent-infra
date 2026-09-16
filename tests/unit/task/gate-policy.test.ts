@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeVerificationRecord } from '../../../lib/task/gate-policy.ts';
+import { normalizeVerificationRecord, platformAuditPolicy } from '../../../lib/task/gate-policy.ts';
 
 test('optional platform audits retain their raw failure without blocking the gate', () => {
   const result = normalizeVerificationRecord({
@@ -38,4 +38,13 @@ test('explicit hard platform failures retain failed gate semantics', () => {
   });
   assert.equal(result.classification, 'hard');
   assert.equal(result.effectiveStatus, 'fail');
+});
+
+
+test('platform audit applicability and expected values come from the policy', () => {
+  const code = platformAuditPolicy('comment-content', { skillName: 'code-task', artifactFile: 'code.md' });
+  assert.deepEqual(code, { classification: 'soft', enabled: true, expectedCommentMarkerKey: 'artifact' });
+  assert.equal(platformAuditPolicy('requirements', { skillName: 'code-task' }).enabled, false);
+  assert.equal(platformAuditPolicy('requirements', { skillName: 'complete-task' }).enabled, true);
+  assert.equal(platformAuditPolicy('milestone', { skillName: 'code-task' }).requireSpecificMilestone, true);
 });

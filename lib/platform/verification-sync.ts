@@ -1,5 +1,5 @@
 import type { VerificationShared } from "../task/verification-types.ts";
-import { normalizeVerificationRecord } from "../task/gate-policy.ts";
+import { normalizeVerificationRecord, platformAuditPolicy, type PlatformAuditId } from "../task/gate-policy.ts";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -76,8 +76,8 @@ function hardResult(result: any): any {
   return { ...result, classification: 'hard' };
 }
 
-export async function check({ taskDir, config, artifactFile }: any, shared: VerificationShared): Promise<any> {
-  const context = await buildSyncContext({ taskDir, config, artifactFile }, shared);
+export async function check({ taskDir, config, artifactFile, skillName }: any, shared: VerificationShared): Promise<any> {
+  const context = await buildSyncContext({ taskDir, config, artifactFile, skillName }, shared);
   if (context.earlyReturn) {
     return context.earlyReturn;
   }
@@ -97,10 +97,11 @@ export async function check({ taskDir, config, artifactFile }: any, shared: Veri
     ['requirements', checkSyncedRequirements], ['issue-type', checkIssueType],
     ['issue-fields', checkIssueFields], ['milestone', checkMilestone]
   ] as const;
-  const results = subChecks.map(([id, subCheck]) => ({
-    ...(subCheck(context, remoteData, shared) ?? infoResult(`Platform audit '${id}' was not evaluated`)),
-    checkId: `platform.${id}`
-  }));
+  const results = subChecks.map(([id, subCheck]) => {
+    const audit = platformAuditPolicy(id as PlatformAuditId, context);
+    const result = subCheck({ ...context, audit }, remoteData, shared) ?? infoResult(`Platform audit '${id}' was not evaluated`);
+    return { ...result, checkId: `platform.${id}`, classification: result.classification ?? audit.classification };
+  });
   const blocking = results.map(normalizeVerificationRecord).find((result) => result.effectiveStatus !== 'pass');
   return {
     ...(blocking
@@ -116,7 +117,7 @@ export async function check({ taskDir, config, artifactFile }: any, shared: Veri
   };
 }
 
-async function buildSyncContext({ taskDir, config, artifactFile }: any, shared: VerificationShared): Promise<any> {
+async function buildSyncContext({ taskDir, config, artifactFile, skillName }: any, shared: VerificationShared): Promise<any> {
   const task = shared.loadTask(taskDir);
   if (!task.ok) {
     return { earlyReturn: shared.failResult(CHECK_TYPE, task.message) };
@@ -155,7 +156,8 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any, shared: 
     }
     return { earlyReturn: shared.passResult(CHECK_TYPE, `Skipped: ${platformContext.error?.message || "platform unavailable"}`) };
   }
-  const expectedValues = resolveExpectedValues(config);
+  const effectiveSkillName = skillName || config.skillName || "code-task";
+  const expectedValues = resolveExpectedValues(effectiveSkillName, artifactFile);
   if (!expectedValues.ok) {
     return { earlyReturn: shared.failResult(CHECK_TYPE, expectedValues.message, "check_failed") };
   }
@@ -172,6 +174,7 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any, shared: 
     task,
     taskDir,
     config,
+    skillName: effectiveSkillName,
     artifactFile,
     artifactPath,
     issueIdentity,
@@ -190,57 +193,17 @@ async function buildSyncContext({ taskDir, config, artifactFile }: any, shared: 
   };
 }
 
-function resolveExpectedValues(config: any): any {
+function resolveExpectedValues(skillName: string, artifactFile: string | undefined): any {
   const defaults = getDefaults();
-  const statusLabel = resolveDefaultValue({
-    collection: defaults.statusLabels,
-    key: config.expected_status_label_key,
-    value: config.expected_status_label,
-    configKey: "expected_status_label_key"
-  });
-  if (!statusLabel.ok) {
-    return statusLabel;
-  }
-
-  const commentMarker = resolveDefaultValue({
-    collection: defaults.markers,
-    key: config.expected_comment_marker_key,
-    value: config.expected_comment_marker,
-    configKey: "expected_comment_marker_key"
-  });
-  if (!commentMarker.ok) {
-    return commentMarker;
-  }
-
-  const prCommentMarker = resolveDefaultValue({
-    collection: defaults.markers,
-    key: config.expected_pr_comment_marker_key,
-    value: config.expected_pr_comment_marker,
-    configKey: "expected_pr_comment_marker_key"
-  });
-  if (!prCommentMarker.ok) {
-    return prCommentMarker;
-  }
-
+  const statusPolicy = platformAuditPolicy('status-label', { skillName, artifactFile });
+  const commentPolicy = platformAuditPolicy('comment-marker', { skillName, artifactFile });
+  const prCommentPolicy = platformAuditPolicy('pr-comment-marker', { skillName, artifactFile });
   return {
     ok: true,
-    statusLabel: statusLabel.value,
-    commentMarker: commentMarker.value,
-    prCommentMarker: prCommentMarker.value
+    statusLabel: statusPolicy.expectedStatusLabel || null,
+    commentMarker: commentPolicy.expectedCommentMarkerKey ? defaults.markers[commentPolicy.expectedCommentMarkerKey] : null,
+    prCommentMarker: prCommentPolicy.expectedPrCommentMarkerKey ? defaults.markers[prCommentPolicy.expectedPrCommentMarkerKey] : null
   };
-}
-
-function resolveDefaultValue({ collection, key, value, configKey }: any): any {
-  if (!key) {
-    return { ok: true, value: value || null };
-  }
-
-  const resolvedValue = collection[key];
-  if (!resolvedValue) {
-    return { ok: false, message: `Unknown ${configKey}: ${key}` };
-  }
-
-  return { ok: true, value: resolvedValue };
 }
 
 async function fetchRemoteData(context: any, shared: VerificationShared): Promise<any> {
@@ -252,7 +215,7 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
       taskId: context.task?.metadata?.id || context.task?.id || "",
       ...(context.issueIdentity ? { issue: context.issueIdentity } : {}),
       ...(context.prIdentity ? { changeRequest: context.prIdentity } : {}),
-      includeComments: shouldFetchComments(context.config),
+      includeComments: shouldFetchComments(context),
       includeFields: true
     })
     : unsupportedProviderOperation(provider, "verification.fetchRemoteFacts");
@@ -281,7 +244,7 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
     };
   }
   let prComments = null;
-  if (context.prMarker && context.prIdentity && shouldFetchComments(context.config) && provider?.comments?.list) {
+  if (context.prMarker && context.prIdentity && shouldFetchComments(context) && provider?.comments?.list) {
     const listed = await provider.comments.list({ context: operationContext, parent: context.prIdentity });
     if (!listed.ok) return {
       earlyReturn: listed.error.retryable
@@ -293,7 +256,7 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
   const changeRequest = facts.value.changeRequest;
   let inLabelMapping: Record<string, string[]> = {};
   let repositoryLabels: string[] = [];
-  if (context.config.verify_in_labels_computed && context.hasTriage) {
+  if (platformAuditPolicy('in-labels-computed', context).enabled && context.hasTriage) {
     const mapping = loadInLabelMapping(shared);
     if (!mapping.ok) return { earlyReturn: shared.failResult(CHECK_TYPE, mapping.message, "check_failed") };
     inLabelMapping = mapping.value;
@@ -335,16 +298,9 @@ function mapTaskTypeToLabel(taskType: any): any {
   return taskTypeLabel(taskType);
 }
 
-function shouldFetchComments(config: any): any {
-  return Boolean(
-    config.expected_comment_marker
-    || config.expected_comment_marker_key
-    || config.expected_pr_comment_marker
-    || config.expected_pr_comment_marker_key
-    || config.verify_pr_comment_last_commit_matches_head
-    || config.verify_comment_content
-    || config.verify_task_comment_content
-  );
+function shouldFetchComments(context: any): boolean {
+  return ['comment-marker', 'pr-comment-marker', 'comment-content', 'task-comment-content']
+    .some((id) => platformAuditPolicy(id as PlatformAuditId, context).enabled);
 }
 
 function checkStatusLabel(context: any, remoteData: any, shared: VerificationShared): any {
@@ -368,7 +324,7 @@ function checkStatusLabel(context: any, remoteData: any, shared: VerificationSha
 }
 
 function checkClosedIssueStatusLabels(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_closed_issue_has_no_status_labels) {
+  if (!context.audit.enabled) {
     return infoResult('Closed Issue status-label audit is not enabled for this workflow');
   }
 
@@ -382,10 +338,10 @@ function checkClosedIssueStatusLabels(context: any, remoteData: any, shared: Ver
     return shared.passResult(CHECK_TYPE, `Closed Issue #${context.issueNumber} has no status labels`);
   }
 
-  return hardResult(shared.failResult(CHECK_TYPE,
+  return shared.failResult(CHECK_TYPE,
     `Closed Issue #${context.issueNumber} retains status labels: ${statusLabels.join(", ")}`,
     "check_failed"
-  ));
+  );
 }
 
 function checkCommentMarker(context: any, remoteData: any, shared: VerificationShared): any {
@@ -421,7 +377,7 @@ function checkPrCommentMarker(context: any, remoteData: any, shared: Verificatio
 }
 
 function checkPrCommentLastCommit(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_pr_comment_last_commit_matches_head) {
+  if (!context.audit.enabled) {
     return infoResult('PR last-commit audit is not enabled for this workflow');
   }
 
@@ -462,7 +418,7 @@ function checkPrCommentLastCommit(context: any, remoteData: any, shared: Verific
 }
 
 function checkPrCommentRequiredPatterns(context: any, remoteData: any, shared: VerificationShared): any {
-  const patterns = context.config.expected_pr_comment_required_patterns || [];
+  const patterns = context.audit.enabled ? context.config.expected_pr_comment_required_patterns || [] : [];
   if (!Array.isArray(patterns) || patterns.length === 0) {
     return infoResult('PR comment-content audit is not enabled for this workflow');
   }
@@ -497,19 +453,19 @@ function checkPrCommentRequiredPatterns(context: any, remoteData: any, shared: V
 }
 
 function checkCommentContent(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_comment_content) {
+  if (!context.audit.enabled) {
     return infoResult('Artifact comment-content audit is not enabled for this workflow');
   }
 
   if (!context.marker) {
-    return shared.failResult(CHECK_TYPE, "verify_comment_content requires expected_comment_marker", "check_failed");
+    return hardResult(shared.failResult(CHECK_TYPE, "Artifact comment-content audit requires an expected comment marker", "check_failed"));
   }
 
   if (!context.artifactPath || !shared.safeStat(context.artifactPath)) {
-    return shared.failResult(CHECK_TYPE,
+    return hardResult(shared.failResult(CHECK_TYPE,
       `Artifact not found for comment verification: ${context.artifactFile || "(missing artifactFile)"}`,
       "check_failed"
-    );
+    ));
   }
 
   const comment = findCommentByMarker(remoteData.comments, context.marker);
@@ -519,24 +475,24 @@ function checkCommentContent(context: any, remoteData: any, shared: Verification
     const localCanonical = canonicalizeCommentBody(fs.readFileSync(context.artifactPath, "utf8"));
     const commentCanonical = canonicalizeCommentBody(extractCommentBody(comment?.body || ""));
     if (!localCanonical.ok) {
-      return shared.failResult(CHECK_TYPE,
+      return hardResult(shared.failResult(CHECK_TYPE,
         `Comment content cannot be canonicalized for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${localCanonical.error.message}`,
         "check_failed"
-      );
+      ));
     }
     if (!commentCanonical.ok) {
-      return shared.failResult(CHECK_TYPE,
+      return hardResult(shared.failResult(CHECK_TYPE,
         `Comment content cannot be canonicalized for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${commentCanonical.error.message}`,
         "check_failed"
-      );
+      ));
     }
     localContent = shared.normalizeContent(localCanonical.value);
     commentContent = shared.normalizeContent(commentCanonical.value);
   } catch (error) {
-    return shared.failResult(CHECK_TYPE,
+    return hardResult(shared.failResult(CHECK_TYPE,
       `Comment content cannot be read for '${path.basename(context.artifactPath, path.extname(context.artifactPath))}': ${error instanceof Error ? error.message : String(error)}`,
       "check_failed"
-    );
+    ));
   }
 
   if (localContent === commentContent) {
@@ -555,7 +511,7 @@ function checkCommentContent(context: any, remoteData: any, shared: Verification
 }
 
 function checkTaskCommentContent(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_task_comment_content) {
+  if (!context.audit.enabled) {
     return infoResult('Task comment-content audit is not enabled for this workflow');
   }
   const taskMarker = `<!-- sync-issue:${context.task.metadata.id}:task -->`;
@@ -594,7 +550,7 @@ function checkTaskCommentContent(context: any, remoteData: any, shared: Verifica
 }
 
 function checkPrTypeLabel(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_pr_type_label || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
+  if (!context.audit.enabled || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
     return infoResult('PR type-label audit is not applicable because the required PR metadata or capability is unavailable');
   }
 
@@ -614,7 +570,7 @@ function checkPrTypeLabel(context: any, remoteData: any, shared: VerificationSha
 }
 
 function checkInLabelsMatchPr(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_in_labels_match_pr || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
+  if (!context.audit.enabled || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
     return infoResult('PR in: label audit is not applicable because the required PR metadata or capability is unavailable');
   }
 
@@ -636,7 +592,7 @@ function checkInLabelsMatchPr(context: any, remoteData: any, shared: Verificatio
 }
 
 function checkInLabelsComputed(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_in_labels_computed || !context.hasTriage) {
+  if (!context.audit.enabled || !context.hasTriage) {
     return infoResult('Computed in: label audit is not applicable because it is disabled or triage capability is unavailable');
   }
 
@@ -667,7 +623,7 @@ function checkInLabelsComputed(context: any, remoteData: any, shared: Verificati
 }
 
 function checkSyncedRequirements(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.sync_checked_requirements || !context.hasTriage) {
+  if (!context.audit.enabled || !context.hasTriage) {
     return infoResult('Requirements audit is not applicable because it is disabled or triage capability is unavailable');
   }
 
@@ -775,7 +731,7 @@ function checkIssueFields(context: any, remoteData: any, shared: VerificationSha
 }
 
 function checkPrAssignee(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.config.verify_pr_assignee || !context.hasPush || !context.prNumber) {
+  if (!context.audit.enabled || !context.hasPush || !context.prNumber) {
     return infoResult('PR assignee audit is not applicable because it is disabled or required PR metadata/capability is unavailable');
   }
 
@@ -808,7 +764,7 @@ function checkMilestone(context: any, remoteData: any, shared: VerificationShare
     );
   }
 
-  if (context.config.verify_milestone_specific) {
+  if (context.audit.requireSpecificMilestone) {
     const issueTitle = remoteData.issue.milestone.title;
     if (VERSION_LINE_REGEX.test(issueTitle)) {
       return shared.failResult(CHECK_TYPE,

@@ -28,13 +28,7 @@
       "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)"
     },
     "platform-sync": {
-      "when": "platform_issue_identity_exists",
-      "expected_status_label": "status: in-progress",
-      "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
-      "verify_comment_content": true,
-      "verify_task_comment_content": true,
-      "expected_status_label_key": "inProgress",
-      "expected_comment_marker_key": "artifact"
+      "when": "platform_issue_identity_exists"
     }
   }
 }

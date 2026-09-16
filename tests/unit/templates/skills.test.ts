@@ -1797,18 +1797,13 @@ test("platform workflow docs delegate comment mechanics to internal intents", ()
   }
 });
 
-test("import-issue requires task comment sync in local and template configs", () => {
+test("import-issue platform configs keep only the invocation condition", () => {
   [
     ".agents/skills/import-issue/config/verify.json",
     "templates/.agents/skills/import-issue/config/verify.json"
   ].forEach((relativePath) => {
     const config = JSON.parse(read(relativePath));
-
-    assert.equal(
-      config.checks["platform-sync"]?.verify_task_comment_content,
-      true,
-      `${relativePath} should require task comment verification`
-    );
+    assert.deepEqual(config.checks["platform-sync"], { when: "platform_issue_identity_exists", issue_must_exist: true });
   });
 });
 
@@ -1841,19 +1836,8 @@ test("complete-task splits active preflight checks from completed-state checks",
   ].forEach((relativePath) => {
     const checks = JSON.parse(read(relativePath)).checks;
 
-    assert.deepEqual(checks["platform-sync-preflight"], {
-      when: "platform_issue_identity_exists",
-      expected_comment_marker: "<!-- sync-issue:{task-id}:summary -->",
-      verify_task_comment_content: false,
-      sync_checked_requirements: true,
-      verify_closed_issue_has_no_status_labels: false,
-      expected_comment_marker_key: "summary"
-    });
-    assert.deepEqual(checks["platform-sync"], {
-      when: "platform_issue_identity_exists",
-      verify_task_comment_content: true,
-      verify_closed_issue_has_no_status_labels: true
-    });
+    assert.deepEqual(checks["platform-sync-preflight"], { when: "platform_issue_identity_exists" });
+    assert.deepEqual(checks["platform-sync"], { when: "platform_issue_identity_exists" });
     assert.deepEqual(checks["required-pr-delivery"], {});
   });
 });

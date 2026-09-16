@@ -24,13 +24,7 @@
       "expected_action_pattern": "(Analyze Task|Requirement Analysis) \\(Round \\d+\\)"
     },
     "platform-sync": {
-      "when": "platform_issue_identity_exists",
-      "expected_status_label": "status: pending-design-work",
-      "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
-      "verify_comment_content": true,
-      "verify_task_comment_content": true,
-      "expected_status_label_key": "pendingDesignWork",
-      "expected_comment_marker_key": "artifact"
+      "when": "platform_issue_identity_exists"
     }
   }
 }
