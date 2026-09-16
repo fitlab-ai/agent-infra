@@ -46,9 +46,9 @@ intent 使用 current-only schema version 4。旧 schema 直接失败关闭；�
 ## 动态收敛循环
 
 1. 用固定 invocation 运行 finalizer。
-2. 失败且安全门通过时，读取结构化诊断和 `candidatePath`，只作一次最小、可解释的候选编辑。
-3. 确认字节变化后，使用同一 `--recovery-id` 完整重跑全部 finalizer 校验。
-4. 诊断或指纹重复、无字节进展、恢复状态未知或达到当前 invocation 的 8 次编辑上限时停止；不发布 completed，不生成跨阶段 next-step。
+2. 每次失败且安全门通过时，读取结构化诊断和 `candidatePath`，仅作一次最小、可解释的候选编辑。
+3. 确认字节变化后，使用同一 `--recovery-id` 完整重跑全部 finalizer 校验；仍失败但诊断和指纹均未重复时，回到第 2 步。
+4. 诊断或指纹重复、无字节进展、恢复状态未知、无法安全修复或达到当前 invocation 的 8 次编辑上限时停止；不发布 completed，不生成跨阶段 next-step。
 
 ## 共享入口
 

@@ -135,8 +135,8 @@ agent-infra-internal task-artifact {task-id} finalize-local --family plan --arti
 ```
 
 - On `status=passed`, save that result's `artifactSha256` and `semanticDigest`; the finalizer has recorded the matching one-shot local provenance intent.
-- On `status=failed` with recovery context, edit only the returned `candidatePath` once after the completion gates pass, then rerun the finalizer completely with the same `recoveryId`; the formal artifact must remain unchanged until commit.
-- The recovery candidate must match the recorded task, round, artifact, baseline, and request identity. On baseline conflict, unknown state, no progress, or repeated failure, stop without publishing a completed event.
+- On `status=failed` with recovery context, after the completion gates pass, edit the returned `candidatePath` only once for this attempt, then rerun the finalizer completely with the same `recoveryId`; if it still fails with a new diagnostic and fingerprint while the gates continue to pass, continue to the next attempt; the formal artifact must remain unchanged until commit.
+- The recovery candidate must match the recorded task, round, artifact, baseline, and request identity. On baseline conflict, unknown state, an unsafe repair, repeated diagnostics or fingerprints, no progress, or the shared edit limit, stop without publishing a completed event.
 
 Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {plan-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}

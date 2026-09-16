@@ -45,9 +45,9 @@ The intent is current-only schema version 4. Legacy schemas fail closed; do not 
 ## Dynamic convergence loop
 
 1. Run the finalizer with the fixed invocation.
-2. If it fails and the gates pass, read the structured diagnostic and `candidatePath`, then make one minimal, explainable candidate edit.
-3. Confirm byte-level progress and rerun every finalizer check with the same `--recovery-id`.
-4. Stop on repeated diagnostics or fingerprints, no byte progress, unknown recovery state, or the eight-edit limit for the current invocation. Do not publish a completed event or generate a cross-stage next step.
+2. On every failure that passes the gates, read the structured diagnostic and `candidatePath`, then make only one minimal, explainable candidate edit.
+3. Confirm byte-level progress and rerun every finalizer check with the same `--recovery-id`; if it still fails with a new diagnostic and fingerprint, return to step 2.
+4. Stop on repeated diagnostics or fingerprints, no byte progress, unknown recovery state, an unsafe repair, or the eight-edit limit for the current invocation. Do not publish a completed event or generate a cross-stage next step.
 
 ## Shared entry points
 

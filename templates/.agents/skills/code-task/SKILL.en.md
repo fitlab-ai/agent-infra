@@ -139,8 +139,8 @@ echo "$finalizer"
 ```
 
 - `status=0` with `finalizer.status="passed"`: bind `{artifact-sha256}` and `{semantic-digest}` from this result.
-- `status=1` with recovery context: confirm task, round, artifact, baseline, and request identity are unchanged; edit only the returned `candidatePath` once, confirm the bytes changed, then rerun the same finalizer completely with the same `recoveryId`; `baseline`, `final`, `publish`, and `intent` remain framework-internal state and must not be edited.
-- For any other failure, external formal-artifact change, lack of progress, or recovery identity mismatch, stop without publishing `code.completed`.
+- `status=1` with recovery context: confirm task, round, artifact, baseline, and request identity are unchanged; edit the returned `candidatePath` only once for this attempt, confirm the bytes changed, then rerun the same finalizer completely with the same `recoveryId`; if it still fails with a new diagnostic and fingerprint while the gates continue to pass, continue to the next attempt; `baseline`, `final`, `publish`, and `intent` remain framework-internal state and must not be edited.
+- For any other failure, external formal-artifact change, an unsafe repair, repeated diagnostics or fingerprints, lack of progress, the shared edit limit, or recovery identity mismatch, stop without publishing `code.completed`.
 
 Do not rescan or manually write digest data; the completion event must include `--artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}` from the successful finalizer result.
 

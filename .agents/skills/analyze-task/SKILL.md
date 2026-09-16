@@ -226,8 +226,8 @@ agent-infra-internal task-artifact {task-id} init --family analysis --artifact {
   agent-infra-internal task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact}
   ```
   - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`；finalizer 已记录对应的一次性本地 provenance intent。
-  - `status=failed` 且返回 recovery context：完成门禁通过后，只编辑返回的 `candidatePath` 一次，然后使用同一个 `recoveryId` 完整重跑 finalizer；formal artifact 在 commit 前必须保持不变。
-  - recovery candidate 必须与记录的任务、轮次、产物、baseline 和 request identity 匹配；基线冲突、未知状态、无进展或重复失败：停止，不发布 completed 事件。
+  - `status=failed` 且返回 recovery context：完成门禁通过后，本次只编辑返回的 `candidatePath` 一次，然后使用同一个 `recoveryId` 完整重跑 finalizer；若仍失败但诊断和指纹均未重复且安全门继续通过，继续下一轮；formal artifact 在 commit 前必须保持不变。
+  - recovery candidate 必须与记录的任务、轮次、产物、baseline 和 request identity 匹配；基线冲突、未知状态、无法安全修复、诊断或指纹重复、无进展，或达到共享规则的编辑上限时停止，不发布 completed 事件。
 - 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `platform_issue_identity`，执行以下同步操作（任一失败则跳过并继续）：
