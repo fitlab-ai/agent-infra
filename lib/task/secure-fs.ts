@@ -1,6 +1,6 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 
 const NO_FOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 const DIRECTORY = fs.constants.O_DIRECTORY ?? 0;
@@ -25,11 +25,8 @@ function conflict(message: string): never {
 }
 
 function sameStat(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
-  return left.dev === right.dev
-    && left.ino === right.ino
-    && left.size === right.size
-    && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs;
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
 }
 
 function assertNoSymlinkAncestors(candidate: string): void {
@@ -43,25 +40,15 @@ function assertNoSymlinkAncestors(candidate: string): void {
   }
 }
 
-export async function readStableFile(
-  candidate: string,
-  options: Readonly<{ maxBytes: number; expectedSha256?: string }>
-): Promise<StableFile> {
+export async function readStableFile(candidate: string, options: Readonly<{ maxBytes: number; expectedSha256?: string }>): Promise<StableFile> {
   return readStableFileSync(candidate, options);
 }
 
-/** Shared bounded reader for synchronous domain commands and async workflow callers. */
-export function readStableFileSync(
-  candidate: string,
-  options: Readonly<{ maxBytes: number; expectedSha256?: string }>
-): StableFile {
-  if (!path.isAbsolute(candidate)) {
-    conflict('candidate path must be absolute and terminal');
-  }
+export function readStableFileSync(candidate: string, options: Readonly<{ maxBytes: number; expectedSha256?: string }>): StableFile {
+  if (!path.isAbsolute(candidate)) conflict('candidate path must be absolute and terminal');
   assertNoSymlinkAncestors(candidate);
   let descriptor: number | undefined;
   try {
-    // O_NONBLOCK lets fstat reject a FIFO even when it has no writer.
     descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | NO_FOLLOW | (fs.constants.O_NONBLOCK ?? 0));
     const before = fs.fstatSync(descriptor, { bigint: true });
     if (!before.isFile()) conflict('candidate is not a regular file');
@@ -76,16 +63,12 @@ export function readStableFileSync(
     const after = fs.fstatSync(descriptor, { bigint: true });
     if (!sameStat(before, after)) conflict('candidate identity or metadata changed during read');
     const sha256 = createHash('sha256').update(bytes).digest('hex');
-    if (options.expectedSha256 !== undefined && sha256 !== options.expectedSha256) {
-      conflict('candidate digest does not match the expected digest');
-    }
+    if (options.expectedSha256 !== undefined && sha256 !== options.expectedSha256) conflict('candidate digest does not match the expected digest');
     return { bytes, sha256, stat: after };
   } catch (error) {
     if (error instanceof SecureFileError) throw error;
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ELOOP' || code === 'ENOTSUP' || code === 'EINVAL') {
-      conflict('candidate terminal is not a stable non-symlink file');
-    }
+    if (code === 'ELOOP' || code === 'ENOTSUP' || code === 'EINVAL') conflict('candidate terminal is not a stable non-symlink file');
     throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', error instanceof Error ? error.message : String(error));
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);
@@ -99,18 +82,14 @@ export async function writeAtomicFile(target: string, bytes: Buffer, mode = 0o60
     let stat: fs.Stats;
     try { stat = await fs.promises.lstat(current); }
     catch { throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', 'authoritative parent directory is missing'); }
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', 'authoritative parent directory is not a real directory');
-    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', 'authoritative parent directory is not a real directory');
     const next = path.dirname(current);
     if (next === current) break;
     current = next;
   }
   try {
     const existing = await fs.promises.lstat(target);
-    if (existing.isSymbolicLink() || !existing.isFile()) {
-      throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', 'authoritative target is not a regular file');
-    }
+    if (existing.isSymbolicLink() || !existing.isFile()) throw new SecureFileError('TASK_ARTIFACT_WRITE_CONFLICT', 'authoritative target is not a regular file');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
@@ -123,7 +102,6 @@ export async function writeAtomicFile(target: string, bytes: Buffer, mode = 0o60
     await handle.chmod(mode);
     await handle.close();
     handle = undefined;
-    // Check after all asynchronous preparation; keep the final check/rename adjacent.
     if (expectedSha256 !== undefined) readStableFileSync(target, { maxBytes: 1024 * 1024, expectedSha256 });
     fs.renameSync(temporary, target);
     const directory = await fs.promises.open(parent, fs.constants.O_RDONLY | DIRECTORY);

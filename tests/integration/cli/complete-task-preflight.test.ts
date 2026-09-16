@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { filePath, gitSafeEnv, sandboxControlSafeEnv } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH, filePath, gitSafeEnv, sandboxControlSafeEnv } from '../../helpers.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -35,7 +35,7 @@ function fixture() {
 }
 
 function run(root: string, args: string[]) {
-  return spawnSync(filePath('bin/internal-cli.sh'), args, {
+  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, ...args], {
     cwd: root,
     encoding: 'utf8',
     env: sandboxControlSafeEnv()

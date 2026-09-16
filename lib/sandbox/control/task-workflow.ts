@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { readStableFile, SecureFileError, writeAtomicFile } from '../../host-control/secure-fs.ts';
+import { readStableFile, SecureFileError, writeAtomicFile } from '../../task/secure-fs.ts';
 
 import { TASK_WORKFLOW_COMMANDS, TASK_WORKFLOW_OPERATIONS, type TaskWorkflowOperation, type WorkflowCommand } from '../../task/workflow-command.ts';
 

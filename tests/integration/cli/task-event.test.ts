@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { filePath, INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
@@ -793,7 +793,7 @@ test('completed event validates orchestration provenance before writing task sta
   spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: f.root });
 
   const orchestrate = (args: string[]) => spawnSync(
-    filePath('bin/internal-cli.sh'), ['task-orchestration', f.id, ...args],
+    process.execPath, [INTERNAL_CLI_PATH, 'task-orchestration', f.id, ...args],
     { cwd: f.root, encoding: 'utf8', env: sandboxControlSafeEnv() }
   );
   assert.equal(orchestrate([

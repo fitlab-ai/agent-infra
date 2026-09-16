@@ -21,6 +21,7 @@ import {
   commitArtifactRecovery,
   prepareArtifactRecoveryFinal,
   prepareArtifactRecoveryCommit,
+  reconcileArtifactRecovery,
   recoveryContextFromIntent,
   stageArtifactCandidate
 } from './artifact-recovery.ts';
@@ -387,6 +388,12 @@ function prepareReviewSummaryCandidate(
   const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts);
   if (!transformed.ok) return reject(transformed.code, transformed.message);
   const finalDigests = { artifactSha256: sha256Content(transformed.content), semanticDigest: canonicalSemanticDigest(transformed.content) };
+  if (!recovery && repairIntent?.state === 'commit-started') {
+    if (repairIntent.finalArtifactSha256 !== finalDigests.artifactSha256 || repairIntent.finalSemanticDigest !== finalDigests.semanticDigest) {
+      return reject('REVIEW_PROVENANCE_INVALID', 'formal review artifact does not match the interrupted recovery journal', finalDigests);
+    }
+    recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, repairIntent);
+  }
   if (!recovery && (repairIntent?.state === 'passed' || repairIntent?.state === 'consumed')) {
     if (transformed.changed) return reject('REVIEW_PROVENANCE_INVALID', 'the review artifact requires changes after its completed recovery was consumed', finalDigests);
     return {
@@ -424,14 +431,30 @@ function prepareReviewSummaryCandidate(
 
 function commitReviewSummaryProvenance(
   prepared: ReviewSummaryCandidatePreparation,
-  repoRoot: string
+  repoRoot: string,
+  options: Readonly<{ afterPublish?: () => void }> = {}
 ): ReviewFinalizationResult {
   if (prepared.result.status === 'failed' || !prepared.recovery) return prepared.result;
   try {
     const intent = readArtifactRecoveryIntent(prepared.recovery.repoRoot, prepared.recovery.taskId, prepared.recovery.family, prepared.recovery.artifact);
     if (!intent) throw new Error('ARTIFACT_RECOVERY_INTENT_MISSING');
     let committed;
-    if (intent.state === 'awaiting-preflight-recovery') {
+    if (intent.state === 'passed' || intent.state === 'consumed') {
+      return {
+        ...prepared.result,
+        status: 'no-op',
+        changed: false,
+        artifactSha256: intent.finalArtifactSha256,
+        semanticDigest: intent.finalSemanticDigest,
+        error: null
+      };
+    } else if (intent.state === 'commit-started') {
+      const reconciled = reconcileArtifactRecovery(prepared.recovery, {
+        lockAlreadyHeld: prepared.lockAlreadyHeld,
+        afterPublish: options.afterPublish
+      });
+      committed = reconciled.intent;
+    } else if (intent.state === 'awaiting-preflight-recovery') {
       const staged = stageArtifactCandidate(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
       prepareArtifactRecoveryCommit(prepared.recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: prepared.lockAlreadyHeld });
       committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
@@ -440,9 +463,9 @@ function commitReviewSummaryProvenance(
     }
     if (committed?.state === 'preflight-passed' || intent.state === 'preflight-passed') {
       prepareArtifactRecoveryFinal(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
-    } else if (intent.state === 'full-finalizer-ready' || intent.state === 'commit-started') {
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld, afterPublish: options.afterPublish });
+    } else if (intent.state === 'full-finalizer-ready') {
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld, afterPublish: options.afterPublish });
     }
     if (!committed || committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed?.state ?? intent.state}'`);
     return {
@@ -452,6 +475,7 @@ function commitReviewSummaryProvenance(
       error: null
     };
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith('TASK_WORKFLOW_FAULT_INJECTED:')) throw error;
     return { ...prepared.result, status: 'failed', error: {
       code: 'REVIEW_RECOVERY_COMMIT_FAILED', message: `cannot publish review candidate: ${String(error)}`
     } };

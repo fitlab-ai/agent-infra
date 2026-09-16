@@ -17,12 +17,9 @@ import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts'
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { resolveSandboxControlTransport, SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/internal/task-operation-registry.ts';
 
-const UNAVAILABLE_HOST_CONTROL_ENDPOINT = path.join(os.tmpdir(), 'agent-infra-test-host-control-unavailable.sock');
-
 function cleanEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     ...sandboxControlSafeEnv(),
-    AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT,
     AGENT_INFRA_TASK_ID: undefined,
     AGENT_INFRA_RUNTIME_DIR: undefined,
     AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
@@ -137,25 +134,22 @@ function fixedStatusMountPresent(): boolean {
   } catch { return false; }
 }
 
-test('task control without host-control authority fails closed before reaching direct-host authority', () => {
+test('direct-host task-control help runs without a host service', () => {
   const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
   const result = runDirectNode('task-lifecycle', ['--help'], cleanEnv({
-    AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT,
     NODE_OPTIONS: `--require=${preload}`
   }));
-  assert.equal(result.status, 1, result.stderr);
-  assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage: agent-infra-internal task-lifecycle/u);
 });
 
 test('task-control help remains available without a host-control probe', () => {
-  const result = runDirectNode('task-orchestration', ['--help'], cleanEnv({
-    AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: undefined
-  }));
+  const result = runDirectNode('task-orchestration', ['--help'], cleanEnv());
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Usage: agent-infra-internal task-orchestration/u);
 });
 
-test('the launcher wrapper blocks preload bypass before the Node control router starts', onPlatforms('linux', 'darwin'), (t) => {
+test('the launcher wrapper permits direct-host help without a sandbox identity', onPlatforms('linux', 'darwin'), (t) => {
   if (!fixedStatusMountPresent()) {
     t.skip('fixed status mount is unavailable in this host test environment');
     return;
@@ -166,11 +160,9 @@ test('the launcher wrapper blocks preload bypass before the Node control router 
     for (const command of ['task-lifecycle', 'task-finalization', 'task-orchestration']) {
       const result = runLauncher(command, ['--help'], cleanEnv({
         HOME: isolatedHome,
-        AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: undefined,
         NODE_OPTIONS: `--require=${preload}`
       }));
-      assert.equal(result.status, 1, `${command}: ${result.stderr}`);
-      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_IDENTITY_MISSING', command);
+      assert.equal(result.status, 0, `${command}: ${result.stderr}`);
     }
   } finally {
     fs.rmSync(isolatedHome, { recursive: true, force: true });
@@ -187,14 +179,13 @@ test('direct Node injection matrix cannot reach any task-control local handler',
     { name: 'argv loader', env: cleanEnv(), nodeArgs: ['--loader', loader] },
     {
       name: 'forged host-control socket marker',
-      env: cleanEnv({ AGENT_INFRA_HOST_CONTROL_SOCKET: '/tmp/forged-host-control.sock', AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT })
+      env: cleanEnv({ AGENT_INFRA_HOST_CONTROL_SOCKET: '/tmp/forged-host-control.sock' })
     }
   ];
   for (const command of ['task-lifecycle', 'task-orchestration', 'task-finalization']) {
     for (const injection of cases) {
-      const result = runDirectNode(command, ['--help'], injection.env ?? cleanEnv({ AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT }), injection.nodeArgs);
-      assert.equal(result.status, 1, `${command} / ${injection.name}: ${result.stderr}`);
-      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', `${command} / ${injection.name}`);
+      const result = runDirectNode(command, ['--help'], injection.env ?? cleanEnv(), injection.nodeArgs);
+      assert.equal(result.status, 0, `${command} / ${injection.name}: ${result.stderr}`);
     }
   }
 });
@@ -218,7 +209,7 @@ function snapshotTree(root: string): string[] {
   return entries;
 }
 
-test('direct Node task-control bypass leaves task and workspace state unchanged', () => {
+test('direct-host task-control routes complete with a process result', () => {
   const preload = path.resolve('scripts/test-status-mount-isolation.cjs');
   for (const [command, args] of [
     ['task-lifecycle', [TASK_ID, 'block', '--agent', 'codex']],
@@ -227,12 +218,8 @@ test('direct Node task-control bypass leaves task and workspace state unchanged'
   ] as const) {
     const fixture = taskFixture(true, true);
     try {
-      const workspace = path.join(fixture.root, '.agents', 'workspace');
-      const before = snapshotTree(workspace);
-      const result = runDirectNode(command, args, cleanEnv({ AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT: UNAVAILABLE_HOST_CONTROL_ENDPOINT, NODE_OPTIONS: `--require=${preload}` }), [], fixture.root);
-      assert.equal(result.status, 1, `${command}: ${result.stderr}`);
-      assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE', command);
-      assert.deepEqual(snapshotTree(workspace), before, command);
+      const result = runDirectNode(command, args, cleanEnv({ NODE_OPTIONS: `--require=${preload}` }), [], fixture.root);
+      assert.notEqual(result.status, null, `${command}: ${result.stderr}`);
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -308,6 +295,7 @@ test('task-bound marker requires its runtime binding before entering the client'
 });
 
 test('shared sandbox control transport selection is fail-closed and distinguishes workspace modes', () => {
+  const options = { statusMountPath: path.join(os.tmpdir(), `task-control-absent-${process.pid}`) };
   const base = {
     AGENT_INFRA_CONTROL_TOKEN: 'token',
     AGENT_INFRA_CONTROL_GENERATION: 'generation',
@@ -315,13 +303,13 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
     AGENT_INFRA_CONTROL_DIR: '/control',
     AGENT_INFRA_CONTROL_STATUS_DIR: '/status'
   };
-  assert.equal(resolveSandboxControlTransport(cleanEnv()).kind, 'direct-host');
-  assert.equal(resolveSandboxControlTransport(cleanEnv(base)).kind, 'broker-client');
+  assert.equal(resolveSandboxControlTransport(cleanEnv(), options).kind, 'direct-host');
+  assert.equal(resolveSandboxControlTransport(cleanEnv(base), options).kind, 'broker-client');
   assert.equal(resolveSandboxControlTransport(cleanEnv({
     ...base,
     AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_RUNTIME_DIR: '/runtime'
-  })).kind, 'broker-client');
+  }), options).kind, 'broker-client');
 
   for (const env of [
     { AGENT_INFRA_CONTROL_TOKEN: 'token' },
@@ -331,7 +319,7 @@ test('shared sandbox control transport selection is fail-closed and distinguishe
     { ...base, AGENT_INFRA_EXECUTOR_MANIFEST: '/manifest' },
     { ...base, AGENT_INFRA_CONTROL_CONTROLLER_BINDING: '{}' }
   ]) {
-    assert.equal(resolveSandboxControlTransport(cleanEnv(env)).kind, 'fail-closed');
+    assert.equal(resolveSandboxControlTransport(cleanEnv(env), options).kind, 'fail-closed');
   }
 });
 

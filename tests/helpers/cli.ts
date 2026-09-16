@@ -1,5 +1,5 @@
 import path from "node:path";
-import { sandboxControlSafeEnv } from "../../lib/sandbox/control/server.ts";
+import { sandboxControlSafeEnv as withoutSandboxControlAuthority } from "../../lib/sandbox/control/server.ts";
 import { filePath } from "./paths.ts";
 
 const CLI_PATH = filePath("dist/bin/cli.js");
@@ -25,6 +25,18 @@ function envWithPrependedPath(env: NodeJS.ProcessEnv, binDir: string): NodeJS.Pr
     [pathKey]: nextPath,
     PATH: nextPath
   };
+}
+
+/**
+ * Child CLI fixtures model a direct host even when the test runner itself is
+ * hosted in a task sandbox. The preload is test-only; production continues to
+ * use the native fixed-mount probe.
+ */
+function sandboxControlSafeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const safe = withoutSandboxControlAuthority(env);
+  const isolation = `--require=${filePath("scripts/test-status-mount-isolation.cjs")}`;
+  const nodeOptions = [safe.NODE_OPTIONS, isolation].filter((value, index, values) => Boolean(value) && values.indexOf(value) === index).join(" ");
+  return { ...safe, NODE_OPTIONS: nodeOptions };
 }
 
 export {

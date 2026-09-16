@@ -38,8 +38,8 @@ function parseFailure(error: unknown): string {
 }
 
 async function taskFinalization(args: string[] = []): Promise<void> {
-  if (!ensureInternalHandlerRoute('task-finalization', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
+  if (!ensureInternalHandlerRoute('task-finalization', args)) return;
 
   let operation;
   try {

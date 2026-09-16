@@ -95,13 +95,9 @@ Every command above works the same way in Claude Code, Codex, Antigravity CLI, a
 
 ### Sandbox control boundary
 
-Task-bound sandboxes use a host-only control service for lifecycle and workflow writes. On Linux its fixed endpoint is `/run/user/<uid>/agent-infra/host-control.sock`; on macOS it is `/Users/<login>/Library/Application Support/agent-infra/run/host-control.sock`, resolved from the account identity rather than `HOME` or `TMPDIR`. The service directory is private (`0700`) and the socket is private (`0600`). If the endpoint or sandbox identity is unavailable, task-control commands fail closed.
+Direct-host lifecycle and workflow commands execute in the current CLI process. Task-bound sandboxes route requests to their broker; the broker verifies the request, manifest, generation, owner, lease, and controller before starting a one-request executor. There is no host socket, worker token, or user-level task-control service.
 
-The shell installer creates and starts the user-scoped service through systemd user units on Linux or launchd user agents on macOS. After a manual npm install, run `agent-infra-internal host-control install`, then enable the generated user service; `agent-infra-internal host-control status` reports endpoint health. No root or setuid service is required.
-
-On macOS, the installer retries service registration during reload. If registration or startup still fails, it exits with an error and a recovery command.
-
-The task directory exposed inside a task-bound sandbox is a writable projection. Artifact commands accept only typed workflow operations and canonical artifact basenames. The host opens candidates with `O_NOFOLLOW`, reads and hashes them through one file descriptor, checks observable metadata changes, and atomically lands validated bytes into the authoritative task directory. Changes to the projection's protected topology fail closed and never turn the projection into task state.
+The task directory exposed inside a task-bound sandbox is writable only for its bound task. Artifact commands accept typed workflow operations and canonical artifact basenames. The executor opens candidates with `O_NOFOLLOW`, reads and hashes them through one file descriptor, checks observable metadata changes, and atomically lands validated bytes into the authoritative task directory.
 
 ## Quick Start
 

@@ -7,14 +7,6 @@ import {
   TaskViewOperationError
 } from '../lib/internal/task-operation-registry.ts';
 import { INTERNAL_HANDLER_ROUTE_SELECTORS } from '../lib/internal/cli-route-inventory.ts';
-import {
-  hostControlRequestForCommand,
-  requestHostControl,
-  HostControlClientError,
-  HOST_CONTROL_TEST_ENVIRONMENT_KEYS,
-  type HostControlCommand
-} from '../lib/host-control/client.ts';
-import { resolveHostControlEndpoint, readHostControlWorkerToken } from '../lib/host-control/path.ts';
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
 if (major < 22 || (major === 22 && minor < 9)) {
   process.stderr.write(
@@ -33,10 +25,13 @@ const taskWorkflowCommand = command === 'task-artifact'
   || command === 'task-invalidation'
   || command === 'task-warning';
 const manualValidationWorkflowCommand = command === 'manual-validation';
-const localTaskControlHelp = taskControlCommand
-  && (process.argv[3] === '--help' || process.argv[3] === '-h')
-  && !process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
-
+const taskControlMarkers = [
+  'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
+  'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR', 'AGENT_INFRA_RUNTIME_DIR',
+  'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST'
+];
+const markerlessHelp = ['--help', '-h'].includes(process.argv[3] ?? '')
+  && taskControlMarkers.every((key) => !process.env[key]);
 let taskViewGuardFailed = false;
 try {
   const guard = guardTaskOperation('internal', command, process.argv.slice(3));
@@ -61,43 +56,8 @@ function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANS
   process.exit(1);
 }
 
-async function runHostControlCommand(commandName: HostControlCommand, args: string[]): Promise<void> {
-  let response;
-  try {
-    const testEndpoint = process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT;
-    const forwardedEnvironment = testEndpoint
-      ? Object.fromEntries(HOST_CONTROL_TEST_ENVIRONMENT_KEYS.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]!]]))
-      : {};
-    response = await requestHostControl({
-      request: hostControlRequestForCommand(commandName, args, process.cwd(), forwardedEnvironment),
-      endpoint: process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint()
-    });
-  } catch (error) {
-    if (error instanceof HostControlClientError) {
-      taskControlTransportFailure(error.message, error.changed === false
-        ? 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE' : error.code, error.changed);
-    }
-    throw error;
-  }
-  process.stdout.write(response.stdout);
-  process.stderr.write(response.stderr);
-  process.exitCode = response.exitCode;
-}
-
-const hostWorkerRequested = process.env.AGENT_INFRA_HOST_CONTROL_WORKER === '1';
-const hostWorker = hostWorkerRequested && (() => {
-  try {
-    const endpoint = process.env.AGENT_INFRA_TEST_HOST_CONTROL_ENDPOINT ?? resolveHostControlEndpoint();
-    return process.env.AGENT_INFRA_HOST_CONTROL_WORKER_TOKEN === readHostControlWorkerToken(endpoint);
-  } catch {
-    return false;
-  }
-})();
-if (hostWorkerRequested && !hostWorker && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand)) {
-  taskControlTransportFailure('host-control worker authorization is invalid', 'SANDBOX_CONTROL_HOST_AUTHORITY_UNAVAILABLE');
-}
 let controlRouted = false;
-if (!taskViewGuardFailed && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand) && !hostWorker && !localTaskControlHelp) {
+if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand)) {
   const transport = resolveSandboxControlTransport(process.env);
   switch (transport.kind) {
     case 'fail-closed': {
@@ -106,7 +66,8 @@ if (!taskViewGuardFailed && (taskControlCommand || taskWorkflowCommand || manual
       break;
     }
     case 'direct-host':
-      await runHostControlCommand(command as HostControlCommand, process.argv.slice(3));
+      // The host CLI is the direct-host authority. Domain handlers retain their
+      // task locks, atomic writes, and operation-specific recovery facts.
       break;
     case 'broker-client': {
       const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
@@ -114,7 +75,7 @@ if (!taskViewGuardFailed && (taskControlCommand || taskWorkflowCommand || manual
       break;
     }
   }
-  controlRouted = true;
+  controlRouted = transport.kind === 'broker-client';
 }
 
 if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (command) {
@@ -143,11 +104,6 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
   case 'sandbox-control': {
     const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
     await sandboxControl(process.argv.slice(3));
-    break;
-  }
-  case 'host-control': {
-    const { hostControl } = await import('../lib/internal/host-control.ts');
-    await hostControl(process.argv.slice(3));
     break;
   }
   case 'agent-client': {

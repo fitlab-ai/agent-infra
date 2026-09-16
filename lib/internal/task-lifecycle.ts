@@ -24,8 +24,8 @@ function parseFailure(error: unknown): string {
 }
 
 async function taskLifecycle(args: string[] = []): Promise<void> {
-  if (!ensureInternalHandlerRoute('task-lifecycle', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
+  if (!ensureInternalHandlerRoute('task-lifecycle', args)) return;
 
   let operation;
   try {

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { writeDurableFile } from '../fs/durable-write.ts';
-import { readStableFileSync } from '../host-control/secure-fs.ts';
+import { readStableFileSync } from './secure-fs.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import { canonicalSemanticDigest, sha256Content } from './artifact-operations.ts';
 import {
@@ -434,7 +434,7 @@ function markCommitStarted(context: ArtifactRecoveryContext, intent: ArtifactRec
 
 export function commitArtifactRecovery(
   context: ArtifactRecoveryContext,
-  options: Readonly<{ lockAlreadyHeld?: boolean }> = {}
+  options: Readonly<{ lockAlreadyHeld?: boolean; afterPublish?: () => void }> = {}
 ): ArtifactRecoveryIntent {
   return runLocked(context, 'task-artifact.recovery.commit', () => {
     let intent = readIntentForContext(context);
@@ -448,6 +448,7 @@ export function commitArtifactRecovery(
       return passed;
     }
     publishGeneration(context, intent.pendingGenerationSha256!, intent.pendingGenerationSemanticDigest!, intent.activeGenerationSha256!);
+    options.afterPublish?.();
     const passed: ArtifactRecoveryIntent = {
       ...intent, state: 'passed', activeGenerationSha256: intent.pendingGenerationSha256,
       activeGenerationSemanticDigest: intent.pendingGenerationSemanticDigest,
@@ -510,6 +511,7 @@ export function reconcileArtifactRecovery(
     lockAlreadyHeld?: boolean;
     validateFinal?: () => boolean;
     restoreBaseline?: boolean;
+    afterPublish?: () => void;
   }> = {}
 ): ArtifactRecoveryReconcileResult {
   return runLocked(context, 'task-artifact.recovery.reconcile', () => {
@@ -525,7 +527,7 @@ export function reconcileArtifactRecovery(
       return { status: next.state, intent: next };
     }
     if (target.sha256 === (intent.state === 'preflight-commit-started' ? intent.baselineSha256 : intent.activeGenerationSha256)) {
-      const retried = commitArtifactRecovery(context, { lockAlreadyHeld: true });
+      const retried = commitArtifactRecovery(context, { lockAlreadyHeld: true, afterPublish: options.afterPublish });
       return { status: retried.state, intent: retried };
     }
     if (options.restoreBaseline) {

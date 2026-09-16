@@ -9,7 +9,7 @@ import {
   readStableFile,
   readStableFileSync,
   writeAtomicFile
-} from '../../../lib/host-control/secure-fs.ts';
+} from '../../../lib/task/secure-fs.ts';
 import { onPlatforms } from '../../helpers.ts';
 
 function testRoot(prefix: string): string {
