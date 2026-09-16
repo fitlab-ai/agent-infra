@@ -36,6 +36,9 @@ type ValidatorOptions = {
 type ValidatorCheck = {
   type: string;
   status: string;
+  checkId?: string;
+  classification?: 'hard' | 'soft' | 'info';
+  effectiveStatus?: string;
   fail_type?: string;
   message?: string;
   warnings?: string[];

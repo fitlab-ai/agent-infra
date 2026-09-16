@@ -186,7 +186,7 @@ test('required PR delivery gates on normalized merged state and platform availab
   }
 });
 
-test('review-pr task-verify gate requires re-sync after publication write-back (PL-8)', () => {
+test('review-pr task-verify reports re-sync after publication write-back as a soft audit (PL-8)', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-pr-verify-'));
   try {
     spawnSync('git', ['init', '-q'], { cwd: root });
@@ -285,10 +285,10 @@ test('review-pr task-verify gate requires re-sync after publication write-back (
     fs.writeFileSync(path.join(dir, 'pr-review.md'),
       artifactContent.replace('- **正式 Review 状态**：applied', '- **正式 Review 状态**：applied\n- **Review URL**：https://github.com/fitlab-ai/agent-infra/pull/42'));
 
-    // Control: verifying WITHOUT re-sync must fail with a content mismatch.
+    // Verifying without re-sync retains the mismatch as a non-blocking audit.
     const before = run(['task-verify', id, 'review-pr.completed', '--artifact', 'pr-review.md', '--format', 'text']);
-    assert.equal(before.status, 1, before.stdout);
-    assert.match(before.stdout, /Comment content mismatch/);
+    assert.equal(before.status, 0, before.stdout);
+    assert.match(before.stdout, /platform\.comment-content \(soft; raw FAIL; reason check_failed\) - Comment content mismatch/);
 
     // Step 7: re-sync the artifact comment to align local and remote.
     const reSync = run(['platform-comment', 'sync', id, '--kind', 'artifact', '--artifact', 'pr-review.md', '--agent', 'claude-code']);

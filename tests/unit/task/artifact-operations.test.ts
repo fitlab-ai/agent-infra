@@ -1,12 +1,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import {
   canonicalSemanticDigest,
+  initializeArtifactSkeleton,
   inspectArtifactContract,
   inspectArtifactStructure
 } from '../../../lib/task/artifact-operations.ts';
+import { validateQualificationAudit } from '../../../lib/task/qualification-audit.ts';
+
+const qualificationTask = `---
+id: TASK-20260101-000001
+---
+
+## 约束
+
+| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| C-1 | Keep the current contract. | assumption | test | test | unit test |  |  |
+
+## 候选与否决方案
+
+| candidate_id | statement | status | constraint_ids | impact | evidence |
+| --- | --- | --- | --- | --- | --- |
+| A | Use the current implementation. | pending | C-1 | requires qualification | unit test |
+`;
+
+test('artifact initialization renders a valid qualification audit for every workflow family', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-init-qualification-'));
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), qualificationTask);
+
+  for (const family of ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const) {
+    const artifact = `${family}.md`;
+    const initialized = initializeArtifactSkeleton({ repoRoot: root, taskId, taskDir, family, artifact });
+    assert.equal(initialized.status, 'applied');
+    const content = fs.readFileSync(path.join(taskDir, artifact), 'utf8');
+    assert.equal(validateQualificationAudit(qualificationTask, content, { family, artifact, require: true }).ok, true);
+  }
+});
 
 test('structure inspection retains fence diagnostics and ignores fenced headings', () => {
   const schema = getArtifactSchema('plan')!;

@@ -42,7 +42,7 @@ export function normalizeVerificationRecord(record: VerificationRecord): Verific
     checkId,
     classification,
     effectiveStatus: record.effectiveStatus ?? effectiveStatus(record.status, classification),
-    reason: record.reason ?? record.fail_type ?? (record.status === 'pass' ? 'OK' : 'CHECK_FAILED'),
-    action: record.action ?? (record.status === 'pass' ? 'No action required' : 'Review the check evidence and retry after correction')
+    reason: record.reason ?? record.fail_type ?? (classification === 'info' ? 'NOT_APPLICABLE' : record.status === 'pass' ? 'OK' : 'CHECK_FAILED'),
+    action: record.action ?? (classification === 'info' || record.status === 'pass' ? 'No action required' : 'Review the check evidence and retry after correction')
   };
 }

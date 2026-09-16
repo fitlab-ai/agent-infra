@@ -1510,9 +1510,18 @@ async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks:
       repositoryRoot: repoRoot,
       config
     }, shared));
-  return result.subchecks?.length
-    ? { skill: skillName, ...result, checks: result.subchecks.map(normalizeVerificationRecord) }
-    : { skill: skillName, ...result };
+  if (!result.subchecks?.length) return { skill: skillName, ...result };
+  const checks = result.subchecks.map(normalizeVerificationRecord);
+  const gate = summarizeGate(checks);
+  return {
+    skill: skillName,
+    ...result,
+    status: gate,
+    effectiveStatus: gate,
+    reason: gate === 'pass' ? 'OK' : checks.find((check: any) => check.effectiveStatus !== 'pass')?.reason ?? 'CHECK_FAILED',
+    action: buildAction(gate, checks),
+    checks
+  };
 }
 
 export { verifyInProcess };
