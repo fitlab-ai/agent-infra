@@ -91,6 +91,7 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'platform-metadata', 'init-milestones', 'non-task', 'remote-write', 'none'),
     descriptor('internal', 'platform-context', 'resolve', 'non-task', 'diagnostic', 'none'),
     descriptor('internal', 'platform-comment', 'list', 'non-task', 'diagnostic', 'none'),
+    descriptor('internal', 'platform-comment', 'recover', 'non-task', 'recovery', 'none'),
     descriptor('internal', 'platform-comment', 'owner', 'task-bound', 'diagnostic'),
     descriptor('internal', 'platform-comment', 'backfill', 'task-bound', 'remote-write'),
     descriptor('internal', 'platform-comment', 'sync', 'task-bound', 'remote-write'),

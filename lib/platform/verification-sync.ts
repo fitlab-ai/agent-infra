@@ -12,7 +12,7 @@ import { planInLabelUpdate, validateInLabelMapping } from "./in-label-sync.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
-import { isTaskCommentTooLarge } from "./issue-comments.ts";
+import { renderTaskCommentResult } from "./issue-comments.ts";
 import {
   CONTROL_MARKER_PATTERN,
   canonicalizeCommentBody,
@@ -542,10 +542,6 @@ function checkTaskCommentContent(context: any, remoteData: any, shared: Verifica
   if (!context.config.verify_task_comment_content) {
     return null;
   }
-  if (isTaskCommentTooLarge(context.task.content)) {
-    return null;
-  }
-
   const taskMarker = `<!-- sync-issue:${context.task.metadata.id}:task -->`;
   const comment = findCommentByMarker(remoteData.comments, taskMarker);
   if (!comment) {
@@ -555,14 +551,20 @@ function checkTaskCommentContent(context: any, remoteData: any, shared: Verifica
     );
   }
 
-  const expectedTaskBody = buildExpectedTaskBody(context.task.content, shared);
-  if (expectedTaskBody === null) {
-    return shared.failResult(CHECK_TYPE,
-      "Task content cannot be rendered safely for comment verification",
-      "check_failed"
+  let renderedTask: { body: string; byteLength: number };
+  try {
+    renderedTask = renderTaskCommentResult(
+      context.task.content,
+      context.task.metadata.id,
+      loadProjectLanguage(shared)
     );
+  } catch {
+    return shared.failResult(CHECK_TYPE, "Task content cannot be rendered safely for comment verification", "check_failed");
   }
-  const expectedBody = shared.normalizeContent(expectedTaskBody);
+  if (renderedTask.byteLength > 60_000) {
+    return shared.failResult(CHECK_TYPE, "Task comment exceeds the platform byte limit", "check_failed");
+  }
+  const expectedBody = shared.normalizeContent(extractCommentBody(renderedTask.body));
   const commentBody = shared.normalizeContent(extractCommentBody(comment.body || ""));
 
   if (expectedBody === commentBody) {
@@ -833,7 +835,7 @@ function extractCommentBody(commentBody: any): any {
     start += 1;
   }
 
-  if (start < lines.length && /^> \*\*.+\*\* · .+$/.test(lines[start]!.trim())) {
+  if (start < lines.length && (/^> \*\*.+\*\* · .+$/.test(lines[start]!.trim()) || /^> 任务同步 · .+$/.test(lines[start]!.trim()))) {
     start += 1;
   }
 

@@ -44,13 +44,14 @@ description: >
 
 ### 3. 确定 task-id 与待恢复文件
 
-按 `.agents/rules/issue-sync.md` 中定义的 task、artifact 和分片 artifact 标记筛选评论。
+按 `.agents/rules/issue-sync.md` 中定义的 task、artifact、分片 artifact 与 recovery 标记筛选评论。
 
 处理规则：
 - 用户提供了 `{task-id}` 时，仅匹配该任务
 - 未提供时，优先从 task 评论标记推断
 - 若找不到唯一 task-id，立即停止并告知用户
 - 忽略 `summary` 标记评论；它是 complete-task 的聚合产物，不对应本地任务文件
+- `task` 评论仅用于确定当前投影和 snapshot 身份；`recovery-action`、`recovery-prepare`、`recovery-commit` 由受控 recovery core 验证并重建完整 `task.md`。
 - 将 `{file-stem}` 映射回文件名：
   - `task` -> `task.md`
   - `analysis` / `analysis-r{N}` -> 对应 `.md`
@@ -67,7 +68,7 @@ description: >
 
 对每个文件执行：
 - 收集单条评论或分片评论
-- 对 `task.md` 评论按 issue-sync.md 中的 `<details>` frontmatter 格式反向拆解，提取 frontmatter 后再与正文拼合
+- 不直接把投影 task 评论反向拆成 `task.md`；完整 task 内容必须来自匹配当前投影的 recovery commit
 - 如分片标记中存在 part 和 total 序号，按 part 升序排序并校验分片完整
 - 从评论正文中提取文件内容，去掉隐藏标记、标题和页脚
 - 拼接得到最终文件内容
@@ -82,10 +83,14 @@ description: >
 
 创建受控 staging 目录，按以下顺序写回：
 
-1. `task.md`
+1. 调用 recovery core 写入 `task.md`：
+   ```bash
+   agent-infra-internal platform-comment recover --issue {issue-token} --task-id {task-id} \
+     --output "{staging-dir}/task.md"
+   ```
 2. 其余产物文件（按文件名排序）
 
-仅写回从 Issue 评论中实际恢复出的文件，不补造缺失文件。
+仅写回从 Issue 评论中实际恢复出的文件，不补造缺失文件。recovery core 返回失败时停止，不调用 lifecycle intent。
 
 ### 6. 执行 restore 生命周期意图
 

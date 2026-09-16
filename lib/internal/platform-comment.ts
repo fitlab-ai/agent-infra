@@ -9,13 +9,15 @@ import {
 } from '../platform/issue-comments.ts';
 import type { CommentKind } from '../platform/issue-comments.ts';
 import type { PlatformResult } from '../platform/types.ts';
+import { recoverTaskFromComments } from '../platform/task-recovery.ts';
 import { backfillCompletionComments } from '../platform/completion-backfill.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
+       agent-infra-internal platform-comment recover --issue <token> --task-id <TASK-id> --output <staging-task.md> [--cwd <path>]
        agent-infra-internal platform-comment owner <task-ref> [--cwd <path>]
        agent-infra-internal platform-comment backfill <task-ref> --agent <agent> [--cwd <path>]
-       agent-infra-internal platform-comment sync <task-ref> --kind <kind> --agent <agent> [--artifact <file>] [--body-file <path|->] [--status-label <label>] [--backfill] [--cwd <path>]
+       agent-infra-internal platform-comment sync <task-ref> --kind <kind> --agent <agent> [--artifact <file>] [--body-file <path|->] [--recovery-id <id>] [--status-label <label>] [--backfill] [--cwd <path>]
 `;
 
 function fail(message: string): void {
@@ -35,7 +37,7 @@ function parseFlags(args: string[], start: number): { values: Record<string, str
   const seen = new Set<string>();
   for (let index = start; index < args.length; index += 1) {
     const flag = args[index]!;
-    if (!['--issue', '--cwd', '--kind', '--agent', '--artifact', '--body-file', '--status-label', '--backfill'].includes(flag)) {
+    if (!['--issue', '--task-id', '--output', '--cwd', '--kind', '--agent', '--artifact', '--body-file', '--recovery-id', '--status-label', '--backfill'].includes(flag)) {
       return { values, error: `unknown option '${flag}'` };
     }
     if (seen.has(flag)) return { values, error: `duplicate option '${flag}'` };
@@ -59,11 +61,12 @@ async function platformComment(args: string[] = []): Promise<void> {
   const operation = args[0];
   if (!operation || ![
     internalHandlerRoute('platform-comment', 'list', operation),
+    internalHandlerRoute('platform-comment', 'recover', operation),
     internalHandlerRoute('platform-comment', 'owner', operation),
     internalHandlerRoute('platform-comment', 'backfill', operation),
     internalHandlerRoute('platform-comment', 'sync', operation)
   ].some(Boolean)) { fail('a valid operation is required'); return; }
-  const hasTaskRef = operation !== 'list';
+  const hasTaskRef = operation !== 'list' && operation !== 'recover';
   const taskRef = hasTaskRef ? args[1] : undefined;
   if (hasTaskRef && (!taskRef || taskRef.startsWith('--'))) { fail(`${operation} requires a task ref`); return; }
   const parsed = parseFlags(args, hasTaskRef ? 2 : 1);
@@ -75,6 +78,52 @@ async function platformComment(args: string[] = []): Promise<void> {
     const unexpected = Object.keys(parsed.values).find((key) => !['issue', 'cwd'].includes(key));
     if (unexpected) { fail(`list does not accept '--${unexpected}'`); return; }
     finish(await listPlatformComments(issue, cwd));
+    return;
+  }
+  if (internalHandlerRoute('platform-comment', 'recover', operation)) {
+    const issue = parsed.values.issue;
+    const taskId = parsed.values.taskId;
+    const output = parsed.values.output;
+    if (typeof issue !== 'string' || !issue || typeof taskId !== 'string' || !/^TASK-\d{8}-\d{6}$/.test(taskId)
+      || typeof output !== 'string' || !output) {
+      fail('recover requires --issue <token> --task-id <TASK-id> --output <staging-task.md>');
+      return;
+    }
+    const unexpected = Object.keys(parsed.values).find((key) => !['issue', 'taskId', 'output', 'cwd'].includes(key));
+    if (unexpected) { fail(`recover does not accept '--${unexpected}'`); return; }
+    const outputPath = path.resolve(cwd, output);
+    const workspaceDir = path.resolve(cwd, '.agents', 'workspace');
+    const stagingDir = path.dirname(outputPath);
+    if (path.basename(outputPath) !== 'task.md' || path.dirname(stagingDir) !== workspaceDir
+      || !path.basename(stagingDir).startsWith('.restore-staging-') || !fs.existsSync(stagingDir)
+      || !fs.lstatSync(stagingDir).isDirectory() || fs.existsSync(outputPath)) {
+      fail('recover output must be a new task.md inside an existing .agents/workspace/.restore-staging-* directory');
+      return;
+    }
+    const listed = await listPlatformComments(issue, cwd);
+    if (listed.status === 'failed' || listed.status === 'blocked' || !listed.comments) { finish(listed); return; }
+    try {
+      const taskContent = recoverTaskFromComments({ taskId, comments: listed.comments });
+      fs.writeFileSync(outputPath, taskContent, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      finish({
+        ...listed,
+        status: 'applied',
+        changed: true,
+        operations: [{ name: `recovery:task:${taskId}`, status: 'applied', reasonCode: null }],
+        error: null
+      });
+    } catch (error) {
+      finish({
+        ...listed,
+        status: 'failed',
+        changed: false,
+        error: {
+          code: 'RECOVERY_EVIDENCE_MISSING',
+          message: error instanceof Error ? error.message : String(error),
+          retryable: false
+        }
+      });
+    }
     return;
   }
   if (internalHandlerRoute('platform-comment', 'owner', operation)) {
@@ -96,12 +145,13 @@ async function platformComment(args: string[] = []): Promise<void> {
   if (!internalHandlerRoute('platform-comment', 'sync', operation)) { fail('operation is not registered'); return; }
   const kind = parsed.values.kind;
   const agent = parsed.values.agent;
-  if (!['task', 'artifact', 'summary', 'cancel'].includes(String(kind))) { fail('sync requires a valid --kind'); return; }
+  if (!['task', 'artifact', 'summary', 'cancel', 'recovery-action', 'recovery-prepare', 'recovery-commit'].includes(String(kind))) { fail('sync requires a valid --kind'); return; }
   if (typeof agent !== 'string' || !agent) { fail('sync requires --agent'); return; }
   const normalizedAgent = normalizeAgentToken(agent);
   if (!normalizedAgent) { fail(`invalid --agent '${agent}': ${AGENT_USAGE_HINT}`); return; }
   if (kind === 'artifact' && typeof parsed.values.artifact !== 'string') { fail('artifact sync requires --artifact'); return; }
   if ((kind === 'summary' || kind === 'cancel') && typeof parsed.values.bodyFile !== 'string') { fail(`${kind} sync requires --body-file`); return; }
+  if (String(kind).startsWith('recovery-') && (typeof parsed.values.bodyFile !== 'string' || typeof parsed.values.recoveryId !== 'string')) { fail(`${kind} sync requires --body-file and --recovery-id`); return; }
   let body: string | undefined;
   try {
     if (typeof parsed.values.bodyFile === 'string') body = readBodyFile(parsed.values.bodyFile, cwd);
@@ -114,6 +164,7 @@ async function platformComment(args: string[] = []): Promise<void> {
     agent: normalizedAgent,
     artifact: typeof parsed.values.artifact === 'string' ? parsed.values.artifact : undefined,
     body,
+    recoveryId: typeof parsed.values.recoveryId === 'string' ? parsed.values.recoveryId : undefined,
     backfill: parsed.values.backfill === true,
     cwd
   }));

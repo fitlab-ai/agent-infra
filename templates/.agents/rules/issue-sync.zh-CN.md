@@ -13,6 +13,9 @@
 | `artifactChunk` | `<!-- sync-issue:{task-id}:{artifact-stem}:{part}/{total} -->` |
 | `summary` | `<!-- sync-issue:{task-id}:summary -->` |
 | `cancel` | `<!-- sync-issue:{task-id}:cancel -->` |
+| `recoveryAction` | `<!-- sync-issue:{task-id}:recovery-action:{action-id} -->` |
+| `recoveryPrepare` | `<!-- sync-issue:{task-id}:recovery-prepare:{commit-id} -->` |
+| `recoveryCommit` | `<!-- sync-issue:{task-id}:recovery-commit:{commit-id} -->` |
 
 `prSummary` 属于 `.agents/rules/pr-sync.md`，本规则不实现 PR 聚合。
 
@@ -25,15 +28,19 @@
 ```bash
 agent-infra-internal platform-context resolve [--cwd <path>]
 agent-infra-internal platform-comment list --issue <issue-token> [--cwd <path>]
+agent-infra-internal platform-comment recover --issue <issue-token> --task-id <TASK-id> \
+  --output <.agents/workspace/.restore-staging-*/task.md> [--cwd <path>]
 agent-infra-internal platform-comment owner <task-ref>
 agent-infra-internal platform-comment sync <task-ref> \
-  --kind task|artifact|summary|cancel --agent {standard-agent-token} \
+  --kind task|artifact|summary|cancel|recovery-action|recovery-prepare|recovery-commit --agent {standard-agent-token} \
   [--artifact <canonical.md>] [--body-file <path|->] [--backfill]
 ```
 
 - `applied|no-op|degraded` → exit 0；`failed` → exit 1；`blocked` → exit 2。
-- task 评论保持 `<details>` frontmatter 可逆格式；artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
-- task 内容超过平台评论字节上限时不上传，返回 `COMMENT_PAYLOAD_TOO_LARGE` 的 skipped 操作；本地 task 文件保持不变，platform verification 同样跳过 task marker/content 检查。
+- task 评论保持 `<details>` frontmatter 可逆格式，只同步确定性的当前任务投影；活动日志、产物生命周期收据、失效记录等过程章节由 recovery 事务保存。artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
+- 长度预检与 platform verification 使用同一最终渲染正文的 UTF-8 字节数。正文超限时失败关闭；本地 task 文件不会被截断。
+
+恢复评论使用 `recovery-action`、`recovery-prepare` 和 `recovery-commit` marker，并携带稳定 recovery id 和 body file。task 同步按 prepare、action、task snapshot 写入并复读、commit 的顺序发布。相同内容重放返回 `no-op`；已有恢复 marker 的正文不同返回 `RECOVERY_IMMUTABLE_CONFLICT`。restore 只接受作者一致、分片完整、phase/摘要/marker 匹配且绑定当前 task 评论正文 SHA-256 的完整事务。
 - 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
 - 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 

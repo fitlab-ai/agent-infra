@@ -253,15 +253,16 @@ test("platform-sync compares task comments after the same sanitization used by c
   });
 });
 
-test("platform-sync skips task comment verification when task content is too large", async () => {
+test("platform-sync rejects a task comment that exceeds the final rendered byte limit", async () => {
   await withTempRoot("agent-infra-platform-sync-large-task-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
-    const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}`;
+    const taskContent = `${buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' })}\n## Requirements\n${'x'.repeat(COMMENT_BYTE_LIMIT + 1)}`;
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     write(path.join(ctx.taskDir, "code.md"), "# 实现报告\n\n通过");
     writeJson(ctx.issuePath, buildIssuePayload());
     writeJson(ctx.commentsPath, [
-      { body: buildArtifactComment(taskId, "code.md", "实现报告", "# 实现报告\n\n通过") }
+      { body: buildArtifactComment(taskId, "code.md", "实现报告", "# 实现报告\n\n通过") },
+      { body: buildTaskComment(taskId, taskContent) }
     ]);
 
     const result = await runValidatorWithFakeGh(
@@ -269,8 +270,8 @@ test("platform-sync skips task comment verification when task content is too lar
       ctx,
       { GH_FAKE_ISSUE_PATH: ctx.issuePath, GH_FAKE_COMMENTS_PATH: ctx.commentsPath }
     );
-    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    assert.equal(result.status, 1, `${result.stderr}\n${result.stdout}`);
+    assert.match(result.stdout, /Task comment exceeds the platform byte limit/);
   });
 });
 
@@ -382,7 +383,7 @@ const implementSyncCases = [
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
   },
@@ -411,11 +412,11 @@ const implementSyncCases = [
     comments(taskContent: string, artifactContent: string) {
       return [
         { body: buildArtifactComment(taskId, "code.md", "Code Report", artifactContent) },
-        { body: buildTaskComment(taskId, taskContent, { summaryText: "Metadata (frontmatter)" }) }
+        { body: renderTaskComment(taskContent, taskId, "codex", "en") }
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
   },

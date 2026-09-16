@@ -45,13 +45,14 @@ Run `agent-infra-internal platform-comment list --issue {issue-token}` to read a
 
 ### 3. Determine the task-id and Files to Restore
 
-Filter comments by the task, artifact, and chunked artifact markers defined in `.agents/rules/issue-sync.md`.
+Filter comments by the task, artifact, chunked artifact, and recovery markers defined in `.agents/rules/issue-sync.md`.
 
 Rules:
 - when `{task-id}` was provided, match only that task
 - when `{task-id}` was omitted, infer it from the task comment marker first
 - if you cannot determine a unique task-id, stop and tell the user
 - ignore `summary` marker comments because they are complete-task aggregate output rather than restorable local task files
+- use the `task` comment only for the current projection and snapshot identity; the controlled recovery core validates `recovery-action`, `recovery-prepare`, and `recovery-commit` comments and reconstructs the complete `task.md`
 - map `{file-stem}` back to filenames:
   - `task` -> `task.md`
   - `analysis` / `analysis-r{N}` -> matching `.md`
@@ -68,7 +69,7 @@ Read `.agents/rules/issue-sync.md` before executing this step.
 
 For each file:
 - collect its single comment or chunked comments
-- for `task.md` comments, reverse the `<details>` frontmatter wrapper described in issue-sync.md before reassembling the file body
+- do not reverse the projected task comment directly into `task.md`; the complete task content must come from a recovery commit matching the current projection
 - when a chunk marker includes part and total indexes, sort by part and verify the set is complete
 - extract the file body by removing the hidden marker, heading, and footer
 - concatenate chunk bodies into the final file content
@@ -83,10 +84,14 @@ If the directory already exists, stop immediately and tell the user to handle it
 
 Create the controlled staging directory and write files back in this order:
 
-1. `task.md`
+1. call the recovery core to write `task.md`:
+   ```bash
+   agent-infra-internal platform-comment recover --issue {issue-token} --task-id {task-id} \
+     --output "{staging-dir}/task.md"
+   ```
 2. every other restored artifact file in filename order
 
-Write only files that were actually recovered from Issue comments. Do not invent missing files.
+Write only files that were actually recovered from Issue comments. Do not invent missing files. Stop without calling the lifecycle intent if the recovery core fails.
 
 ### 6. Apply the Restore Lifecycle Intent
 
