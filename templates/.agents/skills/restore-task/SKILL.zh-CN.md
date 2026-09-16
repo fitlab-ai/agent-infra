@@ -44,14 +44,14 @@ description: >
 
 ### 3. 确定 task-id 与待恢复文件
 
-按 `.agents/rules/issue-sync.md` 中定义的 task、artifact、分片 artifact 和 recovery 标记筛选评论。
+按 `.agents/rules/issue-sync.md` 中定义的 task、artifact 与分片 artifact 标记筛选评论。
 
 处理规则：
 - 用户提供了 `{task-id}` 时，仅匹配该任务
 - 未提供时，优先从 task 评论标记推断
 - 若找不到唯一 task-id，立即停止并告知用户
 - 忽略 `summary` 标记评论；它是 complete-task 的聚合产物，不对应本地任务文件
-- `task` 评论仅用于确定当前投影和 snapshot 身份；`recovery-action`、`recovery-prepare`、`recovery-commit` 由受控 recovery core 验证并重建完整 `task.md`
+- `task`、artifact 和交付摘要评论顶部的折叠恢复元数据由受控 recovery core 验证并重建活动日志。
 - 将 `{file-stem}` 映射回文件名：
   - `task` -> `task.md`
   - `analysis` / `analysis-r{N}` -> 对应 `.md`
@@ -68,9 +68,9 @@ description: >
 
 对每个文件执行：
 - 收集单条评论或分片评论
-- 不直接把投影 task 评论反向拆成 `task.md`；完整 task 内容必须来自匹配当前投影的 recovery commit
+- 从 task 评论恢复当前任务投影，再只从通过校验的 artifact 恢复元数据重建活动日志；不得根据缺失记录推测过程状态
 - 如分片标记中存在 part 和 total 序号，按 part 升序排序并校验分片完整
-- 从评论正文中提取文件内容，去掉隐藏标记、标题和页脚
+- 从评论正文中提取文件内容，去掉隐藏标记、标题、恢复元数据和页脚
 - 拼接得到最终文件内容
 
 在写文件前检查：
