@@ -134,7 +134,7 @@ test('every workflow operation is isolated across the four termination windows',
   const windows = ['before-call', 'before-domain-write', 'after-atomic-rename', 'before-result-return'] as const;
   for (const operation of TASK_WORKFLOW_OPERATIONS) {
     const operationWindows = operation === 'artifact-preflight'
-      ? windows.filter((window) => window !== 'after-atomic-rename' && window !== 'before-result-return')
+      ? windows.filter((window) => window !== 'after-atomic-rename')
       : windows;
     for (const window of operationWindows) {
       const f = fixture();

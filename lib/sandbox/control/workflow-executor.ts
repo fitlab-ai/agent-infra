@@ -54,7 +54,11 @@ export async function executeTaskWorkflow(
       recoveryObservation.family,
       recoveryObservation.artifact
     );
-    publicationCommitted ||= intent?.state === 'passed' || intent?.state === 'commit-started';
+    publicationCommitted ||= intent?.state === 'preflight-ready'
+      || intent?.state === 'preflight-commit-started'
+      || intent?.state === 'preflight-passed'
+      || intent?.state === 'passed'
+      || intent?.state === 'commit-started';
   };
   let faultTriggered = false;
   const fault = (window: TaskWorkflowFaultWindow): void => {
@@ -121,7 +125,10 @@ export async function executeTaskWorkflow(
         if (input.operation === 'preflight') {
           // Preflight only seals a verified generation. It must not publish the
           // formal artifact, set publicationStarted, or append finalizer audit.
-          return executionResult(preflightLocalArtifact(local));
+          const result = preflightLocalArtifact(local);
+          recoveryObservation = { family, artifact: input.artifact, wasPassed: false };
+          observeRecoveryPublication();
+          return response(result);
         }
         recoveryObservation = {
           family,
