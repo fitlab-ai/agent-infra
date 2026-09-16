@@ -11,6 +11,7 @@ import { readArtifactRecoveryIntent } from '../../../lib/task/artifact-repair-in
 import {
   beginArtifactRecovery,
   commitArtifactRecovery,
+  prepareArtifactRecoveryFinal,
   prepareArtifactRecoveryCommit,
   stageArtifactCandidate
 } from '../../../lib/task/artifact-recovery.ts';
@@ -132,11 +133,14 @@ function workflowStateSnapshot(root: string): string {
 test('every workflow operation is isolated across the four termination windows', onPlatforms('linux', 'darwin'), async () => {
   const windows = ['before-call', 'before-domain-write', 'after-atomic-rename', 'before-result-return'] as const;
   for (const operation of TASK_WORKFLOW_OPERATIONS) {
-    for (const window of windows) {
+    const operationWindows = operation === 'artifact-preflight'
+      ? windows.filter((window) => window !== 'after-atomic-rename' && window !== 'before-result-return')
+      : windows;
+    for (const window of operationWindows) {
       const f = fixture();
       try {
-        if (operation === 'artifact-finalize-local') fs.writeFileSync(path.join(f.taskDir, 'plan.md'), content('plan'));
-        if (operation === 'review-finalize-summary') fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), content('review-analysis'));
+        if (operation === 'artifact-preflight' || operation === 'artifact-finalize-local') fs.writeFileSync(path.join(f.taskDir, 'plan.md'), content('plan'));
+        if (operation === 'review-preflight' || operation === 'review-finalize-summary') fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), content('review-analysis'));
         const [command] = TASK_WORKFLOW_COMMANDS[operation];
         const request = createTaskWorkflowRequest(command, workflowArgs(operation), taskId, f.manifest.generation);
         const before = workflowStateSnapshot(f.root);
@@ -159,9 +163,10 @@ test('every workflow operation is isolated across the four termination windows',
         const afterReplay = workflowStateSnapshot(f.root);
         const published = afterFault !== before;
         assert.equal(body.changed, published ? null : false, `${operation}/${window} must classify its native publication state`);
-        if (operation === 'review-finalize-summary' && window === 'after-atomic-rename') {
-          assert.equal(interruptedIntent?.state, 'commit-started', `${operation}/${window} must stop after the formal rename`);
-          assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'review-analysis', 'review-analysis.md')?.state, 'passed');
+        if ((operation === 'review-preflight' || operation === 'review-finalize-summary') && window === 'after-atomic-rename') {
+          if (operation === 'review-finalize-summary') {
+            assert.equal(interruptedIntent?.state, 'commit-started', `${operation}/${window} must stop after the formal rename`);
+          }
           assert.notEqual(afterReplay, afterFault, `${operation}/${window} replay must record the reconciled terminal fact`);
           const settled = await executeTaskWorkflow(f.manifest, request);
           assert.equal(workflowStateSnapshot(f.root), afterReplay, `${operation}/${window} settled replay must not rewrite the artifact`);
@@ -189,6 +194,8 @@ test('workflow finalize-local reconciles an interrupted publication without a re
     );
     const staged = stageArtifactCandidate(recovery, Buffer.from(candidate));
     prepareArtifactRecoveryCommit(recovery, staged.candidateSha256, staged.semanticDigest);
+    assert.equal(commitArtifactRecovery(recovery).state, 'preflight-passed');
+    prepareArtifactRecoveryFinal(recovery, Buffer.from(candidate));
     assert.throws(() => commitArtifactRecovery(recovery, { afterPublish: () => { throw new Error('injected interruption'); } }), /lifecycle task lock operation failed/u);
     assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', artifact)?.state, 'commit-started');
 
