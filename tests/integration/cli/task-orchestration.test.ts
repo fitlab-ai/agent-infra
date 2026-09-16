@@ -8,6 +8,7 @@ import test from 'node:test';
 import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { createInvalidationOperation, invalidationMutation, targetIdFor } from '../../../lib/task/invalidation.ts';
+import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
@@ -106,11 +107,46 @@ function approvedRouteFixture(
 }
 
 function persistedArtifactState(dir: string) {
-  const inventory = fs.readdirSync(dir).filter((name) => name.endsWith('.md')).sort();
+  const inventory = fs.readdirSync(dir).filter((name) => fs.lstatSync(path.join(dir, name)).isFile()).sort();
   return {
     inventory,
     hashes: Object.fromEntries(inventory.map((name) => [name, sha256File(path.join(dir, name))]))
   };
+}
+
+function writeQualificationFixture(taskDir: string) {
+  const taskPath = path.join(taskDir, 'task.md');
+  fs.appendFileSync(taskPath, `
+## 约束
+
+| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| C-1 | Keep recovery bounded | derived | task-input | task.md | task.md#约束 |  |  |
+
+## 候选与否决方案
+
+| candidate_id | statement | status | constraint_ids | impact | evidence |
+| --- | --- | --- | --- | --- | --- |
+| A | Rebuild the earliest stale stage | qualified | C-1 | bounded recovery | task.md#候选与否决方案 |
+`);
+  const audit = buildQualificationAudit(fs.readFileSync(taskPath, 'utf8'));
+  assert.equal(audit.ok, true);
+  if (!audit.ok) return;
+  for (const name of ['analysis.md', 'review-analysis.md', 'plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+    fs.appendFileSync(path.join(taskDir, name), `\n## 资格审计\n\n${renderQualificationAudit(audit.audit)}\n`);
+  }
+  let content = fs.readFileSync(taskPath, 'utf8');
+  for (const [output, input] of [
+    ['review-analysis.md', 'analysis.md'], ['review-plan.md', 'plan.md'],
+    ['code.md', 'plan.md'], ['review-code.md', 'code.md']
+  ] as const) {
+    const escapedOutput = output.replace('.', '\\.');
+    content = content.replace(
+      new RegExp(`(\\| [^|]+ \\| ${escapedOutput} \\| [^|]+ \\| )[a-f0-9]{64}( \\|)`),
+      `$1${sha256File(path.join(taskDir, input))}$2`
+    );
+  }
+  fs.writeFileSync(taskPath, content);
 }
 
 const explicitPolicyArgs = [
@@ -401,6 +437,7 @@ test('task-orchestration CLI resumes valid plan and code chains across independe
 test('task-orchestration CLI keeps completed code chains read-only without or after a run', () => {
   const missingRun = approvedRouteFixture('disabled');
   const missingBefore = persistedArtifactState(missingRun.dir);
+  assert.equal(missingBefore.inventory.includes('orchestration.json'), false);
   for (const result of [
     run(missingRun.root, [missingRun.id, 'route'], missingRun.env),
     run(missingRun.root, [missingRun.id, 'route'], missingRun.env)
@@ -419,6 +456,9 @@ test('task-orchestration CLI keeps completed code chains read-only without or af
   assert.equal(completed.status, 0, completed.stderr);
   assert.equal(JSON.parse(completed.stdout).status, 'completed');
   const completedBefore = persistedArtifactState(completedRun.dir);
+  const completedRunPath = path.join(completedRun.dir, 'orchestration.json');
+  const completedRunBefore = fs.readFileSync(completedRunPath);
+  assert.equal(completedBefore.inventory.includes('orchestration.json'), true);
   const resumed = run(completedRun.root, [completedRun.id, 'route'], completedRun.env);
   assert.equal(resumed.status, 0, resumed.stderr);
   const resumedPayload = JSON.parse(resumed.stdout);
@@ -426,31 +466,28 @@ test('task-orchestration CLI keeps completed code chains read-only without or af
   assert.equal(resumedPayload.changed, false);
   assert.equal(resumedPayload.next, null);
   assert.deepEqual(persistedArtifactState(completedRun.dir), completedBefore);
+  assert.deepEqual(fs.readFileSync(completedRunPath), completedRunBefore);
 });
 
 test('task-orchestration CLI recovers stale qualification and bindings, then rejects invalidation and pending runs without writing', () => {
   const qualification = approvedRouteFixture('disabled');
-  const qualificationTask = path.join(qualification.dir, 'task.md');
-  fs.appendFileSync(qualificationTask, `
-## 约束
-
-| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| C-1 | Keep recovery bounded | derived | task-input | task.md | task.md#约束 |  |  |
-
-## 候选与否决方案
-
-| candidate_id | statement | status | constraint_ids | impact | evidence |
-| --- | --- | --- | --- | --- | --- |
-| A | Rebuild the earliest stale stage | qualified | C-1 | bounded recovery | task.md#候选与否决方案 |
-`);
+  writeQualificationFixture(qualification.dir);
+  const planPath = path.join(qualification.dir, 'plan.md');
+  fs.writeFileSync(planPath, fs.readFileSync(planPath, 'utf8').replace(
+    /(?<=\| task_input_digest \| non_constraint_input_digest \| upstream_artifact_digest \|\n\| --- \| --- \| --- \|\n\| )[a-f0-9]{64}/,
+    '0'.repeat(64)
+  ));
   const qualificationBefore = persistedArtifactState(qualification.dir);
-  const qualificationRoute = run(qualification.root, [qualification.id, 'route'], qualification.env);
-  assert.equal(qualificationRoute.status, 0, qualificationRoute.stderr);
-  assert.deepEqual(JSON.parse(qualificationRoute.stdout).next, {
-    action: 'analyze-task', role: 'executor', stage: 'analysis', round: 2, artifact: 'analysis-r2.md',
-    requestedModel: null, requestedReasoningEffort: null
-  });
+  for (const qualificationRoute of [
+    run(qualification.root, [qualification.id, 'route'], qualification.env),
+    run(qualification.root, [qualification.id, 'route'], qualification.env)
+  ]) {
+    assert.equal(qualificationRoute.status, 0, qualificationRoute.stderr);
+    assert.deepEqual(JSON.parse(qualificationRoute.stdout).next, {
+      action: 'plan-task', role: 'executor', stage: 'plan', round: 2, artifact: 'plan-r2.md',
+      requestedModel: null, requestedReasoningEffort: null
+    });
+  }
   assert.deepEqual(persistedArtifactState(qualification.dir), qualificationBefore);
 
   const binding = approvedRouteFixture('disabled', 'code');
