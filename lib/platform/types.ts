@@ -21,7 +21,7 @@ type PlatformOperation = {
 };
 
 type CommentIdentity = {
-  kind: 'task' | 'artifact' | 'summary' | 'cancel' | 'recovery-action' | 'recovery-prepare' | 'recovery-commit';
+  kind: 'task' | 'artifact' | 'summary' | 'cancel';
   marker: string;
   ids: Array<number | string>;
   parts: number;

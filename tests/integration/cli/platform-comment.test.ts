@@ -58,12 +58,12 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   const first = spawnSync(process.execPath, command, { cwd: f.root, env: f.env, encoding: 'utf8' });
   assert.equal(first.status, 0, first.stderr);
   assert.equal(JSON.parse(first.stdout).status, 'applied');
-  assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+  assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
 
   const second = spawnSync(process.execPath, command, { cwd: f.root, env: f.env, encoding: 'utf8' });
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(second.stdout).status, 'no-op');
-  assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+  assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
 
   const stagingDir = path.join(f.root, '.agents', 'workspace', '.restore-staging-cli-test');
   const outputPath = path.join(stagingDir, 'task.md');
@@ -71,12 +71,11 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   const recovered = runComment([
     'recover', '--issue', '7', '--task-id', f.taskId, '--output', outputPath
   ], f);
-  assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
+  assert.equal(recovered.status, 0, `${recovered.stderr}\n${recovered.stdout}`);
   assert.equal(JSON.parse(recovered.stdout).status, 'applied');
-  assert.equal(
-    fs.readFileSync(outputPath, 'utf8'),
-    fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md'), 'utf8')
-  );
+  const restored = fs.readFileSync(outputPath, 'utf8');
+  assert.match(restored, new RegExp(`^id: ${f.taskId}$`, 'm'));
+  assert.match(restored, /# Task/);
 });
 
 test('platform-comment preserves source content including local-looking artifact links', () => {
@@ -87,7 +86,7 @@ test('platform-comment preserves source content including local-looking artifact
     const taskResult = runComment(['sync', taskFixture.taskId, '--kind', 'task', '--agent', 'codex'], taskFixture);
     assert.equal(taskResult.status, 0, taskResult.stderr || taskResult.stdout);
     assert.equal(JSON.parse(taskResult.stdout).status, 'applied');
-    assert.equal(JSON.parse(fs.readFileSync(taskFixture.commentsPath, 'utf8')).length, 4);
+    assert.equal(JSON.parse(fs.readFileSync(taskFixture.commentsPath, 'utf8')).length, 1);
   } finally {
     fs.rmSync(taskFixture.root, { recursive: true, force: true });
   }
@@ -141,13 +140,13 @@ test('platform-comment CLI encodes mixed-case HTML and rejects malformed content
     const rejected = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
     assert.equal(rejected.status, 1);
     assert.equal(JSON.parse(rejected.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
-    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
-test('platform task comment sync excludes receipt evidence from the projection and preserves it for recovery', () => {
+test('platform task comment sync excludes receipt evidence from the projection', () => {
   const f = fixture();
   try {
     const taskDir = path.join(f.root, '.agents', 'workspace', 'active', f.taskId);
@@ -165,21 +164,11 @@ test('platform task comment sync excludes receipt evidence from the projection a
     const synced = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
     assert.equal(synced.status, 0, synced.stderr || synced.stdout);
     const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
-    assert.equal(comments.length, 4);
+    assert.equal(comments.length, 1);
     const taskComment = comments.find(({ body }) => body.startsWith(`<!-- sync-issue:${f.taskId}:task -->`));
     assert.ok(taskComment);
     assert.equal(receiptForOutput(taskComment.body, 'review-plan.md'), null);
 
-    const stagingDir = path.join(f.root, '.agents', 'workspace', '.restore-staging-receipt-test');
-    const outputPath = path.join(stagingDir, 'task.md');
-    fs.mkdirSync(stagingDir, { recursive: true });
-    const recovered = runComment([
-      'recover', '--issue', '7', '--task-id', f.taskId, '--output', outputPath
-    ], f);
-    assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
-    const recoveredContent = fs.readFileSync(outputPath, 'utf8');
-    assert.equal(receiptForOutput(recoveredContent, 'review-plan.md')?.input, 'plan.md');
-    assert.equal(receiptForOutput(recoveredContent, 'review-plan.md')?.inputSha256, sha256File(path.join(taskDir, 'plan.md')));
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

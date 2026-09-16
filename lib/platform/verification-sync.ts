@@ -843,6 +843,16 @@ function extractCommentBody(commentBody: any): any {
     start += 1;
   }
 
+  if (lines[start]?.trim() === "<details><summary>恢复元数据</summary>") {
+    const metadataEnd = lines.indexOf("</details>", start + 1);
+    if (metadataEnd >= 0) {
+      start = metadataEnd + 1;
+      while (start < lines.length && lines[start]!.trim() === "") {
+        start += 1;
+      }
+    }
+  }
+
   let end = lines.length;
   for (let index = lines.length - 1; index >= start; index -= 1) {
     const trimmed = lines[index]!.trim();

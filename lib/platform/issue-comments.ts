@@ -18,12 +18,12 @@ import {
 import { resourceIdentityNumber } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
 import {
-  canonicalJson,
-  decodeRecoveryAction,
-  decodeRecoveryManifest,
-  encodeRecoveryAction,
-  encodeRecoveryManifest
-} from '../task/recovery-actions.ts';
+  recordForArtifact,
+  recordForCancel,
+  recordForSummary,
+  recordForTask,
+  renderActivityRecoveryMetadata
+} from './activity-recovery.ts';
 import { projectTaskComment } from './task-comment-projection.ts';
 import {
   canonicalizeCommentBody,
@@ -35,13 +35,12 @@ import type { FenceRange } from './comment-safety.ts';
 
 type RemoteComment = { id: number | string; body: string; user?: { login?: string } };
 type RenderedChunk = { marker: string; body: string; content: string; part: number; total: number };
-type CommentKind = 'task' | 'artifact' | 'summary' | 'cancel' | 'recovery-action' | 'recovery-prepare' | 'recovery-commit';
+type CommentKind = 'task' | 'artifact' | 'summary' | 'cancel';
 type SyncOptions = {
   kind: CommentKind;
   agent: string;
   artifact?: string;
   body?: string;
-  recoveryId?: string;
   cwd?: string;
   backfill?: boolean;
   client?: PlatformClient;
@@ -59,11 +58,6 @@ const MARKERS = {
     `<!-- sync-issue:${taskId}:${stem}:${part}/${total} -->`,
   summary: (taskId: string) => `<!-- sync-issue:${taskId}:summary -->`,
   cancel: (taskId: string) => `<!-- sync-issue:${taskId}:cancel -->`,
-  recoveryAction: (taskId: string, actionId: string) => `<!-- sync-issue:${taskId}:recovery-action:${actionId} -->`,
-  recoveryActionChunk: (taskId: string, actionId: string, part: number, total: number) =>
-    `<!-- sync-issue:${taskId}:recovery-action:${actionId}:${part}/${total} -->`,
-  recoveryPrepare: (taskId: string, commitId: string) => `<!-- sync-issue:${taskId}:recovery-prepare:${commitId} -->`,
-  recoveryCommit: (taskId: string, commitId: string) => `<!-- sync-issue:${taskId}:recovery-commit:${commitId} -->`
 };
 const COMMENT_BYTE_LIMIT = 60_000;
 
@@ -113,12 +107,14 @@ function renderTaskCommentResult(content: string, taskId: string, language = '')
   const taskBody = projected.frontmatter === null
     ? safeBody
     : `<details><summary>${taskFrontmatterSummary(language)}</summary>\n\n${renderSafeCodeFence(`---\n${projected.frontmatter}\n---`, 'yaml')}\n\n</details>\n\n${safeBody}`;
+  const recoveryMetadata = renderActivityRecoveryMetadata(recordForTask(taskId, content));
   const body = normalizeCommentContent([
     MARKERS.task(taskId),
     '## 任务文件',
     '',
     `> 任务同步 · ${taskId}`,
     '',
+    ...(recoveryMetadata ? [recoveryMetadata.replace(/\n+$/, ''), ''] : []),
     taskBody.replace(/\n+$/, ''),
     '',
     '---',
@@ -133,22 +129,6 @@ function renderTaskCommentResult(content: string, taskId: string, language = '')
 
 function renderTaskComment(content: string, taskId: string, _agent: string, language = ''): string {
   return renderTaskCommentResult(content, taskId, language).body;
-}
-
-function recoveryTransaction(taskId: string, content: string, snapshotSha256: string) {
-  const actionId = createHash('sha256').update(content, 'utf8').digest('hex');
-  const action = encodeRecoveryAction({
-    taskId, actionId, sequence: 1, type: 'task-document', payload: { taskContent: content }, previousActionSha256: null
-  });
-  const commitId = `${snapshotSha256.slice(0, 32)}-${action.actionSha256.slice(0, 31)}`;
-  const input = {
-    taskId, commitId, actionCount: 1, actionHeadSha256: action.actionSha256, snapshotSha256
-  };
-  return {
-    action,
-    prepare: encodeRecoveryManifest({ ...input, phase: 'prepare' }),
-    commit: encodeRecoveryManifest({ ...input, phase: 'commit' })
-  };
 }
 
 function isTaskCommentTooLarge(content: string, taskId = 'TASK-UNKNOWN', _agent = 'codex'): boolean {
@@ -305,7 +285,8 @@ function buildArtifactChunk(
   total: number,
   chunked: boolean,
   backfill: boolean,
-  renderedContent = content
+  renderedContent = content,
+  recoveryMetadata = ''
 ): RenderedChunk {
   const marker = chunked ? MARKERS.artifactChunk(taskId, stem, part, total) : MARKERS.artifact(taskId, stem);
   const heading = chunked ? `## ${title}（${part}/${total}）` : `## ${title}`;
@@ -317,6 +298,7 @@ function buildArtifactChunk(
     '',
     `> **${agent}** · ${taskId}`,
     '',
+    ...(recoveryMetadata ? [recoveryMetadata] : []),
     renderedContent,
     '',
     footer(agent, taskId)
@@ -331,12 +313,13 @@ function chunkArtifactComment(input: {
   body: string;
   byteLimit?: number;
   backfill?: boolean;
+  recoveryMetadata?: string;
 }): RenderedChunk[] {
   const byteLimit = input.byteLimit || COMMENT_BYTE_LIMIT;
   const identity = artifactIdentity(input.artifact);
   const safeBody = sanitizeCommentBody(input.body, 'artifact body');
   const single = buildArtifactChunk(
-    input.taskId, identity.stem, identity.title, input.agent, safeBody, 1, 1, false, Boolean(input.backfill)
+    input.taskId, identity.stem, identity.title, input.agent, safeBody, 1, 1, false, Boolean(input.backfill), safeBody, input.recoveryMetadata
   );
   if (Buffer.byteLength(single.body, 'utf8') <= byteLimit) return [single];
 
@@ -346,7 +329,7 @@ function chunkArtifactComment(input: {
   if (!ranges.ok) throw new Error(`${ranges.error.code}: artifact body: ${ranges.error.message} at offset ${ranges.error.offset}`);
   for (;;) {
     const probe = buildArtifactChunk(
-      input.taskId, identity.stem, identity.title, input.agent, '', total, total, true, Boolean(input.backfill)
+      input.taskId, identity.stem, identity.title, input.agent, '', 1, total, true, Boolean(input.backfill), '', input.recoveryMetadata
     );
     const available = byteLimit - Buffer.byteLength(probe.body, 'utf8');
     const sourceLimit = Math.min(available, payloadLimit);
@@ -366,7 +349,8 @@ function chunkArtifactComment(input: {
       total,
       true,
       Boolean(input.backfill),
-      independentChunkContent(piece, ranges.value, sourceLimit)
+      independentChunkContent(piece, ranges.value, sourceLimit),
+      index === 0 ? input.recoveryMetadata : ''
     ));
     const overflow = Math.max(...chunks.map((chunk) => Buffer.byteLength(chunk.body, 'utf8') - byteLimit));
     if (overflow <= 0) return chunks;
@@ -404,9 +388,11 @@ function hasResolvedPlatformContext(context: PlatformResult): boolean {
   return context.status === 'degraded' || (context.status === 'no-op' && context.error === null);
 }
 
-function bodyEnvelope(marker: string, title: string, taskId: string, agent: string, body: string): string {
+function bodyEnvelope(marker: string, title: string, taskId: string, agent: string, body: string, recoveryMetadata = ''): string {
   return normalizeCommentContent([
-    marker, `## ${title}`, '', `> **${agent}** · ${taskId}`, '', sanitizeCommentBody(body, `${title} body`).replace(/\n+$/, ''), '', footer(agent, taskId)
+    marker, `## ${title}`, '', `> **${agent}** · ${taskId}`, '',
+    ...(recoveryMetadata ? [recoveryMetadata.replace(/\n+$/, ''), ''] : []),
+    sanitizeCommentBody(body, `${title} body`).replace(/\n+$/, ''), '', footer(agent, taskId)
   ].join('\n'));
 }
 
@@ -440,49 +426,17 @@ function expectedComments(
       artifact: options.artifact,
       agent: options.agent,
       body: resolveArtifactBody(taskDir, options.artifact),
-      backfill: options.backfill
+      backfill: options.backfill,
+      recoveryMetadata: renderActivityRecoveryMetadata(recordForArtifact(taskId, taskContent, options.artifact))
     });
   }
   if (options.body === undefined) throw new Error(`${options.kind} sync requires a body`);
-  if (options.kind.startsWith('recovery-')) {
-    if (!options.recoveryId || /[\r\n]/.test(options.recoveryId)) throw new Error('recovery sync requires a stable recovery id');
-    let content: string;
-    try {
-      const parsed = JSON.parse(options.body);
-      if (options.kind === 'recovery-action') {
-        const action = decodeRecoveryAction(parsed);
-        if (action.taskId !== taskId || action.actionId !== options.recoveryId) throw new Error('recovery action identity does not match its marker');
-        content = canonicalJson(action);
-      } else {
-        const manifest = decodeRecoveryManifest(parsed);
-        const phase = options.kind === 'recovery-prepare' ? 'prepare' : 'commit';
-        if (manifest.taskId !== taskId || manifest.commitId !== options.recoveryId || manifest.phase !== phase) {
-          throw new Error('recovery manifest identity does not match its marker');
-        }
-        content = canonicalJson(manifest);
-      }
-    } catch (error) {
-      throw new Error(`recovery payload is invalid: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    const marker = options.kind === 'recovery-action'
-      ? MARKERS.recoveryAction(taskId, options.recoveryId)
-      : options.kind === 'recovery-prepare'
-        ? MARKERS.recoveryPrepare(taskId, options.recoveryId)
-        : MARKERS.recoveryCommit(taskId, options.recoveryId);
-    const title = options.kind === 'recovery-action' ? '恢复动作记录' : options.kind === 'recovery-prepare' ? '恢复提交准备' : '恢复提交完成';
-    if (options.kind === 'recovery-action') {
-      const pieces = chunkByUtf8(content, COMMENT_BYTE_LIMIT - 1_000);
-      if (pieces.length > 1) return pieces.map((piece, index) => {
-        const part = index + 1;
-        const chunkMarker = MARKERS.recoveryActionChunk(taskId, options.recoveryId!, part, pieces.length);
-        return { marker: chunkMarker, body: bodyEnvelope(chunkMarker, title, taskId, options.agent, piece.content), content: piece.content, part, total: pieces.length };
-      });
-    }
-    return [{ marker, body: bodyEnvelope(marker, title, taskId, options.agent, content), content, part: 1, total: 1 }];
-  }
   const marker = options.kind === 'summary' ? MARKERS.summary(taskId) : MARKERS.cancel(taskId);
   const title = options.kind === 'summary' ? '交付摘要' : '任务取消';
-  const body = bodyEnvelope(marker, title, taskId, options.agent, options.body);
+  const recoveryMetadata = options.kind === 'summary'
+    ? renderActivityRecoveryMetadata(recordForSummary(taskId, taskContent))
+    : renderActivityRecoveryMetadata(recordForCancel(taskId, taskContent));
+  const body = bodyEnvelope(marker, title, taskId, options.agent, options.body, recoveryMetadata);
   return [{ marker, body, content: options.body, part: 1, total: 1 }];
 }
 
@@ -490,9 +444,6 @@ function markerPrefix(taskId: string, options: SyncOptions): string {
   if (options.kind === 'task') return `<!-- sync-issue:${taskId}:task`;
   if (options.kind === 'summary') return `<!-- sync-issue:${taskId}:summary`;
   if (options.kind === 'cancel') return `<!-- sync-issue:${taskId}:cancel`;
-  if (options.kind === 'recovery-action') return `<!-- sync-issue:${taskId}:recovery-action:${options.recoveryId}`;
-  if (options.kind === 'recovery-prepare') return `<!-- sync-issue:${taskId}:recovery-prepare:${options.recoveryId}`;
-  if (options.kind === 'recovery-commit') return `<!-- sync-issue:${taskId}:recovery-commit:${options.recoveryId}`;
   const stem = path.basename(options.artifact || '', '.md');
   return `<!-- sync-issue:${taskId}:${stem}`;
 }
@@ -572,13 +523,6 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       error: { code: 'COMMENT_PAYLOAD_TOO_LARGE', message: 'Projected task comment exceeds the platform byte limit', retryable: false }
     });
   }
-  const transaction = options.kind === 'task'
-    ? recoveryTransaction(
-      resolved.taskId,
-      taskContent,
-      createHash('sha256').update(desired[0]!.body, 'utf8').digest('hex')
-    )
-    : null;
   const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!hasResolvedPlatformContext(context) || !loaded.ok) return context;
@@ -625,17 +569,6 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     }
   }
 
-  if (transaction) {
-    for (const [kind, value, recoveryId] of [
-      ['recovery-prepare', transaction.prepare, transaction.prepare.commitId],
-      ['recovery-action', transaction.action, transaction.action.actionId]
-    ] as const) {
-      const published = await syncPlatformComment(resolved.taskId, {
-        kind, agent: options.agent, body: canonicalJson(value), recoveryId, cwd: resolved.repoRoot, client: options.client
-      });
-      if (published.status === 'failed' || published.status === 'blocked') return published;
-    }
-  }
 
   // Backfill only supplies missing artifact comments; valid existing marker sets stay untouched.
   if (options.kind === 'artifact' && options.backfill && existing.length > 0) {
@@ -668,12 +601,6 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       operations.push({ name: `comment:${item.marker}`, status: 'no-op', reasonCode: null });
       continue;
     }
-    if (current && options.kind.startsWith('recovery-')) {
-      return platformResult('failed', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
-        error: { code: 'RECOVERY_IMMUTABLE_CONFLICT', message: `Recovery marker '${item.marker}' already has different content`, retryable: false }
-      });
-    }
     const written = loaded.value.provider.comments?.write
         ? await loaded.value.provider.comments.write({
           context: providerOperationContext(loaded.value),
@@ -699,7 +626,7 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   }
 
   const desiredMarkers = new Set(desired.map((item) => item.marker));
-  const stale = options.kind.startsWith('recovery-') ? [] : existing.filter((comment) => !desiredMarkers.has(normalizeCommentContent(comment.body).split('\n', 1)[0]!));
+  const stale = existing.filter((comment) => !desiredMarkers.has(normalizeCommentContent(comment.body).split('\n', 1)[0]!));
   for (const comment of stale) {
     const deleted = loaded.value.provider.comments?.delete
         ? await loaded.value.provider.comments.delete({
@@ -725,45 +652,10 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     changed,
     resource: { kind: 'issue', number: issue },
     operations,
-    comment: { kind: options.kind, marker: desired[0]!.marker, ids, parts: desired.length },
+    comment: { kind: options.kind, marker: desired[0]?.marker ?? markerPrefix(resolved.taskId, options), ids, parts: desired.length },
     error: null
   });
-  if (!transaction) return result;
-  const reread = loaded.value.provider.comments?.list
-    ? await loaded.value.provider.comments.list({
-      context: providerOperationContext(loaded.value),
-      parent: issueIdentityFromTask
-    }).then((response) => response.ok
-      ? { ok: true as const, value: response.value.map((comment) => ({
-        id: providerCommentId(comment.id, loaded.value.provider),
-        body: comment.body,
-        user: comment.author?.name ? { login: comment.author.name } : undefined
-      })) }
-      : response)
-    : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
-  if (!reread.ok) {
-    return platformResult(reread.error.retryable ? 'blocked' : 'failed', {
-      ...contextFields(context), resource: { kind: 'issue', number: issue }, operations, error: reread.error
-    });
-  }
-  const snapshots = findMarkerComments(reread.value, MARKERS.task(resolved.taskId));
-  const rereadBody = snapshots[0]?.body;
-  if (snapshots.length !== 1 || normalizeCommentContent(rereadBody || '') !== normalizeCommentContent(desired[0]!.body)
-    || createHash('sha256').update(normalizeCommentContent(rereadBody || ''), 'utf8').digest('hex') !== transaction.commit.snapshotSha256) {
-    return platformResult('failed', {
-      ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
-      error: {
-        code: 'RECOVERY_SNAPSHOT_MISMATCH',
-        message: 'Task comment read-after-write does not match the recovery snapshot identity',
-        retryable: false
-      }
-    });
-  }
-  const committed = await syncPlatformComment(resolved.taskId, {
-    kind: 'recovery-commit', agent: options.agent, body: canonicalJson(transaction.commit),
-    recoveryId: transaction.commit.commitId, cwd: resolved.repoRoot, client: options.client
-  });
-  return committed.status === 'failed' || committed.status === 'blocked' ? committed : result;
+  return result;
 }
 
 async function listPlatformComments(issue: string | number, cwd = process.cwd(), client?: PlatformClient): Promise<PlatformResult & { comments?: RemoteComment[] }> {
