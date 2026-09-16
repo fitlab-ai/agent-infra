@@ -197,12 +197,14 @@ function resolveExpectedValues(skillName: string, artifactFile: string | undefin
   const defaults = getDefaults();
   const statusPolicy = platformAuditPolicy('status-label', { skillName, artifactFile });
   const commentPolicy = platformAuditPolicy('comment-marker', { skillName, artifactFile });
-  const prCommentPolicy = platformAuditPolicy('pr-comment-marker', { skillName, artifactFile });
+  const prCommentPolicy = ['pr-comment-marker', 'pr-comment-last-commit', 'pr-comment-content']
+    .map((id) => platformAuditPolicy(id as PlatformAuditId, { skillName, artifactFile }))
+    .find((policy) => policy.enabled && policy.expectedPrCommentMarkerKey);
   return {
     ok: true,
-    statusLabel: statusPolicy.expectedStatusLabel || null,
-    commentMarker: commentPolicy.expectedCommentMarkerKey ? defaults.markers[commentPolicy.expectedCommentMarkerKey] : null,
-    prCommentMarker: prCommentPolicy.expectedPrCommentMarkerKey ? defaults.markers[prCommentPolicy.expectedPrCommentMarkerKey] : null
+    statusLabel: statusPolicy.enabled ? statusPolicy.expectedStatusLabel || null : null,
+    commentMarker: commentPolicy.enabled && commentPolicy.expectedCommentMarkerKey ? defaults.markers[commentPolicy.expectedCommentMarkerKey] : null,
+    prCommentMarker: prCommentPolicy?.expectedPrCommentMarkerKey ? defaults.markers[prCommentPolicy.expectedPrCommentMarkerKey] : null
   };
 }
 
@@ -215,7 +217,7 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
       taskId: context.task?.metadata?.id || context.task?.id || "",
       ...(context.issueIdentity ? { issue: context.issueIdentity } : {}),
       ...(context.prIdentity ? { changeRequest: context.prIdentity } : {}),
-      includeComments: shouldFetchComments(context),
+      includeComments: shouldFetchIssueComments(context),
       includeFields: true
     })
     : unsupportedProviderOperation(provider, "verification.fetchRemoteFacts");
@@ -244,7 +246,7 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
     };
   }
   let prComments = null;
-  if (context.prMarker && context.prIdentity && shouldFetchComments(context) && provider?.comments?.list) {
+  if (context.prMarker && context.prIdentity && shouldFetchPrComments(context) && provider?.comments?.list) {
     const listed = await provider.comments.list({ context: operationContext, parent: context.prIdentity });
     if (!listed.ok) return {
       earlyReturn: listed.error.retryable
@@ -298,9 +300,17 @@ function mapTaskTypeToLabel(taskType: any): any {
   return taskTypeLabel(taskType);
 }
 
-function shouldFetchComments(context: any): boolean {
-  return ['comment-marker', 'pr-comment-marker', 'comment-content', 'task-comment-content']
+function hasEnabledAudit(context: any, auditIds: PlatformAuditId[]): boolean {
+  return auditIds
     .some((id) => platformAuditPolicy(id as PlatformAuditId, context).enabled);
+}
+
+function shouldFetchIssueComments(context: any): boolean {
+  return hasEnabledAudit(context, ['comment-marker', 'comment-content', 'task-comment-content']);
+}
+
+function shouldFetchPrComments(context: any): boolean {
+  return hasEnabledAudit(context, ['pr-comment-marker', 'pr-comment-last-commit', 'pr-comment-content']);
 }
 
 function checkStatusLabel(context: any, remoteData: any, shared: VerificationShared): any {
@@ -345,7 +355,7 @@ function checkClosedIssueStatusLabels(context: any, remoteData: any, shared: Ver
 }
 
 function checkCommentMarker(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.marker) {
+  if (!context.audit.enabled || !context.marker) {
     return infoResult('Issue comment-marker audit is not applicable because no marker is configured');
   }
 
@@ -361,7 +371,7 @@ function checkCommentMarker(context: any, remoteData: any, shared: VerificationS
 }
 
 function checkPrCommentMarker(context: any, remoteData: any, shared: VerificationShared): any {
-  if (!context.prMarker) {
+  if (!context.audit.enabled || !context.prMarker) {
     return infoResult('PR comment-marker audit is not applicable because no marker is configured');
   }
 

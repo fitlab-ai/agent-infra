@@ -603,6 +603,51 @@ for (const c of implementSyncCases) {
   }));
 }
 
+test("platform-sync does not read disabled PR comment audits for code and review workflows", async () => {
+  for (const skill of ["code-task", "review-code"] as const) {
+    for (const bound of [true, false]) {
+      await withTempRoot(`agent-infra-platform-sync-disabled-pr-${skill}-`, async (tempRoot) => {
+        const ctx = setupPlatformSyncEnv(tempRoot);
+        const prHeadSha = createHeadCommit(tempRoot);
+        const taskContent = buildTaskContent({
+          platform_issue_identity: '\'{"kind":"number","value":65}\'',
+          ...(bound ? { pr_delivery_fact: boundFactValue(77, prHeadSha) } : {})
+        });
+        const argsPath = path.join(tempRoot, "gh-args.jsonl");
+        const counterPath = path.join(tempRoot, "pr-comments-counter");
+        write(path.join(ctx.taskDir, "task.md"), taskContent);
+        writeJson(ctx.issuePath, buildIssuePayload());
+        writeJson(ctx.prPath, buildPrPayload({ headSha: prHeadSha }));
+        writeJson(ctx.commentsPath, [{ body: buildTaskComment(taskId, taskContent) }]);
+        write(counterPath, "3");
+
+        const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", skill], ctx, {
+          GH_FAKE_ISSUE_PATH: ctx.issuePath,
+          GH_FAKE_PR_PATH: ctx.prPath,
+          GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
+          GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
+          GH_FAKE_ISSUE_NUMBER: "65",
+          GH_FAKE_PR_NUMBER: "77",
+          GH_FAKE_ARGS_PATH: argsPath,
+          GH_FAKE_TRANSIENT_FAIL_MATCHER: "/issues/77/comments",
+          GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: counterPath,
+          AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: "0,0"
+        });
+
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        assert.equal(fs.readFileSync(counterPath, "utf8"), "3");
+        const payload = parseValidatorPayload(result.stdout);
+        const check = payload.checks.find((item) => item.checkId === "platform.pr-comment-marker");
+        assert.ok(check);
+        assert.equal(check.classification, "info");
+        assert.equal(check.effectiveStatus, "pass");
+        const calls = fs.readFileSync(argsPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line) as string[]);
+        assert.equal(calls.some((args) => args.some((arg) => arg.includes("/issues/77/comments"))), false);
+      });
+    }
+  }
+});
+
 test("validate-artifact platform-sync hard-fails malformed artifact comment input", async () => {
   await withTempRoot("agent-infra-platform-sync-malformed-artifact-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);

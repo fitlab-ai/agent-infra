@@ -65,13 +65,29 @@ export function platformAuditPolicy(checkId: PlatformAuditId, context: { skillNa
     case 'status-label':
       return { classification: 'soft', enabled: Boolean(STATUS_LABELS[skillName]), expectedStatusLabel: STATUS_LABELS[skillName] };
     case 'comment-marker':
-      return { classification: 'soft', enabled: artifactComment || skillName === 'complete-task', expectedCommentMarkerKey: artifactComment ? 'artifact' : 'summary' };
+      return {
+        classification: 'soft',
+        enabled: artifactComment || skillName === 'complete-task',
+        ...(artifactComment ? { expectedCommentMarkerKey: 'artifact' } : skillName === 'complete-task' ? { expectedCommentMarkerKey: 'summary' } : {})
+      };
     case 'pr-comment-marker':
-      return { classification: 'soft', enabled: skillName === 'commit' || prAudit, expectedPrCommentMarkerKey: 'prSummary' };
+      return {
+        classification: 'soft',
+        enabled: skillName === 'commit' || prAudit,
+        ...(skillName === 'commit' || prAudit ? { expectedPrCommentMarkerKey: 'prSummary' } : {})
+      };
     case 'pr-comment-last-commit':
-      return { classification: 'soft', enabled: skillName === 'commit', expectedPrCommentMarkerKey: 'prSummary' };
+      return {
+        classification: 'soft',
+        enabled: skillName === 'commit',
+        ...(skillName === 'commit' ? { expectedPrCommentMarkerKey: 'prSummary' } : {})
+      };
     case 'pr-comment-content':
-      return { classification: 'soft', enabled: skillName === 'complete-manual-validation' };
+      return {
+        classification: 'soft',
+        enabled: skillName === 'complete-manual-validation',
+        ...(skillName === 'complete-manual-validation' ? { expectedPrCommentMarkerKey: 'prSummary' } : {})
+      };
     case 'comment-content':
       return { classification: 'soft', enabled: artifactComment, expectedCommentMarkerKey: 'artifact' };
     case 'task-comment-content':
