@@ -176,19 +176,25 @@ function equalCounts(left: ReviewFindingCounts, right: ReviewFindingCounts): boo
 
 function finalizeReviewSummaryContent(
   content: string,
-  counts: ReviewFindingCounts
+  counts: ReviewFindingCounts,
+  options: { refreshNumericCounts?: boolean } = {}
 ): ReviewSummaryFinalizeResult {
   const parsed = parseReviewSummary(content);
   if (!parsed.ok) return parsed;
   if (parsed.summary.countState === 'numeric') {
     if (equalCounts(parsed.summary.counts!, counts)) return { ok: true, changed: false, content };
-    return {
+    if (!options.refreshNumericCounts) return {
       ok: false,
       code: 'REVIEW_SUMMARY_COUNT_MISMATCH',
       message: 'review summary finding counts do not match the ledger snapshot'
     };
   }
   let line = content.slice(parsed.findingsStart, parsed.findingsEnd);
+  if (parsed.summary.countState === 'numeric') {
+    const values = [counts.blocker, counts.major, counts.minor];
+    let ordinal = 0;
+    line = line.replace(/\d+(?=\s*(?:阻塞项|主要|次要|blockers?\b|majors?\b|minors?\b))/gi, () => String(values[ordinal++]));
+  }
   line = line
     .replace(PLACEHOLDERS[0], String(counts.blocker))
     .replace(PLACEHOLDERS[1], String(counts.major))

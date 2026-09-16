@@ -201,6 +201,34 @@ test('workflow review preflight seals the draft without finalizing its summary',
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('workflow restores an unconsumed review before updating its findings summary', onPlatforms('linux', 'darwin'), async () => {
+  const f = fixture();
+  try {
+    const artifact = 'review-analysis.md';
+    const formalPath = path.join(f.taskDir, artifact);
+    fs.writeFileSync(formalPath, content('review-analysis'));
+    const finalized = await f.run('task-review', ['finalize-summary', '--stage', 'analysis', '--artifact', artifact]);
+    assert.equal(finalized.exitCode, 0, finalized.stdout);
+    const before = fs.readFileSync(formalPath, 'utf8');
+    const taskBefore = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
+    const preflight = await f.run('task-review', ['preflight', '--stage', 'analysis', '--artifact', artifact]);
+    assert.equal(preflight.exitCode, 0, preflight.stdout);
+    assert.equal(typeof preflight.body.recovery?.recoveryId, 'string');
+    assert.equal(fs.readFileSync(formalPath, 'utf8'), before);
+    assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), taskBefore);
+    const finding = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
+      'task-ledger', [taskId, 'finding-upsert', '--stage', 'analysis', '--review-artifact', artifact,
+        '--ordinal', '1', '--severity', 'major', '--evidence', `${artifact}#1`], taskId, f.manifest.generation
+    ));
+    assert.equal(finding.exitCode, 0, finding.stdout);
+    const summary = await f.run('task-review', ['finalize-summary', '--stage', 'analysis', '--artifact', artifact,
+      '--recovery-id', preflight.body.recovery.recoveryId]);
+    assert.equal(summary.exitCode, 0, summary.stdout);
+    assert.equal(summary.body.stageStatus.unresolvedFindingCounts.major, 1);
+    assert.equal(summary.body.stageStatus.canAdvance, false);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('workflow finalize-local reconciles an interrupted publication without a recovery id', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   try {

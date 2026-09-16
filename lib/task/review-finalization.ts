@@ -163,7 +163,6 @@ function preflightReviewSummaryUnlocked(
   let taskContent: string;
   let content: string;
   let recovery: ArtifactRecoveryContext | undefined;
-  let existingIntent;
   try {
     taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
     if (request.recoveryId) {
@@ -179,7 +178,6 @@ function preflightReviewSummaryUnlocked(
       if (!validated.ok) return preflightFailed(request, validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID', validated.error.message, resolved.taskId);
       content = fs.readFileSync(validated.artifact.path, 'utf8');
       const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact);
-      existingIntent = intent;
       if (intent?.state === 'preflight-ready') recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
       if (intent?.state === 'consumed') return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', 'review artifact was already finalized', resolved.taskId);
     }
@@ -223,12 +221,6 @@ function preflightReviewSummaryUnlocked(
       artifactSha256, semanticDigest,
       ...(recovery ? { recovery: recoveryInfo(recovery) } : {})
     });
-  }
-  if (!recovery && existingIntent?.state === 'passed') {
-    return {
-      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest }),
-      status: 'passed', changed: false, error: null
-    };
   }
   if (request.dryRun || recovery && readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact)?.state === 'preflight-ready') {
     return {
@@ -385,7 +377,9 @@ function prepareReviewSummaryCandidate(
       ...(recovery ? { recovery } : {})
     };
   }
-  const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts);
+  const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts, {
+    refreshNumericCounts: Boolean(request.recoveryId && recovery)
+  });
   if (!transformed.ok) return reject(transformed.code, transformed.message);
   const finalDigests = { artifactSha256: sha256Content(transformed.content), semanticDigest: canonicalSemanticDigest(transformed.content) };
   if (!recovery && repairIntent?.state === 'commit-started') {
