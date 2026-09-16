@@ -22,6 +22,40 @@ import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { readArtifactRecoveryIntent } from '../../../lib/task/artifact-repair-intent.ts';
+import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-executor.ts';
+import { createTaskWorkflowRequest } from '../../../lib/sandbox/control/task-workflow.ts';
+import type { SandboxControlManifest } from '../../../lib/sandbox/control/protocol.ts';
+
+test('review completion accepts a preflight recovery identity with matching artifact facts', onPlatforms('linux', 'darwin'), async () => {
+  const f = fixture('requirement-analysis');
+  try {
+    const started = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+    const manifest = {
+      repoRoot: f.root, worktreeRoot: f.root, mode: 'task-bound', taskId: f.id, generation: 'generation-1',
+      controlRootId: 'a'.repeat(96), publicStatusDir: path.join(f.root, 'public'),
+      processingDir: path.join(f.root, 'processing')
+    } as SandboxControlManifest;
+    const preflight = await executeTaskWorkflow(manifest, createTaskWorkflowRequest('task-review', [
+      f.id, 'preflight', '--stage', 'analysis', '--artifact', 'review-analysis.md'
+    ], f.id, manifest.generation));
+    assert.equal(preflight.exitCode, 0, preflight.stdout);
+    const recoveryId = JSON.parse(preflight.stdout).recovery.recoveryId;
+    const finalized = await executeTaskWorkflow(manifest, createTaskWorkflowRequest('task-review', [
+      f.id, 'finalize-summary', '--stage', 'analysis', '--artifact', 'review-analysis.md', '--recovery-id', recoveryId
+    ], f.id, manifest.generation));
+    assert.equal(finalized.exitCode, 0, finalized.stdout);
+    const completed = await executeTaskWorkflow(manifest, createTaskWorkflowRequest('task-event', [
+      f.id, 'review-analysis.completed', '--agent', 'codex', '--initiator', 'model',
+      '--request-id', `${f.id}:review-analysis`, '--reason-code', 'user-request',
+      '--artifact', 'review-analysis.md', '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
+    ], f.id, manifest.generation));
+    assert.equal(completed.exitCode, 0, completed.stdout);
+    assert.equal(JSON.parse(completed.stdout).toStep, 'requirement-analysis-review');
+    assert.equal(readArtifactRecoveryIntent(f.root, f.id, 'review-analysis', 'review-analysis.md')?.state, 'consumed');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
 
 function enableQualification(taskPath: string) {
   fs.appendFileSync(taskPath, `\n## \u7ea6\u675f\n\n| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| C-1 | Keep recovery bounded | derived | task-input | task.md | task.md#\u7ea6\u675f |  |  |\n\n## \u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848\n\n| candidate_id | statement | status | constraint_ids | impact | evidence |\n| --- | --- | --- | --- | --- | --- |\n| A | Rebuild the earliest stale stage | qualified | C-1 | bounded recovery | task.md#\u5019\u9009\u4e0e\u5426\u51b3\u65b9\u6848 |\n`);

@@ -413,9 +413,7 @@ function reconcileReviewCompletionReplay(
       return { code: 'EVENT_ARTIFACT_CONFLICT', message: validated.error.message };
     }
     const content = fs.readFileSync(validated.artifact.path, 'utf8');
-    const expectedRequestId = `review-finalize:${taskId}:${stage}:${round}`;
     if (intent.round !== round
-      || intent.requestId !== expectedRequestId
       || intent.finalArtifactSha256 !== sha256Content(content)
       || intent.finalSemanticDigest !== canonicalSemanticDigest(content)) {
       return {
@@ -969,14 +967,9 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
           message: `review finalizer provenance is missing or incomplete for ${completedArtifact.name}`
         }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
-      const reviewStage = eventIdentity.family === 'review-analysis'
-        ? 'analysis'
-        : eventIdentity.family === 'review-plan' ? 'plan' : 'code';
       const actualSha256 = sha256File(completedArtifact.path);
       const actualSemanticDigest = canonicalSemanticDigest(reviewContent);
-      const expectedRequestId = `review-finalize:${resolved.taskId}:${reviewStage}:${normalized.round}`;
       if (reviewFinalizationIntent.round !== normalized.round
-        || reviewFinalizationIntent.requestId !== expectedRequestId
         || reviewFinalizationIntent.finalArtifactSha256 !== actualSha256
         || reviewFinalizationIntent.finalSemanticDigest !== actualSemanticDigest) {
         return failed(normalized, {
