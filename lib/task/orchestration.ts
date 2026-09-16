@@ -711,6 +711,9 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   const routed = routeFromFacts(facts.facts);
   if (!routed) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
   if ('completion' in routed) {
+    if (facts.facts.executionBusy && !run?.pendingDelegation) {
+      return failed('ORCHESTRATION_EXECUTION_BUSY', 'clean completion requires no open lifecycle execution', resolved.taskId);
+    }
     const reviewRound = maxArtifactRound(fs.readdirSync(resolved.taskDir), 'review-code');
     const review = parseReviewSummary(fs.readFileSync(
       path.join(resolved.taskDir, artifactName('review-code', reviewRound)),

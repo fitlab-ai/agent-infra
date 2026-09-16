@@ -598,6 +598,33 @@ test('route fails closed before commit when code review ledger work remains', ()
   );
 });
 
+test('route rejects clean completion while a lifecycle execution remains open', () => {
+  for (const runState of ['missing', 'idle'] as const) {
+    const f = cleanCommitCandidateFixture();
+    const taskPath = path.join(f.taskDir, 'task.md');
+    fs.appendFileSync(
+      taskPath,
+      '\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n'
+    );
+    if (runState === 'missing') fs.unlinkSync(path.join(f.taskDir, 'orchestration.json'));
+    const taskBefore = fs.readFileSync(taskPath);
+    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const runBefore = runState === 'idle' ? fs.readFileSync(runPath) : null;
+
+    const routed = routeOrchestration('TASK-20260101-000001', {
+      repoRoot: f.root,
+      captureRepository: () => { throw new Error('must not collect completion evidence'); }
+    });
+
+    assert.equal(routed.status, 'failed');
+    assert.equal(routed.changed, false);
+    assert.equal(routed.next, null);
+    assert.equal(routed.error?.code, 'ORCHESTRATION_EXECUTION_BUSY');
+    assert.deepEqual(fs.readFileSync(taskPath), taskBefore);
+    if (runBefore) assert.deepEqual(fs.readFileSync(runPath), runBefore);
+  }
+});
+
 test('route completes a reviewed clean head without preparing a commit', () => {
   const f = cleanCommitCandidateFixture();
   const tree = 'b'.repeat(40);
