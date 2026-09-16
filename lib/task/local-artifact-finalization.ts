@@ -22,6 +22,7 @@ import {
   prepareArtifactRecoveryFinal,
   prepareArtifactRecoveryCommit,
   recordArtifactRecoveryPassed,
+  reconcileArtifactRecovery,
   recoveryContextFromIntent,
   stageArtifactCandidate
 } from './artifact-recovery.ts';
@@ -343,8 +344,25 @@ function prepareLocalArtifact(
     }
   }
 
-  if (existing && ['preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started'].includes(existing.state)) {
+  if (existing && ['preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready'].includes(existing.state)) {
     const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
+    return {
+      result: { ...result, status: 'passed', changed: false, error: null, recovery: recoveryInfo(context) },
+      content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
+    };
+  }
+  if (existing?.state === 'commit-started') {
+    if (existing.finalArtifactSha256 !== artifactSha256 || existing.finalSemanticDigest !== validation.semanticDigest) {
+      return { ...failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', 'formal artifact does not match the interrupted recovery journal'), content, repoRoot: resolved.repoRoot, authority, lockAlreadyHeld: request.lockAlreadyHeld };
+    }
+    const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
+    const reconciled = reconcileArtifactRecovery(context, {
+      lockAlreadyHeld: request.lockAlreadyHeld,
+      validateFinal: () => validation.semanticDigest === existing.finalSemanticDigest
+    });
+    if (reconciled.status !== 'passed') {
+      return { ...failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', `interrupted recovery could not be reconciled: ${reconciled.status}`), content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld };
+    }
     return {
       result: { ...result, status: 'passed', changed: false, error: null, recovery: recoveryInfo(context) },
       content, repoRoot: resolved.repoRoot, recovery: context, authority, lockAlreadyHeld: request.lockAlreadyHeld
@@ -389,7 +407,10 @@ function prepareLocalArtifact(
   }
 }
 
-function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): LocalArtifactFinalizationResult {
+function commitLocalArtifactProvenance(
+  prepared: LocalArtifactPreparation,
+  options: Readonly<{ afterPublish?: () => void }> = {}
+): LocalArtifactFinalizationResult {
   if (!prepared.recovery || !prepared.repoRoot || prepared.result.status === 'failed' && !prepared.result.recovery) return prepared.result;
   if (prepared.result.status === 'failed') return prepared.result;
   try {
@@ -404,6 +425,12 @@ function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): Loca
         semanticDigest: intent.finalSemanticDigest,
         error: null
       };
+    } else if (intent.state === 'commit-started') {
+      const reconciled = reconcileArtifactRecovery(prepared.recovery, {
+        lockAlreadyHeld: prepared.lockAlreadyHeld,
+        afterPublish: options.afterPublish
+      });
+      committed = reconciled.intent;
     } else if (intent.state === 'awaiting-preflight-recovery') {
       const staged = stageArtifactCandidate(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
       prepareArtifactRecoveryCommit(prepared.recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: prepared.lockAlreadyHeld });
@@ -414,9 +441,9 @@ function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): Loca
     }
     if (committed?.state === 'preflight-passed' || intent.state === 'preflight-passed') {
       prepareArtifactRecoveryFinal(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
-    } else if (intent.state === 'full-finalizer-ready' || intent.state === 'commit-started') {
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld, afterPublish: options.afterPublish });
+    } else if (intent.state === 'full-finalizer-ready') {
+      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld, afterPublish: options.afterPublish });
     }
     if (!committed || committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed?.state ?? intent.state}'`);
     return {
@@ -428,6 +455,7 @@ function commitLocalArtifactProvenance(prepared: LocalArtifactPreparation): Loca
       error: null
     };
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith('TASK_WORKFLOW_FAULT_INJECTED:')) throw error;
     return { ...prepared.result, status: 'failed', error: {
       code: 'LOCAL_RECOVERY_COMMIT_FAILED', message: String(error)
     } };

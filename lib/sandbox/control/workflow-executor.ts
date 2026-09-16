@@ -54,7 +54,7 @@ export async function executeTaskWorkflow(
       recoveryObservation.family,
       recoveryObservation.artifact
     );
-    publicationCommitted ||= intent?.state === 'passed';
+    publicationCommitted ||= intent?.state === 'passed' || intent?.state === 'commit-started';
   };
   let faultTriggered = false;
   const fault = (window: TaskWorkflowFaultWindow): void => {
@@ -130,8 +130,9 @@ export async function executeTaskWorkflow(
         };
         const prepared = prepareLocalArtifact(local, content, lifecycleRecoveryAttestation ?? undefined);
         observeRecoveryPublication();
-        if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared));
-        result = commitLocalArtifactProvenance(prepared);
+        const commitOptions = { afterPublish: () => fault('after-atomic-rename') };
+        if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared, commitOptions));
+        result = commitLocalArtifactProvenance(prepared, commitOptions);
       } else {
         if (input.overrideTicket) throw new Error('TASK_WORKFLOW_OVERRIDE_UNSUPPORTED');
         const family = `review-${input.stage}` as 'review-analysis' | 'review-plan' | 'review-code';
@@ -143,8 +144,9 @@ export async function executeTaskWorkflow(
         const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true, startRecovery: true });
         observeRecoveryPublication();
         if (input.dryRun || prepared.result.status === 'planned') return executionResult(prepared.result);
-        if (prepared.result.status === 'failed') return executionResult(commitReviewSummaryProvenance(prepared, manifest.repoRoot));
-        result = commitReviewSummaryProvenance(prepared, manifest.repoRoot);
+        const commitOptions = { afterPublish: () => fault('after-atomic-rename') };
+        if (prepared.result.status === 'failed') return executionResult(commitReviewSummaryProvenance(prepared, manifest.repoRoot, commitOptions));
+        result = commitReviewSummaryProvenance(prepared, manifest.repoRoot, commitOptions);
       }
       observeRecoveryPublication();
       publicationCommitted ||= result.changed === true;

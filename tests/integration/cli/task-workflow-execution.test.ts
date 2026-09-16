@@ -8,6 +8,12 @@ import test from 'node:test';
 
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { readArtifactRecoveryIntent } from '../../../lib/task/artifact-repair-intent.ts';
+import {
+  beginArtifactRecovery,
+  commitArtifactRecovery,
+  prepareArtifactRecoveryCommit,
+  stageArtifactCandidate
+} from '../../../lib/task/artifact-recovery.ts';
 import { prepareLocalArtifact, commitLocalArtifactProvenance } from '../../../lib/task/local-artifact-finalization.ts';
 import { executeTaskWorkflow } from '../../../lib/sandbox/control/workflow-executor.ts';
 import { createTaskWorkflowRequest } from '../../../lib/sandbox/control/task-workflow.ts';
@@ -93,7 +99,9 @@ function workflowArgs(operation: typeof TASK_WORKFLOW_OPERATIONS[number]): strin
   switch (operation) {
     case 'artifact-inspect': return [taskId, 'inspect', '--family', 'plan'];
     case 'artifact-init': return [taskId, 'init', '--family', 'plan', '--artifact', 'plan.md'];
+    case 'artifact-preflight': return [taskId, 'preflight', '--family', 'plan', '--artifact', 'plan.md'];
     case 'artifact-finalize-local': return [taskId, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md'];
+    case 'review-preflight': return [taskId, 'preflight', '--stage', 'analysis', '--artifact', 'review-analysis.md'];
     case 'review-finalize-summary': return [taskId, 'finalize-summary', '--stage', 'analysis', '--artifact', 'review-analysis.md'];
     case 'event': return [taskId, 'plan.started', '--agent', 'codex', '--initiator', 'model', '--request-id', 'workflow-fault-event', '--reason-code', 'user-request'];
     case 'ledger-finding-response': return [taskId, 'finding-respond', '--id', 'AN-1', '--round', '1', '--status', 'accepted', '--evidence', 'code-r2.md:1'];
@@ -135,6 +143,9 @@ test('every workflow operation is isolated across the four termination windows',
         const result = await executeTaskWorkflow(f.manifest, request, null, { faultWindow: window });
         const body = JSON.parse(result.stdout);
         const afterFault = workflowStateSnapshot(f.root);
+        const interruptedIntent = operation === 'review-finalize-summary' && window === 'after-atomic-rename'
+          ? readArtifactRecoveryIntent(f.root, taskId, 'review-analysis', 'review-analysis.md')
+          : null;
         assert.equal(result.exitCode, 1, `${operation}/${window}: ${result.stdout}`);
         assert.equal(body.error.code, 'TASK_WORKFLOW_FAULT_INJECTED', `${operation}/${window}: ${result.stdout}`);
         assert.match(body.error.message, new RegExp(`:${window}$`), `${operation}/${window}: ${result.stdout}`);
@@ -148,11 +159,45 @@ test('every workflow operation is isolated across the four termination windows',
         const afterReplay = workflowStateSnapshot(f.root);
         const published = afterFault !== before;
         assert.equal(body.changed, published ? null : false, `${operation}/${window} must classify its native publication state`);
-        assert.equal(afterReplay, afterFault, `${operation}/${window} replay must reconcile the native terminal fact without rewriting it`);
+        if (operation === 'review-finalize-summary' && window === 'after-atomic-rename') {
+          assert.equal(interruptedIntent?.state, 'commit-started', `${operation}/${window} must stop after the formal rename`);
+          assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'review-analysis', 'review-analysis.md')?.state, 'passed');
+          assert.notEqual(afterReplay, afterFault, `${operation}/${window} replay must record the reconciled terminal fact`);
+          const settled = await executeTaskWorkflow(f.manifest, request);
+          assert.equal(workflowStateSnapshot(f.root), afterReplay, `${operation}/${window} settled replay must not rewrite the artifact`);
+          assert.equal(JSON.parse(settled.stdout).changed, false, `${operation}/${window} settled replay must remain a no-op`);
+        } else {
+          assert.equal(afterReplay, afterFault, `${operation}/${window} replay must reconcile the native terminal fact without rewriting it`);
+        }
         assert.equal(replayBody.changed, false, `${operation}/${window} replay must not automatically publish again`);
       } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
     }
   }
+});
+
+test('workflow finalize-local reconciles an interrupted publication without a recovery id', onPlatforms('linux', 'darwin'), async () => {
+  const f = fixture();
+  try {
+    const artifact = 'plan.md';
+    const formalPath = path.join(f.taskDir, artifact);
+    const candidate = content('plan');
+    fs.writeFileSync(formalPath, '# provisional\n');
+    const recovery = beginArtifactRecovery(
+      { taskId, family: 'plan', artifact, round: 1, requestId: 'interrupted-local-finalize' },
+      Buffer.from('# provisional\n'),
+      { repoRoot: f.root, taskDir: f.taskDir, recoveryId: 'abcde-00000000009' }
+    );
+    const staged = stageArtifactCandidate(recovery, Buffer.from(candidate));
+    prepareArtifactRecoveryCommit(recovery, staged.candidateSha256, staged.semanticDigest);
+    assert.throws(() => commitArtifactRecovery(recovery, { afterPublish: () => { throw new Error('injected interruption'); } }), /lifecycle task lock operation failed/u);
+    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', artifact)?.state, 'commit-started');
+
+    const replay = await f.run('task-artifact', ['finalize-local', '--family', 'plan', '--artifact', artifact]);
+    assert.equal(replay.exitCode, 0, replay.stdout);
+    assert.equal(replay.body.changed, false);
+    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', artifact)?.state, 'passed');
+    assert.equal(fs.readFileSync(formalPath, 'utf8'), candidate);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
 for (const family of ['plan', 'review-analysis'] as const) {
