@@ -469,7 +469,7 @@ test('task-orchestration CLI keeps completed code chains read-only without or af
   assert.deepEqual(fs.readFileSync(completedRunPath), completedRunBefore);
 });
 
-test('task-orchestration CLI recovers stale qualification and bindings, then rejects invalidation and pending runs without writing', () => {
+test('task-orchestration CLI recovers stale qualification and bindings, allows read-only routing during invalidation, then rejects pending runs without writing', () => {
   const qualification = approvedRouteFixture('disabled');
   writeQualificationFixture(qualification.dir);
   const planPath = path.join(qualification.dir, 'plan.md');
@@ -521,8 +521,11 @@ test('task-orchestration CLI recovers stale qualification and bindings, then rej
   })).content);
   const invalidationBefore = fs.readFileSync(invalidationTask);
   const invalidated = run(invalidation.root, [invalidation.id, 'route'], invalidation.env);
-  assert.equal(invalidated.status, 1, invalidated.stderr);
-  assert.equal(JSON.parse(invalidated.stdout).error.code, 'ORCHESTRATION_INVALIDATION_INCOMPLETE');
+  assert.equal(invalidated.status, 0, invalidated.stderr);
+  const invalidatedPayload = JSON.parse(invalidated.stdout);
+  assert.equal(invalidatedPayload.status, 'running');
+  assert.equal(invalidatedPayload.changed, false);
+  assert.equal(invalidatedPayload.next, null);
   assert.deepEqual(fs.readFileSync(invalidationTask), invalidationBefore);
 
   const pending = approvedRouteFixture('disabled');
