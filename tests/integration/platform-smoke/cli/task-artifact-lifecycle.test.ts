@@ -163,13 +163,13 @@ test('automatic artifact references use code text and remain idempotent', () => 
   assert.equal(second.body, first.body);
 });
 
-test('context resolves required latest inputs and actual review references independently', () => {
+test('context resolves required latest inputs from review receipts', () => {
   const f = fixture({
     'analysis.md': '# analysis',
     'analysis-r2.md': '# analysis 2',
     'plan.md': '# plan',
     'plan-r2.md': '# plan 2',
-    'review-plan.md': '**审查输入**：`plan-r2.md`\n'
+    'review-plan.md': '# Review Plan\n\n本轮检视了 `plan-r2.md`。\n'
   });
   addReceipt(f, {
     event: 'review-plan.completed', output: 'review-plan.md', input: 'plan-r2.md',

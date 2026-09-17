@@ -4,6 +4,8 @@
 
 创建 `code.md` 或 `code-r{N}.md` 时，使用以下结构。
 
+> “实现输入”字段用于读者追溯。生命周期身份以 `code.started` 冻结的输入和完成 receipt 为准，不从本报告正文解析。
+
 ## 输出模板
 
 ```markdown

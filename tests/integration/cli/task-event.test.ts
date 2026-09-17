@@ -1790,21 +1790,33 @@ test('internal event preserves a human decision in the same task directory', () 
   assert.match(afterEvent, /Code Task \(Round 2, decision II-1\) \[started\]/);
 });
 
-test('code completion rejects a report without a canonical plan input', () => {
+test('code completion uses the plan identity bound by code.started', () => {
   const f = decisionFixture();
   const started = run(f.root, [f.id, 'code.started', '--agent', 'codex', '--implementation-input', 'II-1']);
   assert.equal(started.status, 0, started.stderr);
-  fs.writeFileSync(path.join(f.dir, 'code-r2.md'), codeReport('missing-plan.md'));
+  fs.writeFileSync(path.join(f.dir, 'code-r2.md'), codeReport().replace('- **方案输入**：`plan.md`', '本轮输入为 `plan.md`'));
   const digests = completionDigestArgs(f.dir, 'code-r2.md', 'code');
-  const before = fs.readFileSync(f.file);
   const completed = run(f.root, [
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
     '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '1', ...digests
   ]);
-  assert.equal(completed.status, 1);
-  assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
-  assert.deepEqual(fs.readFileSync(f.file), before);
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  assert.match(fs.readFileSync(f.file, 'utf8'), /\| code\.completed \| code-r2\.md \| plan\.md \|/);
 });
+
+for (const scenario of reviewScenarios) {
+  test(`${scenario.family} completion uses the input identity bound by review.started`, () => {
+    const f = prepareReview(scenario, []);
+    const artifactPath = path.join(f.dir, scenario.artifact);
+    fs.writeFileSync(artifactPath, fs.readFileSync(artifactPath, 'utf8').replace(
+      `- **审查输入**：\`${scenario.input}\``, `本轮检视了 \`${scenario.input}\``
+    ));
+    const finalized = finalizeReview(f, scenario);
+    assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+    const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
+    assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  });
+}
 
 test('code completion rejects a plan changed after code started', () => {
   const f = fixture('technical-design-review');

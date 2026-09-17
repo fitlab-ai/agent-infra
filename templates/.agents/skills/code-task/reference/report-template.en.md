@@ -4,6 +4,8 @@
 
 Use this structure when creating `code.md` or `code-r{N}.md`.
 
+> Implementation-input fields provide reader-facing traceability. Lifecycle identity uses the input frozen by `code.started` and the completion receipt; it is not parsed from this report body.
+
 ## Output Template
 
 ```markdown

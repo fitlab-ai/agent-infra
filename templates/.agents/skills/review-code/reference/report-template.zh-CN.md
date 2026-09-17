@@ -4,6 +4,8 @@
 
 编写 `review-code.md` 或 `review-code-r{N}.md` 时使用本模板。
 
+> “审查输入”字段用于读者追溯。生命周期身份以 `review-code.started` 冻结的输入和完成 receipt 为准，不从本报告正文解析。
+
 ## 输出模板
 
 ```markdown

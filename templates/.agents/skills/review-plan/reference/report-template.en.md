@@ -4,6 +4,8 @@
 
 Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 
+> The `Review Input` field provides reader-facing traceability. Lifecycle identity uses the input frozen by `review-plan.started` and the completion receipt; it is not parsed from this report body.
+
 ## Output Template
 
 ```markdown

@@ -10,7 +10,7 @@ agent-infra-internal task-artifact {task-id} inspect --family code
 
 核心扫描任务目录中的 `plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md` 和 `review-code.md` / `review-code-r{N}.md`。
 
-`code.started` 会在 task.md frontmatter 中绑定本轮方案文件及其 SHA-256。`code.completed` 必须从实现报告的“方案输入”/“Plan Input”字段读取 canonical plan，并同时匹配该开始上下文和当前最新 plan；缺失、身份不一致或内容变化均失败关闭。
+`code.started` 会在 task.md frontmatter 中绑定本轮方案文件及其 SHA-256。`code.completed` 使用该开始上下文并校验当前最新 plan；内容变化失败关闭。实现报告的“方案输入”/“Plan Input”仅供读者追溯，不参与生命周期身份校验。
 
 ## 8 个分支
 

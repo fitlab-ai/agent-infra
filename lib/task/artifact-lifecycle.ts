@@ -221,65 +221,28 @@ function resolveReviewedInput(
   expectedFamily: ArtifactFamily,
   diagnostics: ArtifactDiagnostic[]
 ): ArtifactIdentity | null {
-  let content: string;
-  try { content = fs.readFileSync(review.path, 'utf8'); }
-  catch (error) {
+  try {
+    const taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    const receipt = receiptForOutput(taskContent, review.name);
+    const expectedEvent = reviewEventName(review.family);
+    if (!receipt || receipt.event !== expectedEvent) throw new Error(`receipt for ${review.name} is missing or invalid`);
+    const input = parseArtifactName(receipt.input);
+    if (!input || input.family !== expectedFamily) throw new Error(`receipt input '${receipt.input}' is not a canonical ${expectedFamily} artifact`);
+    const abs = path.join(taskDir, input.name);
+    const stat = fs.lstatSync(abs);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('referenced input is not a regular file');
+    const invalidation = parseInvalidationDocument(taskContent);
+    if (!invalidation.ok) throw new Error(invalidation.message);
+    if (isArtifactInvalidated(invalidation.document, expectedFamily, input.name)) throw new Error(`${input.name} is invalidated`);
+    const actualSha256 = sha256File(abs);
+    if (actualSha256 !== receipt.inputSha256) {
+      throw new Error(`${input.name} content digest does not match receipt`);
+    }
+    return { ...input, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
+  } catch (error) {
     diagnostics.push(diagnostic('BROKEN_REFERENCE', review.family, review.name, String(error)));
     return null;
   }
-  const parsed = parseReviewedInputReference(content, expectedFamily);
-  if (!parsed) {
-    diagnostics.push(diagnostic('BROKEN_REFERENCE', review.family, review.name, `${review.name} does not reference a canonical ${expectedFamily} artifact`));
-    return null;
-  }
-  const abs = path.join(taskDir, parsed.name);
-  try {
-    const stat = fs.lstatSync(abs);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('referenced input is not a regular file');
-    const taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
-    const invalidation = parseInvalidationDocument(taskContent);
-    if (!invalidation.ok) throw new Error(invalidation.message);
-    if (isArtifactInvalidated(invalidation.document, expectedFamily, parsed.name)) {
-      throw new Error(`${parsed.name} is invalidated`);
-    }
-    const receipt = receiptForOutput(taskContent, review.name);
-    if (!receipt) throw new Error(`receipt for ${review.name} is missing`);
-    const expectedEvent = reviewEventName(review.family);
-    if (receipt.event !== expectedEvent || receipt.input !== parsed.name) {
-      throw new Error(`receipt for ${review.name} does not match ${parsed.name}`);
-    }
-    const actualSha256 = sha256File(abs);
-    if (actualSha256 !== receipt.inputSha256) {
-      throw new Error(`${parsed.name} content digest does not match receipt`);
-    }
-    return { ...parsed, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
-  } catch (error) {
-    diagnostics.push(diagnostic('BROKEN_REFERENCE', review.family, review.name, `${parsed.name}: ${String(error)}`));
-    return null;
-  }
-}
-
-function parseReviewedInputReference(content: string, expectedFamily: ArtifactFamily): { family: ArtifactFamily; round: number; name: string } | null {
-  const lines = content.split(/\r?\n/);
-  const header = lines.findIndex((line) => /\*\*(?:审查输入|Review Input)\*\*[:：]/.test(line));
-  const referenceBlock = header >= 0 ? lines.slice(header, header + 12).join('\n') : '';
-  const candidates = [...referenceBlock.matchAll(/`([^`]+\.md)`/g)].map((match) => match[1]!);
-  return candidates
-    .map((name) => parseArtifactName(name))
-    .find((item) => item?.family === expectedFamily) ?? null;
-}
-
-function parseCodePlanInputReference(content: string): { family: 'plan'; round: number; name: string } | null {
-  const lines = content.split(/\r?\n/);
-  const sectionStart = lines.findIndex((line) => /^##\s+(?:实现输入|Implementation Input)\s*$/.test(line.trim()));
-  if (sectionStart < 0) return null;
-  const bodyLines = lines.slice(sectionStart + 1);
-  const nextSection = bodyLines.findIndex((line) => /^##\s+/.test(line.trim()));
-  const body = (nextSection < 0 ? bodyLines : bodyLines.slice(0, nextSection)).join('\n');
-  const match = body.match(/\*\*(?:方案输入|Plan Input)\*\*[:：]\s*`([^`]+\.md)`/);
-  if (!match) return null;
-  const parsed = parseArtifactName(match[1]!);
-  return parsed?.family === 'plan' ? { ...parsed, family: 'plan' } : null;
 }
 
 function reviewEventName(family: ArtifactFamily): 'review-analysis.completed' | 'review-plan.completed' | 'review-code.completed' {
@@ -557,7 +520,7 @@ function buildArtifactLinkSection(content: string, artifact: ArtifactIdentity): 
 export {
   artifactFamilyCatalog, familySpec,
   inspectTaskArtifacts, inspectArtifactDirectory, resolveArtifactContext,
-  parseReviewedInputReference, parseCodePlanInputReference, resolveCodePlanInput, reviewEventName,
+  resolveCodePlanInput, reviewEventName,
   assertWritableInventory, validateCompletedArtifact, buildArtifactLinkSection
 };
 export type {

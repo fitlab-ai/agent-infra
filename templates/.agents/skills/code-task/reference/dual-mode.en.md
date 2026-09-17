@@ -10,7 +10,7 @@ agent-infra-internal task-artifact {task-id} inspect --family code
 
 The core scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md` in the task directory.
 
-`code.started` persists the plan identity and SHA-256 for the round in task.md frontmatter. `code.completed` must read the canonical plan from the implementation report's `Plan Input` field and match both that start context and the current latest plan; missing, mismatched, or changed input fails closed.
+`code.started` persists the plan identity and SHA-256 for the round in task.md frontmatter. `code.completed` uses that start context and verifies the current latest plan; changed input fails closed. The implementation report's `Plan Input` field is reader-facing traceability, not lifecycle identity validation.
 
 ## Eight Branches
 

@@ -5,8 +5,6 @@ import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows 
 import {
   buildArtifactLinkSection,
   inspectArtifactDirectory,
-  parseReviewedInputReference,
-  parseCodePlanInputReference,
   resolveArtifactContext,
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
@@ -651,26 +649,20 @@ function buildCompletionReceipt(
   frontmatter: Record<string, unknown>
 ): { ok: true; receipt: ArtifactReceipt } | { ok: false; message: string } | null {
   if (family === 'code') {
-    let content: string;
-    try { content = fs.readFileSync(artifact.path, 'utf8'); }
-    catch (error) { return { ok: false, message: `cannot read ${artifact.name}: ${String(error)}` }; }
-    const input = parseCodePlanInputReference(content);
-    if (!input) return { ok: false, message: `${artifact.name} does not reference a canonical plan artifact` };
     const startedInput = typeof frontmatter.code_input_artifact === 'string' ? frontmatter.code_input_artifact : '';
     const startedSha256 = typeof frontmatter.code_input_sha256 === 'string' ? frontmatter.code_input_sha256 : '';
     if (!startedInput || !startedSha256) return { ok: false, message: 'code.started plan input context is missing' };
-    if (input.name !== startedInput) return { ok: false, message: `${artifact.name} plan input '${input.name}' does not match code.started input '${startedInput}'` };
     const plan = inspectArtifactDirectory(taskDir, 'plan');
-    if (plan.status !== 'ready' || !plan.latest || plan.latest.name !== input.name) {
-      return { ok: false, message: `code input '${input.name}' is not the latest plan artifact` };
+    if (plan.status !== 'ready' || !plan.latest || plan.latest.name !== startedInput) {
+      return { ok: false, message: `code input '${startedInput}' is not the latest plan artifact` };
     }
     try {
       const inputSha256 = sha256File(plan.latest.path);
-      if (inputSha256 !== startedSha256) return { ok: false, message: `code input ${input.name} changed after code.started` };
+      if (inputSha256 !== startedSha256) return { ok: false, message: `code input ${startedInput} changed after code.started` };
       return {
         ok: true,
         receipt: {
-          event: 'code.completed', output: artifact.name, input: input.name,
+          event: 'code.completed', output: artifact.name, input: startedInput,
           inputSha256, completedAt
         }
       };
@@ -680,18 +672,12 @@ function buildCompletionReceipt(
   }
   if (!family.startsWith('review-')) return null;
   const expectedFamily = reviewInputFamily(family);
-  let content: string;
-  try { content = fs.readFileSync(artifact.path, 'utf8'); }
-  catch (error) { return { ok: false, message: `cannot read ${artifact.name}: ${String(error)}` }; }
-  const input = parseReviewedInputReference(content, expectedFamily);
-  if (!input) return { ok: false, message: `${artifact.name} does not reference a canonical ${expectedFamily} artifact` };
   const startedInput = typeof frontmatter.review_input_artifact === 'string' ? frontmatter.review_input_artifact : '';
   const startedSha256 = typeof frontmatter.review_input_sha256 === 'string' ? frontmatter.review_input_sha256 : '';
   if (!startedInput || !startedSha256) return { ok: false, message: 'review started input context is missing' };
-  if (input.name !== startedInput) return { ok: false, message: `${artifact.name} input '${input.name}' does not match review.started input '${startedInput}'` };
   const current = inspectArtifactDirectory(taskDir, expectedFamily);
-  if (current.status !== 'ready' || !current.latest || current.latest.name !== input.name) {
-    return { ok: false, message: `review input '${input.name}' is not the latest ${expectedFamily} artifact` };
+  if (current.status !== 'ready' || !current.latest || current.latest.name !== startedInput) {
+    return { ok: false, message: `review input '${startedInput}' is not the latest ${expectedFamily} artifact` };
   }
   const event = family === 'review-analysis'
     ? 'review-analysis.completed' as const
@@ -700,16 +686,16 @@ function buildCompletionReceipt(
     const stat = fs.lstatSync(current.latest.path);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('review input is not a regular file');
     const inputSha256 = sha256File(current.latest.path);
-    if (inputSha256 !== startedSha256) return { ok: false, message: `review input ${input.name} changed after review.started` };
+    if (inputSha256 !== startedSha256) return { ok: false, message: `review input ${startedInput} changed after review.started` };
     return {
       ok: true,
       receipt: {
-        event, output: artifact.name, input: input.name,
+        event, output: artifact.name, input: startedInput,
         inputSha256, completedAt
       }
     };
   } catch (error) {
-    return { ok: false, message: `cannot hash review input ${input.name}: ${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, message: `cannot hash review input ${startedInput}: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 

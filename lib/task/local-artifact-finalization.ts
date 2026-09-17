@@ -5,7 +5,6 @@ import { scanVisibleMarkdown } from './markdown.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import {
   hasOpenArtifactRound,
-  parseCodePlanInputReference,
   validateArtifactPublication,
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
