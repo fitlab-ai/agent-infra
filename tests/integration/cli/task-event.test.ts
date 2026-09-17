@@ -1700,6 +1700,36 @@ test('review-code event completes a supplemental round against the latest code a
   assert.match(content, /`review-code-r2\.md`/);
 });
 
+test('review-code completion anchors an approved clean reviewed commit', () => {
+  const f = fixture('code-review');
+  fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
+  const added = spawnSync('git', ['add', '.gitignore'], { cwd: f.root, encoding: 'utf8' });
+  assert.equal(added.status, 0, added.stderr);
+  const committed = spawnSync('git', [
+    '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'fixture'
+  ], { cwd: f.root, encoding: 'utf8' });
+  assert.equal(committed.status, 0, committed.stderr);
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
+  const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
+
+  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  const artifact = reviewCodeArtifact()
+    .replace('- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`', `- **审查基线提交**：${head}`)
+    .replace('- **审查快照树**：dddddddddddddddddddddddddddddddddddddddd', `- **审查快照树**：${tree}`)
+    .replace('- **审查差异基线**：bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', `- **审查已检视提交**：${head}\n- **审查差异基线**：${head}`);
+  fs.writeFileSync(path.join(f.dir, 'review-code-r2.md'), artifact);
+  const finalized = finalizeReview(f, { stage: 'code', artifact: 'review-code-r2.md' });
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+
+  const completed = run(f.root, [
+    f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code-r2.md',
+    '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
+  ]);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.match(fs.readFileSync(f.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
+});
+
 test('review-code event allows a supplemental round after commit preparation', () => {
   const f = fixture('commit');
   fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
