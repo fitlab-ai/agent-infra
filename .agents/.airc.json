@@ -10,7 +10,7 @@
     "baseRef": "main"
   },
   "prFlow": "required",
-  "templateVersion": "v0.11.1-alpha.0",
+  "templateVersion": "v0.11.1",
   "sandbox": {
     "engine": {
       "darwin": "orbstack"
