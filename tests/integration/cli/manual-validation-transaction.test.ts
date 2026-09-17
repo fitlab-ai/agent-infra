@@ -423,3 +423,29 @@ test('coordinator replaces the Chinese manual-validation status section in place
   assert.match(body, /## 审查摘要\n\n### ✅ 人工验证已通过\n\n人工验证已通过；transaction=.*\n\n### 关键技术决策/m);
   assert.equal((body.match(/^###\s+(?:⚠️\s+需人工校验|✅\s+人工验证已通过|⏳\s+人工验证待收尾)\s*$/gmu) ?? []).length, 1);
 });
+
+test('coordinator preserves a canonical report placeholder after the manual-validation section', async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  fs.writeFileSync(fixture.summaryPath, [
+    '## 审查摘要',
+    '',
+    '### ⚠️ 需人工校验',
+    '',
+    '- 在生产环境完成权限校验。',
+    '',
+    '<!-- canonical-pr-change-report -->',
+    ''
+  ].join('\n'));
+  const state: FakeGitHubState = { comments: [], writes: 0 };
+
+  const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
+    client: fakeClient(fixture.baseSha, fixture.headSha, state)
+  });
+
+  assert.equal(result.status, 'applied', JSON.stringify(result));
+  const body = state.comments[0]?.body ?? '';
+  assert.match(body, /^### ✅ 人工验证已通过$/mu);
+  assert.match(body, /^### PR 代码增减$/mu);
+  assert.ok(body.indexOf('### PR 代码增减') < body.indexOf('### ✅ 人工验证已通过'));
+});

@@ -44,6 +44,7 @@ function printFailure(format: OutputFormat, error: { code: string; message: stri
 }
 
 const MANUAL_VALIDATION_STATUS_SECTION = /^###\s+(?:⚠️\s+(?:需人工校验|Manual Validation Required)|✅\s+(?:人工验证已通过|无需人工校验|Manual Validation Passed|No Manual Validation Required)|⏳\s+(?:人工验证待收尾|Manual Validation Pending))\s*$[\s\S]*?(?=^#{1,3}\s|(?![\s\S]))/gmu;
+const TRAILING_CANONICAL_REPORT_PLACEHOLDER = /\n*<!--\s*canonical-pr-change-report\s*-->\s*$/u;
 
 function manualSummaryBody(body: string, phase: 'pending' | 'final', transactionId: string, receiptDigest = '', evidenceDigest = '', prHeadSha = ''): string {
   const chinese = /###\s+(?:⚠️\s+需人工校验|✅\s+(?:人工验证已通过|无需人工校验)|⏳\s+人工验证待收尾)\s*$/mu.test(body);
@@ -55,10 +56,13 @@ function manualSummaryBody(body: string, phase: 'pending' | 'final', transaction
       ? `### ✅ 人工验证已通过\n\n人工验证已通过；transaction=${transactionId}; receipt=${receiptDigest}; evidence=${evidenceDigest}; head=${prHeadSha}.`
       : `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${transactionId}; receipt=${receiptDigest}; evidence=${evidenceDigest}; head=${prHeadSha}.`;
   let inserted = false;
-  const updated = body.replace(MANUAL_VALIDATION_STATUS_SECTION, () => {
+  const updated = body.replace(MANUAL_VALIDATION_STATUS_SECTION, (matched) => {
     if (inserted) return '';
     inserted = true;
-    return `${section}\n\n`;
+    const trailingPlaceholder = TRAILING_CANONICAL_REPORT_PLACEHOLDER.exec(matched)?.[0];
+    return trailingPlaceholder
+      ? `${trailingPlaceholder.trim()}\n\n${section}\n\n`
+      : `${section}\n\n`;
   });
   return inserted ? `${updated.replace(/\s+$/u, '')}\n` : `${body.replace(/\s+$/u, '')}\n\n${section}\n`;
 }
