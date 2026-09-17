@@ -44,6 +44,8 @@ agent-infra-internal platform-comment sync <task-ref> \
 
 平台结果不直接写 task.md。调用方在有关联任务时把关键失败映射为 workflow warning：
 
+生命周期验证把 Issue Type、milestone、labels、需求锚点和非关键评论作为平台审计。每条审计保留 check id、原始状态、reason 和 action；缺失、权限不足或值不一致不会阻塞 gate。身份歧义、协议冲突、实际写入失败和写后状态未知仍为硬失败。
+
 - capability 不足：`IMPORTANT / PERMISSION_DEGRADED`
 - 评论同步永久失败：`ACTION_REQUIRED / COMMENT_SYNC_FAILED`
 - 网络重试耗尽：`ACTION_REQUIRED / NETWORK_RETRY_EXHAUSTED`

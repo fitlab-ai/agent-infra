@@ -39,6 +39,8 @@ PR event `in:` synchronization uses `agent-infra-internal platform-pr sync-in-la
 
 `planned|applied|no-op|degraded` exit 0; `failed` exits 1; `blocked` exits 2.
 
+Lifecycle verification treats Issue Type, milestones, labels, requirement anchors, and noncritical comments as platform audits. Each audit retains its check id, raw status, reason, and action; missing structure, unavailable optional capability, or a value mismatch does not block a gate. Identity ambiguity, protocol conflicts, actual write failures, and unknown post-write state remain hard failures.
+
 Map material degraded/failed/blocked results to workflow warnings through the structured intent; callers must not edit warning rows directly:
 
 ```bash

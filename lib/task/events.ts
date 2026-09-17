@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import {
@@ -22,6 +23,7 @@ import {
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { ReviewStage } from './ledger.ts';
 import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.ts';
+import { extractReviewBaseline, extractReviewedHead, extractReviewedSnapshotTree } from './review-fingerprint.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { findSectionHeading } from './sections.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
@@ -111,6 +113,23 @@ type TaskEventResult = {
   timestamp: string | null; agentInfraVersion: string | null;
   operations: readonly TaskOperationSummary[]; error: TaskEventError | null;
 };
+
+function approvedCleanReviewedCommit(reviewContent: string, verdict: Verdict | undefined, repoRoot: string): string | null {
+  if (verdict !== 'approved') return null;
+  const reviewedHead = extractReviewedHead(reviewContent) || extractReviewBaseline(reviewContent);
+  const reviewedTree = extractReviewedSnapshotTree(reviewContent);
+  if (!/^[a-f0-9]{40}$/.test(reviewedHead) || !/^[a-f0-9]{40}$/.test(reviewedTree)) return null;
+  try {
+    const currentHead = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    if (currentHead !== reviewedHead) return null;
+    const currentTree = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+    if (currentTree !== reviewedTree) return null;
+    execFileSync('git', ['-C', repoRoot, 'diff-index', '--quiet', 'HEAD', '--']);
+    return reviewedHead;
+  } catch {
+    return null;
+  }
+}
 
 const BASE_FIELDS = new Set(['taskRef', 'event', 'agent', 'dryRun', 'overrideTicket', 'overrideTarget', 'overrideScope', 'initiator', 'requestId', 'reasonCode', 'sourceFinding', 'sourceArtifact', 'sourceSha256']);
 const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] }> = {
@@ -1064,6 +1083,11 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     }
   } else if (eventIdentity.phase === 'completed' && eventIdentity.family.startsWith('review-')) {
     frontmatterRemove = ['review_input_artifact', 'review_input_sha256'];
+  }
+  if (eventIdentity.phase === 'completed' && eventIdentity.family === 'review-code' && reviewContent !== null) {
+    const reviewedCommit = approvedCleanReviewedCommit(reviewContent, normalized.verdict, resolved.repoRoot);
+    if (reviewedCommit) frontmatterSet.last_reviewed_commit = reviewedCommit;
+    else if (normalized.verdict === 'approved') frontmatterSet.last_reviewed_commit = '';
   }
   if (eventIdentity.phase === 'completed') frontmatterRemove = [...(frontmatterRemove ?? []), 'qualification_input_relations'];
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';

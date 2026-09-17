@@ -20,6 +20,13 @@ type VerificationCheckResult = {
   message: string;
   fail_type?: string;
   warnings?: string[];
+  checkId?: string;
+  classification?: 'hard' | 'soft' | 'info';
+  effectiveStatus?: VerificationStatus;
+  reason?: string;
+  action?: string;
+  dependsOn?: string;
+  subchecks?: VerificationCheckResult[];
 };
 type VerificationContext = {
   skillName: string;

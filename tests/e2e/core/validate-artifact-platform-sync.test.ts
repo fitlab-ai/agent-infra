@@ -38,6 +38,18 @@ import {
   write,
   writeJson
 } from "./validate-artifact-helpers.ts";
+
+function assertSoftAudit(result: Awaited<ReturnType<typeof runValidator>>, checkId: string, message: RegExp) {
+  assert.equal(result.status, 0, result.stderr);
+  const payload = parseValidatorPayload(result.stdout);
+  assert.equal(payload.status, "pass");
+  const check = payload.checks?.find((item) => item.checkId === checkId);
+  assert.ok(check, `missing ${checkId}`);
+  assert.equal(check.status, "fail");
+  assert.equal(check.classification, "soft");
+  assert.equal(check.effectiveStatus, "pass");
+  assert.match(String(check.message), message);
+}
 import { CONTROL_MARKER_PATTERN, sanitizeMarkdownDocument } from "../../../lib/platform/comment-safety.ts";
 import { COMMENT_BYTE_LIMIT, renderTaskComment } from "../../../lib/platform/issue-comments.ts";
 
@@ -57,8 +69,7 @@ test(
     writeJson(ctx.issuePath, buildIssuePayload());
 
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "platform_issue_identity_exists",
-      expected_status_label: "status: in-progress"
+      when: "platform_issue_identity_exists"
     }, ctx.env({
       AGENT_INFRA_GH_BIN: "gh",
       AGENT_INFRA_GH_ARGS_JSON: JSON.stringify(["--jq", "value | value"]),
@@ -82,8 +93,7 @@ test("platform-sync reads Issue metadata through the shared REST snapshot adapte
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     writeJson(ctx.issuePath, buildIssuePayload());
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "platform_issue_identity_exists",
-      expected_status_label: "status: in-progress"
+      when: "platform_issue_identity_exists"
     }, ctx.env({ GH_FAKE_ARGS_PATH: argsPath, GH_FAKE_ISSUE_PATH: ctx.issuePath }));
     assert.equal(result.status, "pass", result.message);
     const calls = fs.readFileSync(argsPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line) as string[]);
@@ -112,8 +122,7 @@ test("platform-sync computes in: labels from the repository when the task worksp
     writeJson(ctx.issuePath, buildIssuePayload({ labels: [{ name: "in: cli" }] }));
 
     const result = await runPlatformSyncAdapter(externalTaskDir, {
-      when: "platform_issue_identity_exists",
-      verify_in_labels_computed: true
+      when: "platform_issue_identity_exists"
     }, ctx.env({ GH_FAKE_ISSUE_PATH: ctx.issuePath }), repositoryRoot);
 
     assert.equal(result.status, "pass", result.message);
@@ -127,8 +136,7 @@ test("platform-sync performs no GitHub operation when the repository selects non
     write(path.join(tempRoot, ".agents", ".airc.json"), '{"platform":{"type":"none"}}');
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "platform_issue_identity_exists",
-      expected_status_label: "status: in-progress"
+      when: "platform_issue_identity_exists"
     }, ctx.env({ GH_FAKE_ARGS_PATH: argsPath }), tempRoot);
 
     assert.equal(result.status, "pass", result.message);
@@ -291,11 +299,11 @@ const implementSyncCases = [
       const payload = parseValidatorPayload(result.stdout);
       assert.equal(payload.gate, "pass");
       assert.ok(payload.checks.length > 0);
-      assert.ok(payload.checks.every((check) => check.status === "pass"));
+      assert.ok(payload.checks.every((check) => check.effectiveStatus === "pass"));
     }
   },
   {
-    name: "validate-artifact platform-sync fails when artifact comment content differs from the local artifact",
+    name: "validate-artifact platform-sync reports artifact comment mismatch as a soft audit",
     skill: "code-task",
     comments(taskContent: string) {
       return [
@@ -304,17 +312,11 @@ const implementSyncCases = [
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 1);
-      assertPayloadStatus(result, {
-        type: "platform-sync",
-        status: "fail",
-        message: /Comment content mismatch for 'code'/
-      });
-      assert.match(parseValidatorPayload(result.stdout).message, /first difference near char \d+/);
+      assertSoftAudit(result, "platform.comment-content", /Comment content mismatch for 'code'/);
     }
   },
   {
-    name: "validate-artifact platform-sync fails when the task comment does not use the rendered frontmatter details block",
+    name: "validate-artifact platform-sync reports task comment mismatch as a soft audit",
     skill: "code-task",
     comments(taskContent: string, artifactContent: string) {
       return [
@@ -323,17 +325,11 @@ const implementSyncCases = [
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 1);
-      assertPayloadStatus(result, {
-        type: "platform-sync",
-        status: "fail",
-        message: /Comment content mismatch for 'task'/
-      });
-      assert.match(parseValidatorPayload(result.stdout).message, /line \d+, column \d+/);
+      assertSoftAudit(result, "platform.task-comment-content", /Comment content mismatch for 'task'/);
     }
   },
   {
-    name: "validate-artifact platform-sync fails when the Issue Type does not match task type",
+    name: "validate-artifact platform-sync reports Issue Type mismatch as a soft audit",
     skill: "code-task",
     taskOverrides: { type: "feature" },
     issuePayload: buildIssuePayload({ type: buildIssueType("Task") }),
@@ -344,16 +340,11 @@ const implementSyncCases = [
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 1);
-      assertPayloadStatus(result, {
-        type: "platform-sync",
-        status: "fail",
-        message: /has type 'Task', expected 'Feature'/
-      });
+      assertSoftAudit(result, "platform.issue-type", /has type 'Task', expected 'Feature'/);
     }
   },
   {
-    name: "validate-artifact platform-sync fails for organization repos when the Issue Type is missing",
+    name: "validate-artifact platform-sync reports missing organization Issue Type as a soft audit",
     skill: "code-task",
     issuePayload: buildIssuePayload({ type: null }),
     comments(taskContent: string, artifactContent: string) {
@@ -363,12 +354,7 @@ const implementSyncCases = [
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 1);
-      assertPayloadStatus(result, {
-        type: "platform-sync",
-        status: "fail",
-        message: /has no Issue Type set/
-      });
+      assertSoftAudit(result, "platform.issue-type", /has no Issue Type set/);
     }
   },
   {
@@ -421,7 +407,7 @@ const implementSyncCases = [
     }
   },
   {
-    name: "validate-artifact platform-sync fails for create-task when the task comment is missing",
+    name: "validate-artifact platform-sync reports a missing task comment as a soft audit",
     skill: "create-task",
     issuePayload: buildIssuePayload({
       labels: [{ name: "status: waiting-for-triage" }],
@@ -431,12 +417,7 @@ const implementSyncCases = [
       return [];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 1);
-      assertPayloadStatus(result, {
-        type: "platform-sync",
-        status: "fail",
-        message: /sync-issue:TASK-20260328-000001:task/
-      });
+      assertSoftAudit(result, "platform.task-comment-content", /sync-issue:TASK-20260328-000001:task/);
     }
   },
   {
@@ -455,7 +436,7 @@ const implementSyncCases = [
     }
   },
   {
-    name: "validate-artifact platform-sync fails for create-task when the Issue has no milestone",
+    name: "validate-artifact platform-sync reports missing Issue milestone as a soft audit",
     skill: "create-task",
     issuePayload: buildIssuePayload({
       labels: [{ name: "status: waiting-for-triage" }],
@@ -466,16 +447,11 @@ const implementSyncCases = [
       return [{ body: buildTaskComment(taskId, taskContent) }];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 1);
-      assertPayloadStatus(result, {
-        type: "platform-sync",
-        status: "fail",
-        message: /has no milestone set/
-      });
+      assertSoftAudit(result, "platform.milestone", /has no milestone set/);
     }
   },
   {
-    name: "validate-artifact platform-sync fails for code-task when Issue milestone is a release line",
+    name: "validate-artifact platform-sync does not require a specific Issue milestone for code-task",
     skill: "code-task",
     issuePayload: buildIssuePayload({
       labels: [{ name: "status: in-progress" }],
@@ -489,12 +465,8 @@ const implementSyncCases = [
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 1);
-      assertPayloadStatus(result, {
-        type: "platform-sync",
-        status: "fail",
-        message: /milestone '0\.7\.x' is a release line/
-      });
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
     }
   },
   {
@@ -557,7 +529,7 @@ const implementSyncCases = [
     }
   },
   {
-    name: "validate-artifact platform-sync-preflight fails when an anchored section is missing a checked requirement",
+    name: "validate-artifact platform-sync-preflight reports missing checked requirements as a soft audit",
     skill: "complete-task",
     check: "platform-sync-preflight",
     issuePayload: buildIssuePayload({
@@ -572,12 +544,7 @@ const implementSyncCases = [
       ];
     },
     assertResult(result: Awaited<ReturnType<typeof runValidator>>) {
-      assert.equal(result.status, 1);
-      assertPayloadStatus(result, {
-        type: "platform-sync-preflight",
-        status: "fail",
-        message: /missing checked requirements/
-      });
+      assertSoftAudit(result, "platform.requirements", /missing checked requirements/);
     }
   },
   {
@@ -635,6 +602,75 @@ for (const c of implementSyncCases) {
     }));
   }));
 }
+
+test("platform-sync does not read disabled PR comment audits for code and review workflows", async () => {
+  for (const skill of ["code-task", "review-code"] as const) {
+    for (const bound of [true, false]) {
+      await withTempRoot(`agent-infra-platform-sync-disabled-pr-${skill}-`, async (tempRoot) => {
+        const ctx = setupPlatformSyncEnv(tempRoot);
+        const prHeadSha = createHeadCommit(tempRoot);
+        const taskContent = buildTaskContent({
+          platform_issue_identity: '\'{"kind":"number","value":65}\'',
+          ...(bound ? { pr_delivery_fact: boundFactValue(77, prHeadSha) } : {})
+        });
+        const argsPath = path.join(tempRoot, "gh-args.jsonl");
+        const counterPath = path.join(tempRoot, "pr-comments-counter");
+        write(path.join(ctx.taskDir, "task.md"), taskContent);
+        writeJson(ctx.issuePath, buildIssuePayload());
+        writeJson(ctx.prPath, buildPrPayload({ headSha: prHeadSha }));
+        writeJson(ctx.commentsPath, [{ body: buildTaskComment(taskId, taskContent) }]);
+        write(counterPath, "3");
+
+        const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "--skill", skill], ctx, {
+          GH_FAKE_ISSUE_PATH: ctx.issuePath,
+          GH_FAKE_PR_PATH: ctx.prPath,
+          GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
+          GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
+          GH_FAKE_ISSUE_NUMBER: "65",
+          GH_FAKE_PR_NUMBER: "77",
+          GH_FAKE_ARGS_PATH: argsPath,
+          GH_FAKE_TRANSIENT_FAIL_MATCHER: "/issues/77/comments",
+          GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: counterPath,
+          AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: "0,0"
+        });
+
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        assert.equal(fs.readFileSync(counterPath, "utf8"), "3");
+        const payload = parseValidatorPayload(result.stdout);
+        const check = payload.checks.find((item) => item.checkId === "platform.pr-comment-marker");
+        assert.ok(check);
+        assert.equal(check.classification, "info");
+        assert.equal(check.effectiveStatus, "pass");
+        const calls = fs.readFileSync(argsPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line) as string[]);
+        assert.equal(calls.some((args) => args.some((arg) => arg.includes("/issues/77/comments"))), false);
+      });
+    }
+  }
+});
+
+test("validate-artifact platform-sync hard-fails malformed artifact comment input", async () => {
+  await withTempRoot("agent-infra-platform-sync-malformed-artifact-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const taskContent = buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' });
+    const artifactContent = "# 实现报告\n\n```text\nunterminated";
+    write(path.join(ctx.taskDir, "task.md"), taskContent);
+    write(path.join(ctx.taskDir, "code.md"), artifactContent);
+    writeJson(ctx.issuePath, buildIssuePayload());
+    writeJson(ctx.commentsPath, [
+      { body: `<!-- sync-issue:${taskId}:code -->\n# 实现报告\n\n${artifactContent}` },
+      { body: buildTaskComment(taskId, taskContent) }
+    ]);
+
+    const result = await runValidatorWithFakeGh(["check", "platform-sync", ctx.taskDir, "code.md", "--skill", "code-task"], ctx, {
+      GH_FAKE_ISSUE_PATH: ctx.issuePath,
+      GH_FAKE_COMMENTS_PATH: ctx.commentsPath
+    });
+    assert.equal(result.status, 1, result.stderr);
+    const check = parseValidatorPayload(result.stdout).checks.find((item) => item.checkId === "platform.comment-content");
+    assert.equal(check?.classification, "hard");
+    assert.equal(check?.effectiveStatus, "fail");
+  });
+});
 
 test("validate-artifact platform-sync preserves source @ content when comparing artifact data", () => withTempRoot("agent-infra-platform-sync-content-policy-", async (tempRoot) => {
   const ctx = setupPlatformSyncEnv(tempRoot);
@@ -750,7 +786,7 @@ const issueFieldCases = [
     expectedStatus: "pass"
   },
   {
-    name: "validate-artifact platform-sync fails when an Issue field differs from task frontmatter",
+    name: "validate-artifact platform-sync reports Issue field mismatch as a soft audit",
     taskOverrides: {
       platform_issue_identity: '\'{"kind":"number","value":65}\'',
       priority: "High"
@@ -760,7 +796,7 @@ const issueFieldCases = [
         { typename: "IssueFieldSingleSelectValue", fieldName: "Priority", value: "Low" }
       ]
     }),
-    expectedStatus: "fail",
+    expectedStatus: "pass",
     message: /field 'Priority' is 'Low', expected 'High'/
   }
 ];
@@ -784,7 +820,8 @@ for (const c of issueFieldCases) {
     });
     assert.equal(result.status, c.expectedStatus);
     if (c.message) {
-      assert.match(result.message, c.message);
+      const subcheck = result.subchecks?.find((item: Record<string, unknown>) => item.checkId === 'platform.issue-fields');
+      assert.match(String(subcheck?.message), c.message);
     }
   }));
 }
@@ -847,33 +884,36 @@ test("validate-artifact platform-sync skips Issue field verification when fields
 
 const createPrCases = [
   {
-    name: "validate-artifact platform-sync fails when create-pr milestone is missing",
+    name: "validate-artifact platform-sync reports missing create-pr milestone as a soft audit",
     prPayload: buildPrPayload({ labels: [{ name: "type: enhancement" }], milestone: null }),
-    expectedStatus: 1,
+    expectedStatus: 0,
+    auditId: "platform.milestone",
     message: [/PR #77 has no milestone set/]
   },
   {
-    name: "validate-artifact platform-sync fails when create-pr PR milestone is a release line",
+    name: "validate-artifact platform-sync does not require a specific create-pr milestone",
     issuePayload: buildIssuePayload({ labels: [], body: "# Issue\n", milestone: { title: "0.7.1" } }),
     prPayload: buildPrPayload({ labels: [{ name: "type: enhancement" }], milestone: { title: "0.7.x" } }),
-    expectedStatus: 1,
-    message: [/PR #77 milestone '0\.7\.x' is a release line/]
+    expectedStatus: 0,
+    message: []
   },
   {
-    name: "validate-artifact platform-sync fails when PR and Issue in: labels diverge",
+    name: "validate-artifact platform-sync reports divergent PR in: labels as a soft audit",
     changedPath: "tests/unit/core/fixture.txt",
     issuePayload: buildIssuePayload({ labels: [{ name: "in: core" }], body: "# Issue\n" }),
     prPayload: buildPrPayload({ labels: [{ name: "type: enhancement" }, { name: "in: cli" }, { name: "in: core" }] }),
-    expectedStatus: 1,
+    expectedStatus: 0,
+    auditId: "platform.in-labels-match-pr",
     message: [/in: labels mismatch/, /PR #77/, /Issue #65/]
   },
   {
-    name: "validate-artifact platform-sync fails when create-pr is missing the expected type label",
+    name: "validate-artifact platform-sync reports a missing create-pr type label as a soft audit",
     changedPath: "tests/unit/core/fixture.txt",
     taskOverrides: { type: "feature" },
     issuePayload: buildIssuePayload({ labels: [{ name: "in: core" }], body: "# Issue\n" }),
     prPayload: buildPrPayload({ labels: [{ name: "in: core" }] }),
-    expectedStatus: 1,
+    expectedStatus: 0,
+    auditId: "platform.pr-type-label",
     message: [/Expected type label 'type: feature' not found on PR #77/]
   },
   {
@@ -893,9 +933,10 @@ const createPrCases = [
     expectedStatus: 0
   },
   {
-    name: "validate-artifact platform-sync fails when create-pr has no assignee",
+    name: "validate-artifact platform-sync reports a missing create-pr assignee as a soft audit",
     prPayload: buildPrPayload({ labels: [{ name: "type: enhancement" }], assignees: [] }),
-    expectedStatus: 1,
+    expectedStatus: 0,
+    auditId: "platform.pr-assignee",
     message: [/PR #77 has no assignee/]
   },
   {
@@ -910,10 +951,11 @@ const createPrCases = [
     expectedStatus: 0
   },
   {
-    name: "validate-artifact platform-sync fails when create-pr summary comment is missing on the PR",
+    name: "validate-artifact platform-sync reports a missing create-pr summary comment as a soft audit",
     prPayload: buildPrPayload(),
     prComments: [],
-    expectedStatus: 1,
+    expectedStatus: 0,
+    auditId: "platform.pr-comment-marker",
     message: [/Expected PR comment marker/, /PR #77/]
   }
 ];
@@ -957,10 +999,17 @@ for (const c of createPrCases) {
     assert.equal(result.status, c.expectedStatus, result.stderr);
     const payload = assertPayloadStatus(result, {
       type: "platform-sync",
-      status: c.expectedStatus === 0 ? "pass" : "fail"
+      status: "pass"
     });
     for (const matcher of c.message || []) {
-      assert.match(payload.message, matcher);
+      if (c.auditId) {
+        const check = payload.checks.find((item) => item.checkId === c.auditId);
+        assert.equal(check?.classification, 'soft');
+        assert.equal(check?.effectiveStatus, 'pass');
+        assert.match(String(check?.message), matcher);
+      } else {
+        assert.match(payload.message, matcher);
+      }
     }
   }));
 }
@@ -1267,7 +1316,7 @@ for (const c of retryCases) {
   }));
 }
 
-test("platform-sync rejects status labels on closed issues without triage permission", async () => (
+test("platform-sync reports status labels on closed issues as a soft audit without triage permission", async () => (
   withTempRoot("agent-infra-platform-sync-closed-status-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ platform_issue_identity: '\'{"kind":"number","value":65}\'' }));
@@ -1277,8 +1326,7 @@ test("platform-sync rejects status labels on closed issues without triage permis
     }));
 
     const result = await runPlatformSyncAdapter(ctx.taskDir, {
-      when: "platform_issue_identity_exists",
-      verify_closed_issue_has_no_status_labels: true
+      when: "platform_issue_identity_exists"
     }, {
       PATH: pathWithPrependedBin(ctx.binDir),
       AGENT_INFRA_GH_BIN: process.execPath,
@@ -1287,9 +1335,10 @@ test("platform-sync rejects status labels on closed issues without triage permis
       GH_FAKE_PERMISSIONS: JSON.stringify({ triage: false, push: false })
     });
 
-    assert.equal(result.status, "fail");
-    assert.equal(result.fail_type, "check_failed");
-    assert.match(result.message, /status: in-progress/);
+    assert.equal(result.status, "pass");
+    const closedLabel = result.subchecks.find((check: { checkId?: string }) => check.checkId === "platform.closed-status-labels");
+    assert.equal(closedLabel?.status, "fail");
+    assert.equal(closedLabel?.classification, "soft");
   })
 ));
 
@@ -1304,8 +1353,7 @@ for (const issuePayload of [
       writeJson(ctx.issuePath, issuePayload);
 
       const result = await runPlatformSyncAdapter(ctx.taskDir, {
-        when: "platform_issue_identity_exists",
-        verify_closed_issue_has_no_status_labels: true
+        when: "platform_issue_identity_exists"
       }, {
         PATH: pathWithPrependedBin(ctx.binDir),
         AGENT_INFRA_GH_BIN: process.execPath,

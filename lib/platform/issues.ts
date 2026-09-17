@@ -574,9 +574,8 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
   const failure = plan.operations.find((operation) => operation.status === 'failed');
   if (failure) return result('failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: { code: failure.reasonCode || 'ISSUE_SYNC_FAILED', message: `Operation ${failure.name} failed`, retryable: false } });
   const planned = plan.operations.filter((operation) => operation.status === 'planned');
-  const skipped = plan.operations.some((operation) => operation.status === 'skipped');
-  if (options.dryRun) return result(planned.length ? 'planned' : skipped ? 'degraded' : 'no-op', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: null });
-  if (planned.length === 0) return result(skipped ? 'degraded' : 'no-op', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: null });
+  if (options.dryRun) return result(planned.length ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: null });
+  if (planned.length === 0) return result('no-op', base.resolved.taskId, base.issueNumber, { issue: snapshot, operations: plan.operations, error: null });
   const payload = applyRestOperations(snapshot, planned) as Partial<{
     title: string; body: string; labels: string[]; assignees: string[];
     milestone: string | null; state: 'open' | 'closed'; fields: Record<string, string | number | null>;
@@ -611,7 +610,7 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
       error: { code: 'IN_LABEL_SYNC_PARTIAL', message: 'Issue labels did not converge after update', retryable: true }
     });
   }
-  return result(skipped ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, {
+  return result('applied', base.resolved.taskId, base.issueNumber, {
     changed: updated.value.changed, platform: base.context.platform, capabilities: base.context.capabilities,
     resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity }, issue: finalIssue,
     operations: plan.operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null

@@ -27,16 +27,7 @@
       "expected_action_pattern": "(Review Analysis|Analysis Review) \\(Round \\d+\\)"
     },
     "platform-sync": {
-      "when": "platform_issue_identity_exists",
-      "expected_status_label": "status: pending-design-work",
-      "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
-      "verify_comment_content": true,
-      "verify_task_comment_content": true,
-      "verify_issue_type": true,
-      "verify_issue_fields": false,
-      "verify_milestone": true,
-      "expected_status_label_key": "pendingDesignWork",
-      "expected_comment_marker_key": "artifact"
+      "when": "platform_issue_identity_exists"
     }
   }
 }

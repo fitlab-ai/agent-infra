@@ -20,7 +20,7 @@ test('platform-sync obtains computed in-label repository metadata from the selec
     git(root, ['init', '-q', '-b', 'main']);
     git(root, ['config', 'user.name', 'Test']);
     git(root, ['config', 'user.email', 'test@example.com']);
-    fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'skills', 'code-task', 'config'), { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
       platform: {
         type: 'trae',
@@ -28,8 +28,8 @@ test('platform-sync obtains computed in-label repository metadata from the selec
       },
       labels: { in: { core: ['lib/'] } }
     }));
-    fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
-      skill: 'complete-task', checks: { 'platform-sync': { verify_in_labels_computed: true } }
+    fs.writeFileSync(path.join(root, '.agents', 'skills', 'code-task', 'config', 'verify.json'), JSON.stringify({
+      skill: 'code-task', checks: { 'platform-sync': { when: 'platform_issue_identity_exists' } }
     }));
     fs.writeFileSync(path.join(root, 'base.txt'), 'base\n');
     git(root, ['add', '.']);
@@ -61,7 +61,7 @@ test('platform-sync obtains computed in-label repository metadata from the selec
     ].join('\n'));
 
     const result = await withGitSafeProcessEnv(() => verifyInProcess({
-      mode: 'gate', skillName: 'complete-task', taskDir, checks: [], repositoryRoot: root
+      mode: 'gate', skillName: 'code-task', taskDir, checks: [], repositoryRoot: root
     }), { AGENT_INFRA_GH_BIN: path.join(root, 'github-must-not-run') });
     assert.equal(result.gate, 'pass', JSON.stringify(result));
     assert.equal(result.checks[0].status, 'pass');

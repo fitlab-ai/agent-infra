@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   VERIFICATION_CATALOG,
+  renderTaskVerification,
   verifyTaskEvent
 } from '../../../lib/task/verification.ts';
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
@@ -227,6 +228,24 @@ test('preflight stops on the first non-pass and preserves blocked exit semantics
   assert.equal(result.status, 'blocked');
   assert.equal(result.invocations.length, 1);
   assert.equal(calls, 1);
+});
+
+test('single-check text output preserves subcheck diagnostics without a gate summary', () => {
+  const text = renderTaskVerification({
+    status: 'pass', changed: false, event: 'code.completed', requestRef: 'TASK-20260101-000001',
+    taskId: 'TASK-20260101-000001', taskDir: '/tmp/task', taskState: 'active', skill: 'code-task', mode: 'checks', artifact: 'code.md', error: null,
+    invocations: [{
+      status: 'pass', exitCode: 0,
+      payload: {
+        skill: 'code-task', type: 'platform-sync', status: 'pass', checks: [{
+          type: 'platform-sync', checkId: 'platform.comment-content', status: 'fail', effectiveStatus: 'pass',
+          classification: 'soft', reason: 'check_failed', message: 'Comment content mismatch for code', action: 'Synchronize the comment'
+        }], action: 'All declared checks passed'
+      }
+    }]
+  });
+  assert.match(text, /Check: pass \| Skill: code-task \| Type: platform-sync/);
+  assert.match(text, /reason check_failed\) - Comment content mismatch for code; Synchronize the comment/);
 });
 
 test('unknown events fail with a stable orchestration error', async () => {

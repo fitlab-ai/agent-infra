@@ -15,8 +15,7 @@
         "completed_at"
       ],
       "expected_status": "completed",
-      "require_completed_at": true,
-      "require_target_date": true
+      "require_completed_at": true
     },
     "activity-log": {
       "expected_action_pattern": "(Complete Task|Completed)"
@@ -28,21 +27,11 @@
     "manual-validation": {},
     "post-review-commit": {},
     "platform-sync-preflight": {
-      "when": "platform_issue_identity_exists",
-      "expected_comment_marker": "<!-- sync-issue:{task-id}:summary -->",
-      "verify_task_comment_content": false,
-      "sync_checked_requirements": true,
-      "verify_issue_type": true,
-      "verify_issue_fields": false,
-      "verify_milestone": true,
-      "verify_closed_issue_has_no_status_labels": false,
-      "expected_comment_marker_key": "summary"
+      "when": "platform_issue_identity_exists"
     },
     "required-pr-delivery": {},
     "platform-sync": {
-      "when": "platform_issue_identity_exists",
-      "verify_task_comment_content": true,
-      "verify_closed_issue_has_no_status_labels": true
+      "when": "platform_issue_identity_exists"
     },
     "artifact": {
       "file_pattern": "task.md",
