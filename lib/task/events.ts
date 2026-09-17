@@ -1087,6 +1087,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   if (eventIdentity.phase === 'completed' && eventIdentity.family === 'review-code' && reviewContent !== null) {
     const reviewedCommit = approvedCleanReviewedCommit(reviewContent, normalized.verdict, resolved.repoRoot);
     if (reviewedCommit) frontmatterSet.last_reviewed_commit = reviewedCommit;
+    else if (normalized.verdict === 'approved') frontmatterSet.last_reviewed_commit = '';
   }
   if (eventIdentity.phase === 'completed') frontmatterRemove = [...(frontmatterRemove ?? []), 'qualification_input_relations'];
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
