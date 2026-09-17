@@ -40,7 +40,7 @@ test('artifact initialization renders a valid qualification audit for every work
   for (const family of ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const) {
     const artifact = `${family}.md`;
     const initialized = initializeArtifactSkeleton({ repoRoot: root, taskId, taskDir, family, artifact });
-    assert.equal(initialized.status, 'applied');
+    assert.equal(initialized.status, 'applied', `${family}: ${JSON.stringify(initialized.error)}`);
     const content = fs.readFileSync(path.join(taskDir, artifact), 'utf8');
     assert.equal(validateQualificationAudit(qualificationTask, content, { family, artifact, require: true }).ok, true);
   }
