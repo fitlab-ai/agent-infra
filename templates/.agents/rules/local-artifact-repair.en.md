@@ -11,6 +11,14 @@ This rule covers the pre-completion gate for `analyze-task`, `plan-task`, and `c
 - Preflight publishes active `R` through `preflight-ready → preflight-commit-started → preflight-passed`; the business finalizer publishes `F` through `full-finalizer-ready → commit-started → passed` and reuses `R` when `F=R`.
 - Candidate-only is a protocol authorization boundary, not OS isolation: a same-UID process with arbitrary host filesystem write access may tamper with recovery internals. Identity, fingerprint, and state checks detect such anomalies and fail closed, but the protocol does not claim an independent security principal or cross-platform isolation.
 
+## Recovery continuation context
+
+Whenever a preflight or finalizer returns `recovery`, bind the complete continuation context from that response for the current execution: `taskRef`, `stage/family`, `artifact`, `recoveryId`, `candidatePath`, baseline digests, and the original entry point. These fields belong to one controlled transaction; do not regenerate, guess, or mix any of them for a later call.
+
+- For a preflight failure, edit only that `candidatePath`, then rerun the same preflight entry point with the same `--recovery-id`. Only the successful response's recovery context may proceed to ledger writes or summary/finalization.
+- For a finalizer failure, edit only that `candidatePath`, then rerun that same finalizer entry point with the same `--recovery-id`.
+- Stop when the context is lost, the tuple differs, or the formal artifact was edited directly. A fresh invocation without `--recovery-id` cannot replace recovery, and a formal artifact is never a candidate.
+
 ## Authorization boundary
 
 - The finalizer and recovery core validate identity, state, permissions, stable reads, complete artifact semantics, and fingerprints. They do not infer repairability or expose a text-operation allow-list.

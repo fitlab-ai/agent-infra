@@ -12,6 +12,14 @@
 - preflight-ready 后 publish 只读取 active/pending generation，绝不再读取可编辑 candidate。
 - candidate-only 是协议授权边界，不是操作系统隔离：拥有同一 UID 且可任意写入宿主文件系统的进程可能篡改 recovery 内部文件；协议会通过身份、指纹和状态校验发现异常并失败关闭，但不承诺独立权限主体或跨平台隔离。
 
+## 恢复续办上下文
+
+任一 preflight 或 finalizer 返回 `recovery` 时，立即在本次执行中绑定该响应的完整续办上下文：`taskRef`、`stage/family`、`artifact`、`recoveryId`、`candidatePath`、baseline digest 和原入口。它们属于同一受控事务，后续调用不得重新生成、猜测或混用其中任一字段。
+
+- 失败来自 preflight：只编辑该 `candidatePath` 后，以相同入口和同一 `--recovery-id` 重跑 preflight；只有成功响应中的 recovery context 才能进入后续账本写入或 summary/finalizer。
+- 失败来自 finalizer：只编辑该 `candidatePath` 后，以相同入口和同一 `--recovery-id` 重跑该 finalizer。
+- 上下文丢失、tuple 不匹配或正式 artifact 已被直接修改时停止；不得以省略 `--recovery-id` 的新调用替代恢复，也不得把正式 artifact 当作 candidate。
+
 ## 授权边界
 
 - finalizer 和 recovery core 只校验身份、状态、权限、稳定读取、完整 artifact 语义和指纹；不根据错误码猜测“可修复”，也不提供文本操作白名单。
