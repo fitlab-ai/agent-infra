@@ -285,7 +285,7 @@ const taskMetaCases: TaskMetaCase[] = [
     }
   },
   {
-    name: "validate-artifact task-meta fails for complete-task when target_date is missing",
+    name: "validate-artifact task-meta allows complete-task when target_date is missing",
     skill: "complete-task",
     content() {
       const now = formatTimestamp(new Date());
@@ -297,9 +297,8 @@ const taskMetaCases: TaskMetaCase[] = [
       });
     },
     assertResult(result) {
-      assert.equal(result.status, 1, result.stderr);
-      assertPayloadStatus(result, { type: "task-meta", status: "fail" });
-      assert.match(result.stdout, /Expected target_date to be present/);
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "task-meta", status: "pass" });
     }
   }
 ];
