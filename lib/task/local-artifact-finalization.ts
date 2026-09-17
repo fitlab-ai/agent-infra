@@ -205,12 +205,15 @@ function validateLocalArtifact(
   if (!decisionDetails.ok) diagnostics.push({ code: 'LOCAL_DECISION_DETAIL_DUPLICATE', message: decisionDetails.message, line: null });
 
   if (options.taskContent !== undefined) {
-    const expected = expectedQualificationRelations(options.taskContent, options.family);
-    if (!expected.ok) diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${expected.code}: ${expected.message}`, line: null });
+    const identity = options.artifact ? parseArtifactName(options.artifact) : null;
+    const expected = identity?.family === options.family && hasOpenArtifactRound(options.taskContent, options.family, identity.round)
+      ? expectedQualificationRelations(options.taskContent, options.family)
+      : undefined;
+    if (expected && !expected.ok) diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${expected.code}: ${expected.message}`, line: null });
     const qualification = validateQualificationAudit(options.taskContent, content, {
       family: options.family,
       artifact: options.artifact,
-      expectedUpstreamRelations: expected.ok ? expected.relations : undefined
+      expectedUpstreamRelations: expected?.ok ? expected.relations : undefined
     });
     if (!qualification.ok) diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${qualification.code}: ${qualification.message}`, line: null });
   }
