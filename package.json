@@ -52,7 +52,7 @@
     "installer"
   ],
   "dependencies": {
-    "@clack/prompts": "1.7.0",
+    "@clack/prompts": "1.8.1",
     "@larksuiteoapi/node-sdk": "^1.68.0",
     "cross-spawn": "^7.0.6",
     "fs-native-extensions": "1.5.1",
