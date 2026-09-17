@@ -2799,8 +2799,8 @@ async function runFinalizationRecoveryCase(
       const receiptDir = path.join(root, '.agents', 'workspace', '.task-finalization');
       fs.mkdirSync(receiptDir, { recursive: true });
       fs.writeFileSync(path.join(receiptDir, `${taskId}.json`), `${JSON.stringify({
-        version: 2, taskId, intent: 'complete', receiptId: `receipt-${label}`, revision: 1,
-        lifecycle: 'done', taskComment: label === 'warnings' ? 'pending' : 'done', verification: 'done',
+        version: 3, taskId, intent: 'complete', receiptId: `receipt-${label}`, revision: 1,
+        lifecycle: 'done', taskComment: label === 'warnings' ? 'pending' : 'done', verification: 'done', summary: 'done', postSummaryVerification: 'done',
         warningProjection: 'done',
         warnings: label === 'warnings' ? [{
           code: 'COMMENT_SYNC_FAILED', message: 'comment sync needs retry', retryable: true,

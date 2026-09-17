@@ -9,7 +9,7 @@ description: >
 # 完成任务
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
-宿主 finalization 使用 receipt v2（不可变 `receiptId`、单调 `revision` 和 canonical warnings）。生命周期/身份/required PR 等硬失败返回 `result: failed|blocked`；生命周期完成后，评论、外围验证和其他同步失败返回 `result: completed_with_warnings` 及六字段 warning，并仅重试 receipt 中的 pending step。
+宿主 finalization 使用 receipt v3（不可变 `receiptId`、单调 `revision`、摘要暂存和 canonical warnings）。生命周期/身份/required PR 等硬失败返回 `result: failed|blocked`；生命周期完成后，评论、外围验证和其他同步失败返回 `result: completed_with_warnings` 及六字段 warning，并仅重试 receipt 中的 pending step。
 
 
 ## 行为边界 / 关键规则
@@ -142,7 +142,7 @@ Please satisfy the hard prerequisite first, then retry complete-task.
 
 1. 调用 `agent-infra-internal platform-comment backfill {task-id} --agent {standard-agent-token}`，由 core 仅按 completion canonical inventory 固定顺序补发产物并在全部成功后精确恢复目标历史告警。
 2. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。
-3. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {standard-agent-token}`。
+3. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`。该命令把正文和 SHA-256 写入 task 目录的 durable staging record；本步骤不得直接发布 summary 评论。
 
 若账本含合法的 `PRC-N` post-review 豁免，摘要正文必须镜像 task.md 中的裁决理由、提交范围、人工身份与时间，并明确这是人工覆盖而非自动校验成功。已有匹配 workflow warning 时，同时镜像其原始 failure code/message；尚无 warning 时只写“裁决已记录、最终门禁待验证”，不得提前宣称豁免已通过。summary marker 仍由同一 `--kind summary` intent 唯一维护。
 
@@ -176,7 +176,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-finalization 按 lifecycle → task 评论 → `complete-task.completed` 校验的固定顺序执行，并将每一步的状态写入宿主 receipt。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
+finalization 按 lifecycle → task 评论 → core verification → warning task 评论更新 → summary → post-summary verification 的固定顺序执行，并将每一步的状态写入宿主 receipt。summary 使用暂存正文；仅在所有步骤完成且无未解决 warning 后清理 staging record。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
 
 ### 7. 处理 finalization 重试与结果
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { platformResult } from '../../../lib/platform/types.ts';
@@ -135,6 +136,39 @@ test('host finalization uses the canonical root and makes a successful replay a 
   }
 });
 
+test('host finalization publishes a staged summary after core verification and clears it only after post-summary verification', async () => {
+  const f = fixture();
+  const staged = 'Delivered summary.\n';
+  const stagingPath = path.join(f.taskDir, '.delivery-summary.json');
+  fs.writeFileSync(stagingPath, `${JSON.stringify({
+    taskId: TASK_ID,
+    body: staged,
+    sha256: createHash('sha256').update(staged).digest('hex')
+  })}\n`);
+  const kinds: string[] = [];
+  let verifyCalls = 0;
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
+    kinds.push(received.kind);
+    return platformResult('applied');
+  };
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
+    verifyCalls += 1;
+    return verification('pass');
+  };
+  try {
+    const result = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    assert.equal(result.result, 'completed');
+    assert.deepEqual(kinds, ['task', 'summary']);
+    assert.equal(verifyCalls, 2);
+    assert.equal(receipt?.summary, 'done');
+    assert.equal(receipt?.postSummaryVerification, 'done');
+    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), false);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization revalidates canonical steps when the receipt is absent', async () => {
   const f = fixture();
   let commentCalls = 0;
@@ -202,7 +236,7 @@ test('host finalization returns actionable verification gate failures and retrie
     assert.equal(failed.result, 'completed_with_warnings');
     assert.equal(failed.warnings[0]?.code, 'CHECK_FAILED');
     assert.match(failed.warnings[0]?.message ?? '', /Fix complete-task issues/);
-    assert.deepEqual(failed.pendingSteps, ['task-comment', 'verification']);
+    assert.deepEqual(failed.pendingSteps, ['task-comment', 'verification', 'summary', 'post-summary-verification']);
     assert.equal(recovered.status, 'completed');
     assert.equal(replay.status, 'completed');
     assert.equal(verifyCalls, 2);

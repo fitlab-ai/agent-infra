@@ -84,6 +84,8 @@ type RemoteCommentSnapshot = {
   body: string;
   createdAt: string;
   updatedAt: string;
+  /** Strict creation order when the provider can prove it for this list snapshot. */
+  createdSequence: number | null;
 };
 
 type ChangeRequestSnapshot = {

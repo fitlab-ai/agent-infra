@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { syncPlatformComment } from '../platform/issue-comments.ts';
 import type { PlatformResult } from '../platform/types.ts';
@@ -22,8 +22,8 @@ import {
   type OperationWarningSeverity
 } from './operation-outcome.ts';
 
-const RECEIPT_VERSION = 2 as const;
-const FINALIZATION_STEPS = ['lifecycle', 'task-comment', 'verification'] as const;
+const RECEIPT_VERSION = 3 as const;
+const FINALIZATION_STEPS = ['lifecycle', 'task-comment', 'verification', 'summary', 'post-summary-verification'] as const;
 type FinalizationStep = typeof FINALIZATION_STEPS[number];
 type FinalizationStepState = 'pending' | 'done' | 'skipped';
 type FinalizationError = { code: string; message: string; retryable: boolean };
@@ -72,6 +72,8 @@ type TaskFinalizationReceipt = Readonly<{
   lifecycle: FinalizationStepState;
   taskComment: FinalizationStepState;
   verification: FinalizationStepState;
+  summary: FinalizationStepState;
+  postSummaryVerification: FinalizationStepState;
   warningProjection: WarningProjectionState;
   warnings: readonly FinalizationWarning[];
   controlBinding?: Readonly<{ generation: string; requestId: string }>;
@@ -101,6 +103,8 @@ type TaskFinalizationResult = Readonly<{
   lifecycle: TaskFinalizationStep | null;
   taskComment: TaskFinalizationStep | null;
   verification: TaskFinalizationStep | null;
+  summary: TaskFinalizationStep | null;
+  postSummaryVerification: TaskFinalizationStep | null;
   completedSteps: readonly FinalizationStep[];
   pendingSteps: readonly FinalizationStep[];
   result: 'completed' | 'completed_with_warnings' | 'failed' | 'blocked';
@@ -139,6 +143,8 @@ function failed(
     lifecycle: null,
     taskComment: null,
     verification: null,
+    summary: null,
+    postSummaryVerification: null,
     completedSteps: [],
     pendingSteps: [...FINALIZATION_STEPS],
     result: error.retryable ? 'blocked' : 'failed',
@@ -158,6 +164,8 @@ function emptyReceipt(taskId: string, controlBinding?: Readonly<{ generation: st
     lifecycle: 'pending',
     taskComment: 'pending',
     verification: 'pending',
+    summary: 'pending',
+    postSummaryVerification: 'pending',
     warningProjection: 'done',
     warnings: [],
     ...(controlBinding ? { controlBinding } : {}),
@@ -194,6 +202,8 @@ function validateReceipt(value: unknown, taskId: string): TaskFinalizationReceip
     || !states.includes(String(receipt.lifecycle))
     || !states.includes(String(receipt.taskComment))
     || !states.includes(String(receipt.verification))
+    || !states.includes(String(receipt.summary))
+    || !states.includes(String(receipt.postSummaryVerification))
     || !['pending', 'done'].includes(String(receipt.warningProjection))
     || !Array.isArray(receipt.warnings) || receipt.warnings.some((warning) => !validWarning(warning))
     || typeof receipt.updatedAt !== 'string'
@@ -242,7 +252,7 @@ function writeReceipt(repoRoot: string, receipt: TaskFinalizationReceipt): void 
 function updateReceipt(
   repoRoot: string,
   receipt: TaskFinalizationReceipt,
-  patch: Partial<Pick<TaskFinalizationReceipt, 'lifecycle' | 'taskComment' | 'verification' | 'warningProjection' | 'warnings' | 'lastError'>>
+  patch: Partial<Pick<TaskFinalizationReceipt, 'lifecycle' | 'taskComment' | 'verification' | 'summary' | 'postSummaryVerification' | 'warningProjection' | 'warnings' | 'lastError'>>
 ): TaskFinalizationReceipt {
   const current = readReceipt(repoRoot, receipt.taskId);
   if (!current || current.receiptId !== receipt.receiptId || current.revision !== receipt.revision) {
@@ -256,11 +266,17 @@ function updateReceipt(
 }
 
 function completedSteps(receipt: TaskFinalizationReceipt): FinalizationStep[] {
-  return FINALIZATION_STEPS.filter((step) => receipt[step === 'task-comment' ? 'taskComment' : step] !== 'pending');
+  return FINALIZATION_STEPS.filter((step) => stepState(receipt, step) !== 'pending');
 }
 
 function pendingSteps(receipt: TaskFinalizationReceipt): FinalizationStep[] {
-  return FINALIZATION_STEPS.filter((step) => receipt[step === 'task-comment' ? 'taskComment' : step] === 'pending');
+  return FINALIZATION_STEPS.filter((step) => stepState(receipt, step) === 'pending');
+}
+
+function stepState(receipt: TaskFinalizationReceipt, step: FinalizationStep): FinalizationStepState {
+  if (step === 'task-comment') return receipt.taskComment;
+  if (step === 'post-summary-verification') return receipt.postSummaryVerification;
+  return receipt[step];
 }
 
 function lifecycleStep(result: TaskLifecycleResult): TaskFinalizationStep {
@@ -556,15 +572,63 @@ async function syncPendingTaskComment(input: {
   }
 }
 
+function readDeliverySummary(taskDir: string, taskId: string): { body: string } {
+  const file = path.join(taskDir, '.delivery-summary.json');
+  const value = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+  if (value.taskId !== taskId || typeof value.body !== 'string' || typeof value.sha256 !== 'string') {
+    throw Object.assign(new Error('delivery summary staging record is invalid'), { code: 'SUMMARY_STAGING_INVALID' });
+  }
+  const digest = createHash('sha256').update(value.body).digest('hex');
+  if (digest !== value.sha256) throw Object.assign(new Error('delivery summary staging digest does not match body'), { code: 'SUMMARY_STAGING_INVALID' });
+  return { body: value.body };
+}
+
+async function syncPendingSummary(input: {
+  repoRoot: string;
+  taskId: string;
+  agent: string;
+  receipt: TaskFinalizationReceipt;
+  commentSync: typeof syncPlatformComment;
+}): Promise<{ receipt: TaskFinalizationReceipt; step: TaskFinalizationStep; changed: boolean; error: FinalizationError | null }> {
+  let { receipt } = input;
+  if (receipt.summary !== 'pending') {
+    return { receipt, step: { status: receipt.summary === 'skipped' ? 'skipped' : 'no-op', changed: false, error: null }, changed: false, error: null };
+  }
+  try {
+    const resolved = resolveTaskRef(input.taskId, { repoRoot: input.repoRoot });
+    if (!resolved.ok || resolved.state !== 'completed') throw Object.assign(new Error('completed task is unavailable for summary sync'), { code: 'SUMMARY_STAGING_INVALID' });
+    const summary = readDeliverySummary(resolved.taskDir, input.taskId);
+    const result = await input.commentSync(input.taskId, { kind: 'summary', agent: input.agent, body: summary.body, cwd: input.repoRoot });
+    const step = commentStep(result);
+    if (result.status === 'applied' || result.status === 'no-op') {
+      const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
+      receipt = updateReceipt(input.repoRoot, receipt, { summary: skipped ? 'skipped' : 'done', postSummaryVerification: skipped ? 'skipped' : receipt.postSummaryVerification, lastError: null });
+      return { receipt, step: skipped ? { ...step, status: 'skipped' } : step, changed: result.changed, error: null };
+    }
+    const error = step.error ?? { code: 'SUMMARY_SYNC_FAILED', message: 'delivery summary synchronization failed', retryable: true };
+    receipt = updateReceipt(input.repoRoot, receipt, { summary: 'pending', lastError: error });
+    return { receipt, step, changed: result.changed, error };
+  } catch (cause) {
+    const error = errorOf(cause, 'SUMMARY_SYNC_FAILED', true);
+    try { receipt = updateReceipt(input.repoRoot, receipt, { summary: 'pending', lastError: error }); } catch { /* preserve primary error */ }
+    return { receipt, step: { status: 'blocked', changed: false, error }, changed: false, error };
+  }
+}
+
+function clearDeliverySummary(taskDir: string): void {
+  const file = path.join(taskDir, '.delivery-summary.json');
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+}
+
 function terminalResult(
   taskId: string,
   receipt: TaskFinalizationReceipt,
-  steps: Pick<TaskFinalizationResult, 'lifecycle' | 'taskComment' | 'verification'>,
+  steps: Partial<Pick<TaskFinalizationResult, 'lifecycle' | 'taskComment' | 'verification' | 'summary' | 'postSummaryVerification'>>,
   changed: boolean,
   error: FinalizationError | null = null
 ): TaskFinalizationResult {
   const pending = pendingSteps(receipt);
-  const blocked = [steps.lifecycle, steps.taskComment, steps.verification].some((step) => step?.status === 'blocked');
+  const blocked = [steps.lifecycle, steps.taskComment, steps.verification, steps.summary, steps.postSummaryVerification].some((step) => step?.status === 'blocked');
   const warnings = openWarnings(receipt);
   const postLifecyclePending = receipt.lifecycle === 'done' && (pending.some((step) => step !== 'lifecycle') || receipt.warningProjection === 'pending');
   const hardError = error?.code.startsWith('FINALIZATION_') || error?.code === 'TASK_FINALIZATION_RECEIPT_INVALID';
@@ -572,7 +636,11 @@ function terminalResult(
     status: hardError ? (error?.retryable ? 'blocked' : 'failed') : pending.length === 0 ? 'completed' : postLifecyclePending ? 'completed' : blocked ? 'blocked' : 'failed',
     changed,
     taskId,
-    ...steps,
+    lifecycle: steps.lifecycle ?? null,
+    taskComment: steps.taskComment ?? null,
+    verification: steps.verification ?? null,
+    summary: steps.summary ?? null,
+    postSummaryVerification: steps.postSummaryVerification ?? null,
     completedSteps: completedSteps(receipt),
     pendingSteps: pending,
     result: postLifecyclePending && (warnings.length > 0 || receipt.warningProjection === 'pending')
@@ -756,8 +824,46 @@ async function applyUnderLock(
     } catch { /* preserve the primary error */ }
     return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification: { status: 'blocked', changed: false, error: detail } }, changed, detail);
   }
+
+  const summary = await syncPendingSummary({ repoRoot, taskId, agent: request.agent, receipt, commentSync });
+  receipt = summary.receipt;
+  changed = changed || summary.changed;
+  if (summary.error) {
+    return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification, summary: summary.step }, changed, summary.error);
+  }
+
+  let postSummaryVerification: TaskFinalizationStep | null = null;
+  if (receipt.postSummaryVerification === 'skipped') {
+    postSummaryVerification = { status: 'skipped', changed: false, error: null };
+  } else if (receipt.postSummaryVerification !== 'pending') {
+    postSummaryVerification = { status: 'no-op', changed: false, error: null };
+  } else {
+    try {
+      const result = await verify({ taskRef: taskId, event: 'complete-task.completed' }, { repoRoot });
+      postSummaryVerification = verificationStep(result);
+      if (result.status === 'pass') {
+        receipt = updateReceipt(repoRoot, receipt, { postSummaryVerification: 'done', lastError: null });
+      } else {
+        const error = postSummaryVerification.error ?? { code: 'VERIFY_FAILED', message: 'post-summary verification failed', retryable: true };
+        const warnings = replaceWarning(receipt, warningFromError('post-summary-verification', error), 'open');
+        receipt = updateReceipt(repoRoot, receipt, { postSummaryVerification: 'pending', warningProjection: 'pending', warnings, lastError: error });
+        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+        return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification, summary: summary.step, postSummaryVerification }, changed, error);
+      }
+    } catch (error) {
+      const detail = errorOf(error, 'POST_SUMMARY_VERIFY_FAILED', true);
+      const warnings = replaceWarning(receipt, warningFromError('post-summary-verification', detail), 'open');
+      receipt = updateReceipt(repoRoot, receipt, { postSummaryVerification: 'pending', warningProjection: 'pending', warnings, lastError: detail });
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification, summary: summary.step, postSummaryVerification: { status: 'blocked', changed: false, error: detail } }, changed, detail);
+    }
+  }
   receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-  return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed);
+  if (receipt.summary !== 'pending' && receipt.postSummaryVerification !== 'pending' && receipt.warningProjection === 'done' && openWarnings(receipt).length === 0) {
+    const resolved = resolveTaskRef(taskId, { repoRoot });
+    if (resolved.ok && resolved.state === 'completed') clearDeliverySummary(resolved.taskDir);
+  }
+  return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification, summary: summary.step, postSummaryVerification }, changed);
 }
 
 async function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {

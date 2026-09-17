@@ -46,7 +46,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'platform-security': ['read', 'dismiss'],
   'platform-metadata': ['init-labels', 'init-milestones'],
   'platform-context': ['resolve'],
-  'platform-comment': ['list', 'recover', 'owner', 'backfill', 'sync'],
+  'platform-comment': ['list', 'recover', 'owner', 'backfill', 'stage-summary', 'sync'],
   'platform-issue': ['inspect', 'create', 'bind', 'sync'],
   'platform-pr': ['inspect', 'summary-context', 'resolve-external', 'create', 'bind', 'skip', 'sync', 'change-report', 'summary-sync', 'sync-in-labels'],
   'platform-pr-review': ['inspect', 'list', 'publish-pr', 'publish-task'],

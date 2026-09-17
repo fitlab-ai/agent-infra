@@ -4,9 +4,15 @@ import type { SandboxControlResponse } from './protocol.ts';
 export function finalizationTerminalResponse(taskId: string, requestId: string, receipt: TaskFinalizationReceipt): SandboxControlResponse {
   const pendingSteps = [
     receipt.taskComment === 'pending' ? 'task-comment' : null,
-    receipt.verification === 'pending' ? 'verification' : null
+    receipt.verification === 'pending' ? 'verification' : null,
+    receipt.summary === 'pending' ? 'summary' : null,
+    receipt.postSummaryVerification === 'pending' ? 'post-summary-verification' : null
   ].filter((step): step is string => step !== null);
-  const completedSteps = ['lifecycle', receipt.taskComment === 'pending' ? null : 'task-comment', receipt.verification === 'pending' ? null : 'verification']
+  const completedSteps = [
+    'lifecycle', receipt.taskComment === 'pending' ? null : 'task-comment',
+    receipt.verification === 'pending' ? null : 'verification', receipt.summary === 'pending' ? null : 'summary',
+    receipt.postSummaryVerification === 'pending' ? null : 'post-summary-verification'
+  ]
     .filter((step): step is string => step !== null);
   const warnings = receipt.warnings
     .filter((warning) => warning.status === 'open')
@@ -16,6 +22,8 @@ export function finalizationTerminalResponse(taskId: string, requestId: string, 
     lifecycle: { status: 'no-op', changed: false, error: null },
     taskComment: receipt.taskComment === 'pending' ? null : { status: 'no-op', changed: false, error: null },
     verification: receipt.verification === 'pending' ? null : { status: 'no-op', changed: false, error: null },
+    summary: receipt.summary === 'pending' ? null : { status: 'no-op', changed: false, error: null },
+    postSummaryVerification: receipt.postSummaryVerification === 'pending' ? null : { status: 'no-op', changed: false, error: null },
     completedSteps, pendingSteps,
     result: pendingSteps.length > 0 || receipt.warningProjection === 'pending' || warnings.length > 0
       ? 'completed_with_warnings' : 'completed',
