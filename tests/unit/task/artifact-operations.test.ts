@@ -31,7 +31,7 @@ id: TASK-20260101-000001
 `;
 
 test('artifact initialization renders a valid qualification audit for every workflow family', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-init-qualification-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-init-qualification-')));
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
