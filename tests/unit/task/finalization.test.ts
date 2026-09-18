@@ -195,6 +195,40 @@ test('host finalization rechecks terminal verification on a successful replay wi
   }
 });
 
+test('host finalization records a replayed verification exception and recovers on a later pass', async () => {
+  const f = fixture();
+  const staged = 'Delivered summary.\n';
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
+    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+  })}\n`);
+  let verifyCalls = 0;
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
+    verifyCalls += 1;
+    if (verifyCalls === 3) throw new Error('verification input unavailable');
+    return verification('pass');
+  };
+  try {
+    const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const replay = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const replayReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const recoveredReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    assert.equal(first.result, 'completed');
+    assert.equal(replay.result, 'completed_with_warnings');
+    assert.deepEqual(replay.pendingSteps, ['verification']);
+    assert.equal(replay.error, null);
+    assert.equal(replayReceipt?.verification, 'pending');
+    assert.equal(replayReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.code === 'VERIFY_FAILED' && warning.status === 'open'), true);
+    assert.equal(recovered.result, 'completed');
+    assert.equal(recoveredReceipt?.verification, 'done');
+    assert.equal(recoveredReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), false);
+    assert.equal(verifyCalls, 4);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization resolves a summary warning after a successful retry', async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';

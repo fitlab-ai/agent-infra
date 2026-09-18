@@ -870,11 +870,22 @@ async function applyUnderLock(
   } catch (error) {
     const detail = errorOf(error, 'VERIFY_FAILED', true);
     try {
-      const capability = issueCapability(receipt, 'verification');
-      receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
-        scope: 'verification', operation: 'failed', error: detail
-      }, consumedCapabilities);
+      if (receipt.verification === 'pending') {
+        const capability = issueCapability(receipt, 'verification');
+        receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+          scope: 'verification', operation: 'failed', error: detail
+        }, consumedCapabilities);
+      } else {
+        const warnings = replaceWarning(receipt, warningFromError('verification', detail), 'open');
+        receipt = updateReceipt(repoRoot, receipt, {
+          verification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: detail
+        });
+      }
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities });
+      receipt = warningComment.receipt;
+      if (warningComment.step.status !== 'no-op') taskComment = warningComment.step;
+      changed = changed || warningComment.changed;
     } catch { /* preserve the primary error */ }
     return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification: { status: 'blocked', changed: false, error: detail } }, changed, detail);
   }
