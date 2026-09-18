@@ -27,6 +27,7 @@ import {
 import { projectTaskComment } from './task-comment-projection.ts';
 import {
   canonicalizeCommentBody,
+  canonicalizeSummaryBody,
   escapeHtmlText,
   fenceRanges,
   renderSafeCodeFence
@@ -487,7 +488,8 @@ function summaryDigest(comment: RemoteComment): string {
     .replace(/^<!-- sync-issue:[^\n]+:summary -->\n## [^\n]+\n\n> [^\n]+\n\n/u, '')
     .replace(/^<details><summary>恢复元数据<\/summary>[\s\S]*?<\/details>\n\n/u, '')
     .replace(/\n---\n\*[^\n]*\*$/u, '');
-  return createHash('sha256').update(body).digest('hex');
+  const canonical = canonicalizeSummaryBody(body);
+  return canonical.ok ? createHash('sha256').update(canonical.value).digest('hex') : '';
 }
 
 async function listedComments(provider: any, loaded: any, parent: ReturnType<typeof taskIssueIdentity>): Promise<any> {

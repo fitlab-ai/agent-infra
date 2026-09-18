@@ -9,6 +9,7 @@ import {
   syncPlatformComment
 } from '../platform/issue-comments.ts';
 import type { CommentKind } from '../platform/issue-comments.ts';
+import { canonicalizeSummaryBody } from '../platform/comment-safety.ts';
 import { platformResult } from '../platform/types.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { recoverTaskFromComments } from '../platform/task-recovery.ts';
@@ -156,6 +157,9 @@ async function platformComment(args: string[] = []): Promise<void> {
     let body: string;
     try { body = readBodyFile(parsed.values.bodyFile, cwd); }
     catch (error) { fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`); return; }
+    const canonical = canonicalizeSummaryBody(body);
+    if (!canonical.ok) { fail(`unable to stage summary: ${canonical.error.code}: ${canonical.error.message}`); return; }
+    body = canonical.value;
     const resolved = resolveTaskRef(taskRef!, { repoRoot: cwd });
     if (!resolved.ok || resolved.state !== 'active') { fail('stage-summary requires an active task'); return; }
     const target = path.join(resolved.taskDir, '.delivery-summary.json');

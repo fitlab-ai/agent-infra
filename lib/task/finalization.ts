@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { syncPlatformComment } from '../platform/issue-comments.ts';
+import { canonicalizeSummaryBody } from '../platform/comment-safety.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
@@ -588,9 +589,13 @@ function readDeliverySummary(taskDir: string, taskId: string): { body: string; s
   if (value.taskId !== taskId || typeof value.body !== 'string' || typeof value.sha256 !== 'string') {
     throw Object.assign(new Error('delivery summary staging record is invalid'), { code: 'SUMMARY_STAGING_INVALID' });
   }
-  const digest = createHash('sha256').update(value.body).digest('hex');
+  const canonical = canonicalizeSummaryBody(value.body);
+  if (!canonical.ok || canonical.value !== value.body) {
+    throw Object.assign(new Error('delivery summary staging body is not canonical'), { code: 'SUMMARY_STAGING_INVALID' });
+  }
+  const digest = createHash('sha256').update(canonical.value).digest('hex');
   if (digest !== value.sha256) throw Object.assign(new Error('delivery summary staging digest does not match body'), { code: 'SUMMARY_STAGING_INVALID' });
-  return { body: value.body, sha256: value.sha256 };
+  return { body: canonical.value, sha256: value.sha256 };
 }
 
 async function syncPendingSummary(input: {
@@ -621,9 +626,15 @@ async function syncPendingSummary(input: {
     const step = commentStep(result);
     if (result.status === 'applied' || result.status === 'no-op') {
       const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
+      const resolvedWarning = receipt.warnings.some((warning) => warning.step === 'summary' && warning.status === 'open');
+      const warnings = resolveStepWarnings(receipt, 'summary');
       receipt = updateReceipt(input.repoRoot, receipt, {
         summary: skipped ? 'skipped' : 'done', postSummaryVerification: skipped ? 'skipped' : receipt.postSummaryVerification,
-        summarySha256: skipped ? null : summary.sha256, lastError: null
+        summarySha256: skipped ? null : summary.sha256,
+        taskComment: resolvedWarning ? 'pending' : receipt.taskComment,
+        warningProjection: warnings.some((warning) => warning.status === 'open') ? 'pending' : 'done',
+        warnings,
+        lastError: null
       });
       return { receipt, step: skipped ? { ...step, status: 'skipped' } : step, changed: result.changed, error: null };
     }
@@ -810,15 +821,14 @@ async function applyUnderLock(
   let verification: TaskFinalizationStep | null = null;
   try {
     receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-    if (receipt.verification !== 'pending') {
-      verification = { status: 'no-op', changed: false, error: null };
-    } else {
-      const result = await verify(
-        { taskRef: taskId, event: 'complete-task.completed' },
-        { repoRoot }
-      );
-      verification = verificationStep(result);
-      if (result.status === 'pass') {
+    const verificationPending = receipt.verification === 'pending';
+    const result = await verify(
+      { taskRef: taskId, event: 'complete-task.completed' },
+      { repoRoot }
+    );
+    verification = verificationStep(result);
+    if (result.status === 'pass') {
+      if (verificationPending) {
         const capability = issueCapability(receipt, 'verification');
         receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
           scope: 'verification', operation: 'succeeded'
@@ -834,14 +844,28 @@ async function applyUnderLock(
           return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed, finalComment.error);
         }
       } else {
-        const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
+        receipt = updateReceipt(repoRoot, receipt, { lastError: null });
+      }
+    } else {
+      const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
+      if (verificationPending) {
         const capability = issueCapability(receipt, 'verification');
         receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
           scope: 'verification', operation: 'failed', error: detail
         }, consumedCapabilities);
         receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-        return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed, verification.error);
+      } else {
+        const warnings = replaceWarning(receipt, warningFromError('verification', detail), 'open');
+        receipt = updateReceipt(repoRoot, receipt, {
+          verification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: detail
+        });
+        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+        const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities });
+        receipt = warningComment.receipt;
+        if (warningComment.step.status !== 'no-op') taskComment = warningComment.step;
+        changed = changed || warningComment.changed;
       }
+      return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed, detail);
     }
   } catch (error) {
     const detail = errorOf(error, 'VERIFY_FAILED', true);

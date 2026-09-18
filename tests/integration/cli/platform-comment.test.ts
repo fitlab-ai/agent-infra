@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, filePath } from '../../helpers.ts';
@@ -219,18 +220,18 @@ test('summary sync creates, updates and converges on one marker while preserving
   }
 });
 
-test('stage-summary writes an idempotent durable body and digest for an active task', () => {
+test('stage-summary stores the canonical body and digest used for delivery comments', () => {
   const f = fixture();
   try {
     const bodyPath = path.join(f.root, 'summary.md');
-    fs.writeFileSync(bodyPath, 'Durable delivery summary.\n');
+    fs.writeFileSync(bodyPath, 'Durable <delivery> summary.\r\n');
     const args = ['stage-summary', f.taskId, '--body-file', bodyPath];
     assert.equal(runComment(args, f).status, 0);
     assert.equal(runComment(args, f).status, 0);
     const staged = JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, '.delivery-summary.json'), 'utf8'));
     assert.equal(staged.taskId, f.taskId);
-    assert.equal(staged.body, 'Durable delivery summary.\n');
-    assert.equal(typeof staged.sha256, 'string');
+    assert.equal(staged.body, 'Durable &lt;delivery&gt; summary.\n');
+    assert.equal(staged.sha256, createHash('sha256').update(staged.body).digest('hex'));
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
