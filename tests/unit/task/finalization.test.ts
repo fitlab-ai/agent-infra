@@ -229,6 +229,54 @@ test('host finalization records a replayed verification exception and recovers o
   }
 });
 
+test('host finalization blocks when a replayed verification failure cannot be persisted', async () => {
+  const f = fixture();
+  const staged = 'Delivered summary.\n';
+  const receiptDirectory = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization');
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
+    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+  })}\n`);
+  const comments: Array<{ kind: string; verifyOnly: boolean }> = [];
+  let verifyCalls = 0;
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
+    comments.push({ kind: received.kind, verifyOnly: received.verifyOnly === true });
+    return platformResult('no-op');
+  };
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
+    verifyCalls += 1;
+    if (verifyCalls === 3) {
+      fs.chmodSync(receiptDirectory, 0o500);
+      const error = new Error('terminal verification unavailable');
+      Object.assign(error, { code: 'VERIFY_UNAVAILABLE', retryable: true });
+      throw error;
+    }
+    return verification('pass');
+  };
+  try {
+    const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const blocked = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const blockedReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    fs.chmodSync(receiptDirectory, 0o700);
+    const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const recoveredReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    assert.equal(first.result, 'completed');
+    assert.equal(blocked.status, 'blocked');
+    assert.equal(blocked.result, 'blocked');
+    assert.equal(blocked.error?.code, 'FINALIZATION_RECEIPT_WRITE_FAILED');
+    assert.match(blocked.error?.message ?? '', /VERIFY_UNAVAILABLE/);
+    assert.match(blocked.error?.message ?? '', /EACCES|permission denied/i);
+    assert.equal(blockedReceipt?.verification, 'done');
+    assert.equal(blockedReceipt?.warnings.length, 0);
+    assert.equal(recovered.result, 'completed');
+    assert.equal(recoveredReceipt?.verification, 'done');
+    assert.equal(verifyCalls, 4);
+    assert.equal(comments.filter((item) => item.kind === 'summary' && !item.verifyOnly).length, 1);
+  } finally {
+    if (fs.existsSync(receiptDirectory)) fs.chmodSync(receiptDirectory, 0o700);
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization resolves a summary warning after a successful retry', async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';

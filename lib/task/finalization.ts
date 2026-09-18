@@ -882,6 +882,18 @@ async function applyUnderLock(
         });
       }
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    } catch (writeError) {
+      const persistence = errorOf(writeError, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
+      const hardError: FinalizationError = {
+        code: 'FINALIZATION_RECEIPT_WRITE_FAILED',
+        message: `Unable to persist verification failure (${detail.code}: ${detail.message}): ${persistence.message}`,
+        retryable: true
+      };
+      return terminalResult(taskId, receipt, {
+        lifecycle: lifecycleResult, taskComment, verification: { status: 'blocked', changed: false, error: detail }
+      }, changed, hardError);
+    }
+    try {
       const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities });
       receipt = warningComment.receipt;
       if (warningComment.step.status !== 'no-op') taskComment = warningComment.step;
