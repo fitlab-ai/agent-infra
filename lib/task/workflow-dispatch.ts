@@ -1,6 +1,10 @@
+import fs from 'node:fs';
+
 import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import { applyLedgerIntent } from './ledger-intents.ts';
 import type { LedgerIntent } from './ledger-intents.ts';
+import { isReviewStage, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
+import { resolveTaskRef } from './resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { TaskWorkflowOperation } from './workflow-command.ts';
 import { applyWorkflowWarningIntent } from './workflow-warning-intents.ts';
@@ -116,7 +120,24 @@ function ledgerIntent(operation: TaskWorkflowOperation, args: readonly string[])
 
 function warningIntent(args: readonly string[]): WorkflowWarningIntent | DispatchFailure {
   const [taskRef, kind] = args;
-  if (!taskRef || kind !== 'add') return failed('TASK_WORKFLOW_PAYLOAD_INVALID', 'task workflow warning request is invalid');
+  if (!taskRef || !['add', 'list', 'set-status'].includes(kind ?? '')) {
+    return failed('TASK_WORKFLOW_PAYLOAD_INVALID', 'task workflow warning request is invalid');
+  }
+  if (kind === 'list') {
+    const values = options(args, { '--status': 'status' });
+    if (isFailure(values)) return values;
+    return { kind, taskRef, ...(value(values, '--status') ? { status: value(values, '--status') as never } : {}) };
+  }
+  if (kind === 'set-status') {
+    const values = options(args, { '--id': 'id', '--status': 'status', '--resolution': 'resolution', '--dry-run': 'dryRun' });
+    if (isFailure(values)) return values;
+    const missing = required(values, ['--id', '--status', '--resolution']);
+    if (missing) return missing;
+    return {
+      kind, taskRef, id: value(values, '--id')!, status: value(values, '--status') as never,
+      resolution: value(values, '--resolution')!, ...(values['--dry-run'] === true ? { dryRun: true } : {})
+    };
+  }
   const values = options(args, {
     '--step': 'step', '--severity': 'severity', '--code': 'code', '--target': 'target',
     '--message': 'message', '--action': 'action', '--dry-run': 'dryRun'
@@ -129,6 +150,26 @@ function warningIntent(args: readonly string[]): WorkflowWarningIntent | Dispatc
     code: value(values, '--code')!, target: value(values, '--target')!, message: value(values, '--message')!,
     action: value(values, '--action')!, ...(values['--dry-run'] === true ? { dryRun: true } : {})
   } as WorkflowWarningIntent;
+}
+
+function stageStatus(repoRoot: string, args: readonly string[]): WorkflowDispatchResult {
+  const [taskRef, kind] = args;
+  if (!taskRef || kind !== 'stage-status') return failed('TASK_WORKFLOW_PAYLOAD_INVALID', 'task workflow ledger request is invalid');
+  const values = options(args, { '--stage': 'stage' });
+  if (isFailure(values)) return values;
+  const stage = value(values, '--stage');
+  if (!stage || !isReviewStage(stage)) return failed('TASK_WORKFLOW_PAYLOAD_INVALID', 'stage-status requires a valid review stage');
+  const resolved = resolveTaskRef(taskRef, { repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message);
+  try {
+    const ledger = parseLedgerDocument(fs.readFileSync(resolved.taskMdPath, 'utf8'));
+    if (!ledger.present) return failed('LEDGER_SECTION_MISSING', 'review disagreement ledger section is missing');
+    const invalid = validateLedgerRows(ledger.rows);
+    if (invalid) return failed(invalid.code, invalid.message);
+    return { status: 'ready', changed: false, taskId: resolved.taskId, stageStatus: summarizeLedgerStage(ledger.rows, stage), error: null };
+  } catch (error) {
+    return failed('LEDGER_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error));
+  }
 }
 
 /**
@@ -157,10 +198,12 @@ export function dispatchWorkflowCommand(
         ...(values['--dry-run'] === true ? { dryRun: true } : {})
       }));
     }
-    if (operation === 'warning-add') {
+    if (operation === 'ledger-stage-status') return stageStatus(repoRoot, args);
+    if (operation === 'warning-add' || operation === 'warning-list' || operation === 'warning-set-status') {
       const intent = warningIntent(args);
       if (isFailure(intent)) return intent;
-      return withTaskExecutionLock(repoRoot, taskRef, 'task-warning.add', () => applyWorkflowWarningIntent(intent, { repoRoot }));
+      if (intent.kind === 'list') return applyWorkflowWarningIntent(intent, { repoRoot });
+      return withTaskExecutionLock(repoRoot, taskRef, `task-warning.${intent.kind}`, () => applyWorkflowWarningIntent(intent, { repoRoot }));
     }
     const intent = ledgerIntent(operation, args);
     if (isFailure(intent)) return intent;

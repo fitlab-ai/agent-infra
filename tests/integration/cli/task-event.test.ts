@@ -1493,6 +1493,33 @@ test('review completion replays the same current result without another activity
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
 });
 
+test('review completion records a new result when the finalized review artifact changes', () => {
+  const scenario = reviewScenarios[2];
+  const f = prepareReview(scenario, []);
+  assert.equal(finalizeReview(f, scenario).status, 0);
+  assert.equal(completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 }).status, 0);
+  const before = fs.readFileSync(f.file, 'utf8');
+  fs.appendFileSync(path.join(f.dir, scenario.artifact), '\nUpdated evidence.\n');
+  assert.equal(finalizeReview(f, scenario).status, 0);
+  const repeated = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
+  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+  assert.equal(JSON.parse(repeated.stdout).status, 'applied');
+  assert.notDeepEqual(fs.readFileSync(f.file, 'utf8'), before);
+});
+
+test('review completion rejects a changed reviewed input after an earlier completion', () => {
+  const scenario = reviewScenarios[2];
+  const f = prepareReview(scenario, []);
+  assert.equal(finalizeReview(f, scenario).status, 0);
+  assert.equal(completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 }).status, 0);
+  fs.appendFileSync(path.join(f.dir, scenario.input), '\nChanged implementation.\n');
+  const before = fs.readFileSync(f.file, 'utf8');
+  const repeated = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
+  assert.equal(repeated.status, 1);
+  assert.equal(JSON.parse(repeated.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+  assert.deepEqual(fs.readFileSync(f.file, 'utf8'), before);
+});
+
 test('review completion dry-run leaves current task bytes unchanged', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);

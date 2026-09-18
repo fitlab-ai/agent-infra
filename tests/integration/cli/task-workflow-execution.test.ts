@@ -108,10 +108,13 @@ function workflowArgs(operation: typeof TASK_WORKFLOW_OPERATIONS[number]): strin
     case 'ledger-finding-response': return [taskId, 'finding-respond', '--id', 'AN-1', '--round', '1', '--status', 'accepted', '--evidence', 'code-r2.md:1'];
     case 'ledger-finding-review': return [taskId, 'finding-review', '--id', 'AN-1', '--status', 'confirmed', '--evidence', 'review-analysis.md#finding-1'];
     case 'ledger-finding-upsert': return [taskId, 'finding-upsert', '--stage', 'analysis', '--review-artifact', 'review-analysis.md', '--ordinal', '1', '--severity', 'major', '--evidence', 'review-analysis.md#finding-1'];
+    case 'ledger-stage-status': return [taskId, 'stage-status', '--stage', 'analysis'];
     case 'decision-next-id': return [taskId, 'decision-next-id'];
     case 'decision-upsert': return [taskId, 'decision-upsert', '--id', 'HD-1', '--stage', 'plan', '--artifact', 'plan.md'];
     case 'invalidation-reconcile': return [taskId, 'reconcile'];
     case 'warning-add': return [taskId, 'add', '--step', 'code', '--severity', 'IMPORTANT', '--code', 'FAULT_MATRIX', '--target', 'workflow', '--message', 'fault test', '--action', 'retry'];
+    case 'warning-list': return [taskId, 'list'];
+    case 'warning-set-status': return [taskId, 'set-status', '--id', 'WW-1', '--status', 'resolved', '--resolution', 'fault test complete'];
   }
 }
 
@@ -141,6 +144,12 @@ test('every workflow operation is isolated across the four termination windows',
       try {
         if (operation === 'artifact-preflight' || operation === 'artifact-finalize-local') fs.writeFileSync(path.join(f.taskDir, 'plan.md'), content('plan'));
         if (operation === 'review-preflight' || operation === 'review-finalize-summary') fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), content('review-analysis'));
+        if (operation === 'warning-set-status') {
+          const added = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
+            'task-warning', workflowArgs('warning-add'), taskId, f.manifest.generation
+          ));
+          assert.equal(added.exitCode, 0, added.stdout);
+        }
         const [command] = TASK_WORKFLOW_COMMANDS[operation];
         const request = createTaskWorkflowRequest(command, workflowArgs(operation), taskId, f.manifest.generation);
         const before = workflowStateSnapshot(f.root);
