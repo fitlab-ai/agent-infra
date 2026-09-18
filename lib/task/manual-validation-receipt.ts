@@ -14,6 +14,7 @@ import {
 
 const MANUAL_VALIDATION_RECEIPT_SCHEMA = 'agent-infra/manual-validation-receipt';
 const MANUAL_VALIDATION_RECEIPT_VERSION = 1;
+const MANUAL_VALIDATION_RECEIPT_PLACEHOLDER = '[[manual-validation-receipt]]';
 
 type ManualValidationReceipt = Readonly<{
   schema: typeof MANUAL_VALIDATION_RECEIPT_SCHEMA;
@@ -73,13 +74,16 @@ function manualValidationFinalSummaryDigest(body: string): string {
   const projection = heading
     ? body.slice(heading.index, heading.index + heading[0].length + (nextSection?.index ?? afterHeading.length)).replace(/\s+$/u, '')
     : body;
-  const preimage = projection.replace(/receipt=(?:[a-f0-9]{64}|<receipt>)/gu, 'receipt=<receipt>');
+  const preimage = projection
+    .replace(/<!--\s*manual-validation-receipt:\s*[\s\S]*?-->/gu, MANUAL_VALIDATION_RECEIPT_PLACEHOLDER)
+    .replace(/receipt=(?:[a-f0-9]{64}|<receipt>)/gu, 'receipt=<receipt>');
   return createHash('sha256').update(preimage, 'utf8').digest('hex');
 }
 
 function manualValidationFinalSummaryProjectionMatches(body: string, receipt: ManualValidationReceipt): boolean {
   const identity = `transaction=${receipt.transactionId}; receipt=${receipt.receiptDigest}; evidence=${receipt.evidenceDigest}; head=${receipt.prHeadSha}`;
-  return body.includes(identity) && manualValidationFinalSummaryDigest(body) === receipt.finalSummaryDigest;
+  return (body.includes(identity) || body.includes(MANUAL_VALIDATION_RECEIPT_PLACEHOLDER))
+    && manualValidationFinalSummaryDigest(body) === receipt.finalSummaryDigest;
 }
 
 function validateManualValidationReceipt(value: unknown, expected?: ManualValidationReceiptIdentity): ManualValidationReceiptResult {
@@ -137,6 +141,7 @@ function readManualValidationReceipt(taskDir: string, expected?: ManualValidatio
 export {
   MANUAL_VALIDATION_RECEIPT_SCHEMA,
   MANUAL_VALIDATION_RECEIPT_VERSION,
+  MANUAL_VALIDATION_RECEIPT_PLACEHOLDER,
   createManualValidationReceipt,
   manualValidationFinalSummaryDigest,
   manualValidationFinalSummaryProjectionMatches,

@@ -35,7 +35,7 @@ import type {
   MechanicalChangeReport,
   PrChangeReport
 } from './pr-change-report.ts';
-import { manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
+import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 
 type SummaryComment = { id: number | string; body: string };
@@ -58,6 +58,7 @@ type ManualValidationSummaryOptions = {
   phase: 'pending' | 'final';
   transactionId?: string;
   receiptDigest?: string;
+  evidenceDigest?: string;
   prHeadSha?: string;
   authority?: 'coordinator';
 };
@@ -587,7 +588,7 @@ async function syncPullRequestSummary(
       if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
       if (manual) {
         if (prNumber === null) return fail('failed', context, { code: 'MANUAL_VALIDATION_PR_NUMBER_REQUIRED', message: 'manual-validation summary requires a numeric pull-request identity', retryable: false }, prNumber);
-        if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, and current head identity', retryable: false }, prNumber);
+        if (manual.phase === 'final' && (!manual.transactionId || !manual.receiptDigest || !manual.evidenceDigest || !manual.prHeadSha || manual.prHeadSha !== initial.value.head.sha)) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires transaction, receipt, evidence, and current head identity', retryable: false }, prNumber);
         if (manual.phase === 'final') {
           if (manual.authority !== 'coordinator') return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires coordinator authority', retryable: false }, prNumber);
           const completion = readManualValidationCompletion(resolved.taskDir, {
@@ -635,7 +636,13 @@ async function syncPullRequestSummary(
       }
       const replaced = replaceCanonicalReportPlaceholder(`${prefix.value}${placeholder}${suffix.value}`, report.value);
       if (!replaced.ok) return fail('failed', context, platformError(replaced.error));
-      const desired = buildPullRequestSummary(resolved.taskId, replaced.value, initial.value.head.sha, renderHumanOverrideAudit(taskContent));
+      const receiptMarker = manual?.phase === 'final'
+        ? `<!-- manual-validation-receipt: transaction=${manual.transactionId}; receipt=${manual.receiptDigest}; evidence=${manual.evidenceDigest}; head=${manual.prHeadSha} -->`
+        : null;
+      const renderedBody = receiptMarker === null
+        ? replaced.value
+        : replaced.value.replace(MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, receiptMarker);
+      const desired = buildPullRequestSummary(resolved.taskId, renderedBody, initial.value.head.sha, renderHumanOverrideAudit(taskContent));
       if (!isSafeSummaryEnvelope(desired, resolved.taskId)) return fail('failed', context, {
         code: 'PR_SUMMARY_RENDER_INVALID',
         message: 'Summary contains an invalid or duplicated reserved control marker',

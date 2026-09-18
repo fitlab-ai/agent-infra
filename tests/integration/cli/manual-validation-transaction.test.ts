@@ -343,6 +343,24 @@ test('coordinator retries after archive completion without duplicating the start
   assert.equal(countStarted(fixture.taskPath), 1);
 });
 
+test('coordinator archives a failed generation and reuses its started identity for changed evidence', async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const first = await prepare(fixture);
+  assert.equal(first.status, 'applied');
+  const failed = transitionManualValidationTransaction(first.transaction!, 'recovery-required', { error: 'summary contract rejected' });
+  assert.ok(failed.ok);
+  writeManualValidationTransactionAtomic(fixture.taskDir, failed.value);
+  fs.appendFileSync(fixture.summaryPath, 'Updated evidence.\n');
+
+  const retry = await prepare(fixture);
+  assert.equal(retry.status, 'applied', JSON.stringify(retry));
+  assert.equal(retry.transaction?.transactionId, first.transaction?.transactionId);
+  assert.equal(retry.transaction?.attempt, 2);
+  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', `transaction-${first.transaction?.transactionId}-attempt-1.json`)), true);
+  assert.equal(countStarted(fixture.taskPath), 1);
+});
+
 test('coordinator recovers a receipt-first archive interruption on the same retry identity', async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
@@ -420,7 +438,7 @@ test('coordinator replaces the Chinese manual-validation status section in place
 
   assert.equal(result.status, 'applied', JSON.stringify(result));
   const body = state.comments[0]?.body ?? '';
-  assert.match(body, /## 审查摘要\n\n### ✅ 人工验证已通过\n\n人工验证已通过；transaction=.*\n\n### 关键技术决策/m);
+  assert.match(body, /## 审查摘要\n\n### ✅ 人工验证已通过\n\n- 在生产环境完成权限校验。\n\n<!-- manual-validation-receipt: transaction=.* -->\n\n### 关键技术决策/m);
   assert.equal((body.match(/^###\s+(?:⚠️\s+需人工校验|✅\s+人工验证已通过|⏳\s+人工验证待收尾)\s*$/gmu) ?? []).length, 1);
 });
 
