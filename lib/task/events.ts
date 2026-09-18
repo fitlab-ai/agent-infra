@@ -941,14 +941,14 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     } catch (error) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot inspect current completion result: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     }
-    if (completionReceipt && completionFacts(frontmatter).some((fact) => sameCompletionFact(fact, currentFact!))) {
+    if (completionFacts(frontmatter).some((fact) => sameCompletionFact(fact, currentFact!))) {
       return successNoOp(
         normalized,
         resolved.taskId,
         resolved.taskMdPath,
         currentStep,
         eventIdentity,
-        completionReceipt.completedAt,
+        completionReceipt?.completedAt ?? metadata.timestamp,
         frontmatter,
         artifactContext
       );

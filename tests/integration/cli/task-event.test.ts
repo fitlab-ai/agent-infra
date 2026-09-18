@@ -462,6 +462,11 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   const done = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
   assert.equal(done.status, 0, done.stderr);
   assert.equal(JSON.parse(done.stdout).toStep, 'technical-design');
+  const beforeReplay = fs.readFileSync(f.file, 'utf8');
+  const replayed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
+  assert.equal(replayed.status, 0, replayed.stderr);
+  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+  assert.deepEqual(fs.readFileSync(f.file, 'utf8'), beforeReplay);
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
   assert.match(content, /current_step: technical-design/);
@@ -1038,6 +1043,13 @@ test('analysis can restart from code when task requirements expand', () => {
   ]);
   assert.equal(completed.status, 0, completed.stderr);
   assert.equal(JSON.parse(completed.stdout).toStep, 'requirement-analysis');
+  const beforeReplay = fs.readFileSync(f.file, 'utf8');
+  const replayed = run(f.root, [
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+  ]);
+  assert.equal(replayed.status, 0, replayed.stderr);
+  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+  assert.deepEqual(fs.readFileSync(f.file, 'utf8'), beforeReplay);
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /current_step: requirement-analysis/);
   assert.match(content, /Analyze Task \(Round 2\) \[started\]/);

@@ -228,6 +228,23 @@ test('standalone finalization requires child discovery for a running delegation'
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
     pendingDelegation: reviewReceipt(f.artifact)
   }), null, 2)}\n`);
+  fs.writeFileSync(path.join(f.dir, 'current-run.json'), `${JSON.stringify({
+    taskId: TASK_ID,
+    runId: 'run-1',
+    mode: 'orchestrated',
+    stage: 'review-analysis',
+    round: 1,
+    artifact: f.artifact,
+    role: 'reviewer',
+    client: 'codex',
+    state: 'starting',
+    startedAt: '2026-01-01T00:00:00.000Z',
+    lastObservedAt: '2026-01-01T00:00:00.000Z',
+    spawnAttemptId: 'receipt-1',
+    childId: null,
+    terminalOutcome: null,
+    terminalAt: null
+  }, null, 2)}\n`);
   const artifactPath = path.join(f.dir, f.artifact);
   const runBefore = fs.readFileSync(runPath);
   const artifactBefore = fs.readFileSync(artifactPath, 'utf8');
