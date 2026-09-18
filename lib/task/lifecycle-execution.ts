@@ -37,14 +37,11 @@ function inspectLifecycleExecution(
   if (!resolved.ok) return failure(request.mode, resolved.code, resolved.message);
   if (request.mode === 'standalone') {
     try {
-      const run = readRun(resolved.taskDir);
-      if (run?.pendingDelegation) {
-        return failure(
-          request.mode,
-          'ORCHESTRATION_STANDALONE_BUSY',
-          'standalone lifecycle execution is blocked by a pending orchestration delegation'
-        );
-      }
+      // A persisted delegation is historical workflow state.  It is useful for
+      // diagnostics, but cannot authorize or prohibit a trusted local retry.
+      // Actual concurrent writers are serialized by task-execution-lock at the
+      // mutation boundary.
+      readRun(resolved.taskDir);
       return { ok: true, mode: request.mode, completionPlan: null, error: null };
     } catch (error) {
       return failure(

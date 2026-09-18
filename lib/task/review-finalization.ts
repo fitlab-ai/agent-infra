@@ -204,7 +204,7 @@ function preflightReviewSummaryUnlocked(
   });
   const qualificationError = qualification.ok ? null : qualification;
   if (!detail.ok || !structure.ok || qualificationError) {
-    if (!recovery && !request.dryRun) {
+    if (!recovery && !request.dryRun && options.startRecovery) {
       try {
         recovery = beginArtifactRecovery({
           taskId: resolved.taskId, family: spec.family, artifact: request.artifact, round: parsed.round,
@@ -225,6 +225,12 @@ function preflightReviewSummaryUnlocked(
   if (request.dryRun || recovery && readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact)?.state === 'preflight-ready') {
     return {
       ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest, ...(recovery ? { recovery: recoveryInfo(recovery) } : {}) }),
+      status: 'passed', changed: false, error: null
+    };
+  }
+  if (!options.startRecovery) {
+    return {
+      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest }),
       status: 'passed', changed: false, error: null
     };
   }
@@ -324,15 +330,6 @@ function prepareReviewSummaryCandidate(
   let repairIntent;
   try { repairIntent = readArtifactRecoveryIntent(resolved.repoRoot, taskId!, spec.family, request.artifact); }
   catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), digests); }
-  if (repairIntent?.state === 'consumed') {
-    if (repairIntent.finalArtifactSha256 !== artifactSha256 || repairIntent.finalSemanticDigest !== semanticDigest) {
-      return reject('REVIEW_PROVENANCE_INVALID', 'the review artifact changed after its finalization provenance was recorded', digests);
-    }
-  }
-  if (repairIntent?.state === 'passed'
-    && (repairIntent.finalArtifactSha256 !== artifactSha256 || repairIntent.finalSemanticDigest !== semanticDigest)) {
-    repairIntent = undefined;
-  }
   if (!hasOpenArtifactRound(taskContent, spec.family, parsed.round)) {
     return reject('REVIEW_ARTIFACT_IDENTITY_INVALID', `${request.artifact} does not have one matching open started review event`);
   }
@@ -387,19 +384,6 @@ function prepareReviewSummaryCandidate(
       return reject('REVIEW_PROVENANCE_INVALID', 'formal review artifact does not match the interrupted recovery journal', finalDigests);
     }
     recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, repairIntent);
-  }
-  if (!recovery && (repairIntent?.state === 'passed' || repairIntent?.state === 'consumed')) {
-    if (transformed.changed) return reject('REVIEW_PROVENANCE_INVALID', 'the review artifact requires changes after its completed recovery was consumed', finalDigests);
-    return {
-      content: transformed.content,
-      result: {
-        ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', taskId, stageStatus, finalDigests),
-        status: 'no-op',
-        changed: false,
-        error: null
-      },
-      lockAlreadyHeld: options.lockAlreadyHeld
-    };
   }
   if (!recovery && !request.dryRun && options.startRecovery) {
     try {
@@ -492,16 +476,32 @@ function finalizeReviewSummaryUnlocked(
   let content: string;
   try { content = fileSystem.readFileSync(validated.artifact.path); }
   catch (error) { return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
-  const prepared = prepareReviewSummaryCandidate(request, content, options);
+  const prepared = prepareReviewSummaryCandidate(request, content, { ...options, startRecovery: false });
   if (request.dryRun) return prepared.result;
-  return commitReviewSummaryProvenance(prepared, resolved.repoRoot);
+  if (prepared.result.status === 'failed' || !prepared.result.changed) return prepared.result;
+  try {
+    fs.writeFileSync(validated.artifact.path, prepared.content, 'utf8');
+    return {
+      ...prepared.result,
+      status: 'applied',
+      artifactSha256: sha256Content(prepared.content),
+      semanticDigest: canonicalSemanticDigest(prepared.content)
+    };
+  } catch (error) {
+    return failed(
+      request,
+      'REVIEW_RECOVERY_COMMIT_FAILED',
+      `cannot update current review artifact: ${error instanceof Error ? error.message : String(error)}`,
+      resolved.taskId
+    );
+  }
 }
 
 function finalizeReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
-  const effectiveOptions = { ...options, startRecovery: !request.dryRun };
+  const effectiveOptions = { ...options, startRecovery: false };
   if (request.dryRun || options.lockAlreadyHeld) return finalizeReviewSummaryUnlocked(request, effectiveOptions);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return finalizeReviewSummaryUnlocked(request, effectiveOptions);

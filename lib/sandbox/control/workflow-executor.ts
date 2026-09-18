@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { TASK_WORKFLOW_COMMANDS } from '../../task/workflow-command.ts';
 
 import { parseArtifactCommand, executeArtifactCommand } from '../../task/artifact-command.ts';
@@ -5,10 +8,8 @@ import { parseReviewCommand } from '../../task/review-command.ts';
 import { prepareLocalArtifact, preflightLocalArtifact, commitLocalArtifactProvenance } from '../../task/local-artifact-finalization.ts';
 import {
   prepareReviewSummaryCandidate,
-  commitReviewSummaryProvenance,
   preflightReviewSummary
 } from '../../task/review-finalization.ts';
-import { readArtifactRecoveryIntent } from '../../task/artifact-repair-intent.ts';
 import { withTaskExecutionLock } from '../../task/task-execution-lock.ts';
 import { dispatchWorkflowCommand } from '../../task/workflow-dispatch.ts';
 import { assertSandboxTaskSource } from '../workspace-view.ts';
@@ -45,25 +46,6 @@ export async function executeTaskWorkflow(
   options: TaskWorkflowExecutionOptions = {}
 ): Promise<SandboxControlExecutionResult> {
   let publicationCommitted = false;
-  let recoveryObservation: Readonly<{
-    family: 'analysis' | 'plan' | 'code' | 'review-analysis' | 'review-plan' | 'review-code';
-    artifact: string;
-    wasPassed: boolean;
-  }> | null = null;
-  const observeRecoveryPublication = (): void => {
-    if (!recoveryObservation || recoveryObservation.wasPassed) return;
-    const intent = readArtifactRecoveryIntent(
-      manifest.repoRoot,
-      request.taskId,
-      recoveryObservation.family,
-      recoveryObservation.artifact
-    );
-    publicationCommitted ||= intent?.state === 'preflight-ready'
-      || intent?.state === 'preflight-commit-started'
-      || intent?.state === 'preflight-passed'
-      || intent?.state === 'passed'
-      || intent?.state === 'commit-started';
-  };
   let faultTriggered = false;
   const fault = (window: TaskWorkflowFaultWindow): void => {
     if (faultTriggered || options.faultWindow !== window) return;
@@ -125,47 +107,26 @@ export async function executeTaskWorkflow(
       if ('operation' in input) {
         const { family } = input;
         if (family !== 'analysis' && family !== 'plan' && family !== 'code') throw new Error('ARTIFACT_IDENTITY_INVALID');
-        const local = { taskRef: request.taskId, family, artifact: input.artifact, repoRoot: manifest.repoRoot, recoveryId: input.recoveryId, lockAlreadyHeld: true } as const;
+        const local = { taskRef: request.taskId, family, artifact: input.artifact, repoRoot: manifest.repoRoot, lockAlreadyHeld: true } as const;
         if (input.operation === 'preflight') {
-          // Preflight only seals a verified generation. It must not publish the
-          // formal artifact, set publicationStarted, or append finalizer audit.
           const result = preflightLocalArtifact(local);
-          recoveryObservation = { family, artifact: input.artifact, wasPassed: false };
-          observeRecoveryPublication();
           return response(result);
         }
-        recoveryObservation = {
-          family,
-          artifact: input.artifact,
-          wasPassed: readArtifactRecoveryIntent(manifest.repoRoot, request.taskId, family, input.artifact)?.state === 'passed'
-        };
-        const prepared = prepareLocalArtifact(local, content, lifecycleRecoveryAttestation ?? undefined);
-        observeRecoveryPublication();
-        const commitOptions = { afterPublish: () => fault('after-atomic-rename') };
-        if (prepared.result.status === 'failed') return executionResult(commitLocalArtifactProvenance(prepared, commitOptions));
-        result = commitLocalArtifactProvenance(prepared, commitOptions);
+        const prepared = prepareLocalArtifact(local, content);
+        result = commitLocalArtifactProvenance(prepared);
       } else {
         if (input.overrideTicket) throw new Error('TASK_WORKFLOW_OVERRIDE_UNSUPPORTED');
         const family = `review-${input.stage}` as 'review-analysis' | 'review-plan' | 'review-code';
         if (request.operation === 'review-preflight') {
           const result = preflightReviewSummary(input, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true });
-          recoveryObservation = { family, artifact: input.artifact, wasPassed: false };
-          observeRecoveryPublication();
           return response(result);
         }
-        recoveryObservation = {
-          family,
-          artifact: input.artifact,
-          wasPassed: readArtifactRecoveryIntent(manifest.repoRoot, request.taskId, family, input.artifact)?.state === 'passed'
-        };
-        const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true, startRecovery: true });
-        observeRecoveryPublication();
+        const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true });
         if (input.dryRun || prepared.result.status === 'planned') return executionResult(prepared.result);
-        const commitOptions = { afterPublish: () => fault('after-atomic-rename') };
-        if (prepared.result.status === 'failed') return executionResult(commitReviewSummaryProvenance(prepared, manifest.repoRoot, commitOptions));
-        result = commitReviewSummaryProvenance(prepared, manifest.repoRoot, commitOptions);
+        if (prepared.result.status === 'failed') return executionResult(prepared.result);
+        if (prepared.result.changed) fs.writeFileSync(path.join(taskDir, input.artifact), prepared.content, 'utf8');
+        result = prepared.result;
       }
-      observeRecoveryPublication();
       publicationCommitted ||= result.changed === true;
       if (result.status !== 'failed') appendDiagnosticAudit(manifest, 'task-workflow-artifact-finalized', {
         requestId: request.id, sandboxTaskId: request.taskId, workflowOperation: request.operation,
@@ -175,7 +136,6 @@ export async function executeTaskWorkflow(
       return response(result);
     });
   } catch (error) {
-    observeRecoveryPublication();
     const message = error instanceof Error ? error.message : String(error);
     const code = (error as { code?: string })?.code ?? /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'TASK_WORKFLOW_REQUEST_INVALID';
     return executionResult({ status: 'failed', changed: publicationCommitted ? null : false, error: { code, message } });

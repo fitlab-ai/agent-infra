@@ -218,7 +218,7 @@ test('standalone finalization ignores a current run without a pending delegation
   assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
-test('standalone finalization fails before writing when a delegation is pending', () => {
+test('standalone finalization ignores a historical pending delegation', () => {
   const scenario = scenarios[0];
   const f = fixture(
     scenario,
@@ -229,16 +229,15 @@ test('standalone finalization fails before writing when a delegation is pending'
     pendingDelegation: reviewReceipt(f.artifact)
   }), null, 2)}\n`);
   const artifactPath = path.join(f.dir, f.artifact);
-  const artifactBefore = fs.readFileSync(artifactPath);
   const runBefore = fs.readFileSync(runPath);
 
   const result = run(f.root, [
     TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact
   ]);
 
-  assert.equal(result.status, 1);
-  assert.match(JSON.parse(result.stdout).error.message, /ORCHESTRATION_STANDALONE_BUSY/);
-  assert.deepEqual(fs.readFileSync(artifactPath), artifactBefore);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).status, 'applied');
+  assert.match(fs.readFileSync(artifactPath, 'utf8'), /Findings \(AI-actionable\)/);
   assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 

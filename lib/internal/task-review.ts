@@ -5,7 +5,7 @@ import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-review <task-ref> <preflight|finalize-summary> --stage <analysis|plan|code> --artifact <review-*.md> [--recovery-id <id>] [--orchestrated] [--dry-run] [--override-ticket <ticket> --override-target <target> --override-scope <scope>]\n';
+const USAGE = 'Usage: agent-infra-internal task-review <task-ref> <preflight|finalize-summary> --stage <analysis|plan|code> --artifact <review-*.md> [--orchestrated] [--dry-run] [--override-ticket <ticket> --override-target <target> --override-scope <scope>]\n';
 
 function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({
@@ -27,7 +27,7 @@ async function taskReview(args: string[] = []): Promise<void> {
   let request;
   try { request = parseReviewCommand(args); }
   catch (error) { failUsage(error instanceof Error ? error.message : String(error)); return; }
-  const { stage, artifact, recoveryId, dryRun, orchestrated, overrideTicket, overrideTarget, overrideScope } = request;
+  const { stage, artifact, dryRun, orchestrated, overrideTicket, overrideTarget, overrideScope } = request;
   const operation = args[1]!;
   const dryRunConflict = overrideDryRunConflict({ dryRun, overrideTicket, overrideTarget, overrideScope });
   if (dryRunConflict) { failUsage(dryRunConflict.message); return; }
@@ -38,8 +38,8 @@ async function taskReview(args: string[] = []): Promise<void> {
   try {
     result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-review.${operation}`, async () => {
       let current = operation === 'preflight'
-        ? preflightReviewSummary({ taskRef: args[0]!, stage, artifact, recoveryId, orchestrated, dryRun }, { lockAlreadyHeld: true })
-        : finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, recoveryId, orchestrated, dryRun }, { lockAlreadyHeld: true });
+        ? preflightReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun }, { lockAlreadyHeld: true })
+        : finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun }, { lockAlreadyHeld: true });
       if (operation === 'preflight') return current;
       if (current.status !== 'failed' || !overrideTicket) return current;
       if (!overrideTarget || !overrideScope) { failUsage('override ticket requires target and scope'); return current; }
@@ -49,7 +49,7 @@ async function taskReview(args: string[] = []): Promise<void> {
         target: overrideTarget, scope: overrideScope
       }, {
         effectExecutor: (capability) => {
-          const retried = finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, recoveryId, orchestrated, dryRun }, { lockAlreadyHeld: true, manualOverride: capability });
+          const retried = finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun }, { lockAlreadyHeld: true, manualOverride: capability });
           current = retried;
           return retried.status === 'failed' || retried.status === 'planned'
             ? { code: 'OVERRIDE_EFFECT_FAILED', message: retried.status === 'planned' ? 'producer returned planned; no review effect was committed' : `${retried.error?.code ?? 'REVIEW_FAILED'}: ${retried.error?.message ?? 'manual review effect failed'}` }

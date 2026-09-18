@@ -78,7 +78,7 @@ test('task-artifact init rejects an existing historical artifact before no-op', 
   assert.deepEqual(fs.readFileSync(artifact), before);
 });
 
-test('task-artifact recovery requires the journal id and publishes a corrected candidate', () => {
+test('task-artifact revalidates a directly repaired formal artifact', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
   let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: path.basename(artifact) }).replaceAll('<!-- artifact-slot:empty -->', 'content');
@@ -86,16 +86,12 @@ test('task-artifact recovery requires the journal id and publishes a corrected c
   fs.writeFileSync(artifact, content.replace('## 问题理解\n', '## 问题理解：\n'));
   const finalizer = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
   assert.equal(finalizer.status, 1, finalizer.stdout);
-  const failed = JSON.parse(finalizer.stdout);
-  fs.writeFileSync(failed.recovery.candidatePath, content);
-  const repaired = run(f.root, [
-    f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md',
-    '--recovery-id', failed.recovery.recoveryId
-  ]);
+  fs.writeFileSync(artifact, content);
+  const repaired = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
   assert.equal(repaired.status, 0, `${repaired.stderr}\n${repaired.stdout}`);
   const result = JSON.parse(repaired.stdout);
   assert.equal(result.status, 'passed');
-  assert.equal(fs.readFileSync(artifact, 'utf8').includes('## 问题理解：'), false);
+  assert.match(fs.readFileSync(artifact, 'utf8'), /^## 问题理解$/m);
 });
 
 test('task-artifact reports usage and domain failures with nonzero exit codes', () => {
@@ -125,7 +121,7 @@ test('task-artifact finalize-local returns stable digests without mutating a val
   assert.deepEqual(fs.readFileSync(artifact), before);
 });
 
-test('task-artifact preflight seals a generation before the formal artifact is published', () => {
+test('task-artifact preflight validates the current formal artifact without changing it', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
   fs.writeFileSync(artifact, localArtifact('plan'));
@@ -137,11 +133,8 @@ test('task-artifact preflight seals a generation before the formal artifact is p
   const result = JSON.parse(preflight.stdout);
   assert.equal(result.status, 'passed');
   assert.deepEqual(fs.readFileSync(artifact), baseline);
-  const journal = fs.readdirSync(path.join(f.root, '.agents', 'workspace', '.local-artifact-finalization-intents'));
-  assert.equal(journal.length, 1);
-  const intent = JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', '.local-artifact-finalization-intents', journal[0]!), 'utf8'));
-  assert.equal(intent.state, 'preflight-ready');
-  assert.equal(fs.existsSync(path.join(f.dir, '.local-artifact-recovery', intent.stagingId, 'generations', `${intent.activeGenerationSha256}.md`)), true);
+  assert.match(result.artifactSha256, /^[0-9a-f]{64}$/);
+  assert.match(result.semanticDigest, /^[0-9a-f]{64}$/);
 });
 
 test('task-artifact finalize-local uses repository config from a nested working directory', () => {
@@ -165,7 +158,7 @@ test('task-artifact finalize-local uses repository config from a nested working 
   assert.deepEqual(result.diagnostics, []);
 });
 
-test('task-artifact refinalizes a changed passed artifact through a new recovery journal', () => {
+test('task-artifact refinalizes a changed passed artifact directly', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
   fs.writeFileSync(artifact, localArtifact('plan'));
@@ -182,7 +175,7 @@ test('task-artifact refinalizes a changed passed artifact through a new recovery
   assert.notEqual(after.artifactSha256, before.artifactSha256);
 });
 
-test('task-artifact does not accept an invalid artifact that matches a passed recovery journal', () => {
+test('task-artifact revalidates required evidence after a successful finalization', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
   fs.writeFileSync(artifact, localArtifact('plan'));
@@ -197,10 +190,9 @@ test('task-artifact does not accept an invalid artifact that matches a passed re
   const result = JSON.parse(second.stdout);
   assert.equal(result.status, 'failed');
   assert.equal(result.diagnostics[0].code, 'LOCAL_STATUS_COMMAND_MISSING');
-  assert.ok(result.recovery?.recoveryId);
 });
 
-test('task-artifact finalize-local reports one-line heading diagnostics and revalidates a staged edit', () => {
+test('task-artifact finalize-local reports one-line heading diagnostics and revalidates a direct edit', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'analysis.md');
   fs.appendFileSync(path.join(f.dir, 'task.md'), '- 2026-01-01 00:01:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n');
@@ -211,17 +203,15 @@ test('task-artifact finalize-local reports one-line heading diagnostics and reva
   const failure = JSON.parse(failed.stdout);
   assert.equal(failure.status, 'failed');
   assert.equal(failure.diagnostics[0].code, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
-  assert.ok(failure.recovery?.recoveryId);
-
-  fs.writeFileSync(failure.recovery.candidatePath, fs.readFileSync(artifact, 'utf8').replace('## 需求来源：\n', '## 需求来源\n'));
-  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'analysis', '--artifact', 'analysis.md', '--recovery-id', failure.recovery.recoveryId]);
+  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('## 需求来源：\n', '## 需求来源\n'));
+  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'analysis', '--artifact', 'analysis.md']);
   assert.equal(passed.status, 0, passed.stderr);
   const success = JSON.parse(passed.stdout);
   assert.equal(success.status, 'passed');
   assert.notEqual(success.semanticDigest, failure.semanticDigest);
 });
 
-test('task-artifact finalize-local supports code reports through staged recovery', () => {
+test('task-artifact finalize-local supports direct code report repair', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'code.md');
   fs.appendFileSync(path.join(f.dir, 'task.md'), '- 2026-01-01 00:01:00+00:00 — **Code Task (Round 1) [started]** by codex — started\n');
@@ -231,10 +221,8 @@ test('task-artifact finalize-local supports code reports through staged recovery
   assert.equal(failed.status, 1);
   const failure = JSON.parse(failed.stdout);
   assert.equal(failure.diagnostics[0].code, 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION');
-  assert.ok(failure.recovery?.recoveryId);
-
-  fs.writeFileSync(failure.recovery.candidatePath, fs.readFileSync(artifact, 'utf8').replace('## 测试结果：', '## 测试结果'));
-  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'code', '--artifact', 'code.md', '--recovery-id', failure.recovery.recoveryId]);
+  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('## 测试结果：', '## 测试结果'));
+  const passed = run(f.root, [f.id, 'finalize-local', '--family', 'code', '--artifact', 'code.md']);
   assert.equal(passed.status, 0, passed.stderr);
   const success = JSON.parse(passed.stdout);
   assert.equal(success.status, 'passed');

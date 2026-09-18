@@ -261,11 +261,10 @@ function updateReceipt(
   patch: Partial<Pick<TaskFinalizationReceipt, 'lifecycle' | 'taskComment' | 'verification' | 'summary' | 'postSummaryVerification' | 'warningProjection' | 'warnings' | 'summarySha256' | 'lastError'>>
 ): TaskFinalizationReceipt {
   const current = readReceipt(repoRoot, receipt.taskId);
-  if (!current || current.receiptId !== receipt.receiptId || current.revision !== receipt.revision) {
-    const error = new Error('finalization receipt revision is stale');
-    Object.assign(error, { code: 'FINALIZATION_CAPABILITY_STALE' });
-    throw error;
-  }
+  if (!current || current.receiptId !== receipt.receiptId) throw capabilityError(
+    'FINALIZATION_SCOPE_INVALID',
+    'finalization receipt does not belong to the current task'
+  );
   const next = { ...current, ...patch, revision: current.revision + 1, updatedAt: now() };
   writeReceipt(repoRoot, next);
   return next;
@@ -398,9 +397,10 @@ function validateCapabilityMutation(
   mutation: FinalizationMutation,
   consumed: Set<string>
 ): void {
-  if (capability.receiptId !== current.receiptId || capability.baseRevision !== current.revision || consumed.has(capability.nonce)) {
-    throw capabilityError('FINALIZATION_CAPABILITY_STALE', 'finalization capability is stale or outside its scope');
-  }
+  if (capability.receiptId !== current.receiptId) throw capabilityError(
+    'FINALIZATION_SCOPE_INVALID',
+    'finalization mutation belongs to a different task receipt'
+  );
   if (capability.scope !== mutation.scope) {
     throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability mutation scope does not match its capability');
   }

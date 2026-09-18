@@ -484,7 +484,7 @@ test("review skills preflight before writing their ledgers", () => {
       assert.equal(content.split(preflight).length - 1, 1, `${relativePath} should declare one review preflight`);
       assert.ok(content.indexOf(preflight) < content.indexOf(ledger), `${relativePath} should preflight before ledger writes`);
       assert.ok(content.indexOf(ledger) < content.indexOf(finalizer), `${relativePath} should finalize after ledger writes`);
-      assert.ok(content.includes(`${finalizer} --recovery-id {recovery-id}`), `${relativePath} should pass preflight recovery identity to finalization`);
+      assert.equal(content.split(finalizer).length - 1, 1, `${relativePath} should use one current review finalizer`);
     }
   }
 });

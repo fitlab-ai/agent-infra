@@ -13,7 +13,6 @@ export type ArtifactCommand = Readonly<{
   family: string;
   artifact: string;
   locale?: 'zh-CN' | 'en';
-  recoveryId?: string;
 }>;
 
 /** One option contract for the CLI and trusted projection executor. */
@@ -26,8 +25,8 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   const allowed = {
     inspect: ['--family'],
     init: ['--family', '--artifact', '--locale'],
-    'preflight': ['--family', '--artifact', '--recovery-id'],
-    'finalize-local': ['--family', '--artifact', '--recovery-id']
+    'preflight': ['--family', '--artifact'],
+    'finalize-local': ['--family', '--artifact']
   }[operation as ArtifactCommand['operation']];
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
@@ -43,7 +42,7 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   if (locale !== undefined && locale !== 'zh-CN' && locale !== 'en') throw new Error("option '--locale' must be 'zh-CN' or 'en'");
   return {
     taskRef, operation: operation as ArtifactCommand['operation'], family: fields['--family'],
-    artifact: fields['--artifact'] ?? '', locale, recoveryId: fields['--recovery-id']
+    artifact: fields['--artifact'] ?? '', locale
   };
 }
 /** Resolve authoritative task metadata separately from a trusted candidate directory. */
@@ -51,7 +50,7 @@ export function executeArtifactCommand(
   command: ArtifactCommand,
   options: Readonly<{ repoRoot?: string; artifactDir?: string }> = {}
 ): Record<string, unknown> {
-  const { taskRef, operation, family, artifact, locale, recoveryId } = command;
+  const { taskRef, operation, family, artifact, locale } = command;
   const fail = (code: string, message: string) => ({ status: 'failed', changed: false, error: { code, message } });
   if (operation === 'inspect') {
     const result = resolveArtifactContext(taskRef, family, { repoRoot: options.repoRoot });
@@ -82,6 +81,6 @@ export function executeArtifactCommand(
   if (family !== 'analysis' && family !== 'plan' && family !== 'code') {
     return fail('ARTIFACT_PAYLOAD_INVALID', "preflight and finalize-local only support 'analysis', 'plan', and 'code'");
   }
-  if (operation === 'preflight') return { ...preflightLocalArtifact({ taskRef, family, artifact, repoRoot: resolved.repoRoot, recoveryId }) };
-  return { ...finalizeLocalArtifact({ taskRef, family, artifact, repoRoot: resolved.repoRoot, recoveryId }) };
+  if (operation === 'preflight') return { ...preflightLocalArtifact({ taskRef, family, artifact, repoRoot: resolved.repoRoot }) };
+  return { ...finalizeLocalArtifact({ taskRef, family, artifact, repoRoot: resolved.repoRoot }) };
 }
