@@ -13,7 +13,7 @@ import { planInLabelUpdate, validateInLabelMapping } from "./in-label-sync.ts";
 import { readPrDeliveryFact } from "../task/pr-delivery-fact.ts";
 import { providerError, providerOperationContext, resourceIdentityNumber, unsupportedProviderOperation } from "./provider-bridge.ts";
 import { taskIssueIdentity } from "./task-identities.ts";
-import { renderTaskCommentResult } from "./issue-comments.ts";
+import { MARKERS, renderTaskCommentResult } from "./issue-comments.ts";
 import {
   CONTROL_MARKER_PATTERN,
   canonicalizeCommentBody,
@@ -279,7 +279,9 @@ async function fetchRemoteData(context: any, shared: VerificationShared): Promis
   }
   return {
     issue,
-    comments: facts.value.comments.map((comment: { id: string; body: string }) => ({ id: comment.id, body: comment.body })),
+    comments: facts.value.comments.map((comment: { id: string; body: string; createdSequence: number | null }) => ({
+      id: comment.id, body: comment.body, createdSequence: comment.createdSequence
+    })),
     prComments,
     prLabels: changeRequest?.labels || null,
     issueType: issueSnapshot
@@ -361,6 +363,21 @@ function checkCommentMarker(context: any, remoteData: any, shared: VerificationS
 
   const comment = findCommentByMarker(remoteData.comments, context.marker);
   if (comment) {
+    if (context.marker === MARKERS.summary(context.task.metadata.id)) {
+      const managed = remoteData.comments.filter((candidate: any) => {
+        const first = String(candidate.body || '').replace(/\r\n/g, '\n').split('\n', 1)[0] || '';
+        return first === MARKERS.task(context.task.metadata.id)
+          || first === MARKERS.summary(context.task.metadata.id)
+          || first.startsWith(`<!-- sync-issue:${context.task.metadata.id}:`);
+      });
+      if (managed.some((candidate: any) => !Number.isSafeInteger(candidate.createdSequence) || candidate.createdSequence < 1)) {
+        return shared.failResult(CHECK_TYPE, `Issue #${context.issueNumber} summary comment ordering is not provable`, "check_failed");
+      }
+      const summarySequence = comment.createdSequence;
+      if (!managed.every((candidate: any) => summarySequence >= candidate.createdSequence)) {
+        return shared.failResult(CHECK_TYPE, `Issue #${context.issueNumber} summary comment is not last among task-managed comments`, "check_failed");
+      }
+    }
     return shared.passResult(CHECK_TYPE, `Issue #${context.issueNumber} has expected comment marker`);
   }
 

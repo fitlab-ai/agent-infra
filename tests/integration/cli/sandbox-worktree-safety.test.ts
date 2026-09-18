@@ -268,7 +268,7 @@ function writeTaskBoundCleanupEvidence(
   fs.writeFileSync(
     path.join(finalizationDir, `${taskId}.json`),
     `${JSON.stringify({
-      version: 2,
+      version: 3,
       taskId,
       intent: "complete",
       receiptId: "receipt-1",
@@ -276,6 +276,9 @@ function writeTaskBoundCleanupEvidence(
       lifecycle: "done",
       taskComment: "done",
       verification: "done",
+      summary: "done",
+      postSummaryVerification: "done",
+      summarySha256: null,
       warningProjection: "done",
       warnings: [],
       updatedAt: "2026-01-01T00:00:00.000Z",

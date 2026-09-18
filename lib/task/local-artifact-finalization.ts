@@ -337,7 +337,7 @@ function prepareLocalArtifact(
     if (existing.state === 'consumed' && (existing.finalArtifactSha256 !== artifactSha256 || existing.finalSemanticDigest !== validation.semanticDigest)) {
       return { ...failed('LOCAL_RECOVERY_PROVENANCE_CONFLICT', 'formal artifact does not match its completed recovery journal'), content, repoRoot: resolved.repoRoot, authority, lockAlreadyHeld: request.lockAlreadyHeld };
     }
-    if (existing.finalArtifactSha256 === artifactSha256 && existing.finalSemanticDigest === validation.semanticDigest) {
+    if (validation.ok && existing.finalArtifactSha256 === artifactSha256 && existing.finalSemanticDigest === validation.semanticDigest) {
       const context = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, existing);
       return {
         result: { ...result, status: 'passed', error: null, recovery: recoveryInfo(context) },

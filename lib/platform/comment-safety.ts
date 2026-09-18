@@ -189,6 +189,13 @@ function canonicalizeCommentBody(value: string): SanitizationResult<string> {
   return sanitizeMarkdownDocument(value, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
 }
 
+function canonicalizeSummaryBody(value: string): SanitizationResult<string> {
+  const sanitized = canonicalizeCommentBody(value);
+  return sanitized.ok
+    ? ok(`${sanitized.value.replace(/\n+$/, '')}\n`)
+    : sanitized;
+}
+
 function renderSafeCodeFence(value: string, language = '', reservedMarkers: readonly RegExp[] = [CONTROL_MARKER_PATTERN]): string {
   const content = markerSafe(normalized(value), reservedMarkers);
   const longestRun = Math.max(0, ...(content.match(/`+/g) || []).map((run) => run.length));
@@ -249,6 +256,7 @@ export {
   fenceRanges,
   renderSafeCodeFence,
   canonicalizeCommentBody,
+  canonicalizeSummaryBody,
   sanitizeMarkdownDocument,
   splitDocumentPlaceholder
 };

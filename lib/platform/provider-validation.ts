@@ -218,13 +218,17 @@ function issueType(value: unknown, label: string): NonNullable<IssueSnapshot['is
 
 function validateComment(value: unknown): RemoteCommentSnapshot {
   const item = record(value, 'comment');
-  exactKeys(item, ['id', 'author', 'body', 'createdAt', 'updatedAt'], 'comment');
+  exactKeys(item, ['id', 'author', 'body', 'createdAt', 'updatedAt', 'createdSequence'], 'comment');
   return {
     id: stringValue(item.id, 'comment.id'),
     author: author(item.author, 'comment.author'),
     body: stringValue(item.body, 'comment.body', true),
     createdAt: utcTimestamp(item.createdAt, 'comment.createdAt'),
-    updatedAt: utcTimestamp(item.updatedAt, 'comment.updatedAt')
+    updatedAt: utcTimestamp(item.updatedAt, 'comment.updatedAt'),
+    createdSequence: item.createdSequence === null ? null : (() => {
+      if (!Number.isSafeInteger(item.createdSequence) || Number(item.createdSequence) < 1) throw new Error('comment.createdSequence must be a positive safe integer or null');
+      return Number(item.createdSequence);
+    })()
   };
 }
 

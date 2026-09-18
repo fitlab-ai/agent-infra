@@ -9,7 +9,7 @@ description: >
 # Complete Task
 > `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
-Host finalization uses receipt v2 with an immutable `receiptId`, monotonic `revision`, and canonical warnings. Lifecycle/identity/required-PR hard failures return `result: failed|blocked`; after lifecycle succeeds, comment, peripheral verification, and other sync failures return `result: completed_with_warnings` and six-field warnings, retrying only receipt-pending steps.
+Host finalization uses receipt v3 with an immutable `receiptId`, monotonic `revision`, staged summary input, and canonical warnings. Lifecycle/identity/required-PR hard failures return `result: failed|blocked`; after lifecycle succeeds, comment, peripheral verification, and other sync failures return `result: completed_with_warnings` and six-field warnings, retrying only receipt-pending steps.
 
 
 ## Boundary / Critical Rules
@@ -143,7 +143,7 @@ When a valid `platform_issue_identity` exists, execute in this exact order:
 
 1. Run `agent-infra-internal platform-comment backfill {task-id} --agent {standard-agent-token}` so core publishes only the completion canonical inventory in fixed order and resolves matching historical warnings only after full success.
 2. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.
-3. Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {standard-agent-token}`.
+3. Write the business summary to a temporary file and run `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`. This stores the body and SHA-256 in the task's durable staging record; it must not publish the summary comment directly.
 
 When the ledger contains a valid `PRC-N` post-review exemption, the summary body must mirror the ruling reason, commit scope, human identity, and time from task.md, and state that this is a human override rather than an automatic verification success. If a matching workflow warning exists, also mirror its original failure code/message. If no warning exists yet, state only that the ruling is recorded and final gate verification is pending; do not claim that the exemption has passed. The same `--kind summary` intent remains the sole owner of the summary marker.
 
@@ -177,7 +177,7 @@ If a summary must mirror a human-decided `post-review-commit` exemption, make a 
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-Finalization runs lifecycle -> the terminal task comment -> the `complete-task.completed` gate in a fixed order and records each step in the host receipt. `result=completed` means the host safely completed the task from structured results and the receipt; if peripheral warnings remain, return `result=completed_with_warnings`, warnings, and pending steps. Use `result=failed` or `result=blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state. A sandbox must not run `ls completed` or a local terminal verification against its historical mount to re-decide this result.
+Finalization runs lifecycle -> terminal task comment -> core verification -> warning task-comment update -> summary -> post-summary verification in a fixed order and records every step in the host receipt. It clears the staging record only after all steps finish with no open warning. `result=completed` means the host safely completed the task from structured results and the receipt; if peripheral warnings remain, return `result=completed_with_warnings`, warnings, and pending steps. Use `result=failed` or `result=blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state. A sandbox must not run `ls completed` or a local terminal verification against its historical mount to re-decide this result.
 
 ### 7. Handle Finalization Retries and Results
 

@@ -331,13 +331,14 @@ function issueSnapshot(value: any, graph?: { type: any; values: Array<{ name: st
   };
 }
 
-function commentSnapshot(value: any): RemoteCommentSnapshot {
+function commentSnapshot(value: any, createdSequence: number | null = null): RemoteCommentSnapshot {
   return {
     id: String(value.id),
     author: value.user?.login ? { id: String(value.user.login), name: String(value.user.login) } : null,
     body: String(value.body || ''),
     createdAt: String(value.created_at || ''),
     updatedAt: String(value.updated_at || value.created_at || '')
+    ,createdSequence
   };
 }
 
@@ -603,7 +604,15 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/issues/${number}/comments?per_page=100`], { cwd: context.workingDirectory });
       if (!response.ok) return response;
       const values = Array.isArray(response.value) ? response.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry]) : [];
-      return { ok: true, value: values.filter((entry: any) => entry && entry.id !== undefined).map(commentSnapshot) };
+      const comments = values.filter((entry: any) => entry && typeof entry === 'object');
+      let previous = 0;
+      const ordered = comments.length === values.length && comments.every((entry: any) => {
+        const id = Number(entry.id);
+        if (!Number.isSafeInteger(id) || id <= previous) return false;
+        previous = id;
+        return true;
+      });
+      return { ok: true, value: comments.map((comment: any) => commentSnapshot(comment, ordered ? Number(comment.id) : null)) };
     },
     async write({ context, parent, body, existingComment }) {
       const number = resourceIdentityNumber(parent);

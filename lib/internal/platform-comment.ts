@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
@@ -8,15 +9,19 @@ import {
   syncPlatformComment
 } from '../platform/issue-comments.ts';
 import type { CommentKind } from '../platform/issue-comments.ts';
+import { canonicalizeSummaryBody } from '../platform/comment-safety.ts';
+import { platformResult } from '../platform/types.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { recoverTaskFromComments } from '../platform/task-recovery.ts';
 import { backfillCompletionComments } from '../platform/completion-backfill.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
+import { resolveTaskRef } from '../task/resolve-ref.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <token> [--cwd <path>]
        agent-infra-internal platform-comment recover --issue <token> --task-id <TASK-id> --output <staging-task.md> [--cwd <path>]
        agent-infra-internal platform-comment owner <task-ref> [--cwd <path>]
        agent-infra-internal platform-comment backfill <task-ref> --agent <agent> [--cwd <path>]
+       agent-infra-internal platform-comment stage-summary <task-ref> --body-file <path|-> [--cwd <path>]
        agent-infra-internal platform-comment sync <task-ref> --kind <kind> --agent <agent> [--artifact <file>] [--body-file <path|->] [--status-label <label>] [--backfill] [--cwd <path>]
 `;
 
@@ -64,6 +69,7 @@ async function platformComment(args: string[] = []): Promise<void> {
     internalHandlerRoute('platform-comment', 'recover', operation),
     internalHandlerRoute('platform-comment', 'owner', operation),
     internalHandlerRoute('platform-comment', 'backfill', operation),
+    internalHandlerRoute('platform-comment', 'stage-summary', operation),
     internalHandlerRoute('platform-comment', 'sync', operation)
   ].some(Boolean)) { fail('a valid operation is required'); return; }
   const hasTaskRef = operation !== 'list' && operation !== 'recover';
@@ -142,6 +148,38 @@ async function platformComment(args: string[] = []): Promise<void> {
     const normalizedAgent = normalizeAgentToken(agent);
     if (!normalizedAgent) { fail(`invalid --agent '${agent}': ${AGENT_USAGE_HINT}`); return; }
     finish(await backfillCompletionComments(taskRef!, { cwd, agent: normalizedAgent }));
+    return;
+  }
+  if (internalHandlerRoute('platform-comment', 'stage-summary', operation)) {
+    const unexpected = Object.keys(parsed.values).find((key) => !['cwd', 'bodyFile'].includes(key));
+    if (unexpected) { fail(`stage-summary does not accept '--${unexpected}'`); return; }
+    if (typeof parsed.values.bodyFile !== 'string') { fail('stage-summary requires --body-file'); return; }
+    let body: string;
+    try { body = readBodyFile(parsed.values.bodyFile, cwd); }
+    catch (error) { fail(`unable to read body file: ${error instanceof Error ? error.message : String(error)}`); return; }
+    const canonical = canonicalizeSummaryBody(body);
+    if (!canonical.ok) { fail(`unable to stage summary: ${canonical.error.code}: ${canonical.error.message}`); return; }
+    body = canonical.value;
+    const resolved = resolveTaskRef(taskRef!, { repoRoot: cwd });
+    if (!resolved.ok || resolved.state !== 'active') { fail('stage-summary requires an active task'); return; }
+    const target = path.join(resolved.taskDir, '.delivery-summary.json');
+    const value = { taskId: resolved.taskId, body, sha256: createHash('sha256').update(body).digest('hex') };
+    const previous = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
+    const next = `${JSON.stringify(value)}\n`;
+    if (previous === next) {
+      finish(platformResult('no-op'));
+      return;
+    }
+    const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporary, next, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      fs.renameSync(temporary, target);
+    } catch (error) {
+      try { fs.unlinkSync(temporary); } catch { /* preserve primary error */ }
+      fail(`unable to stage summary: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    finish(platformResult('applied', { operations: [{ name: 'delivery-summary', status: 'applied', reasonCode: null }] }));
     return;
   }
   if (!internalHandlerRoute('platform-comment', 'sync', operation)) { fail('operation is not registered'); return; }

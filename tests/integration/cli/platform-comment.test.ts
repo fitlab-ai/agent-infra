@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, filePath } from '../../helpers.ts';
@@ -214,6 +215,44 @@ test('summary sync creates, updates and converges on one marker while preserving
     assert.equal(replayed.status, 0, replayed.stderr || replayed.stdout);
     assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
     assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('stage-summary stores the canonical body and digest used for delivery comments', () => {
+  const f = fixture();
+  try {
+    const bodyPath = path.join(f.root, 'summary.md');
+    fs.writeFileSync(bodyPath, 'Durable <delivery> summary.\r\n');
+    const args = ['stage-summary', f.taskId, '--body-file', bodyPath];
+    assert.equal(runComment(args, f).status, 0);
+    assert.equal(runComment(args, f).status, 0);
+    const staged = JSON.parse(fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, '.delivery-summary.json'), 'utf8'));
+    assert.equal(staged.taskId, f.taskId);
+    assert.equal(staged.body, 'Durable &lt;delivery&gt; summary.\n');
+    assert.equal(staged.sha256, createHash('sha256').update(staged.body).digest('hex'));
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('ordinary summary sync refuses to re-post an out-of-order summary without finalization authorization', () => {
+  const f = fixture();
+  try {
+    const bodyPath = path.join(f.root, 'summary.md');
+    fs.writeFileSync(bodyPath, 'Delivery summary.\n');
+    const summaryArgs = ['sync', f.taskId, '--kind', 'summary', '--body-file', bodyPath, '--agent', 'codex'];
+    assert.equal(runComment(summaryArgs, f).status, 0);
+    assert.equal(runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f).status, 0);
+
+    const repaired = runComment(summaryArgs, f);
+    assert.equal(repaired.status, 1, repaired.stderr || repaired.stdout);
+    const output = JSON.parse(repaired.stdout);
+    assert.equal(output.error.code, 'SUMMARY_REPOSITION_UNAUTHORIZED');
+    const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
+    assert.equal(comments.length, 2);
+    assert.equal(comments[0]?.body.startsWith(`<!-- sync-issue:${f.taskId}:summary -->`), true);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
