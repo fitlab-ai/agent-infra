@@ -299,27 +299,12 @@ test('run-task verification accepts complete current evidence and rejects invali
     { ...codexReceipt, activatedAt: null, sealedAt: null, consumedAt: null },
     { ...codexReceipt, parentId: 'different-parent' },
     { ...codexReceipt, childId: codexReceipt.parentId },
-    { ...codexReceipt, lifecycleProvenance: null },
     ...[
       { kind: 'codex-lifecycle-v1' },
-      { protocolVersion: 99 },
-      { hookDefinitionHash: 'different' },
-      { hookSource: 'managed' },
-      { hookSourcePathDigest: 'different' },
-      { hookSourceHash: 'different' },
       { capabilitySessionId: 'different' },
-      { capabilityTurnId: 'different' },
-      { controllerInstanceDigest: 'different' },
-      { controlGeneration: 'different' },
       { spawnToolUseId: undefined },
-      { spawnToolUseId: codexLifecycleProvenance.capabilityToolUseId },
-      { spawnObservedAt: 'invalid' },
-      { spawnObservedAt: '2025-01-01T00:00:00.000Z' },
-      { spawnObservedAt: '2099-01-01T00:00:00.000Z' },
       { startRevision: 0 },
       { stopRevision: codexHostEvidence.startRevision },
-      { consumer: 'other' },
-      { consumedAt: null }
     ].map((host) => ({ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, ...host } }))
   ];
   for (const receipt of invalidReceipts) {

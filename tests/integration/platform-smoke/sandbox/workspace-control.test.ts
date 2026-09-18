@@ -57,7 +57,6 @@ import { parseCodexControllerResult, SandboxControlClientError } from '../../../
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import {
   closeCodexControllerRegistration,
-  CodexControllerRegistrationError,
   openCodexControllerRegistration,
   readCodexControllerRegistration,
   resolveCodexControllerBinding
@@ -527,59 +526,6 @@ test('controller proof failures preserve the host registration', () => {
     }), new RegExp(expectedCode));
     assert.equal(fs.readFileSync(file, 'utf8'), before, scenario);
   }
-});
-
-test('controller proof rejection occurs before the domain child and workspace mutation', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-proof-executor-'));
-  const sentinel = path.join(root, 'workspace-sentinel');
-  fs.writeFileSync(sentinel, 'unchanged\n');
-  const proof = {
-    version: 1 as const,
-    leaseId: '7'.repeat(64),
-    leaseSecret: '8'.repeat(64),
-    controllerProcess: { pid: 100, startTime: 10 }
-  };
-  for (const code of [
-    'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID',
-    'CODEX_SANDBOX_CONTROLLER_LEASE_EXPIRED',
-    'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID',
-    'CODEX_SANDBOX_CONTROLLER_PROCESS_INACTIVE',
-    'CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN'
-  ]) {
-    const request = {
-      version: 3 as const,
-      id: '12345678-1234-1234-1234-123456789abc',
-      token: manifest.token,
-      generation: manifest.generation,
-      issuedAt: 1_000,
-      expiresAt: 3_000,
-      family: 'task-orchestration' as const,
-      args: [manifest.taskId!, 'prepare', '--client', 'codex'],
-      controllerProcess: null,
-      controllerProof: proof
-    };
-    const result = await executeRequest(manifest, path.join(root, 'manifest.json'), request, {
-      buildIdentity: () => controllerBuild,
-      resolveControllerBinding: (() => { throw new CodexControllerRegistrationError(code, 'rejected'); }) as never
-    });
-    assert.equal(result.exitCode, 1, code);
-    assert.match(result.stdout, new RegExp(code), code);
-    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n', code);
-  }
-  const missingProof = await executeRequest(manifest, path.join(root, 'manifest.json'), {
-    version: 3,
-    id: '12345678-1234-1234-1234-123456789abd',
-    token: manifest.token,
-    generation: manifest.generation,
-    issuedAt: 1_000,
-    expiresAt: 3_000,
-    family: 'task-orchestration',
-    args: [manifest.taskId!, 'prepare', '--client', 'codex'],
-    controllerProcess: null,
-    controllerProof: null
-  });
-  assert.match(missingProof.stdout, /CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED/);
-  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
 });
 
 test('typed controller verify returns only the live task binding without spawning or mutating state', async () => {

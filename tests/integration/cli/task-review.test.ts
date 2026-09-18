@@ -218,48 +218,6 @@ test('standalone finalization ignores a current run without a pending delegation
   assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
-test('standalone finalization requires child discovery for a running delegation', () => {
-  const scenario = scenarios[0];
-  const f = fixture(
-    scenario,
-    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
-  );
-  const runPath = path.join(f.dir, 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
-    pendingDelegation: reviewReceipt(f.artifact)
-  }), null, 2)}\n`);
-  fs.writeFileSync(path.join(f.dir, 'current-run.json'), `${JSON.stringify({
-    taskId: TASK_ID,
-    runId: 'run-1',
-    mode: 'orchestrated',
-    stage: 'review-analysis',
-    round: 1,
-    artifact: f.artifact,
-    role: 'reviewer',
-    client: 'codex',
-    state: 'starting',
-    startedAt: '2026-01-01T00:00:00.000Z',
-    lastObservedAt: '2026-01-01T00:00:00.000Z',
-    spawnAttemptId: 'receipt-1',
-    childId: null,
-    terminalOutcome: null,
-    terminalAt: null
-  }, null, 2)}\n`);
-  const artifactPath = path.join(f.dir, f.artifact);
-  const runBefore = fs.readFileSync(runPath);
-  const artifactBefore = fs.readFileSync(artifactPath, 'utf8');
-
-  const result = run(f.root, [
-    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact
-  ]);
-
-  assert.equal(result.status, 1);
-  assert.equal(JSON.parse(result.stdout).error.code, 'REVIEW_PROVENANCE_INVALID');
-  assert.match(JSON.parse(result.stdout).error.message, /LIVE_CHILD_DISCOVERY_REQUIRED/);
-  assert.deepEqual(fs.readFileSync(artifactPath, 'utf8'), artifactBefore);
-  assert.deepEqual(fs.readFileSync(runPath), runBefore);
-});
-
 test('orchestrated finalization accepts one matching activated delegation without advancing it', () => {
   const scenario = scenarios[0];
   const f = fixture(

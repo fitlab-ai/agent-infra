@@ -3,8 +3,6 @@ import {
   pauseOrchestration,
   planOrchestrationStageCompletion
 } from './orchestration.ts';
-import { readCurrentRun, reconcileCurrentRun } from './current-run.ts';
-import type { CurrentRun, CurrentRunDiscovery } from './current-run.ts';
 import type {
   OrchestrationStageCompletion,
   OrchestrationStageIdentity
@@ -34,37 +32,13 @@ function inspectLifecycleExecution(
   request: LifecycleExecutionRequest,
   options: Readonly<{
     repoRoot?: string;
-    discoverCurrentRun?: (run: CurrentRun) => CurrentRunDiscovery;
     now?: () => string;
   }> = {}
 ): LifecycleExecutionResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failure(request.mode, resolved.code, resolved.message);
   if (request.mode === 'standalone') {
-    try {
-      const current = options.discoverCurrentRun
-        ? reconcileCurrentRun(
-            resolved.taskDir,
-            options.discoverCurrentRun,
-            (options.now ?? (() => new Date().toISOString()))()
-          )
-        : null;
-      const persisted = current ?? (options.discoverCurrentRun ? null : readCurrentRun(resolved.taskDir));
-      if (persisted && persisted.state !== 'terminal') {
-        return failure(
-          request.mode,
-          'LIVE_CHILD_DISCOVERY_REQUIRED',
-          `task ${resolved.taskId} has a ${persisted.state} ${persisted.client} child attempt; query or stop that child before retrying standalone execution`
-        );
-      }
-      return { ok: true, mode: request.mode, completionPlan: null, error: null };
-    } catch (error) {
-      return failure(
-        request.mode,
-        'ORCHESTRATION_STATE_INVALID',
-        error instanceof Error ? error.message : String(error)
-      );
-    }
+    return { ok: true, mode: request.mode, completionPlan: null, error: null };
   }
 
   if (request.agent) {
@@ -98,7 +72,6 @@ function validateLifecycleExecution(
   request: LifecycleExecutionRequest,
   options: Readonly<{
     repoRoot?: string;
-    discoverCurrentRun?: (run: CurrentRun) => CurrentRunDiscovery;
     now?: () => string;
   }> = {}
 ): LifecycleExecutionResult {

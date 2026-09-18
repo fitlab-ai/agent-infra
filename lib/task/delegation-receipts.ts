@@ -108,13 +108,6 @@ function exactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value;
 }
 
-function validCodexBuildMetadata(value: Readonly<Record<string, unknown>>): boolean {
-  return Number.isSafeInteger(value.protocolVersion) && (value.protocolVersion as number) > 0
-    && exactText(value.packageVersion)
-    && exactText(value.internalExecutableBuildHash)
-    && exactText(value.lifecycleContractHash);
-}
-
 function nullableText(value: unknown): value is string | null {
   return value === null || exactText(value);
 }
@@ -181,52 +174,6 @@ function isDelegationHostEvidence(value: unknown): value is DelegationHostEviden
     && exactText(value.spawnObservedAt)
     && nullableText(value.controllerInstanceDigest)
     && nullableText(value.controlGeneration);
-}
-
-function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
-  const provenance = receipt.lifecycleProvenance;
-  if (!provenance) return false;
-  const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status)
-    || (receipt.status === 'aborted' && receipt.activatedAt !== null);
-  if (!activated) return receipt.hostEvidence === null;
-  const host = receipt.hostEvidence;
-  if (
-    host?.kind !== 'codex-lifecycle-v2'
-    || host.protocolVersion !== provenance.protocolVersion
-    || host.hookDefinitionHash !== provenance.hookDefinitionHash
-    || host.hookSource !== provenance.hookSource
-    || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
-    || host.hookSourceHash !== provenance.hookSourceHash
-    || host.capabilitySessionId !== provenance.capabilitySessionId
-    || host.capabilityTurnId !== provenance.capabilityTurnId
-    || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
-    || host.controlGeneration !== provenance.controlGeneration
-    || receipt.parentId !== provenance.capabilitySessionId
-    || host.spawnToolUseId === provenance.capabilityToolUseId
-  ) return false;
-  const spawnObservedAt = Date.parse(host.spawnObservedAt ?? '');
-  const spawnDispatchedAt = Date.parse(receipt.spawnDispatchedAt ?? '');
-  const activationDeadlineAt = Date.parse(receipt.activationDeadlineAt ?? '');
-  if (
-    !Number.isFinite(spawnObservedAt)
-    || !Number.isFinite(spawnDispatchedAt)
-    || !Number.isFinite(activationDeadlineAt)
-    || spawnObservedAt < spawnDispatchedAt
-    || spawnObservedAt > activationDeadlineAt
-  ) return false;
-  if (['sealed', 'consumed'].includes(receipt.status)) {
-    return Number.isSafeInteger(host.stopRevision)
-      && (host.stopRevision as number) > host.startRevision
-      && host.consumer === receipt.id
-      && exactText(host.consumedAt);
-  }
-  if (receipt.status === 'aborted') {
-    return Number.isSafeInteger(host.stopRevision)
-      && (host.stopRevision as number) > host.startRevision
-      && host.consumer === `lifecycle-recovery:${receipt.taskId}:${receipt.id}`
-      && exactText(host.consumedAt);
-  }
-  return host.stopRevision === null && host.consumer === null && host.consumedAt === null;
 }
 
 const RECEIPT_KEYS = [
@@ -366,8 +313,15 @@ function isDelegationReceipt(value: unknown): value is DelegationReceipt {
     && nullableText(value.consumedAt);
   if (!structurallyValid) return false;
   const receipt = value as unknown as DelegationReceipt;
-  return hasStatusBoundEvidence(receipt)
-    && (receipt.client !== 'codex' || hasCurrentCodexEvidence(receipt));
+  if (!hasStatusBoundEvidence(receipt)) return false;
+  const host = receipt.hostEvidence;
+  if (receipt.client === 'codex' && receipt.activatedAt !== null) {
+    if (host?.kind !== 'codex-lifecycle-v2' || host.capabilitySessionId !== receipt.parentId) return false;
+    if (['sealed', 'consumed'].includes(receipt.status)) {
+      return Number.isSafeInteger(host.stopRevision) && host.stopRevision! > host.startRevision;
+    }
+  }
+  return true;
 }
 
 const MANAGED_AGENTS = {
@@ -550,30 +504,9 @@ function activateDelegation(
       || event.hostEvidence.startRevision < 1
     )
   ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex start evidence reference is invalid');
-  if (event.hostEvidence?.kind === 'codex-lifecycle-v2') {
-    const expected = receipt.lifecycleProvenance;
-    const spawnObservedAt = Date.parse(event.hostEvidence.spawnObservedAt ?? '');
-    const spawnDispatchedAt = Date.parse(receipt.spawnDispatchedAt);
-    const activationDeadlineAt = Date.parse(receipt.activationDeadlineAt);
-    if (
-      !expected
-      || event.hostEvidence.protocolVersion !== expected.protocolVersion
-      || event.hostEvidence.hookDefinitionHash !== expected.hookDefinitionHash
-      || event.hostEvidence.hookSource !== expected.hookSource
-      || event.hostEvidence.hookSourcePathDigest !== expected.hookSourcePathDigest
-      || event.hostEvidence.hookSourceHash !== expected.hookSourceHash
-      || event.hostEvidence.capabilitySessionId !== expected.capabilitySessionId
-      || event.hostEvidence.capabilityTurnId !== expected.capabilityTurnId
-      || !event.hostEvidence.spawnToolUseId?.trim()
-      || event.hostEvidence.spawnToolUseId === expected.capabilityToolUseId
-      || !Number.isFinite(spawnObservedAt)
-      || spawnObservedAt < spawnDispatchedAt
-      || spawnObservedAt > activationDeadlineAt
-      || event.parentId !== expected.capabilitySessionId
-      || (event.hostEvidence.controllerInstanceDigest ?? null) !== expected.controllerInstanceDigest
-      || (event.hostEvidence.controlGeneration ?? null) !== expected.controlGeneration
-      || !validCodexBuildMetadata(event.hostEvidence)
-    ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex lifecycle provenance does not match the prepared receipt');
+  if (event.hostEvidence?.kind === 'codex-lifecycle-v2'
+    && event.hostEvidence.capabilitySessionId !== event.parentId) {
+    return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex start evidence does not match the observed parent');
   }
   return { ok: true, receipt: Object.freeze({
     ...receipt,

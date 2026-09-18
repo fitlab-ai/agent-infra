@@ -5,18 +5,18 @@
 - The orchestrator only routes and delegates. Stage skills remain the single source of truth for behavior and artifacts.
 - Every stage and rework round uses a fresh executor. Every review uses a fresh reviewer; follow-up reuse is forbidden.
 - A reviewer may only write its review artifact and core-generated task metadata. Business-code, HEAD, or index changes invalidate the receipt.
-- An active run has one pending delegation. The child must pass the activation barrier before any stage side effect. Missing, late, mismatched, forked, replayed, hook-less, or drifted evidence pauses the run (on the claude-code path, missing or mismatched model/effort evidence, and fork/spawn-mode evidence this host structurally does not provide, follow the recording rules in `.agents/skills/run-task/reference/host-validation.md` instead and are exempt from this; missing or mismatched `parentId`/`childId` still pauses). Cross-root package/build/contract or hook/profile content drift is a deliverable warning; the current receipt's hook/evidence binding remains hard.
+- An active run has one pending delegation. Keep the stage associated with the observed child and report actual start and terminal failures.
 - The first release ends after one existing safely gated `commit`; it does not create a PR, monitor checks, or complete the task.
 
-## Recovery
+## Current Execution Records
 
-`orchestration.json` is the detailed state source. A current run persists complete policy, append-only recovery, build/contract/hook-source/controller provenance, and activation monotonic timestamps. Readers accept only the complete structure emitted by the current writer; unknown fields, missing fields, invalid provenance, and old runs fail closed without rewriting. If the state cannot be recognized, preserve the file, advise rebuilding the sandbox or manually repairing it, do not migrate it, and do not create a follow-up task. Finish or clear every active run before upgrading agent-infra. An expired prepared orphan may be explicitly recovered only with the exact task fingerprint, no consumed authorization, and no matching unconsumed active lifecycle evidence.
+`orchestration.json` records stages, model policy, child identity, and actual outcomes. Records use the current structure; trusted local operators may correct them and rerun validation. Existing task write locks and atomic writes protect updates.
 
-## Codex Host and Capability
+## Codex Host
 
-- Direct-host accepts only trusted project or managed lifecycle hooks. A task-bound sandbox requires a controlled nested controller and isolated `CODEX_HOME`; only user hooks bound to that controller context are accepted. Ordinary user/plugin hooks are not evidence. The actual hook/profile used by the run is the source of record; content drift is reported as a warning with rebuild guidance.
-- The controller starts a nested loop only after control generation, task binding, protocol version, profiles, and hook discovery pass. Build/contract and content drift is reported as a structured warning with rebuild guidance instead of blocking natural evolution. Both bypass flags are restricted to this task-bound launch path.
-- Every prepare arms a one-use capability attested by the current loop's real PostToolUse. Atomic consumption binds task/session/build/controller and retains only a redacted tombstone.
+- Use native spawn, wait, and App Server results from the current host; forward task operations through the existing broker.
+- Prepare validates the current task, model policy, and host preflight. Start and terminal records associate observed parent/child identity; failure must not be recorded as success.
+- Local execution does not require capability, controller attestation, or one-use consumption authority. Do not add automatic child discovery, spawn under a new lock protocol, orphan recovery, or a dedicated recovery protocol.
 
 ## Model Policy
 

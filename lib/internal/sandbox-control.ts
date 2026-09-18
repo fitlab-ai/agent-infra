@@ -1,11 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import {
   recoverSandboxControl,
   requestSandboxControl,
   requestSandboxTaskFinalization,
-  requestSandboxTaskControl,
   requestSandboxTaskWorkflow,
   resolveVisibleActiveShortId,
   SandboxControlClientError
@@ -13,129 +9,9 @@ import {
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import { serveSandboxControl } from '../sandbox/control/server.ts';
 import { runSandboxControlExecutor } from '../sandbox/control/executor.ts';
-import {
-  controllerProofFromContext,
-  verifyCodexSandboxControllerContextWithWarnings
-} from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 import { parseTaskCreateResult, taskCreateExitCode } from '../task/create-service.ts';
 import { createTaskWorkflowRequest } from '../sandbox/control/task-workflow.ts';
-import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import { routeOrchestration } from '../task/orchestration.ts';
-import { parseArtifactName } from '../task/artifact-name.ts';
-import type { LifecycleAuthorityRequestV1 } from '../task/control-authority.ts';
-
-function valueAfter(args: readonly string[], flag: string): string | undefined {
-  for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === flag) return args[index + 1];
-    if (args[index]?.startsWith(`${flag}=`)) return args[index]!.slice(flag.length + 1);
-  }
-  return undefined;
-}
-
-function withoutValue(args: readonly string[], flag: string): string[] {
-  const result: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === flag) { index += 1; continue; }
-    if (args[index]?.startsWith(`${flag}=`)) continue;
-    result.push(args[index]!);
-  }
-  return result;
-}
-
-function lifecycleIds(authorityRef: string, taskId: string): Readonly<{ operationId: string; lifecycleRequestId: string }> {
-  const digest = (label: string) => createHash('sha256')
-    .update(`${label}\0${taskId}\0${authorityRef}`, 'utf8')
-    .digest('hex');
-  return { operationId: digest('operation'), lifecycleRequestId: digest('lifecycle-request') };
-}
-
-function lifecycleAuthorityIdentity(
-  authorityRef: string,
-  taskId: string,
-  requestId: string,
-  phase: LifecycleAuthorityRequestV1['phase'],
-  family: LifecycleAuthorityRequestV1['family'],
-  artifact: string,
-  round: number
-): LifecycleAuthorityRequestV1 | undefined {
-  const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-  if (!authorityRef || !contextPath) return undefined;
-  const routed = verifyCodexSandboxControllerContextWithWarnings(contextPath, { repoRoot: process.cwd() });
-  const buildIdentity = computeLifecycleBuildIdentity(process.cwd());
-  const hookDefinitionHash = createHash('sha256')
-    .update(readFileSync(path.join(process.cwd(), '.codex', 'hooks.json')))
-    .digest('hex');
-  const ids = lifecycleIds(authorityRef, taskId);
-  return {
-    version: 1,
-    requestId,
-    operationId: ids.operationId,
-    phase,
-    taskId,
-    family,
-    artifact,
-    round,
-    lifecycleRequestId: ids.lifecycleRequestId,
-    authorityRef,
-    expectedControlGeneration: routed.context.controlGeneration,
-    expectedControllerInstanceDigest: routed.context.controllerInstanceDigest,
-    expectedBuildIdentityDigest: createHash('sha256').update(JSON.stringify(buildIdentity)).digest('hex'),
-    expectedHookDefinitionHash: hookDefinitionHash
-  };
-}
-
-function lifecycleAuthoritySelector(args: readonly string[]): LifecycleAuthorityRequestV1 | undefined {
-  if (!isCanonicalCodexPrepare(args)) return undefined;
-  const authorityRef = valueAfter(args, '--capability-ref');
-  const taskId = args[0];
-  if (!authorityRef || !taskId) return undefined;
-  const routed = routeOrchestration(taskId);
-  if (!routed.next || !['analysis', 'plan', 'code'].includes(routed.next.stage)) return undefined;
-  return lifecycleAuthorityIdentity(
-    authorityRef,
-    taskId,
-    randomUUID(),
-    'orchestration.prepare',
-    routed.next.stage === 'analysis' ? 'analysis' : routed.next.stage === 'plan' ? 'plan' : 'code',
-    routed.next.artifact,
-    routed.next.round
-  );
-}
-
-function lifecycleWorkflowAuthoritySelector(
-  originalArgs: readonly string[],
-  workflow: ReturnType<typeof createTaskWorkflowRequest>
-): LifecycleAuthorityRequestV1 | undefined {
-  const authorityRef = valueAfter(originalArgs, '--capability-ref');
-  if (!authorityRef) return undefined;
-  if (workflow.operation === 'artifact-finalize-local') {
-    const family = valueAfter(workflow.args, '--family');
-    const artifact = valueAfter(workflow.args, '--artifact');
-    const parsed = artifact ? parseArtifactName(artifact) : null;
-    if ((family !== 'analysis' && family !== 'plan' && family !== 'code')
-      || !parsed || parsed.family !== family) return undefined;
-    return lifecycleAuthorityIdentity(authorityRef, workflow.taskId, workflow.id,
-      'artifact.finalize-local', family, artifact!, parsed.round);
-  }
-  if (workflow.operation !== 'event') return undefined;
-  const completed = /^(analysis|plan|code)\.completed$/u.exec(workflow.args[1] ?? '');
-  const artifact = valueAfter(workflow.args, '--artifact');
-  const parsed = artifact ? parseArtifactName(artifact) : null;
-  if (!completed || !parsed || parsed.family !== completed[1]) return undefined;
-  return lifecycleAuthorityIdentity(authorityRef, workflow.taskId, workflow.id,
-    'task-event.completed', completed[1] as LifecycleAuthorityRequestV1['family'], artifact!, parsed.round);
-}
-
-function isCanonicalCodexPrepare(args: readonly string[]): boolean {
-  if (args[1] !== 'prepare') return false;
-  const clients: string[] = [];
-  for (let index = 2; index < args.length; index += 1) {
-    if (args[index] === '--client') clients.push(args[index + 1] ?? '');
-    else if (args[index]?.startsWith('--client=')) clients.push(args[index]!.slice('--client='.length));
-  }
-  return clients.length === 1 && clients[0] === 'codex';
-}
 
 type FinalizationStatus = 'completed' | 'failed' | 'blocked' | 'unknown';
 
@@ -274,7 +150,7 @@ async function sandboxControl(args: string[]): Promise<void> {
       }
       let workflow;
       try {
-        const args = withoutValue(commandArgs.slice(1), '--capability-ref');
+        const args = commandArgs.slice(1);
         if (/^\d+$/.test(args[0] ?? '')) {
           const resolved = resolveVisibleActiveShortId(args[0]!);
           if (resolved !== taskId) throw new Error('SANDBOX_TASK_REF_MISMATCH');
@@ -289,11 +165,7 @@ async function sandboxControl(args: string[]): Promise<void> {
       }
       let response;
       try {
-        const authority = lifecycleWorkflowAuthoritySelector(commandArgs, workflow);
-        response = requestSandboxTaskWorkflow({
-          workflow,
-          ...(authority ? { authority } : {})
-        });
+        response = requestSandboxTaskWorkflow({ workflow });
       }
       catch (error) {
         if (!(error instanceof SandboxControlClientError)) throw error;
@@ -308,21 +180,7 @@ async function sandboxControl(args: string[]): Promise<void> {
     }
     let response;
     try {
-      if (family === 'task-orchestration' && isCanonicalCodexPrepare(commandArgs)) {
-        const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-        const proof = contextPath
-          ? controllerProofFromContext(verifyCodexSandboxControllerContextWithWarnings(contextPath).context)
-          : null;
-        const authority = lifecycleAuthoritySelector(commandArgs);
-        response = requestSandboxTaskControl({
-          family,
-          args: commandArgs,
-          controllerProof: authority ? null : proof,
-          ...(authority ? { authority } : {})
-        });
-      } else {
-        response = requestSandboxControl({ family, args: commandArgs });
-      }
+      response = requestSandboxControl({ family, args: commandArgs });
     } catch (error) {
       if (!(error instanceof SandboxControlClientError)) throw error;
       writeClientError(error);

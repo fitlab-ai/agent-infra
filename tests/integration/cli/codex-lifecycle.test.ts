@@ -12,7 +12,6 @@ import {
   sandboxControlSafeEnv,
   writeNodeCommandShim
 } from '../../helpers.ts';
-import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
 import {
   activateCodexOrchestrationDelegation,
@@ -279,17 +278,6 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
     internalExecutableBuildHash: 'a'.repeat(64),
     lifecycleContractHash: 'b'.repeat(64)
   } as const;
-  const controller = { instanceDigest: 'e'.repeat(64), controlGeneration: 'generation-1' } as const;
-  const capabilityStore = createCodexCapabilityStore({
-    root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-capabilities'),
-    reference: () => 'capability-reference'
-  });
-  const armed = capabilityStore.arm({ taskId, buildIdentity, controller });
-  capabilityStore.attestByReference({
-    capabilityRef: armed.capabilityRef,
-    sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'capability-tool',
-    hookDefinitionHash, buildIdentity, controller
-  });
   const preflight = async () => ({
     cliVersion: '0.147.0', hookDefinitionHash, staticReady: true as const,
     discoveredHooks: [], runtimeLiveness: false, diagnostics: [],
@@ -300,12 +288,9 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
   });
   await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'model', requestedReasoningEffort: 'high',
-    capabilityRef: armed.capabilityRef
   }, {
     repoRoot: root,
     buildIdentity,
-    controllerBinding: controller,
-    capabilityStore,
     preflight,
     orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
   });
@@ -333,7 +318,6 @@ test('Codex SubagentStop bridge records stop before parent reconciliation seals 
   const activated = await activateCodexOrchestrationDelegation('child', {
     repoRoot: root,
     store,
-    controllerBinding: controller,
     buildIdentity,
     preflight,
     resolveThread: async () => ({
