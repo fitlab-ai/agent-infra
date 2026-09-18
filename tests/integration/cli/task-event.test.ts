@@ -841,7 +841,7 @@ test('standalone completion ignores a current orchestration run without a pendin
   assert.deepEqual(fs.readFileSync(path.join(f.dir, 'orchestration.json')), runBefore);
 });
 
-test('standalone completion requires child discovery for a running delegation', () => {
+test('standalone completion ignores a legacy delegation receipt without a current child attempt', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
@@ -860,8 +860,8 @@ test('standalone completion requires child discovery for a running delegation', 
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')
   ]);
 
-  assert.equal(completed.status, 1);
-  assert.match(completed.stdout, /LIVE_CHILD_DISCOVERY_REQUIRED/);
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
   assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
@@ -1478,7 +1478,7 @@ test('completed approved review rejects stale finding counts after the ledger ch
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
 });
 
-test('review completion requires a new started attempt after completion', () => {
+test('review completion replays the same current result without another activity entry', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);
   const finalized = finalizeReview(f, scenario);
@@ -1488,8 +1488,8 @@ test('review completion requires a new started attempt after completion', () => 
   assert.equal(first.status, 0, first.stderr || first.stdout);
   const beforeReplay = fs.readFileSync(f.file);
   const replayed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
-  assert.equal(replayed.status, 1);
-  assert.match(replayed.stdout, /review started input context is missing/);
+  assert.equal(replayed.status, 0, replayed.stderr || replayed.stdout);
+  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
 });
 

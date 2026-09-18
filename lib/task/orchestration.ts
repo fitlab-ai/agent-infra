@@ -51,6 +51,7 @@ import type { RepositorySnapshot } from './workspace-snapshot.ts';
 import type { WorkspaceSnapshotContext } from './workspace-snapshot.ts';
 import { assertGitRepositoryBinding } from '../git/worktree-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { observeCurrentRun, readCurrentRun, startCurrentRun } from './current-run.ts';
 import { hasActiveCodexLifecycleEvidence } from '../agent-clients/adapters/codex-lifecycle/store.ts';
 import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead } from './review-fingerprint.ts';
@@ -924,6 +925,20 @@ function prepareOrchestrationDelegationUnlocked(
     nextStage: next.stage,
     pendingDelegation: receipt
   });
+  const startedAt = (options.now ?? (() => new Date().toISOString()))();
+  startCurrentRun(resolved.taskDir, {
+    taskId: resolved.taskId,
+    runId: run.runId,
+    mode: 'orchestrated',
+    stage: next.stage,
+    round: next.round,
+    artifact: next.artifact,
+    role: next.role,
+    client: input.client,
+    startedAt,
+    lastObservedAt: startedAt,
+    spawnAttemptId: receipt.id
+  });
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next, error: null };
 }
@@ -1244,6 +1259,10 @@ function sealMatchingOrchestrationDelegationWithHostEvidence(
     const resolved = resolveTaskRef(matched.taskId, { repoRoot });
     if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
     const updated = withUpdatedRun(matched.run, { pendingDelegation: sealed.receipt }, options.now);
+    const current = readCurrentRun(resolved.taskDir);
+    if (current && current.childId === event.childId) {
+      observeCurrentRun(resolved.taskDir, current, { status: 'terminal' }, (options.now ?? (() => new Date().toISOString()))());
+    }
     saveRun(resolved.taskDir, updated);
     return { status: 'running', changed: true, taskId: matched.taskId, run: updated, next: null, error: null };
   } catch (error) {
@@ -1306,6 +1325,10 @@ function activateOrchestrationDelegation(
     return pauseOrchestration(taskRef, result.code, result.message, true, options);
   }
   const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
+  const current = readCurrentRun(resolved.taskDir);
+  if (current && current.spawnAttemptId === run.pendingDelegation.id) {
+    observeCurrentRun(resolved.taskDir, current, { status: 'running', childId: event.childId }, (options.now ?? (() => new Date().toISOString()))());
+  }
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
 }
@@ -1605,6 +1628,10 @@ function sealOrchestrationDelegation(
   const result = sealDelegation(run.pendingDelegation, event, { now: options.now });
   if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
   const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
+  const current = readCurrentRun(resolved.taskDir);
+  if (current && current.childId === event.childId) {
+    observeCurrentRun(resolved.taskDir, current, { status: 'terminal' }, (options.now ?? (() => new Date().toISOString()))());
+  }
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
 }

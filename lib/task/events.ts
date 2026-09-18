@@ -595,15 +595,25 @@ function reworkIntentMutationForCompletion(
 }
 
 function buildCompletionReceipt(
+  content: string,
   taskDir: string,
   family: EventFamily,
   artifact: ArtifactIdentity,
   completedAt: string,
   frontmatter: Record<string, unknown>
 ): { ok: true; receipt: ArtifactReceipt } | { ok: false; message: string } | null {
+  const existing = (() => {
+    try {
+      return parseArtifactReceipts(content).rows.find((receipt) => receipt.output === artifact.name) ?? null;
+    } catch {
+      return null;
+    }
+  })();
   if (family === 'code') {
-    const startedInput = typeof frontmatter.code_input_artifact === 'string' ? frontmatter.code_input_artifact : '';
-    const startedSha256 = typeof frontmatter.code_input_sha256 === 'string' ? frontmatter.code_input_sha256 : '';
+    const startedInput = typeof frontmatter.code_input_artifact === 'string'
+      ? frontmatter.code_input_artifact : existing?.input ?? '';
+    const startedSha256 = typeof frontmatter.code_input_sha256 === 'string'
+      ? frontmatter.code_input_sha256 : existing?.inputSha256 ?? '';
     if (!startedInput || !startedSha256) return { ok: false, message: 'code.started plan input context is missing' };
     const plan = inspectArtifactDirectory(taskDir, 'plan');
     if (plan.status !== 'ready' || !plan.latest || plan.latest.name !== startedInput) {
@@ -616,7 +626,7 @@ function buildCompletionReceipt(
         ok: true,
         receipt: {
           event: 'code.completed', output: artifact.name, input: startedInput,
-          inputSha256, completedAt
+          inputSha256, completedAt: existing?.completedAt ?? completedAt
         }
       };
     } catch (error) {
@@ -625,8 +635,10 @@ function buildCompletionReceipt(
   }
   if (!family.startsWith('review-')) return null;
   const expectedFamily = reviewInputFamily(family);
-  const startedInput = typeof frontmatter.review_input_artifact === 'string' ? frontmatter.review_input_artifact : '';
-  const startedSha256 = typeof frontmatter.review_input_sha256 === 'string' ? frontmatter.review_input_sha256 : '';
+  const startedInput = typeof frontmatter.review_input_artifact === 'string'
+    ? frontmatter.review_input_artifact : existing?.input ?? '';
+  const startedSha256 = typeof frontmatter.review_input_sha256 === 'string'
+    ? frontmatter.review_input_sha256 : existing?.inputSha256 ?? '';
   if (!startedInput || !startedSha256) return { ok: false, message: 'review started input context is missing' };
   const current = inspectArtifactDirectory(taskDir, expectedFamily);
   if (current.status !== 'ready' || !current.latest || current.latest.name !== startedInput) {
@@ -644,7 +656,7 @@ function buildCompletionReceipt(
       ok: true,
       receipt: {
         event, output: artifact.name, input: startedInput,
-        inputSha256, completedAt
+        inputSha256, completedAt: existing?.completedAt ?? completedAt
       }
     };
   } catch (error) {
@@ -733,8 +745,10 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   if (!manual && openRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity has more than one open attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
   const row = openRows.at(-1);
   const exactDone = completedRows.find((item) => item.note === eventIdentity.note);
-  if (eventIdentity.phase === 'completed' && exactDone && eventIdentity.family === 'code') {
-    const artifact = normalized.artifact ? validateCompletedArtifact(resolved.taskDir, FAMILY.code.artifact, normalized.artifact, normalized.round) : null;
+  if (eventIdentity.phase === 'completed' && exactDone) {
+    const artifact = normalized.artifact
+      ? validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact, normalized.round)
+      : null;
     if (artifact?.ok
       && sha256File(artifact.artifact.path) === normalized.artifactSha256
       && canonicalSemanticDigest(fs.readFileSync(artifact.artifact.path, 'utf8')) === normalized.semanticDigest) {
@@ -871,6 +885,33 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     }
     orchestrationCompletion = execution.completionPlan;
   }
+  if (eventIdentity.phase === 'completed' && completedArtifact) {
+    try {
+      const existingReceipt = parseArtifactReceipts(content).rows.find((receipt) => (
+        receipt.event === normalized.event && receipt.output === completedArtifact.name
+      ));
+      if (existingReceipt
+        && (normalized.artifactSha256 === undefined || sha256File(completedArtifact.path) === normalized.artifactSha256)
+        && (normalized.semanticDigest === undefined
+          || canonicalSemanticDigest(fs.readFileSync(completedArtifact.path, 'utf8')) === normalized.semanticDigest)) {
+        return successNoOp(
+          normalized,
+          resolved.taskId,
+          resolved.taskMdPath,
+          currentStep,
+          eventIdentity,
+          existingReceipt.completedAt,
+          frontmatter,
+          artifactContext
+        );
+      }
+    } catch (error) {
+      return failed(normalized, {
+        code: 'EVENT_ARTIFACT_CONFLICT',
+        message: `cannot inspect current completion receipt: ${error instanceof Error ? error.message : String(error)}`
+      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+    }
+  }
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
   catch (error) { return failed(normalized, { code: 'METADATA_CAPTURE_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
@@ -878,7 +919,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   let completionInvalidation: ReturnType<typeof invalidationMutation> | null = null;
   let completionRework: ReturnType<typeof reworkIntentMutation> | null = null;
   if (eventIdentity.phase === 'completed' && completedArtifact) {
-    const receipt = buildCompletionReceipt(resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter);
+    const receipt = buildCompletionReceipt(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter);
     if (receipt && !receipt.ok) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: receipt.message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
