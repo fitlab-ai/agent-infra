@@ -58,6 +58,7 @@ function taskFixture(): { root: string; taskDir: string } {
       verification: 'done',
       summary: 'done',
       postSummaryVerification: 'done',
+      summarySha256: null,
       warningProjection: 'done',
       warnings: [],
       updatedAt: '2026-01-01T00:00:00.000Z',

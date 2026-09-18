@@ -604,9 +604,9 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       const response = client.json<any>(['api', '--paginate', '--slurp', `repos/${repository(context)}/issues/${number}/comments?per_page=100`], { cwd: context.workingDirectory });
       if (!response.ok) return response;
       const values = Array.isArray(response.value) ? response.value.flatMap((entry: any) => Array.isArray(entry) ? entry : [entry]) : [];
-      const comments = values.filter((entry: any) => entry && entry.id !== undefined);
+      const comments = values.filter((entry: any) => entry && typeof entry === 'object');
       let previous = 0;
-      const ordered = comments.every((entry: any) => {
+      const ordered = comments.length === values.length && comments.every((entry: any) => {
         const id = Number(entry.id);
         if (!Number.isSafeInteger(id) || id <= previous) return false;
         previous = id;

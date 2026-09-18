@@ -1779,7 +1779,6 @@ test("platform workflow docs delegate comment mechanics to internal intents", ()
     "code-task": "platform-comment sync {task-id}",
     "complete-manual-validation": "platform-comment sync {task-id}",
     "run-manual-validation": "platform-comment sync {task-id}",
-    "complete-task": "platform-comment sync {task-id}",
     "create-task": "platform-comment sync {task-id}",
     "import-issue": "platform-comment list --issue {issue-token}",
     "plan-task": "platform-comment sync {task-id}",

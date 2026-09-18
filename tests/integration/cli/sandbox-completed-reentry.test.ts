@@ -23,7 +23,7 @@ function fixture(t: TestContext) {
   const generation = 'fixture-generation';
   const requestId = 'a'.repeat(32);
   const receipt = { version: 3, taskId, intent: 'complete', receiptId: 'fixture-receipt', revision: 3,
-    lifecycle: 'done', taskComment: 'skipped', verification: 'done', summary: 'skipped', postSummaryVerification: 'skipped', warningProjection: 'done', warnings: [],
+    lifecycle: 'done', taskComment: 'skipped', verification: 'done', summary: 'skipped', postSummaryVerification: 'skipped', summarySha256: null, warningProjection: 'done', warnings: [],
     controlBinding: { generation, requestId }, updatedAt: new Date().toISOString(), lastError: null };
   const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', taskId + '.json');
   fs.mkdirSync(path.dirname(receiptPath), { recursive: true });

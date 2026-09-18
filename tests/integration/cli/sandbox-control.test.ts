@@ -2800,7 +2800,7 @@ async function runFinalizationRecoveryCase(
       fs.mkdirSync(receiptDir, { recursive: true });
       fs.writeFileSync(path.join(receiptDir, `${taskId}.json`), `${JSON.stringify({
         version: 3, taskId, intent: 'complete', receiptId: `receipt-${label}`, revision: 1,
-        lifecycle: 'done', taskComment: label === 'warnings' ? 'pending' : 'done', verification: 'done', summary: 'done', postSummaryVerification: 'done',
+        lifecycle: 'done', taskComment: label === 'warnings' ? 'pending' : 'done', verification: 'done', summary: 'done', postSummaryVerification: 'done', summarySha256: null,
         warningProjection: 'done',
         warnings: label === 'warnings' ? [{
           code: 'COMMENT_SYNC_FAILED', message: 'comment sync needs retry', retryable: true,

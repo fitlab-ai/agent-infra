@@ -50,6 +50,8 @@ type SyncOptions = {
   backfill?: boolean;
   client?: PlatformClient;
   runtimeVersion?: string;
+  summaryAuthorization?: { sha256: string };
+  verifyOnly?: boolean;
 };
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
@@ -480,6 +482,14 @@ function summaryPosition(comments: RemoteComment[], taskId: string): { ok: boole
   return { ok: managed.every((comment) => sequence >= comment.createdSequence!), known: true, summary: summary[0]! };
 }
 
+function summaryDigest(comment: RemoteComment): string {
+  const body = normalizeCommentContent(comment.body)
+    .replace(/^<!-- sync-issue:[^\n]+:summary -->\n## [^\n]+\n\n> [^\n]+\n\n/u, '')
+    .replace(/^<details><summary>恢复元数据<\/summary>[\s\S]*?<\/details>\n\n/u, '')
+    .replace(/\n---\n\*[^\n]*\*$/u, '');
+  return createHash('sha256').update(body).digest('hex');
+}
+
 async function listedComments(provider: any, loaded: any, parent: ReturnType<typeof taskIssueIdentity>): Promise<any> {
   return provider.comments?.list
     ? provider.comments.list({ context: providerOperationContext(loaded), parent }).then((response: any) => response.ok
@@ -597,6 +607,26 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     }
   }
 
+  if (options.verifyOnly) {
+    if (options.kind !== 'summary' || !options.summaryAuthorization) {
+      return platformResult('failed', {
+        ...contextFields(context), resource: { kind: 'issue', number: issue },
+        error: { code: 'SUMMARY_VERIFICATION_INVALID', message: 'summary verification requires durable authorization', retryable: false }
+      });
+    }
+    const position = summaryPosition(listed.value, resolved.taskId);
+    if (!position.ok || !position.summary || summaryDigest(position.summary) !== options.summaryAuthorization.sha256) {
+      return platformResult('failed', {
+        ...contextFields(context), resource: { kind: 'issue', number: issue },
+        error: { code: 'SUMMARY_VERIFICATION_FAILED', message: 'summary marker, body digest, or managed comment order is invalid', retryable: true }
+      });
+    }
+    return platformResult('no-op', {
+      ...contextFields(context), changed: false, resource: { kind: 'issue', number: issue },
+      comment: { kind: options.kind, marker: desired[0]!.marker, ids: [position.summary.id], parts: 1 }, error: null
+    });
+  }
+
 
   // Backfill only supplies missing artifact comments; valid existing marker sets stay untouched.
   if (options.kind === 'artifact' && options.backfill && existing.length > 0) {
@@ -689,6 +719,14 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       });
     }
     if (!position.ok && position.summary) {
+      const owner = position.summary.user?.login;
+      if (!options.summaryAuthorization || options.summaryAuthorization.sha256 !== createHash('sha256').update(options.body ?? '').digest('hex')
+        || !owner || owner !== context.platform.currentUser) {
+        return platformResult('failed', {
+          ...contextFields(context), resource: { kind: 'issue', number: issue }, operations,
+          error: { code: 'SUMMARY_REPOSITION_UNAUTHORIZED', message: 'summary reposition requires current finalization authorization and an owned durable summary', retryable: false }
+        });
+      }
       const deleted = loaded.value.provider.comments?.delete
         ? await loaded.value.provider.comments.delete({
           context: providerOperationContext(loaded.value), parent: issueIdentityFromTask,

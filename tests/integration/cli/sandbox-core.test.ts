@@ -411,6 +411,7 @@ function writeCompletedTaskWithConsumedPlan(repoDir: string, taskId: string, bra
     verification: "done",
     summary: "done",
     postSummaryVerification: "done",
+    summarySha256: null,
     warningProjection: "done",
     warnings: [],
     updatedAt: new Date().toISOString(),

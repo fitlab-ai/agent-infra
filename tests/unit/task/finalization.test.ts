@@ -126,7 +126,7 @@ test('host finalization uses the canonical root and makes a successful replay a 
     const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
-    assert.equal(commentCalls, 1);
+    assert.equal(commentCalls, 2);
     assert.equal(verifyCalls, 1);
     assert.equal(second.taskComment?.status, 'no-op');
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
@@ -159,7 +159,7 @@ test('host finalization publishes a staged summary after core verification and c
     const result = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(result.result, 'completed');
-    assert.deepEqual(kinds, ['task', 'summary']);
+    assert.deepEqual(kinds, ['task', 'summary', 'summary']);
     assert.equal(verifyCalls, 2);
     assert.equal(receipt?.summary, 'done');
     assert.equal(receipt?.postSummaryVerification, 'done');
@@ -188,7 +188,7 @@ test('host finalization revalidates canonical steps when the receipt is absent',
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
     assert.equal(second.lifecycle?.status, 'no-op');
-    assert.equal(commentCalls, 2);
+    assert.equal(commentCalls, 4);
     assert.equal(verifyCalls, 2);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
@@ -240,7 +240,7 @@ test('host finalization returns actionable verification gate failures and retrie
     assert.equal(recovered.status, 'completed');
     assert.equal(replay.status, 'completed');
     assert.equal(verifyCalls, 2);
-    assert.equal(commentCalls, 3);
+    assert.equal(commentCalls, 4);
     assert.doesNotMatch(commentSnapshots[0]!, /CHECK_FAILED/);
     assert.match(commentSnapshots[1]!, /\| CHECK_FAILED \| open \|/);
     assert.match(commentSnapshots[2]!, /\| CHECK_FAILED \| resolved \|/);
@@ -272,7 +272,7 @@ test('host finalization retries only the pending terminal steps after a comment 
     assert.equal(first.lifecycle?.status, 'applied');
     assert.equal(first.pendingSteps.includes('task-comment'), true);
     assert.equal(second.status, 'completed');
-    assert.equal(commentCalls, 2);
+    assert.equal(commentCalls, 3);
     assert.equal(verifyCalls, 1);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
     const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
@@ -284,6 +284,10 @@ test('host finalization retries only the pending terminal steps after a comment 
 
 test('host finalization projects every stable warning key for a step before resolving projection', async () => {
   const f = fixture();
+  const staged = 'Delivered summary.\n';
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
+    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+  })}\n`);
   let commentCalls = 0;
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => {
     commentCalls += 1;

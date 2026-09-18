@@ -182,6 +182,24 @@ test('task-artifact refinalizes a changed passed artifact through a new recovery
   assert.notEqual(after.artifactSha256, before.artifactSha256);
 });
 
+test('task-artifact does not accept an invalid artifact that matches a passed recovery journal', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'plan.md');
+  fs.writeFileSync(artifact, localArtifact('plan'));
+
+  const first = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+  assert.equal(first.status, 0, first.stderr);
+  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('```text\n$ git status -s\n```', 'status unavailable'));
+
+  const second = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
+
+  assert.equal(second.status, 1, second.stderr);
+  const result = JSON.parse(second.stdout);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.diagnostics[0].code, 'LOCAL_STATUS_COMMAND_MISSING');
+  assert.ok(result.recovery?.recoveryId);
+});
+
 test('task-artifact finalize-local reports one-line heading diagnostics and revalidates a staged edit', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'analysis.md');

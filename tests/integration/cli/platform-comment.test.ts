@@ -236,7 +236,7 @@ test('stage-summary writes an idempotent durable body and digest for an active t
   }
 });
 
-test('summary sync re-posts an out-of-order owned summary only when comment creation order is provable', () => {
+test('ordinary summary sync refuses to re-post an out-of-order summary without finalization authorization', () => {
   const f = fixture();
   try {
     const bodyPath = path.join(f.root, 'summary.md');
@@ -246,13 +246,12 @@ test('summary sync re-posts an out-of-order owned summary only when comment crea
     assert.equal(runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f).status, 0);
 
     const repaired = runComment(summaryArgs, f);
-    assert.equal(repaired.status, 0, repaired.stderr || repaired.stdout);
+    assert.equal(repaired.status, 1, repaired.stderr || repaired.stdout);
     const output = JSON.parse(repaired.stdout);
-    assert.equal(output.status, 'applied');
-    assert.equal(output.operations.some((item: { reasonCode: string | null }) => item.reasonCode === 'SUMMARY_REPOSITIONED'), true);
+    assert.equal(output.error.code, 'SUMMARY_REPOSITION_UNAUTHORIZED');
     const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
     assert.equal(comments.length, 2);
-    assert.equal(comments.at(-1)?.body.startsWith(`<!-- sync-issue:${f.taskId}:summary -->`), true);
+    assert.equal(comments[0]?.body.startsWith(`<!-- sync-issue:${f.taskId}:summary -->`), true);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
