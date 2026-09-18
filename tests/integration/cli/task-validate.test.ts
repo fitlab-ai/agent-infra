@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 import { gitSafeEnv, initIsolatedGitRepo } from '../../helpers/git.ts';
-import { envWithPrependedPath, sandboxControlSafeEnv, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
+import { envWithPrependedPath, onPlatforms, sandboxControlSafeEnv, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
 import { sandboxControlPaths } from '../../../lib/sandbox/workspace-view.ts';
 import { SANDBOX_CONTROL_STATUS_STALE_MS } from '../../../lib/sandbox/control/protocol.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
@@ -255,6 +255,31 @@ test('snapshot validation runs at the task commit and removes its temporary work
   assert.equal(envelope.result.exitCode, 0);
   const worktrees = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: f.root, encoding: 'utf8', env: gitSafeEnv() });
   assert.equal(worktrees.stdout.match(/^worktree /gm)?.length, 1);
+});
+
+test('snapshot validation completes when global worktree pruning is unavailable', onPlatforms('linux', 'darwin'), (t) => {
+  const f = fixture();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-validate-git-guard-'));
+  t.after(() => {
+    fs.rmSync(binDir, { recursive: true, force: true });
+    fs.rmSync(f.root, { recursive: true, force: true });
+  });
+  const gitGuard = path.join(binDir, 'git');
+  fs.writeFileSync(gitGuard, `#!/bin/sh
+if [ "$1" = "worktree" ] && [ "$2" = "prune" ]; then
+  exit 86
+fi
+exec /usr/bin/git "$@"
+`);
+  fs.chmodSync(gitGuard, 0o755);
+  const env = envWithPrependedPath(gitSafeEnv(), binDir);
+
+  const result = spawnTaskValidate(f.root, env, [
+    f.id, '--scope', 'snapshot', '--format', 'json', '--', process.execPath, '-e', 'process.exit(0)'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.evidence.cleanup, 'completed');
 });
 
 test('explicit branch validation writes a non-recoverable branch-only envelope', (t) => {

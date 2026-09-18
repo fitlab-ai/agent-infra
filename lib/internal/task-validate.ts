@@ -141,11 +141,6 @@ function snapshotValidation(repoRoot: string, commit: string, options: ValidateO
       }
     }
     try {
-      git(repoRoot, ['worktree', 'prune']);
-    } catch (error) {
-      cleanupError ??= error;
-    }
-    try {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     } catch (error) {
       cleanupError ??= error;
