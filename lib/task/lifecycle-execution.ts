@@ -37,11 +37,17 @@ function inspectLifecycleExecution(
   if (!resolved.ok) return failure(request.mode, resolved.code, resolved.message);
   if (request.mode === 'standalone') {
     try {
-      // A persisted delegation is historical workflow state.  It is useful for
-      // diagnostics, but cannot authorize or prohibit a trusted local retry.
-      // Actual concurrent writers are serialized by task-execution-lock at the
-      // mutation boundary.
-      readRun(resolved.taskDir);
+      const run = readRun(resolved.taskDir);
+      // Lock release does not prove that a child has stopped.  A running
+      // orchestration record is current concurrency evidence and must be
+      // resolved by its client before a standalone writer can proceed.
+      if (run?.status === 'running' && run.pendingDelegation) {
+        return failure(
+          request.mode,
+          'LIVE_CHILD_DISCOVERY_REQUIRED',
+          `task ${resolved.taskId} has a running child; query or stop that child before retrying standalone execution`
+        );
+      }
       return { ok: true, mode: request.mode, completionPlan: null, error: null };
     } catch (error) {
       return failure(

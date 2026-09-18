@@ -841,7 +841,7 @@ test('standalone completion ignores a current orchestration run without a pendin
   assert.deepEqual(fs.readFileSync(path.join(f.dir, 'orchestration.json')), runBefore);
 });
 
-test('standalone completion ignores a historical pending delegation', () => {
+test('standalone completion requires child discovery for a running delegation', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
@@ -860,8 +860,8 @@ test('standalone completion ignores a historical pending delegation', () => {
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')
   ]);
 
-  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
-  assert.equal(JSON.parse(completed.stdout).status, 'applied');
+  assert.equal(completed.status, 1);
+  assert.match(completed.stdout, /LIVE_CHILD_DISCOVERY_REQUIRED/);
   assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
@@ -1454,7 +1454,7 @@ test('approved review completion reports an invalid ledger as an invalid task do
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
-test('completed approved review remains a no-op after the ledger changes', () => {
+test('completed approved review rejects stale finding counts after the ledger changes', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);
   const finalized = finalizeReview(f, scenario);
@@ -1473,12 +1473,12 @@ test('completed approved review remains a no-op after the ledger changes', () =>
   const beforeReplay = fs.readFileSync(f.file);
   const replayed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
 
-  assert.equal(replayed.status, 0, replayed.stderr);
-  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+  assert.equal(replayed.status, 1);
+  assert.equal(JSON.parse(replayed.stdout).error.code, 'EVENT_FINDING_COUNT_MISMATCH');
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
 });
 
-test('review completion replays the same current facts without another task write', () => {
+test('review completion requires a new started attempt after completion', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);
   const finalized = finalizeReview(f, scenario);
@@ -1488,8 +1488,8 @@ test('review completion replays the same current facts without another task writ
   assert.equal(first.status, 0, first.stderr || first.stdout);
   const beforeReplay = fs.readFileSync(f.file);
   const replayed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
-  assert.equal(replayed.status, 0, replayed.stderr || replayed.stdout);
-  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+  assert.equal(replayed.status, 1);
+  assert.match(replayed.stdout, /review started input context is missing/);
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
 });
 
@@ -1688,7 +1688,7 @@ test('decision code event clears the review baseline and consumes its input on c
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
     '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4', ...digests
   ]);
-  assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
+  assert.equal(JSON.parse(repeated.stdout).status, 'failed');
 });
 
 test('internal event preserves a human decision in the same task directory', () => {
@@ -1868,7 +1868,6 @@ test('code-r7 completion accepts a directly repaired report', () => {
   assert.equal((afterCompletion.match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\)\*\* by codex — Fixed /gm) ?? []).length, 1);
   assert.equal((afterCompletion.match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\) \[started\]\*\* by codex — started$/gm) ?? []).length, 1);
   const replayed = run(f.root, completedArgs);
-  assert.equal(replayed.status, 0, replayed.stdout || replayed.stderr);
-  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+  assert.equal(replayed.status, 1);
   assert.equal((fs.readFileSync(f.file, 'utf8').match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\)\*\* by codex — Fixed /gm) ?? []).length, 1);
 });

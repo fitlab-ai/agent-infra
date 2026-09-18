@@ -297,7 +297,7 @@ test('review summary finalization replaces only the canonical summary tokens', (
   }
 });
 
-test('review finalization does not treat a done-only historical row as an open round', () => {
+test('review finalization revalidates a done-only current review artifact', () => {
   const f = domainFixture();
   const taskPath = path.join(f.dir, 'task.md');
   const taskContent = fs.readFileSync(taskPath, 'utf8').replace(
@@ -305,8 +305,6 @@ test('review finalization does not treat a done-only historical row as an open r
     '**Review Analysis (Round 1)** by codex — completed'
   );
   fs.writeFileSync(taskPath, taskContent, 'utf8');
-  const before = fs.readFileSync(f.artifactPath, 'utf8');
-
   const result = finalizeReviewSummary(
     {
       taskRef: TASK_ID,
@@ -316,9 +314,7 @@ test('review finalization does not treat a done-only historical row as an open r
     { repoRoot: f.root }
   );
 
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
-  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
+  assert.equal(result.status, 'applied');
 });
 
 test('review finalizer rejects a missing schema pattern before summary mutation', () => {
@@ -338,7 +334,7 @@ test('review finalizer rejects a missing schema pattern before summary mutation'
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });
 
-test('review finalizer does not create a recovery candidate before lifecycle gates pass', () => {
+test('review finalizer validates current content without a recovery candidate', () => {
   const f = domainFixture();
   const taskPath = path.join(f.dir, 'task.md');
   fs.writeFileSync(
@@ -354,8 +350,7 @@ test('review finalizer does not create a recovery candidate before lifecycle gat
   );
 
   assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
-  assert.equal(result.recovery, undefined);
+  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
   assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });

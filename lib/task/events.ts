@@ -728,10 +728,10 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const currentStep = typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '';
   const matchingRows = rows.filter((item) => item.step === eventIdentity.action);
   const manual = eventIdentity.family === 'manual-validation';
-  if (!manual && matchingRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity appears more than once' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
   const openRows = matchingRows.filter((item) => item.started && !item.done);
   const completedRows = matchingRows.filter((item) => item.done);
-  const row = manual ? openRows.at(-1) : matchingRows[0];
+  if (!manual && openRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity has more than one open attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+  const row = openRows.at(-1);
   let completedArtifact: ArtifactIdentity | null = null;
   let reviewContent: string | null = null;
   if (eventIdentity.phase === 'started' && row) {
@@ -744,13 +744,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     }
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, row.started, frontmatter, artifactContext);
   }
-  if (eventIdentity.phase === 'started' && !manual && completedRows.length > 0) return failed(normalized, { code: 'EVENT_ALREADY_COMPLETED', message: 'event identity is already completed' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-  const done = completedRows.find((item) => item.note === eventIdentity.note);
-  if (eventIdentity.phase === 'completed' && done) {
-    return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, done.done, frontmatter, artifactContext);
-  }
-  if (eventIdentity.phase === 'completed' && completedRows.length > 0 && openRows.length === 0) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity is already completed with a different payload' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-  if (eventIdentity.phase === 'completed' && !row?.started && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_START_MISSING')) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires one open matching started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+  if (eventIdentity.phase === 'completed' && !row?.started && completedRows.length === 0 && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_START_MISSING')) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires a started event or an earlier completed attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   if (eventIdentity.phase === 'completed') {
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });

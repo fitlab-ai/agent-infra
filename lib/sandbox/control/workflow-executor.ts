@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import { TASK_WORKFLOW_COMMANDS } from '../../task/workflow-command.ts';
 
@@ -36,6 +37,18 @@ export type TaskWorkflowExecutionOptions = Readonly<{
 
 function executionResult(result: Record<string, unknown>): SandboxControlExecutionResult {
   return { exitCode: result.status === 'failed' || result.status === 'refused' ? 1 : 0, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
+}
+
+function replaceCurrentArtifactAtomically(file: string, content: string): void {
+  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
+    fs.renameSync(temporary, file);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
 }
 
 /** The broker already authorized this host executor; domain operations own validation. */
@@ -124,7 +137,7 @@ export async function executeTaskWorkflow(
         const prepared = prepareReviewSummaryCandidate(input, content, { repoRoot: manifest.repoRoot, lockAlreadyHeld: true });
         if (input.dryRun || prepared.result.status === 'planned') return executionResult(prepared.result);
         if (prepared.result.status === 'failed') return executionResult(prepared.result);
-        if (prepared.result.changed) fs.writeFileSync(path.join(taskDir, input.artifact), prepared.content, 'utf8');
+        if (prepared.result.changed) replaceCurrentArtifactAtomically(path.join(taskDir, input.artifact), prepared.content);
         result = prepared.result;
       }
       publicationCommitted ||= result.changed === true;

@@ -117,7 +117,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
 agent-infra-internal task-artifact {task-id} init --family plan --artifact {plan-artifact}
 ```
 
-骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实方案内容后才能通过完成门禁。finalizer 返回可证明的单个结构错误时，会返回受控 recovery candidate；只能编辑返回的 `candidatePath`，然后使用同一个 `recoveryId` 重跑 `task-artifact {task-id} finalize-local --family plan --artifact {plan-artifact} --recovery-id {recovery-id}`。candidate-only 是协议授权边界，不是操作系统隔离；同 UID 的任意宿主写入者不在本协议的防护承诺内，异常由指纹/状态校验失败关闭。
+骨架只包含身份元数据、稳定 section marker 和必需标题；必须填入真实方案内容后才能通过完成门禁。finalizer 返回结构错误时，直接修正正式产物后重跑 `task-artifact {task-id} finalize-local --family plan --artifact {plan-artifact}`；当前结构、资格和摘要事实是唯一门禁。
 
 创建 `.agents/workspace/active/{task-id}/{plan-artifact}`。
 
@@ -134,7 +134,7 @@ agent-infra-internal task-artifact {task-id} init --family plan --artifact {plan
   agent-infra-internal task-artifact {task-id} finalize-local --family plan --artifact {plan-artifact}
   ```
   - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`；finalizer 已记录对应的一次性本地 provenance intent。
-  - `status=failed` 且返回 recovery context：完成门禁通过后，本次只编辑返回的 `candidatePath` 一次，然后使用同一个 `recoveryId` 完整重跑 finalizer；若仍失败但诊断和指纹均未重复且安全门继续通过，继续下一轮；formal artifact 在 commit 前必须保持不变。
+  - `status=failed`：直接修正正式产物并完整重跑 finalizer；若仍失败且诊断未解决，继续下一轮。
   - recovery candidate 必须与记录的任务、轮次、产物、baseline 和 request identity 匹配；基线冲突、未知状态、无法安全修复、诊断或指纹重复、无进展，或达到共享规则的编辑上限时停止，不发布 completed 事件。
 - 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {plan-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
 
