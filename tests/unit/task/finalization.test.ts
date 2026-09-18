@@ -91,7 +91,7 @@ test('host finalization receipt records the sandbox generation and request bindi
   }
 });
 
-test('host finalization fails closed when an existing receipt has a different sandbox binding', async () => {
+test('host finalization replaces an obsolete local sandbox binding with the current request', async () => {
   const f = fixture();
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
@@ -100,9 +100,8 @@ test('host finalization fails closed when an existing receipt has a different sa
   try {
     assert.equal((await applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, verify), controlBinding: firstBinding })).status, 'completed');
     const replay = await applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, verify), controlBinding: conflictingBinding });
-    assert.equal(replay.status, 'failed');
-    assert.equal(replay.error?.code, 'TASK_FINALIZATION_CONTROL_BINDING_CONFLICT');
-    assert.deepEqual(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.controlBinding, firstBinding);
+    assert.equal(replay.status, 'completed');
+    assert.deepEqual(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.controlBinding, conflictingBinding);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

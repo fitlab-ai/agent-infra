@@ -135,7 +135,7 @@ agent-infra-internal task-artifact {task-id} init --family plan --artifact {plan
   ```
   - `status=passed`：保存本次返回的 `artifactSha256` 和 `semanticDigest`；finalizer 已记录对应的一次性本地 provenance intent。
   - `status=failed`：直接修正正式产物并完整重跑 finalizer；若仍失败且诊断未解决，继续下一轮。
-  - recovery candidate 必须与记录的任务、轮次、产物、baseline 和 request identity 匹配；基线冲突、未知状态、无法安全修复、诊断或指纹重复、无进展，或达到共享规则的编辑上限时停止，不发布 completed 事件。
+  - 当前正式产物发生外部变化、无法安全修复、诊断或指纹重复、无进展，或达到共享规则的编辑上限时停止，不发布 completed 事件。
 - 使用同一次 `status=passed` 返回的摘要执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {plan-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}`，由核心登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `platform_issue_identity`，执行以下同步操作（任一失败则跳过并继续）：

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { executeCommitOperation } from '../../../../lib/task/commit-operation.ts';
+import { checkpointIntentDigest, readCheckpointIntent, writeCheckpointIntent } from '../../../../lib/task/commit-intent.ts';
 import { activateDelegation, dispatchDelegation, prepareDelegation } from '../../../../lib/task/delegation-receipts.ts';
 import { beginOrResumeOrchestration, readRun } from '../../../../lib/task/orchestration.ts';
 
@@ -279,6 +280,52 @@ test('task-bound local delivery creates a checkpoint without touching the remote
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-commit-intents', `${taskId}.json`)), false);
     assert.match(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), /checkpoint_commit: [a-f0-9]{40}/);
     assert.throws(() => git(root, ['show-ref', '--verify', 'refs/remotes/origin/feature']));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound local delivery replaces a stale prepared intent with current Git facts', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000008';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  try {
+    fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '.agents/\n');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
+    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
+    const current = input(root, {
+      taskRef: taskId,
+      agent: 'codex',
+      round: 4,
+      delivery: { mode: 'local' },
+      push: undefined
+    });
+    const staleIdentity = {
+      taskId,
+      branch: 'feature',
+      mode: 'local' as const,
+      expectedHead: current.expectedHead,
+      expectedTree: 'a'.repeat(40),
+      paths: ['change.txt'],
+      message: 'fix: stale checkpoint',
+      round: 3
+    };
+    writeCheckpointIntent(root, {
+      version: 1,
+      ...staleIdentity,
+      digest: checkpointIntentDigest(staleIdentity),
+      state: 'prepared',
+      committedHead: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z'
+    });
+
+    const result = executeCommitOperation(current);
+
+    assert.equal(result.result, 'committed');
+    assert.equal(readCheckpointIntent(root, taskId), null);
+    assert.equal(git(root, ['log', '-1', '--format=%s']), 'fix: update change');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

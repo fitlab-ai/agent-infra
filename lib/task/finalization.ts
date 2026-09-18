@@ -233,14 +233,6 @@ function readTaskFinalizationReceipt(repoRoot: string, taskId: string): TaskFina
   return readReceipt(path.resolve(repoRoot), taskId);
 }
 
-function controlBindingMatches(
-  receipt: TaskFinalizationReceipt,
-  binding: Readonly<{ generation: string; requestId: string }>
-): boolean {
-  return receipt.controlBinding?.generation === binding.generation
-    && receipt.controlBinding.requestId === binding.requestId;
-}
-
 function writeReceipt(repoRoot: string, receipt: TaskFinalizationReceipt): void {
   const directory = finalizationRoot(repoRoot);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -258,7 +250,7 @@ function writeReceipt(repoRoot: string, receipt: TaskFinalizationReceipt): void 
 function updateReceipt(
   repoRoot: string,
   receipt: TaskFinalizationReceipt,
-  patch: Partial<Pick<TaskFinalizationReceipt, 'lifecycle' | 'taskComment' | 'verification' | 'summary' | 'postSummaryVerification' | 'warningProjection' | 'warnings' | 'summarySha256' | 'lastError'>>
+  patch: Partial<Pick<TaskFinalizationReceipt, 'lifecycle' | 'taskComment' | 'verification' | 'summary' | 'postSummaryVerification' | 'warningProjection' | 'warnings' | 'summarySha256' | 'controlBinding' | 'lastError'>>
 ): TaskFinalizationReceipt {
   const current = readReceipt(repoRoot, receipt.taskId);
   if (!current || current.receiptId !== receipt.receiptId) throw capabilityError(
@@ -717,17 +709,10 @@ async function applyUnderLock(
   } catch (error) {
     return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
   }
-  if (options.controlBinding && !controlBindingMatches(receipt, options.controlBinding)) {
-    const error: FinalizationError = {
-      code: 'TASK_FINALIZATION_CONTROL_BINDING_CONFLICT',
-      message: 'finalization receipt belongs to a different sandbox request or generation',
-      retryable: false
-    };
-    return failed(taskId, error, {
-      completedSteps: completedSteps(receipt),
-      pendingSteps: pendingSteps(receipt)
-    });
-  }
+  if (options.controlBinding && (
+    receipt.controlBinding?.generation !== options.controlBinding.generation
+    || receipt.controlBinding.requestId !== options.controlBinding.requestId
+  )) receipt = updateReceipt(repoRoot, receipt, { controlBinding: options.controlBinding });
 
   const preflightState = resolveTaskRef(taskId, { repoRoot });
   if (options.preflight && preflightState.ok && preflightState.state === 'active') {

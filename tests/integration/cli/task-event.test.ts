@@ -1688,7 +1688,7 @@ test('decision code event clears the review baseline and consumes its input on c
     f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
     '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4', ...digests
   ]);
-  assert.equal(JSON.parse(repeated.stdout).status, 'failed');
+  assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
 });
 
 test('internal event preserves a human decision in the same task directory', () => {
@@ -1868,6 +1868,7 @@ test('code-r7 completion accepts a directly repaired report', () => {
   assert.equal((afterCompletion.match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\)\*\* by codex — Fixed /gm) ?? []).length, 1);
   assert.equal((afterCompletion.match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\) \[started\]\*\* by codex — started$/gm) ?? []).length, 1);
   const replayed = run(f.root, completedArgs);
-  assert.equal(replayed.status, 1);
+  assert.equal(replayed.status, 0, replayed.stdout || replayed.stderr);
+  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
   assert.equal((fs.readFileSync(f.file, 'utf8').match(/^.* — \*\*Code Task \(Round 7, fix for review-code-r6\.md\)\*\* by codex — Fixed /gm) ?? []).length, 1);
 });

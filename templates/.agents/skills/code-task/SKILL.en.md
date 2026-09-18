@@ -122,7 +122,7 @@ Before writing this round's `{code-artifact}`, create the controlled report skel
 agent-infra-internal task-artifact {task-id} init --family code --artifact {code-artifact} --locale en
 ```
 
-The skeleton contains identity metadata, stable section markers, and required headings only; real implementation and verification content is required before the completion gate can pass. When preflight or finalization returns one provably safe structural error, it returns a controlled recovery candidate; edit only its `candidatePath`, then retain the same recovery context and rerun the entry point that returned it, as specified by `.agents/rules/local-artifact-repair.md`. Candidate-only is a protocol authorization boundary, not OS isolation; arbitrary same-UID host writers are outside the protocol's protection claim, and fingerprint/state checks fail closed on anomalies.
+The skeleton contains identity metadata, stable section markers, and required headings only; real implementation and verification content is required before the completion gate can pass. On a preflight or finalization structural error, follow `.agents/rules/local-artifact-repair.md` to correct the formal artifact directly and rerun the same entry point; current structure, qualification, and summary facts are the only gate.
 
 Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
@@ -139,8 +139,8 @@ echo "$finalizer"
 ```
 
 - `status=0` with `finalizer.status="passed"`: bind `{artifact-sha256}` and `{semantic-digest}` from this result.
-- `status=1` with recovery context: confirm task, round, artifact, baseline, and request identity are unchanged; edit the returned `candidatePath` only once for this attempt, confirm the bytes changed, then rerun the entry point that returned the context completely with the same `recoveryId`; a failed preflight reruns preflight and a failed finalizer reruns that finalizer. If it still fails with a new diagnostic and fingerprint while the gates continue to pass, continue to the next attempt; `baseline`, `final`, `publish`, and `intent` remain framework-internal state and must not be edited.
-- For any other failure, external formal-artifact change, an unsafe repair, repeated diagnostics or fingerprints, lack of progress, the shared edit limit, or recovery identity mismatch, stop without publishing `code.completed`.
+- `status=1`: correct the formal artifact directly and rerun the entry point completely; a failed preflight reruns preflight and a failed finalizer reruns that finalizer. If the current diagnostic remains unresolved, continue to the next attempt.
+- For any other failure, external formal-artifact change, an unsafe repair, repeated diagnostics or fingerprints, lack of progress, or the shared edit limit, stop without publishing `code.completed`.
 
 Do not rescan or manually write digest data; the completion event must include `--artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}` from the successful finalizer result.
 

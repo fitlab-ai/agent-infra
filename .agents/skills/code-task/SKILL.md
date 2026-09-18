@@ -180,7 +180,7 @@ echo "$finalizer"
 
 - `status=0` 且 `finalizer.status="passed"`：绑定这一次返回的 `{artifact-sha256}` 和 `{semantic-digest}`。
 - `status=1`：直接修正正式产物后重跑同一入口；preflight 失败必须重跑 preflight，finalizer 失败必须重跑 finalizer。若仍失败且当前诊断未解决，继续下一轮。
-- 其他失败、formal artifact 外部变化、无法安全修复、诊断或指纹重复、无进展、达到共享规则的编辑上限或 recovery identity 不匹配：停止，不发布 `code.completed`。
+- 其他失败、formal artifact 外部变化、无法安全修复、诊断或指纹重复、无进展或达到共享规则的编辑上限：停止，不发布 `code.completed`。
 
 不得重新扫描或手工补写摘要；完成事件必须携带本次 `passed` 结果的 `--artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest}`。
 

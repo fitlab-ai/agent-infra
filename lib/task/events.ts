@@ -732,6 +732,15 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const completedRows = matchingRows.filter((item) => item.done);
   if (!manual && openRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity has more than one open attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
   const row = openRows.at(-1);
+  const exactDone = completedRows.find((item) => item.note === eventIdentity.note);
+  if (eventIdentity.phase === 'completed' && exactDone && eventIdentity.family === 'code') {
+    const artifact = normalized.artifact ? validateCompletedArtifact(resolved.taskDir, FAMILY.code.artifact, normalized.artifact, normalized.round) : null;
+    if (artifact?.ok
+      && sha256File(artifact.artifact.path) === normalized.artifactSha256
+      && canonicalSemanticDigest(fs.readFileSync(artifact.artifact.path, 'utf8')) === normalized.semanticDigest) {
+      return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, exactDone.done, frontmatter, artifactContext);
+    }
+  }
   let completedArtifact: ArtifactIdentity | null = null;
   let reviewContent: string | null = null;
   if (eventIdentity.phase === 'started' && row) {
