@@ -684,10 +684,10 @@ function terminalResult(
     postSummaryVerification: steps.postSummaryVerification ?? null,
     completedSteps: completedSteps(receipt),
     pendingSteps: pending,
-    result: postLifecyclePending && (warnings.length > 0 || receipt.warningProjection === 'pending')
-      ? 'completed_with_warnings'
-      : hardError
-        ? (error?.retryable ? 'blocked' : 'failed')
+    result: hardError
+      ? (error?.retryable ? 'blocked' : 'failed')
+      : postLifecyclePending && (warnings.length > 0 || receipt.warningProjection === 'pending')
+        ? 'completed_with_warnings'
         : pending.length === 0 || postLifecyclePending
           ? 'completed'
           : blocked
@@ -1015,7 +1015,8 @@ export {
   applyFinalizationReceiptMutation,
   applyTaskFinalization,
   issueCapability as createFinalizationCapability,
-  readTaskFinalizationReceipt
+  readTaskFinalizationReceipt,
+  terminalResult
 };
 export type {
   FinalizationError,

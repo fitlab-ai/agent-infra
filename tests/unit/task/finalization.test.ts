@@ -5,12 +5,14 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 
+import { onPlatforms } from '../../helpers.ts';
 import { platformResult } from '../../../lib/platform/types.ts';
 import {
   applyFinalizationReceiptMutation,
   applyTaskFinalization,
   createFinalizationCapability,
   readTaskFinalizationReceipt,
+  terminalResult,
   type TaskFinalizationOptions,
   type TaskFinalizationRequest,
   type TaskFinalizationReceipt
@@ -229,7 +231,36 @@ test('host finalization records a replayed verification exception and recovers o
   }
 });
 
-test('host finalization blocks when a replayed verification failure cannot be persisted', async () => {
+test('host finalization keeps a receipt persistence error blocked when warnings are pending', () => {
+  const receipt: TaskFinalizationReceipt = {
+    version: 3,
+    taskId: TASK_ID,
+    intent: 'complete',
+    receiptId: 'receipt-1',
+    revision: 3,
+    lifecycle: 'done',
+    taskComment: 'pending',
+    verification: 'pending',
+    summary: 'pending',
+    postSummaryVerification: 'pending',
+    warningProjection: 'pending',
+    warnings: [{
+      code: 'VERIFY_FAILED', message: 'verification failed', retryable: true,
+      step: 'verification', target: 'complete-task', severity: 'ACTION_REQUIRED', status: 'open', resolvedAt: null
+    }],
+    summarySha256: null,
+    updatedAt: '2026-09-18T00:00:00.000Z',
+    lastError: null
+  };
+  const result = terminalResult(TASK_ID, receipt, {}, false, {
+    code: 'FINALIZATION_RECEIPT_WRITE_FAILED', message: 'receipt write failed', retryable: true
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.result, 'blocked');
+  assert.equal(result.error?.code, 'FINALIZATION_RECEIPT_WRITE_FAILED');
+});
+
+test('host finalization blocks when a warning-state replayed verification failure cannot be persisted', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';
   const receiptDirectory = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization');
@@ -244,7 +275,8 @@ test('host finalization blocks when a replayed verification failure cannot be pe
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
-    if (verifyCalls === 3) {
+    if (verifyCalls === 3) return verification('fail');
+    if (verifyCalls === 4) {
       fs.chmodSync(receiptDirectory, 0o500);
       const error = new Error('terminal verification unavailable');
       Object.assign(error, { code: 'VERIFY_UNAVAILABLE', retryable: true });
@@ -254,22 +286,24 @@ test('host finalization blocks when a replayed verification failure cannot be pe
   };
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const warned = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const blocked = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const blockedReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     fs.chmodSync(receiptDirectory, 0o700);
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recoveredReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(first.result, 'completed');
+    assert.equal(warned.result, 'completed_with_warnings');
     assert.equal(blocked.status, 'blocked');
     assert.equal(blocked.result, 'blocked');
     assert.equal(blocked.error?.code, 'FINALIZATION_RECEIPT_WRITE_FAILED');
     assert.match(blocked.error?.message ?? '', /VERIFY_UNAVAILABLE/);
     assert.match(blocked.error?.message ?? '', /EACCES|permission denied/i);
-    assert.equal(blockedReceipt?.verification, 'done');
-    assert.equal(blockedReceipt?.warnings.length, 0);
+    assert.equal(blockedReceipt?.verification, 'pending');
+    assert.equal(blockedReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), true);
     assert.equal(recovered.result, 'completed');
     assert.equal(recoveredReceipt?.verification, 'done');
-    assert.equal(verifyCalls, 4);
+    assert.equal(verifyCalls, 5);
     assert.equal(comments.filter((item) => item.kind === 'summary' && !item.verifyOnly).length, 1);
   } finally {
     if (fs.existsSync(receiptDirectory)) fs.chmodSync(receiptDirectory, 0o700);
