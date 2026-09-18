@@ -1130,7 +1130,7 @@ test("sandbox purge deletes despite malformed auxiliary evidence", onPlatforms("
 
     await withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
       confirm: async () => true,
-      isCancel: (value): value is symbol => false
+      isCancel: (value): value is typeof import("@clack/prompts").CANCEL_SYMBOL => false
     }));
 
     assert.equal(fs.existsSync(evidence.controlRoot), false);
