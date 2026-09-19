@@ -41,7 +41,6 @@ import type {
   OrchestrationModelPolicy,
   OrchestrationRolePolicy
 } from '../agent-clients/types.ts';
-import type { LifecycleRecoveryAttestationV1 } from './control-authority.ts';
 import {
   captureRepositorySnapshot,
   captureWorkspaceSnapshot,
@@ -174,9 +173,6 @@ type OrchestrationOptions = {
   }>;
   diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
   supportsLifecycleDelegation?: (client: AgentClientId) => boolean;
-  validateLifecycleCapability?: () => Exclude<OrchestrationResult['error'], null> | null;
-  consumeLifecycleCapability?: () => Exclude<OrchestrationResult['error'], null> | null;
-  lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
   token?: () => string;
   monotonicNow?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -819,7 +815,6 @@ function prepareOrchestrationDelegationUnlocked(
     requestedModel?: string;
     requestedReasoningEffort?: string;
     lifecycleProvenance?: DelegationLifecycleProvenance;
-    lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
   }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
@@ -861,31 +856,12 @@ function prepareOrchestrationDelegationUnlocked(
   if (!validModel(input.requestedReasoningEffort)) {
     return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_REQUIRED', 'prepare requires the exact requested reasoning effort', resolved.taskId);
   }
-  if (input.client === 'codex' && !input.lifecycleProvenance) {
-    return failed('ORCHESTRATION_CODEX_PROVENANCE_REQUIRED', 'Codex prepare requires lifecycle provenance', resolved.taskId);
-  }
-  if (input.lifecycleRecoveryAttestation
-    && (input.lifecycleRecoveryAttestation.phase !== 'orchestration.prepare'
-      || input.lifecycleRecoveryAttestation.taskId !== resolved.taskId
-      || input.lifecycleRecoveryAttestation.artifact !== next.artifact
-      || input.lifecycleRecoveryAttestation.round !== next.round)) {
-    return failed('LIFECYCLE_AUTHORITY_TUPLE_MISMATCH', 'orchestration authority does not match the routed stage', resolved.taskId);
-  }
   const expectedPolicy = run.modelPolicy[next.role];
   if (input.requestedModel !== expectedPolicy.model) {
     return failed('ORCHESTRATION_REQUESTED_MODEL_MISMATCH', `requested model does not match the persisted ${next.role} model`, resolved.taskId);
   }
   if (input.requestedReasoningEffort !== expectedPolicy.reasoningEffort) {
     return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_MISMATCH', `requested reasoning effort does not match the persisted ${next.role} policy`, resolved.taskId);
-  }
-  const capabilityValidationError = options.validateLifecycleCapability?.();
-  if (capabilityValidationError) {
-    return failed(
-      capabilityValidationError.code,
-      capabilityValidationError.message,
-      resolved.taskId,
-      capabilityValidationError.detail ? { detail: capabilityValidationError.detail } : {}
-    );
   }
   let beforeFingerprint: string;
   try {
@@ -911,15 +887,6 @@ function prepareOrchestrationDelegationUnlocked(
     lifecycleProvenance: input.lifecycleProvenance ?? null,
     beforeFingerprint
   }, { id: options.id, now: options.now, monotonicNow: options.monotonicNow });
-  const capabilityError = options.consumeLifecycleCapability?.();
-  if (capabilityError) {
-    return failed(
-      capabilityError.code,
-      capabilityError.message,
-      resolved.taskId,
-      capabilityError.detail ? { detail: capabilityError.detail } : {}
-    );
-  }
   const updated = withUpdatedRun(run, {
     nextStage: next.stage,
     pendingDelegation: receipt
@@ -935,7 +902,6 @@ function prepareOrchestrationDelegation(
     requestedModel?: string;
     requestedReasoningEffort?: string;
     lifecycleProvenance?: DelegationLifecycleProvenance;
-    lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
   }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {

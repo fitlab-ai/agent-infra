@@ -7,7 +7,6 @@ export function parseReviewCommand(args: readonly string[]): ReviewFinalizationR
   const values: Record<string, string | boolean> = {};
   const flags = {
     '--stage': 'stage', '--artifact': 'artifact', '--orchestrated': 'orchestrated', '--dry-run': 'dryRun',
-    '--recovery-id': 'recoveryId',
     '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
   } as const;
   for (let index = 2; index < args.length; index += 1) {

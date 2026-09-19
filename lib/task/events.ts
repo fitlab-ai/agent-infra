@@ -33,15 +33,8 @@ import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 import { allowsManualOverride } from './guard-override.ts';
-import {
-  consumeLocalArtifactFinalizationIntent,
-  readLocalArtifactFinalizationIntent,
-  validateLocalArtifact
-} from './local-artifact-finalization.ts';
-import { writeArtifactRecoveryIntent, readArtifactRecoveryIntent } from './artifact-repair-intent.ts';
-import { reconcileArtifactRecovery, recoveryContextFromIntent, sha256Content } from './artifact-recovery.ts';
-import type { ArtifactRecoveryIntent } from './artifact-repair-intent.ts';
-import type { LocalArtifactFamily, LocalArtifactFinalizationIntent } from './local-artifact-finalization.ts';
+import { validateLocalArtifact } from './local-artifact-finalization.ts';
+import type { LocalArtifactFamily } from './local-artifact-finalization.ts';
 import { buildLifecycleFacts, canStart } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
 import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
@@ -393,65 +386,6 @@ function reviewInputFamily(family: EventFamily): ArtifactFamily {
   return family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
 }
 
-function reconcileReviewCompletionReplay(
-  repoRoot: string,
-  taskDir: string,
-  taskId: string,
-  family: EventFamily,
-  artifact: string,
-  round: number
-): TaskEventError | null {
-  const stage = REVIEW_LEDGER_STAGES[family];
-  if (!stage) return null;
-  const reviewFamily = family as 'review-analysis' | 'review-plan' | 'review-code';
-  try {
-    let intent = readArtifactRecoveryIntent(repoRoot, taskId, reviewFamily, artifact);
-    if (!intent) return null;
-    if (intent.state === 'commit-started') {
-      const reconciled = reconcileArtifactRecovery(
-        recoveryContextFromIntent(repoRoot, taskDir, intent),
-        { lockAlreadyHeld: true }
-      );
-      if (reconciled.status !== 'passed' && reconciled.status !== 'consumed') {
-        return {
-          code: 'EVENT_ARTIFACT_CONFLICT',
-          message: `review finalizer recovery remains ${reconciled.status} for ${artifact}`
-        };
-      }
-      intent = reconciled.intent;
-    }
-    if (!['passed', 'consumption-started', 'consumed'].includes(intent.state)) {
-      return {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: `review finalizer provenance is incomplete for ${artifact}`
-      };
-    }
-    const validated = validateCompletedArtifact(taskDir, FAMILY[family].artifact, artifact, round);
-    if (!validated.ok) {
-      return { code: 'EVENT_ARTIFACT_CONFLICT', message: validated.error.message };
-    }
-    const content = fs.readFileSync(validated.artifact.path, 'utf8');
-    if (intent.round !== round
-      || intent.finalArtifactSha256 !== sha256Content(content)
-      || intent.finalSemanticDigest !== canonicalSemanticDigest(content)) {
-      return {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: `review finalizer provenance does not match ${artifact}`
-      };
-    }
-    if (intent.state === 'passed' || intent.state === 'consumption-started') {
-      const consumed = { ...intent, state: 'consumed' as const, updatedAt: Date.now() };
-      writeArtifactRecoveryIntent(repoRoot, consumed, { expected: intent });
-    }
-    return null;
-  } catch (error) {
-    return {
-      code: 'EVENT_ARTIFACT_CONFLICT',
-      message: `review finalizer recovery could not be reconciled for ${artifact}: ${error instanceof Error ? error.message : String(error)}`
-    };
-  }
-}
-
 function relationForStartedInput(family: EventFamily, input: ArtifactIdentity): UpstreamRelation['relation'] {
   if (family.startsWith('review-')) {
     return input.family === reviewInputFamily(family) ? 'reviewed-input' : 'approval-context';
@@ -661,15 +595,25 @@ function reworkIntentMutationForCompletion(
 }
 
 function buildCompletionReceipt(
+  content: string,
   taskDir: string,
   family: EventFamily,
   artifact: ArtifactIdentity,
   completedAt: string,
   frontmatter: Record<string, unknown>
 ): { ok: true; receipt: ArtifactReceipt } | { ok: false; message: string } | null {
+  const existing = (() => {
+    try {
+      return parseArtifactReceipts(content).rows.find((receipt) => receipt.output === artifact.name) ?? null;
+    } catch {
+      return null;
+    }
+  })();
   if (family === 'code') {
-    const startedInput = typeof frontmatter.code_input_artifact === 'string' ? frontmatter.code_input_artifact : '';
-    const startedSha256 = typeof frontmatter.code_input_sha256 === 'string' ? frontmatter.code_input_sha256 : '';
+    const startedInput = typeof frontmatter.code_input_artifact === 'string'
+      ? frontmatter.code_input_artifact : existing?.input ?? '';
+    const startedSha256 = typeof frontmatter.code_input_sha256 === 'string'
+      ? frontmatter.code_input_sha256 : existing?.inputSha256 ?? '';
     if (!startedInput || !startedSha256) return { ok: false, message: 'code.started plan input context is missing' };
     const plan = inspectArtifactDirectory(taskDir, 'plan');
     if (plan.status !== 'ready' || !plan.latest || plan.latest.name !== startedInput) {
@@ -682,7 +626,7 @@ function buildCompletionReceipt(
         ok: true,
         receipt: {
           event: 'code.completed', output: artifact.name, input: startedInput,
-          inputSha256, completedAt
+          inputSha256, completedAt: existing?.completedAt ?? completedAt
         }
       };
     } catch (error) {
@@ -691,8 +635,10 @@ function buildCompletionReceipt(
   }
   if (!family.startsWith('review-')) return null;
   const expectedFamily = reviewInputFamily(family);
-  const startedInput = typeof frontmatter.review_input_artifact === 'string' ? frontmatter.review_input_artifact : '';
-  const startedSha256 = typeof frontmatter.review_input_sha256 === 'string' ? frontmatter.review_input_sha256 : '';
+  const startedInput = typeof frontmatter.review_input_artifact === 'string'
+    ? frontmatter.review_input_artifact : existing?.input ?? '';
+  const startedSha256 = typeof frontmatter.review_input_sha256 === 'string'
+    ? frontmatter.review_input_sha256 : existing?.inputSha256 ?? '';
   if (!startedInput || !startedSha256) return { ok: false, message: 'review started input context is missing' };
   const current = inspectArtifactDirectory(taskDir, expectedFamily);
   if (current.status !== 'ready' || !current.latest || current.latest.name !== startedInput) {
@@ -710,12 +656,75 @@ function buildCompletionReceipt(
       ok: true,
       receipt: {
         event, output: artifact.name, input: startedInput,
-        inputSha256, completedAt
+        inputSha256, completedAt: existing?.completedAt ?? completedAt
       }
     };
   } catch (error) {
     return { ok: false, message: `cannot hash review input ${startedInput}: ${error instanceof Error ? error.message : String(error)}` };
   }
+}
+
+type CompletionFact = Readonly<{
+  event: string;
+  output: string;
+  outputSha256: string;
+  semanticDigest: string;
+  requestId: string;
+  result: string;
+}>;
+
+function completionFacts(frontmatter: Record<string, unknown>): CompletionFact[] {
+  if (typeof frontmatter.completion_facts !== 'string') return [];
+  try {
+    const facts: unknown = JSON.parse(frontmatter.completion_facts);
+    if (!Array.isArray(facts)) return [];
+    return facts.filter((fact): fact is CompletionFact => Boolean(
+      fact && typeof fact === 'object' && !Array.isArray(fact)
+      && typeof (fact as CompletionFact).event === 'string'
+      && typeof (fact as CompletionFact).output === 'string'
+      && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).outputSha256)
+      && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).semanticDigest)
+      && typeof (fact as CompletionFact).requestId === 'string'
+      && typeof (fact as CompletionFact).result === 'string'
+    ));
+  } catch {
+    return [];
+  }
+}
+
+function currentCompletionFact(request: TaskEventRequest, artifact: ArtifactIdentity): CompletionFact {
+  const content = fs.readFileSync(artifact.path, 'utf8');
+  return {
+    event: request.event,
+    output: artifact.name,
+    outputSha256: sha256File(artifact.path),
+    semanticDigest: canonicalSemanticDigest(content),
+    requestId: request.requestId ?? '',
+    result: JSON.stringify({
+      filesModified: request.filesModified,
+      testsPassed: request.testsPassed,
+      blockers: request.blockers,
+      major: request.major,
+      minor: request.minor,
+      manualValidation: request.manualValidation ?? 0,
+      verdict: request.verdict,
+      fixFor: request.fixFor,
+      implementationInput: request.implementationInput
+    })
+  };
+}
+
+function sameCompletionFact(left: CompletionFact, right: CompletionFact): boolean {
+  return left.event === right.event
+    && left.output === right.output
+    && left.outputSha256 === right.outputSha256
+    && left.semanticDigest === right.semanticDigest
+    && left.requestId === right.requestId
+    && left.result === right.result;
+}
+
+function replaceCompletionFact(facts: readonly CompletionFact[], next: CompletionFact): CompletionFact[] {
+  return [...facts.filter((fact) => !(fact.event === next.event && fact.output === next.output)), next];
 }
 
 function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
@@ -794,13 +803,11 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const currentStep = typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '';
   const matchingRows = rows.filter((item) => item.step === eventIdentity.action);
   const manual = eventIdentity.family === 'manual-validation';
-  if (!manual && matchingRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity appears more than once' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
   const openRows = matchingRows.filter((item) => item.started && !item.done);
   const completedRows = matchingRows.filter((item) => item.done);
-  const row = manual ? openRows.at(-1) : matchingRows[0];
+  if (!manual && openRows.length > 1) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity has more than one open attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+  const row = openRows.at(-1);
   let completedArtifact: ArtifactIdentity | null = null;
-  let localFinalizationIntent: LocalArtifactFinalizationIntent | null = null;
-  let reviewFinalizationIntent: ArtifactRecoveryIntent | null = null;
   let reviewContent: string | null = null;
   if (eventIdentity.phase === 'started' && row) {
     if (row.agent !== normalized.agent) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
@@ -812,24 +819,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     }
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, row.started, frontmatter, artifactContext);
   }
-  if (eventIdentity.phase === 'started' && !manual && completedRows.length > 0) return failed(normalized, { code: 'EVENT_ALREADY_COMPLETED', message: 'event identity is already completed' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-  const done = completedRows.find((item) => item.note === eventIdentity.note);
-  if (eventIdentity.phase === 'completed' && done) {
-    if (!normalized.dryRun && eventIdentity.family.startsWith('review-') && normalized.artifact && normalized.round) {
-      const recoveryError = reconcileReviewCompletionReplay(
-        resolved.repoRoot,
-        resolved.taskDir,
-        resolved.taskId,
-        eventIdentity.family,
-        normalized.artifact,
-        normalized.round
-      );
-      if (recoveryError) return failed(normalized, recoveryError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-    }
-    return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, done.done, frontmatter, artifactContext);
-  }
-  if (eventIdentity.phase === 'completed' && completedRows.length > 0 && openRows.length === 0) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity is already completed with a different payload' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-  if (eventIdentity.phase === 'completed' && !row?.started && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_START_MISSING')) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires one open matching started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+  if (eventIdentity.phase === 'completed' && !row?.started && completedRows.length === 0 && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_START_MISSING')) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires a started event or an earlier completed attempt' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   if (eventIdentity.phase === 'completed') {
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
@@ -870,23 +860,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       const localFamily = eventIdentity.family === 'analyze'
         ? 'analysis'
         : eventIdentity.family === 'plan' ? 'plan' : 'code';
-      try {
-        localFinalizationIntent = readLocalArtifactFinalizationIntent(
-          resolved.repoRoot, resolved.taskId, localFamily, completedArtifact.name
-        );
-        if (localFinalizationIntent?.state === 'commit-started') {
-          const reconciled = reconcileArtifactRecovery(
-            recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, localFinalizationIntent),
-            { lockAlreadyHeld: true }
-          );
-          if (reconciled.status === 'passed' || reconciled.status === 'consumed') localFinalizationIntent = reconciled.intent;
-        }
-      } catch (error) {
-        return failed(normalized, {
-          code: 'EVENT_ARTIFACT_CONFLICT',
-          message: `local finalizer recovery could not be reconciled for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
-        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
       let artifactContent: string;
       try { artifactContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
       catch (error) {
@@ -916,29 +889,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
           message: `semantic digest does not match finalizer result for ${completedArtifact.name}`
         }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
-      if (!localFinalizationIntent || !['passed', 'consumed'].includes(localFinalizationIntent.state)) {
-        return failed(normalized, {
-          code: 'EVENT_ARTIFACT_CONFLICT',
-          message: `local finalizer provenance is missing or incomplete for ${completedArtifact.name}`
-        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-      if (localFinalizationIntent.finalArtifactSha256 !== actualSha256 || localFinalizationIntent.finalSemanticDigest !== local.semanticDigest) {
-        return failed(normalized, {
-          code: 'EVENT_ARTIFACT_CONFLICT',
-          message: `local finalizer provenance does not match ${completedArtifact.name}`
-        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-      if (localFinalizationIntent.authorityDigest !== null) {
-        if (!lifecycleAuthority
-          || localFinalizationIntent.recoveryOperationId !== lifecycleAuthority.operationId
-          || localFinalizationIntent.requestId !== lifecycleAuthority.lifecycleRequestId
-          || localFinalizationIntent.authorityDigest !== lifecycleRecoveryAttestationDigest(lifecycleAuthority)) {
-          return failed(normalized, {
-            code: 'EVENT_ARTIFACT_CONFLICT',
-            message: `local finalizer provenance does not match lifecycle completion authority for ${completedArtifact.name}`
-          }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
-        }
-      }
     }
   }
   if (eventIdentity.phase === 'waiting' && section.entries.some((entry) => entry.step === eventIdentity.action && entry.note === eventIdentity.note)) {
@@ -965,44 +915,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     completedArtifact?.path ?? null
   );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-  if (eventIdentity.phase === 'completed' && eventIdentity.family.startsWith('review-') && completedArtifact && reviewContent !== null) {
-    try {
-      reviewFinalizationIntent = readArtifactRecoveryIntent(
-        resolved.repoRoot,
-        resolved.taskId,
-        eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code',
-        completedArtifact.name
-      );
-      if (!normalized.dryRun && reviewFinalizationIntent?.state === 'commit-started') {
-        const reconciled = reconcileArtifactRecovery(
-          recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, reviewFinalizationIntent),
-          { lockAlreadyHeld: true }
-        );
-        if (reconciled.status === 'passed' || reconciled.status === 'consumed') reviewFinalizationIntent = reconciled.intent;
-      }
-      if (!reviewFinalizationIntent || !['passed', 'consumption-started', 'consumed'].includes(reviewFinalizationIntent.state)) {
-        return failed(normalized, {
-          code: 'EVENT_ARTIFACT_CONFLICT',
-          message: `review finalizer provenance is missing or incomplete for ${completedArtifact.name}`
-        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-      const actualSha256 = sha256File(completedArtifact.path);
-      const actualSemanticDigest = canonicalSemanticDigest(reviewContent);
-      if (reviewFinalizationIntent.round !== normalized.round
-        || reviewFinalizationIntent.finalArtifactSha256 !== actualSha256
-        || reviewFinalizationIntent.finalSemanticDigest !== actualSemanticDigest) {
-        return failed(normalized, {
-          code: 'EVENT_ARTIFACT_CONFLICT',
-          message: `review finalizer provenance does not match ${completedArtifact.name}`
-        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-    } catch (error) {
-      return failed(normalized, {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: `review finalizer recovery could not be reconciled for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
-      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-    }
-  }
   let orchestrationCompletion: OrchestrationStageCompletion | null = null;
   if (eventIdentity.phase === 'completed' && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
     const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
@@ -1029,14 +941,32 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
   catch (error) { return failed(normalized, { code: 'METADATA_CAPTURE_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
   let completionReceipt: ArtifactReceipt | null = null;
+  let currentFact: CompletionFact | null = null;
   let completionInvalidation: ReturnType<typeof invalidationMutation> | null = null;
   let completionRework: ReturnType<typeof reworkIntentMutation> | null = null;
   if (eventIdentity.phase === 'completed' && completedArtifact) {
-    const receipt = buildCompletionReceipt(resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter);
+    const receipt = buildCompletionReceipt(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter);
     if (receipt && !receipt.ok) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: receipt.message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
     completionReceipt = receipt?.receipt ?? null;
+    try {
+      currentFact = currentCompletionFact(normalized, completedArtifact);
+    } catch (error) {
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot inspect current completion result: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+    }
+    if (completionFacts(frontmatter).some((fact) => sameCompletionFact(fact, currentFact!))) {
+      return successNoOp(
+        normalized,
+        resolved.taskId,
+        resolved.taskMdPath,
+        currentStep,
+        eventIdentity,
+        completionReceipt?.completedAt ?? metadata.timestamp,
+        frontmatter,
+        artifactContext
+      );
+    }
     try {
       const invalidation = invalidationMutationForCompletion(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp);
       if ('error' in invalidation) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: invalidation.error }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
@@ -1052,6 +982,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const logStep = eventIdentity.phase === 'started' ? `${eventIdentity.action} [started]` : eventIdentity.action;
   const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
+  if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(completionFacts(frontmatter), currentFact));
   let frontmatterRemove: string[] | undefined;
   if (eventIdentity.phase === 'started' && artifactContext) {
     try {
@@ -1127,90 +1058,10 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     });
   }
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
-  if (!normalized.dryRun && localFinalizationIntent && completedArtifact) {
-    try {
-      if (lifecycleAuthority && localFinalizationIntent.state === 'passed') {
-        const expectedIntent = localFinalizationIntent;
-        localFinalizationIntent = {
-          ...localFinalizationIntent,
-          state: 'consumption-started',
-          phase: 'task-event.completed',
-          authorityDigest: lifecycleRecoveryAttestationDigest(lifecycleAuthority),
-          requestId: lifecycleAuthority.lifecycleRequestId,
-          updatedAt: Date.now()
-        };
-        writeArtifactRecoveryIntent(resolved.repoRoot, localFinalizationIntent, { expected: expectedIntent });
-      } else if (!lifecycleAuthority && localFinalizationIntent.state === 'passed') {
-        localFinalizationIntent = consumeLocalArtifactFinalizationIntent(resolved.repoRoot, localFinalizationIntent, { lockAlreadyHeld: options.lockAlreadyHeld });
-      }
-    } catch (error) {
-      return failed(normalized, {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: `local finalizer provenance could not be advanced before task write for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
-      }, {
-        taskId: resolved.taskId,
-        taskMdPath: resolved.taskMdPath,
-        fromStep: currentStep,
-        toStep: step,
-        action: eventIdentity.action,
-        phase: eventIdentity.phase,
-        artifactContext
-      });
-    }
-  }
-  if (!normalized.dryRun && reviewFinalizationIntent && completedArtifact && reviewFinalizationIntent.state === 'passed') {
-    try {
-      const expectedIntent = reviewFinalizationIntent;
-      reviewFinalizationIntent = {
-        ...reviewFinalizationIntent,
-        state: 'consumption-started',
-        phase: 'task-event.completed',
-        updatedAt: Date.now()
-      };
-      writeArtifactRecoveryIntent(resolved.repoRoot, reviewFinalizationIntent, { expected: expectedIntent });
-    } catch (error) {
-      return failed(normalized, {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: `review finalizer provenance could not be advanced before task write for ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}`
-      }, {
-        taskId: resolved.taskId,
-        taskMdPath: resolved.taskMdPath,
-        fromStep: currentStep,
-        toStep: step,
-        action: eventIdentity.action,
-        phase: eventIdentity.phase,
-        artifactContext
-      });
-    }
-  }
   const sourceCompletion = eventIdentity.phase === 'completed'
     && ['analyze', 'plan', 'code'].includes(eventIdentity.family);
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: stateOverride ? resolved.state : 'active', dryRun: normalized.dryRun, mutations }, { ...options, invalidationContext: sourceCompletion ? 'source-completion' : 'standard', metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
-  if (!normalized.dryRun && lifecycleAuthority && localFinalizationIntent && completedArtifact) {
-    try {
-      if (!options.deferLifecycleRecoveryConsumption) consumeLifecycleRecoveryAttestation(lifecycleAuthority);
-      writeArtifactRecoveryIntent(resolved.repoRoot, { ...localFinalizationIntent, state: 'consumed', updatedAt: Date.now() }, { expected: localFinalizationIntent });
-    } catch (error) {
-      return failed(normalized, {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: `task completion was written but lifecycle recovery consumption is incomplete: ${error instanceof Error ? error.message : String(error)}`
-      }, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
-    }
-  }
-  if (!normalized.dryRun && reviewFinalizationIntent && completedArtifact) {
-    try {
-      if (reviewFinalizationIntent.state === 'consumption-started') {
-        const consumed = { ...reviewFinalizationIntent, state: 'consumed' as const, updatedAt: Date.now() };
-        writeArtifactRecoveryIntent(resolved.repoRoot, consumed, { expected: reviewFinalizationIntent });
-      }
-    } catch (error) {
-      return failed(normalized, {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: `review finalizer recovery consumption is incomplete: ${error instanceof Error ? error.message : String(error)}`
-      }, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
-    }
-  }
   if (!normalized.dryRun && orchestrationCompletion) {
     try {
       (options.commitOrchestrationCompletion ?? commitOrchestrationStageCompletion)(orchestrationCompletion);

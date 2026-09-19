@@ -1424,7 +1424,7 @@ test('task-finalization client exposes accepted result loss as a structured unkn
   }
 });
 
-test('task-bound finalization rejects a new request after accepted response loss', async () => {
+test('task-bound finalization accepts a new request after accepted response loss', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-compensation-'));
   const taskId = 'TASK-20260809-010203';
   const token = 'lifecycle-secret';
@@ -1537,10 +1537,10 @@ test('task-bound finalization rejects a new request after accepted response loss
     const secondClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS });
     const secondExecution = await secondBroker;
     assert.equal(secondClient.exitCode, 0, secondClient.stderr);
-    assert.equal(secondClient.payload.exitCode, 1);
+    assert.equal(secondClient.payload.exitCode, 0);
     assert.equal(secondClient.payload.phase, 'completed');
-    assert.equal((JSON.parse(String(secondClient.payload.stdout)) as { error: { code: string } }).error.code, 'TASK_FINALIZATION_CONTROL_BINDING_CONFLICT');
-    assert.equal(JSON.parse(secondExecution.stdout).status, 'failed');
+    assert.equal((JSON.parse(String(secondClient.payload.stdout)) as { status: string }).status, 'completed');
+    assert.equal(JSON.parse(secondExecution.stdout).status, 'completed');
   } finally {
     if (heartbeat) clearInterval(heartbeat);
     fs.rmSync(root, { recursive: true, force: true });

@@ -140,7 +140,7 @@ Before writing this round's `{analysis-artifact}`, create the controlled report 
 agent-infra-internal task-artifact {task-id} init --family analysis --artifact {analysis-artifact} --locale en
 ```
 
-The skeleton contains identity metadata, stable section markers, and required headings only; real analysis content is required before the completion gate can pass. If the finalizer returns one provably safe structural error, it returns a controlled recovery candidate; edit only its `candidatePath`, then rerun `task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact} --recovery-id {recovery-id}` with the same `recoveryId`. Candidate-only is a protocol authorization boundary, not OS isolation; arbitrary same-UID host writers are outside the protocol's protection claim, and fingerprint/state checks fail closed on anomalies.
+The skeleton contains identity metadata, stable section markers, and required headings only; real analysis content is required before the completion gate can pass. On a structural error, correct the formal artifact directly and rerun `task-artifact {task-id} finalize-local --family analysis --artifact {analysis-artifact}`; current structure, qualification, and summary facts are the only gate.
 
 > Steps 6–9 are the **Scenario A (normal output)** path. **Scenario B (ask and early-exit)** already finished its state update, task-comment sync, and verification inside step 4 and STOPped, so it does not enter these steps.
 
@@ -223,8 +223,8 @@ agent-infra-internal task-artifact {task-id} finalize-local --family analysis --
 ```
 
 - On `status=passed`, save that result's `artifactSha256` and `semanticDigest`; the finalizer has recorded the matching one-shot local provenance intent.
-- On `status=failed` with recovery context, after the completion gates pass, edit the returned `candidatePath` only once for this attempt, then rerun the finalizer completely with the same `recoveryId`; if it still fails with a new diagnostic and fingerprint while the gates continue to pass, continue to the next attempt; the formal artifact must remain unchanged until commit.
-- The recovery candidate must match the recorded task, round, artifact, baseline, and request identity. On baseline conflict, unknown state, an unsafe repair, repeated diagnostics or fingerprints, no progress, or the shared edit limit, stop without publishing a completed event.
+- On `status=failed`, correct the formal artifact directly and rerun the finalizer completely; if the current diagnostic remains unresolved, continue to the next attempt.
+- On an external formal-artifact change, an unsafe repair, repeated diagnostics or fingerprints, no progress, or the shared edit limit, stop without publishing a completed event.
 
 Use the digests from that same `status=passed` result in `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {analysis-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} {execution-flag}` so the core records the link, stage, agent, metadata, and Activity Log atomically.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}

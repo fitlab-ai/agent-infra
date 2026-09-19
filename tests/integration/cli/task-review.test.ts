@@ -218,30 +218,6 @@ test('standalone finalization ignores a current run without a pending delegation
   assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
-test('standalone finalization fails before writing when a delegation is pending', () => {
-  const scenario = scenarios[0];
-  const f = fixture(
-    scenario,
-    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
-  );
-  const runPath = path.join(f.dir, 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify(currentRun({
-    pendingDelegation: reviewReceipt(f.artifact)
-  }), null, 2)}\n`);
-  const artifactPath = path.join(f.dir, f.artifact);
-  const artifactBefore = fs.readFileSync(artifactPath);
-  const runBefore = fs.readFileSync(runPath);
-
-  const result = run(f.root, [
-    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact
-  ]);
-
-  assert.equal(result.status, 1);
-  assert.match(JSON.parse(result.stdout).error.message, /ORCHESTRATION_STANDALONE_BUSY/);
-  assert.deepEqual(fs.readFileSync(artifactPath), artifactBefore);
-  assert.deepEqual(fs.readFileSync(runPath), runBefore);
-});
-
 test('orchestrated finalization accepts one matching activated delegation without advancing it', () => {
   const scenario = scenarios[0];
   const f = fixture(
@@ -263,20 +239,18 @@ test('orchestrated finalization accepts one matching activated delegation withou
   assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
-test('task-review rejects a numeric count mismatch without changing artifact bytes', () => {
+test('task-review refreshes numeric finding counts from the current ledger', () => {
   const scenario = scenarios[0];
   const f = fixture(
     scenario,
     '- **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors'
   );
-  const before = fs.readFileSync(path.join(f.dir, f.artifact));
   const result = run(f.root, [
     TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact
   ]);
 
-  assert.equal(result.status, 1);
-  assert.equal(JSON.parse(result.stdout).error.code, 'REVIEW_SUMMARY_COUNT_MISMATCH');
-  assert.deepEqual(fs.readFileSync(path.join(f.dir, f.artifact)), before);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).status, 'applied');
 });
 
 test('task-review reports duplicate decision details without changing artifact bytes', () => {

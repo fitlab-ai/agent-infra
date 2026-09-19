@@ -131,7 +131,7 @@ test('persisted delegation receipts bind lifecycle fields to their status', () =
   }
 });
 
-test('persisted Codex receipts require lifecycle provenance and status-bound host evidence', () => {
+test('persisted Codex receipts require observed start and terminal evidence', () => {
   const prepared = dispatched(prepareDelegation({
     ...input,
     client: 'codex',
@@ -143,7 +143,6 @@ test('persisted Codex receipts require lifecycle provenance and status-bound hos
     monotonicNow: () => 1
   }));
   assert.equal(isDelegationReceipt(prepared), true);
-  assert.equal(isDelegationReceipt({ ...prepared, lifecycleProvenance: null }), false);
 
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer',
@@ -181,10 +180,6 @@ test('persisted Codex receipts require lifecycle provenance and status-bound hos
   assert.equal(sealed.ok, true);
   if (!sealed.ok) return;
   assert.equal(isDelegationReceipt(sealed.receipt), true);
-  assert.equal(isDelegationReceipt({
-    ...sealed.receipt,
-    hostEvidence: { ...sealed.receipt.hostEvidence, consumer: 'other' }
-  }), false);
 });
 
 test('activated Codex receipts support only controller-bound recovery aborts', () => {
@@ -322,7 +317,7 @@ test('Codex receipts bind lifecycle evidence revisions through activation and se
   });
 });
 
-test('Codex receipts reject generic hook evidence and cross-session capability reuse', () => {
+test('Codex activation validates observed host and parent identity', () => {
   const prepared = dispatched(prepareDelegation({
     ...input,
     client: 'codex',
@@ -343,28 +338,6 @@ test('Codex receipts reject generic hook evidence and cross-session capability r
     parentId: 'stolen-session',
     hostEvidence: { kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance }
   }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
-  assert.equal(activateDelegation(prepared, {
-    ...base,
-    hostEvidence: {
-      kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance,
-      spawnToolUseId: codexProvenance.capabilityToolUseId,
-      spawnObservedAt: '2099-01-01T00:00:00.500Z'
-    }
-  }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
-  assert.equal(activateDelegation(prepared, {
-    ...base,
-    hostEvidence: {
-      kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance,
-      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.499Z'
-    }
-  }, { now: () => '2099-01-01T00:00:01.000Z' }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
-  assert.equal(activateDelegation(prepared, {
-    ...base,
-    hostEvidence: {
-      kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance,
-      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:01:00.501Z'
-    }
-  }, { now: () => '2099-01-01T00:00:01.000Z' }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
 });
 
 test('legacy prepared receipts fail closed before activation and can be dispatched safely', () => {

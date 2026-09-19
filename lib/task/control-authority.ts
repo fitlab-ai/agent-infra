@@ -789,17 +789,11 @@ function orchestration(
         client: input.client as AgentClientId,
         requestedModel: input.requestedModel as string | undefined,
         requestedReasoningEffort: input.requestedReasoningEffort as string | undefined,
-        ...(input.capabilityRef === undefined ? {} : { capabilityRef: input.capabilityRef as string }),
-        ...(context.lifecycleRecoveryAttestation === undefined
-          ? {}
-          : { lifecycleRecoveryAttestation: context.lifecycleRecoveryAttestation })
       };
       if (prepareInput.client === 'codex') {
         return prepareCodexOrchestrationDelegation(operation.taskRef, prepareInput, {
           repoRoot: context.repoRoot,
           orchestrationOptions: options,
-          deferLifecycleRecoveryConsumption: context.source === 'sandbox-executor',
-          ...(context.controllerBinding ? { controllerBinding: context.controllerBinding } : {})
         });
       }
       return prepareOrchestrationDelegation(operation.taskRef, prepareInput, options);
@@ -912,7 +906,7 @@ const FINALIZATION_FLAGS = new Set(['--agent']);
 const ORCHESTRATION_FLAGS = new Set([
   '--agent', '--max-steps', '--executor-model', '--executor-reasoning-effort', '--reviewer-model',
   '--reviewer-reasoning-effort', '--client', '--requested-model', '--requested-reasoning-effort',
-  '--capability-ref', '--parent-id', '--before-fingerprint', '--stage', '--round', '--artifact', '--role',
+  '--parent-id', '--before-fingerprint', '--stage', '--round', '--artifact', '--role',
   '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--actual-reasoning-effort',
   '--model-fallback-reason', '--reasoning-effort-fallback-reason', '--exit-code', '--after-fingerprint',
   '--changed-paths', '--code', '--message', '--recoverable', '--git-worktree-root'
@@ -1049,7 +1043,6 @@ export function parseTaskControlOperation(
   if (parsedIntent === 'prepare') {
     input.requestedModel = value(values, '--requested-model');
     input.requestedReasoningEffort = value(values, '--requested-reasoning-effort');
-    input.capabilityRef = value(values, '--capability-ref');
   }
   if (parsedIntent === 'await-activation') {
     required(values, ['--stage', '--round', '--artifact', '--role']);

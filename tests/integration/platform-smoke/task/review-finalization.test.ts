@@ -234,7 +234,6 @@ test('review preflight seals every review family before ledger writes', () => {
       assert.equal(result.status, 'passed', `${relativePath} should preflight`);
       assert.equal(result.error, null);
       assert.equal(fs.readFileSync(path.join(fixture.dir, 'task.md'), 'utf8'), taskBefore);
-      assert.equal(readArtifactRecoveryIntent(fixture.root, TASK_ID, family, artifact)?.state, 'preflight-ready');
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -298,7 +297,7 @@ test('review summary finalization replaces only the canonical summary tokens', (
   }
 });
 
-test('review finalization does not treat a done-only historical row as an open round', () => {
+test('review finalization revalidates a done-only current review artifact', () => {
   const f = domainFixture();
   const taskPath = path.join(f.dir, 'task.md');
   const taskContent = fs.readFileSync(taskPath, 'utf8').replace(
@@ -306,8 +305,6 @@ test('review finalization does not treat a done-only historical row as an open r
     '**Review Analysis (Round 1)** by codex — completed'
   );
   fs.writeFileSync(taskPath, taskContent, 'utf8');
-  const before = fs.readFileSync(f.artifactPath, 'utf8');
-
   const result = finalizeReviewSummary(
     {
       taskRef: TASK_ID,
@@ -317,9 +314,7 @@ test('review finalization does not treat a done-only historical row as an open r
     { repoRoot: f.root }
   );
 
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
-  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
+  assert.equal(result.status, 'applied');
 });
 
 test('review finalizer rejects a missing schema pattern before summary mutation', () => {
@@ -339,7 +334,7 @@ test('review finalizer rejects a missing schema pattern before summary mutation'
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });
 
-test('review finalizer does not create a recovery candidate before lifecycle gates pass', () => {
+test('review finalizer validates current content without a recovery candidate', () => {
   const f = domainFixture();
   const taskPath = path.join(f.dir, 'task.md');
   fs.writeFileSync(
@@ -355,8 +350,7 @@ test('review finalizer does not create a recovery candidate before lifecycle gat
   );
 
   assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_IDENTITY_INVALID');
-  assert.equal(result.recovery, undefined);
+  assert.equal(result.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
   assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });
@@ -380,7 +374,7 @@ test('projection review preparation enforces the same artifact contract without 
   }
 });
 
-test('review finalizer stages an invalid baseline and retries from the explicit recovery candidate', () => {
+test('review finalizer accepts a directly repaired formal artifact', () => {
   const f = domainFixture();
   const valid = fs.readFileSync(f.artifactPath, 'utf8');
   const malformed = valid.replace('## 检视覆盖声明\n', '');
@@ -393,21 +387,13 @@ test('review finalizer stages an invalid baseline and retries from the explicit 
 
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
-  assert.match(failed.recovery?.baselineSha256 ?? '', /^[a-f0-9]{64}$/);
-  assert.ok(failed.recovery?.candidatePath);
-  const intent = readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
-  assert.equal(intent?.state, 'awaiting-preflight-recovery');
-  assert.equal(intent?.baselineSha256, intent?.candidateSha256);
-  const formalBeforeRecovery = fs.readFileSync(f.artifactPath, 'utf8');
-  fs.writeFileSync(failed.recovery!.candidatePath, valid);
-  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), formalBeforeRecovery);
+  fs.writeFileSync(f.artifactPath, valid);
 
   const finalized = finalizeReviewSummary(
-    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md', recoveryId: failed.recovery!.recoveryId },
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
     { repoRoot: f.root }
   );
   assert.equal(finalized.status, 'applied');
-  assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md')?.state, 'passed');
 
   const retry = finalizeReviewSummary(
     { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
@@ -416,7 +402,7 @@ test('review finalizer stages an invalid baseline and retries from the explicit 
   assert.equal(retry.status, 'no-op');
 });
 
-test('review finalizer refinalizes a changed passed artifact through a new recovery journal', () => {
+test('review finalizer refinalizes a changed passed artifact directly', () => {
   const f = domainFixture();
   try {
     const first = finalizeReviewSummary(
@@ -433,13 +419,12 @@ test('review finalizer refinalizes a changed passed artifact through a new recov
     );
     assert.equal(second.error, null);
     assert.notEqual(second.artifactSha256, first.artifactSha256);
-    assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md')?.state, 'passed');
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
-test('review finalizer keeps the formal artifact unchanged while a recovery candidate remains invalid', () => {
+test('review finalizer keeps an invalid formal artifact until it is directly repaired', () => {
   const f = domainFixture();
   const malformed = fs.readFileSync(f.artifactPath, 'utf8').replace('## 检视覆盖声明\n', '');
   fs.writeFileSync(f.artifactPath, malformed);
@@ -449,23 +434,16 @@ test('review finalizer keeps the formal artifact unchanged while a recovery cand
     { repoRoot: f.root }
   );
   assert.equal(first.status, 'failed');
-  assert.ok(first.recovery?.candidatePath);
   const beforeRetry = fs.readFileSync(f.artifactPath, 'utf8');
-  const firstIntent = readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md');
-
-  fs.writeFileSync(
-    first.recovery!.candidatePath,
-    beforeRetry.replace('- **总体结论**：通过', '- **总体结论**：需要修改')
-  );
+  fs.writeFileSync(f.artifactPath, beforeRetry.replace('- **总体结论**：通过', '- **总体结论**：需要修改'));
   const second = finalizeReviewSummary(
-    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md', recoveryId: first.recovery!.recoveryId },
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
     { repoRoot: f.root }
   );
 
   assert.equal(second.status, 'failed');
   assert.equal(second.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
-  assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), beforeRetry);
-  assert.deepEqual(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), firstIntent);
+  assert.notEqual(fs.readFileSync(f.artifactPath, 'utf8'), beforeRetry);
 });
 
 test('review summary finalization is idempotent and rejects mismatched numeric counts', () => {

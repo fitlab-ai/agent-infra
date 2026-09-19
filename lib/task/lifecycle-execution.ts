@@ -1,8 +1,7 @@
 import {
   inspectOrchestrationStage,
   pauseOrchestration,
-  planOrchestrationStageCompletion,
-  readRun
+  planOrchestrationStageCompletion
 } from './orchestration.ts';
 import type {
   OrchestrationStageCompletion,
@@ -31,28 +30,15 @@ function failure(mode: LifecycleExecutionMode, code: string, message: string): L
 function inspectLifecycleExecution(
   taskRef: string,
   request: LifecycleExecutionRequest,
-  options: Readonly<{ repoRoot?: string }> = {}
+  options: Readonly<{
+    repoRoot?: string;
+    now?: () => string;
+  }> = {}
 ): LifecycleExecutionResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failure(request.mode, resolved.code, resolved.message);
   if (request.mode === 'standalone') {
-    try {
-      const run = readRun(resolved.taskDir);
-      if (run?.pendingDelegation) {
-        return failure(
-          request.mode,
-          'ORCHESTRATION_STANDALONE_BUSY',
-          'standalone lifecycle execution is blocked by a pending orchestration delegation'
-        );
-      }
-      return { ok: true, mode: request.mode, completionPlan: null, error: null };
-    } catch (error) {
-      return failure(
-        request.mode,
-        'ORCHESTRATION_STATE_INVALID',
-        error instanceof Error ? error.message : String(error)
-      );
-    }
+    return { ok: true, mode: request.mode, completionPlan: null, error: null };
   }
 
   if (request.agent) {
@@ -84,7 +70,10 @@ function inspectLifecycleExecution(
 function validateLifecycleExecution(
   taskRef: string,
   request: LifecycleExecutionRequest,
-  options: Readonly<{ repoRoot?: string }> = {}
+  options: Readonly<{
+    repoRoot?: string;
+    now?: () => string;
+  }> = {}
 ): LifecycleExecutionResult {
   const inspected = inspectLifecycleExecution(taskRef, request, options);
   if (inspected.ok || request.mode === 'standalone' || request.dryRun) return inspected;

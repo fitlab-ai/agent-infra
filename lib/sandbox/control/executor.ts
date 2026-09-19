@@ -441,49 +441,6 @@ async function executeRequestInner(
       ? lifecycleFailure('LIFECYCLE_PAYLOAD_INVALID', message)
       : orchestrationFailure(code, message);
   }
-  let controllerBinding: Readonly<{
-    instanceDigest: string;
-    controlGeneration: string;
-  }> | null = null;
-  if (request.family === 'task-orchestration') {
-    const codexPrepare = operation.family === 'task-orchestration'
-      && operation.intent === 'prepare'
-      && operation.input.client === 'codex';
-    if (codexPrepare) {
-      if (!request.controllerProof) {
-        const authority = options.lifecycleRecoveryAttestation;
-        if (!authority || authority.phase !== 'orchestration.prepare') {
-          return orchestrationFailure(
-            'CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED',
-            'Codex prepare requires a current controller lease proof'
-          );
-        }
-        controllerBinding = {
-          instanceDigest: authority.controllerInstanceDigest,
-          controlGeneration: authority.controlGeneration
-        };
-      } else {
-        try {
-          controllerBinding = (options.resolveControllerBinding ?? resolveCodexControllerBinding)({
-            manifest,
-            manifestPath,
-            proof: request.controllerProof,
-            buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
-          });
-        } catch (error) {
-          const code = error instanceof CodexControllerRegistrationError
-            ? error.code
-            : 'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID';
-          return orchestrationFailure(code, `${code}: Codex controller proof was rejected`);
-        }
-      }
-    } else if (request.controllerProof !== null) {
-      return orchestrationFailure(
-        'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID',
-        'Controller proof is only accepted for canonical Codex prepare'
-      );
-    }
-  }
   const diagnosticLog: OrchestrationDiagnosticLogger = (event, fields): void => {
     appendExecutorAudit(manifest, event.startsWith('orchestration-') ? event : `orchestration-${event}`, {
       requestId: request.id,
@@ -501,7 +458,6 @@ async function executeRequestInner(
     manifestPath,
     requestId: request.id,
     diagnosticLog,
-    ...(controllerBinding ? { controllerBinding } : {}),
     lifecycleRecoveryAttestation: options.lifecycleRecoveryAttestation ?? null
   });
   const format = (value: unknown): SandboxControlExecutionResult => {

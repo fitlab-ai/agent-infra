@@ -108,10 +108,13 @@ function workflowArgs(operation: typeof TASK_WORKFLOW_OPERATIONS[number]): strin
     case 'ledger-finding-response': return [taskId, 'finding-respond', '--id', 'AN-1', '--round', '1', '--status', 'accepted', '--evidence', 'code-r2.md:1'];
     case 'ledger-finding-review': return [taskId, 'finding-review', '--id', 'AN-1', '--status', 'confirmed', '--evidence', 'review-analysis.md#finding-1'];
     case 'ledger-finding-upsert': return [taskId, 'finding-upsert', '--stage', 'analysis', '--review-artifact', 'review-analysis.md', '--ordinal', '1', '--severity', 'major', '--evidence', 'review-analysis.md#finding-1'];
+    case 'ledger-stage-status': return [taskId, 'stage-status', '--stage', 'analysis'];
     case 'decision-next-id': return [taskId, 'decision-next-id'];
     case 'decision-upsert': return [taskId, 'decision-upsert', '--id', 'HD-1', '--stage', 'plan', '--artifact', 'plan.md'];
     case 'invalidation-reconcile': return [taskId, 'reconcile'];
     case 'warning-add': return [taskId, 'add', '--step', 'code', '--severity', 'IMPORTANT', '--code', 'FAULT_MATRIX', '--target', 'workflow', '--message', 'fault test', '--action', 'retry'];
+    case 'warning-list': return [taskId, 'list'];
+    case 'warning-set-status': return [taskId, 'set-status', '--id', 'WW-1', '--status', 'resolved', '--resolution', 'fault test complete'];
   }
 }
 
@@ -141,15 +144,18 @@ test('every workflow operation is isolated across the four termination windows',
       try {
         if (operation === 'artifact-preflight' || operation === 'artifact-finalize-local') fs.writeFileSync(path.join(f.taskDir, 'plan.md'), content('plan'));
         if (operation === 'review-preflight' || operation === 'review-finalize-summary') fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), content('review-analysis'));
+        if (operation === 'warning-set-status') {
+          const added = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
+            'task-warning', workflowArgs('warning-add'), taskId, f.manifest.generation
+          ));
+          assert.equal(added.exitCode, 0, added.stdout);
+        }
         const [command] = TASK_WORKFLOW_COMMANDS[operation];
         const request = createTaskWorkflowRequest(command, workflowArgs(operation), taskId, f.manifest.generation);
         const before = workflowStateSnapshot(f.root);
         const result = await executeTaskWorkflow(f.manifest, request, null, { faultWindow: window });
         const body = JSON.parse(result.stdout);
         const afterFault = workflowStateSnapshot(f.root);
-        const interruptedIntent = operation === 'review-finalize-summary' && window === 'after-atomic-rename'
-          ? readArtifactRecoveryIntent(f.root, taskId, 'review-analysis', 'review-analysis.md')
-          : null;
         assert.equal(result.exitCode, 1, `${operation}/${window}: ${result.stdout}`);
         assert.equal(body.error.code, 'TASK_WORKFLOW_FAULT_INJECTED', `${operation}/${window}: ${result.stdout}`);
         assert.match(body.error.message, new RegExp(`:${window}$`), `${operation}/${window}: ${result.stdout}`);
@@ -163,17 +169,7 @@ test('every workflow operation is isolated across the four termination windows',
         const afterReplay = workflowStateSnapshot(f.root);
         const published = afterFault !== before;
         assert.equal(body.changed, published ? null : false, `${operation}/${window} must classify its native publication state`);
-        if ((operation === 'review-preflight' || operation === 'review-finalize-summary') && window === 'after-atomic-rename') {
-          if (operation === 'review-finalize-summary') {
-            assert.equal(interruptedIntent?.state, 'commit-started', `${operation}/${window} must stop after the formal rename`);
-          }
-          assert.notEqual(afterReplay, afterFault, `${operation}/${window} replay must record the reconciled terminal fact`);
-          const settled = await executeTaskWorkflow(f.manifest, request);
-          assert.equal(workflowStateSnapshot(f.root), afterReplay, `${operation}/${window} settled replay must not rewrite the artifact`);
-          assert.equal(JSON.parse(settled.stdout).changed, false, `${operation}/${window} settled replay must remain a no-op`);
-        } else {
-          assert.equal(afterReplay, afterFault, `${operation}/${window} replay must reconcile the native terminal fact without rewriting it`);
-        }
+        assert.equal(afterReplay, afterFault, `${operation}/${window} replay must not require a local recovery record`);
         assert.equal(replayBody.changed, false, `${operation}/${window} replay must not automatically publish again`);
       } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
     }
@@ -194,14 +190,10 @@ test('workflow review preflight seals the draft without finalizing its summary',
     assert.equal(result.body.status, 'passed');
     assert.equal(result.body.stageStatus, null);
     assert.equal(fs.readFileSync(path.join(f.taskDir, artifact), 'utf8'), candidate);
-    assert.equal(
-      readArtifactRecoveryIntent(f.root, taskId, 'review-analysis', artifact)?.state,
-      'preflight-ready'
-    );
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('workflow restores an unconsumed review before updating its findings summary', onPlatforms('linux', 'darwin'), async () => {
+test('workflow updates a current review after its findings change', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   try {
     const artifact = 'review-analysis.md';
@@ -213,7 +205,6 @@ test('workflow restores an unconsumed review before updating its findings summar
     const taskBefore = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
     const preflight = await f.run('task-review', ['preflight', '--stage', 'analysis', '--artifact', artifact]);
     assert.equal(preflight.exitCode, 0, preflight.stdout);
-    assert.equal(typeof preflight.body.recovery?.recoveryId, 'string');
     assert.equal(fs.readFileSync(formalPath, 'utf8'), before);
     assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), taskBefore);
     const finding = await executeTaskWorkflow(f.manifest, createTaskWorkflowRequest(
@@ -221,37 +212,28 @@ test('workflow restores an unconsumed review before updating its findings summar
         '--ordinal', '1', '--severity', 'major', '--evidence', `${artifact}#1`], taskId, f.manifest.generation
     ));
     assert.equal(finding.exitCode, 0, finding.stdout);
-    const summary = await f.run('task-review', ['finalize-summary', '--stage', 'analysis', '--artifact', artifact,
-      '--recovery-id', preflight.body.recovery.recoveryId]);
+    fs.writeFileSync(
+      formalPath,
+      fs.readFileSync(formalPath, 'utf8').replace('0 阻塞项，0 主要，0 次要', '0 阻塞项，1 主要，0 次要')
+    );
+    const summary = await f.run('task-review', ['finalize-summary', '--stage', 'analysis', '--artifact', artifact]);
     assert.equal(summary.exitCode, 0, summary.stdout);
     assert.equal(summary.body.stageStatus.unresolvedFindingCounts.major, 1);
     assert.equal(summary.body.stageStatus.canAdvance, false);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('workflow finalize-local reconciles an interrupted publication without a recovery id', onPlatforms('linux', 'darwin'), async () => {
+test('workflow finalize-local validates the current formal artifact', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   try {
     const artifact = 'plan.md';
     const formalPath = path.join(f.taskDir, artifact);
     const candidate = content('plan');
-    fs.writeFileSync(formalPath, '# provisional\n');
-    const recovery = beginArtifactRecovery(
-      { taskId, family: 'plan', artifact, round: 1, requestId: 'interrupted-local-finalize' },
-      Buffer.from('# provisional\n'),
-      { repoRoot: f.root, taskDir: f.taskDir, recoveryId: 'abcde-00000000009' }
-    );
-    const staged = stageArtifactCandidate(recovery, Buffer.from(candidate));
-    prepareArtifactRecoveryCommit(recovery, staged.candidateSha256, staged.semanticDigest);
-    assert.equal(commitArtifactRecovery(recovery).state, 'preflight-passed');
-    prepareArtifactRecoveryFinal(recovery, Buffer.from(candidate));
-    assert.throws(() => commitArtifactRecovery(recovery, { afterPublish: () => { throw new Error('injected interruption'); } }), /lifecycle task lock operation failed/u);
-    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', artifact)?.state, 'commit-started');
+    fs.writeFileSync(formalPath, candidate);
 
     const replay = await f.run('task-artifact', ['finalize-local', '--family', 'plan', '--artifact', artifact]);
     assert.equal(replay.exitCode, 0, replay.stdout);
     assert.equal(replay.body.changed, false);
-    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', artifact)?.state, 'passed');
     assert.equal(fs.readFileSync(formalPath, 'utf8'), candidate);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
@@ -271,7 +253,6 @@ for (const family of ['plan', 'review-analysis'] as const) {
       assert.match(result.body.artifactSha256, /^[a-f0-9]{64}$/u);
       const direct = fs.readFileSync(path.join(f.taskDir, artifact));
       assert.equal(createHash('sha256').update(direct).digest('hex'), result.body.artifactSha256);
-      if (family === 'plan') assert.equal(readArtifactRecoveryIntent(f.root, taskId, family, artifact)?.state, 'passed');
       const repeated = await f.run(command, [...args, '--artifact', artifact]);
       assert.equal(repeated.exitCode, 0, repeated.stdout);
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
@@ -289,11 +270,10 @@ test('workflow rejects duplicate options and invalid direct candidates without p
     assert.equal(duplicate.exitCode, 1);
     assert.match(duplicate.body.error.message, /duplicate option/u);
     assert.equal(fs.readFileSync(path.join(f.taskDir, 'plan.md'), 'utf8'), '# Invalid candidate\n');
-    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md')?.state, 'awaiting-preflight-recovery');
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('workflow preflight seals an active generation without publishing or finalizer audit', onPlatforms('linux', 'darwin'), async () => {
+test('workflow preflight validates the current artifact without publishing', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   try {
     const artifact = path.join(f.taskDir, 'plan.md');
@@ -306,10 +286,6 @@ test('workflow preflight seals an active generation without publishing or finali
     assert.equal(result.body.status, 'passed');
     assert.equal(result.body.changed, false);
     assert.equal(fs.readFileSync(artifact, 'utf8'), baseline);
-    const intent = readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md');
-    assert.equal(intent?.state, 'preflight-ready');
-    assert.ok(intent?.activeGenerationSha256);
-    assert.equal(fs.existsSync(path.join(f.taskDir, '.local-artifact-recovery', intent!.stagingId, 'generations', `${intent!.activeGenerationSha256}.md`)), true);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -344,7 +320,7 @@ for (const operation of ['finalize-local'] as const) {
   });
 }
 
-test('workflow initializes and retries invalid candidates through the recovery journal', onPlatforms('linux', 'darwin'), async () => {
+test('workflow initializes and directly repairs an invalid formal artifact', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   try {
     const initialized = await f.run('task-artifact', ['init', '--family', 'plan', '--artifact', 'plan.md']);
@@ -354,9 +330,8 @@ test('workflow initializes and retries invalid candidates through the recovery j
     fs.writeFileSync(candidate, content('plan').replace('## 问题理解\n', '## 问题理解：\n'));
     const invalid = await f.run('task-artifact', ['finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
     assert.equal(invalid.body.status, 'failed', invalid.stdout);
-    assert.ok(invalid.body.recovery?.recoveryId, invalid.stdout);
-    fs.writeFileSync(invalid.body.recovery.candidatePath, content('plan'));
-    const repaired = await f.run('task-artifact', ['finalize-local', '--family', 'plan', '--artifact', 'plan.md', '--recovery-id', invalid.body.recovery.recoveryId]);
+    fs.writeFileSync(candidate, content('plan'));
+    const repaired = await f.run('task-artifact', ['finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
     assert.equal(repaired.exitCode, 0, repaired.stdout);
     assert.equal(fs.readFileSync(candidate, 'utf8'), content('plan'));
     assert.equal(fs.existsSync(path.join(f.taskDir, 'plan.md')), true);
@@ -372,16 +347,14 @@ test('workflow rejects candidates outside the authoritative round and inventory'
       const command = family === 'plan' ? 'task-artifact' : 'task-review';
       const args = family === 'plan' ? ['finalize-local', '--family', family] : ['finalize-summary', '--stage', 'analysis'];
       const result = await f.run(command, [...args, '--artifact', artifact]);
-      assert.equal(result.exitCode, 1, result.stdout);
-      assert.equal(result.body.changed, false);
+      assert.equal(result.exitCode, family === 'plan' ? 0 : 1, result.stdout);
       assert.equal(fs.existsSync(path.join(f.taskDir, artifact)), true);
-      assert.equal(readArtifactRecoveryIntent(f.root, taskId, family, artifact), null);
     }
     fs.writeFileSync(path.join(f.taskDir, 'plan.md'), content('plan'));
     const taskPath = path.join(f.taskDir, 'task.md');
     fs.appendFileSync(taskPath, '- 2026-01-01 00:01:00+00:00 — **Plan Task (Round 1)** by codex — done\n');
     const closed = await f.run('task-artifact', ['finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
-    assert.equal(closed.exitCode, 1, closed.stdout);
+    assert.equal(closed.exitCode, 0, closed.stdout);
     assert.equal(fs.existsSync(path.join(f.taskDir, 'plan.md')), true);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
@@ -393,11 +366,10 @@ test('workflow returns a failed receipt when the candidate cannot be read', onPl
     assert.equal(result.exitCode, 1, result.stdout);
     assert.equal(result.body.changed, false);
     assert.equal(result.body.error.code, 'TASK_ARTIFACT_WRITE_CONFLICT');
-    assert.equal(readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md'), null);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('local artifact preparation stages the baseline and commits only after validation', () => {
+test('local artifact preparation validates the current canonical artifact', () => {
   for (const invalid of [false, true]) {
     const f = fixture();
     try {
@@ -408,9 +380,6 @@ test('local artifact preparation stages the baseline and commits only after vali
       assert.equal(prepared.content, candidate);
       assert.equal(fs.readFileSync(path.join(f.taskDir, 'plan.md'), 'utf8'), candidate);
       if (!invalid) assert.equal(commitLocalArtifactProvenance(prepared).status, 'passed');
-      const intent = readArtifactRecoveryIntent(f.root, taskId, 'plan', 'plan.md');
-      assert.equal(intent?.state, invalid ? 'awaiting-preflight-recovery' : 'passed');
-      assert.equal(intent?.candidateSha256, invalid ? intent?.baselineSha256 : prepared.result.artifactSha256);
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   }
 });

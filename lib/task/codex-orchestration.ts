@@ -6,20 +6,9 @@ import {
 } from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
 import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
 import {
-  createCodexCapabilityStore,
-  isCodexCapabilityProvenanceDetail
-} from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
-import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
-import {
   computeLifecycleBuildIdentity,
-  verifyLifecycleBuildIdentity,
   type LifecycleBuildIdentity,
-  type LifecycleIdentityWarning
 } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import { verifyCodexSandboxControllerContextWithWarnings as verifySandboxControllerWithWarnings } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
-import {
-  verifyCodexSandboxControllerContextWithWarnings as verifyControllerContextFileWithWarnings
-} from '../agent-clients/adapters/codex-lifecycle/controller-context.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import {
@@ -29,32 +18,20 @@ import {
   OrchestrationStateError,
   pauseMatchingOrchestrationDelegation,
   prepareOrchestrationDelegation,
-  routeOrchestration,
   reconcileMatchingOrchestrationDelegation,
   sealMatchingOrchestrationDelegationWithHostEvidence
 } from './orchestration.ts';
-import { randomUUID, createHash } from 'node:crypto';
 import type { OrchestrationOptions, OrchestrationResult } from './orchestration.ts';
-import {
-  consumeLifecycleRecoveryAttestation,
-  issueLifecycleRecoveryAttestation,
-  validateLifecycleRecoveryAttestation,
-  type LifecycleRecoveryAttestationV1
-} from './control-authority.ts';
 
 type LifecycleStore = ReturnType<typeof createCodexLifecycleStore>;
-type CapabilityStore = ReturnType<typeof createCodexCapabilityStore>;
 type CodexBridgeOptions = Readonly<{
   repoRoot?: string;
   store?: LifecycleStore;
   preflight?: typeof preflightCodexLifecycleEvidence;
   resolveThread?: typeof resolveCodexThread;
   resolveTerminal?: typeof resolveCodexTerminal;
-  capabilityStore?: CapabilityStore;
   buildIdentity?: LifecycleBuildIdentity;
   orchestrationOptions?: OrchestrationOptions;
-  controllerBinding?: Readonly<{ instanceDigest: string; controlGeneration: string }>;
-  deferLifecycleRecoveryConsumption?: boolean;
 }>;
 
 type CodexSpawnIdentity = Readonly<{
@@ -68,35 +45,14 @@ type CodexSpawnIdentity = Readonly<{
   requestedReasoningEffort?: string;
 }>;
 
-function buildIdentityDigest(value: LifecycleBuildIdentity): string {
-  return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
-}
-
 function coreOptions(options: CodexBridgeOptions): OrchestrationOptions {
   return { ...options.orchestrationOptions, repoRoot: options.repoRoot ?? options.orchestrationOptions?.repoRoot };
 }
 
-function bridgeFailure(code: string, message: string, detail?: CodexCapabilityProvenanceDetail): OrchestrationResult {
+function bridgeFailure(code: string, message: string): OrchestrationResult {
   return {
     status: 'failed', changed: false, taskId: null, run: null, next: null,
-    error: { code, message, ...(detail ? { detail } : {}) }
-  };
-}
-
-function capabilityFailure(error: unknown): NonNullable<OrchestrationResult['error']> {
-  const detailValue = error instanceof Error
-    ? (error as Error & { detail?: unknown }).detail
-    : undefined;
-  return {
-    code: error instanceof Error && error.name.startsWith('CODEX_CAPABILITY_')
-      ? error.name
-      : 'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED',
-    message: error instanceof Error ? error.message : String(error),
-    ...(error instanceof Error
-      && error.name === 'CODEX_CAPABILITY_PROVENANCE_MISMATCH'
-      && isCodexCapabilityProvenanceDetail(detailValue)
-      ? { detail: detailValue }
-      : {})
+    error: { code, message }
   };
 }
 
@@ -112,35 +68,12 @@ function requiredStore(options: CodexBridgeOptions): LifecycleStore {
   return options.store;
 }
 
-function brokerControllerBinding(): Readonly<{ instanceDigest: string; controlGeneration: string }> | null {
-  const raw = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
-  if (!raw) return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
-  }
-  const binding = value as Record<string, unknown>;
-  if (Object.keys(binding).sort().join(',') !== 'controlGeneration,instanceDigest'
-    || typeof binding.instanceDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(binding.instanceDigest)
-    || typeof binding.controlGeneration !== 'string' || binding.controlGeneration.length === 0) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
-  }
-  return binding as { instanceDigest: string; controlGeneration: string };
-}
-
 async function prepareCodexOrchestrationDelegation(
   taskRef: string,
   input: Readonly<{
     client: AgentClientId;
     requestedModel?: string;
     requestedReasoningEffort?: string;
-    capabilityRef?: string;
-    lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
   }>,
   options: CodexBridgeOptions = {}
 ): Promise<OrchestrationResult> {
@@ -149,164 +82,11 @@ async function prepareCodexOrchestrationDelegation(
     const repoRoot = options.repoRoot ?? process.cwd();
     const resolved = resolveTaskRef(taskRef, { repoRoot });
     if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
-    const preflight = await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot);
-    const capabilityRef = input.capabilityRef;
-    if (!capabilityRef) {
-      return bridgeFailure(
-        'ORCHESTRATION_CODEX_CAPABILITY_REQUIRED',
-        'Codex prepare requires a current-session capability reference'
-      );
-    }
-    const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
-    const brokerController = options.controllerBinding ?? brokerControllerBinding();
-    const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-    const contextVerification = contextPath
-      ? (brokerController
-        ? verifyControllerContextFileWithWarnings(contextPath, {
-            repoRoot,
-            generation: process.env.AGENT_INFRA_CONTROL_GENERATION ?? brokerController.controlGeneration
-          })
-        : verifySandboxControllerWithWarnings(contextPath, { repoRoot }))
-      : null;
-    const identityWarnings: LifecycleIdentityWarning[] = [...(contextVerification?.warnings ?? [])];
-    const localController = contextVerification?.context ?? null;
-    if (localController && brokerController
-      && (localController.controllerInstanceDigest !== brokerController.instanceDigest
-        || localController.controlGeneration !== brokerController.controlGeneration)) {
-      return bridgeFailure(
-        'CODEX_SANDBOX_CONTROLLER_BINDING_MISMATCH',
-        'broker and local controller bindings do not match'
-      );
-    }
-    const controller = brokerController ?? (localController ? {
-      instanceDigest: localController.controllerInstanceDigest,
-      controlGeneration: localController.controlGeneration
-    } : null);
-    const capabilityStore = options.capabilityStore ?? createCodexCapabilityStore();
-    const attested = capabilityStore.inspectReference(capabilityRef);
-    const capabilityIdentity = verifyLifecycleBuildIdentity(attested.buildIdentity, buildIdentity);
-    if (!capabilityIdentity.ok) {
-      return bridgeFailure(capabilityIdentity.code!, capabilityIdentity.message!);
-    }
-    identityWarnings.push(...capabilityIdentity.warnings);
-    const lifecycleProvenance = {
-      ...attested.buildIdentity,
-      hookDefinitionHash: preflight.hookDefinitionHash,
-      ...preflight.hookProvenance,
-      capabilitySessionId: attested.sessionId!,
-      capabilityTurnId: attested.turnId!,
-      capabilityToolUseId: attested.toolUseId!,
-      controllerInstanceDigest: controller?.instanceDigest ?? null,
-      controlGeneration: controller?.controlGeneration ?? null
-    };
-    const capabilityExpected = {
-      taskId: resolved.taskId,
-      hookDefinitionHash: preflight.hookDefinitionHash,
-      buildIdentity,
-      ...(controller ? { controller: {
-        instanceDigest: controller.instanceDigest,
-        controlGeneration: controller.controlGeneration
-      } } : {})
-    };
-    if (input.lifecycleRecoveryAttestation) {
-      try { validateLifecycleRecoveryAttestation(input.lifecycleRecoveryAttestation); }
-      catch (error) {
-        return bridgeFailure(
-          'LIFECYCLE_AUTHORITY_ATTESTATION_INVALID',
-          error instanceof Error ? error.message : String(error)
-        );
-      }
-    }
-    let lifecycleRecoveryAttestation: LifecycleRecoveryAttestationV1 | null = input.lifecycleRecoveryAttestation ?? null;
-    const routed = input.capabilityRef && !lifecycleRecoveryAttestation
-      ? routeOrchestration(taskRef, coreOptions(options))
-      : null;
-    if (routed && !routed.next) return routed;
-    if (routed?.next && ['analysis', 'plan', 'code'].includes(routed.next.stage)) {
-      const recoveryRequest = {
-        version: 1 as const,
-        requestId: randomUUID(),
-        operationId: randomUUID(),
-        phase: 'orchestration.prepare' as const,
-        taskId: resolved.taskId,
-        family: routed.next.stage === 'analysis' ? 'analysis' as const
-          : routed.next.stage === 'plan' ? 'plan' as const : 'code' as const,
-        artifact: routed.next.artifact,
-        round: routed.next.round,
-        lifecycleRequestId: randomUUID(),
-        authorityRef: capabilityRef,
-        expectedControlGeneration: controller?.controlGeneration ?? '',
-        expectedControllerInstanceDigest: controller?.instanceDigest ?? '0'.repeat(64),
-        expectedBuildIdentityDigest: buildIdentityDigest(buildIdentity),
-        expectedHookDefinitionHash: preflight.hookDefinitionHash
-      };
-      const authority = issueLifecycleRecoveryAttestation(recoveryRequest, {
-        capabilityStore,
-        ...(controller ? { controllerBinding: controller } : {}),
-        buildIdentity
-      });
-      if (authority.status === 'rejected' || !authority.attestation) {
-        return bridgeFailure(
-          authority.error?.code ?? 'LIFECYCLE_AUTHORITY_REJECTED',
-          authority.error?.message ?? 'lifecycle authority was rejected'
-        );
-      }
-      lifecycleRecoveryAttestation = authority.attestation;
-    }
-    const prepared = prepareOrchestrationDelegation(taskRef, {
-      ...input,
-      lifecycleProvenance,
-      lifecycleRecoveryAttestation
-    }, {
-      ...coreOptions(options),
-      validateLifecycleCapability: () => {
-        try {
-          const validated = capabilityStore.validateReference(capabilityRef, capabilityExpected);
-          if (validated.sessionId !== attested.sessionId
-            || validated.turnId !== attested.turnId
-            || validated.toolUseId !== attested.toolUseId) {
-            return {
-              code: 'CODEX_CAPABILITY_IDENTITY_CHANGED',
-              message: 'capability identity changed during validation'
-            };
-          }
-          return null;
-        } catch (error) {
-          return capabilityFailure(error);
-        }
-      },
-      consumeLifecycleCapability: () => null
-    });
-    if (lifecycleRecoveryAttestation && !options.deferLifecycleRecoveryConsumption && prepared.status !== 'failed') {
-      try {
-        consumeLifecycleRecoveryAttestation(lifecycleRecoveryAttestation);
-      } catch (error) {
-        return bridgeFailure(
-          error instanceof Error ? error.name : 'LIFECYCLE_AUTHORITY_CONSUME_FAILED',
-          error instanceof Error ? error.message : String(error)
-        );
-      }
-    }
-    return identityWarnings.length > 0 && prepared.status !== 'failed'
-      ? { ...prepared, warnings: Object.freeze(identityWarnings) }
-      : prepared;
+    await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot);
+    return prepareOrchestrationDelegation(taskRef, input, coreOptions(options));
   } catch (error) {
     if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
-    const detailValue = error instanceof Error
-      ? (error as Error & { detail?: unknown }).detail
-      : undefined;
-    const detail = error instanceof Error
-      && error.name === 'CODEX_CAPABILITY_PROVENANCE_MISMATCH'
-      && isCodexCapabilityProvenanceDetail(detailValue)
-      ? detailValue
-      : undefined;
-    return bridgeFailure(
-      error instanceof Error && error.name.startsWith('CODEX_CAPABILITY_')
-        ? error.name
-        : 'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED',
-      error instanceof Error ? error.message : String(error),
-      detail
-    );
+    return bridgeFailure('ORCHESTRATION_CLIENT_PREFLIGHT_FAILED', error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -335,16 +115,6 @@ async function activateCodexOrchestrationDelegation(
       toolUseId: evidence.spawnToolUseId
     });
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
-    const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-    const contextVerification = contextPath
-      ? verifySandboxControllerWithWarnings(contextPath, { repoRoot })
-      : null;
-    const controller = options.controllerBinding
-      ?? brokerControllerBinding()
-      ?? (contextVerification?.context ? {
-        instanceDigest: contextVerification.context.controllerInstanceDigest,
-        controlGeneration: contextVerification.context.controlGeneration
-      } : null);
     const activated = activateMatchingOrchestrationDelegation('codex', {
       nativeAgent: evidence.nativeAgent,
       childId: evidence.childThreadId,
@@ -366,14 +136,11 @@ async function activateCodexOrchestrationDelegation(
         capabilityTurnId: evidence.parentTurnId,
         spawnToolUseId: evidence.spawnToolUseId,
         spawnObservedAt: record.spawnObservedAt ?? undefined,
-        controllerInstanceDigest: controller?.instanceDigest ?? null,
-        controlGeneration: controller?.controlGeneration ?? null
+        controllerInstanceDigest: null,
+        controlGeneration: null
       }
     }, coreOptions(options));
-    const warnings = contextVerification?.warnings ?? [];
-    return warnings.length > 0 && activated.status !== 'failed'
-      ? { ...activated, warnings: Object.freeze(warnings) }
-      : activated;
+    return activated;
   } catch (error) {
     if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
     return pauseBridge('ORCHESTRATION_CODEX_START_FAILED', error instanceof Error ? error.message : String(error), options);

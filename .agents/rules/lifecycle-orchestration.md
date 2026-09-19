@@ -5,18 +5,18 @@
 - 总控只路由和委派；阶段技能仍是业务规则与产物格式的单一事实源。
 - 每个阶段和每轮返工都创建 fresh executor；每轮审查创建 fresh reviewer，禁止 follow-up 复用。
 - reviewer 只能写当前审查产物和核心生成的任务元数据。业务代码、HEAD 或暂存区变化会使 receipt 失效。
-- active run 中只有一个 pending delegation。child 必须在任何阶段副作用前通过 activation barrier；缺失、超时、错配、fork、重放、hook 不可用或工作区漂移一律暂停（claude-code 路径下 model/effort 证据的缺失或错配、以及该宿主结构上不提供的 fork/spawn-mode 证据，按 `.agents/skills/run-task/reference/host-validation.md` 的记录规则处理，不在此列；`parentId`/`childId` 的缺失或错配仍然暂停）。跨根 package/build/contract 或 hook/profile 内容漂移只输出可交付 warning；本轮 receipt 的 hook/evidence 绑定仍硬校验。
+- active run 中只有一个 pending delegation；阶段与实际 child 身份保持一致，启动和终态失败如实记录。
 - 首版成功终点是一次通过既有安全门禁的 `commit`；不创建 PR、不监控 checks、不执行 `complete-task`。
 
-## 恢复语义
+## 当前执行记录
 
-`orchestration.json` 是详细状态源。current run 保存完整策略、append-only 恢复历史、build/contract/hook source/controller provenance 与 activation 单调时钟。读取时只接受当前 writer 的完整结构；未知字段、缺失字段、非法 provenance 或旧 run 一律失败关闭且不改写。遇到无法识别的 `orchestration.json`，保留原文件并提示重建 sandbox 或人工修复后重试，不做 schema 迁移，也不创建 follow-up task。升级 agent-infra 前必须完成或清空所有 active run。prepared orphan 只允许在 deadline 已过、task fingerprint 精确不变、无 authorization 消耗且无匹配的未消费 active lifecycle evidence 时显式恢复。
+`orchestration.json` 记录阶段、模型策略、child 身份及实际执行结果。记录必须符合当前结构；本地操作者可直接修正后重新校验。已有任务写锁与原子写入继续保护写操作。
 
-## Codex 宿主与 capability
+## Codex 宿主
 
-- direct-host 只接受 trusted project 或 managed lifecycle hooks。task-bound sandbox 必须由受控 nested controller 建立隔离 `CODEX_HOME`，仅接受绑定 controller context 的 user hooks；普通 user/plugin hook 不得成为证据源。使用本轮实际加载的 hook/profile，内容漂移只记录 warning 并提示重建 sandbox。
-- controller 只有在 control generation、task binding、协议版本、profile 与 hook discovery 全部通过后才能启动 nested loop；build/contract 及内容漂移通过结构化 warning 告知并建议重建 sandbox，不阻塞自然演进。两个 bypass 参数只允许出现在该 task-bound 启动路径。
-- 每次 prepare 前必须 arm 一次性 capability，并由同一当前 loop 的真实 PostToolUse attestation；token 原子消费后保留去敏 tombstone，不能重放或跨 task/session/build/controller 使用。
+- 使用当前宿主的原生 spawn、wait 与 App Server 结果；任务操作通过现有 broker 转发。
+- prepare 校验当前任务、模型策略与宿主 preflight。启动和完成记录关联实际 parent/child 身份，失败不得写成成功。
+- 不要求 capability、controller attestation 或一次性消费授权本地实现；不新增 child 自动发现、锁内启动交接、孤立 child 恢复或专用恢复协议。
 
 ## 模型策略
 

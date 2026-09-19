@@ -1,7 +1,9 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import { parseArtifactName } from './artifact-name.ts';
-import { validateCompletedArtifact, hasOpenArtifactRound, validateArtifactPublication } from './artifact-lifecycle.ts';
+import { validateCompletedArtifact, validateArtifactPublication } from './artifact-lifecycle.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';
@@ -15,17 +17,6 @@ import type { ManualOverrideCapability } from './guard-override.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
-import { readArtifactRecoveryIntent } from './artifact-repair-intent.ts';
-import {
-  beginArtifactRecovery,
-  commitArtifactRecovery,
-  prepareArtifactRecoveryFinal,
-  prepareArtifactRecoveryCommit,
-  reconcileArtifactRecovery,
-  recoveryContextFromIntent,
-  stageArtifactCandidate
-} from './artifact-recovery.ts';
-import type { ArtifactRecoveryContext } from './artifact-recovery.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -51,7 +42,6 @@ type ReviewFinalizationRequest = {
   artifact: string;
   orchestrated?: boolean;
   dryRun?: boolean;
-  recoveryId?: string;
 };
 type ReviewFinalizationResult = {
   status: 'planned' | 'applied' | 'no-op' | 'failed';
@@ -64,12 +54,6 @@ type ReviewFinalizationResult = {
   stageStatus: LedgerStageStatus | null;
   artifactSha256: string | null;
   semanticDigest: string | null;
-  recovery?: Readonly<{
-    recoveryId: string;
-    candidatePath: string;
-    baselineSha256: string;
-    baselineSemanticDigest: string;
-  }>;
   operations: readonly {
     kind: 'artifact';
     artifact: string;
@@ -90,7 +74,6 @@ type ReviewFinalizationOptions = {
   fileSystem?: Partial<ReviewFileSystem>;
   manualOverride?: ManualOverrideCapability;
   lockAlreadyHeld?: boolean;
-  startRecovery?: boolean;
 };
 
 const STAGES: Record<ReviewStage, { family: 'review-analysis' | 'review-plan' | 'review-code' }> = {
@@ -143,7 +126,7 @@ function preflightFailed(
   };
 }
 
-/** Validate and seal a review draft before any finding-ledger write. */
+/** Validate the current review draft before any finding-ledger write. */
 function preflightReviewSummaryUnlocked(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
@@ -162,28 +145,13 @@ function preflightReviewSummaryUnlocked(
 
   let taskContent: string;
   let content: string;
-  let recovery: ArtifactRecoveryContext | undefined;
   try {
     taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-    if (request.recoveryId) {
-      const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact);
-      if (!intent || intent.recoveryOperationId !== request.recoveryId) return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', 'recovery id does not match the artifact journal', resolved.taskId);
-      if (!['awaiting-preflight-recovery', 'preflight-ready'].includes(intent.state)) return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', `recovery journal is in '${intent.state}' state`, resolved.taskId);
-      recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
-      content = fs.existsSync(recovery.stagingPath)
-        ? fs.readFileSync(recovery.stagingPath, 'utf8')
-        : fs.readFileSync(recovery.formalPath, 'utf8');
-    } else {
-      const validated = validateCompletedArtifact(resolved.taskDir, spec.family, request.artifact);
-      if (!validated.ok) return preflightFailed(request, validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID', validated.error.message, resolved.taskId);
-      content = fs.readFileSync(validated.artifact.path, 'utf8');
-      const intent = readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact);
-      if (intent?.state === 'preflight-ready') recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
-      if (intent?.state === 'consumed') return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', 'review artifact was already finalized', resolved.taskId);
-    }
+    const validated = validateCompletedArtifact(resolved.taskDir, spec.family, request.artifact);
+    if (!validated.ok) return preflightFailed(request, validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID', validated.error.message, resolved.taskId);
+    content = fs.readFileSync(validated.artifact.path, 'utf8');
   } catch (error) { return preflightFailed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
 
-  if (!hasOpenArtifactRound(taskContent, spec.family, parsed.round)) return preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', `${request.artifact} does not have one matching open started review event`, resolved.taskId);
   const execution = validateLifecycleExecution(request.taskRef, {
     mode: request.orchestrated ? 'orchestrated' : 'standalone',
     identity: { stage: spec.family, round: parsed.round, artifact: request.artifact, role: 'reviewer' },
@@ -204,14 +172,6 @@ function preflightReviewSummaryUnlocked(
   });
   const qualificationError = qualification.ok ? null : qualification;
   if (!detail.ok || !structure.ok || qualificationError) {
-    if (!recovery && !request.dryRun) {
-      try {
-        recovery = beginArtifactRecovery({
-          taskId: resolved.taskId, family: spec.family, artifact: request.artifact, round: parsed.round,
-          requestId: `review-preflight:${resolved.taskId}:${stage}:${parsed.round}`
-        }, Buffer.from(content, 'utf8'), { repoRoot: resolved.repoRoot, taskDir: resolved.taskDir, lockAlreadyHeld: options.lockAlreadyHeld });
-      } catch (error) { return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', String(error), resolved.taskId); }
-    }
     const diagnostics = [
       ...(!detail.ok ? [`${detail.code}: ${detail.message}`] : []),
       ...structure.diagnostics.map((item) => `${item.code}: ${item.message}`),
@@ -219,27 +179,18 @@ function preflightReviewSummaryUnlocked(
     ].join('; ');
     return preflightFailed(request, !detail.ok ? 'REVIEW_DECISION_DETAIL_INVALID' : !structure.ok ? 'REVIEW_ARTIFACT_STRUCTURE_INVALID' : 'REVIEW_ARTIFACT_QUALIFICATION_INVALID', diagnostics, resolved.taskId, {
       artifactSha256, semanticDigest,
-      ...(recovery ? { recovery: recoveryInfo(recovery) } : {})
     });
   }
-  if (request.dryRun || recovery && readArtifactRecoveryIntent(resolved.repoRoot, resolved.taskId, spec.family, request.artifact)?.state === 'preflight-ready') {
+  if (request.dryRun) {
     return {
-      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest, ...(recovery ? { recovery: recoveryInfo(recovery) } : {}) }),
+      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest }),
       status: 'passed', changed: false, error: null
     };
   }
-  try {
-    recovery ??= beginArtifactRecovery({
-      taskId: resolved.taskId, family: spec.family, artifact: request.artifact, round: parsed.round,
-      requestId: `review-preflight:${resolved.taskId}:${stage}:${parsed.round}`
-    }, Buffer.from(content, 'utf8'), { repoRoot: resolved.repoRoot, taskDir: resolved.taskDir, lockAlreadyHeld: options.lockAlreadyHeld });
-    const staged = stageArtifactCandidate(recovery, Buffer.from(content, 'utf8'), { lockAlreadyHeld: options.lockAlreadyHeld });
-    prepareArtifactRecoveryCommit(recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: options.lockAlreadyHeld });
-    return {
-      ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest, recovery: recoveryInfo(recovery) }),
-      status: 'passed', changed: false, error: null
-    };
-  } catch (error) { return preflightFailed(request, 'REVIEW_PROVENANCE_INVALID', String(error), resolved.taskId, { artifactSha256, semanticDigest }); }
+  return {
+    ...preflightFailed(request, 'REVIEW_ARTIFACT_CONFLICT', '', resolved.taskId, { artifactSha256, semanticDigest }),
+    status: 'passed', changed: false, error: null
+  };
 }
 
 function preflightReviewSummary(
@@ -265,18 +216,8 @@ function preflightReviewSummary(
 type ReviewSummaryCandidatePreparation = Readonly<{
   result: ReviewFinalizationResult;
   content: string;
-  recovery?: ArtifactRecoveryContext;
   lockAlreadyHeld?: boolean;
 }>;
-
-function recoveryInfo(recovery: ArtifactRecoveryContext): NonNullable<ReviewFinalizationResult['recovery']> {
-  return {
-    recoveryId: recovery.recoveryId,
-    candidatePath: recovery.stagingPath,
-    baselineSha256: recovery.baselineSha256,
-    baselineSemanticDigest: recovery.baselineSemanticDigest
-  };
-}
 
 /** Prepare domain validation, summary bytes and provenance before any publication. */
 function prepareReviewSummaryCandidate(
@@ -306,36 +247,9 @@ function prepareReviewSummaryCandidate(
   let taskContent: string;
   try { taskContent = (options.fileSystem?.readFileSync ?? DEFAULT_FILE_SYSTEM.readFileSync)(resolved.taskMdPath); }
   catch (error) { return reject('REVIEW_ARTIFACT_NOT_REGULAR', String(error)); }
-  let recovery: ArtifactRecoveryContext | undefined;
-  if (request.recoveryId) {
-    try {
-      const intent = readArtifactRecoveryIntent(resolved.repoRoot, taskId!, spec.family, request.artifact);
-      if (!intent || intent.recoveryOperationId !== request.recoveryId) return reject('REVIEW_PROVENANCE_INVALID', 'recovery id does not match the artifact journal');
-      if (!['awaiting-preflight-recovery', 'preflight-ready', 'preflight-commit-started', 'preflight-passed', 'full-finalizer-ready', 'commit-started'].includes(intent.state)) return reject('REVIEW_PROVENANCE_INVALID', `recovery journal is in '${intent.state}' state`);
-      recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, intent);
-      artifactContent = fs.existsSync(recovery.stagingPath)
-        ? fs.readFileSync(recovery.stagingPath, 'utf8')
-        : fs.readFileSync(recovery.formalPath, 'utf8');
-    } catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error)); }
-  }
   const artifactSha256 = sha256Content(artifactContent);
   const semanticDigest = canonicalSemanticDigest(artifactContent);
   const digests = { artifactSha256, semanticDigest };
-  let repairIntent;
-  try { repairIntent = readArtifactRecoveryIntent(resolved.repoRoot, taskId!, spec.family, request.artifact); }
-  catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), digests); }
-  if (repairIntent?.state === 'consumed') {
-    if (repairIntent.finalArtifactSha256 !== artifactSha256 || repairIntent.finalSemanticDigest !== semanticDigest) {
-      return reject('REVIEW_PROVENANCE_INVALID', 'the review artifact changed after its finalization provenance was recorded', digests);
-    }
-  }
-  if (repairIntent?.state === 'passed'
-    && (repairIntent.finalArtifactSha256 !== artifactSha256 || repairIntent.finalSemanticDigest !== semanticDigest)) {
-    repairIntent = undefined;
-  }
-  if (!hasOpenArtifactRound(taskContent, spec.family, parsed.round)) {
-    return reject('REVIEW_ARTIFACT_IDENTITY_INVALID', `${request.artifact} does not have one matching open started review event`);
-  }
   const execution = validateLifecycleExecution(request.taskRef, {
     mode: request.orchestrated ? 'orchestrated' : 'standalone',
     identity: { stage: spec.family, round: parsed.round, artifact: request.artifact, role: 'reviewer' },
@@ -356,59 +270,15 @@ function prepareReviewSummaryCandidate(
   const schema = getArtifactSchema(spec.family)!;
   const structure = inspectArtifactContract(artifactContent, schema);
   if (!structure.ok) {
-    if (!recovery && !request.dryRun && options.startRecovery) {
-      try {
-        recovery = beginArtifactRecovery({
-          taskId: taskId!, family: spec.family, artifact: request.artifact, round: parsed.round,
-          requestId: `review-finalize:${taskId!}:${stage}:${parsed.round}`
-        }, Buffer.from(artifactContent, 'utf8'), { repoRoot: resolved.repoRoot, taskDir: resolved.taskDir, lockAlreadyHeld: options.lockAlreadyHeld });
-      } catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), digests); }
-    }
-    return {
-      ...reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), {
-        artifactSha256, semanticDigest: structure.semanticDigest,
-        ...(recovery ? { recovery: {
-          recoveryId: recovery.recoveryId,
-          candidatePath: recovery.stagingPath,
-          baselineSha256: recovery.baselineSha256,
-          baselineSemanticDigest: recovery.baselineSemanticDigest
-        } } : {})
-      }),
-      ...(recovery ? { recovery } : {})
-    };
+    return reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), {
+      artifactSha256, semanticDigest: structure.semanticDigest
+    });
   }
   const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts, {
-    refreshNumericCounts: Boolean(request.recoveryId && recovery)
+    refreshNumericCounts: true
   });
   if (!transformed.ok) return reject(transformed.code, transformed.message);
   const finalDigests = { artifactSha256: sha256Content(transformed.content), semanticDigest: canonicalSemanticDigest(transformed.content) };
-  if (!recovery && repairIntent?.state === 'commit-started') {
-    if (repairIntent.finalArtifactSha256 !== finalDigests.artifactSha256 || repairIntent.finalSemanticDigest !== finalDigests.semanticDigest) {
-      return reject('REVIEW_PROVENANCE_INVALID', 'formal review artifact does not match the interrupted recovery journal', finalDigests);
-    }
-    recovery = recoveryContextFromIntent(resolved.repoRoot, resolved.taskDir, repairIntent);
-  }
-  if (!recovery && (repairIntent?.state === 'passed' || repairIntent?.state === 'consumed')) {
-    if (transformed.changed) return reject('REVIEW_PROVENANCE_INVALID', 'the review artifact requires changes after its completed recovery was consumed', finalDigests);
-    return {
-      content: transformed.content,
-      result: {
-        ...failed(request, 'REVIEW_ARTIFACT_CONFLICT', '', taskId, stageStatus, finalDigests),
-        status: 'no-op',
-        changed: false,
-        error: null
-      },
-      lockAlreadyHeld: options.lockAlreadyHeld
-    };
-  }
-  if (!recovery && !request.dryRun && options.startRecovery) {
-    try {
-      recovery = beginArtifactRecovery({
-        taskId: taskId!, family: spec.family, artifact: request.artifact, round: parsed.round,
-        requestId: `review-finalize:${taskId!}:${stage}:${parsed.round}`
-      }, Buffer.from(artifactContent, 'utf8'), { repoRoot: resolved.repoRoot, taskDir: resolved.taskDir, lockAlreadyHeld: options.lockAlreadyHeld });
-    } catch (error) { return reject('REVIEW_PROVENANCE_INVALID', String(error), finalDigests); }
-  }
   return {
     content: transformed.content,
     result: {
@@ -418,7 +288,6 @@ function prepareReviewSummaryCandidate(
       operations: transformed.changed ? [{ kind: 'artifact', artifact: request.artifact, operation: 'update' }] : [],
       error: null
     },
-    ...(recovery ? { recovery } : {}),
     lockAlreadyHeld: options.lockAlreadyHeld
   };
 }
@@ -428,51 +297,18 @@ function commitReviewSummaryProvenance(
   repoRoot: string,
   options: Readonly<{ afterPublish?: () => void }> = {}
 ): ReviewFinalizationResult {
-  if (prepared.result.status === 'failed' || !prepared.recovery) return prepared.result;
+  return prepared.result;
+}
+
+function replaceCurrentArtifactAtomically(file: string, content: string): void {
+  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`);
   try {
-    const intent = readArtifactRecoveryIntent(prepared.recovery.repoRoot, prepared.recovery.taskId, prepared.recovery.family, prepared.recovery.artifact);
-    if (!intent) throw new Error('ARTIFACT_RECOVERY_INTENT_MISSING');
-    let committed;
-    if (intent.state === 'passed' || intent.state === 'consumed') {
-      return {
-        ...prepared.result,
-        status: 'no-op',
-        changed: false,
-        artifactSha256: intent.finalArtifactSha256,
-        semanticDigest: intent.finalSemanticDigest,
-        error: null
-      };
-    } else if (intent.state === 'commit-started') {
-      const reconciled = reconcileArtifactRecovery(prepared.recovery, {
-        lockAlreadyHeld: prepared.lockAlreadyHeld,
-        afterPublish: options.afterPublish
-      });
-      committed = reconciled.intent;
-    } else if (intent.state === 'awaiting-preflight-recovery') {
-      const staged = stageArtifactCandidate(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
-      prepareArtifactRecoveryCommit(prepared.recovery, staged.candidateSha256, staged.semanticDigest, { lockAlreadyHeld: prepared.lockAlreadyHeld });
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
-    } else if (intent.state === 'preflight-ready' || intent.state === 'preflight-commit-started') {
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld });
+    fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
+    fs.renameSync(temporary, file);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    if (committed?.state === 'preflight-passed' || intent.state === 'preflight-passed') {
-      prepareArtifactRecoveryFinal(prepared.recovery, Buffer.from(prepared.content, 'utf8'), { lockAlreadyHeld: prepared.lockAlreadyHeld });
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld, afterPublish: options.afterPublish });
-    } else if (intent.state === 'full-finalizer-ready') {
-      committed = commitArtifactRecovery(prepared.recovery, { lockAlreadyHeld: prepared.lockAlreadyHeld, afterPublish: options.afterPublish });
-    }
-    if (!committed || committed.state !== 'passed') throw new Error(`ARTIFACT_RECOVERY_STATE_INVALID: commit ended in '${committed?.state ?? intent.state}'`);
-    return {
-      ...prepared.result,
-      artifactSha256: committed.finalArtifactSha256,
-      semanticDigest: committed.finalSemanticDigest,
-      error: null
-    };
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('TASK_WORKFLOW_FAULT_INJECTED:')) throw error;
-    return { ...prepared.result, status: 'failed', error: {
-      code: 'REVIEW_RECOVERY_COMMIT_FAILED', message: `cannot publish review candidate: ${String(error)}`
-    } };
   }
 }
 
@@ -494,14 +330,30 @@ function finalizeReviewSummaryUnlocked(
   catch (error) { return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
   const prepared = prepareReviewSummaryCandidate(request, content, options);
   if (request.dryRun) return prepared.result;
-  return commitReviewSummaryProvenance(prepared, resolved.repoRoot);
+  if (prepared.result.status === 'failed' || !prepared.result.changed) return prepared.result;
+  try {
+    replaceCurrentArtifactAtomically(validated.artifact.path, prepared.content);
+    return {
+      ...prepared.result,
+      status: 'applied',
+      artifactSha256: sha256Content(prepared.content),
+      semanticDigest: canonicalSemanticDigest(prepared.content)
+    };
+  } catch (error) {
+    return failed(
+      request,
+      'REVIEW_RECOVERY_COMMIT_FAILED',
+      `cannot update current review artifact: ${error instanceof Error ? error.message : String(error)}`,
+      resolved.taskId
+    );
+  }
 }
 
 function finalizeReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
-  const effectiveOptions = { ...options, startRecovery: !request.dryRun };
+  const effectiveOptions = options;
   if (request.dryRun || options.lockAlreadyHeld) return finalizeReviewSummaryUnlocked(request, effectiveOptions);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return finalizeReviewSummaryUnlocked(request, effectiveOptions);

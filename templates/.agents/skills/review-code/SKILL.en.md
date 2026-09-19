@@ -102,7 +102,7 @@ Before writing this round's `{review-artifact}`, create the controlled review sk
 agent-infra-internal task-artifact {task-id} init --family review-code --artifact {review-artifact} --locale en
 ```
 
-The skeleton does not generate a verdict, findings, or counts; complete review content is required before summary finalization. If structural finalization returns one provably safe error, it returns a controlled recovery candidate; edit only its `candidatePath`, then rerun the original finalizer with the same `recoveryId`. Candidate-only is a protocol authorization boundary, not OS isolation; arbitrary same-UID host writers are outside the protocol's protection claim, and fingerprint/state checks fail closed on anomalies.
+The skeleton does not generate a verdict, findings, or counts; complete review content is required before summary finalization. On a structural error, follow `.agents/rules/local-artifact-repair.md` to correct the formal review artifact directly and rerun the original finalizer; current artifact content is the only input.
 
 Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
@@ -111,9 +111,9 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 ### 6. Update Task Status
 
 Update task.md:
-- After the report, call `agent-infra-internal task-review {task-id} preflight --stage code --artifact {review-artifact} {execution-flag}` before any ledger write. On failure, follow `.agents/rules/local-artifact-repair.md`; on success, bind `{recovery-id}` from the response.
+- After the report, call `agent-infra-internal task-review {task-id} preflight --stage code --artifact {review-artifact} {execution-flag}` before any ledger write. On failure, correct the formal artifact directly and rerun it.
 - Only after preflight passes, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. When escalating to `needs-human-decision`, append `--needs-implementation true|false` using the judgment recorded in the detail block. Do not scan ids or edit ledger rows
-- After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} --recovery-id {recovery-id} {execution-flag}`; never treat an error type or `changed=false` as automatic authorization
+- After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} {execution-flag}`; never treat an error type or `changed=false` as automatic authorization
 
   Bind and reuse this structured mapping from that one response:
 
