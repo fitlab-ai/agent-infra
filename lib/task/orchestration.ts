@@ -1470,6 +1470,16 @@ function recoverActivatedOrchestrationDelegationUnderLock(
   if (run.receipts.some((candidate) => candidate.id === receipt.id)) {
     return failed('ORCHESTRATION_RECEIPT_DUPLICATE', 'recovery receipt already exists in the completed receipt history', resolved.taskId);
   }
+  if (
+    !(
+      (run.status === 'running' && run.pause === null)
+      || (run.status === 'paused'
+        && run.pause?.code === ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
+        && run.pause.recoverable === true)
+    )
+  ) {
+    return failed('ORCHESTRATION_RECOVERY_UNSAFE', 'activated recovery cannot replace an unrelated orchestration pause', resolved.taskId);
+  }
   const aborted = abortActivatedDelegation(receipt, {
     childId: event.childId,
     stopRevision: event.stopRevision,

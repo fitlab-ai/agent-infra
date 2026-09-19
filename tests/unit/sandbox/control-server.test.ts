@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
 import { activateOrchestrationDelegation, beginOrResumeOrchestration, dispatchOrchestrationDelegation, prepareOrchestrationDelegation, readRun } from '../../../lib/task/orchestration.ts';
-import { recoverStartedLifecycleUnderLock } from '../../../lib/task/lifecycle-recovery.ts';
+import { readLifecycleRecoveryDomainEvidence, recoverStartedLifecycleUnderLock } from '../../../lib/task/lifecycle-recovery.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { genericRecoveryResponse, recoveryResponse } from '../../../lib/sandbox/control/server.ts';
 import type { SandboxControlManifest, SandboxControlRecoveryWarning, SandboxControlRequest, SandboxControlResultEvidence } from '../../../lib/sandbox/control/protocol.ts';
@@ -36,10 +36,13 @@ const PROVENANCE = {
   controlGeneration: 'generation-1'
 } as const;
 
-function recoveryFixture() {
+function recoveryFixture(options: { boundRuntime?: boolean } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-server-recovery-'));
   const taskDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
-  const runtimeRoot = path.join(root, '.agents', 'workspace', '.runtime', 'codex-lifecycle');
+  const agentRuntimeRoot = path.join(root, 'agent-runtime');
+  const runtimeRoot = options.boundRuntime
+    ? path.join(agentRuntimeRoot, 'clients', 'codex', 'lifecycle')
+    : path.join(root, '.agents', 'workspace', '.runtime', 'codex-lifecycle');
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: requirement-analysis\nassigned_to: codex\nupdated_at: old\nagent_infra_version: v0.9.16-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
   const store = createCodexLifecycleStore({ root: runtimeRoot, cliVersion: '0.147.0', now: () => '2026-01-01T00:00:00.200Z' });
@@ -54,7 +57,7 @@ function recoveryFixture() {
   assert.equal(dispatchOrchestrationDelegation(TASK_ID, { repoRoot: root, now: () => '2026-01-01T00:00:00.150Z', monotonicNow: () => 20 }).status, 'running');
   assert.equal(activateOrchestrationDelegation(TASK_ID, { nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child', parentId: 'parent', spawnMode: 'fresh', actualModel: 'executor-model', actualReasoningEffort: 'high', hostEvidence: { kind: 'codex-lifecycle-v2', startRevision: 4, ...PROVENANCE, spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:00.200Z' } }, { repoRoot: root, now: () => '2026-01-01T00:00:00.300Z', monotonicNow: () => 30 }).status, 'running');
   fs.appendFileSync(path.join(taskDir, 'task.md'), `- 2026-01-01 00:00:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n`);
-  return { root, taskDir, store };
+  return { root, taskDir, store, agentRuntimeRoot };
 }
 
 function recoveryManifest(f: ReturnType<typeof recoveryFixture>): SandboxControlManifest {
@@ -208,6 +211,52 @@ test('server rebuilds automatic recovery success when the output payload is unav
     assert.match(response.stderr, /SANDBOX_CONTROL_OUTPUT_UNAVAILABLE/u);
     assert.equal(readRun(f.taskDir)?.status, 'running');
   } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('server rebuilds repeated automatic release retries when output payloads are unavailable', () => {
+  const f = recoveryFixture({ boundRuntime: true });
+  const manifest = recoveryManifest(f);
+  const manifestPath = path.join(path.dirname(manifest.publicStatusDir), 'manifest.json');
+  const previousRuntime = process.env.AGENT_INFRA_RUNTIME_DIR;
+  process.env.AGENT_INFRA_RUNTIME_DIR = f.agentRuntimeRoot;
+  try {
+    for (const [index, requestId] of ['d'.repeat(32), 'e'.repeat(32)].entries()) {
+      const request = automaticRecoveryRequest(requestId);
+      commitPhases(manifest, request.id);
+      const recovered = withTaskExecutionLock(f.root, TASK_ID, `test.recover-started-auto-retry-${index}`, () => (
+        recoverStartedLifecycleUnderLock(
+          { taskRef: TASK_ID, intent: 'recover-started', agent: 'codex', auto: true },
+          { repoRoot: f.root, lifecycleStore: f.store, releaseRecovery: () => false }
+        )
+      ));
+      assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+      assert.equal(recovered.warning?.code, 'RECOVERY_RELEASE_RETRY_REQUIRED');
+      const terminal = terminalFor(manifest, request, recovered);
+      assert.deepEqual(readLifecycleRecoveryDomainEvidence(
+        f.root,
+        { taskRef: TASK_ID, intent: 'recover-started', agent: 'codex', auto: true },
+        terminal
+      ), {
+        consistent: true,
+        recovery: true,
+        targetState: 'active',
+        recoveryState: 'retry-required',
+        warning: recovered.warning
+      });
+      const response = recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, terminal);
+      assert.ok(response);
+      assert.equal(response.error, null, JSON.stringify(response));
+      assert.equal(response.phase, 'completed');
+      assert.equal(response.outputState, 'unavailable');
+      assert.match(response.stderr, /RECOVERY_RELEASE_RETRY_REQUIRED/u);
+      assert.match(response.stderr, /retry recover-started with the same selector and reason/u);
+      assert.doesNotMatch(response.stderr, /SANDBOX_CONTROL_RECOVERY_UNKNOWN/u);
+    }
+  } finally {
+    if (previousRuntime === undefined) delete process.env.AGENT_INFRA_RUNTIME_DIR;
+    else process.env.AGENT_INFRA_RUNTIME_DIR = previousRuntime;
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });

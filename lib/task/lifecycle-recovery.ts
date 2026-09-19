@@ -463,6 +463,13 @@ function recoveryRunCanFinish(run: OrchestrationRun | null): run is Orchestratio
     );
 }
 
+function recoveryRunAllowsActivatedMutation(run: OrchestrationRun): boolean {
+  return (run.status === 'running' && run.pause === null)
+    || (run.status === 'paused'
+      && run.pause?.code === ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
+      && run.pause.recoverable === true);
+}
+
 function recoveryTerminalFailureStatus(code: string): 'owner-unknown' | 'conflict' {
   switch (code) {
     case 'RECOVERY_LOG_CONFLICT':
@@ -761,7 +768,9 @@ export function readLifecycleRecoveryDomainEvidence(
           reason: note.reason
         };
         const facts = readRecoveryTerminalFacts(section, resolved.taskId, selector, run, store);
-        return facts.ok && facts.facts.stored === null;
+        return facts.ok && (isReleaseRetryWarning(terminalResult.warning)
+          ? facts.facts.stored !== null
+          : facts.facts.stored === null);
       });
       if (candidates.length !== 1) return recoveryDomainFailure();
       const note = candidates[0]!;
@@ -883,6 +892,15 @@ function recoverStartedLifecycleUnderLock(
   const receipt = pending ?? (recovered.length === 1 ? recovered[0]! : null);
   if (!receipt || (pending && (receipt.status !== 'activated' || receipt.client !== 'codex')) || (!pending && receipt.status !== 'aborted')) {
     return failure(request, 'owner-unknown', 'RECOVERY_DELEGATION_UNAVAILABLE', 'open lifecycle execution is not backed by one matching activated Codex delegation', { taskId });
+  }
+  if (receipt.status === 'activated' && !recoveryRunAllowsActivatedMutation(run)) {
+    return failure(
+      request,
+      'conflict',
+      'RECOVERY_ORCHESTRATION_INVALID',
+      'activated recovery cannot replace an unrelated orchestration pause',
+      { taskId, receiptId: receipt.id, childId: receipt.childId }
+    );
   }
   if (normalizeAgentToken(started.agent) !== normalizeAgentToken(receipt.client)) {
     return failure(request, 'conflict', 'RECOVERY_SELECTOR_MISMATCH', 'started agent does not match the delegation client', { taskId, receiptId: receipt.id, childId: receipt.childId });

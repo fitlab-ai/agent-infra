@@ -266,6 +266,56 @@ test('recover-started auto never clears an unrelated recoverable pause', () => {
   }
 });
 
+test('recover-started auto preserves unrelated pauses before aborting an activated delegation', () => {
+  for (const recoverable of [true, false]) {
+    const f = fixture();
+    try {
+      const paused = pauseOrchestration(
+        TASK_ID,
+        'OTHER_PAUSE',
+        'do not resume this run',
+        recoverable,
+        { repoRoot: f.root }
+      );
+      assert.equal(paused.status, 'paused');
+
+      const recovered = recoverAuto(f);
+      assert.equal(recovered.status, 'conflict');
+      assert.equal(recovered.error?.code, 'RECOVERY_ORCHESTRATION_INVALID');
+      assert.equal(readRun(f.taskDir)?.status, 'paused');
+      assert.equal(readRun(f.taskDir)?.pause?.code, 'OTHER_PAUSE');
+      assert.equal(readRun(f.taskDir)?.pendingDelegation?.status, 'activated');
+      assert.equal(readRun(f.taskDir)?.receipts.length, 0);
+      assert.equal(f.store.read('child').consumer, null);
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('recover-started auto domain evidence preserves a retained-claim retry result', () => {
+  const f = fixture();
+  try {
+    const recovered = recoverAuto(f, () => false);
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(recovered.warning?.code, 'RECOVERY_RELEASE_RETRY_REQUIRED');
+    assert.deepEqual(readLifecycleRecoveryDomainEvidence(
+      f.root,
+      autoRecoveryRequest,
+      { ...recovered, targetState: 'active' },
+      { lifecycleStore: f.store }
+    ), {
+      consistent: true,
+      recovery: true,
+      targetState: 'active',
+      recoveryState: 'retry-required',
+      warning: recovered.warning
+    });
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('recover-started claims, aborts, logs, releases, and replays as no-op', () => {
   const f = fixture();
   try {
