@@ -265,7 +265,23 @@ export function reconcileCodexControllerAuthorityState(params: Readonly<{
   }
   const now = (options.now ?? Date.now)();
   const publicStatusDir = authorityStatusDir(params.manifestPath);
-  let current = authorityState(params.manifest, publicStatusDir, null, now);
+  let current: ControllerAuthorityState;
+  let initializedProjection = false;
+  try {
+    current = readControllerAuthorityState(publicStatusDir);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'CONTROLLER_AUTHORITY_STATE_MISSING') throw error;
+    const initial = createInactiveControllerAuthorityState({
+      taskId: params.manifest.taskId,
+      generation: params.manifest.generation,
+      controlRootId: params.manifest.controlRootId
+    }, now);
+    current = writeControllerAuthorityState(publicStatusDir, {
+      ...initial,
+      state: 'opening'
+    }, { expected: null });
+    initializedProjection = true;
+  }
   const raw = readRaw(registrationPath(params.manifestPath));
   try {
     assertAuthorityIdentity(current, params.manifest);
@@ -275,15 +291,22 @@ export function reconcileCodexControllerAuthorityState(params: Readonly<{
       generation: params.manifest.generation,
       controlRootId: params.manifest.controlRootId
     }, now);
-    current = writeControllerAuthorityState(publicStatusDir, reset, { expected: current });
-    if (!raw) return current;
+    current = writeControllerAuthorityState(publicStatusDir, { ...reset, state: 'faulted' }, { expected: current });
   }
   const fault = (): ControllerAuthorityState => current.state === 'faulted'
     ? current
     : transitionControllerAuthorityState(publicStatusDir, current, {
       state: 'faulted', transitionId: crypto.randomBytes(32).toString('hex'), now
     });
-  if (!raw) return current.state === 'inactive' ? current : fault();
+  if (!raw) {
+    if (current.state === 'inactive') return current;
+    if (initializedProjection && current.state === 'opening') {
+      return transitionControllerAuthorityState(publicStatusDir, current, {
+        state: 'inactive', transitionId: current.transitionId, now
+      });
+    }
+    return fault();
+  }
   let registration: CodexControllerRegistrationV1;
   try {
     registration = parseRegistration(raw.raw);

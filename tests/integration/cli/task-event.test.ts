@@ -961,12 +961,19 @@ test('dry-run returns planned without changing task bytes for start and completi
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+  const finalized = finalizeLocalArtifact({
+    taskRef: f.id, repoRoot: f.root, family: 'plan', artifact: 'plan.md'
+  });
+  assert.equal(finalized.status, 'passed', finalized.error?.message);
   const beforeCompletion = fs.readFileSync(f.file);
+  const recoveryRoot = path.join(f.dir, '.local-artifact-recovery');
+  const recoveryBefore = fs.existsSync(recoveryRoot) ? fs.readdirSync(recoveryRoot) : [];
   const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--dry-run']);
   const completedResult = JSON.parse(completed.stdout);
   assert.equal(completedResult.status, 'planned');
   assert.equal(completedResult.operations.length, 4);
   assert.deepEqual(fs.readFileSync(f.file), beforeCompletion);
+  assert.deepEqual(fs.existsSync(recoveryRoot) ? fs.readdirSync(recoveryRoot) : [], recoveryBefore);
 });
 
 test('orchestrated completion dry-run reports a provenance mismatch without pausing the run', () => {

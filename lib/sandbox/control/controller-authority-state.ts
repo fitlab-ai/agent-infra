@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { LifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerRegistrationV1 } from './controller-registration.ts';
+import { withRecoverableFileLock } from '../../task/recoverable-file-lock.ts';
 
 export const CONTROLLER_AUTHORITY_STATE_FILE = 'controller-authority.json';
 
@@ -164,10 +165,7 @@ export function writeControllerAuthorityState(
   fs.mkdirSync(publicStatusDir, { recursive: true, mode: 0o700 });
   const file = statePath(publicStatusDir);
   const lock = `${file}.lock`;
-  let descriptor: number;
-  try { descriptor = fs.openSync(lock, 'wx', 0o600); }
-  catch { return fail('CONTROLLER_AUTHORITY_STATE_CONFLICT'); }
-  try {
+  return withRecoverableFileLock(lock, 'CONTROLLER_AUTHORITY_STATE_CONFLICT', () => {
     let current: ControllerAuthorityState | null = null;
     if (fs.existsSync(file)) current = readControllerAuthorityState(publicStatusDir);
     if (!isDeepStrictEqual(current, options.expected)) fail('CONTROLLER_AUTHORITY_STATE_CONFLICT');
@@ -180,10 +178,7 @@ export function writeControllerAuthorityState(
       fs.rmSync(temporary, { force: true });
     }
     return validated;
-  } finally {
-    fs.closeSync(descriptor!);
-    fs.rmSync(lock, { force: true });
-  }
+  });
 }
 
 export function transitionControllerAuthorityState(

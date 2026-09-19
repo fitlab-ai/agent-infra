@@ -42,3 +42,18 @@ test('finalization receipt rejects changed bytes while an operation is pending',
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('finalization receipt reclaims a lock left by a dead writer', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'finalization-receipt-stale-lock-'));
+  try {
+    const directory = path.join(root, '.agents', 'workspace', '.local-lifecycle-finalization-receipts');
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, `${tuple.taskId}-${tuple.family}-${tuple.artifact}.json.lock`), `${JSON.stringify({
+      version: 1, pid: 2_000_000_000, startTime: 0, token: 'dead-writer'
+    })}\n`);
+    const receipt = recordLifecycleFinalizationReceipt(root, tuple, { operationId: '1'.repeat(32), now: 1 });
+    assert.equal(receipt.state, 'pending');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

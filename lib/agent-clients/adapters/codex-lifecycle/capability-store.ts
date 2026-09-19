@@ -338,7 +338,8 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   fs.chmodSync(root, 0o700);
 
   function fileFor(capabilityRef: string): string {
-    return path.join(root, `${digest(capabilityRef)}.json`);
+    const identity = /^sha256:([a-f0-9]{64})$/u.exec(capabilityRef)?.[1] ?? digest(capabilityRef);
+    return path.join(root, `${identity}.json`);
   }
 
   function read(file: string): CodexCapabilityRecord {
@@ -595,6 +596,32 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     return validateRecord(record, expected);
   }
 
+  function findUniqueAttestedReference(expected: Readonly<{
+    taskId: string;
+    hookDefinitionHash: string;
+    buildIdentity: LifecycleBuildIdentity;
+    controller?: CodexControllerBinding;
+  }>): string {
+    sweep();
+    const matches = files().flatMap((file) => {
+      const record = read(file);
+      if (record.status !== 'attested' || record.recoveryState !== 'unreserved') return [];
+      try {
+        validateRecord(record, expected);
+        return [`sha256:${record.capabilityRefDigest}`];
+      } catch {
+        return [];
+      }
+    });
+    if (matches.length === 0) {
+      throw capabilityError('CODEX_CAPABILITY_MISSING', 'no attested capability matches the lifecycle operation');
+    }
+    if (matches.length !== 1) {
+      throw capabilityError('CODEX_CAPABILITY_AMBIGUOUS', 'more than one attested capability matches the lifecycle operation');
+    }
+    return matches[0]!;
+  }
+
   function consumeReference(capabilityRef: string, operationId: string, expected: Readonly<{
     taskId: string;
     hookDefinitionHash: string;
@@ -650,7 +677,9 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     if (record.recoveryState !== 'reserved' || record.recoveryOperationId !== operationId) {
       throw capabilityError('CODEX_CAPABILITY_RECOVERY_INVALID', 'capability must be reserved by this operation before phase reservation');
     }
-    if (record.recoveryPhases.some((entry) => entry.phase === phase)) {
+    const existing = record.recoveryPhases.find((entry) => entry.phase === phase);
+    if (existing?.requestId === requestId) return record;
+    if (existing) {
       throw capabilityError('CODEX_CAPABILITY_PHASE_REPLAY', 'recovery phase was already reserved');
     }
     const next: CodexCapabilityRecord = Object.freeze({
@@ -758,7 +787,7 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   return Object.freeze({
     arm, attestByReference, reserveReference, reserveRecoveryPhase, consumeRecoveryPhase,
     consumeReference, inspectReference,
-    findByRecoveryOperation, validateReference, sweep
+    findByRecoveryOperation, findUniqueAttestedReference, validateReference, sweep
   });
 }
 

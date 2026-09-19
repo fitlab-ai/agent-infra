@@ -143,6 +143,8 @@ const lifecycleAuthorityPhases: readonly LifecycleAuthorityPhase[] = [
 const lifecycleAuthorityFamilies = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
 const lifecycleAuthorityArtifact = /^(?:analysis|review-analysis|plan|review-plan|code|review-code)(?:-r[1-9]\d*)?\.md$/u;
 const lifecycleAuthorityDigest = (value: string): string => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+const lifecycleAuthorityReferenceDigest = (value: string): string =>
+  /^sha256:([a-f0-9]{64})$/u.exec(value)?.[1] ?? lifecycleAuthorityDigest(value);
 const lifecycleAuthorityBuildDigest = (value: LifecycleBuildIdentity): string => lifecycleAuthorityDigest(JSON.stringify(value));
 
 export function lifecycleRecoveryAttestationDigest(value: LifecycleRecoveryAttestationV1): string {
@@ -271,7 +273,7 @@ export function issueLifecycleRecoveryAttestation(
     const attestation = validateLifecycleRecoveryAttestation({
       version: 1,
       attestationId: crypto.randomUUID(),
-      authorityRefDigest: lifecycleAuthorityDigest(request.authorityRef),
+      authorityRefDigest: lifecycleAuthorityReferenceDigest(request.authorityRef),
       operationId: request.operationId,
       phase: request.phase,
       requestId: request.requestId,
@@ -463,7 +465,7 @@ export function recoverLifecycleRecoveryOperation(
     controller: options.controllerBinding
   };
   const capabilities = store.findByRecoveryOperation(selector.operationId);
-  if (capabilities.length !== 1 || capabilities[0]!.capabilityRefDigest !== lifecycleAuthorityDigest(selector.authorityRef)) {
+  if (capabilities.length !== 1 || capabilities[0]!.capabilityRefDigest !== lifecycleAuthorityReferenceDigest(selector.authorityRef)) {
     throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_PROVENANCE_INVALID', 'durable capability provenance does not identify this operation');
   }
   const capability = capabilities[0]!;

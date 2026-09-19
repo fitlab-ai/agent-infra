@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { parseArtifactName } from './artifact-name.ts';
 import { validateCompletedArtifact, validateArtifactPublication } from './artifact-lifecycle.ts';
@@ -18,6 +18,7 @@ import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { currentLifecycleAuthority, recordLifecycleFinalizationReceipt } from './lifecycle-finalization-receipt.ts';
+import { consumeLocalLifecycleAuthorityPhase, reserveLocalLifecycleAuthorityPhase } from './local-lifecycle-authority.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -309,6 +310,16 @@ function commitReviewSummaryProvenance(
   try {
     options.afterPublish?.();
     const authority = currentLifecycleAuthority(process.env, result.taskId);
+    const operationId = createHash('sha256').update([
+      result.taskId, spec.family, result.artifact, result.artifactSha256, result.semanticDigest
+    ].join('\0')).digest('hex');
+    const attestation = authority.mode === 'sandbox-active'
+      ? reserveLocalLifecycleAuthorityPhase({
+          taskId: result.taskId, family: spec.family, artifact: result.artifact,
+          round: parsed.round, operationId, phase: 'artifact.finalize-local',
+          lifecycleRequestId: `${spec.family}:${result.artifact}:finalize`
+        })
+      : null;
     recordLifecycleFinalizationReceipt(repoRoot, {
       taskId: result.taskId,
       family: spec.family,
@@ -319,7 +330,8 @@ function commitReviewSummaryProvenance(
       finalizer: 'review',
       authorityMode: authority.mode,
       authorityDigest: authority.digest
-    });
+    }, { operationId });
+    consumeLocalLifecycleAuthorityPhase(attestation);
     return result;
   } catch (error) {
     return failed(

@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseArtifactName } from './artifact-name.ts';
 import type { ArtifactSchemaFamily } from './artifact-schema.ts';
 import { readControllerAuthorityState } from '../sandbox/control/controller-authority-state.ts';
+import { withRecoverableFileLock } from './recoverable-file-lock.ts';
 
 export type LifecycleFinalizationReceipt = Readonly<{
   version: 1;
@@ -82,10 +83,7 @@ function writeReceipt(
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const file = receiptPath(repoRoot, receipt.taskId, receipt.family, receipt.artifact);
   const lock = `${file}.lock`;
-  let descriptor: number;
-  try { descriptor = fs.openSync(lock, 'wx', 0o600); }
-  catch { return fail('LIFECYCLE_FINALIZATION_RECEIPT_CONFLICT'); }
-  try {
+  return withRecoverableFileLock(lock, 'LIFECYCLE_FINALIZATION_RECEIPT_CONFLICT', () => {
     const current = fs.existsSync(file)
       ? readLifecycleFinalizationReceipt(repoRoot, receipt.taskId, receipt.family, receipt.artifact)
       : null;
@@ -96,10 +94,7 @@ function writeReceipt(
       fs.renameSync(temporary, file);
     } finally { fs.rmSync(temporary, { force: true }); }
     return receipt;
-  } finally {
-    fs.closeSync(descriptor!);
-    fs.rmSync(lock, { force: true });
-  }
+  });
 }
 
 export function recordLifecycleFinalizationReceipt(

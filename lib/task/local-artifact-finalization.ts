@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
@@ -12,6 +13,7 @@ import { expectedQualificationRelations, validateQualificationAudit } from './qu
 import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { currentLifecycleAuthority, recordLifecycleFinalizationReceipt } from './lifecycle-finalization-receipt.ts';
+import { consumeLocalLifecycleAuthorityPhase, reserveLocalLifecycleAuthorityPhase } from './local-lifecycle-authority.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
@@ -231,6 +233,16 @@ function commitLocalArtifactProvenance(
   }, { code: 'ARTIFACT_IDENTITY_INVALID', message: 'final artifact identity is invalid' });
   try {
     const authority = currentLifecycleAuthority(process.env, result.taskId);
+    const operationId = createHash('sha256').update([
+      result.taskId, result.family, result.artifact, result.artifactSha256, result.semanticDigest
+    ].join('\0')).digest('hex');
+    const attestation = authority.mode === 'sandbox-active'
+      ? reserveLocalLifecycleAuthorityPhase({
+          taskId: result.taskId, family: result.family, artifact: result.artifact,
+          round: parsed.round, operationId, phase: 'artifact.finalize-local',
+          lifecycleRequestId: `${result.family}:${result.artifact}:finalize`
+        })
+      : null;
     recordLifecycleFinalizationReceipt(prepared.repoRoot, {
       taskId: result.taskId,
       family: result.family,
@@ -241,7 +253,8 @@ function commitLocalArtifactProvenance(
       finalizer: 'artifact',
       authorityMode: authority.mode,
       authorityDigest: authority.digest
-    });
+    }, { operationId });
+    consumeLocalLifecycleAuthorityPhase(attestation);
   } catch (error) {
     return { ...result, status: 'failed', error: {
       code: /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]

@@ -53,6 +53,20 @@ test('controller authority state rejects missing and malformed projections', () 
   }
 });
 
+test('controller authority state reclaims a lock left by a dead writer', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-authority-stale-lock-'));
+  try {
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'controller-authority.json.lock'), `${JSON.stringify({
+      version: 1, pid: 2_000_000_000, startTime: 0, token: 'dead-writer'
+    })}\n`);
+    const inactive = createInactiveControllerAuthorityState(identity, 1_000);
+    assert.deepEqual(writeControllerAuthorityState(root, inactive, { expected: null }), inactive);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('controller authority reconciliation fails closed after an interrupted transition', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-authority-reconcile-'));
   const publicStatusDir = path.join(root, 'public');
@@ -81,7 +95,7 @@ test('controller authority reconciliation fails closed after an interrupted tran
     assert.equal(opening.state, 'opening');
     const faulted = reconcileCodexControllerAuthorityState(params, { now: () => 1_002 });
     assert.equal(faulted.state, 'faulted');
-    assert.equal(faulted.revision, 3);
+    assert.equal(faulted.revision, 4);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

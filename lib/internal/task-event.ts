@@ -21,6 +21,12 @@ import {
 import type { ArtifactSchemaFamily } from '../task/artifact-schema.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  consumeLocalLifecycleAuthorityPhase,
+  recoverCommittedLocalLifecycleAuthorityPhase,
+  reserveLocalLifecycleAuthorityPhase
+} from '../task/local-lifecycle-authority.ts';
+import type { LifecycleRecoveryAttestationV1 } from '../task/control-authority.ts';
 
 const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--orchestrated] [--dry-run]
 
@@ -52,7 +58,8 @@ const COMPLETED_FAMILIES: Readonly<Record<string, ArtifactSchemaFamily>> = {
 
 function sandboxFinalizationReceipt(
   request: TaskEventRequest,
-  resolved: Readonly<{ repoRoot: string; taskId: string; taskDir: string }>
+  resolved: Readonly<{ repoRoot: string; taskId: string; taskDir: string }>,
+  options: Readonly<{ committed?: boolean }> = {}
 ): LifecycleFinalizationReceipt | null {
   const family = COMPLETED_FAMILIES[request.event];
   if (!family) return null;
@@ -68,13 +75,13 @@ function sandboxFinalizationReceipt(
     if (sandboxBound) throw new Error('LIFECYCLE_FINALIZATION_RECEIPT_MISSING');
     return null;
   }
-  const authority = currentLifecycleAuthority(process.env, resolved.taskId);
+  const authority = options.committed ? null : currentLifecycleAuthority(process.env, resolved.taskId);
   const content = fs.readFileSync(path.join(resolved.taskDir, artifact), 'utf8');
   if (receipt.round !== parsed.round
     || receipt.artifactSha256 !== sha256Content(content)
     || receipt.semanticDigest !== canonicalSemanticDigest(content)
-    || receipt.authorityMode !== authority.mode
-    || receipt.authorityDigest !== authority.digest
+    || (authority !== null && receipt.authorityMode !== authority.mode)
+    || (authority !== null && receipt.authorityDigest !== authority.digest)
     || (request.artifactSha256 !== undefined && request.artifactSha256 !== receipt.artifactSha256)
     || (request.semanticDigest !== undefined && request.semanticDigest !== receipt.semanticDigest)) {
     throw new Error('LIFECYCLE_FINALIZATION_RECEIPT_MISMATCH');
@@ -139,10 +146,25 @@ async function taskEvent(args: string[] = []): Promise<void> {
     result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-event.${request.event}`, async () => {
       let receipt: LifecycleFinalizationReceipt | null;
       let recovery: ArtifactRecoveryContext | null = null;
+      let completionAuthority: LifecycleRecoveryAttestationV1 | null = null;
+      let committed = false;
       try {
-        receipt = sandboxFinalizationReceipt(request, resolved);
-        if (receipt) {
+        const replay = applyTaskEvent({ ...request, dryRun: true }, { lockAlreadyHeld: true });
+        committed = replay.status === 'no-op';
+        receipt = sandboxFinalizationReceipt(request, resolved, { committed });
+        if (receipt && !request.dryRun) {
           if (!request.requestId) throw new Error('LIFECYCLE_FINALIZATION_REQUEST_ID_MISSING');
+          if (!committed && receipt.authorityMode === 'sandbox-active') {
+            completionAuthority = reserveLocalLifecycleAuthorityPhase({
+              taskId: receipt.taskId,
+              family: receipt.family,
+              artifact: receipt.artifact,
+              round: receipt.round,
+              operationId: receipt.operationId,
+              phase: 'task-event.completed',
+              lifecycleRequestId: request.requestId
+            });
+          }
           recovery = recordArtifactRecoveryPassed({
             taskId: receipt.taskId,
             family: receipt.family,
@@ -171,10 +193,18 @@ async function taskEvent(args: string[] = []): Promise<void> {
           error: { code: /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'LIFECYCLE_FINALIZATION_RECEIPT_INVALID', message }
         };
       }
-      let current = applyTaskEvent(request, { lockAlreadyHeld: true });
+      let current = applyTaskEvent(request, {
+        lockAlreadyHeld: true,
+        lifecycleRecoveryAttestation: completionAuthority
+      });
       const values = request as Record<string, unknown>;
       if (current.status !== 'failed' || !values.overrideTicket) {
         if (receipt && (current.status === 'applied' || current.status === 'no-op')) {
+          if (committed && receipt.authorityMode === 'sandbox-active') {
+            recoverCommittedLocalLifecycleAuthorityPhase(receipt.operationId);
+          } else {
+            consumeLocalLifecycleAuthorityPhase(completionAuthority);
+          }
           if (recovery) consumeArtifactRecovery(recovery, { lockAlreadyHeld: true });
           consumeLifecycleFinalizationReceipt(resolved.repoRoot, receipt);
         }
