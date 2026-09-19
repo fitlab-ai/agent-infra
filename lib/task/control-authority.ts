@@ -72,7 +72,7 @@ export type LifecycleAuthorityRequestV1 = Readonly<{
   operationId: string;
   phase: LifecycleAuthorityPhase;
   taskId: string;
-  family: 'analysis' | 'plan' | 'code';
+  family: 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code';
   artifact: string;
   round: number;
   lifecycleRequestId: string;
@@ -92,7 +92,7 @@ export type LifecycleRecoveryAttestationV1 = Readonly<{
   requestId: string;
   lifecycleRequestId: string;
   taskId: string;
-  family: 'analysis' | 'plan' | 'code';
+  family: 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code';
   artifact: string;
   round: number;
   controlGeneration: string;
@@ -140,8 +140,8 @@ export type LifecycleRecoveryOperationQueryV1 = Readonly<{
 const lifecycleAuthorityPhases: readonly LifecycleAuthorityPhase[] = [
   'orchestration.prepare', 'artifact.finalize-local', 'task-event.completed'
 ];
-const lifecycleAuthorityFamilies = ['analysis', 'plan', 'code'] as const;
-const lifecycleAuthorityArtifact = /^(?:analysis|plan|code)(?:-r[1-9]\d*)?\.md$/u;
+const lifecycleAuthorityFamilies = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
+const lifecycleAuthorityArtifact = /^(?:analysis|review-analysis|plan|review-plan|code|review-code)(?:-r[1-9]\d*)?\.md$/u;
 const lifecycleAuthorityDigest = (value: string): string => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 const lifecycleAuthorityBuildDigest = (value: LifecycleBuildIdentity): string => lifecycleAuthorityDigest(JSON.stringify(value));
 
@@ -412,7 +412,11 @@ function lifecycleRecoveryEventCommitted(
   catch { return false; }
   const section = locateActivityLog(content);
   if (!section) return false;
-  const labels = { analysis: 'Analyze Task', plan: 'Plan Task', code: 'Code Task' } as const;
+  const labels = {
+    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis',
+    plan: 'Plan Task', 'review-plan': 'Review Plan',
+    code: 'Code Task', 'review-code': 'Review Code'
+  } as const;
   const prefix = `${labels[selector.family]} (Round ${selector.round}`;
   return section.entries.some((entry) => {
     if (entry.step.endsWith(' [started]') || !entry.step.startsWith(prefix)) return false;

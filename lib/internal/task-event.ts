@@ -5,6 +5,22 @@ import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
+import { parseArtifactName } from '../task/artifact-name.ts';
+import { canonicalSemanticDigest, sha256Content } from '../task/artifact-operations.ts';
+import {
+  consumeLifecycleFinalizationReceipt,
+  currentLifecycleAuthority,
+  readLifecycleFinalizationReceipt,
+  type LifecycleFinalizationReceipt
+} from '../task/lifecycle-finalization-receipt.ts';
+import {
+  consumeArtifactRecovery,
+  recordArtifactRecoveryPassed,
+  type ArtifactRecoveryContext
+} from '../task/artifact-recovery.ts';
+import type { ArtifactSchemaFamily } from '../task/artifact-schema.ts';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--orchestrated] [--dry-run]
 
@@ -25,6 +41,46 @@ const FLAGS: Record<string, keyof TaskEventRequest> = {
   '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
 };
 const NUMERIC = new Set(['round', 'question', 'blockers', 'major', 'minor', 'manualValidation', 'filesModified', 'testsPassed']);
+const COMPLETED_FAMILIES: Readonly<Record<string, ArtifactSchemaFamily>> = {
+  'analyze.completed': 'analysis',
+  'review-analysis.completed': 'review-analysis',
+  'plan.completed': 'plan',
+  'review-plan.completed': 'review-plan',
+  'code.completed': 'code',
+  'review-code.completed': 'review-code'
+};
+
+function sandboxFinalizationReceipt(
+  request: TaskEventRequest,
+  resolved: Readonly<{ repoRoot: string; taskId: string; taskDir: string }>
+): LifecycleFinalizationReceipt | null {
+  const family = COMPLETED_FAMILIES[request.event];
+  if (!family) return null;
+  const artifact = request.artifact;
+  const parsed = artifact ? parseArtifactName(artifact) : null;
+  if (!artifact || !parsed || parsed.family !== family) return null;
+  const receipt = readLifecycleFinalizationReceipt(resolved.repoRoot, resolved.taskId, family, artifact);
+  const sandboxBound = process.env.AGENT_INFRA_TASK_ID === resolved.taskId
+    && Boolean(process.env.AGENT_INFRA_CONTROL_STATUS_DIR)
+    && Boolean(process.env.AGENT_INFRA_CONTROL_GENERATION)
+    && Boolean(process.env.AGENT_INFRA_CONTROL_ROOT_ID);
+  if (!receipt) {
+    if (sandboxBound) throw new Error('LIFECYCLE_FINALIZATION_RECEIPT_MISSING');
+    return null;
+  }
+  const authority = currentLifecycleAuthority(process.env, resolved.taskId);
+  const content = fs.readFileSync(path.join(resolved.taskDir, artifact), 'utf8');
+  if (receipt.round !== parsed.round
+    || receipt.artifactSha256 !== sha256Content(content)
+    || receipt.semanticDigest !== canonicalSemanticDigest(content)
+    || receipt.authorityMode !== authority.mode
+    || receipt.authorityDigest !== authority.digest
+    || (request.artifactSha256 !== undefined && request.artifactSha256 !== receipt.artifactSha256)
+    || (request.semanticDigest !== undefined && request.semanticDigest !== receipt.semanticDigest)) {
+    throw new Error('LIFECYCLE_FINALIZATION_RECEIPT_MISMATCH');
+  }
+  return receipt;
+}
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'EVENT_PAYLOAD_INVALID', message } })}\n`);
@@ -81,9 +137,49 @@ async function taskEvent(args: string[] = []): Promise<void> {
   let humanOverride: unknown = null;
   try {
     result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-event.${request.event}`, async () => {
+      let receipt: LifecycleFinalizationReceipt | null;
+      let recovery: ArtifactRecoveryContext | null = null;
+      try {
+        receipt = sandboxFinalizationReceipt(request, resolved);
+        if (receipt) {
+          if (!request.requestId) throw new Error('LIFECYCLE_FINALIZATION_REQUEST_ID_MISSING');
+          recovery = recordArtifactRecoveryPassed({
+            taskId: receipt.taskId,
+            family: receipt.family,
+            artifact: receipt.artifact,
+            round: receipt.round,
+            requestId: request.requestId,
+            phase: 'task-event.completed',
+            authorityDigest: receipt.authorityDigest
+          }, {
+            repoRoot: resolved.repoRoot,
+            taskDir: resolved.taskDir,
+            recoveryId: receipt.operationId,
+            lockAlreadyHeld: true,
+            expectedFinalSha256: receipt.artifactSha256,
+            expectedFinalSemanticDigest: receipt.semanticDigest
+          });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          status: 'failed' as const, changed: false, event: request.event, requestRef: request.taskRef,
+          taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: null, toStep: null,
+          action: null, phase: null, round: null, artifact: request.artifact ?? null,
+          fixFor: request.fixFor ?? null, implementationInput: request.implementationInput ?? null,
+          artifactContext: null, timestamp: null, agentInfraVersion: null, operations: [],
+          error: { code: /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'LIFECYCLE_FINALIZATION_RECEIPT_INVALID', message }
+        };
+      }
       let current = applyTaskEvent(request, { lockAlreadyHeld: true });
       const values = request as Record<string, unknown>;
-      if (current.status !== 'failed' || !values.overrideTicket) return current;
+      if (current.status !== 'failed' || !values.overrideTicket) {
+        if (receipt && (current.status === 'applied' || current.status === 'no-op')) {
+          if (recovery) consumeArtifactRecovery(recovery, { lockAlreadyHeld: true });
+          consumeLifecycleFinalizationReceipt(resolved.repoRoot, receipt);
+        }
+        return current;
+      }
       if (!values.overrideTarget || !values.overrideScope) {
         return { ...current, humanOverride: { status: 'failed', error: { code: 'OVERRIDE_PAYLOAD_INVALID', message: 'override ticket requires target and scope' } } } as typeof current & { humanOverride: unknown };
       }

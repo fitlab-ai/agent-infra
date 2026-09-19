@@ -11,6 +11,7 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
+import { currentLifecycleAuthority, recordLifecycleFinalizationReceipt } from './lifecycle-finalization-receipt.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
@@ -221,13 +222,40 @@ function prepareLocalArtifact(
 function commitLocalArtifactProvenance(
   prepared: LocalArtifactPreparation
 ): LocalArtifactFinalizationResult {
+  const result = prepared.result;
+  if (result.status !== 'passed' || !result.taskId || !result.taskDir
+    || !result.artifactSha256 || !result.semanticDigest || !prepared.repoRoot) return result;
+  const parsed = parseArtifactName(result.artifact);
+  if (!parsed) return failedFinalization({
+    taskRef: result.taskId, family: result.family, artifact: result.artifact
+  }, { code: 'ARTIFACT_IDENTITY_INVALID', message: 'final artifact identity is invalid' });
+  try {
+    const authority = currentLifecycleAuthority(process.env, result.taskId);
+    recordLifecycleFinalizationReceipt(prepared.repoRoot, {
+      taskId: result.taskId,
+      family: result.family,
+      artifact: result.artifact,
+      round: parsed.round,
+      artifactSha256: result.artifactSha256,
+      semanticDigest: result.semanticDigest,
+      finalizer: 'artifact',
+      authorityMode: authority.mode,
+      authorityDigest: authority.digest
+    });
+  } catch (error) {
+    return { ...result, status: 'failed', error: {
+      code: /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]
+        ?? 'LIFECYCLE_FINALIZATION_RECEIPT_FAILED',
+      message: error instanceof Error ? error.message : String(error)
+    } };
+  }
   return prepared.result;
 }
 
 function finalizeLocalArtifact(
   request: LocalArtifactFinalizationRequest
 ): LocalArtifactFinalizationResult {
-  return prepareLocalArtifact(request).result;
+  return commitLocalArtifactProvenance(prepareLocalArtifact(request));
 }
 
 /** Validate and seal an immutable preflight generation without publishing the formal artifact. */

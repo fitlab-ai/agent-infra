@@ -5,7 +5,6 @@ import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
-import { validateTaskWorkflowRequest, type TaskWorkflowRequest } from './task-workflow.ts';
 import {
   validateLifecycleAuthorityRequest,
   type LifecycleAuthorityRequestV1,
@@ -21,7 +20,7 @@ export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
-export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-finalization', 'task-create', 'codex-controller', 'task-workflow'] as const;
+export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-finalization', 'task-create', 'codex-controller'] as const;
 export type SandboxControlTimingPolicy = Readonly<{
   controlTickMs: number;
   parkedBindingInitialMs: number;
@@ -85,13 +84,7 @@ export type SandboxCodexControllerRequest = RequestBase & Readonly<{
   command: 'open' | 'close' | 'verify';
   args: [];
 }>;
-export type SandboxTaskWorkflowRequest = RequestBase & Readonly<{
-  family: 'task-workflow';
-  args: [];
-  workflow: TaskWorkflowRequest;
-  authority?: LifecycleAuthorityRequestV1;
-}>;
-export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest | SandboxTaskWorkflowRequest;
+export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
 export type SandboxControlResultEvidence = Readonly<{
   version: 1;
@@ -313,22 +306,6 @@ export function validateSandboxControlRequest(
     }
     return request as SandboxTaskFinalizationRequest;
   }
-  if (request.family === 'task-workflow') {
-    const expected = ['args', 'authority', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version', 'workflow'];
-    const baseExpected = expected.filter((key) => key !== 'authority');
-    if (![baseExpected, expected].some((keys) => Object.keys(request).sort().join(',') === keys.sort().join(','))
-      || !Array.isArray(request.args) || request.args.length !== 0
-      || request.controllerProcess !== null || request.controllerProof !== null) {
-      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-workflow request schema is invalid');
-    }
-    if (manifest.mode !== 'task-bound' || !manifest.taskId) fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot use task-workflow');
-    const workflow = validateTaskWorkflowRequest(request.workflow);
-    if (workflow.taskId !== manifest.taskId || workflow.generation !== manifest.generation || workflow.id !== request.id) {
-      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-workflow binding does not match the sandbox manifest');
-    }
-    if (request.authority !== undefined) validateAuthoritySelector(request.authority, request, manifest);
-    return { ...request, workflow } as SandboxTaskWorkflowRequest;
-  }
   const expected = ['args', 'authority', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
   const baseExpected = expected.filter((key) => key !== 'authority');
   if (![baseExpected, expected].some((keys) => Object.keys(request).sort().join(',') === keys.sort().join(','))
@@ -374,19 +351,10 @@ function validateAuthoritySelector(
     && (args[1] !== 'prepare' || authority.phase !== 'orchestration.prepare')) {
     fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'orchestration authority is only valid for prepare');
   }
-  const workflow = request.workflow as TaskWorkflowRequest | undefined;
-  if (request.family === 'task-workflow') {
-    const expectedPhase = workflow?.operation === 'artifact-finalize-local'
-      ? 'artifact.finalize-local'
-      : workflow?.operation === 'event' ? 'task-event.completed' : null;
-    if (authority.phase !== expectedPhase) {
-      fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'workflow authority phase does not match the workflow operation');
-    }
-  }
 }
 
 export function bindSandboxControlTask(request: SandboxControlRequest, taskId: string): string[] {
-  if (request.family === 'task-create' || request.family === 'codex-controller' || request.family === 'task-finalization' || request.family === 'task-workflow') {
+  if (request.family === 'task-create' || request.family === 'codex-controller' || request.family === 'task-finalization') {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', `${request.family} requests do not bind a current task`);
   }
   if (request.args.length === 0) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'command arguments are required');

@@ -26,7 +26,6 @@ import {
 import type { SandboxTaskView } from '../../../../lib/sandbox/control/task-view.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import { onPlatforms } from '../../../helpers.ts';
-import { TASK_WORKFLOW_COMMANDS } from '../../../../lib/task/workflow-command.ts';
 import { parseArtifactCommand } from '../../../../lib/task/artifact-command.ts';
 import { parseReviewCommand } from '../../../../lib/task/review-command.ts';
 
@@ -59,7 +58,10 @@ function routeKeysFromHandlerBranches(): Set<string> {
     for (const match of source.matchAll(marker)) keys.add(routeKey(match[1]!, match[2]!));
   }
   // Shared domain commands have no CLI-local branch marker: exercise their parsers.
-  for (const [command, selector] of Object.values(TASK_WORKFLOW_COMMANDS)) {
+  for (const [command, selector] of [
+    ...['inspect', 'init', 'preflight', 'finalize-local'].map((selector) => ['task-artifact', selector] as const),
+    ...['preflight', 'finalize-summary'].map((selector) => ['task-review', selector] as const)
+  ]) {
     if (command === 'task-artifact') {
       const args = ['TASK-20260101-000001', selector, '--family', 'plan'];
       if (selector !== 'inspect') args.push('--artifact', 'plan.md');
@@ -298,6 +300,16 @@ test('mounted sandbox control requires a matching identity sentinel', onPlatform
       version: 1, mode: 'branch-only', taskId: null, generation, controlRootId
     });
     assert.deepEqual(resolveSandboxControlTransport(baseEnv), { kind: 'broker-client', reasonCode: null });
+    writeSandboxControlIdentitySentinel(statusDir, {
+      version: 1, mode: 'task-bound', taskId: 'TASK-20260101-000001', generation, controlRootId
+    });
+    assert.deepEqual(resolveSandboxControlTransport({
+      ...baseEnv,
+      AGENT_INFRA_TASK_ID: 'TASK-20260101-000001',
+      AGENT_INFRA_RUNTIME_DIR: path.join(root, 'runtime')
+    }, { statusMountPath: statusDir, localWorkflow: true }), {
+      kind: 'sandbox-local', reasonCode: null
+    });
     assert.deepEqual(resolveSandboxControlTransport({ ...baseEnv, AGENT_INFRA_CONTROL_ROOT_ID: 'b'.repeat(96) }), {
       kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_ROOT_ID_MISMATCH'
     });

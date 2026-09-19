@@ -36,7 +36,6 @@ import {
   type LifecycleRecoveryAttestationV1,
   type TaskControlOperation
 } from '../../task/control-authority.ts';
-import { executeTaskWorkflow } from './workflow-executor.ts';
 import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type BrokerOwner } from './lifecycle.ts';
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
@@ -188,9 +187,7 @@ export async function prepareSandboxControlExecution(params: {
         owner: gateOwner,
         requestId: params.request.id,
         operationId: authority?.operationId ?? params.request.id,
-        phase: authority?.phase ?? (params.request.family === 'task-workflow'
-          && params.request.workflow?.operation === 'artifact-preflight' ? 'artifact.preflight'
-          : params.request.family === 'task-workflow' ? 'artifact.finalize-local' : 'orchestration.prepare'),
+        phase: authority?.phase ?? 'orchestration.prepare',
         authority
       } satisfies SandboxControlExecutorGateV2);
     },
@@ -406,7 +403,6 @@ async function executeRequestInner(
       return controllerFailure(error);
     }
   }
-  if (request.family === 'task-workflow') return executeTaskWorkflow(manifest, request.workflow, options.lifecycleRecoveryAttestation ?? null);
   if (request.family === 'task-finalization') {
     const operation = parseTaskControlOperation(
       'task-finalization', [manifest.taskId!, 'complete', '--agent', request.agent]

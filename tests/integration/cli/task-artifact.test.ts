@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
 function fixture() {
@@ -20,7 +20,9 @@ function fixture() {
 }
 
 function run(root: string, args: string[]) {
-  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], { cwd: root, encoding: 'utf8' });
+  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], {
+    cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv()
+  });
 }
 
 function localArtifact(family: 'analysis' | 'plan' | 'code', suffix = ''): string {
@@ -158,7 +160,7 @@ test('task-artifact finalize-local uses repository config from a nested working 
   assert.deepEqual(result.diagnostics, []);
 });
 
-test('task-artifact refinalizes a changed passed artifact directly', () => {
+test('task-artifact rejects changed bytes while a finalization receipt is pending', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
   fs.writeFileSync(artifact, localArtifact('plan'));
@@ -169,9 +171,10 @@ test('task-artifact refinalizes a changed passed artifact directly', () => {
   fs.appendFileSync(artifact, '\n补充证据\n');
 
   const second = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
-  assert.equal(second.status, 0, second.stderr);
+  assert.equal(second.status, 1, second.stderr);
   const after = JSON.parse(second.stdout);
-  assert.equal(after.status, 'passed');
+  assert.equal(after.status, 'failed');
+  assert.equal(after.error.code, 'LIFECYCLE_FINALIZATION_RECEIPT_CONFLICT');
   assert.notEqual(after.artifactSha256, before.artifactSha256);
 });
 

@@ -586,7 +586,7 @@ test('local completion rejects a stale finalizer digest before mutating task sta
     const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...stale]);
 
     assert.equal(completed.status, 1);
-    assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+    assert.equal(JSON.parse(completed.stdout).error.code, 'LIFECYCLE_FINALIZATION_RECEIPT_MISMATCH');
     assert.deepEqual(fs.readFileSync(f.file), before);
   }
 });
@@ -629,7 +629,7 @@ test('local completion remains valid after a direct artifact revalidation', () =
   assert.equal(JSON.parse(completed.stdout).status, 'applied');
 });
 
-test('local completion accepts a direct formal artifact repair', () => {
+test('local completion rejects bytes changed after direct formal artifact repair', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   const artifact = path.join(f.dir, 'plan.md');
@@ -648,12 +648,14 @@ test('local completion accepts a direct formal artifact repair', () => {
   fs.writeFileSync(artifact, `${fs.readFileSync(artifact, 'utf8')}\nexternal mutation\n`);
   const local = validateLocalArtifact(fs.readFileSync(artifact, 'utf8'), { family: 'plan' });
   assert.equal(local.ok, true);
+  const before = fs.readFileSync(f.file);
   const completed = run(f.root, [
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md',
     '--artifact-sha256', sha256File(artifact), '--semantic-digest', local.semanticDigest
   ]);
-  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
-  assert.equal(JSON.parse(completed.stdout).status, 'applied');
+  assert.equal(completed.status, 1, completed.stderr || completed.stdout);
+  assert.equal(JSON.parse(completed.stdout).error.code, 'LIFECYCLE_FINALIZATION_RECEIPT_MISMATCH');
+  assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
 test('local completion uses the repository verification config for its language', () => {
@@ -995,7 +997,7 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
 
 test('task-event timestamps keep an ASCII offset in negative-offset timezones', () => {
   const f = fixture();
-  const env = { ...process.env, TZ: 'America/Los_Angeles' };
+  const env = { ...sandboxControlSafeEnv(), TZ: 'America/Los_Angeles' };
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1'], env);
   assert.equal(started.status, 0, started.stderr);
   assert.match(JSON.parse(started.stdout).timestamp, /-\d{2}:\d{2}$/);
@@ -1512,7 +1514,8 @@ test('review completion records a new result when the finalized review artifact 
   assert.equal(completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 }).status, 0);
   const before = fs.readFileSync(f.file, 'utf8');
   fs.appendFileSync(path.join(f.dir, scenario.artifact), '\nUpdated evidence.\n');
-  assert.equal(finalizeReview(f, scenario).status, 0);
+  const refinalized = finalizeReview(f, scenario);
+  assert.equal(refinalized.status, 0, refinalized.stderr || refinalized.stdout);
   const repeated = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
   assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
   assert.equal(JSON.parse(repeated.stdout).status, 'applied');

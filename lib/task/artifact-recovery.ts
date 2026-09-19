@@ -310,10 +310,17 @@ export function recordArtifactRecoveryPassed(
     const existing = readArtifactRecoveryIntent(prepared.repoRoot, prepared.taskId, prepared.family, prepared.artifact);
     if (existing && (existing.state === 'passed' || existing.state === 'consumed')
       && existing.finalArtifactSha256 === prepared.baselineSha256
-      && existing.finalSemanticDigest === prepared.baselineSemanticDigest) {
+      && existing.finalSemanticDigest === prepared.baselineSemanticDigest
+      && existing.recoveryOperationId === prepared.recoveryId
+      && existing.requestId === prepared.requestId
+      && existing.phase === (prepared.phase ?? null)
+      && existing.authorityDigest === (prepared.authorityDigest ?? null)) {
       return recoveryContextFromIntent(prepared.repoRoot, prepared.taskDir, existing);
     }
-    if (existing && existing.state !== 'aborted' && existing.state !== 'passed') {
+    if (existing?.state === 'passed') {
+      fail('ARTIFACT_RECOVERY_CONFLICT', 'completed recovery provenance does not match this operation');
+    }
+    if (existing && existing.state !== 'aborted' && existing.state !== 'consumed') {
       fail('ARTIFACT_RECOVERY_CONFLICT', 'an active recovery journal already exists for this artifact');
     }
     const base = createIntent(prepared, Date.now());

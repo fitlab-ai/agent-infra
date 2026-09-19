@@ -17,6 +17,7 @@ import type { ManualOverrideCapability } from './guard-override.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
+import { currentLifecycleAuthority, recordLifecycleFinalizationReceipt } from './lifecycle-finalization-receipt.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -297,7 +298,39 @@ function commitReviewSummaryProvenance(
   repoRoot: string,
   options: Readonly<{ afterPublish?: () => void }> = {}
 ): ReviewFinalizationResult {
-  return prepared.result;
+  const result = prepared.result;
+  if (result.status === 'failed' || result.status === 'planned' || !result.taskId
+    || !result.artifactSha256 || !result.semanticDigest) return result;
+  const parsed = parseArtifactName(result.artifact);
+  const spec = STAGES[result.stage as ReviewStage];
+  if (!parsed || !spec) return failed({
+    taskRef: result.requestRef, stage: result.stage, artifact: result.artifact
+  }, 'REVIEW_ARTIFACT_IDENTITY_INVALID', 'review artifact identity is invalid', result.taskId);
+  try {
+    options.afterPublish?.();
+    const authority = currentLifecycleAuthority(process.env, result.taskId);
+    recordLifecycleFinalizationReceipt(repoRoot, {
+      taskId: result.taskId,
+      family: spec.family,
+      artifact: result.artifact,
+      round: parsed.round,
+      artifactSha256: result.artifactSha256,
+      semanticDigest: result.semanticDigest,
+      finalizer: 'review',
+      authorityMode: authority.mode,
+      authorityDigest: authority.digest
+    });
+    return result;
+  } catch (error) {
+    return failed(
+      { taskRef: result.requestRef, stage: result.stage, artifact: result.artifact },
+      'REVIEW_RECOVERY_COMMIT_FAILED',
+      error instanceof Error ? error.message : String(error),
+      result.taskId,
+      result.stageStatus,
+      { artifactSha256: result.artifactSha256, semanticDigest: result.semanticDigest }
+    );
+  }
 }
 
 function replaceCurrentArtifactAtomically(file: string, content: string): void {
@@ -330,15 +363,17 @@ function finalizeReviewSummaryUnlocked(
   catch (error) { return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
   const prepared = prepareReviewSummaryCandidate(request, content, options);
   if (request.dryRun) return prepared.result;
-  if (prepared.result.status === 'failed' || !prepared.result.changed) return prepared.result;
+  if (prepared.result.status === 'failed') return prepared.result;
+  if (!prepared.result.changed) return commitReviewSummaryProvenance(prepared, resolved.repoRoot);
   try {
     replaceCurrentArtifactAtomically(validated.artifact.path, prepared.content);
-    return {
+    const published = {
       ...prepared.result,
       status: 'applied',
       artifactSha256: sha256Content(prepared.content),
       semanticDigest: canonicalSemanticDigest(prepared.content)
-    };
+    } as ReviewFinalizationResult;
+    return commitReviewSummaryProvenance({ ...prepared, result: published }, resolved.repoRoot);
   } catch (error) {
     return failed(
       request,

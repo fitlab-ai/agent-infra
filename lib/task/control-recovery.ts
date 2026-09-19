@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { isCompletionEvidence } from './orchestration.ts';
-import { TASK_WORKFLOW_OPERATIONS } from './workflow-command.ts';
 import { sameRecoveryWarning } from './recovery-warning.ts';
 
 export type ControlRecoveryOutcome = 'not-executed' | 'in-progress' | 'success' | 'failure' | 'unknown' | 'rejected';
@@ -16,7 +15,7 @@ export function parseControlOutput(output: string | null): Record<string, unknow
 }
 
 export type ControlRecoveryOperation = Readonly<{
-  family: 'task-lifecycle' | 'task-finalization' | 'task-orchestration' | 'task-create' | 'codex-controller' | 'task-workflow';
+  family: 'task-lifecycle' | 'task-finalization' | 'task-orchestration' | 'task-create' | 'codex-controller';
   intent: string;
   class: string;
 }>;
@@ -69,7 +68,6 @@ export const SANDBOX_CONTROL_RECOVERY_OPERATIONS: readonly ControlRecoveryOperat
     class: intent === 'route.clean-completion' ? 'route.clean-completion' : intent === 'route.read' || intent === 'status' ? 'read-only' : 'orchestration'
   })),
   { family: 'task-create', intent: 'create', class: 'task-create' },
-  ...TASK_WORKFLOW_OPERATIONS.map((intent) => ({ family: 'task-workflow' as const, intent, class: intent === 'artifact-inspect' || intent === 'decision-next-id' ? 'read-only' : 'workflow' })),
   ...(['open', 'close', 'verify'] as const).map((intent) => ({ family: 'codex-controller' as const, intent, class: 'codex-controller' }))
 ]);
 

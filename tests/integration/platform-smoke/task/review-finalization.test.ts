@@ -402,7 +402,7 @@ test('review finalizer accepts a directly repaired formal artifact', () => {
   assert.equal(retry.status, 'no-op');
 });
 
-test('review finalizer refinalizes a changed passed artifact directly', () => {
+test('review finalizer rejects changed bytes while a finalization receipt is pending', () => {
   const f = domainFixture();
   try {
     const first = finalizeReviewSummary(
@@ -417,7 +417,8 @@ test('review finalizer refinalizes a changed passed artifact directly', () => {
       { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
       { repoRoot: f.root }
     );
-    assert.equal(second.error, null);
+    assert.equal(second.error?.code, 'REVIEW_RECOVERY_COMMIT_FAILED');
+    assert.match(second.error?.message ?? '', /LIFECYCLE_FINALIZATION_RECEIPT_CONFLICT/u);
     assert.notEqual(second.artifactSha256, first.artifactSha256);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });

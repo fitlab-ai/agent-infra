@@ -58,7 +58,9 @@ function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANS
 
 let controlRouted = false;
 if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand)) {
-  const transport = resolveSandboxControlTransport(process.env);
+  const transport = resolveSandboxControlTransport(process.env, {
+    localWorkflow: taskWorkflowCommand || manualValidationWorkflowCommand
+  });
   switch (transport.kind) {
     case 'fail-closed': {
       const reason = transport.reasonCode ?? 'TASK_CONTROL_TRANSPORT_INVALID';
@@ -69,9 +71,19 @@ if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkfl
       // The host CLI is the direct-host authority. Domain handlers retain their
       // task locks, atomic writes, and operation-specific recovery facts.
       break;
+    case 'sandbox-local': {
+      const { verifySandboxLocalControllerAuthority } = await import('../lib/agent-clients/adapters/codex-lifecycle/controller-context.ts');
+      try {
+        verifySandboxLocalControllerAuthority({ repoRoot: process.cwd() });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        taskControlTransportFailure(message, /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1]);
+      }
+      break;
+    }
     case 'broker-client': {
       const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
-      await sandboxControl(['client', ...(taskControlCommand ? [command] : ['task-workflow', command]), ...process.argv.slice(3)]);
+      await sandboxControl(['client', command, ...process.argv.slice(3)]);
       break;
     }
   }

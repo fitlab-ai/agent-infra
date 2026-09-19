@@ -22,7 +22,7 @@ export type TaskOperationEffect = TaskViewAccessEffect;
 export type TaskRefSource = 'argv' | 'environment' | 'none' | 'delegated' | 'input';
 
 export type SandboxControlTransportDecision = Readonly<{
-  kind: 'direct-host' | 'broker-client' | 'fail-closed';
+  kind: 'direct-host' | 'sandbox-local' | 'broker-client' | 'fail-closed';
   reasonCode: string | null;
 }>;
 
@@ -340,7 +340,7 @@ function taskMarkerState(env: NodeJS.ProcessEnv): TaskMarkerState {
 
 export function resolveSandboxControlTransport(
   env: NodeJS.ProcessEnv = process.env,
-  options: Readonly<{ statusMountPath?: string }> = {}
+  options: Readonly<{ statusMountPath?: string; localWorkflow?: boolean }> = {}
 ): SandboxControlTransportDecision {
   const hasAnyMarker = TASK_MARKER_KEYS.some((key) => Boolean(env[key]))
     || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING)
@@ -407,13 +407,15 @@ export function resolveSandboxControlTransport(
     if (!hasCompleteConfig) {
       return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
     }
-    return { kind: 'broker-client', reasonCode: null };
+    return { kind: options.localWorkflow ? 'sandbox-local' : 'broker-client', reasonCode: null };
   }
   if (!hasAnyMarker) return { kind: 'direct-host', reasonCode: null };
   if (!hasCompleteConfig || (taskBound && !runtime) || (!taskBound && runtime)) {
     return { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_CONFIGURATION_INCOMPLETE' };
   }
-  return { kind: 'broker-client', reasonCode: null };
+  return options.localWorkflow
+    ? { kind: 'fail-closed', reasonCode: 'SANDBOX_CONTROL_IDENTITY_MISSING' }
+    : { kind: 'broker-client', reasonCode: null };
 }
 
 export function hasTaskBoundMarker(env: NodeJS.ProcessEnv = process.env): boolean {
