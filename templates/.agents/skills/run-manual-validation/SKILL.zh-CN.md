@@ -26,7 +26,7 @@ description: >
 - `complete-manual-validation` 仍是维护者确认覆盖充分后的最终登记入口。
 - 禁止直接操作临时 worktree、lease 或 container；只调用 `agent-infra-internal task-validate`。
 - 产物不得记录 token、环境变量、完整 argv、绝对用户路径或原始 transcript；每个验证目标必须由核心写入同一 current-only evidence envelope。
-- 生成会同步到 Issue 的验证 artifact Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；Issue 同步保持透明，不解析或改写正文。
+- 生成会由 task 评论引用的验证 artifact Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；验证 artifact 保留在本地，不发布为 Issue artifact 评论。
 - branch-only 降级路径走 `.agents/workspace/validations/{branch-slug}/`，标记 `recoverable: false`：不写 task.md、不发 lifecycle 事件、不同步 Issue、不跑 `task-verify`；产物须带回宿主机，由维护者登记。
 
 ## 第 0 步：状态核对（执行前硬约束）
@@ -46,7 +46,7 @@ branch-only 无 `{task-id}`，跳过本步，并在产物 `## 状态核对` 记�
 3. 从核心结果取得轮次和产物名；确认存在有效显式工作或非空发现清单后，运行 `agent-infra-internal task-event {task-id} validation-run.started --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code}`，并逐项分类为 `executable|unavailable|unknown|unsafe|unresolved`。
 4. 为每个验证目标分配 `{evidence-file}`，分别调用 `agent-infra-internal task-validate {task-ref} --scope snapshot --format json --evidence-file {evidence-file} -- {command...}`；只有证据表明必须原位时才对该项进行第二次显式 inplace 调用并写入对应 evidence 文件。零项可执行时不运行伪造命令，但仍继续产出覆盖缺口证据。
 5. 读取 `reference/report-template.md`，创建 `validation-run.md|validation-run-r{N}.md`；记录输入模式、发现清单、逐项结果、CLI JSON allowlist 与去敏摘要。
-6. 运行 `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {artifact}`。存在 Issue 时依次运行 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` 和 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}`。
+6. 运行 `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {artifact}`。存在 Issue 时仅运行 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`；验证 artifact 不发布为 Issue 评论。
 7. 运行 `agent-infra-internal task-verify {task-id} validation-run.completed --artifact {artifact} --format text`；未通过则修复后重跑。
 8. 告知用户证据路径、覆盖缺口和验证结果；明确仍需维护者判断是否执行 `complete-manual-validation`。读取 `.agents/rules/next-step-output.md`，最后一行输出 `Completed at`。
 

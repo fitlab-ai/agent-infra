@@ -54,6 +54,14 @@ type SyncOptions = {
   summaryAuthorization?: { sha256: string };
   verifyOnly?: boolean;
 };
+type SummaryRecoveryOptions = {
+  sha256: string;
+  cwd?: string;
+  client?: PlatformClient;
+};
+type SummaryRecoveryResult = PlatformResult & {
+  summary: { id: number | string; body: string; sha256: string } | null;
+};
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
   return provider.identity?.comment === 'number' && /^\d+$/.test(id) ? Number(id) : id;
@@ -76,8 +84,6 @@ const ARTIFACT_TITLES: Record<string, string> = {
   'review-plan': '技术方案审查',
   code: '实现报告',
   'review-code': '代码审查',
-  'manual-validation': '人工验证报告',
-  'validation-run': '验证运行证据',
   'pr-review': 'PR 审查报告'
 };
 
@@ -154,7 +160,7 @@ function taskCommentLanguage(repoRoot: string): string {
 
 function artifactIdentity(artifact: string): { stem: string; title: string } {
   const stem = path.basename(artifact, '.md');
-  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run|pr-review)(?:-r(\d+))?$/);
+  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|pr-review)(?:-r(\d+))?$/);
   if (!match) throw new Error(`unsupported artifact '${artifact}'`);
   const base = ARTIFACT_TITLES[match[1]!]!;
   const round = match[2] ? Number(match[2]) : 1;
@@ -483,13 +489,18 @@ function summaryPosition(comments: RemoteComment[], taskId: string): { ok: boole
   return { ok: managed.every((comment) => sequence >= comment.createdSequence!), known: true, summary: summary[0]! };
 }
 
-function summaryDigest(comment: RemoteComment): string {
+function summaryBody(comment: RemoteComment): string | null {
   const body = normalizeCommentContent(comment.body)
     .replace(/^<!-- sync-issue:[^\n]+:summary -->\n## [^\n]+\n\n> [^\n]+\n\n/u, '')
     .replace(/^<details><summary>恢复元数据<\/summary>[\s\S]*?<\/details>\n\n/u, '')
     .replace(/\n---\n\*[^\n]*\*$/u, '');
   const canonical = canonicalizeSummaryBody(body);
-  return canonical.ok ? createHash('sha256').update(canonical.value).digest('hex') : '';
+  return canonical.ok ? canonical.value : null;
+}
+
+function summaryDigest(comment: RemoteComment): string {
+  const body = summaryBody(comment);
+  return body === null ? '' : createHash('sha256').update(body).digest('hex');
 }
 
 async function listedComments(provider: any, loaded: any, parent: ReturnType<typeof taskIssueIdentity>): Promise<any> {
@@ -777,6 +788,54 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   return result;
 }
 
+async function recoverPlatformSummary(taskRef: string, options: SummaryRecoveryOptions): Promise<SummaryRecoveryResult> {
+  const fail = (base: PlatformResult): SummaryRecoveryResult => ({ ...base, summary: null });
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return fail(platformResult('failed', {
+    error: { code: resolved.code, message: resolved.message, retryable: false }
+  }));
+  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+  let issueIdentityFromTask: ReturnType<typeof taskIssueIdentity>;
+  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent)); }
+  catch (error) { return fail(platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } })); }
+  if (!issueIdentityFromTask) return fail(platformResult('no-op', {
+    error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
+  }));
+
+  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
+  const context = loaded.ok ? loaded.value.context : loaded.context;
+  if (!hasResolvedPlatformContext(context) || !loaded.ok) return fail(context);
+  const issue = resourceIdentityNumber(issueIdentityFromTask);
+  const listed = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
+  if (!listed.ok) return fail(platformResult(listed.error.retryable ? 'blocked' : 'failed', {
+    ...contextFields(context), resource: { kind: 'issue', number: issue }, error: listed.error
+  }));
+
+  const position = summaryPosition(listed.value, resolved.taskId);
+  if (!position.known || !position.summary) return fail(platformResult('failed', {
+    ...contextFields(context), resource: { kind: 'issue', number: issue },
+    error: { code: 'SUMMARY_RECOVERY_UNVERIFIED', message: 'summary marker uniqueness or managed comment ordering cannot be proven', retryable: false }
+  }));
+  const owner = position.summary.user?.login;
+  if (!owner || owner !== context.platform.currentUser) return fail(platformResult('failed', {
+    ...contextFields(context), resource: { kind: 'issue', number: issue },
+    error: { code: 'SUMMARY_RECOVERY_UNAUTHORIZED', message: 'summary recovery requires a comment owned by the current platform user', retryable: false }
+  }));
+  const body = summaryBody(position.summary);
+  const sha256 = body === null ? '' : createHash('sha256').update(body).digest('hex');
+  if (body === null || sha256 !== options.sha256) return fail(platformResult('failed', {
+    ...contextFields(context), resource: { kind: 'issue', number: issue },
+    error: { code: 'SUMMARY_RECOVERY_DIGEST_MISMATCH', message: 'remote summary body does not match the durable receipt digest', retryable: false }
+  }));
+  return {
+    ...platformResult('no-op', {
+      ...contextFields(context), resource: { kind: 'issue', number: issue },
+      comment: { kind: 'summary', marker: MARKERS.summary(resolved.taskId), ids: [position.summary.id], parts: 1 }, error: null
+    }),
+    summary: { id: position.summary.id, body, sha256 }
+  };
+}
+
 async function listPlatformComments(issue: string | number, cwd = process.cwd(), client?: PlatformClient): Promise<PlatformResult & { comments?: RemoteComment[] }> {
   const loaded = await resolvePlatformProviderContext({ cwd, client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
@@ -842,8 +901,9 @@ export {
   renderTaskComment,
   renderTaskCommentResult,
   isTaskCommentTooLarge,
+  recoverPlatformSummary,
   syncPlatformComment,
   validateRelatedMarkerSet,
   writeComment
 };
-export type { CommentKind, RemoteComment, RenderedChunk, SyncOptions };
+export type { CommentKind, RemoteComment, RenderedChunk, SummaryRecoveryOptions, SummaryRecoveryResult, SyncOptions };

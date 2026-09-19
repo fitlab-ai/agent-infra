@@ -21,7 +21,7 @@ description: >
 - 本技能用于收尾已有 PR 摘要评论中的人工校验状态，不创建并行的普通验证留言。
 - 必须写入 `manual-validation.md` 或 `manual-validation-r{N}.md`，让后续 PR 摘要刷新可复用人工验证结果。
 - 找不到 `sync-pr` 摘要评论时失败，不创建部分摘要兜底；receipt、通过日志和 final summary 未全部提交前，远端只允许 pending/non-pass 状态。
-- 生成会同步到 Issue 的人工验证 artifact Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；Issue 同步保持透明，不解析或改写正文。
+- 生成会由 task 评论和 PR 摘要引用的人工验证 artifact Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；人工验证 artifact 保留在本地，不发布为 Issue artifact 评论。
 - 执行本技能后必须立即更新 `task.md`。
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
@@ -106,7 +106,7 @@ coordinator 负责 pending summary、receipt、通过日志、final promotion �
 
 transaction coordinator 成功后，核心已使用同一 transaction/receipt/head identity 原子登记 `manual-validation.completed`；不要手工补写 Activity Log。
 
-如任务存在有效 `platform_issue_identity`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`。
+如任务存在有效 `platform_issue_identity`，仅调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`。人工验证 artifact 继续作为本地证据和 PR 摘要输入，不发布为 Issue 评论。
 
 ### 8. 完成校验
 

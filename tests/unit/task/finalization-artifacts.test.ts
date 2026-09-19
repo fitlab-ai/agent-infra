@@ -30,10 +30,10 @@ test('completion inventory returns only canonical lifecycle artifacts in stable 
     assert.equal(result.status, 'ready');
     assert.deepEqual(COMPLETION_BACKFILL_FAMILIES, [
       'analysis', 'review-analysis', 'plan', 'review-plan',
-      'code', 'review-code', 'manual-validation', 'validation-run'
+      'code', 'review-code'
     ]);
     assert.deepEqual(result.artifacts.map((artifact) => artifact.name), [
-      'analysis.md', 'analysis-r2.md', 'plan.md', 'code.md', 'manual-validation.md', 'validation-run.md'
+      'analysis.md', 'analysis-r2.md', 'plan.md', 'code.md'
     ]);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });

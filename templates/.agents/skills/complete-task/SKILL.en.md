@@ -59,7 +59,7 @@ If not found in `active/`, check `blocked/` and `completed/`:
 - If in `completed/` without a matching entry: report the incomplete terminal identity and stop without hand-repairing it
 - If in `blocked/`: Inform user the task is blocked; suggest unblocking first
 
-Scenario A is the normal active-task path. Scenario B `finalization-retry` retries only the archived task comment and terminal gate.
+Scenario A is the normal active-task path. Scenario B `finalization-retry` retries allowed artifact backfill, the terminal task comment, completion verification, and summary sealing without moving lifecycle backward.
 
 ### 2. Verify Completion Prerequisites (Failure Must Stop)
 
@@ -141,9 +141,8 @@ Check whether task.md has a valid `platform_issue_identity`. If it does not, ski
 
 When a valid `platform_issue_identity` exists, execute in this exact order:
 
-1. Run `agent-infra-internal platform-comment backfill {task-id} --agent {standard-agent-token}` so core publishes only the completion canonical inventory in fixed order and resolves matching historical warnings only after full success.
-2. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.
-3. Write the business summary to a temporary file and run `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`. This stores the body and SHA-256 in the task's durable staging record; it must not publish the summary comment directly.
+1. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.
+2. Write the business summary to a temporary file and run `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`. This stores the body and SHA-256 in the task's durable staging record; it must not publish the summary comment directly.
 
 When the ledger contains a valid `PRC-N` post-review exemption, the summary body must mirror the ruling reason, commit scope, human identity, and time from task.md, and state that this is a human override rather than an automatic verification success. If a matching workflow warning exists, also mirror its original failure code/message. If no warning exists yet, state only that the ruling is recorded and final gate verification is pending; do not claim that the exemption has passed. The same `--kind summary` intent remains the sole owner of the summary marker.
 
@@ -152,7 +151,7 @@ Do not sync the task comment here; it requires the terminal task.md written by l
 If any operation fails, the task must remain active and its short id must remain valid. Record the failure with the matching structured warning intent, then continue to Step 5. Platform failures do not block the local lifecycle:
 
 ```bash
-agent-infra-internal task-warning {task-id} add --step complete-task --severity ACTION_REQUIRED --code {COMMENT_SYNC_FAILED|REQUIREMENTS_SYNC_FAILED|SUMMARY_SYNC_FAILED|NETWORK_RETRY_EXHAUSTED} --target {artifact|issue|summary|platform} --message "{error_code}: {error_message}" --action "Fix the platform sync problem and rerun complete-task"
+agent-infra-internal task-warning {task-id} add --step complete-task --severity ACTION_REQUIRED --code {REQUIREMENTS_SYNC_FAILED|SUMMARY_SYNC_FAILED|NETWORK_RETRY_EXHAUSTED} --target {issue|summary|platform} --message "{error_code}: {error_message}" --action "Fix the platform sync problem and rerun complete-task"
 ```
 
 The core deduplicates the stable `step/code/target` tuple. Callers must not allocate warning ids or edit ledger rows.
@@ -177,11 +176,11 @@ If a summary must mirror a human-decided `post-review-commit` exemption, make a 
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-Finalization runs lifecycle -> terminal task comment -> core verification -> warning task-comment update -> summary -> post-summary verification in a fixed order and records every step in the host receipt. It clears the staging record only after all steps finish with no open warning. `result=completed` means the host safely completed the task from structured results and the receipt; if peripheral warnings remain, return `result=completed_with_warnings`, warnings, and pending steps. Use `result=failed` or `result=blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state. A sandbox must not run `ls completed` or a local terminal verification against its historical mount to re-decide this result.
+Finalization runs allowed artifact backfill -> lifecycle -> terminal task comment -> core verification -> warning task-comment update -> summary seal -> final remote-order readback in a fixed order. Every backfill must reach a successful terminal result before lifecycle starts. When completed-task re-entry needs to rebuild a summary, the host recovers the body only from a unique, owned remote summary whose digest matches the receipt, durably stages it, and only then deletes and recreates the comment. It clears the staging record only after all steps finish with no open warning. `result=completed` means the host safely completed the task from structured results and the receipt; if peripheral warnings remain, return `result=completed_with_warnings`, warnings, and pending steps. Use `result=failed` or `result=blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state. A sandbox must not run `ls completed` or a local terminal verification against its historical mount to re-decide this result.
 
 ### 7. Handle Finalization Retries and Results
 
-Both Scenario A and Scenario B `finalization-retry` run the same `task-finalization` entry point from the host. The receipt is only a re-entry hint, not canonical truth: every re-entry revalidates the terminal task comment and completion gate; only an already `completed` task with its short-id registry entry released may skip the irreversible lifecycle. Do not split the operation into the former lifecycle, comment-sync, or completion-gate commands. If the task comment or gate is blocked by the network, preserve the receipt and completed steps, fix the network, and rerun complete-task. If lifecycle has not completed, keep the task active and resume the pending steps from the receipt.
+Both Scenario A and Scenario B `finalization-retry` run the same `task-finalization` entry point from the host. The receipt is only a re-entry hint, not canonical truth: every re-entry revalidates allowed artifact backfill, the terminal task comment, completion verification, and remote summary order; only an already `completed` task with its short-id registry entry released may skip the irreversible lifecycle. Do not split the operation into the former lifecycle, comment-sync, or completion-gate commands. If backfill, the task comment, summary recovery, or verification is blocked by the network, preserve the receipt, staging record, and completed steps, fix the network, and rerun complete-task. If lifecycle has not completed, keep the task active and resume the pending steps from the receipt.
 
 Consume the structured finalization result, receipt, and warning projection directly. Continue only for `completed` or `completed_with_warnings`; preserve the receipt and stop for `failed`, `blocked`, or `unknown`, then retry through the same finalization entry point. Do not run `ls completed` or `task-verify complete-task.completed` from a stale sandbox mount, and do not let that local result overrule the host result.
 

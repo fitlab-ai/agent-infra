@@ -178,6 +178,7 @@ function writeBoundControlEvidence(root: string): string {
   fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`);
   const result = {
     status: 'completed', changed: false, taskId: TASK_ID,
+    backfill: { status: 'no-op', changed: false, error: null },
     lifecycle: { status: 'no-op', changed: false, error: null },
     taskComment: { status: 'no-op', changed: false, error: null },
     verification: { status: 'no-op', changed: false, error: null },

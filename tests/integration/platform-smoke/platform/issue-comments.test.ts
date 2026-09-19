@@ -11,6 +11,7 @@ import {
   MARKERS,
   chunkArtifactComment,
   findMarkerComments,
+  recoverPlatformSummary,
   renderTaskComment,
   renderTaskCommentResult,
   normalizeCommentContent,
@@ -189,14 +190,6 @@ test('pr-review.md resolves to the round-1 PR review report title', () => {
   assert.match(chunk!.body, /## PR 审查报告（Round 1）/);
 });
 
-test('validation-run artifacts use their registered marker and round title', () => {
-  const [chunk] = chunkArtifactComment({
-    taskId: 'TASK-20260101-000001', artifact: 'validation-run-r2.md', agent: 'codex', body: '# Validation Evidence\n'
-  });
-  assert.equal(chunk!.marker, MARKERS.artifact('TASK-20260101-000001', 'validation-run-r2'));
-  assert.match(chunk!.body, /## 验证运行证据（Round 2）/);
-});
-
 test('artifact backfill adds a deterministic timeline hint without changing content', () => {
   const body = 'historical content\n';
   const [chunk] = chunkArtifactComment({
@@ -302,6 +295,63 @@ test('comment sync rejects malformed content before reading or writing remote co
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'COMMENT_PAYLOAD_INVALID');
   assert.equal(calls, 0);
+});
+
+test('summary recovery returns only an owned canonical body matching the durable digest', async () => {
+  const root = syncFixture();
+  const body = 'Delivery &lt;summary&gt;.\n';
+  const comments = [{
+    id: 10,
+    body: [
+      MARKERS.summary('TASK-20260101-000001'),
+      '## 交付摘要',
+      '',
+      '> 任务同步 · TASK-20260101-000001',
+      '',
+      '<details><summary>恢复元数据</summary>',
+      '',
+      '```json',
+      '{}',
+      '```',
+      '',
+      '</details>',
+      '',
+      body.trimEnd(),
+      '',
+      '---',
+      '*由 codex 自动生成 · 内部追踪：TASK-20260101-000001*'
+    ].join('\n'),
+    user: { login: 'codex' }
+  }, {
+    id: 11,
+    body: `${MARKERS.task('TASK-20260101-000001')}\nlate task comment`,
+    user: { login: 'codex' }
+  }];
+  const client = {
+    version() { return { ok: true, value: '2.72.0' }; },
+    json(args: string[]) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const recovered = await recoverPlatformSummary('TASK-20260101-000001', {
+    sha256: createHash('sha256').update(body).digest('hex'), cwd: root, client
+  });
+  assert.equal(recovered.status, 'no-op');
+  assert.deepEqual(recovered.summary, {
+    id: 10, body, sha256: createHash('sha256').update(body).digest('hex')
+  });
+
+  const rejected = await recoverPlatformSummary('TASK-20260101-000001', {
+    sha256: '0'.repeat(64), cwd: root, client
+  });
+  assert.equal(rejected.status, 'failed');
+  assert.equal(rejected.error?.code, 'SUMMARY_RECOVERY_DIGEST_MISMATCH');
 });
 
 test('comment sync excludes oversized process history from the task snapshot', async () => {

@@ -19,6 +19,7 @@ export function finalizationTerminalResponse(taskId: string, requestId: string, 
     .map(({ status: _status, resolvedAt: _resolvedAt, ...warning }) => warning);
   const result = {
     status: 'completed', changed: false, taskId,
+    backfill: { status: 'no-op', changed: false, error: null },
     lifecycle: { status: 'no-op', changed: false, error: null },
     taskComment: receipt.taskComment === 'pending' ? null : { status: 'no-op', changed: false, error: null },
     verification: receipt.verification === 'pending' ? null : { status: 'no-op', changed: false, error: null },

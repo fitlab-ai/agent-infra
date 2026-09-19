@@ -58,7 +58,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 - 如果在 `completed/` 但缺少匹配日志：告知用户任务已完成但终态身份不完整并停止，不手工修补
 - 如果在 `blocked/`：告知用户任务被阻塞；建议先解除阻塞
 
-场景 A 为 active 任务的正常完成路径；场景 B `finalization-retry` 只重试归档后的 task 评论与终态门禁。
+场景 A 为 active 任务的正常完成路径；场景 B `finalization-retry` 重试允许的 artifact 回填、终态 task 评论、完成校验和摘要封口，不回迁生命周期。
 
 ### 2. 验证完成前置条件（未满足则必须停止）
 
@@ -140,9 +140,8 @@ Please satisfy the hard prerequisite first, then retry complete-task.
 
 如果存在有效的 `platform_issue_identity`，严格按以下顺序执行：
 
-1. 调用 `agent-infra-internal platform-comment backfill {task-id} --agent {standard-agent-token}`，由 core 仅按 completion canonical inventory 固定顺序补发产物并在全部成功后精确恢复目标历史告警。
-2. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。
-3. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`。该命令把正文和 SHA-256 写入 task 目录的 durable staging record；本步骤不得直接发布 summary 评论。
+1. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。
+2. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment stage-summary {task-id} --body-file {path}`。该命令把正文和 SHA-256 写入 task 目录的 durable staging record；本步骤不得直接发布 summary 评论。
 
 若账本含合法的 `PRC-N` post-review 豁免，摘要正文必须镜像 task.md 中的裁决理由、提交范围、人工身份与时间，并明确这是人工覆盖而非自动校验成功。已有匹配 workflow warning 时，同时镜像其原始 failure code/message；尚无 warning 时只写“裁决已记录、最终门禁待验证”，不得提前宣称豁免已通过。summary marker 仍由同一 `--kind summary` intent 唯一维护。
 
@@ -151,7 +150,7 @@ Please satisfy the hard prerequisite first, then retry complete-task.
 任一操作失败时，任务仍必须位于 active 且短号仍有效；按失败类型调用以下结构化 warning intent，随后继续步骤 5。平台失败不会阻止本地生命周期。
 
 ```bash
-agent-infra-internal task-warning {task-id} add --step complete-task --severity ACTION_REQUIRED --code {COMMENT_SYNC_FAILED|REQUIREMENTS_SYNC_FAILED|SUMMARY_SYNC_FAILED|NETWORK_RETRY_EXHAUSTED} --target {artifact|issue|summary|platform} --message "{error_code}: {error_message}" --action "修复平台同步问题后重跑 complete-task"
+agent-infra-internal task-warning {task-id} add --step complete-task --severity ACTION_REQUIRED --code {REQUIREMENTS_SYNC_FAILED|SUMMARY_SYNC_FAILED|NETWORK_RETRY_EXHAUSTED} --target {issue|summary|platform} --message "{error_code}: {error_message}" --action "修复平台同步问题后重跑 complete-task"
 ```
 
 相同 `step/code/target` 组合由核心幂等去重；调用方不分配 warning id 或手写账本行。
@@ -176,11 +175,11 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-finalization 按 lifecycle → task 评论 → core verification → warning task 评论更新 → summary → post-summary verification 的固定顺序执行，并将每一步的状态写入宿主 receipt。summary 使用暂存正文；仅在所有步骤完成且无未解决 warning 后清理 staging record。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
+finalization 按允许的 artifact backfill → lifecycle → task 评论 → core verification → warning task 评论更新 → summary seal → 最终远端顺序复读的固定顺序执行。每项 backfill 必须取得成功终态，否则不得进入 lifecycle。完成态重入需要重建摘要时，宿主只从唯一、自有且 digest 与 receipt 匹配的远端摘要恢复正文，先耐久暂存再删除重建。仅在所有步骤完成且无未解决 warning 后清理 staging record。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
 
 ### 7. 处理 finalization 重试与结果
 
-场景 A 与场景 B `finalization-retry` 都从宿主执行同一个 `task-finalization` 入口。receipt 只是重入提示，不是 canonical truth：每次重入都要重新验证终态 task 评论和完成校验；只有任务已处于 `completed` 且短号 registry 已释放时，才可跳过不可逆的 lifecycle。不得拆开调用旧的 lifecycle、评论同步或完成校验命令。若 task 评论或校验因网络问题返回 `blocked`，保留 receipt 和已完成状态，修复网络后重跑 complete-task；若生命周期仍未完成，任务保持 active 并从 receipt 的待处理步骤继续。
+场景 A 与场景 B `finalization-retry` 都从宿主执行同一个 `task-finalization` 入口。receipt 只是重入提示，不是 canonical truth：每次重入都要重新核对允许的 artifact 回填、终态 task 评论、完成校验和摘要远端顺序；只有任务已处于 `completed` 且短号 registry 已释放时，才可跳过不可逆的 lifecycle。不得拆开调用旧的 lifecycle、评论同步或完成校验命令。若回填、task 评论、摘要恢复或校验因网络问题返回 `blocked`，保留 receipt、staging 和已完成状态，修复网络后重跑 complete-task；若生命周期仍未完成，任务保持 active 并从 receipt 的待处理步骤继续。
 
 完成结果必须直接消费本次宿主 finalization 的结构化输出、receipt 和 warning projection。`completed` 或 `completed_with_warnings` 才允许继续；`failed` / `blocked` / `unknown` 必须保留 receipt 并停止，之后通过同一 finalization 入口重试。不要在沙箱旧挂载中另行运行 `ls completed` 或 `task-verify complete-task.completed`，也不要用其结果推翻宿主结果。
 

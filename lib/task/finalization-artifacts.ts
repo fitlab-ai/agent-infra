@@ -15,9 +15,7 @@ const COMPLETION_BACKFILL_FAMILIES = [
   'plan',
   'review-plan',
   'code',
-  'review-code',
-  'manual-validation',
-  'validation-run'
+  'review-code'
 ] as const satisfies readonly ArtifactFamily[];
 
 type CompletionArtifactResult = {
