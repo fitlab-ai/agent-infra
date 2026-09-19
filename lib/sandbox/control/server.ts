@@ -513,7 +513,11 @@ function readRecoveryDomain(
           return { domain: null };
         }
         return {
-          domain: readLifecycleRecoveryDomainEvidence(manifest.repoRoot, parsed.request, terminalResult),
+          domain: readLifecycleRecoveryDomainEvidence(
+            manifest.repoRoot,
+            parsed.request,
+            { ...terminalResult, ...(output ?? {}) }
+          ),
           journal: readLifecycleJournalEvidence(manifest.repoRoot, taskRef!)
         };
       } catch {

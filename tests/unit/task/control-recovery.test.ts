@@ -104,6 +104,28 @@ test('recover-started response-loss recovery requires durable target and domain 
   assert.equal(classifySandboxControlRecovery({ operation, binding, startedCommitted: true, terminalResult: { ...result, status: 'no-op', changed: false }, domain: valid, criticalPhases }).outcome, 'success');
 });
 
+test('recover-started response-loss accepts not-needed only for a no-op result', () => {
+  const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'recover-started')!;
+  const binding = operationRecoveryBinding('n'.repeat(32), 'generation-9', 'TASK-20260904-002407', operation.family, operation.intent);
+  const result = {
+    requestId: binding.requestId,
+    generation: binding.generation,
+    taskId: binding.taskId,
+    intentDigest: binding.intentDigest,
+    status: 'no-op',
+    changed: false,
+    targetState: 'active'
+  };
+  const domain = { consistent: true, recovery: true, targetState: 'active', recoveryState: 'not-needed' };
+  assert.equal(classifySandboxControlRecovery({
+    operation, binding, startedCommitted: true, terminalResult: result, domain, criticalPhases
+  }).outcome, 'success');
+  assert.equal(classifySandboxControlRecovery({
+    operation, binding, startedCommitted: true,
+    terminalResult: { ...result, status: 'applied', changed: true }, domain, criticalPhases
+  }).outcome, 'unknown');
+});
+
 test('recover-started response-loss recovery preserves a release retry warning', () => {
   const operation = findSandboxControlRecoveryOperation('task-lifecycle', 'recover-started')!;
   const binding = operationRecoveryBinding('g'.repeat(32), 'generation-8', 'TASK-20260904-002407', operation.family, operation.intent);

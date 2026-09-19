@@ -14,6 +14,8 @@ import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import { resolveAgentRuntimeStoreRoot } from '../runtime/agent-runtime.ts';
 import {
+  finishActivatedRecoveryOrchestrationUnderLock,
+  ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
   recoverActivatedOrchestrationDelegationUnderLock,
   readRun
 } from './orchestration.ts';
@@ -37,7 +39,7 @@ const RECOVERY_NOTE_KEYS = [
 ] as const;
 
 type RecoveryStage = (typeof RECOVERY_STAGES)[number];
-type LifecycleRecoveryRequest = Readonly<{
+type LifecycleRecoverySelectorRequest = Readonly<{
   taskRef: string;
   intent: 'recover-started';
   agent: string;
@@ -46,6 +48,13 @@ type LifecycleRecoveryRequest = Readonly<{
   artifact: string;
   reason: string;
 }>;
+type LifecycleRecoveryAutoRequest = Readonly<{
+  taskRef: string;
+  intent: 'recover-started';
+  agent: string;
+  auto: true;
+}>;
+type LifecycleRecoveryRequest = LifecycleRecoverySelectorRequest | LifecycleRecoveryAutoRequest;
 type RecoveryCommitVerification = { ok: true; receipt: DelegationReceipt } | { ok: false; message: string };
 type LifecycleRecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'owner-unknown' | 'conflict';
@@ -73,7 +82,7 @@ type LifecycleRecoveryOptions = Readonly<{
     taskMdPath: string,
     taskDir: string,
     taskId: string,
-    request: LifecycleRecoveryRequest,
+    request: LifecycleRecoverySelectorRequest,
     note: RecoveryNote,
     options: LifecycleRecoveryOptions
   ) => RecoveryCommitVerification;
@@ -109,6 +118,7 @@ const RECOVERY_RELEASE_RETRY_WARNING: RecoveryWarning = Object.freeze({
   message: 'recovery receipt and Activity Log are complete but the protected lifecycle claim could not be released',
   action: 'retry recover-started with the same selector and reason'
 });
+const AUTO_RECOVERY_REASON = 'automatic recovery of a terminated activated delegation';
 
 function text(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value && !/[\r\n]/u.test(value);
@@ -184,9 +194,9 @@ function result(
     requestRef: request.taskRef,
     intent: request.intent,
     taskId: null,
-    stage: request.stage,
-    round: request.round,
-    artifact: request.artifact,
+    stage: 'stage' in request ? request.stage : null,
+    round: 'round' in request ? request.round : null,
+    artifact: 'artifact' in request ? request.artifact : null,
     receiptId: null,
     childId: null,
     warning: null,
@@ -220,13 +230,24 @@ function normalizeRequest(request: LifecycleRecoveryRequest): LifecycleRecoveryR
     || request.intent !== 'recover-started'
     || typeof request.taskRef !== 'string' || !request.taskRef.trim()
     || typeof request.agent !== 'string'
-    || !isRecoveryStage(request.stage)
+  ) return { code: 'RECOVERY_PAYLOAD_INVALID', message: 'recover-started requires a task and agent' };
+  const agent = normalizeAgentToken(request.agent);
+  if (!agent) return { code: 'RECOVERY_PAYLOAD_INVALID', message: 'recovery agent is not a recognized agent token' };
+  if ('auto' in request) {
+    const record = request as unknown as Record<string, unknown>;
+    if (request.auto !== true || agent !== 'codex'
+      || record.stage !== undefined || record.round !== undefined
+      || record.artifact !== undefined || record.reason !== undefined) {
+      return { code: 'RECOVERY_PAYLOAD_INVALID', message: 'automatic recovery requires Codex and cannot include an explicit selector' };
+    }
+    return { taskRef: request.taskRef, intent: 'recover-started', agent, auto: true };
+  }
+  if (
+    !isRecoveryStage(request.stage)
     || !Number.isSafeInteger(request.round) || request.round < 1
     || typeof request.artifact !== 'string'
     || typeof request.reason !== 'string' || !request.reason.trim() || /[\r\n]/u.test(request.reason)
-  ) return { code: 'RECOVERY_PAYLOAD_INVALID', message: 'recover-started requires a task, agent, stage, round, artifact, and single-line reason' };
-  const agent = normalizeAgentToken(request.agent);
-  if (!agent) return { code: 'RECOVERY_PAYLOAD_INVALID', message: 'recovery agent is not a recognized agent token' };
+  ) return { code: 'RECOVERY_PAYLOAD_INVALID', message: 'explicit recover-started requires stage, round, artifact, and a single-line reason' };
   const expectedArtifact = artifactName(request.stage, request.round);
   if (request.artifact !== expectedArtifact) {
     return { code: 'RECOVERY_PAYLOAD_INVALID', message: `artifact must be ${expectedArtifact} for ${request.stage} round ${request.round}` };
@@ -328,7 +349,7 @@ function readStoredEvidence(
 
 function taskNote(
   taskId: string,
-  request: LifecycleRecoveryRequest,
+  request: LifecycleRecoverySelectorRequest,
   receipt: DelegationReceipt,
   stopRevision: number,
   consumer: string,
@@ -371,7 +392,7 @@ function releaseResult(
 function isPostActivationAbortedReceipt(
   receipt: DelegationReceipt,
   taskId: string,
-  request: LifecycleRecoveryRequest
+  request: LifecycleRecoverySelectorRequest
 ): boolean {
   return receipt.status === 'aborted'
     && receipt.activatedAt !== null
@@ -385,7 +406,7 @@ function isPostActivationAbortedReceipt(
 function matchingPostActivationAbortedReceipts(
   run: OrchestrationRun,
   taskId: string,
-  request: LifecycleRecoveryRequest
+  request: LifecycleRecoverySelectorRequest
 ): DelegationReceipt[] {
   return run.receipts.filter((receipt) => isPostActivationAbortedReceipt(receipt, taskId, request));
 }
@@ -409,7 +430,7 @@ function sameRecoveryNote(left: RecoveryNote, right: RecoveryNote): boolean {
 function recoveryNoteMatchesRequest(
   note: RecoveryNote,
   taskId: string,
-  request: LifecycleRecoveryRequest
+  request: LifecycleRecoverySelectorRequest
 ): boolean {
   return note.taskId === taskId
     && note.stage === request.stage
@@ -431,8 +452,15 @@ function recoveryReferencesMatch(
     && receipt.hostEvidence.consumedAt === note.consumedAt;
 }
 
-function recoveryRunIsStable(run: OrchestrationRun | null): run is OrchestrationRun {
-  return run !== null && run.status === 'running' && run.pendingDelegation === null;
+function recoveryRunCanFinish(run: OrchestrationRun | null): run is OrchestrationRun {
+  return run !== null
+    && run.pendingDelegation === null
+    && (
+      (run.status === 'running' && run.pause === null)
+      || (run.status === 'paused'
+        && run.pause?.code === ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
+        && run.pause.recoverable === true)
+    );
 }
 
 function recoveryTerminalFailureStatus(code: string): 'owner-unknown' | 'conflict' {
@@ -452,7 +480,7 @@ function recoveryTerminalFailureStatus(code: string): 'owner-unknown' | 'conflic
 function readRecoveryTerminalFacts(
   section: Readonly<{ entries: readonly LogEntry[] }>,
   taskId: string,
-  request: LifecycleRecoveryRequest,
+  request: LifecycleRecoverySelectorRequest,
   run: OrchestrationRun | null,
   store: ReturnType<typeof createCodexLifecycleStore>
 ): RecoveryTerminalFactsResult {
@@ -466,8 +494,8 @@ function readRecoveryTerminalFacts(
   if (!note || !recoveryNoteMatchesRequest(note, taskId, request)) {
     return { ok: false, code: 'RECOVERY_NOTE_INVALID', message: 'recovery Activity Log note does not match the selector' };
   }
-  if (!recoveryRunIsStable(run)) {
-    return { ok: false, code: 'RECOVERY_ORCHESTRATION_INVALID', message: 'completed recovery state must be running with no pending delegation' };
+  if (!recoveryRunCanFinish(run)) {
+    return { ok: false, code: 'RECOVERY_ORCHESTRATION_INVALID', message: 'recovery state must be running or use the dedicated recovery pause, with no pending delegation' };
   }
   const receipts = matchingPostActivationAbortedReceipts(run, taskId, request);
   if (receipts.length !== 1 || receipts[0]!.id !== note.receiptId) {
@@ -494,7 +522,7 @@ function verifyRecoveryCommit(
   taskMdPath: string,
   taskDir: string,
   taskId: string,
-  request: LifecycleRecoveryRequest,
+  request: LifecycleRecoverySelectorRequest,
   note: RecoveryNote,
   options: LifecycleRecoveryOptions
 ): RecoveryCommitVerification {
@@ -517,6 +545,167 @@ function verifyRecoveryCommit(
   }
 }
 
+type AutoRecoveryResolution =
+  | { kind: 'not-needed'; taskId: string }
+  | { kind: 'candidate'; request: LifecycleRecoverySelectorRequest }
+  | { kind: 'failure'; status: 'owner-unknown' | 'conflict'; code: string; message: string; taskId: string | null };
+
+function selectorForReceipt(
+  request: LifecycleRecoveryAutoRequest,
+  receipt: DelegationReceipt,
+  reason: string
+): LifecycleRecoverySelectorRequest | null {
+  if (!isRecoveryStage(receipt.stage) || receipt.round < 1 || receipt.artifact !== artifactName(receipt.stage, receipt.round)) {
+    return null;
+  }
+  return {
+    taskRef: request.taskRef,
+    intent: 'recover-started',
+    agent: request.agent,
+    stage: receipt.stage,
+    round: receipt.round,
+    artifact: receipt.artifact,
+    reason
+  };
+}
+
+function resolveAutoRecoveryRequest(
+  request: LifecycleRecoveryAutoRequest,
+  options: LifecycleRecoveryOptions
+): AutoRecoveryResolution {
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return { kind: 'failure', status: 'conflict', code: resolved.code, message: resolved.message, taskId: resolved.taskId };
+  let content: string;
+  try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
+  catch (error) { return { kind: 'failure', status: 'owner-unknown', code: 'RECOVERY_TASK_READ_FAILED', message: String(error), taskId: resolved.taskId }; }
+  try { parseTypedTaskFrontmatter(content); }
+  catch (error) {
+    return {
+      kind: 'failure', status: 'conflict', code: 'RECOVERY_TASK_INVALID',
+      message: error instanceof Error ? error.message : String(error), taskId: resolved.taskId
+    };
+  }
+  const section = locateActivityLog(content);
+  if (!section) {
+    return { kind: 'failure', status: 'conflict', code: 'RECOVERY_LOG_INVALID', message: 'task has no unique Activity Log section', taskId: resolved.taskId };
+  }
+  const recoveryEntries = section.entries.filter((entry) => entry.note.startsWith(RECOVERY_NOTE_PREFIX));
+  const parsedNotes = recoveryEntries.map((entry) => parseRecoveryNote(entry.note));
+  if (parsedNotes.some((note) => note === null)) {
+    return { kind: 'failure', status: 'conflict', code: 'RECOVERY_NOTE_INVALID', message: 'structured recovery Activity Log note is invalid', taskId: resolved.taskId };
+  }
+  const notes = parsedNotes as RecoveryNote[];
+  let run: OrchestrationRun | null;
+  try { run = readRun(resolved.taskDir, options.orchestration); }
+  catch (error) {
+    return { kind: 'failure', status: 'owner-unknown', code: 'RECOVERY_ORCHESTRATION_UNKNOWN', message: String(error), taskId: resolved.taskId };
+  }
+  if (!run) {
+    return notes.length === 0
+      ? { kind: 'not-needed', taskId: resolved.taskId }
+      : { kind: 'failure', status: 'conflict', code: 'RECOVERY_ORCHESTRATION_MISSING', message: 'structured recovery facts exist without an orchestration run', taskId: resolved.taskId };
+  }
+
+  const candidates = new Map<string, LifecycleRecoverySelectorRequest>();
+  const noteByReceipt = new Map(notes.map((note) => [note.receiptId, note]));
+  const pending = run.pendingDelegation;
+  if (pending?.status === 'activated') {
+    if (pending.client !== 'codex') {
+      return { kind: 'failure', status: 'conflict', code: 'RECOVERY_CLIENT_UNSUPPORTED', message: 'automatic recovery only supports Codex activated delegations', taskId: resolved.taskId };
+    }
+    const selector = selectorForReceipt(request, pending, AUTO_RECOVERY_REASON);
+    if (!selector) {
+      return { kind: 'failure', status: 'conflict', code: 'RECOVERY_SELECTOR_MISMATCH', message: 'activated delegation has an invalid lifecycle selector', taskId: resolved.taskId };
+    }
+    candidates.set(pending.id, selector);
+  }
+
+  const store = readLifecycleStore(options, resolved.repoRoot);
+  for (const receipt of run.receipts) {
+    if (receipt.status !== 'aborted' || receipt.activatedAt === null || receipt.agent !== null || receipt.client !== 'codex') continue;
+    const selector = selectorForReceipt(request, receipt, AUTO_RECOVERY_REASON);
+    if (!selector) {
+      return { kind: 'failure', status: 'conflict', code: 'RECOVERY_SELECTOR_MISMATCH', message: 'aborted delegation has an invalid lifecycle selector', taskId: resolved.taskId };
+    }
+    const targets = targetRows(section.entries, selector.stage, selector.round);
+    const open = targets.rows.filter((row) => row.started !== '' && row.done === '');
+    const note = noteByReceipt.get(receipt.id) ?? null;
+    if (targets.recoveryEntries.length > 0 && !note) {
+      return { kind: 'failure', status: 'conflict', code: 'RECOVERY_NOTE_INVALID', message: 'recovery terminal row does not match an aborted receipt', taskId: resolved.taskId };
+    }
+    if (note && (note.taskId !== resolved.taskId || note.childId !== receipt.childId)) {
+      return { kind: 'failure', status: 'conflict', code: 'RECOVERY_REFERENCE_CONFLICT', message: 'recovery note does not match its aborted receipt', taskId: resolved.taskId };
+    }
+    let retainedClaim = false;
+    if (note) {
+      const stored = readStoredEvidence(store, note.childId);
+      if ('error' in stored) {
+        return { kind: 'failure', status: 'owner-unknown', code: 'RECOVERY_STORE_UNKNOWN', message: stored.error.message, taskId: resolved.taskId };
+      }
+      retainedClaim = !('missing' in stored);
+    }
+    const dedicatedPause = run.status === 'paused'
+      && run.pause?.code === ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE;
+    if (open.length > 0 || (note && (retainedClaim || dedicatedPause))) {
+      candidates.set(receipt.id, { ...selector, reason: note?.reason ?? AUTO_RECOVERY_REASON });
+    }
+  }
+
+  for (const note of notes) {
+    if (!run.receipts.some((receipt) => receipt.id === note.receiptId)) {
+      return { kind: 'failure', status: 'conflict', code: 'RECOVERY_REFERENCE_CONFLICT', message: 'recovery note references a missing orchestration receipt', taskId: resolved.taskId };
+    }
+  }
+  if (candidates.size > 1) {
+    return { kind: 'failure', status: 'conflict', code: 'RECOVERY_SELECTOR_AMBIGUOUS', message: 'automatic recovery found multiple candidate lifecycle attempts', taskId: resolved.taskId };
+  }
+  if (candidates.size === 1) return { kind: 'candidate', request: [...candidates.values()][0]! };
+  if (run.status === 'paused' && run.pause?.code === ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE) {
+    return { kind: 'failure', status: 'conflict', code: 'RECOVERY_REFERENCE_CONFLICT', message: 'dedicated recovery pause has no matching recovery transaction', taskId: resolved.taskId };
+  }
+  return { kind: 'not-needed', taskId: resolved.taskId };
+}
+
+function activatedRecoveryEvent(
+  request: LifecycleRecoverySelectorRequest,
+  receipt: DelegationReceipt,
+  note: RecoveryNote
+) {
+  return {
+    receiptId: receipt.id,
+    stage: request.stage,
+    round: request.round,
+    artifact: request.artifact,
+    startedAgent: request.agent,
+    childId: note.childId,
+    stopRevision: note.stopRevision,
+    consumer: note.consumer,
+    consumedAt: note.consumedAt
+  } as const;
+}
+
+function finishRecoveryRun(
+  taskId: string,
+  request: LifecycleRecoverySelectorRequest,
+  receipt: DelegationReceipt,
+  note: RecoveryNote,
+  options: LifecycleRecoveryOptions
+): { ok: true; changed: boolean } | { ok: false; code: string; message: string } {
+  const finished = finishActivatedRecoveryOrchestrationUnderLock(
+    taskId,
+    activatedRecoveryEvent(request, receipt, note),
+    { ...options.orchestration, repoRoot: options.repoRoot, now: options.now }
+  );
+  if (finished.status === 'failed') {
+    return {
+      ok: false,
+      code: finished.error?.code ?? 'RECOVERY_ORCHESTRATION_FAILED',
+      message: finished.error?.message ?? 'orchestration recovery completion failed'
+    };
+  }
+  return { ok: true, changed: finished.changed };
+}
+
 function recoveryDomainFailure(): Readonly<Record<string, unknown>> {
   return { consistent: false, recovery: true, targetState: 'active' };
 }
@@ -524,7 +713,16 @@ function recoveryDomainFailure(): Readonly<Record<string, unknown>> {
 export function readLifecycleRecoveryDomainEvidence(
   repoRoot: string,
   requestInput: LifecycleRecoveryRequest,
-  terminalResult: Readonly<{ status: string; changed: boolean | null; targetState: string | null; warning?: unknown | null }>,
+  terminalResult: Readonly<{
+    status: string;
+    changed: boolean | null;
+    targetState: string | null;
+    warning?: unknown | null;
+    receiptId?: unknown;
+    stage?: unknown;
+    round?: unknown;
+    artifact?: unknown;
+  }>,
   options: Pick<LifecycleRecoveryOptions, 'lifecycleStore' | 'now'> = {}
 ): Readonly<Record<string, unknown>> {
   const terminalStateValid = terminalResult.status === 'no-op'
@@ -534,7 +732,54 @@ export function readLifecycleRecoveryDomainEvidence(
   const normalized = normalizeRequest(requestInput);
   if ('code' in normalized || terminalResult.targetState !== 'active'
     || !terminalStateValid) return recoveryDomainFailure();
-  const request = normalized;
+  let request: LifecycleRecoverySelectorRequest;
+  if ('auto' in normalized) {
+    const automatic = resolveAutoRecoveryRequest(normalized, { ...options, repoRoot });
+    if (automatic.kind === 'not-needed' && terminalResult.status === 'no-op' && terminalResult.changed === false) {
+      return { consistent: true, recovery: true, targetState: 'active', recoveryState: 'not-needed' };
+    }
+    const resolved = resolveTaskRef(normalized.taskRef, { repoRoot });
+    if (!resolved.ok) return recoveryDomainFailure();
+    try {
+      const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      const section = locateActivityLog(content);
+      if (!section) return recoveryDomainFailure();
+      const notes = section.entries.map((entry) => parseRecoveryNote(entry.note))
+        .filter((note): note is RecoveryNote => note !== null);
+      const run = readRun(resolved.taskDir);
+      if (!run) return recoveryDomainFailure();
+      const store = readLifecycleStore(options, repoRoot);
+      const candidates = notes.filter((note) => {
+        if (typeof terminalResult.receiptId === 'string' && note.receiptId !== terminalResult.receiptId) return false;
+        const selector: LifecycleRecoverySelectorRequest = {
+          taskRef: normalized.taskRef,
+          intent: 'recover-started',
+          agent: normalized.agent,
+          stage: note.stage,
+          round: note.round,
+          artifact: note.artifact,
+          reason: note.reason
+        };
+        const facts = readRecoveryTerminalFacts(section, resolved.taskId, selector, run, store);
+        return facts.ok && facts.facts.stored === null;
+      });
+      if (candidates.length !== 1) return recoveryDomainFailure();
+      const note = candidates[0]!;
+      request = {
+        taskRef: normalized.taskRef,
+        intent: 'recover-started',
+        agent: normalized.agent,
+        stage: note.stage,
+        round: note.round,
+        artifact: note.artifact,
+        reason: note.reason
+      };
+    } catch {
+      return recoveryDomainFailure();
+    }
+  } else {
+    request = normalized;
+  }
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return recoveryDomainFailure();
   try {
@@ -566,6 +811,16 @@ function recoverStartedLifecycleUnderLock(
 ): LifecycleRecoveryResult {
   const normalized = normalizeRequest(requestInput);
   if ('code' in normalized) return failure(requestInput, 'conflict', normalized.code, normalized.message);
+  if ('auto' in normalized) {
+    const automatic = resolveAutoRecoveryRequest(normalized, options);
+    if (automatic.kind === 'failure') {
+      return failure(normalized, automatic.status, automatic.code, automatic.message, { taskId: automatic.taskId });
+    }
+    if (automatic.kind === 'not-needed') {
+      return result(normalized, 'no-op', { taskId: automatic.taskId });
+    }
+    return recoverStartedLifecycleUnderLock(automatic.request, options);
+  }
   const request = normalized;
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failure(request, 'conflict', resolved.code, resolved.message);
@@ -597,13 +852,20 @@ function recoverStartedLifecycleUnderLock(
       return failure(request, recoveryTerminalFailureStatus(facts.code), facts.code, facts.message, { taskId });
     }
     const { note, receipt, consumer, stored } = facts.facts;
-    if (!stored) return result(request, 'no-op', { taskId, receiptId: receipt.id, childId: receipt.childId });
+    if (!stored) {
+      const finished = finishRecoveryRun(taskId, request, receipt, note, { ...options, repoRoot: resolved.repoRoot });
+      if (!finished.ok) return failure(request, 'conflict', finished.code, finished.message, { taskId, receiptId: receipt.id, childId: receipt.childId });
+      return result(request, finished.changed ? 'applied' : 'no-op', { taskId, receiptId: receipt.id, childId: receipt.childId });
+    }
     let released = false;
     try { released = (options.releaseRecovery ?? store.releaseRecovery)(note.childId, consumer); }
     catch (error) {
       return releaseResult(request, taskId, receipt, false, false);
     }
-    return releaseResult(request, taskId, receipt, released, false);
+    if (!released) return releaseResult(request, taskId, receipt, false, false);
+    const finished = finishRecoveryRun(taskId, request, receipt, note, { ...options, repoRoot: resolved.repoRoot });
+    if (!finished.ok) return failure(request, 'conflict', finished.code, finished.message, { taskId, receiptId: receipt.id, childId: receipt.childId });
+    return result(request, 'applied', { taskId, receiptId: receipt.id, childId: receipt.childId });
   }
 
   const started = open[0]!;
@@ -677,6 +939,8 @@ function recoverStartedLifecycleUnderLock(
   if (!released) {
     return releaseResult(request, taskId, receipt, false, true);
   }
+  const finished = finishRecoveryRun(taskId, request, receipt, note, { ...options, repoRoot: resolved.repoRoot });
+  if (!finished.ok) return failure(request, 'conflict', finished.code, finished.message, { taskId, receiptId: receipt.id, childId: receipt.childId });
   return result(request, 'applied', { taskId, receiptId: receipt.id, childId: receipt.childId });
 }
 

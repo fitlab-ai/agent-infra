@@ -79,6 +79,14 @@ function recoveryRequest(id: string): SandboxControlRequest {
   };
 }
 
+function automaticRecoveryRequest(id: string): SandboxControlRequest {
+  return {
+    version: 3, id, token: 'token', generation: 'generation-1', issuedAt: 1, expiresAt: 2,
+    controllerProcess: null, controllerProof: null, family: 'task-lifecycle',
+    args: [TASK_ID, 'recover-started', '--agent', 'codex', '--auto']
+  };
+}
+
 function resultEvidence(id: string): SandboxControlResultEvidence {
   const empty = crypto.createHash('sha256').update('').digest('hex');
   return { version: 1, id, generation: 'generation-1', exitCode: 0, stdoutBytes: 0, stderrBytes: 0, stdoutSha256: empty, stderrSha256: empty, captureState: 'metadata-only' };
@@ -173,6 +181,32 @@ test('server recovery wiring rebuilds consecutive release failures and converges
     assert.equal(recover().status, 'no-op');
     assert.equal(readRun(f.taskDir)?.receipts.filter((receipt) => receipt.status === 'aborted').length, 1);
     assert.equal((fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/lifecycle-recovery:v1 /gu) ?? []).length, 1);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('server rebuilds automatic recovery success when the output payload is unavailable', () => {
+  const f = recoveryFixture();
+  const manifest = recoveryManifest(f);
+  const manifestPath = path.join(path.dirname(manifest.publicStatusDir), 'manifest.json');
+  const request = automaticRecoveryRequest('c'.repeat(32));
+  commitPhases(manifest, request.id);
+  try {
+    const recovered = withTaskExecutionLock(f.root, TASK_ID, 'test.recover-started-auto', () => (
+      recoverStartedLifecycleUnderLock(
+        { taskRef: TASK_ID, intent: 'recover-started', agent: 'codex', auto: true },
+        { repoRoot: f.root, lifecycleStore: f.store }
+      )
+    ));
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    const terminal = terminalFor(manifest, request, recovered);
+    const response = recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, terminal);
+    assert.ok(response);
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.outputState, 'unavailable');
+    assert.match(response.stderr, /SANDBOX_CONTROL_OUTPUT_UNAVAILABLE/u);
+    assert.equal(readRun(f.taskDir)?.status, 'running');
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

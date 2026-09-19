@@ -99,6 +99,20 @@ test('task-lifecycle recover-started exposes a structured owner-unknown result',
   assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID)), false);
 });
 
+test('task-lifecycle recover-started auto is a no-op when no orchestration run exists', () => {
+  const f = fixture();
+  try {
+    const before = fs.readFileSync(path.join(f.dir, 'task.md'));
+    const result = run(f.root, [TASK_ID, 'recover-started', '--agent', 'codex', '--auto']);
+    assert.equal(result.status, 0, result.stderr);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.status, 'no-op');
+    assert.equal(parsed.changed, false);
+    assert.equal(parsed.receiptId, null);
+    assert.deepEqual(fs.readFileSync(path.join(f.dir, 'task.md')), before);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 const RESTORE_TASK_ID = 'TASK-20260202-000002';
 
 function stagingFixture({ initGit = true } = {}) {

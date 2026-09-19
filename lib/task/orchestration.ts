@@ -61,6 +61,7 @@ import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
+const ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE = 'ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE';
 type ModelPolicySource = Readonly<{
   kind: 'explicit' | 'project-config';
   client: AgentClientId;
@@ -1417,19 +1418,34 @@ function recoverPreparedOrchestrationDelegation(
   }
 }
 
+type ActivatedRecoveryEvent = Readonly<{
+  receiptId: string;
+  stage: DelegationStage;
+  round: number;
+  artifact: string;
+  startedAgent: string;
+  childId: string;
+  stopRevision: number;
+  consumer: string;
+  consumedAt: string;
+}>;
+
+function recoveryReceiptMatches(
+  receipt: DelegationReceipt,
+  taskId: string,
+  event: ActivatedRecoveryEvent
+): boolean {
+  return receipt.taskId === taskId
+    && receipt.stage === event.stage
+    && receipt.round === event.round
+    && receipt.artifact === event.artifact
+    && receipt.childId === event.childId
+    && normalizeAgentToken(event.startedAgent) === normalizeAgentToken(receipt.client);
+}
+
 function recoverActivatedOrchestrationDelegationUnderLock(
   taskRef: string,
-  event: Readonly<{
-    receiptId: string;
-    stage: DelegationStage;
-    round: number;
-    artifact: string;
-    startedAgent: string;
-    childId: string;
-    stopRevision: number;
-    consumer: string;
-    consumedAt: string;
-  }>,
+  event: ActivatedRecoveryEvent,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
@@ -1442,14 +1458,7 @@ function recoverActivatedOrchestrationDelegationUnderLock(
   ];
   const receipt = matches.find((candidate) => candidate.id === event.receiptId);
   if (!receipt) return failed('ORCHESTRATION_DELEGATION_MISSING', 'recovery receipt does not exist', resolved.taskId);
-  if (
-    receipt.taskId !== resolved.taskId
-    || receipt.stage !== event.stage
-    || receipt.round !== event.round
-    || receipt.artifact !== event.artifact
-    || receipt.childId !== event.childId
-    || normalizeAgentToken(event.startedAgent) !== normalizeAgentToken(receipt.client)
-  ) {
+  if (!recoveryReceiptMatches(receipt, resolved.taskId, event)) {
     return failed('ORCHESTRATION_PROVENANCE_MISMATCH', 'recovery selector does not match the delegation receipt', resolved.taskId);
   }
   if (receipt.status === 'aborted' && run.pendingDelegation === null) {
@@ -1475,6 +1484,42 @@ function recoverActivatedOrchestrationDelegationUnderLock(
     pendingDelegation: null,
     receipts: Object.freeze([...run.receipts, aborted.receipt])
   }, options.now);
+  saveRun(resolved.taskDir, updated);
+  return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
+}
+
+function finishActivatedRecoveryOrchestrationUnderLock(
+  taskRef: string,
+  event: ActivatedRecoveryEvent,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  const run = readRun(resolved.taskDir, options);
+  if (!run) return failed('ORCHESTRATION_RUN_MISSING', 'no orchestration run exists', resolved.taskId);
+  if (run.pendingDelegation !== null) {
+    return failed('ORCHESTRATION_RECOVERY_UNSAFE', 'completed recovery requires no pending delegation', resolved.taskId);
+  }
+  const receipts = run.receipts.filter((candidate) => candidate.id === event.receiptId);
+  if (
+    receipts.length !== 1
+    || receipts[0]!.status !== 'aborted'
+    || receipts[0]!.activatedAt === null
+    || !recoveryReceiptMatches(receipts[0]!, resolved.taskId, event)
+  ) {
+    return failed('ORCHESTRATION_RECOVERY_UNSAFE', 'completed recovery receipt does not match the orchestration run', resolved.taskId);
+  }
+  if (run.status === 'running' && run.pause === null) {
+    return { status: 'running', changed: false, taskId: resolved.taskId, run, next: null, error: null };
+  }
+  if (
+    run.status !== 'paused'
+    || run.pause?.code !== ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
+    || run.pause.recoverable !== true
+  ) {
+    return failed('ORCHESTRATION_RECOVERY_UNSAFE', 'only the dedicated lifecycle recovery pause can be resumed', resolved.taskId);
+  }
+  const updated = withUpdatedRun(run, { status: 'running', pause: null }, options.now);
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
 }
@@ -1621,10 +1666,12 @@ export {
   commitOrchestrationStageCompletion,
   completeOrchestrationStage,
   dispatchOrchestrationDelegation,
+  finishActivatedRecoveryOrchestrationUnderLock,
   inspectOrchestrationStage,
   hasActivatableOrchestrationDelegation,
   hasSealableOrchestrationDelegation,
   OrchestrationStateError,
+  ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
   orchestrationPath,
   pauseMatchingOrchestrationDelegation,
   pauseOrchestration,

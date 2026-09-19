@@ -5,7 +5,17 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
-import { activateOrchestrationDelegation, beginOrResumeOrchestration, dispatchOrchestrationDelegation, prepareOrchestrationDelegation, readRun } from '../../../lib/task/orchestration.ts';
+import {
+  activateOrchestrationDelegation,
+  beginOrResumeOrchestration,
+  completeOrchestrationStage,
+  dispatchOrchestrationDelegation,
+  ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+  pauseOrchestration,
+  prepareOrchestrationDelegation,
+  readRun,
+  sealOrchestrationDelegation
+} from '../../../lib/task/orchestration.ts';
 import {
   readLifecycleRecoveryDomainEvidence,
   recoverStartedLifecycleUnderLock
@@ -70,6 +80,13 @@ const recoveryRequest: LifecycleRecoveryRequest = {
   reason: 'native child terminated before result was known'
 };
 
+const autoRecoveryRequest: LifecycleRecoveryRequest = {
+  taskRef: TASK_ID,
+  intent: 'recover-started',
+  agent: 'codex',
+  auto: true
+};
+
 function recover(
   f: ReturnType<typeof fixture>,
   releaseRecovery?: (child: string, consumer: string) => boolean,
@@ -81,6 +98,173 @@ function recover(
     { repoRoot: path.resolve(f.taskDir, '../../../..'), lifecycleStore: f.store, releaseRecovery, ...options }
   ));
 }
+
+function recoverAuto(
+  f: ReturnType<typeof fixture>,
+  releaseRecovery?: (child: string, consumer: string) => boolean
+) {
+  return withTaskExecutionLock(path.resolve(f.taskDir, '../../../..'), TASK_ID, 'test.recover-started-auto', () => recoverStartedLifecycleUnderLock(
+    autoRecoveryRequest,
+    { repoRoot: path.resolve(f.taskDir, '../../../..'), lifecycleStore: f.store, releaseRecovery }
+  ));
+}
+
+test('recover-started auto is not needed before the first orchestration run', () => {
+  const f = fixture();
+  try {
+    fs.rmSync(path.join(f.taskDir, 'orchestration.json'));
+    const before = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
+    const recovered = recoverAuto(f);
+    assert.equal(recovered.status, 'no-op');
+    assert.equal(recovered.changed, false);
+    assert.equal(recovered.stage, null);
+    assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), before);
+    assert.deepEqual(readLifecycleRecoveryDomainEvidence(
+      f.root,
+      autoRecoveryRequest,
+      { ...recovered, targetState: 'active' },
+      { lifecycleStore: f.store }
+    ), { consistent: true, recovery: true, targetState: 'active', recoveryState: 'not-needed' });
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('recover-started auto leaves completed and non-activated pending runs to orchestration', () => {
+  const cases: ReadonlyArray<readonly [string, (f: ReturnType<typeof fixture>) => void]> = [
+    ['completed', (f) => {
+      const runPath = path.join(f.taskDir, 'orchestration.json');
+      const run = JSON.parse(fs.readFileSync(runPath, 'utf8')) as Record<string, unknown>;
+      run.status = 'completed';
+      run.pendingDelegation = null;
+      run.receipts = [];
+      fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+    }],
+    ['prepared', (f) => {
+      const runPath = path.join(f.taskDir, 'orchestration.json');
+      const run = JSON.parse(fs.readFileSync(runPath, 'utf8')) as { pendingDelegation: Record<string, unknown> };
+      Object.assign(run.pendingDelegation, {
+        status: 'prepared', parentId: null, childId: null, spawnMode: null, actualModel: null,
+        actualReasoningEffort: null, modelFallbackReason: null, reasoningEffortFallbackReason: null,
+        agent: null, hostEvidence: null, startEvidenceMonotonicMs: null, activatedMonotonicMs: null,
+        activatedAt: null, afterFingerprint: null, changedPaths: [], sealedAt: null, consumedAt: null
+      });
+      fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+    }],
+    ['stage-completed', (f) => {
+      const completed = completeOrchestrationStage(TASK_ID, {
+        stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex'
+      }, { repoRoot: f.root });
+      assert.equal(completed.run?.pendingDelegation?.status, 'stage-completed');
+    }],
+    ['sealed', (f) => {
+      completeOrchestrationStage(TASK_ID, {
+        stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex'
+      }, { repoRoot: f.root });
+      const sealed = sealOrchestrationDelegation(TASK_ID, {
+        childId: 'child', exitCode: 0, afterFingerprint: 'after-tree', changedPaths: [],
+        hostEvidence: { stopRevision: 6, consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:00.400Z' }
+      }, { repoRoot: f.root });
+      assert.equal(sealed.run?.pendingDelegation?.status, 'sealed');
+    }]
+  ];
+  for (const [name, setup] of cases) {
+    const f = fixture();
+    try {
+      setup(f);
+      const before = fs.readFileSync(path.join(f.taskDir, 'orchestration.json'), 'utf8');
+      const recovered = recoverAuto(f);
+      assert.equal(recovered.status, 'no-op', name);
+      assert.equal(recovered.changed, false, name);
+      assert.equal(fs.readFileSync(path.join(f.taskDir, 'orchestration.json'), 'utf8'), before, name);
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('recover-started auto rejects a dedicated recovery pause without a transaction', () => {
+  const f = fixture();
+  try {
+    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const run = JSON.parse(fs.readFileSync(runPath, 'utf8')) as Record<string, unknown>;
+    run.pendingDelegation = null;
+    run.receipts = [];
+    fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+    pauseOrchestration(
+      TASK_ID,
+      ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+      'recovery transaction did not finish',
+      true,
+      { repoRoot: f.root }
+    );
+
+    const recovered = recoverAuto(f);
+    assert.equal(recovered.status, 'conflict');
+    assert.equal(recovered.error?.code, 'RECOVERY_REFERENCE_CONFLICT');
+    assert.equal(readRun(f.taskDir)?.pause?.code, ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('recover-started auto selects and completes one activated Codex delegation', () => {
+  const f = fixture();
+  try {
+    const recovered = recoverAuto(f);
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(recovered.stage, 'analysis');
+    assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
+    assert.deepEqual(readLifecycleRecoveryDomainEvidence(
+      f.root,
+      autoRecoveryRequest,
+      { ...recovered, targetState: 'active' },
+      { lifecycleStore: f.store }
+    ), { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' });
+    assert.equal(recoverAuto(f).status, 'no-op');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('recover-started auto releases a retained claim before resuming its dedicated pause', () => {
+  const f = fixture();
+  try {
+    const first = recoverAuto(f, () => false);
+    assert.equal(first.warning?.code, 'RECOVERY_RELEASE_RETRY_REQUIRED');
+    const paused = pauseOrchestration(
+      TASK_ID,
+      ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+      'RECOVERY_RELEASE_RETRY_REQUIRED: claim retained',
+      true,
+      { repoRoot: f.root }
+    );
+    assert.equal(paused.status, 'paused');
+
+    const recovered = recoverAuto(f, (child, consumer) => f.store.releaseRecovery(child, consumer));
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(readRun(f.taskDir)?.status, 'running');
+    assert.equal(readRun(f.taskDir)?.pause, null);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('recover-started auto never clears an unrelated recoverable pause', () => {
+  const f = fixture();
+  try {
+    const first = recoverAuto(f, () => false);
+    assert.equal(first.warning?.code, 'RECOVERY_RELEASE_RETRY_REQUIRED');
+    pauseOrchestration(TASK_ID, 'OTHER_RECOVERABLE_PAUSE', 'unrelated pause', true, { repoRoot: f.root });
+
+    const recovered = recoverAuto(f, (child, consumer) => f.store.releaseRecovery(child, consumer));
+    assert.equal(recovered.status, 'conflict');
+    assert.equal(recovered.error?.code, 'RECOVERY_ORCHESTRATION_INVALID');
+    assert.equal(readRun(f.taskDir)?.pause?.code, 'OTHER_RECOVERABLE_PAUSE');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
 
 test('recover-started claims, aborts, logs, releases, and replays as no-op', () => {
   const f = fixture();

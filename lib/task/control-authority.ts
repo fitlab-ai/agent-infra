@@ -898,7 +898,7 @@ function operationInvalid(message: string): never {
 
 const LIFECYCLE_FLAGS = new Set([
   '--agent', '--reason', '--unblock-condition', '--note', '--alert-number', '--staging-dir', '--issue-number',
-  '--stage', '--round', '--artifact', '--override-ticket', '--override-target', '--override-scope', '--dry-run'
+  '--stage', '--round', '--artifact', '--auto', '--override-ticket', '--override-target', '--override-scope', '--dry-run'
 ]);
 
 const FINALIZATION_FLAGS = new Set(['--agent']);
@@ -920,7 +920,7 @@ function parseValues(
   const values: Record<string, string | boolean> = {};
   for (let index = start; index < args.length; index += 1) {
     const flag = args[index]!;
-    if (flag === '--dry-run') {
+    if (flag === '--dry-run' || flag === '--auto') {
       if (!flags.has(flag)) operationInvalid(`unknown option '${flag}'`);
       if (values[flag] !== undefined) operationInvalid(`duplicate option '${flag}'`);
       values[flag] = true;
@@ -981,14 +981,22 @@ export function parseTaskControlOperation(
       ...(value(values, '--stage') ? { stage: value(values, '--stage') } : {}),
       ...(value(values, '--round') ? { round: Number(value(values, '--round')) } : {}),
       ...(value(values, '--artifact') ? { artifact: value(values, '--artifact') } : {}),
+      ...(values['--auto'] === true ? { auto: true } : {}),
       ...(values['--dry-run'] === true ? { dryRun: true } : {})
     };
     if (intent === 'recover-started') {
-      const recoveryFlags = new Set(['--agent', '--stage', '--round', '--artifact', '--reason']);
+      const recoveryFlags = new Set(['--agent', '--stage', '--round', '--artifact', '--reason', '--auto']);
       for (const flag of Object.keys(values)) {
         if (!recoveryFlags.has(flag)) operationInvalid(`option '${flag}' is not supported for recover-started`);
       }
-      required(values, ['--stage', '--round', '--artifact', '--reason']);
+      const automatic = values['--auto'] === true;
+      const selectorFlags = ['--stage', '--round', '--artifact', '--reason'];
+      if (automatic && selectorFlags.some((flag) => values[flag] !== undefined)) {
+        operationInvalid('--auto cannot be combined with --stage, --round, --artifact, or --reason');
+      }
+      if (!automatic) required(values, selectorFlags);
+      if (automatic && agent !== 'codex') operationInvalid('--auto only supports the codex agent');
+      if (automatic) return { family, request: input as unknown as TaskLifecycleControlRequest };
       const stage = value(values, '--stage');
       if (!['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'].includes(stage ?? '')) {
         operationInvalid('--stage must be a supported lifecycle stage');
@@ -998,8 +1006,8 @@ export function parseTaskControlOperation(
       if (value(values, '--reason')!.includes('\n') || value(values, '--reason')!.includes('\r')) {
         operationInvalid('--reason must be a single line');
       }
-    } else if (values['--stage'] !== undefined || values['--round'] !== undefined || values['--artifact'] !== undefined) {
-      operationInvalid('--stage, --round, and --artifact are only supported for recover-started');
+    } else if (values['--stage'] !== undefined || values['--round'] !== undefined || values['--artifact'] !== undefined || values['--auto'] !== undefined) {
+      operationInvalid('--stage, --round, --artifact, and --auto are only supported for recover-started');
     }
     return { family, request: input as unknown as TaskLifecycleControlRequest };
   }

@@ -85,6 +85,21 @@ test('authority parser requires the recovery selector and rejects it for normal 
     taskRef: 'TASK-20260809-010203', intent: 'recover-started', agent: 'codex',
     stage: 'code', round: 2, artifact: 'code-r2.md', reason: 'child terminated before result'
   });
+  const automatic = parseTaskControlOperation('task-lifecycle', [
+    'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--auto'
+  ]);
+  assert.equal(automatic.family, 'task-lifecycle');
+  if (automatic.family !== 'task-lifecycle') throw new Error('unexpected lifecycle operation family');
+  assert.deepEqual(automatic.request, {
+    taskRef: 'TASK-20260809-010203', intent: 'recover-started', agent: 'codex', auto: true
+  });
+  assert.throws(
+    () => parseTaskControlOperation('task-lifecycle', [
+      'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--auto',
+      '--stage', 'code', '--round', '1', '--artifact', 'code.md', '--reason', 'mixed mode'
+    ]),
+    /cannot be combined/u
+  );
   assert.throws(
     () => parseTaskControlOperation('task-lifecycle', [
       'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--stage', 'code'

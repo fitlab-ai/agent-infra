@@ -109,11 +109,14 @@ function domainEvidenceMatches(
   if (operation.family === 'task-lifecycle' && operation.intent === 'recover-started') {
     const retryRequired = domain.recoveryState === 'retry-required'
       && sameRecoveryWarning(domain.warning, result.warning);
+    const notNeeded = domain.recoveryState === 'not-needed'
+      && result.status === 'no-op'
+      && result.changed === false;
     return result.targetState === 'active'
       && ['applied', 'no-op'].includes(String(result.status))
       && domain.recovery === true
       && domain.targetState === 'active'
-      && (domain.recoveryState === 'released' || retryRequired);
+      && (domain.recoveryState === 'released' || retryRequired || notNeeded);
   }
   if (operation.class === 'read-only') return result.changed === false && domain.snapshotValid === true;
   return true;

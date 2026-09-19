@@ -18,6 +18,14 @@
 - prepare 校验当前任务、模型策略与宿主 preflight。启动和完成记录关联实际 parent/child 身份，失败不得写成成功。
 - 不要求 capability、controller attestation 或一次性消费授权本地实现；不新增 child 自动发现、锁内启动交接、孤立 child 恢复或专用恢复协议。
 
+## Activated delegation 自动恢复
+
+- Codex 总控在 `begin-or-resume` 前调用内部 `task-lifecycle <task> recover-started --agent codex --auto`。该入口不公开给用户，也不从“没有存活证据”推断 child 已终止。
+- auto 只把唯一匹配的 activated Codex delegation、规范 Activity Log、completed + hook-stop、receipt 与 lifecycle claim 交给既有恢复 authority。failed、interrupted、`inProgress`、缺证据、其他 client、身份冲突和多候选均失败关闭。
+- `no-op/not-needed` 只表示没有适用的恢复事务，可发生在无 run、completed run、普通 pause 或非 activated pending；它不表示执行过恢复。随后仍由 `begin-or-resume` 和 route 处理既有状态。
+- 恢复事务在 receipt、terminal row、claim 和 run 全部一致前不得 route。可重试失败使用 `ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE` 暂停；只有恢复 authority 在释放 claim 并复核唯一 aborted receipt 后才能清除该暂停。其他 recoverable pause 不得由此路径解除。
+- claim 释放后、run 保存前的中断通过 released + dedicated pause 重放完成；完整历史 recovery 不再成为 auto 候选。
+
 ## 模型策略
 
 - 新 run 必须固化 executor/reviewer 各自的 model 与 reasoning effort；显式策略必须四字段原子完整，完全没有显式字段时才读取当前 client 的 `agentClients[].orchestration`。重入不得静默改写策略。
