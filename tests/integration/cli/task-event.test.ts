@@ -1785,6 +1785,37 @@ for (const scenario of reviewScenarios) {
   });
 }
 
+test('code completion records corrected counts and deduplicates unchanged results', () => {
+  const f = fixture('technical-design-review');
+  try {
+    fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+    fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+    addReceipt(f.file, {
+      event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+      inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+    });
+    const started = run(f.root, [f.id, 'code.started', '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+    fs.writeFileSync(path.join(f.dir, 'code.md'), codeReport());
+    const args = [f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code.md',
+      ...completionDigestArgs(f.dir, 'code.md', 'code')];
+    for (const [files, tests] of [[1, 10], [1, 20], [2, 20]]) {
+      const completedArgs = [...args, '--files-modified', String(files), '--tests-passed', String(tests)];
+      const completed = run(f.root, completedArgs);
+      assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+      assert.equal(JSON.parse(completed.stdout).status, 'applied');
+      const after = fs.readFileSync(f.file, 'utf8');
+      assert.ok(after.includes(`Code implemented, ${files} files modified, ${tests} tests passed → code.md`));
+      const replay = run(f.root, completedArgs);
+      assert.equal(replay.status, 0, replay.stderr || replay.stdout);
+      assert.equal(JSON.parse(replay.stdout).status, 'no-op');
+      assert.equal(fs.readFileSync(f.file, 'utf8'), after);
+    }
+    const notes = fs.readFileSync(f.file, 'utf8').split('\n').filter((line) => line.includes(' — Code implemented,'));
+    assert.equal(notes.length, 3);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('code completion rejects a plan changed after code started', () => {
   const f = fixture('technical-design-review');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan v1\n');

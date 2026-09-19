@@ -670,6 +670,7 @@ type CompletionFact = Readonly<{
   outputSha256: string;
   semanticDigest: string;
   requestId: string;
+  result: string;
 }>;
 
 function completionFacts(frontmatter: Record<string, unknown>): CompletionFact[] {
@@ -684,6 +685,7 @@ function completionFacts(frontmatter: Record<string, unknown>): CompletionFact[]
       && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).outputSha256)
       && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).semanticDigest)
       && typeof (fact as CompletionFact).requestId === 'string'
+      && typeof (fact as CompletionFact).result === 'string'
     ));
   } catch {
     return [];
@@ -697,7 +699,18 @@ function currentCompletionFact(request: TaskEventRequest, artifact: ArtifactIden
     output: artifact.name,
     outputSha256: sha256File(artifact.path),
     semanticDigest: canonicalSemanticDigest(content),
-    requestId: request.requestId ?? ''
+    requestId: request.requestId ?? '',
+    result: JSON.stringify({
+      filesModified: request.filesModified,
+      testsPassed: request.testsPassed,
+      blockers: request.blockers,
+      major: request.major,
+      minor: request.minor,
+      manualValidation: request.manualValidation ?? 0,
+      verdict: request.verdict,
+      fixFor: request.fixFor,
+      implementationInput: request.implementationInput
+    })
   };
 }
 
@@ -706,7 +719,8 @@ function sameCompletionFact(left: CompletionFact, right: CompletionFact): boolea
     && left.output === right.output
     && left.outputSha256 === right.outputSha256
     && left.semanticDigest === right.semanticDigest
-    && left.requestId === right.requestId;
+    && left.requestId === right.requestId
+    && left.result === right.result;
 }
 
 function replaceCompletionFact(facts: readonly CompletionFact[], next: CompletionFact): CompletionFact[] {
