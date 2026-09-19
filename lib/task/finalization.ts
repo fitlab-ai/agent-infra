@@ -981,8 +981,34 @@ async function applyUnderLock(
           writeDeliverySummary(resolved.taskDir, taskId, recovered.summary.body, recovered.summary.sha256);
           receipt = updateReceipt(repoRoot, receipt, { summary: 'pending', postSummaryVerification: 'pending', lastError: null });
         } catch (cause) {
-          const error = errorOf(cause, 'SUMMARY_RECOVERY_INVALID');
-          return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification, summary: summary.step, postSummaryVerification }, changed, error);
+          const persistence = errorOf(cause, 'SUMMARY_RECOVERY_STAGING_FAILED', true);
+          const error: FinalizationError = {
+            code: 'SUMMARY_RECOVERY_STAGING_FAILED',
+            message: `Unable to persist recovered delivery summary: ${persistence.message}`,
+            retryable: true
+          };
+          try {
+            const warnings = replaceWarning(receipt, warningFromError('post-summary-verification', error), 'open');
+            receipt = updateReceipt(repoRoot, receipt, {
+              postSummaryVerification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: error
+            });
+            receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+          } catch (writeError) {
+            const receiptError = errorOf(writeError, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
+            const hardError: FinalizationError = {
+              code: 'FINALIZATION_RECEIPT_WRITE_FAILED',
+              message: `Unable to persist summary recovery failure (${error.code}: ${error.message}): ${receiptError.message}`,
+              retryable: true
+            };
+            return terminalResult(taskId, receipt, {
+              backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification,
+              summary: summary.step, postSummaryVerification
+            }, changed, hardError);
+          }
+          return terminalResult(taskId, receipt, {
+            backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification,
+            summary: summary.step, postSummaryVerification
+          }, changed, error);
         }
         summary = await syncPendingSummary({ repoRoot, taskId, agent: request.agent, receipt, commentSync });
         receipt = summary.receipt;
@@ -1018,6 +1044,32 @@ async function applyUnderLock(
         warning.step === 'post-summary-verification' && warning.status === 'open'
       ));
       if (hasOpenTerminalWarning && receipt.summary === 'done') {
+        const resolved = resolveTaskRef(taskId, { repoRoot });
+        if (!resolved.ok || resolved.state !== 'completed') {
+          return failed(taskId, { code: 'SUMMARY_RECOVERY_INVALID', message: 'completed task is unavailable for summary recovery', retryable: false });
+        }
+        try {
+          readDeliverySummary(resolved.taskDir, taskId);
+        } catch {
+          const recovered = await summaryRecovery(taskId, {
+            sha256: receipt.summarySha256 ?? '', cwd: repoRoot
+          });
+          if ((recovered.status !== 'applied' && recovered.status !== 'no-op') || !recovered.summary) {
+            const error = recovered.error
+              ? errorOf(recovered.error, 'SUMMARY_RECOVERY_FAILED', true)
+              : { code: 'SUMMARY_RECOVERY_FAILED', message: 'delivery summary recovery failed', retryable: true };
+            const warnings = replaceWarning(receipt, warningFromError('post-summary-verification', error), 'open');
+            receipt = updateReceipt(repoRoot, receipt, {
+              postSummaryVerification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: error
+            });
+            receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+            return terminalResult(taskId, receipt, {
+              backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification,
+              summary: summary.step, postSummaryVerification
+            }, changed, error);
+          }
+          writeDeliverySummary(resolved.taskDir, taskId, recovered.summary.body, recovered.summary.sha256);
+        }
         receipt = updateReceipt(repoRoot, receipt, { summary: 'pending', lastError: null });
         summary = await syncPendingSummary({ repoRoot, taskId, agent: request.agent, receipt, commentSync });
         receipt = summary.receipt;
@@ -1058,7 +1110,7 @@ async function applyUnderLock(
         receipt = warningComment.receipt;
         if (warningComment.step.status !== 'no-op') taskComment = warningComment.step;
         changed = changed || warningComment.changed;
-        if (resolvedWarning && warningComment.changed) {
+        if (warningComment.changed) {
           receipt = updateReceipt(repoRoot, receipt, { summary: 'pending', postSummaryVerification: 'pending', lastError: null });
           summary = await syncPendingSummary({ repoRoot, taskId, agent: request.agent, receipt, commentSync });
           receipt = summary.receipt;
