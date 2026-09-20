@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { applyLedgerIntent } from '../../../lib/task/ledger-intents.ts';
+import { parseImplementationInputs } from '../../../lib/task/implementation-inputs.ts';
 
 const METADATA = { timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' };
 
@@ -187,6 +188,61 @@ test('finding responses cover all executor states and reopening stops at the rou
     assert.equal(result.error?.code, 'LEDGER_TRANSITION_INVALID');
     assert.deepEqual(fs.readFileSync(limited.taskMd), before);
   } finally { fs.rmSync(limited.repoRoot, { recursive: true, force: true }); }
+});
+
+test('open findings at the configured round limit can escalate without an executor response', () => {
+  for (const limit of [1, 3, 5]) {
+    for (const [stage, id] of [['analysis', 'AN-1'], ['plan', 'PL-1'], ['code', 'CD-1']] as const) {
+      const f = fixture();
+      try {
+        fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({ review: { maxHandshakeRounds: limit } }));
+        const options = { repoRoot: f.repoRoot, metadataProvider: () => METADATA };
+        const artifact = limit === 1 ? `review-${stage}.md` : `review-${stage}-r${limit}.md`;
+        assert.equal(applyLedgerIntent({
+          kind: 'finding-upsert', taskRef: f.taskId, stage, reviewArtifact: artifact,
+          ordinal: 1, severity: 'major', evidence: `${artifact}#finding-1`
+        }, options).status, 'applied');
+        const request = {
+          kind: 'finding-review' as const, taskRef: f.taskId, id,
+          status: 'needs-human-decision' as const, evidence: `${artifact}#${id}`,
+          ...(stage === 'code' ? { needsImplementation: true } : {})
+        };
+        const before = fs.readFileSync(f.taskMd);
+        assert.equal(applyLedgerIntent({ ...request, dryRun: true }, options).status, 'planned');
+        assert.deepEqual(fs.readFileSync(f.taskMd), before);
+        const escalated = applyLedgerIntent(request, options);
+        assert.equal(escalated.status, 'applied', `${stage}/${limit}: ${escalated.error?.message}`);
+        assert.equal(escalated.after?.round, String(limit));
+        assert.equal(escalated.after?.status, 'needs-human-decision');
+        assert.equal(applyLedgerIntent(request, options).status, 'no-op');
+        const inputs = parseImplementationInputs(fs.readFileSync(f.taskMd, 'utf8')).rows;
+        assert.equal(inputs.length, stage === 'code' ? 1 : 0);
+        if (stage === 'code') {
+          assert.equal(inputs[0]?.ledgerId, id);
+          assert.equal(inputs[0]?.needsImplementation, true);
+        }
+      } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test('open finding escalation preserves the round limit and implementation declaration guards', () => {
+  for (const [round, needsImplementation, expectedCode] of [
+    [2, true, 'LEDGER_TRANSITION_INVALID'],
+    [3, undefined, 'LEDGER_PAYLOAD_INVALID']
+  ] as const) {
+    const f = fixture([`| CD-1 | code | ${round} | major | open | review-code-r${round}.md#CD-1 |`]);
+    try {
+      const before = fs.readFileSync(f.taskMd);
+      const result = applyLedgerIntent({
+        kind: 'finding-review', taskRef: f.taskId, id: 'CD-1',
+        status: 'needs-human-decision', evidence: `review-code-r${round}.md#CD-1`,
+        ...(needsImplementation === undefined ? {} : { needsImplementation })
+      }, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
+      assert.equal(result.error?.code, expectedCode);
+      assert.deepEqual(fs.readFileSync(f.taskMd), before);
+    } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+  }
 });
 
 test('decision ids are global and decision upsert is dry-run safe', () => {

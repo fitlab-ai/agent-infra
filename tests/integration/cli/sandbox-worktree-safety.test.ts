@@ -1132,8 +1132,7 @@ test("sandbox purge deletes despite malformed auxiliary evidence", onPlatforms("
     fs.writeFileSync(evidence.intentPath, "{\"version\":1}\n", "utf8");
 
     await withFixtureDocker(fixture, () => rm.rmPurge(config, [], {
-      confirm: async () => true,
-      isCancel: (value): value is symbol => false
+      confirm: async () => true
     }));
 
     assert.equal(fs.existsSync(evidence.controlRoot), false);
