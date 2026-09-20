@@ -6,14 +6,6 @@ import type { LifecycleBuildIdentity } from '../../agent-clients/adapters/codex-
 import { parseLinuxProcessStat, type ProcessIdentity, type ProcessIdentityState } from '../../server/process-state.ts';
 import { commandForEngine, runProbe } from '../shell.ts';
 import type { SandboxControlManifest } from './protocol.ts';
-import {
-  activeControllerAuthorityState,
-  createInactiveControllerAuthorityState,
-  readControllerAuthorityState,
-  transitionControllerAuthorityState,
-  writeControllerAuthorityState,
-  type ControllerAuthorityState
-} from './controller-authority-state.ts';
 
 const CONTROLLER_TTL_MS = 4 * 60 * 60 * 1_000;
 const HEX_256 = /^[a-f0-9]{64}$/u;
@@ -215,116 +207,10 @@ function atomicWrite(file: string, value: CodexControllerRegistrationV1): void {
   }
 }
 
-function authorityState(
-  manifest: SandboxControlManifest,
-  publicStatusDir: string,
-  registration: CodexControllerRegistrationV1 | null,
-  now: number
-): ControllerAuthorityState {
-  try {
-    return readControllerAuthorityState(publicStatusDir);
-  } catch (error) {
-    if (!(error instanceof Error) || error.message !== 'CONTROLLER_AUTHORITY_STATE_MISSING') throw error;
-  }
-  const inactive = createInactiveControllerAuthorityState({
-    taskId: manifest.taskId!,
-    generation: manifest.generation,
-    controlRootId: manifest.controlRootId
-  }, now);
-  writeControllerAuthorityState(publicStatusDir, inactive, { expected: null });
-  if (!registration) return inactive;
-  const active = activeControllerAuthorityState(inactive, registration, inactive.transitionId, now);
-  return writeControllerAuthorityState(publicStatusDir, active, { expected: inactive });
-}
-
-function authorityStatusDir(manifestPath: string): string {
-  return path.join(path.dirname(path.resolve(manifestPath)), 'public');
-}
-
-function assertAuthorityIdentity(state: ControllerAuthorityState, manifest: SandboxControlManifest): void {
-  if (state.taskId !== manifest.taskId
-    || state.generation !== manifest.generation
-    || state.controlRootId !== manifest.controlRootId) {
-    fail('CODEX_SANDBOX_CONTROLLER_AUTHORITY_INVALID', 'controller authority state does not match the sandbox');
-  }
-}
-
 export function readCodexControllerRegistration(manifestPath: string): CodexControllerRegistrationV1 {
   const existing = readRaw(registrationPath(manifestPath));
   if (!existing) fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_MISSING', 'controller registration is missing');
   return parseRegistration(existing.raw);
-}
-
-export function reconcileCodexControllerAuthorityState(params: Readonly<{
-  manifest: SandboxControlManifest;
-  manifestPath: string;
-  buildIdentity: LifecycleBuildIdentity | (() => LifecycleBuildIdentity);
-}>, options: Pick<RegistrationOptions, 'now' | 'probeProcess'> = {}): ControllerAuthorityState {
-  if (params.manifest.mode !== 'task-bound' || !params.manifest.taskId) {
-    fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes do not have Codex controller authority');
-  }
-  const now = (options.now ?? Date.now)();
-  const publicStatusDir = authorityStatusDir(params.manifestPath);
-  let current: ControllerAuthorityState;
-  let initializedProjection = false;
-  try {
-    current = readControllerAuthorityState(publicStatusDir);
-  } catch (error) {
-    if (!(error instanceof Error) || error.message !== 'CONTROLLER_AUTHORITY_STATE_MISSING') throw error;
-    const initial = createInactiveControllerAuthorityState({
-      taskId: params.manifest.taskId,
-      generation: params.manifest.generation,
-      controlRootId: params.manifest.controlRootId
-    }, now);
-    current = writeControllerAuthorityState(publicStatusDir, {
-      ...initial,
-      state: 'opening'
-    }, { expected: null });
-    initializedProjection = true;
-  }
-  const raw = readRaw(registrationPath(params.manifestPath));
-  try {
-    assertAuthorityIdentity(current, params.manifest);
-  } catch {
-    const reset = createInactiveControllerAuthorityState({
-      taskId: params.manifest.taskId,
-      generation: params.manifest.generation,
-      controlRootId: params.manifest.controlRootId
-    }, now);
-    current = writeControllerAuthorityState(publicStatusDir, { ...reset, state: 'faulted' }, { expected: current });
-  }
-  const fault = (): ControllerAuthorityState => current.state === 'faulted'
-    ? current
-    : transitionControllerAuthorityState(publicStatusDir, current, {
-      state: 'faulted', transitionId: crypto.randomBytes(32).toString('hex'), now
-    });
-  if (!raw) {
-    if (current.state === 'inactive') return current;
-    if (initializedProjection && current.state === 'opening') {
-      return transitionControllerAuthorityState(publicStatusDir, current, {
-        state: 'inactive', transitionId: current.transitionId, now
-      });
-    }
-    return fault();
-  }
-  let registration: CodexControllerRegistrationV1;
-  try {
-    registration = parseRegistration(raw.raw);
-    const buildIdentity = typeof params.buildIdentity === 'function'
-      ? params.buildIdentity()
-      : params.buildIdentity;
-    assertRegistrationBinding(registration, params.manifest, buildIdentity);
-  } catch {
-    return fault();
-  }
-  if (registration.expiresAt <= now) return fault();
-  const processState = (options.probeProcess
-    ?? ((identity) => defaultProbe(params.manifest, identity)))(registration.controllerProcess);
-  if (processState !== 'alive') return fault();
-  const projected = activeControllerAuthorityState(current, registration, current.transitionId, now);
-  if (current.state === 'active'
-    && JSON.stringify(current.registration) === JSON.stringify(projected.registration)) return current;
-  return writeControllerAuthorityState(publicStatusDir, projected, { expected: current });
 }
 
 export function openCodexControllerRegistration(params: Readonly<{
@@ -375,14 +261,6 @@ export function openCodexControllerRegistration(params: Readonly<{
     issuedAt: now,
     expiresAt: now + CONTROLLER_TTL_MS
   });
-  const initialRegistration = initial ? parseRegistration(initial.raw) : null;
-  const publicStatusDir = authorityStatusDir(params.manifestPath);
-  const publicState = authorityState(params.manifest, publicStatusDir, initialRegistration, now);
-  assertAuthorityIdentity(publicState, params.manifest);
-  const transitionId = crypto.randomBytes(32).toString('hex');
-  const opening = transitionControllerAuthorityState(publicStatusDir, publicState, {
-    state: 'opening', transitionId, now
-  });
   options.beforeCommit?.();
   const current = readRaw(file);
   if ((!initial && current)
@@ -390,8 +268,6 @@ export function openCodexControllerRegistration(params: Readonly<{
     fail('CODEX_SANDBOX_CONTROLLER_OWNERSHIP_LOST', 'controller registration changed before commit');
   }
   atomicWrite(file, registration);
-  const active = activeControllerAuthorityState(opening, registration, transitionId, now);
-  writeControllerAuthorityState(publicStatusDir, active, { expected: opening });
   return Object.freeze({
     version: 1,
     status: 'opened',
@@ -422,18 +298,7 @@ export function closeCodexControllerRegistration(params: Readonly<{
   }
   const file = registrationPath(params.manifestPath);
   const existingRaw = readRaw(file);
-  if (!existingRaw) {
-    const publicStatusDir = authorityStatusDir(params.manifestPath);
-    const state = authorityState(params.manifest, publicStatusDir, null, Date.now());
-    assertAuthorityIdentity(state, params.manifest);
-    if (state.state !== 'inactive') {
-      const inactive = transitionControllerAuthorityState(publicStatusDir, state, {
-        state: 'inactive', transitionId: crypto.randomBytes(32).toString('hex')
-      });
-      assertAuthorityIdentity(inactive, params.manifest);
-    }
-    return Object.freeze({ version: 1, status: 'closed', changed: false, lease: null, error: null });
-  }
+  if (!existingRaw) return Object.freeze({ version: 1, status: 'closed', changed: false, lease: null, error: null });
   const existing = parseRegistration(existingRaw.raw);
   if (existing.taskId !== params.manifest.taskId
     || existing.controlGeneration !== params.manifest.generation
@@ -448,17 +313,7 @@ export function closeCodexControllerRegistration(params: Readonly<{
   if (!current || current.raw !== existingRaw.raw || !sameFile(current.stat, existingRaw.stat)) {
     fail('CODEX_SANDBOX_CONTROLLER_OWNERSHIP_LOST', 'controller registration changed before close');
   }
-  const publicStatusDir = authorityStatusDir(params.manifestPath);
-  const publicState = authorityState(params.manifest, publicStatusDir, existing, Date.now());
-  assertAuthorityIdentity(publicState, params.manifest);
-  const transitionId = crypto.randomBytes(32).toString('hex');
-  const closing = transitionControllerAuthorityState(publicStatusDir, publicState, {
-    state: 'closing', transitionId
-  });
   fs.unlinkSync(file);
-  transitionControllerAuthorityState(publicStatusDir, closing, {
-    state: 'inactive', transitionId
-  });
   return Object.freeze({ version: 1, status: 'closed', changed: true, lease: null, error: null });
 }
 

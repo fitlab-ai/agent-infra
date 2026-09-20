@@ -7,7 +7,6 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
 import { filePath, onPlatforms } from '../../helpers.ts';
-import { createInactiveControllerAuthorityState, writeControllerAuthorityState } from '../../../lib/sandbox/control/controller-authority-state.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 
 const TASK_ID = 'TASK-20260919-010101';
@@ -28,23 +27,16 @@ test('sandbox workflow commands execute locally without publishing a broker requ
     writeSandboxControlIdentitySentinel(statusDir, {
       version: 1, mode: 'task-bound', taskId: TASK_ID, generation, controlRootId
     });
-    writeControllerAuthorityState(statusDir, createInactiveControllerAuthorityState({
-      taskId: TASK_ID, generation, controlRootId
-    }), { expected: null });
-
     const registryUrl = pathToFileURL(filePath('lib/internal/task-operation-registry.ts')).href;
-    const contextUrl = pathToFileURL(filePath('lib/agent-clients/adapters/codex-lifecycle/controller-context.ts')).href;
     const warningUrl = pathToFileURL(filePath('lib/internal/task-warning.ts')).href;
     const script = `
       import { resolveSandboxControlTransport } from ${JSON.stringify(registryUrl)};
-      import { verifySandboxLocalControllerAuthority } from ${JSON.stringify(contextUrl)};
       import { taskWarning } from ${JSON.stringify(warningUrl)};
       const decision = resolveSandboxControlTransport(process.env, {
         statusMountPath: process.env.AGENT_INFRA_CONTROL_STATUS_DIR,
         localWorkflow: true
       });
       if (decision.kind !== 'sandbox-local') throw new Error(JSON.stringify(decision));
-      verifySandboxLocalControllerAuthority({ repoRoot: process.cwd() });
       await taskWarning([process.env.AGENT_INFRA_TASK_ID, 'list']);
     `;
     const result = spawnSync(process.execPath, [

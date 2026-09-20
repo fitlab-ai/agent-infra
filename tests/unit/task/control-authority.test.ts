@@ -102,31 +102,6 @@ test('lifecycle authority rejects missing controller proof without reserving', (
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('lifecycle authority reserves the unique attested capability by digest', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-digest-'));
-  const store = createCodexCapabilityStore({ root, reference: () => 'authority-reference', now: () => 1_000 });
-  try {
-    const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build, controller: binding });
-    store.attestByReference({
-      capabilityRef: armed.capabilityRef,
-      sessionId: 'session-1', turnId: 'turn-1', toolUseId: 'tool-1',
-      hookDefinitionHash: 'd'.repeat(64), buildIdentity: build, controller: binding
-    });
-    const authorityRef = store.findUniqueAttestedReference({
-      taskId: 'TASK-20260101-000001', hookDefinitionHash: 'd'.repeat(64),
-      buildIdentity: build, controller: binding
-    });
-    assert.equal(authorityRef, `sha256:${armed.capabilityRefDigest}`);
-    const issued = issueLifecycleRecoveryAttestation(request(authorityRef), {
-      capabilityStore: store, controllerBinding: binding, buildIdentity: build, now: () => 1_000
-    });
-    assert.equal(issued.status, 'issued');
-    assert.equal(issued.attestation?.authorityRefDigest, armed.capabilityRefDigest);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('lifecycle authority persists phase replay state across requests and store recreation', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-authority-restart-'));
   const store = createCodexCapabilityStore({ root, reference: () => 'authority-reference', now: () => 1_000 });

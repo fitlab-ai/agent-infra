@@ -10,7 +10,6 @@ import {
   type LifecycleBuildIdentity,
   type LifecycleIdentityWarning
 } from './build-identity.ts';
-import { readControllerAuthorityState } from '../../../sandbox/control/controller-authority-state.ts';
 
 const HEX_256 = /^[a-f0-9]{64}$/u;
 
@@ -161,47 +160,4 @@ export function controllerProofFromContext(context: CodexSandboxControllerContex
     leaseSecret: context.controllerLease.leaseSecret,
     controllerProcess: context.controllerProcess
   });
-}
-
-function leaseSecretHash(secret: string): string {
-  return crypto.createHash('sha256')
-    .update('agent-infra/codex-controller-lease/v1\0')
-    .update(secret)
-    .digest('hex');
-}
-
-export function verifySandboxLocalControllerAuthority(options: Readonly<{
-  env?: NodeJS.ProcessEnv;
-  repoRoot?: string;
-  now?: number;
-  probeProcess?: (identity: ProcessIdentity) => 'alive' | 'dead' | 'unknown';
-}> = {}): CodexSandboxControllerContextV2 | null {
-  const env = options.env ?? process.env;
-  const statusDir = env.AGENT_INFRA_CONTROL_STATUS_DIR ?? '/run/agent-infra/control-status';
-  const state = readControllerAuthorityState(statusDir);
-  if (state.state === 'inactive') return null;
-  if (state.state !== 'active') throw new Error(`CONTROLLER_AUTHORITY_${state.state.toUpperCase()}`);
-  const contextPath = env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-  if (!contextPath) throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_MISSING');
-  const { context } = verifyCodexSandboxControllerContextWithWarnings(contextPath, {
-    repoRoot: options.repoRoot,
-    now: options.now,
-    generation: env.AGENT_INFRA_CONTROL_GENERATION,
-    probeProcess: options.probeProcess
-  });
-  const registration = state.registration;
-  const secretDigest = leaseSecretHash(context.controllerLease.leaseSecret);
-  const secretMatches = HEX_256.test(registration.leaseSecretHash)
-    && crypto.timingSafeEqual(Buffer.from(secretDigest, 'hex'), Buffer.from(registration.leaseSecretHash, 'hex'));
-  if (state.taskId !== context.taskId
-    || state.generation !== context.controlGeneration
-    || registration.controllerInstanceDigest !== context.controllerInstanceDigest
-    || registration.leaseId !== context.controllerLease.leaseId
-    || JSON.stringify(registration.controllerProcess) !== JSON.stringify(context.controllerProcess)
-    || JSON.stringify(registration.buildIdentity) !== JSON.stringify(context.buildIdentity)
-    || registration.expiresAt !== context.expiresAt
-    || !secretMatches) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_AUTHORITY_MISMATCH');
-  }
-  return context;
 }

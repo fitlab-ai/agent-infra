@@ -4,20 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
 
-import { computeLifecycleBuildIdentity } from '../../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import {
-  contextFromControllerLease,
-  writeCodexSandboxControllerContext
-} from '../../../../lib/agent-clients/adapters/codex-lifecycle/controller-context.ts';
-import {
-  activeControllerAuthorityState,
-  createInactiveControllerAuthorityState,
-  writeControllerAuthorityState
-} from '../../../../lib/sandbox/control/controller-authority-state.ts';
-import { getProcessStartTime } from '../../../../lib/server/process-state.ts';
 import { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
 import { inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
@@ -165,71 +152,6 @@ id: ${TASK_ID}
   review += '\n### 审查决定\n通过\n';
   fs.writeFileSync(artifactPath, review);
   return { root, dir, artifactPath };
-}
-
-function activeControllerEnvironment(root: string) {
-  const statusDir = path.join(root, 'control-status');
-  const runtimeDir = path.join(root, 'runtime');
-  const contextPath = path.join(root, 'controller-context.json');
-  const now = Date.now();
-  const processIdentity = { pid: process.pid, startTime: getProcessStartTime(process.pid)! };
-  const manifest = JSON.parse(fs.readFileSync(path.join(
-    REPOSITORY_ROOT,
-    'lib/agent-clients/adapters/codex-lifecycle/manifest-files.json'
-  ), 'utf8')) as { contractFiles: string[] };
-  for (const relative of manifest.contractFiles) {
-    const destination = path.join(root, relative);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.copyFileSync(path.join(REPOSITORY_ROOT, relative), destination);
-  }
-  const buildIdentity = computeLifecycleBuildIdentity(root);
-  const leaseSecret = 'e'.repeat(64);
-  const lease = {
-    version: 1 as const,
-    leaseId: 'f'.repeat(64),
-    leaseSecret,
-    taskId: TASK_ID,
-    controlGeneration: 'generation-1',
-    controllerInstanceDigest: 'c'.repeat(64),
-    controllerProcess: processIdentity,
-    buildIdentity,
-    issuedAt: now - 1_000,
-    expiresAt: now + 60_000
-  };
-  const controlRootId = 'a'.repeat(96);
-  writeCodexSandboxControllerContext(
-    contextPath,
-    contextFromControllerLease(lease, { hookDefinitionHash: 'd'.repeat(64) })
-  );
-  const inactive = createInactiveControllerAuthorityState({
-    taskId: TASK_ID,
-    generation: lease.controlGeneration,
-    controlRootId
-  }, now);
-  writeControllerAuthorityState(statusDir, inactive, { expected: null });
-  writeControllerAuthorityState(statusDir, activeControllerAuthorityState(inactive, {
-    version: 1,
-    taskId: TASK_ID,
-    controlGeneration: lease.controlGeneration,
-    containerId: 'container-1',
-    leaseId: lease.leaseId,
-    leaseSecretHash: createHash('sha256')
-      .update('agent-infra/codex-controller-lease/v1\0').update(leaseSecret).digest('hex'),
-    controllerInstanceDigest: lease.controllerInstanceDigest,
-    controllerProcess: processIdentity,
-    buildIdentity,
-    issuedAt: lease.issuedAt,
-    expiresAt: lease.expiresAt
-  }, inactive.transitionId, now), { expected: inactive });
-  return {
-    ...process.env,
-    AGENT_INFRA_TASK_ID: TASK_ID,
-    AGENT_INFRA_CONTROL_GENERATION: lease.controlGeneration,
-    AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
-    AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
-    AGENT_INFRA_CODEX_CONTROLLER_CONTEXT: contextPath,
-    AGENT_INFRA_RUNTIME_DIR: runtimeDir
-  };
 }
 
 test('review summary parser distinguishes canonical placeholders and numeric counts', () => {
@@ -480,35 +402,7 @@ test('review finalizer accepts a directly repaired formal artifact', () => {
   assert.equal(retry.status, 'no-op');
 });
 
-test('active review finalization leaves formal bytes unchanged when capability authorization is missing', () => {
-  const f = domainFixture();
-  try {
-    const before = fs.readFileSync(f.artifactPath, 'utf8');
-    const moduleUrl = pathToFileURL(path.join(REPOSITORY_ROOT, 'lib', 'task', 'review-finalization.ts')).href;
-    const script = `
-      import { finalizeReviewSummary } from ${JSON.stringify(moduleUrl)};
-      const result = finalizeReviewSummary(
-        { taskRef: ${JSON.stringify(TASK_ID)}, stage: 'analysis', artifact: 'review-analysis.md' },
-        { repoRoot: process.cwd() }
-      );
-      process.stdout.write(JSON.stringify(result));
-      if (result.status === 'failed') process.exitCode = 1;
-    `;
-    const result = spawnSync(process.execPath, [
-      '--experimental-strip-types', '--no-warnings', '--input-type=module', '--eval', script
-    ], { cwd: f.root, env: activeControllerEnvironment(f.root), encoding: 'utf8' });
-    assert.equal(result.status, 1, result.stdout || result.stderr);
-    assert.notEqual(result.stdout, '', result.stderr);
-    const parsed = JSON.parse(result.stdout);
-    assert.equal(parsed.error?.code, 'REVIEW_RECOVERY_COMMIT_FAILED');
-    assert.match(parsed.error?.message ?? '', /CODEX_CAPABILITY_MISSING/u);
-    assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
-test('review finalizer rejects changed bytes while a finalization receipt is pending', () => {
+test('review finalizer refinalizes a changed passed artifact directly', () => {
   const f = domainFixture();
   try {
     const first = finalizeReviewSummary(
@@ -523,8 +417,7 @@ test('review finalizer rejects changed bytes while a finalization receipt is pen
       { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
       { repoRoot: f.root }
     );
-    assert.equal(second.error?.code, 'REVIEW_RECOVERY_COMMIT_FAILED');
-    assert.match(second.error?.message ?? '', /LIFECYCLE_FINALIZATION_RECEIPT_CONFLICT/u);
+    assert.equal(second.error, null);
     assert.notEqual(second.artifactSha256, first.artifactSha256);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });

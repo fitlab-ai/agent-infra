@@ -5,29 +5,6 @@ import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
-import { parseArtifactName } from '../task/artifact-name.ts';
-import { canonicalSemanticDigest, sha256Content } from '../task/artifact-operations.ts';
-import {
-  consumeLifecycleFinalizationReceipt,
-  currentLifecycleAuthority,
-  readLifecycleFinalizationReceipt,
-  type LifecycleFinalizationReceipt
-} from '../task/lifecycle-finalization-receipt.ts';
-import {
-  consumeArtifactRecovery,
-  recordArtifactRecoveryPassed,
-  type ArtifactRecoveryContext
-} from '../task/artifact-recovery.ts';
-import type { ArtifactSchemaFamily } from '../task/artifact-schema.ts';
-import fs from 'node:fs';
-import path from 'node:path';
-import {
-  consumeLocalLifecycleAuthorityPhase,
-  recoverCommittedLocalLifecycleAuthorityPhase,
-  reserveLocalLifecycleAuthorityPhase
-} from '../task/local-lifecycle-authority.ts';
-import type { LifecycleRecoveryAttestationV1 } from '../task/control-authority.ts';
-import { readArtifactRecoveryIntent } from '../task/artifact-repair-intent.ts';
 
 const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--orchestrated] [--dry-run]
 
@@ -48,47 +25,6 @@ const FLAGS: Record<string, keyof TaskEventRequest> = {
   '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
 };
 const NUMERIC = new Set(['round', 'question', 'blockers', 'major', 'minor', 'manualValidation', 'filesModified', 'testsPassed']);
-const COMPLETED_FAMILIES: Readonly<Record<string, ArtifactSchemaFamily>> = {
-  'analyze.completed': 'analysis',
-  'review-analysis.completed': 'review-analysis',
-  'plan.completed': 'plan',
-  'review-plan.completed': 'review-plan',
-  'code.completed': 'code',
-  'review-code.completed': 'review-code'
-};
-
-function sandboxFinalizationReceipt(
-  request: TaskEventRequest,
-  resolved: Readonly<{ repoRoot: string; taskId: string; taskDir: string }>,
-  options: Readonly<{ committed?: boolean }> = {}
-): LifecycleFinalizationReceipt | null {
-  const family = COMPLETED_FAMILIES[request.event];
-  if (!family) return null;
-  const artifact = request.artifact;
-  const parsed = artifact ? parseArtifactName(artifact) : null;
-  if (!artifact || !parsed || parsed.family !== family) return null;
-  const receipt = readLifecycleFinalizationReceipt(resolved.repoRoot, resolved.taskId, family, artifact);
-  const sandboxBound = process.env.AGENT_INFRA_TASK_ID === resolved.taskId
-    && Boolean(process.env.AGENT_INFRA_CONTROL_STATUS_DIR)
-    && Boolean(process.env.AGENT_INFRA_CONTROL_GENERATION)
-    && Boolean(process.env.AGENT_INFRA_CONTROL_ROOT_ID);
-  if (!receipt) {
-    if (sandboxBound) throw new Error('LIFECYCLE_FINALIZATION_RECEIPT_MISSING');
-    return null;
-  }
-  const authority = options.committed ? null : currentLifecycleAuthority(process.env, resolved.taskId);
-  const content = fs.readFileSync(path.join(resolved.taskDir, artifact), 'utf8');
-  if (receipt.round !== parsed.round
-    || receipt.artifactSha256 !== sha256Content(content)
-    || receipt.semanticDigest !== canonicalSemanticDigest(content)
-    || (authority !== null && receipt.authorityMode !== authority.mode)
-    || (authority !== null && receipt.authorityDigest !== authority.digest)
-    || (request.artifactSha256 !== undefined && request.artifactSha256 !== receipt.artifactSha256)
-    || (request.semanticDigest !== undefined && request.semanticDigest !== receipt.semanticDigest)) {
-    throw new Error('LIFECYCLE_FINALIZATION_RECEIPT_MISMATCH');
-  }
-  return receipt;
-}
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'EVENT_PAYLOAD_INVALID', message } })}\n`);
@@ -128,41 +64,6 @@ export function parseTaskEventRequest(args: readonly string[]): TaskEventRequest
   return request;
 }
 
-export function isCommittedTaskEventReplay(
-  args: readonly string[],
-  options: Readonly<{ repoRoot?: string }> = {}
-): boolean {
-  try {
-    const request = parseTaskEventRequest(args);
-    if (!COMPLETED_FAMILIES[request.event] || request.dryRun) return false;
-    const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
-    if (!resolved.ok) return false;
-    const replay = applyTaskEvent(
-      { ...request, dryRun: true },
-      { lockAlreadyHeld: true, repoRoot: resolved.repoRoot }
-    );
-    if (replay.status !== 'no-op') return false;
-    const receipt = sandboxFinalizationReceipt(request, resolved, { committed: true });
-    if (!receipt || !request.requestId) return false;
-    const intent = readArtifactRecoveryIntent(
-      resolved.repoRoot,
-      receipt.taskId,
-      receipt.family,
-      receipt.artifact
-    );
-    return Boolean(intent
-      && intent.recoveryOperationId === receipt.operationId
-      && intent.requestId === request.requestId
-      && intent.phase === 'task-event.completed'
-      && intent.authorityDigest === receipt.authorityDigest
-      && intent.finalArtifactSha256 === receipt.artifactSha256
-      && intent.finalSemanticDigest === receipt.semanticDigest
-      && ['passed', 'consumption-started', 'consumed'].includes(intent.state));
-  } catch {
-    return false;
-  }
-}
-
 async function taskEvent(args: string[] = []): Promise<void> {
   if (!ensureInternalHandlerRoute('task-event', args)) return;
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
@@ -180,72 +81,9 @@ async function taskEvent(args: string[] = []): Promise<void> {
   let humanOverride: unknown = null;
   try {
     result = await withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-event.${request.event}`, async () => {
-      let receipt: LifecycleFinalizationReceipt | null;
-      let recovery: ArtifactRecoveryContext | null = null;
-      let completionAuthority: LifecycleRecoveryAttestationV1 | null = null;
-      let committed = false;
-      try {
-        const replay = applyTaskEvent({ ...request, dryRun: true }, { lockAlreadyHeld: true });
-        committed = replay.status === 'no-op';
-        receipt = sandboxFinalizationReceipt(request, resolved, { committed });
-        if (receipt && !request.dryRun) {
-          if (!request.requestId) throw new Error('LIFECYCLE_FINALIZATION_REQUEST_ID_MISSING');
-          if (!committed && receipt.authorityMode === 'sandbox-active') {
-            completionAuthority = reserveLocalLifecycleAuthorityPhase({
-              taskId: receipt.taskId,
-              family: receipt.family,
-              artifact: receipt.artifact,
-              round: receipt.round,
-              operationId: receipt.operationId,
-              phase: 'task-event.completed',
-              lifecycleRequestId: request.requestId
-            });
-          }
-          recovery = recordArtifactRecoveryPassed({
-            taskId: receipt.taskId,
-            family: receipt.family,
-            artifact: receipt.artifact,
-            round: receipt.round,
-            requestId: request.requestId,
-            phase: 'task-event.completed',
-            authorityDigest: receipt.authorityDigest
-          }, {
-            repoRoot: resolved.repoRoot,
-            taskDir: resolved.taskDir,
-            recoveryId: receipt.operationId,
-            lockAlreadyHeld: true,
-            expectedFinalSha256: receipt.artifactSha256,
-            expectedFinalSemanticDigest: receipt.semanticDigest
-          });
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          status: 'failed' as const, changed: false, event: request.event, requestRef: request.taskRef,
-          taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: null, toStep: null,
-          action: null, phase: null, round: null, artifact: request.artifact ?? null,
-          fixFor: request.fixFor ?? null, implementationInput: request.implementationInput ?? null,
-          artifactContext: null, timestamp: null, agentInfraVersion: null, operations: [],
-          error: { code: /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'LIFECYCLE_FINALIZATION_RECEIPT_INVALID', message }
-        };
-      }
-      let current = applyTaskEvent(request, {
-        lockAlreadyHeld: true,
-        lifecycleRecoveryAttestation: completionAuthority
-      });
+      let current = applyTaskEvent(request, { lockAlreadyHeld: true });
       const values = request as Record<string, unknown>;
-      if (current.status !== 'failed' || !values.overrideTicket) {
-        if (!request.dryRun && receipt && (current.status === 'applied' || current.status === 'no-op')) {
-          if (committed && receipt.authorityMode === 'sandbox-active') {
-            recoverCommittedLocalLifecycleAuthorityPhase(receipt.operationId);
-          } else {
-            consumeLocalLifecycleAuthorityPhase(completionAuthority);
-          }
-          if (recovery) consumeArtifactRecovery(recovery, { lockAlreadyHeld: true });
-          consumeLifecycleFinalizationReceipt(resolved.repoRoot, receipt);
-        }
-        return current;
-      }
+      if (current.status !== 'failed' || !values.overrideTicket) return current;
       if (!values.overrideTarget || !values.overrideScope) {
         return { ...current, humanOverride: { status: 'failed', error: { code: 'OVERRIDE_PAYLOAD_INVALID', message: 'override ticket requires target and scope' } } } as typeof current & { humanOverride: unknown };
       }

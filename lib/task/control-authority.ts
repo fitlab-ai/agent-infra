@@ -72,7 +72,7 @@ export type LifecycleAuthorityRequestV1 = Readonly<{
   operationId: string;
   phase: LifecycleAuthorityPhase;
   taskId: string;
-  family: 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code';
+  family: 'analysis' | 'plan' | 'code';
   artifact: string;
   round: number;
   lifecycleRequestId: string;
@@ -92,7 +92,7 @@ export type LifecycleRecoveryAttestationV1 = Readonly<{
   requestId: string;
   lifecycleRequestId: string;
   taskId: string;
-  family: 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code';
+  family: 'analysis' | 'plan' | 'code';
   artifact: string;
   round: number;
   controlGeneration: string;
@@ -140,11 +140,9 @@ export type LifecycleRecoveryOperationQueryV1 = Readonly<{
 const lifecycleAuthorityPhases: readonly LifecycleAuthorityPhase[] = [
   'orchestration.prepare', 'artifact.finalize-local', 'task-event.completed'
 ];
-const lifecycleAuthorityFamilies = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
-const lifecycleAuthorityArtifact = /^(?:analysis|review-analysis|plan|review-plan|code|review-code)(?:-r[1-9]\d*)?\.md$/u;
+const lifecycleAuthorityFamilies = ['analysis', 'plan', 'code'] as const;
+const lifecycleAuthorityArtifact = /^(?:analysis|plan|code)(?:-r[1-9]\d*)?\.md$/u;
 const lifecycleAuthorityDigest = (value: string): string => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
-const lifecycleAuthorityReferenceDigest = (value: string): string =>
-  /^sha256:([a-f0-9]{64})$/u.exec(value)?.[1] ?? lifecycleAuthorityDigest(value);
 const lifecycleAuthorityBuildDigest = (value: LifecycleBuildIdentity): string => lifecycleAuthorityDigest(JSON.stringify(value));
 
 export function lifecycleRecoveryAttestationDigest(value: LifecycleRecoveryAttestationV1): string {
@@ -273,7 +271,7 @@ export function issueLifecycleRecoveryAttestation(
     const attestation = validateLifecycleRecoveryAttestation({
       version: 1,
       attestationId: crypto.randomUUID(),
-      authorityRefDigest: lifecycleAuthorityReferenceDigest(request.authorityRef),
+      authorityRefDigest: lifecycleAuthorityDigest(request.authorityRef),
       operationId: request.operationId,
       phase: request.phase,
       requestId: request.requestId,
@@ -414,11 +412,7 @@ function lifecycleRecoveryEventCommitted(
   catch { return false; }
   const section = locateActivityLog(content);
   if (!section) return false;
-  const labels = {
-    analysis: 'Analyze Task', 'review-analysis': 'Review Analysis',
-    plan: 'Plan Task', 'review-plan': 'Review Plan',
-    code: 'Code Task', 'review-code': 'Review Code'
-  } as const;
+  const labels = { analysis: 'Analyze Task', plan: 'Plan Task', code: 'Code Task' } as const;
   const prefix = `${labels[selector.family]} (Round ${selector.round}`;
   return section.entries.some((entry) => {
     if (entry.step.endsWith(' [started]') || !entry.step.startsWith(prefix)) return false;
@@ -465,7 +459,7 @@ export function recoverLifecycleRecoveryOperation(
     controller: options.controllerBinding
   };
   const capabilities = store.findByRecoveryOperation(selector.operationId);
-  if (capabilities.length !== 1 || capabilities[0]!.capabilityRefDigest !== lifecycleAuthorityReferenceDigest(selector.authorityRef)) {
+  if (capabilities.length !== 1 || capabilities[0]!.capabilityRefDigest !== lifecycleAuthorityDigest(selector.authorityRef)) {
     throw lifecycleRecoveryCompensationError('LIFECYCLE_RECOVERY_PROVENANCE_INVALID', 'durable capability provenance does not identify this operation');
   }
   const capability = capabilities[0]!;

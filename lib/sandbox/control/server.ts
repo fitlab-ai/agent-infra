@@ -79,10 +79,7 @@ import {
 import type { BrokerOwner } from './lifecycle.ts';
 import { nextSandboxControlBackoff } from './timing.ts';
 import { readTaskFinalizationReceipt } from '../../task/finalization.ts';
-import {
-  readCodexControllerRegistration,
-  reconcileCodexControllerAuthorityState
-} from './controller-registration.ts';
+import { readCodexControllerRegistration } from './controller-registration.ts';
 import { validateSandboxControlIdentity } from './identity-sentinel.ts';
 import {
   mergeSandboxTaskView,
@@ -1058,13 +1055,6 @@ export async function serveSandboxControl(
     assertRealDirectory(consumedDir, root);
     assertRealDirectory(manifest.publicStatusDir, root);
     assertRealDirectory(manifest.processingDir, root);
-    if (manifest.mode === 'task-bound') {
-      reconcileCodexControllerAuthorityState({
-        manifest,
-        manifestPath,
-        buildIdentity: () => computeLifecycleBuildIdentity(manifest.repoRoot)
-      });
-    }
     fs.writeFileSync(brokerPath, brokerRecord, { mode: 0o600, flag: 'wx' });
     if (isSandboxControlRootQuiescing(root)) {
       if (fs.readFileSync(brokerPath, 'utf8') === brokerRecord) fs.unlinkSync(brokerPath);

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { parseArtifactName } from './artifact-name.ts';
 import { validateCompletedArtifact, validateArtifactPublication } from './artifact-lifecycle.ts';
@@ -17,9 +17,6 @@ import type { ManualOverrideCapability } from './guard-override.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
-import { currentLifecycleAuthority, recordLifecycleFinalizationReceipt } from './lifecycle-finalization-receipt.ts';
-import { consumeLocalLifecycleAuthorityPhase, reserveLocalLifecycleAuthorityPhase } from './local-lifecycle-authority.ts';
-import type { LifecycleRecoveryAttestationV1 } from './control-authority.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -295,86 +292,12 @@ function prepareReviewSummaryCandidate(
   };
 }
 
-type ReviewProvenanceReservation = Readonly<{
-  authority: ReturnType<typeof currentLifecycleAuthority>;
-  operationId: string;
-  attestation: LifecycleRecoveryAttestationV1 | null;
-}>;
-
-function reserveReviewSummaryProvenance(
-  prepared: ReviewSummaryCandidatePreparation,
-): ReviewProvenanceReservation | null {
-  const result = prepared.result;
-  if (result.status === 'failed' || result.status === 'planned' || !result.taskId
-    || !result.artifactSha256 || !result.semanticDigest) return null;
-  const parsed = parseArtifactName(result.artifact);
-  const spec = STAGES[result.stage as ReviewStage];
-  if (!parsed || !spec) throw new Error('REVIEW_ARTIFACT_IDENTITY_INVALID: review artifact identity is invalid');
-  const authority = currentLifecycleAuthority(process.env, result.taskId);
-  const operationId = createHash('sha256').update([
-    result.taskId, spec.family, result.artifact, result.artifactSha256, result.semanticDigest
-  ].join('\0')).digest('hex');
-  const attestation = authority.mode === 'sandbox-active'
-    ? reserveLocalLifecycleAuthorityPhase({
-        taskId: result.taskId, family: spec.family, artifact: result.artifact,
-        round: parsed.round, operationId, phase: 'artifact.finalize-local',
-        lifecycleRequestId: `${spec.family}:${result.artifact}:finalize`
-      })
-    : null;
-  return { authority, operationId, attestation };
-}
-
 function commitReviewSummaryProvenance(
   prepared: ReviewSummaryCandidatePreparation,
   repoRoot: string,
-  options: Readonly<{
-    afterPublish?: () => void;
-    artifactPublished?: boolean;
-    reservation?: ReviewProvenanceReservation | null;
-  }> = {}
+  options: Readonly<{ afterPublish?: () => void }> = {}
 ): ReviewFinalizationResult {
-  const result = prepared.result;
-  if (result.status === 'failed' || result.status === 'planned' || !result.taskId
-    || !result.artifactSha256 || !result.semanticDigest) return result;
-  const parsed = parseArtifactName(result.artifact);
-  const spec = STAGES[result.stage as ReviewStage];
-  if (!parsed || !spec) return failed({
-    taskRef: result.requestRef, stage: result.stage, artifact: result.artifact
-  }, 'REVIEW_ARTIFACT_IDENTITY_INVALID', 'review artifact identity is invalid', result.taskId);
-  try {
-    const reservation = options.reservation ?? reserveReviewSummaryProvenance(prepared);
-    if (!reservation) return result;
-    options.afterPublish?.();
-    recordLifecycleFinalizationReceipt(repoRoot, {
-      taskId: result.taskId,
-      family: spec.family,
-      artifact: result.artifact,
-      round: parsed.round,
-      artifactSha256: result.artifactSha256,
-      semanticDigest: result.semanticDigest,
-      finalizer: 'review',
-      authorityMode: reservation.authority.mode,
-      authorityDigest: reservation.authority.digest
-    }, { operationId: reservation.operationId });
-    consumeLocalLifecycleAuthorityPhase(reservation.attestation);
-    return result;
-  } catch (error) {
-    return failed(
-      { taskRef: result.requestRef, stage: result.stage, artifact: result.artifact },
-      'REVIEW_RECOVERY_COMMIT_FAILED',
-      error instanceof Error ? error.message : String(error),
-      result.taskId,
-      result.stageStatus,
-      {
-        artifactSha256: result.artifactSha256,
-        semanticDigest: result.semanticDigest,
-        changed: options.artifactPublished === true,
-        operations: options.artifactPublished === true
-          ? [{ kind: 'artifact', artifact: result.artifact, operation: 'update' }]
-          : []
-      }
-    );
-  }
+  return prepared.result;
 }
 
 function replaceCurrentArtifactAtomically(file: string, content: string): void {
@@ -407,39 +330,15 @@ function finalizeReviewSummaryUnlocked(
   catch (error) { return failed(request, 'REVIEW_ARTIFACT_NOT_REGULAR', String(error), resolved.taskId); }
   const prepared = prepareReviewSummaryCandidate(request, content, options);
   if (request.dryRun) return prepared.result;
-  if (prepared.result.status === 'failed') return prepared.result;
-  let reservation: ReviewProvenanceReservation | null;
-  try {
-    reservation = reserveReviewSummaryProvenance(prepared);
-  } catch (error) {
-    return failed(
-      request,
-      'REVIEW_RECOVERY_COMMIT_FAILED',
-      error instanceof Error ? error.message : String(error),
-      resolved.taskId,
-      prepared.result.stageStatus,
-      {
-        artifactSha256: prepared.result.artifactSha256,
-        semanticDigest: prepared.result.semanticDigest
-      }
-    );
-  }
-  if (!prepared.result.changed) {
-    return commitReviewSummaryProvenance(prepared, resolved.repoRoot, { reservation });
-  }
+  if (prepared.result.status === 'failed' || !prepared.result.changed) return prepared.result;
   try {
     replaceCurrentArtifactAtomically(validated.artifact.path, prepared.content);
-    const published = {
+    return {
       ...prepared.result,
       status: 'applied',
       artifactSha256: sha256Content(prepared.content),
       semanticDigest: canonicalSemanticDigest(prepared.content)
-    } as ReviewFinalizationResult;
-    return commitReviewSummaryProvenance(
-      { ...prepared, result: published },
-      resolved.repoRoot,
-      { reservation, artifactPublished: true }
-    );
+    };
   } catch (error) {
     return failed(
       request,

@@ -72,18 +72,6 @@ if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkfl
       // task locks, atomic writes, and operation-specific recovery facts.
       break;
     case 'sandbox-local': {
-      const { verifySandboxLocalControllerAuthority } = await import('../lib/agent-clients/adapters/codex-lifecycle/controller-context.ts');
-      try {
-        verifySandboxLocalControllerAuthority({ repoRoot: process.cwd() });
-      } catch (error) {
-        const committedReplay = command === 'task-event'
-          && (await import('../lib/internal/task-event.ts'))
-            .isCommittedTaskEventReplay(process.argv.slice(3), { repoRoot: process.cwd() });
-        if (!committedReplay) {
-          const message = error instanceof Error ? error.message : String(error);
-          taskControlTransportFailure(message, /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1]);
-        }
-      }
       break;
     }
     case 'broker-client': {

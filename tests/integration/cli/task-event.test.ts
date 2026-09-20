@@ -8,7 +8,6 @@ import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
-import { isCommittedTaskEventReplay } from '../../../lib/internal/task-event.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
@@ -22,22 +21,6 @@ import {
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
-import { readArtifactRecoveryIntent } from '../../../lib/task/artifact-repair-intent.ts';
-import { readLifecycleFinalizationReceipt } from '../../../lib/task/lifecycle-finalization-receipt.ts';
-import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
-import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import {
-  contextFromControllerLease,
-  writeCodexSandboxControllerContext
-} from '../../../lib/agent-clients/adapters/codex-lifecycle/controller-context.ts';
-import {
-  activeControllerAuthorityState,
-  createInactiveControllerAuthorityState,
-  writeControllerAuthorityState
-} from '../../../lib/sandbox/control/controller-authority-state.ts';
-import { getProcessStartTime } from '../../../lib/server/process-state.ts';
-
-const REPOSITORY_ROOT = path.resolve(import.meta.dirname, '../../..');
 test('review completion accepts the current valid review artifact', () => {
   const f = fixture('requirement-analysis');
   try {
@@ -124,99 +107,6 @@ function fixture(step = 'requirement-analysis-review') {
     });
   }
   return { root, id, dir, file: path.join(dir, 'task.md') };
-}
-
-function activeControllerEnvironment(root: string, taskId: string) {
-  const statusDir = path.join(root, 'control-status');
-  const runtimeDir = path.join(root, 'runtime');
-  const contextPath = path.join(root, 'controller-context.json');
-  const now = Date.now();
-  const processIdentity = { pid: process.pid, startTime: getProcessStartTime(process.pid)! };
-  const manifest = JSON.parse(fs.readFileSync(path.join(
-    REPOSITORY_ROOT,
-    'lib/agent-clients/adapters/codex-lifecycle/manifest-files.json'
-  ), 'utf8')) as { contractFiles: string[] };
-  for (const relative of manifest.contractFiles) {
-    const destination = path.join(root, relative);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.copyFileSync(path.join(REPOSITORY_ROOT, relative), destination);
-  }
-  const buildIdentity = computeLifecycleBuildIdentity(root);
-  const leaseSecret = 'e'.repeat(64);
-  const lease = {
-    version: 1 as const,
-    leaseId: 'f'.repeat(64),
-    leaseSecret,
-    taskId,
-    controlGeneration: 'generation-1',
-    controllerInstanceDigest: 'c'.repeat(64),
-    controllerProcess: processIdentity,
-    buildIdentity,
-    issuedAt: now - 1_000,
-    expiresAt: now + 60_000
-  };
-  const hookDefinitionHash = 'd'.repeat(64);
-  const controlRootId = 'a'.repeat(96);
-  writeCodexSandboxControllerContext(
-    contextPath,
-    contextFromControllerLease(lease, { hookDefinitionHash })
-  );
-  const inactive = createInactiveControllerAuthorityState({
-    taskId,
-    generation: lease.controlGeneration,
-    controlRootId
-  }, now);
-  writeControllerAuthorityState(statusDir, inactive, { expected: null });
-  writeControllerAuthorityState(statusDir, activeControllerAuthorityState(inactive, {
-    version: 1,
-    taskId,
-    controlGeneration: lease.controlGeneration,
-    containerId: 'container-1',
-    leaseId: lease.leaseId,
-    leaseSecretHash: createHash('sha256')
-      .update('agent-infra/codex-controller-lease/v1\0').update(leaseSecret).digest('hex'),
-    controllerInstanceDigest: lease.controllerInstanceDigest,
-    controllerProcess: processIdentity,
-    buildIdentity,
-    issuedAt: lease.issuedAt,
-    expiresAt: lease.expiresAt
-  }, inactive.transitionId, now), { expected: inactive });
-  const store = createCodexCapabilityStore({
-    root: path.join(runtimeDir, 'clients', 'codex', 'capabilities')
-  });
-  const armed = store.arm({
-    taskId,
-    buildIdentity,
-    controller: {
-      instanceDigest: lease.controllerInstanceDigest,
-      controlGeneration: lease.controlGeneration
-    }
-  });
-  store.attestByReference({
-    capabilityRef: armed.capabilityRef,
-    sessionId: 'session-1',
-    turnId: 'turn-1',
-    toolUseId: 'tool-1',
-    hookDefinitionHash,
-    buildIdentity,
-    controller: {
-      instanceDigest: lease.controllerInstanceDigest,
-      controlGeneration: lease.controlGeneration
-    }
-  });
-  return {
-    env: {
-      ...sandboxControlSafeEnv(),
-      AGENT_INFRA_TASK_ID: taskId,
-      AGENT_INFRA_CONTROL_GENERATION: lease.controlGeneration,
-      AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
-      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir,
-      AGENT_INFRA_CODEX_CONTROLLER_CONTEXT: contextPath,
-      AGENT_INFRA_RUNTIME_DIR: runtimeDir
-    },
-    store,
-    capabilityRef: armed.capabilityRef
-  };
 }
 
 function orchestrationReceipt(taskId: string, overrides: Record<string, unknown> = {}) {
@@ -696,7 +586,7 @@ test('local completion rejects a stale finalizer digest before mutating task sta
     const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...stale]);
 
     assert.equal(completed.status, 1);
-    assert.equal(JSON.parse(completed.stdout).error.code, 'LIFECYCLE_FINALIZATION_RECEIPT_MISMATCH');
+    assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
     assert.deepEqual(fs.readFileSync(f.file), before);
   }
 });
@@ -739,7 +629,7 @@ test('local completion remains valid after a direct artifact revalidation', () =
   assert.equal(JSON.parse(completed.stdout).status, 'applied');
 });
 
-test('local completion rejects bytes changed after direct formal artifact repair', () => {
+test('local completion accepts a direct formal artifact repair', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   const artifact = path.join(f.dir, 'plan.md');
@@ -758,14 +648,12 @@ test('local completion rejects bytes changed after direct formal artifact repair
   fs.writeFileSync(artifact, `${fs.readFileSync(artifact, 'utf8')}\nexternal mutation\n`);
   const local = validateLocalArtifact(fs.readFileSync(artifact, 'utf8'), { family: 'plan' });
   assert.equal(local.ok, true);
-  const before = fs.readFileSync(f.file);
   const completed = run(f.root, [
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md',
     '--artifact-sha256', sha256File(artifact), '--semantic-digest', local.semanticDigest
   ]);
-  assert.equal(completed.status, 1, completed.stderr || completed.stdout);
-  assert.equal(JSON.parse(completed.stdout).error.code, 'LIFECYCLE_FINALIZATION_RECEIPT_MISMATCH');
-  assert.deepEqual(fs.readFileSync(f.file), before);
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
 });
 
 test('local completion uses the repository verification config for its language', () => {
@@ -1071,149 +959,12 @@ test('dry-run returns planned without changing task bytes for start and completi
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-  const finalized = finalizeLocalArtifact({
-    taskRef: f.id, repoRoot: f.root, family: 'plan', artifact: 'plan.md'
-  });
-  assert.equal(finalized.status, 'passed', finalized.error?.message);
   const beforeCompletion = fs.readFileSync(f.file);
-  const recoveryRoot = path.join(f.dir, '.local-artifact-recovery');
-  const recoveryBefore = fs.existsSync(recoveryRoot) ? fs.readdirSync(recoveryRoot) : [];
   const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--dry-run']);
   const completedResult = JSON.parse(completed.stdout);
   assert.equal(completedResult.status, 'planned');
   assert.equal(completedResult.operations.length, 4);
   assert.deepEqual(fs.readFileSync(f.file), beforeCompletion);
-  assert.deepEqual(fs.existsSync(recoveryRoot) ? fs.readdirSync(recoveryRoot) : [], recoveryBefore);
-});
-
-test('completed event dry-run preserves pending and consumed recovery after a process interruption', onPlatforms('linux', 'darwin'), () => {
-  const f = fixture();
-  try {
-    assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
-    fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-    const finalized = finalizeLocalArtifact({ taskRef: f.id, repoRoot: f.root, family: 'plan', artifact: 'plan.md' });
-    assert.equal(finalized.status, 'passed', finalized.error?.message);
-    const args = [
-      f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md',
-      ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--initiator', 'model',
-      '--request-id', `${f.id}:plan`, '--reason-code', 'user-request'
-    ];
-    const script = `
-      import fs from 'node:fs';
-      import { taskEvent } from ${JSON.stringify(new URL('../../../lib/internal/task-event.ts', import.meta.url).href)};
-      const rename = fs.renameSync;
-      fs.renameSync = function (source, target) {
-        const result = rename.call(this, source, target);
-        if (String(target) === ${JSON.stringify(f.file)} && fs.readFileSync(target, 'utf8').includes('completion_facts:')) {
-          process.kill(process.pid, 'SIGKILL');
-        }
-        return result;
-      };
-      await taskEvent(${JSON.stringify(args)});
-    `;
-    const interrupted = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '--eval', script], {
-      cwd: f.root, env: sandboxControlSafeEnv(), encoding: 'utf8', timeout: 10_000
-    });
-    assert.equal(interrupted.signal, 'SIGKILL', interrupted.stderr || interrupted.stdout);
-    const snapshot = () => ({
-      task: fs.readFileSync(f.file, 'utf8'),
-      artifact: fs.readFileSync(path.join(f.dir, 'plan.md'), 'utf8'),
-      receipt: readLifecycleFinalizationReceipt(f.root, f.id, 'plan', 'plan.md'),
-      intent: readArtifactRecoveryIntent(f.root, f.id, 'plan', 'plan.md')
-    });
-    for (const state of ['pending', 'consumed']) {
-      const before = snapshot();
-      assert.equal(before.receipt?.state, state);
-      assert.equal(before.intent?.state, state === 'pending' ? 'passed' : 'consumed');
-      const dry = run(f.root, [...args, '--dry-run']);
-      assert.equal(dry.status, 0, dry.stderr || dry.stdout);
-      const result = JSON.parse(dry.stdout);
-      assert.equal(result.status, 'no-op');
-      assert.equal(result.changed, false);
-      assert.deepEqual(snapshot(), before);
-      if (state === 'pending') {
-        const replay = run(f.root, args);
-        assert.equal(replay.status, 0, replay.stderr || replay.stdout);
-        assert.equal(JSON.parse(replay.stdout).status, 'no-op');
-        assert.equal(fs.readFileSync(f.file, 'utf8'), before.task);
-      }
-    }
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-});
-
-test('completed event dry-run preserves active capability recovery after a process interruption', onPlatforms('linux', 'darwin'), () => {
-  const f = fixture();
-  try {
-    assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
-    fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
-    const active = activeControllerEnvironment(f.root, f.id);
-    const finalizerScript = `
-      import { finalizeLocalArtifact } from ${JSON.stringify(new URL('../../../lib/task/local-artifact-finalization.ts', import.meta.url).href)};
-      process.stdout.write(JSON.stringify(finalizeLocalArtifact({
-        taskRef: ${JSON.stringify(f.id)}, repoRoot: ${JSON.stringify(f.root)},
-        family: 'plan', artifact: 'plan.md'
-      })));
-    `;
-    const finalized = spawnSync(process.execPath, [
-      '--experimental-strip-types', '--input-type=module', '--eval', finalizerScript
-    ], { cwd: f.root, env: active.env, encoding: 'utf8' });
-    assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
-    const finalizedResult = JSON.parse(finalized.stdout);
-    assert.equal(finalizedResult.status, 'passed', finalized.stdout);
-    const args = [
-      f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md',
-      '--artifact-sha256', finalizedResult.artifactSha256,
-      '--semantic-digest', finalizedResult.semanticDigest, '--initiator', 'model',
-      '--request-id', `${f.id}:plan`, '--reason-code', 'user-request'
-    ];
-    const script = `
-      import fs from 'node:fs';
-      import { taskEvent } from ${JSON.stringify(new URL('../../../lib/internal/task-event.ts', import.meta.url).href)};
-      const rename = fs.renameSync;
-      fs.renameSync = function (source, target) {
-        const result = rename.call(this, source, target);
-        if (String(target) === ${JSON.stringify(f.file)} && fs.readFileSync(target, 'utf8').includes('completion_facts:')) {
-          process.kill(process.pid, 'SIGKILL');
-        }
-        return result;
-      };
-      await taskEvent(${JSON.stringify(args)});
-    `;
-    const interrupted = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '--eval', script], {
-      cwd: f.root, env: active.env, encoding: 'utf8', timeout: 10_000
-    });
-    assert.equal(interrupted.signal, 'SIGKILL', interrupted.stderr || interrupted.stdout);
-    const before = {
-      task: fs.readFileSync(f.file, 'utf8'),
-      receipt: readLifecycleFinalizationReceipt(f.root, f.id, 'plan', 'plan.md'),
-      intent: readArtifactRecoveryIntent(f.root, f.id, 'plan', 'plan.md'),
-      capability: active.store.inspectReference(active.capabilityRef)
-    };
-    assert.equal(before.receipt?.state, 'pending');
-    assert.equal(before.intent?.state, 'passed');
-    assert.equal(before.capability.recoveryPhases.at(-1)?.state, 'issued');
-
-    const invoke = (eventArgs: string[]) => spawnSync(process.execPath, [
-      '--experimental-strip-types', '--input-type=module', '--eval', `
-        import { taskEvent } from ${JSON.stringify(new URL('../../../lib/internal/task-event.ts', import.meta.url).href)};
-        await taskEvent(${JSON.stringify(eventArgs)});
-      `
-    ], { cwd: f.root, env: active.env, encoding: 'utf8' });
-    const dry = invoke([...args, '--dry-run']);
-    assert.equal(dry.status, 0, dry.stderr || dry.stdout);
-    assert.equal(JSON.parse(dry.stdout).status, 'no-op');
-    assert.deepEqual({
-      task: fs.readFileSync(f.file, 'utf8'),
-      receipt: readLifecycleFinalizationReceipt(f.root, f.id, 'plan', 'plan.md'),
-      intent: readArtifactRecoveryIntent(f.root, f.id, 'plan', 'plan.md'),
-      capability: active.store.inspectReference(active.capabilityRef)
-    }, before);
-
-    const replay = invoke(args);
-    assert.equal(replay.status, 0, replay.stderr || replay.stdout);
-    assert.equal(JSON.parse(replay.stdout).status, 'no-op');
-    assert.equal(active.store.inspectReference(active.capabilityRef).recoveryState, 'consumed');
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
 test('orchestrated completion dry-run reports a provenance mismatch without pausing the run', () => {
@@ -1244,7 +995,7 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
 
 test('task-event timestamps keep an ASCII offset in negative-offset timezones', () => {
   const f = fixture();
-  const env = { ...sandboxControlSafeEnv(), TZ: 'America/Los_Angeles' };
+  const env = { ...process.env, TZ: 'America/Los_Angeles' };
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1'], env);
   assert.equal(started.status, 0, started.stderr);
   assert.match(JSON.parse(started.stdout).timestamp, /-\d{2}:\d{2}$/);
@@ -1752,20 +1503,6 @@ test('review completion replays the same current result without another activity
   assert.equal(replayed.status, 0, replayed.stderr || replayed.stdout);
   assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
-  const args = [
-    f.id, `${scenario.family}.completed`, '--agent', 'codex', '--artifact', scenario.artifact,
-    '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0',
-    '--manual-validation', '0', '--initiator', 'model',
-    '--request-id', `${f.id}:${scenario.family}`, '--reason-code', 'user-request'
-  ];
-  assert.equal(isCommittedTaskEventReplay(args, { repoRoot: f.root }), true);
-  assert.equal(
-    isCommittedTaskEventReplay(
-      args.map((value) => value === scenario.artifact ? 'review-code-r2.md' : value),
-      { repoRoot: f.root }
-    ),
-    false
-  );
 });
 
 test('review completion records a new result when the finalized review artifact changes', () => {
@@ -1775,8 +1512,7 @@ test('review completion records a new result when the finalized review artifact 
   assert.equal(completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 }).status, 0);
   const before = fs.readFileSync(f.file, 'utf8');
   fs.appendFileSync(path.join(f.dir, scenario.artifact), '\nUpdated evidence.\n');
-  const refinalized = finalizeReview(f, scenario);
-  assert.equal(refinalized.status, 0, refinalized.stderr || refinalized.stdout);
+  assert.equal(finalizeReview(f, scenario).status, 0);
   const repeated = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
   assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
   assert.equal(JSON.parse(repeated.stdout).status, 'applied');

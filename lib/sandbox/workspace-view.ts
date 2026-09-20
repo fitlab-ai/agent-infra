@@ -7,10 +7,6 @@ import {
   createSandboxControlIdentitySentinel,
   writeSandboxControlIdentitySentinel
 } from './control/identity-sentinel.ts';
-import {
-  createInactiveControllerAuthorityState,
-  writeControllerAuthorityState
-} from './control/controller-authority-state.ts';
 
 export type SandboxWorkspaceView = Readonly<{
   root: string;
@@ -239,13 +235,6 @@ export function materializeSandboxControl(params: Readonly<{
     generation
   });
   writeSandboxControlIdentitySentinel(statusDir, identitySentinel);
-  if (params.identity.mode === 'task-bound') {
-    writeControllerAuthorityState(statusDir, createInactiveControllerAuthorityState({
-      taskId: params.identity.taskId,
-      generation,
-      controlRootId: identitySentinel.controlRootId
-    }), { expected: null });
-  }
   const repoRoot = fs.realpathSync.native(params.repoRoot);
   const manifestDraft: SandboxControlManifestDraft = {
     engine: params.engine ?? 'docker',
