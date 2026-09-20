@@ -7,7 +7,7 @@ import { applyTaskEvent } from '../task/events.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { createManualValidationReceipt, manualValidationFinalSummaryDigest, readManualValidationReceipt, renderLegacyManualValidationHiddenSummary, renderManualValidationSummarySource, writeManualValidationReceiptAtomic } from '../task/manual-validation-receipt.ts';
-import { archiveManualValidationGeneration, createManualValidationTransaction, readManualValidationGenerationReceipt, readManualValidationGenerationSummarySource, readManualValidationSummarySource, readManualValidationTransaction, retryManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, validateManualValidationGenerationArchive, writeManualValidationSummarySourceAtomic, writeManualValidationTransactionAtomic } from '../task/manual-validation-transaction.ts';
+import { archiveManualValidationGeneration, createManualValidationTransaction, isManualValidationGenerationCurrent, readManualValidationGenerationReceipt, readManualValidationGenerationSummarySource, readManualValidationSummarySource, readManualValidationTransaction, retryManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, validateManualValidationGenerationArchive, writeManualValidationSummarySourceAtomic, writeManualValidationTransactionAtomic } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationReceipt } from '../task/manual-validation-receipt.ts';
 import { sha256File } from '../task/artifact-receipts.ts';
@@ -180,6 +180,7 @@ async function executeManualValidationTransactionLocked(
   const archiveGeneration = options.archiveGeneration ?? archiveManualValidationGeneration;
   let transactionResult = readManualValidationTransaction(resolved.taskDir, { taskId: resolved.taskId, prNumber: pullRequest.number, prHeadSha: pullRequest.head.sha, evidenceDigest, artifact: values.artifact! });
   let previousTransaction: ManualValidationTransaction | null = null;
+  let requiresOpenStarted = false;
   if (!transactionResult.ok && transactionResult.error.code === 'MANUAL_VALIDATION_TRANSACTION_IDENTITY_MISMATCH') {
     const existing = readManualValidationTransaction(resolved.taskDir);
     if (!existing.ok) return result('failed', existing.error);
@@ -187,8 +188,9 @@ async function executeManualValidationTransactionLocked(
     if (existing.value.phase === 'committed') {
       const verified = validateCommittedGeneration(resolved, existing.value, preimageBody);
       if (!verified.ok) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: verified.message });
+      requiresOpenStarted = !isManualValidationGenerationCurrent(resolved.taskDir, existing.value, true);
     } else {
-      try { validateManualValidationGenerationArchive(resolved.taskDir, existing.value, false); }
+      try { requiresOpenStarted = !isManualValidationGenerationCurrent(resolved.taskDir, existing.value, false); }
       catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: error instanceof Error ? error.message : String(error) }); }
     }
     previousTransaction = existing.value;
@@ -206,15 +208,20 @@ async function executeManualValidationTransactionLocked(
     const committed = transactionResult.value;
     const verified = validateCommittedGeneration(resolved, committed, preimageBody);
     if (!verified.ok) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: verified.message });
-    if (verified.shape !== 'visible') return result('applied', null, { transaction: committed, receipt: verified.receipt, idempotent: true });
-    try { validateManualValidationGenerationArchive(resolved.taskDir, committed, true); }
+    let generationCurrent: boolean;
+    try { generationCurrent = isManualValidationGenerationCurrent(resolved.taskDir, committed, true); }
     catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: error instanceof Error ? error.message : String(error) }); }
+    if (verified.shape !== 'visible' && generationCurrent) return result('applied', null, { transaction: committed, receipt: verified.receipt, idempotent: true });
+    requiresOpenStarted = !generationCurrent;
     previousTransaction = committed;
-    transactionResult = { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_MISSING', message: 'version 1 visible summary requires a version 2 generation' } };
+    transactionResult = { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_MISSING', message: generationCurrent ? 'version 1 visible summary requires a version 2 generation' : 'partially archived generation requires recovery' } };
   }
   const openStarted = transactionResult.ok ? { present: false, transactionId: null } : openManualValidationStarted(resolved.taskMdPath);
   if (openStarted.present && !openStarted.transactionId) {
     return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'open manual-validation started event has no recoverable transactionId' });
+  }
+  if (requiresOpenStarted && !openStarted.present) {
+    return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'partially archived manual-validation generation has no open started identity' });
   }
   const transactionId = transactionResult.ok
     ? transactionResult.value.transactionId

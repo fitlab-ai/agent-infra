@@ -320,6 +320,17 @@ function validateManualValidationGenerationArchive(taskDir: string, transaction:
   }
 }
 
+function isManualValidationGenerationCurrent(taskDir: string, transaction: ManualValidationTransaction, requireReceipt = false): boolean {
+  validateManualValidationGenerationArchive(taskDir, transaction, requireReceipt);
+  const paths = manualValidationGenerationPaths(taskDir, transaction);
+  return fs.existsSync(paths.transaction.current)
+    && !fs.existsSync(paths.transaction.history)
+    && (!requireReceipt || fs.existsSync(paths.receipt.current))
+    && !fs.existsSync(paths.receipt.history)
+    && (transaction.version !== 2 || fs.existsSync(paths.source.current))
+    && !fs.existsSync(paths.source.history);
+}
+
 function archiveManualValidationGeneration(
   taskDir: string,
   transaction: ManualValidationTransaction,
@@ -366,6 +377,7 @@ export {
   MANUAL_VALIDATION_TRANSACTION_VERSION,
   archiveManualValidationGeneration,
   createManualValidationTransaction,
+  isManualValidationGenerationCurrent,
   manualValidationSummarySourcePath,
   manualValidationTransactionPath,
   readManualValidationGenerationReceipt,
