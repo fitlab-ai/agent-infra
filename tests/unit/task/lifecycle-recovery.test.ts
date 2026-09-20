@@ -356,6 +356,52 @@ test('client adapter pauses a partially committed recovery when commit verificat
   }
 });
 
+test('client adapter pauses a partially committed recovery when the terminal log write fails', () => {
+  const f = fixture();
+  const failedWrite = {
+    status: 'failed',
+    requestRef: TASK_ID,
+    expectedState: 'active',
+    taskId: TASK_ID,
+    taskMdPath: null,
+    actualState: 'active',
+    changed: false,
+    operations: [],
+    timestamp: null,
+    agentInfraVersion: null,
+    error: { code: 'TASK_READ_FAILED', message: 'injected log write failure' }
+  } as ReturnType<typeof writeTask>;
+  try {
+    const failed = withTaskExecutionLock(f.root, TASK_ID, 'test.adapter-recovery-log-pause', () =>
+      recoverStartedLifecycleFromAdapter(autoRecoveryRequest, {
+        repoRoot: f.root,
+        lifecycleStore: f.store,
+        writeTask: () => failedWrite
+      })
+    );
+    assert.equal(failed.status, 'owner-unknown', JSON.stringify(failed));
+    assert.equal(failed.changed, true);
+    assert.equal(failed.error?.code, ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE);
+    assert.equal(readRun(f.taskDir)?.status, 'paused');
+    assert.equal(readRun(f.taskDir)?.pause?.code, ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE);
+    assert.equal(readRun(f.taskDir)?.pause?.recoverable, true);
+    assert.equal(f.store.read('child').consumer, `lifecycle-recovery:${TASK_ID}:receipt-1`);
+
+    const recovered = withTaskExecutionLock(f.root, TASK_ID, 'test.adapter-recovery-log-resume', () =>
+      recoverStartedLifecycleFromAdapter(autoRecoveryRequest, {
+        repoRoot: f.root,
+        lifecycleStore: f.store
+      })
+    );
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(readRun(f.taskDir)?.status, 'running');
+    assert.equal(readRun(f.taskDir)?.pause, null);
+    assert.throws(() => f.store.read('child'), /not found uniquely/u);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('recover-started auto releases a retained claim before resuming its dedicated pause', () => {
   const f = fixture();
   try {

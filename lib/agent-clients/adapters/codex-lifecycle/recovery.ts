@@ -971,6 +971,34 @@ function recoverStartedLifecycleUnderLock(
   return result(request, 'applied', { taskId, receiptId: receipt.id, childId: receipt.childId });
 }
 
+function pauseIncompleteRecovery(
+  request: LifecycleRecoveryRequest,
+  incomplete: LifecycleRecoveryResult,
+  message: string,
+  options: LifecycleRecoveryOptions
+): LifecycleRecoveryResult {
+  const paused = pauseOrchestration(
+    request.taskRef,
+    ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+    message,
+    true,
+    { ...options.orchestration, repoRoot: options.repoRoot, now: options.now }
+  );
+  return {
+    ...incomplete,
+    status: 'owner-unknown',
+    changed: incomplete.changed || paused.changed,
+    error: {
+      code: paused.status === 'paused'
+        ? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
+        : paused.error?.code ?? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+      message: paused.status === 'paused'
+        ? message
+        : paused.error?.message ?? message
+    }
+  };
+}
+
 function recoverStartedLifecycleFromAdapter(
   request: LifecycleRecoveryRequest,
   options: LifecycleRecoveryOptions = {}
@@ -978,28 +1006,10 @@ function recoverStartedLifecycleFromAdapter(
   const first = recoverStartedLifecycleUnderLock(request, options);
   if (
     'auto' in request
-    && first.error?.code === 'RECOVERY_COMMIT_VERIFY_FAILED'
+    && (first.error?.code === 'RECOVERY_LOG_WRITE_FAILED'
+      || first.error?.code === 'RECOVERY_COMMIT_VERIFY_FAILED')
   ) {
-    const message = `${first.error.code}: ${first.error.message}`;
-    const paused = pauseOrchestration(
-      request.taskRef,
-      ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
-      message,
-      true,
-      { ...options.orchestration, repoRoot: options.repoRoot, now: options.now }
-    );
-    return {
-      ...first,
-      changed: first.changed || paused.changed,
-      error: {
-        code: paused.status === 'paused'
-          ? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
-          : paused.error?.code ?? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
-        message: paused.status === 'paused'
-          ? message
-          : paused.error?.message ?? message
-      }
-    };
+    return pauseIncompleteRecovery(request, first, `${first.error.code}: ${first.error.message}`, options);
   }
   if (
     'auto' in request
@@ -1008,26 +1018,7 @@ function recoverStartedLifecycleFromAdapter(
     const second = recoverStartedLifecycleUnderLock(request, options);
     if (second.warning?.code !== RECOVERY_RELEASE_RETRY_WARNING.code) return second;
     const message = `${second.warning.code}: ${second.warning.message}`;
-    const paused = pauseOrchestration(
-      request.taskRef,
-      ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
-      message,
-      true,
-      { ...options.orchestration, repoRoot: options.repoRoot, now: options.now }
-    );
-    return {
-      ...second,
-      status: 'owner-unknown',
-      changed: second.changed || paused.changed,
-      error: {
-        code: paused.status === 'paused'
-          ? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
-          : paused.error?.code ?? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
-        message: paused.status === 'paused'
-          ? message
-          : paused.error?.message ?? message
-      }
-    };
+    return pauseIncompleteRecovery(request, second, message, options);
   }
   return first;
 }
