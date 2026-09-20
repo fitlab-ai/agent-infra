@@ -730,8 +730,7 @@ async function applyLifecycleWithAuthority(
         return {
           status: 'no-op', changed: false, targetState: 'active',
           requestRef: request.taskRef, intent: 'recover-started', taskId: null,
-          stage: null, round: null, artifact: null, receiptId: null, childId: null,
-          warning: null, error: null
+          receiptId: null, childId: null, error: null
         };
       }
       return adapter.recoverStarted(request as LifecycleRecoveryRequest, { repoRoot: context.repoRoot });
@@ -773,10 +772,7 @@ async function applyLifecycleWithAuthority(
       return {
         status: 'owner-unknown', changed: false, targetState: 'active',
         requestRef: request.taskRef, intent: 'recover-started', taskId,
-        stage: 'stage' in request ? String(request.stage) : null,
-        round: 'round' in request ? Number(request.round) : null,
-        artifact: 'artifact' in request ? String(request.artifact) : null,
-        receiptId: null, childId: null, warning: null,
+        receiptId: null, childId: null,
         error: { code: error.code, message: error.message }
       };
     }
@@ -917,7 +913,7 @@ function operationInvalid(message: string): never {
 
 const LIFECYCLE_FLAGS = new Set([
   '--agent', '--reason', '--unblock-condition', '--note', '--alert-number', '--staging-dir', '--issue-number',
-  '--stage', '--round', '--artifact', '--auto', '--override-ticket', '--override-target', '--override-scope', '--dry-run'
+  '--auto', '--override-ticket', '--override-target', '--override-scope', '--dry-run'
 ]);
 
 const FINALIZATION_FLAGS = new Set(['--agent']);
@@ -997,35 +993,18 @@ export function parseTaskControlOperation(
       ...(value(values, '--override-scope') ? { overrideScope: value(values, '--override-scope') } : {}),
       ...(value(values, '--alert-number') ? { alertNumber: Number(value(values, '--alert-number')) } : {}),
       ...(value(values, '--issue-number') ? { issueNumber: Number(value(values, '--issue-number')) } : {}),
-      ...(value(values, '--stage') ? { stage: value(values, '--stage') } : {}),
-      ...(value(values, '--round') ? { round: Number(value(values, '--round')) } : {}),
-      ...(value(values, '--artifact') ? { artifact: value(values, '--artifact') } : {}),
       ...(values['--auto'] === true ? { auto: true } : {}),
       ...(values['--dry-run'] === true ? { dryRun: true } : {})
     };
     if (intent === 'recover-started') {
-      const recoveryFlags = new Set(['--agent', '--stage', '--round', '--artifact', '--reason', '--auto']);
+      const recoveryFlags = new Set(['--agent', '--auto']);
       for (const flag of Object.keys(values)) {
         if (!recoveryFlags.has(flag)) operationInvalid(`option '${flag}' is not supported for recover-started`);
       }
-      const automatic = values['--auto'] === true;
-      const selectorFlags = ['--stage', '--round', '--artifact', '--reason'];
-      if (automatic && selectorFlags.some((flag) => values[flag] !== undefined)) {
-        operationInvalid('--auto cannot be combined with --stage, --round, --artifact, or --reason');
-      }
-      if (!automatic) required(values, selectorFlags);
-      if (automatic) return { family, request: input as unknown as TaskLifecycleControlRequest };
-      const stage = value(values, '--stage');
-      if (!['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'].includes(stage ?? '')) {
-        operationInvalid('--stage must be a supported lifecycle stage');
-      }
-      const round = Number(value(values, '--round'));
-      if (!Number.isSafeInteger(round) || round < 1) operationInvalid('--round must be a positive integer');
-      if (value(values, '--reason')!.includes('\n') || value(values, '--reason')!.includes('\r')) {
-        operationInvalid('--reason must be a single line');
-      }
-    } else if (values['--stage'] !== undefined || values['--round'] !== undefined || values['--artifact'] !== undefined || values['--auto'] !== undefined) {
-      operationInvalid('--stage, --round, --artifact, and --auto are only supported for recover-started');
+      if (values['--auto'] !== true) operationInvalid('--auto is required for recover-started');
+      return { family, request: input as unknown as TaskLifecycleControlRequest };
+    } else if (values['--auto'] !== undefined) {
+      operationInvalid('--auto is only supported for recover-started');
     }
     return { family, request: input as unknown as TaskLifecycleControlRequest };
   }

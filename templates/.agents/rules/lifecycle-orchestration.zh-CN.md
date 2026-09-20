@@ -16,14 +16,14 @@
 
 - 使用当前宿主的原生 spawn、wait 与结果接口；任务操作通过现有 broker 转发。
 - prepare 校验当前任务、模型策略与宿主 preflight。启动和完成记录关联实际 parent/child 身份，失败不得写成成功。
-- 客户端特有的 preflight、事件来源与恢复事务由客户端适配器实现；公共总控只调用统一能力。不得在公共流程中新增客户端 ID 分支。
+- 客户端特有的 preflight、事件来源与停止证据校验由客户端适配器实现；公共总控只调用统一能力。不得在公共流程中新增客户端 ID 分支。
 
 ## Activated delegation 自动恢复
 
 - 总控在 `begin-or-resume` 前调用内部 `task-lifecycle <task> recover-started --agent <client> --auto`。该入口不公开给用户，也不从缺少存活证据推断 child 已终止。
-- 客户端适配器决定是否支持恢复，并负责其候选、证据、重试和持久化状态；不支持时返回 `no-op`，无法确认安全完成时失败关闭。
-- `no-op/not-needed` 只表示没有适用的恢复事务；它不表示执行过恢复。随后仍由 `begin-or-resume` 和 route 处理既有状态。
-- 只有结构化结果确认无需恢复或恢复完整完成时才能 route。适配器必须把可重试的未完成事务持久化为稳定暂停，并且只能恢复自己创建且已重新验证的暂停；公共总控不解释客户端事务细节。
+- 客户端适配器决定是否支持恢复，并验证当前 pending delegation 的可信停止证据；不支持或没有 activated pending 时返回 `no-op`，无法确认停止时失败关闭。
+- 恢复按固定顺序消费停止证据、保存 aborted receipt 并清除 pending，再写 Activity Log 结束记录。任务状态已保存而日志未写时，下次调用只补日志。
+- 只有 `no-op` 或 `applied` 才能继续 route。控制响应丢失时不重建恢复结果；下一次人为调用依靠幂等状态继续。
 
 ## 模型策略
 

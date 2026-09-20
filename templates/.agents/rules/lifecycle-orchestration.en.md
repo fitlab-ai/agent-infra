@@ -16,14 +16,14 @@
 
 - Use native spawn, wait, and result interfaces from the current host; forward task operations through the existing broker.
 - Prepare validates the current task, model policy, and host preflight. Start and terminal records associate observed parent/child identity; failure must not be recorded as success.
-- Client-specific preflight, event sources, and recovery transactions belong to the client adapter. The common orchestrator calls only the shared capability and contains no client-ID branches.
+- Client-specific preflight, event sources, and stop-evidence validation belong to the client adapter. The common orchestrator calls only the shared capability and contains no client-ID branches.
 
 ## Activated Delegation Recovery
 
 - Before `begin-or-resume`, the orchestrator calls internal `task-lifecycle <task> recover-started --agent <client> --auto`. This entry is not user-facing and never infers child termination from missing liveness evidence.
-- The client adapter declares recovery support and owns its candidates, evidence, retries, and persisted state. Unsupported adapters return `no-op`; any result that cannot prove safe completion fails closed.
-- `no-op/not-needed` means only that no recovery transaction applies. `begin-or-resume` and route still process the existing state.
-- Routing is allowed only when the structured result confirms that recovery is unnecessary or complete. The adapter persists retryable incomplete work as a stable pause and may resume only a pause it created and revalidated; the common orchestrator does not interpret client transaction details.
+- The client adapter declares recovery support and validates trusted stop evidence for the current pending delegation. Unsupported adapters and runs without an activated pending delegation return `no-op`; uncertain termination fails closed.
+- Recovery consumes stop evidence, saves an aborted receipt while clearing pending, then appends the Activity Log terminal row. If the run save succeeds and the log write fails, the next invocation appends only the missing row.
+- Routing continues only after `no-op` or `applied`. Lost control responses are not reconstructed; the next operator invocation relies on the idempotent persisted state.
 
 ## Model Policy
 

@@ -246,24 +246,6 @@ test('generic sandbox modules do not import or export adapter implementation mod
   }
 });
 
-test('sandbox control recovery delegates client evidence through the adapter boundary', () => {
-  const candidate = filePath('lib/sandbox/control/server.ts');
-  const api = new API({ cwd: filePath('.') });
-  const snapshot = api.updateSnapshot({ openProjects: [filePath('tsconfig.test.json')] });
-  try {
-    const project = snapshot.getProjects()[0];
-    assert.ok(project);
-    const sourceFile = project.program.getSourceFile(candidate);
-    assert.ok(sourceFile);
-    const findings = findAdapterModuleEdges(sourceFile, 'lib/sandbox/control/server.ts')
-      .filter(({ value }) => value.endsWith('/codex-lifecycle/recovery.ts'));
-    assert.deepEqual(findings, []);
-  } finally {
-    snapshot.dispose();
-    api.close();
-  }
-});
-
 test('template sync command cleanup uses manifest targets instead of client paths', () => {
   const commandPrefixes = createAgentClientManifest().flatMap((entry) => {
     const target = entry.customCommand?.target;

@@ -12,7 +12,6 @@ import {
   SANDBOX_CONTROL_MAX_RESPONSE_BYTES,
   SANDBOX_CONTROL_MAX_TERMINAL_RECORD_BYTES,
   type SandboxControlManifest,
-  type SandboxControlRecoveryWarning,
   type SandboxControlRequest,
   type SandboxControlResponse,
   type SandboxControlTimingPolicy
@@ -63,8 +62,6 @@ import {
   SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES
 } from '../../task/control-recovery.ts';
 import { readRun } from '../../task/orchestration.ts';
-import { getAgentClientAdapter } from '../../agent-clients/registry.ts';
-import { isAgentClientId } from '../../agent-clients/types.ts';
 import { captureRepositorySnapshot } from '../../task/workspace-snapshot.ts';
 import { parseTypedTaskFrontmatter } from '../../task/frontmatter.ts';
 import { readLifecycleJournalEvidence } from '../../task/lifecycle.ts';
@@ -371,8 +368,7 @@ export function genericRecoveryResponse(
   request: SandboxControlRequest,
   exitCode: number,
   payload: ReturnType<typeof readSandboxControlPayload> | null,
-  cause: 'publish' | 'recovery' = 'recovery',
-  warning: SandboxControlRecoveryWarning | null = null
+  cause: 'publish' | 'recovery' = 'recovery'
 ): SandboxControlResponse {
   const outputUnavailable = request.family === 'task-create' && !payload;
   return {
@@ -381,9 +377,7 @@ export function genericRecoveryResponse(
     phase: 'completed',
     exitCode,
     stdout: outputUnavailable ? `${JSON.stringify(taskCreateOutputUnavailableResult(request.id))}\n` : '',
-    stderr: payload ? '' : warning
-      ? `${warning.code}: ${warning.message}\nAction: ${warning.action}\n`
-      : cause === 'publish'
+    stderr: payload ? '' : cause === 'publish'
         ? 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: output payload was not retained\n'
         : 'SANDBOX_CONTROL_OUTPUT_UNAVAILABLE: broker restarted after executor completion\n',
     error: null,
@@ -507,28 +501,7 @@ async function readRecoveryDomain(
 
   if (operation.family === 'task-lifecycle') {
     if (operation.intent === 'recover-started') {
-      try {
-        if (!('args' in request)) return { domain: null };
-        const parsed = parseTaskControlOperation('task-lifecycle', request.args);
-        if (parsed.family !== 'task-lifecycle' || parsed.request.intent !== 'recover-started') {
-          return { domain: null };
-        }
-        const agent = parsed.request.agent;
-        const readRecoveryEvidence = isAgentClientId(agent)
-          ? getAgentClientAdapter(agent).orchestrationAdapter?.readRecoveryEvidence
-          : undefined;
-        if (!readRecoveryEvidence) return { domain: null };
-        return {
-          domain: await readRecoveryEvidence(
-            manifest.repoRoot,
-            parsed.request as never,
-            { ...terminalResult, ...(output ?? {}) }
-          ),
-          journal: readLifecycleJournalEvidence(manifest.repoRoot, taskRef!)
-        };
-      } catch {
-        return { domain: null };
-      }
+      return { domain: null };
     }
     if (!taskRef || !terminalResult.targetState) return { domain: null };
     const journal = readLifecycleJournalEvidence(manifest.repoRoot, taskRef);
@@ -637,7 +610,7 @@ export async function recoveryResponse(
     if (finalization?.status !== 'matched') return null;
     return finalization.response ?? null;
   }
-  return genericRecoveryResponse(request, evidence.exitCode, payload, 'recovery', terminalResult.warning ?? null);
+  return genericRecoveryResponse(request, evidence.exitCode, payload);
 }
 
 async function terminalMatchesEvidence(
@@ -681,7 +654,7 @@ async function terminalMatchesEvidence(
   if (response.outputState === 'unavailable') {
     const causes = ['recovery', 'publish'] as const;
     const valid = causes.some((cause) => JSON.stringify(response)
-      === JSON.stringify(genericRecoveryResponse(request, evidence.exitCode, null, cause, terminalResult?.warning ?? null)));
+      === JSON.stringify(genericRecoveryResponse(request, evidence.exitCode, null, cause)));
     return { valid, payloadReferenced: false };
   }
   return {
@@ -737,7 +710,7 @@ function publishExecutionResult(
       } catch {
         payload = null;
       }
-      terminal = genericRecoveryResponse(request, normalized.exitCode, payload, 'publish', terminalResult.warning ?? null);
+      terminal = genericRecoveryResponse(request, normalized.exitCode, payload, 'publish');
     }
   }
   if (!brokerOwns()) return false;

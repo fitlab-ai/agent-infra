@@ -248,7 +248,7 @@ function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
       && host !== undefined
       && Number.isSafeInteger(host.stopRevision)
       && (host.stopRevision as number) > host.startRevision
-      && host.consumer === `lifecycle-recovery:${receipt.taskId}:${receipt.id}`
+      && host.consumer === receipt.id
       && exactText(host.consumedAt);
   }
 
@@ -562,7 +562,7 @@ function abortActivatedDelegation(
     event.childId !== receipt.childId
     || !Number.isSafeInteger(event.stopRevision)
     || event.stopRevision <= receipt.hostEvidence.startRevision
-    || event.consumer !== `lifecycle-recovery:${receipt.taskId}:${receipt.id}`
+    || event.consumer !== receipt.id
     || !exactText(event.consumedAt)
   ) {
     return fail('DELEGATION_RECOVERY_EVIDENCE_INVALID', 'recovery stop evidence does not match the activated delegation');

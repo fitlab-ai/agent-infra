@@ -52,14 +52,6 @@ type AgentClientLifecycleRecoveryRequest = Readonly<{
   intent: 'recover-started';
   agent: string;
   auto: true;
-}> | Readonly<{
-  taskRef: string;
-  intent: 'recover-started';
-  agent: string;
-  stage: 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code';
-  round: number;
-  artifact: string;
-  reason: string;
 }>;
 
 type AgentClientLifecycleRecoveryResult = Readonly<{
@@ -69,12 +61,8 @@ type AgentClientLifecycleRecoveryResult = Readonly<{
   requestRef: string;
   intent: 'recover-started';
   taskId: string | null;
-  stage: string | null;
-  round: number | null;
-  artifact: string | null;
   receiptId: string | null;
   childId: string | null;
-  warning: Readonly<{ code: string; message: string; action: string }> | null;
   error: Readonly<{ code: string; message: string }> | null;
 }>;
 
@@ -92,20 +80,6 @@ type AgentClientOrchestrationAdapter = Readonly<{
     request: AgentClientLifecycleRecoveryRequest,
     options: Readonly<{ repoRoot: string }>
   ) => AgentClientLifecycleRecoveryResult | Promise<AgentClientLifecycleRecoveryResult>;
-  readRecoveryEvidence?: (
-    repoRoot: string,
-    request: AgentClientLifecycleRecoveryRequest,
-    result: Readonly<{
-      status: string;
-      changed: boolean | null;
-      targetState: string | null;
-      warning?: unknown | null;
-      receiptId?: unknown;
-      stage?: unknown;
-      round?: unknown;
-      artifact?: unknown;
-    }>
-  ) => Promise<Readonly<Record<string, unknown>>>;
 }>;
 
 type AgentClientSeedCommand = Readonly<{
