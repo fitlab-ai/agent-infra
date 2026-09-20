@@ -35,7 +35,7 @@ import type {
   MechanicalChangeReport,
   PrChangeReport
 } from './pr-change-report.ts';
-import { manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
+import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
 
 type SummaryComment = { id: number | string; body: string };
@@ -582,6 +582,7 @@ async function syncPullRequestSummary(
       const initial = await inspectBoundPullRequest(context, resolved.repoRoot, prIdentity, loaded.value);
       if (!initial.ok) return fail(initial.status, context, initial.error);
       const manual = options.manualValidation;
+      let manualEvidenceDigest: string | null = null;
       const hasFinalManualValidation = /###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)/u.test(options.body);
       if (hasFinalManualValidation && (!manual || manual.phase !== 'final')) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_REQUIRED', message: 'final manual-validation summary requires the transaction coordinator', retryable: false }, prNumber);
       if (manual && (manual.phase === 'pending' ? hasFinalManualValidation : !hasFinalManualValidation)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PHASE_INVALID', message: 'manual-validation summary phase does not match the requested writer phase', retryable: false }, prNumber);
@@ -599,6 +600,7 @@ async function syncPullRequestSummary(
           });
           if (!completion.ok) return fail('failed', context, platformError(completion.error), prNumber);
           const { receipt, transaction } = completion.value;
+          manualEvidenceDigest = receipt.evidenceDigest;
           if (transaction.phase !== 'final-promotion-in-progress' || !transaction.eventAppended) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'final summary requires a receipt-backed promotion intent', retryable: false }, prNumber);
           if (!manualValidationFinalSummaryProjectionMatches(options.body, receipt)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the canonical receipt projection', retryable: false }, prNumber);
         }
@@ -635,7 +637,13 @@ async function syncPullRequestSummary(
       }
       const replaced = replaceCanonicalReportPlaceholder(`${prefix.value}${placeholder}${suffix.value}`, report.value);
       if (!replaced.ok) return fail('failed', context, platformError(replaced.error));
-      const desired = buildPullRequestSummary(resolved.taskId, replaced.value, initial.value.head.sha, renderHumanOverrideAudit(taskContent));
+      const renderedBody = manual?.phase === 'final'
+        ? replaced.value.replace(
+          MANUAL_VALIDATION_RECEIPT_PLACEHOLDER,
+          `<!-- manual-validation-receipt: transaction=${manual.transactionId}; receipt=${manual.receiptDigest}; evidence=${manualEvidenceDigest}; head=${manual.prHeadSha} -->`
+        )
+        : replaced.value;
+      const desired = buildPullRequestSummary(resolved.taskId, renderedBody, initial.value.head.sha, renderHumanOverrideAudit(taskContent));
       if (!isSafeSummaryEnvelope(desired, resolved.taskId)) return fail('failed', context, {
         code: 'PR_SUMMARY_RENDER_INVALID',
         message: 'Summary contains an invalid or duplicated reserved control marker',

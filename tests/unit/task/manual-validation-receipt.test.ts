@@ -41,7 +41,7 @@ test('manual-validation receipt rejects tampered digest', () => {
 });
 
 test('manual-validation final summary digest binds the canonical identity projection', () => {
-  const placeholder = `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${input.transactionId}; receipt=<receipt>; evidence=${input.evidenceDigest}; head=${input.prHeadSha}.\n`;
+  const placeholder = `### ✅ Manual Validation Passed\n\n<!-- manual-validation-receipt: transaction=${input.transactionId}; receipt=<receipt>; evidence=${input.evidenceDigest}; head=${input.prHeadSha} -->\n\nManual validation passed.\n`;
   const receipt = createManualValidationReceipt({
     ...input,
     finalSummaryDigest: manualValidationFinalSummaryDigest(placeholder)

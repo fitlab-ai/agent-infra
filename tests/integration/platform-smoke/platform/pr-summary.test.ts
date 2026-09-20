@@ -340,7 +340,7 @@ test('summary-sync rejects a direct final manual-validation writer without coord
     fs.writeFileSync(artifact, '# Manual Validation\n');
     const evidenceDigest = 'a'.repeat(64);
     const transactionId = 'mv-direct-final';
-    const placeholderBody = `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${transactionId}; receipt=<receipt>; evidence=${evidenceDigest}; head=${fixture.headSha}.\n`;
+    const placeholderBody = `### ✅ Manual Validation Passed\n\n<!-- manual-validation-receipt: transaction=${transactionId}; receipt=<receipt>; evidence=${evidenceDigest}; head=${fixture.headSha} -->\n\nManual validation passed.\n`;
     const transaction = createManualValidationTransaction({
       transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
       summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') }, pendingSummaryDigest: 'a'.repeat(64),
