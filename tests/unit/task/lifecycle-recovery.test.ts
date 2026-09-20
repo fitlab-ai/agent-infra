@@ -325,6 +325,37 @@ test('client adapter persists a dedicated pause after consecutive release failur
   }
 });
 
+test('client adapter pauses a partially committed recovery when commit verification fails', () => {
+  const f = fixture();
+  try {
+    const failed = withTaskExecutionLock(f.root, TASK_ID, 'test.adapter-recovery-verification-pause', () =>
+      recoverStartedLifecycleFromAdapter(autoRecoveryRequest, {
+        repoRoot: f.root,
+        lifecycleStore: f.store,
+        verifyRecoveryCommit: () => ({ ok: false, message: 'injected reread failure' })
+      })
+    );
+    assert.equal(failed.status, 'owner-unknown', JSON.stringify(failed));
+    assert.equal(failed.changed, true);
+    assert.equal(failed.error?.code, ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE);
+    assert.equal(readRun(f.taskDir)?.status, 'paused');
+    assert.equal(readRun(f.taskDir)?.pause?.code, ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE);
+    assert.equal(readRun(f.taskDir)?.pause?.recoverable, true);
+
+    const recovered = withTaskExecutionLock(f.root, TASK_ID, 'test.adapter-recovery-verification-resume', () =>
+      recoverStartedLifecycleFromAdapter(autoRecoveryRequest, {
+        repoRoot: f.root,
+        lifecycleStore: f.store
+      })
+    );
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(readRun(f.taskDir)?.status, 'running');
+    assert.equal(readRun(f.taskDir)?.pause, null);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('recover-started auto releases a retained claim before resuming its dedicated pause', () => {
   const f = fixture();
   try {

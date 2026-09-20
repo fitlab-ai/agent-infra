@@ -978,6 +978,31 @@ function recoverStartedLifecycleFromAdapter(
   const first = recoverStartedLifecycleUnderLock(request, options);
   if (
     'auto' in request
+    && first.error?.code === 'RECOVERY_COMMIT_VERIFY_FAILED'
+  ) {
+    const message = `${first.error.code}: ${first.error.message}`;
+    const paused = pauseOrchestration(
+      request.taskRef,
+      ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+      message,
+      true,
+      { ...options.orchestration, repoRoot: options.repoRoot, now: options.now }
+    );
+    return {
+      ...first,
+      changed: first.changed || paused.changed,
+      error: {
+        code: paused.status === 'paused'
+          ? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
+          : paused.error?.code ?? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+        message: paused.status === 'paused'
+          ? message
+          : paused.error?.message ?? message
+      }
+    };
+  }
+  if (
+    'auto' in request
     && first.warning?.code === RECOVERY_RELEASE_RETRY_WARNING.code
   ) {
     const second = recoverStartedLifecycleUnderLock(request, options);
