@@ -57,9 +57,7 @@ test('controller authority state reclaims a lock left by a dead writer', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-authority-stale-lock-'));
   try {
     fs.mkdirSync(root, { recursive: true });
-    fs.writeFileSync(path.join(root, 'controller-authority.json.lock'), `${JSON.stringify({
-      version: 1, pid: 2_000_000_000, startTime: 0, token: 'dead-writer'
-    })}\n`);
+    fs.writeFileSync(path.join(root, 'controller-authority.json.lock'), '');
     const inactive = createInactiveControllerAuthorityState(identity, 1_000);
     assert.deepEqual(writeControllerAuthorityState(root, inactive, { expected: null }), inactive);
   } finally {

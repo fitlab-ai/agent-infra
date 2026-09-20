@@ -107,6 +107,29 @@ test('active sandbox lifecycle reserves and consumes the unique attested capabil
     assert.equal(store.inspectReference(armed.capabilityRef).recoveryState, 'reserved');
     consumeLocalLifecycleAuthorityPhase(attestation);
     assert.equal(store.inspectReference(armed.capabilityRef).recoveryPhases[0]?.state, 'consumed');
+    const spare = store.arm({
+      taskId: lease.taskId,
+      buildIdentity,
+      controller: { instanceDigest: lease.controllerInstanceDigest, controlGeneration: lease.controlGeneration }
+    });
+    store.attestByReference({
+      capabilityRef: spare.capabilityRef,
+      sessionId: 'session-2', turnId: 'turn-2', toolUseId: 'tool-2',
+      hookDefinitionHash, buildIdentity,
+      controller: { instanceDigest: lease.controllerInstanceDigest, controlGeneration: lease.controlGeneration }
+    });
+    const retried = reserveLocalLifecycleAuthorityPhase({
+      taskId: lease.taskId,
+      family: 'code',
+      artifact: 'code.md',
+      round: 1,
+      operationId: '1'.repeat(64),
+      phase: 'artifact.finalize-local',
+      lifecycleRequestId: 'code:code.md:finalize'
+    }, env);
+    assert.ok(retried);
+    assert.equal(store.inspectReference(armed.capabilityRef).recoveryState, 'reserved');
+    assert.equal(store.inspectReference(spare.capabilityRef).recoveryState, 'unreserved');
     const completed = reserveLocalLifecycleAuthorityPhase({
       taskId: lease.taskId,
       family: 'code',

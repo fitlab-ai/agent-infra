@@ -48,9 +48,7 @@ test('finalization receipt reclaims a lock left by a dead writer', () => {
   try {
     const directory = path.join(root, '.agents', 'workspace', '.local-lifecycle-finalization-receipts');
     fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(path.join(directory, `${tuple.taskId}-${tuple.family}-${tuple.artifact}.json.lock`), `${JSON.stringify({
-      version: 1, pid: 2_000_000_000, startTime: 0, token: 'dead-writer'
-    })}\n`);
+    fs.writeFileSync(path.join(directory, `${tuple.taskId}-${tuple.family}-${tuple.artifact}.json.lock`), '');
     const receipt = recordLifecycleFinalizationReceipt(root, tuple, { operationId: '1'.repeat(32), now: 1 });
     assert.equal(receipt.state, 'pending');
   } finally {

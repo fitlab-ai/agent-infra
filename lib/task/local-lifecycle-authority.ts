@@ -45,7 +45,16 @@ export function reserveLocalLifecycleAuthorityPhase(
     root: resolveAgentRuntimeStoreRoot({ env, store: 'capabilities' })
   });
   const authorityRef = input.phase === 'artifact.finalize-local'
-    ? store.findUniqueAttestedReference(expected)
+    ? (() => {
+        const reserved = store.findByRecoveryOperation(input.operationId);
+        if (reserved.length > 1) throw new Error('CODEX_CAPABILITY_AMBIGUOUS');
+        if (reserved.length === 1) {
+          const reference = `sha256:${reserved[0]!.capabilityRefDigest}`;
+          store.validateReference(reference, expected);
+          return reference;
+        }
+        return store.findUniqueAttestedReference(expected);
+      })()
     : (() => {
         const matches = store.findByRecoveryOperation(input.operationId);
         if (matches.length !== 1) throw new Error('CODEX_CAPABILITY_AMBIGUOUS');

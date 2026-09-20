@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
+import { isCommittedTaskEventReplay } from '../../../lib/internal/task-event.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
@@ -1512,6 +1513,20 @@ test('review completion replays the same current result without another activity
   assert.equal(replayed.status, 0, replayed.stderr || replayed.stdout);
   assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
+  const args = [
+    f.id, `${scenario.family}.completed`, '--agent', 'codex', '--artifact', scenario.artifact,
+    '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0',
+    '--manual-validation', '0', '--initiator', 'model',
+    '--request-id', `${f.id}:${scenario.family}`, '--reason-code', 'user-request'
+  ];
+  assert.equal(isCommittedTaskEventReplay(args, { repoRoot: f.root }), true);
+  assert.equal(
+    isCommittedTaskEventReplay(
+      args.map((value) => value === scenario.artifact ? 'review-code-r2.md' : value),
+      { repoRoot: f.root }
+    ),
+    false
+  );
 });
 
 test('review completion records a new result when the finalized review artifact changes', () => {

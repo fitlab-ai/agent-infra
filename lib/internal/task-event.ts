@@ -27,6 +27,7 @@ import {
   reserveLocalLifecycleAuthorityPhase
 } from '../task/local-lifecycle-authority.ts';
 import type { LifecycleRecoveryAttestationV1 } from '../task/control-authority.ts';
+import { readArtifactRecoveryIntent } from '../task/artifact-repair-intent.ts';
 
 const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--orchestrated] [--dry-run]
 
@@ -125,6 +126,41 @@ export function parseTaskEventRequest(args: readonly string[]): TaskEventRequest
   const dryRunConflict = overrideDryRunConflict(request as unknown as Record<string, unknown>);
   if (dryRunConflict) throw new Error(dryRunConflict.message);
   return request;
+}
+
+export function isCommittedTaskEventReplay(
+  args: readonly string[],
+  options: Readonly<{ repoRoot?: string }> = {}
+): boolean {
+  try {
+    const request = parseTaskEventRequest(args);
+    if (!COMPLETED_FAMILIES[request.event] || request.dryRun) return false;
+    const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+    if (!resolved.ok) return false;
+    const replay = applyTaskEvent(
+      { ...request, dryRun: true },
+      { lockAlreadyHeld: true, repoRoot: resolved.repoRoot }
+    );
+    if (replay.status !== 'no-op') return false;
+    const receipt = sandboxFinalizationReceipt(request, resolved, { committed: true });
+    if (!receipt || !request.requestId) return false;
+    const intent = readArtifactRecoveryIntent(
+      resolved.repoRoot,
+      receipt.taskId,
+      receipt.family,
+      receipt.artifact
+    );
+    return Boolean(intent
+      && intent.recoveryOperationId === receipt.operationId
+      && intent.requestId === request.requestId
+      && intent.phase === 'task-event.completed'
+      && intent.authorityDigest === receipt.authorityDigest
+      && intent.finalArtifactSha256 === receipt.artifactSha256
+      && intent.finalSemanticDigest === receipt.semanticDigest
+      && ['passed', 'consumption-started', 'consumed'].includes(intent.state));
+  } catch {
+    return false;
+  }
 }
 
 async function taskEvent(args: string[] = []): Promise<void> {

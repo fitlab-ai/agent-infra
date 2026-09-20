@@ -76,8 +76,13 @@ if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkfl
       try {
         verifySandboxLocalControllerAuthority({ repoRoot: process.cwd() });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        taskControlTransportFailure(message, /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1]);
+        const committedReplay = command === 'task-event'
+          && (await import('../lib/internal/task-event.ts'))
+            .isCommittedTaskEventReplay(process.argv.slice(3), { repoRoot: process.cwd() });
+        if (!committedReplay) {
+          const message = error instanceof Error ? error.message : String(error);
+          taskControlTransportFailure(message, /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1]);
+        }
       }
       break;
     }
