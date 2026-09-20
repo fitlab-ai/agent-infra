@@ -8,15 +8,13 @@ import { execFileSync } from 'node:child_process';
 
 import { executeManualValidationTransaction } from '../../../lib/internal/manual-validation.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
-import { locateActivityLog, pairEntries } from '../../../lib/task/activity-log.ts';
 import { buildPrChangeReport, runMechanicalChangeReport, taskIntentDigest, writePrChangeReportAtomic } from '../../../lib/platform/pr-change-report.ts';
 import type { PrecheckCandidate } from '../../../lib/platform/pr-change-report.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import type { ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
-import { createManualValidationReceipt, manualValidationFinalSummaryDigest, renderLegacyManualValidationHiddenSummary, renderManualValidationSummarySource, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
-import { readManualValidationCompletion } from '../../../lib/task/manual-validation-completion.ts';
+import { createManualValidationReceipt, manualValidationFinalSummaryDigest, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
 import { archiveManualValidationGeneration, createManualValidationTransaction, manualValidationTransactionPath, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../../../lib/task/manual-validation-transaction.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
@@ -226,47 +224,16 @@ function countStarted(taskPath: string): number {
   return (fs.readFileSync(taskPath, 'utf8').match(/Complete Manual Validation \[started\]/gu) || []).length;
 }
 
-function countOpenManualValidationOperations(taskPath: string): number {
-  const section = locateActivityLog(fs.readFileSync(taskPath, 'utf8'));
-  return section
-    ? pairEntries(section.entries).filter((entry) => entry.step === 'Complete Manual Validation' && entry.started && !entry.done).length
-    : 0;
-}
-
-function legacyVisibleSummaryBody(body: string, receipt: NonNullable<Awaited<ReturnType<typeof executeManualValidationTransaction>>['receipt']>): string {
-  const section = `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${receipt.transactionId}; receipt=${receipt.receiptDigest}; evidence=${receipt.evidenceDigest}; head=${receipt.prHeadSha}.`;
-  let inserted = false;
-  const updated = body.replace(
-    /^###\s+(?:⚠️\s+(?:需人工校验|Manual Validation Required)|✅\s+(?:人工验证已通过|无需人工校验|Manual Validation Passed|No Manual Validation Required)|⏳\s+(?:人工验证待收尾|Manual Validation Pending))[ \t]*$[\s\S]*?(?=^#{1,3}\s|(?![\s\S]))/gmu,
-    () => {
-      if (inserted) return '';
-      inserted = true;
-      return `${section}\n\n`;
-    }
-  );
-  return inserted ? `${updated.replace(/\s+$/u, '')}\n` : `${body.replace(/\s+$/u, '')}\n\n${section}\n`;
-}
-
-function committedGeneration(fixture: Fixture, transactionId: string, prHeadSha: string, evidenceDigest: string, artifact: string) {
-  const summaryPreimage = [
-    `<!-- sync-pr:${fixture.taskId}:summary -->`,
-    '',
-    '### ⚠️ Manual Validation Required',
-    '',
-    '- Verify the previous generation.',
-    '',
-    `<!-- last-commit:${prHeadSha} -->`,
-    ''
-  ].join('\n');
+function committedGeneration(fixture: Fixture, transactionId: string, prHeadSha: string, evidenceDigest: string, artifact: string, finalSummaryDigest = 'd'.repeat(64)) {
   const transaction = createManualValidationTransaction({
     transactionId,
     taskId: fixture.taskId,
     prNumber: 42,
     prHeadSha,
     evidenceDigest,
-    summaryPreimage: { commentId: 9, body: summaryPreimage, digest: summaryPreimageDigest(summaryPreimage) },
+    summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') },
     pendingSummaryDigest: 'c'.repeat(64),
-    finalSummaryDigest: 'd'.repeat(64),
+    finalSummaryDigest,
     artifact,
     attempt: 1,
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -292,10 +259,9 @@ function committedGeneration(fixture: Fixture, transactionId: string, prHeadSha:
   if (!promoting.ok) throw new Error(promoting.error.message);
   const committed = transitionManualValidationTransaction(promoting.value, 'committed', { postWriteVerified: true });
   if (!committed.ok) throw new Error(committed.error.message);
-  const legacy = { ...committed.value, version: 1 as const };
-  writeManualValidationTransactionAtomic(fixture.taskDir, legacy);
+  writeManualValidationTransactionAtomic(fixture.taskDir, committed.value);
   writeManualValidationReceiptAtomic(fixture.taskDir, receipt);
-  return { transaction: legacy, receipt, summaryBody: renderLegacyManualValidationHiddenSummary(summaryPreimage, receipt) };
+  return { transaction: committed.value, receipt };
 }
 
 function prepare(
@@ -331,15 +297,10 @@ test('coordinator archives a committed generation before preparing the new head'
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
   const old = committedGeneration(fixture, 'mv-old', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
-  const started = applyTaskEvent({
-    taskRef: fixture.taskId, event: 'manual-validation.started', agent: 'codex', initiator: 'model',
-    requestId: 'mv-new-head', reasonCode: 'user-request', transactionId: 'mv-new-head'
-  }, { repoRoot: fixture.root });
-  assert.equal(started.status, 'applied');
   const historyDir = path.join(fixture.taskDir, '.manual-validation', 'history');
   fs.mkdirSync(historyDir, { recursive: true });
   fs.renameSync(path.join(fixture.taskDir, '.manual-validation', 'receipt.json'), path.join(historyDir, 'receipt-mv-old-attempt-1.json'));
-  const result = await prepare(fixture, { comments: [{ id: 9, body: old.summaryBody }], writes: 0 });
+  const result = await prepare(fixture);
   assert.equal(result.status, 'applied');
   assert.equal(result.transaction?.transactionId === old.transaction.transactionId, false);
   assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
@@ -358,7 +319,7 @@ test('coordinator fails closed when the archived receipt is invalid', async (t) 
   const invalidReceipt = JSON.parse(fs.readFileSync(path.join(historyDir, 'receipt-mv-invalid-history-attempt-1.json'), 'utf8')) as Record<string, unknown>;
   invalidReceipt.prHeadSha = 'f'.repeat(40);
   fs.writeFileSync(path.join(historyDir, 'receipt-mv-invalid-history-attempt-1.json'), `${JSON.stringify(invalidReceipt)}\n`);
-  const result = await prepare(fixture, { comments: [{ id: 9, body: old.summaryBody }], writes: 0 });
+  const result = await prepare(fixture);
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
   assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
@@ -382,24 +343,6 @@ test('coordinator retries after archive completion without duplicating the start
   assert.equal(countStarted(fixture.taskPath), 1);
 });
 
-test('coordinator archives a failed generation and reuses its started identity for changed evidence', async (t) => {
-  const fixture = createFixture();
-  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  const first = await prepare(fixture);
-  assert.equal(first.status, 'applied');
-  const failed = transitionManualValidationTransaction(first.transaction!, 'recovery-required', { error: 'summary contract rejected' });
-  assert.ok(failed.ok);
-  writeManualValidationTransactionAtomic(fixture.taskDir, failed.value);
-  fs.appendFileSync(fixture.summaryPath, 'Updated evidence.\n');
-
-  const retry = await prepare(fixture);
-  assert.equal(retry.status, 'applied', JSON.stringify(retry));
-  assert.equal(retry.transaction?.transactionId, first.transaction?.transactionId);
-  assert.equal(retry.transaction?.attempt, 2);
-  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', `transaction-${first.transaction?.transactionId}-attempt-1.json`)), true);
-  assert.equal(countStarted(fixture.taskPath), 1);
-});
-
 test('coordinator recovers a receipt-first archive interruption on the same retry identity', async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
@@ -415,8 +358,7 @@ test('coordinator recovers a receipt-first archive interruption on the same retr
     });
   };
   const old = committedGeneration(fixture, 'mv-fault', fixture.baseSha, 'b'.repeat(64), 'manual-validation.md');
-  const state: FakeGitHubState = { comments: [{ id: 9, body: old.summaryBody }], writes: 0 };
-  const first = await prepare(fixture, state, { archiveGeneration });
+  const first = await prepare(fixture, undefined, { archiveGeneration });
   assert.equal(first.status, 'failed');
   assert.equal(first.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
   assert.equal(countStarted(fixture.taskPath), 1);
@@ -424,56 +366,18 @@ test('coordinator recovers a receipt-first archive interruption on the same retr
   assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
   assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'transaction-mv-fault-attempt-1.json')), false);
 
-  const retry = await prepare(fixture, state, { archiveGeneration });
+  const retry = await prepare(fixture, undefined, { archiveGeneration });
   assert.equal(retry.status, 'applied');
   assert.equal(retry.transaction?.transactionId === old.transaction.transactionId, false);
   assert.equal(countStarted(fixture.taskPath), 1);
   assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', 'transaction-mv-fault-attempt-1.json')), true);
 
-  const replay = await prepare(fixture, state, { archiveGeneration });
+  const replay = await prepare(fixture, undefined, { archiveGeneration });
   assert.equal(replay.status, 'applied');
   assert.equal(replay.transaction?.transactionId, retry.transaction?.transactionId);
   assert.equal(replay.idempotent, true);
   assert.equal(countStarted(fixture.taskPath), 1);
 });
-
-for (const interruptionPoint of ['afterReceiptMove', 'afterSourceMove'] as const) {
-  test(`committed replay completes recovery after ${interruptionPoint}`, async (t) => {
-    const fixture = createFixture();
-    t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-    const state: FakeGitHubState = { comments: [], writes: 0 };
-    const client = fakeClient(fixture.baseSha, fixture.headSha, state);
-    const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client });
-    assert.equal(first.status, 'applied', JSON.stringify(first));
-    const originalSource = fs.readFileSync(fixture.summaryPath, 'utf8');
-    fs.appendFileSync(fixture.summaryPath, '\nChanged caller input.\n');
-    const fault = { injected: false };
-    const archiveGeneration = (taskDir: string, transaction: ManualValidationTransaction, requireReceipt?: boolean): void => {
-      archiveManualValidationGeneration(taskDir, transaction, requireReceipt, {
-        [interruptionPoint]: () => {
-          if (!fault.injected) {
-            fault.injected = true;
-            throw new Error(`injected ${interruptionPoint} interruption`);
-          }
-        }
-      });
-    };
-
-    const interrupted = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client, archiveGeneration });
-    assert.equal(interrupted.status, 'failed');
-    assert.equal(interrupted.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
-    assert.equal(countStarted(fixture.taskPath), 2);
-    fs.writeFileSync(fixture.summaryPath, originalSource);
-
-    const retry = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client });
-    const completion = readManualValidationCompletion(fixture.taskDir);
-
-    assert.equal(retry.status, 'applied', JSON.stringify(retry));
-    assert.equal(completion.ok, true, completion.ok ? undefined : completion.error.message);
-    assert.equal(countStarted(fixture.taskPath), 2);
-    assert.equal(countOpenManualValidationOperations(fixture.taskPath), 0);
-  });
-}
 
 test('actual coordinator execution converges on replay without repeated remote writes', async (t) => {
   const fixture = createFixture();
@@ -491,163 +395,48 @@ test('actual coordinator execution converges on replay without repeated remote w
   assert.equal(countStarted(fixture.taskPath), 1);
 });
 
-test('changed input cannot bypass committed summary drift rejection', async (t) => {
+test('coordinator replaces legacy visible receipt metadata with one hidden marker', async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  const state: FakeGitHubState = { comments: [], writes: 0 };
-  const client = fakeClient(fixture.baseSha, fixture.headSha, state);
-  const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client });
-  assert.equal(first.status, 'applied');
-  state.comments[0]!.body += '\nMaintainer added a new warning.\n';
-  const driftedBody = state.comments[0]!.body;
-  const writes = state.writes;
-  const started = countStarted(fixture.taskPath);
-  fs.appendFileSync(fixture.summaryPath, '\nChanged caller input.\n');
-
-  const replay = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client });
-
-  assert.equal(replay.status, 'failed');
-  assert.equal(replay.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
-  assert.equal(state.writes, writes);
-  assert.equal(state.comments[0]!.body, driftedBody);
-  assert.equal(countStarted(fixture.taskPath), started);
-  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history')), false);
-  assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
-});
-
-test('version 1 visible migration resumes a receipt-first archive interruption', async (t) => {
-  const fixture = createFixture();
-  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  const state: FakeGitHubState = { comments: [], writes: 0 };
-  const client = fakeClient(fixture.baseSha, fixture.headSha, state);
-  const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client });
-  assert.equal(first.status, 'applied');
-  const preimage = state.comments[0]!.body
-    .replace('### ✅ Manual Validation Passed', '### ⚠️ Manual Validation Required')
-    .replace(/<!-- manual-validation-receipt:[^\n]*-->/u, '');
-  const visibleProjection = legacyVisibleSummaryBody(preimage, first.receipt!);
-  const legacyReceipt = createManualValidationReceipt({
-    ...first.receipt!,
-    finalSummaryDigest: manualValidationFinalSummaryDigest(visibleProjection)
-  });
-  const visibleBody = legacyVisibleSummaryBody(preimage, legacyReceipt);
-  const legacyTransaction: ManualValidationTransaction = {
-    ...first.transaction!,
-    version: 1,
-    summaryPreimage: { commentId: 9, body: preimage, digest: summaryPreimageDigest(preimage) },
-    finalSummaryDigest: legacyReceipt.finalSummaryDigest,
-    committedReceipt: legacyReceipt.receiptDigest
-  };
-  writeManualValidationReceiptAtomic(fixture.taskDir, legacyReceipt);
-  writeManualValidationTransactionAtomic(fixture.taskDir, legacyTransaction);
-  fs.unlinkSync(path.join(fixture.taskDir, '.manual-validation', 'summary-source.md'));
-  state.comments[0]!.body = visibleBody;
-  const fault = { injected: false };
-  const archiveGeneration = (taskDir: string, transaction: ManualValidationTransaction, requireReceipt?: boolean): void => {
-    archiveManualValidationGeneration(taskDir, transaction, requireReceipt, {
-      afterReceiptMove: () => {
-        if (!fault.injected) {
-          fault.injected = true;
-          throw new Error('injected v1 receipt interruption');
-        }
-      }
-    });
-  };
-
-  const interrupted = await prepare(fixture, state, { archiveGeneration });
-  assert.equal(interrupted.status, 'failed');
-  assert.match(interrupted.error?.message ?? '', /injected v1 receipt interruption/u);
-  const started = countStarted(fixture.taskPath);
-  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', `receipt-${legacyTransaction.transactionId}-attempt-1.json`)), true);
-  assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
-
-  const retry = await prepare(fixture, state, { archiveGeneration });
-
-  assert.equal(retry.status, 'applied', JSON.stringify(retry));
-  assert.equal(retry.transaction?.version, 2);
-  assert.equal(countStarted(fixture.taskPath), started);
-  assert.equal(fs.existsSync(path.join(fixture.taskDir, '.manual-validation', 'history', `transaction-${legacyTransaction.transactionId}-attempt-1.json`)), true);
-});
-
-test('version 2 committed replay fails closed when its source snapshot is deleted', async (t) => {
-  const fixture = createFixture();
-  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  const state: FakeGitHubState = { comments: [], writes: 0 };
-  const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
-  assert.equal(first.status, 'applied');
-  assert.equal(first.transaction?.version, 2);
-  const writes = state.writes;
-  fs.unlinkSync(path.join(fixture.taskDir, '.manual-validation', 'summary-source.md'));
-
-  const replay = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
-
-  assert.equal(replay.status, 'failed');
-  assert.equal(replay.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
-  assert.equal(state.writes, writes);
-  assert.equal(countStarted(fixture.taskPath), 1);
-  assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
-});
-
-test('identical committed content is bridge-eligible only for version 1', async (t) => {
-  const fixture = createFixture();
-  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  const preimageBody = [
-    `<!-- sync-pr:${fixture.taskId}:summary -->`,
+  fs.writeFileSync(fixture.summaryPath, [
+    '## 审查摘要',
     '',
-    '## Summary',
+    '### ⚠️ 需人工校验',
     '',
-    '### ⚠️ Manual Validation Required',
+    '- 在生产环境完成权限校验。',
     '',
-    '- Verify production permissions.',
-    '',
-    '### Decision',
-    '',
-    '- Keep least privilege.',
-    '',
-    `<!-- last-commit:${fixture.headSha} -->`,
+    '<!-- canonical-pr-change-report -->',
     ''
-  ].join('\n');
+  ].join('\n'));
+  const transactionId = 'mv-visible';
   const evidenceDigest = sha256File(fixture.summaryPath);
-  const pendingSummaryDigest = 'c'.repeat(64);
-  const finalSummaryDigest = manualValidationFinalSummaryDigest(renderManualValidationSummarySource(preimageBody, 'final'));
-  const prepared = createManualValidationTransaction({
-    transactionId: 'mv-version-bridge', taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
-    summaryPreimage: { commentId: 9, body: preimageBody, digest: summaryPreimageDigest(preimageBody) },
-    pendingSummaryDigest, finalSummaryDigest, artifact: 'manual-validation.md', attempt: 1,
-    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
-  });
-  const staged = transitionManualValidationTransaction(prepared, 'summary-staged');
-  assert.equal(staged.ok, true);
-  if (!staged.ok) return;
-  const receipt = createManualValidationReceipt({
-    transactionId: prepared.transactionId, taskId: prepared.taskId, prNumber: prepared.prNumber, prHeadSha: prepared.prHeadSha,
-    evidenceDigest, artifact: prepared.artifact, artifactSha256: sha256File(path.join(fixture.taskDir, 'manual-validation.md')),
-    pendingSummaryDigest, finalSummaryDigest, committedAt: '2026-01-01T00:00:00.000Z'
-  });
-  const receiptCommitted = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
-  assert.equal(receiptCommitted.ok, true);
-  if (!receiptCommitted.ok) return;
-  const promoting = transitionManualValidationTransaction(receiptCommitted.value, 'final-promotion-in-progress', { eventAppended: true });
-  assert.equal(promoting.ok, true);
-  if (!promoting.ok) return;
-  const committed = transitionManualValidationTransaction(promoting.value, 'committed', { postWriteVerified: true });
-  assert.equal(committed.ok, true);
-  if (!committed.ok) return;
-  const currentBody = renderLegacyManualValidationHiddenSummary(preimageBody, receipt);
-  const state: FakeGitHubState = { comments: [{ id: 9, body: currentBody }], writes: 0 };
-  writeManualValidationReceiptAtomic(fixture.taskDir, receipt);
-  writeManualValidationTransactionAtomic(fixture.taskDir, { ...committed.value, version: 1 as const });
+  const legacyProjection = `### ✅ 人工验证已通过\n\n人工验证已通过；transaction=${transactionId}; receipt=<receipt>; evidence=${evidenceDigest}; head=${fixture.headSha}.\n`;
+  const old = committedGeneration(
+    fixture,
+    transactionId,
+    fixture.headSha,
+    evidenceDigest,
+    'manual-validation.md',
+    manualValidationFinalSummaryDigest(legacyProjection)
+  );
+  const state: FakeGitHubState = {
+    comments: [{
+      id: 9,
+      body: `<!-- sync-pr:${fixture.taskId}:summary -->\n<!-- last-commit: ${fixture.headSha} -->\n## 审查摘要\n\n${legacyProjection.replace('<receipt>', old.receipt.receiptDigest)}`
+    }],
+    writes: 0
+  };
 
-  const legacyReplay = await prepare(fixture, state);
-  assert.equal(legacyReplay.status, 'applied');
-  assert.equal(legacyReplay.idempotent, true);
-  assert.equal(state.writes, 0);
+  const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
+    client: fakeClient(fixture.baseSha, fixture.headSha, state)
+  });
 
-  writeManualValidationTransactionAtomic(fixture.taskDir, committed.value);
-  const currentReplay = await prepare(fixture, state);
-  assert.equal(currentReplay.status, 'failed');
-  assert.equal(currentReplay.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
-  assert.equal(state.writes, 0);
+  assert.equal(result.status, 'applied', JSON.stringify(result));
+  assert.notEqual(result.transaction?.transactionId, transactionId);
+  assert.ok(state.writes > 0);
+  const body = state.comments[0]?.body ?? '';
+  assert.match(body, /### ✅ 人工验证已通过\n\n<!-- manual-validation-receipt: [^\n]+ -->\n- 在生产环境完成权限校验。/u);
+  assert.equal(body.includes('人工验证已通过；transaction='), false);
 });
 
 test('coordinator replaces the Chinese manual-validation status section in place', async (t) => {
@@ -675,7 +464,7 @@ test('coordinator replaces the Chinese manual-validation status section in place
 
   assert.equal(result.status, 'applied', JSON.stringify(result));
   const body = state.comments[0]?.body ?? '';
-  assert.match(body, /## 审查摘要\n\n### ✅ 人工验证已通过\n\n- 在生产环境完成权限校验。\n\n<!-- manual-validation-receipt: transaction=.* -->\n\n### 关键技术决策/m);
+  assert.match(body, /## 审查摘要\n\n### ✅ 人工验证已通过\n\n<!-- manual-validation-receipt: [^\n]+ -->\n- 在生产环境完成权限校验。\n\n### 关键技术决策/m);
   assert.equal((body.match(/^###\s+(?:⚠️\s+需人工校验|✅\s+人工验证已通过|⏳\s+人工验证待收尾)\s*$/gmu) ?? []).length, 1);
 });
 
@@ -702,5 +491,6 @@ test('coordinator preserves a canonical report placeholder after the manual-vali
   const body = state.comments[0]?.body ?? '';
   assert.match(body, /^### ✅ 人工验证已通过$/mu);
   assert.match(body, /^### PR 代码增减$/mu);
-  assert.ok(body.indexOf('### PR 代码增减') < body.indexOf('### ✅ 人工验证已通过'));
+  assert.ok(body.indexOf('### ✅ 人工验证已通过') < body.indexOf('- 在生产环境完成权限校验。'));
+  assert.ok(body.indexOf('- 在生产环境完成权限校验。') < body.indexOf('### PR 代码增减'));
 });

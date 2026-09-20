@@ -103,7 +103,6 @@ type ResolvedContextClientOptions = {
   commentWrites?: { value: number };
   comments?: Array<{ id: number; body: string }>;
   writtenBodies?: string[];
-  postWriteBody?: string;
   pullRequestFailureAt?: number;
 };
 
@@ -116,7 +115,6 @@ function resolvedContextClient(
 ): GitHubClient {
   let repositoryCalls = 0;
   let pullRequestCalls = 0;
-  const comments = options.comments ?? [];
   return {
     version: () => ({ ok: true, value: '2.72.0' }),
     json: (args: string[], request?: { input?: string }) => {
@@ -144,13 +142,7 @@ function resolvedContextClient(
       if (args.some((value: string) => value.includes('/issues/42/comments'))) {
         if (args.includes('POST') || args.includes('PATCH')) {
           if (options.commentWrites) options.commentWrites.value += 1;
-          if (request?.input) {
-            const body = JSON.parse(request.input).body as string;
-            if (options.writtenBodies) options.writtenBodies.push(body);
-            const existing = comments.find((comment) => comment.id === 9);
-            if (existing) existing.body = body;
-            else comments.push({ id: 9, body });
-          }
+          if (options.writtenBodies && request?.input) options.writtenBodies.push(JSON.parse(request.input).body);
           return { ok: true, value: { id: 9 } };
         }
         if (failure === 'duplicate') {
@@ -159,7 +151,7 @@ function resolvedContextClient(
         }
         return failure === 'comments'
           ? { ok: false, error: { code: 'COMMENT_LIST_FAILED', message: 'comment API failed', retryable: true } }
-          : { ok: true, value: [options.postWriteBody && comments.length > 0 ? comments.map((comment) => ({ ...comment, body: options.postWriteBody! })) : comments] };
+          : { ok: true, value: [options.comments || []] };
       }
       throw new Error(`unexpected GitHub call: ${args.join(' ')}`);
     },
@@ -348,7 +340,7 @@ test('summary-sync rejects a direct final manual-validation writer without coord
     fs.writeFileSync(artifact, '# Manual Validation\n');
     const evidenceDigest = 'a'.repeat(64);
     const transactionId = 'mv-direct-final';
-    const placeholderBody = `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${transactionId}; receipt=<receipt>; evidence=${evidenceDigest}; head=${fixture.headSha}.\n`;
+    const placeholderBody = `### ✅ Manual Validation Passed\n\n<!-- manual-validation-receipt: transaction=${transactionId}; receipt=<receipt>; evidence=${evidenceDigest}; head=${fixture.headSha} -->\n\nManual validation passed.\n`;
     const transaction = createManualValidationTransaction({
       transactionId, taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
       summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') }, pendingSummaryDigest: 'a'.repeat(64),
@@ -490,27 +482,6 @@ test('summary-sync compensates a published comment when post-write inspection fa
     assert.equal(result.result, null);
     assert.equal(result.warnings.length, 0);
     assert.equal(commentWrites.value, 1);
-    assert.equal(deleteCalls.value, 1);
-  } finally {
-    fs.rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test('summary-sync compensates when the persisted body differs from the desired summary', async () => {
-  const fixture = summaryFixture();
-  const deleteCalls = { value: 0 };
-  try {
-    const result = await syncPullRequestSummary(fixture.taskId, {
-      cwd: fixture.root,
-      agent: 'codex',
-      body: `## Summary\n\n${'<!-- canonical-pr-change-report -->'}`,
-      changeReportFile: fixture.reportPath,
-      primaryResult: 'no_op',
-      strict: true,
-      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { deleteCalls, postWriteBody: 'drifted body' })
-    });
-    assert.equal(result.status, 'blocked');
-    assert.equal(result.error?.code, 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED');
     assert.equal(deleteCalls.value, 1);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });

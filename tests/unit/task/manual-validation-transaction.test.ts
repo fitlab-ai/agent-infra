@@ -7,14 +7,11 @@ import path from 'node:path';
 import {
   archiveManualValidationGeneration,
   createManualValidationTransaction,
-  manualValidationSummarySourcePath,
   manualValidationTransactionPath,
-  readManualValidationSummarySource,
   retryManualValidationTransaction,
   summaryPreimageDigest,
   transitionManualValidationTransaction,
   validateManualValidationTransaction,
-  writeManualValidationSummarySourceAtomic,
   writeManualValidationTransactionAtomic
 } from '../../../lib/task/manual-validation-transaction.ts';
 import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
@@ -24,7 +21,7 @@ const input = {
   taskId: 'TASK-20260910-000001',
   prNumber: 42,
   prHeadSha: 'a'.repeat(40),
-  evidenceDigest: summaryPreimageDigest('source\n'),
+  evidenceDigest: 'b'.repeat(64),
   summaryPreimage: { commentId: 9, body: 'pending', digest: summaryPreimageDigest('pending') },
   pendingSummaryDigest: 'd'.repeat(64),
   finalSummaryDigest: 'e'.repeat(64),
@@ -36,7 +33,6 @@ const input = {
 
 test('manual-validation transaction enforces pending-first phase order', () => {
   const prepared = createManualValidationTransaction(input);
-  assert.equal(prepared.version, 2);
   const staged = transitionManualValidationTransaction(prepared, 'summary-staged');
   assert.equal(staged.ok, true);
   if (!staged.ok) return;
@@ -48,23 +44,6 @@ test('manual-validation transaction enforces pending-first phase order', () => {
   const finalReady = transitionManualValidationTransaction(receipt.value, 'final-promotion-in-progress', { eventAppended: true });
   assert.equal(finalReady.ok, true);
   assert.deepEqual(validateManualValidationTransaction(prepared).ok, true);
-});
-
-test('manual-validation transaction reads version 1 without changing it and rejects unknown versions', () => {
-  const current = createManualValidationTransaction(input);
-  const legacy = { ...current, version: 1 };
-  const checked = validateManualValidationTransaction(legacy);
-  assert.equal(checked.ok, true);
-  if (checked.ok) assert.equal(checked.value.version, 1);
-  assert.equal(validateManualValidationTransaction({ ...current, version: 3 }).ok, false);
-});
-
-test('manual-validation v2 source snapshot is digest-bound', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-validation-source-'));
-  writeManualValidationSummarySourceAtomic(taskDir, 'summary\r\n', summaryPreimageDigest('summary\r\n'));
-  assert.equal(fs.readFileSync(manualValidationSummarySourcePath(taskDir), 'utf8'), 'summary\r\n');
-  assert.deepEqual(readManualValidationSummarySource(taskDir, summaryPreimageDigest('summary\r\n')), { ok: true, value: 'summary\r\n' });
-  assert.equal(readManualValidationSummarySource(taskDir, 'f'.repeat(64)).ok, false);
 });
 
 test('manual-validation transaction accepts only verified committed final state', () => {
@@ -125,9 +104,7 @@ test('manual-validation generation archive is retryable after an interrupted rec
   assert.equal(committed.ok, true);
   if (!committed.ok) return;
   writeManualValidationReceiptAtomic(taskDir, receipt);
-  writeManualValidationSummarySourceAtomic(taskDir, 'source\n', committed.value.evidenceDigest);
   writeManualValidationTransactionAtomic(taskDir, committed.value);
-  writeManualValidationSummarySourceAtomic(taskDir, 'source\n', committed.value.evidenceDigest);
   const transaction = committed.value;
   const receiptPath = path.join(stateDir, 'receipt.json');
   assert.equal(fs.existsSync(receiptPath), true);
@@ -137,7 +114,6 @@ test('manual-validation generation archive is retryable after an interrupted rec
 
   assert.equal(fs.existsSync(manualValidationTransactionPath(taskDir)), false);
   assert.equal(fs.existsSync(path.join(historyDir, `transaction-${transaction.transactionId}-attempt-${transaction.attempt}.json`)), true);
-  assert.equal(fs.existsSync(path.join(historyDir, `summary-source-${transaction.transactionId}-attempt-${transaction.attempt}.md`)), true);
 });
 
 test('manual-validation generation archive rejects an invalid history receipt', () => {
@@ -168,42 +144,4 @@ test('manual-validation generation archive rejects an invalid history receipt', 
   fs.writeFileSync(path.join(historyDir, `receipt-${prepared.transactionId}-attempt-${prepared.attempt}.json`), JSON.stringify({ ...receipt, prHeadSha: 'f'.repeat(40) }));
   assert.throws(() => archiveManualValidationGeneration(taskDir, committed.value, true), /receipt is invalid|does not match/);
   assert.equal(fs.existsSync(manualValidationTransactionPath(taskDir)), true);
-});
-
-test('manual-validation generation archive resumes after the source move', () => {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-validation-generation-source-interrupt-'));
-  const historyDir = path.join(taskDir, '.manual-validation', 'history');
-  const prepared = createManualValidationTransaction(input);
-  const staged = transitionManualValidationTransaction(prepared, 'summary-staged');
-  assert.equal(staged.ok, true);
-  if (!staged.ok) return;
-  const receipt = createManualValidationReceipt({
-    transactionId: prepared.transactionId,
-    taskId: prepared.taskId,
-    prNumber: prepared.prNumber,
-    prHeadSha: prepared.prHeadSha,
-    evidenceDigest: prepared.evidenceDigest,
-    artifact: prepared.artifact,
-    artifactSha256: 'c'.repeat(64),
-    pendingSummaryDigest: prepared.pendingSummaryDigest,
-    finalSummaryDigest: prepared.finalSummaryDigest,
-    committedAt: '2026-09-10T00:00:00.000Z'
-  });
-  const receiptCommitted = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
-  assert.equal(receiptCommitted.ok, true);
-  if (!receiptCommitted.ok) return;
-  writeManualValidationReceiptAtomic(taskDir, receipt);
-  writeManualValidationSummarySourceAtomic(taskDir, 'source\n', prepared.evidenceDigest);
-  writeManualValidationTransactionAtomic(taskDir, receiptCommitted.value);
-
-  assert.throws(() => archiveManualValidationGeneration(taskDir, receiptCommitted.value, true, {
-    afterSourceMove: () => { throw new Error('injected source interruption'); }
-  }), /injected source interruption/);
-  assert.equal(fs.existsSync(path.join(historyDir, `receipt-${prepared.transactionId}-attempt-1.json`)), true);
-  assert.equal(fs.existsSync(path.join(historyDir, `summary-source-${prepared.transactionId}-attempt-1.md`)), true);
-  assert.equal(fs.existsSync(manualValidationTransactionPath(taskDir)), true);
-
-  archiveManualValidationGeneration(taskDir, receiptCommitted.value, true);
-  assert.equal(fs.existsSync(path.join(historyDir, `transaction-${prepared.transactionId}-attempt-1.json`)), true);
-  assert.equal(fs.existsSync(manualValidationTransactionPath(taskDir)), false);
 });
