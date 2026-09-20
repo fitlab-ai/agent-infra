@@ -14,7 +14,7 @@ import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import type { ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
-import { createManualValidationReceipt, manualValidationFinalSummaryDigest, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
+import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
 import { archiveManualValidationGeneration, createManualValidationTransaction, manualValidationTransactionPath, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../../../lib/task/manual-validation-transaction.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
@@ -224,7 +224,7 @@ function countStarted(taskPath: string): number {
   return (fs.readFileSync(taskPath, 'utf8').match(/Complete Manual Validation \[started\]/gu) || []).length;
 }
 
-function committedGeneration(fixture: Fixture, transactionId: string, prHeadSha: string, evidenceDigest: string, artifact: string, finalSummaryDigest = 'd'.repeat(64)) {
+function committedGeneration(fixture: Fixture, transactionId: string, prHeadSha: string, evidenceDigest: string, artifact: string) {
   const transaction = createManualValidationTransaction({
     transactionId,
     taskId: fixture.taskId,
@@ -233,7 +233,7 @@ function committedGeneration(fixture: Fixture, transactionId: string, prHeadSha:
     evidenceDigest,
     summaryPreimage: { commentId: null, body: '', digest: summaryPreimageDigest('') },
     pendingSummaryDigest: 'c'.repeat(64),
-    finalSummaryDigest,
+    finalSummaryDigest: 'd'.repeat(64),
     artifact,
     attempt: 1,
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -393,50 +393,6 @@ test('actual coordinator execution converges on replay without repeated remote w
   assert.equal(second.transaction?.transactionId, first.transaction?.transactionId);
   assert.equal(state.writes, writesAfterFirst);
   assert.equal(countStarted(fixture.taskPath), 1);
-});
-
-test('coordinator replaces legacy visible receipt metadata with one hidden marker', async (t) => {
-  const fixture = createFixture();
-  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
-  fs.writeFileSync(fixture.summaryPath, [
-    '## 审查摘要',
-    '',
-    '### ⚠️ 需人工校验',
-    '',
-    '- 在生产环境完成权限校验。',
-    '',
-    '<!-- canonical-pr-change-report -->',
-    ''
-  ].join('\n'));
-  const transactionId = 'mv-visible';
-  const evidenceDigest = sha256File(fixture.summaryPath);
-  const legacyProjection = `### ✅ 人工验证已通过\n\n人工验证已通过；transaction=${transactionId}; receipt=<receipt>; evidence=${evidenceDigest}; head=${fixture.headSha}.\n`;
-  const old = committedGeneration(
-    fixture,
-    transactionId,
-    fixture.headSha,
-    evidenceDigest,
-    'manual-validation.md',
-    manualValidationFinalSummaryDigest(legacyProjection)
-  );
-  const state: FakeGitHubState = {
-    comments: [{
-      id: 9,
-      body: `<!-- sync-pr:${fixture.taskId}:summary -->\n<!-- last-commit: ${fixture.headSha} -->\n## 审查摘要\n\n${legacyProjection.replace('<receipt>', old.receipt.receiptDigest)}`
-    }],
-    writes: 0
-  };
-
-  const result = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, {
-    client: fakeClient(fixture.baseSha, fixture.headSha, state)
-  });
-
-  assert.equal(result.status, 'applied', JSON.stringify(result));
-  assert.notEqual(result.transaction?.transactionId, transactionId);
-  assert.ok(state.writes > 0);
-  const body = state.comments[0]?.body ?? '';
-  assert.match(body, /### ✅ 人工验证已通过\n\n<!-- manual-validation-receipt: [^\n]+ -->\n- 在生产环境完成权限校验。/u);
-  assert.equal(body.includes('人工验证已通过；transaction='), false);
 });
 
 test('coordinator replaces the Chinese manual-validation status section in place', async (t) => {

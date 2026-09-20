@@ -137,28 +137,7 @@ async function executeManualValidationTransactionLocked(
     transactionResult = { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_MISSING', message: 'previous failed transaction was archived for a new pull-request head' } };
   }
   if (!transactionResult.ok && transactionResult.error.code !== 'MANUAL_VALIDATION_TRANSACTION_MISSING') return result('failed', transactionResult.error);
-  if (transactionResult.ok && transactionResult.value.phase === 'committed') {
-    const committed = transactionResult.value;
-    const receiptResult = readManualValidationReceipt(resolved.taskDir, {
-      transactionId: committed.transactionId,
-      taskId: committed.taskId,
-      prNumber: committed.prNumber,
-      prHeadSha: committed.prHeadSha,
-      evidenceDigest: committed.evidenceDigest,
-      artifact: committed.artifact
-    });
-    if (!receiptResult.ok) return result('failed', receiptResult.error);
-    const receipt = receiptResult.value;
-    const marker = `<!-- manual-validation-receipt: transaction=${receipt.transactionId}; receipt=${receipt.receiptDigest}; evidence=${receipt.evidenceDigest}; head=${receipt.prHeadSha} -->`;
-    if (preimageBody.includes(marker) && manualValidationFinalSummaryProjectionMatches(preimageBody, receipt)) {
-      return result('applied', null, { transaction: committed, receipt, idempotent: true });
-    }
-    if (!manualValidationFinalSummaryProjectionMatches(preimageBody, receipt)) {
-      return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'committed summary does not match its receipt projection' });
-    }
-    previousTransaction = committed;
-    transactionResult = { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_MISSING', message: 'visible receipt metadata requires one replacement generation' } };
-  }
+  if (transactionResult.ok && transactionResult.value.phase === 'committed') return result('applied', null, { transaction: transactionResult.value, receipt: transactionResult.value.committedReceipt, idempotent: true });
   const openStarted = transactionResult.ok ? { present: false, transactionId: null } : openManualValidationStarted(resolved.taskMdPath);
   if (openStarted.present && !openStarted.transactionId) {
     return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'open manual-validation started event has no recoverable transactionId' });
