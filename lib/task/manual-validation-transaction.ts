@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { validateManualValidationReceipt } from './manual-validation-receipt.ts';
+import type { ManualValidationReceipt } from './manual-validation-receipt.ts';
 import {
   MANUAL_VALIDATION_ARTIFACT as ARTIFACT,
   MANUAL_VALIDATION_SHA40 as SHA40,
@@ -261,6 +262,36 @@ function readReceiptAt(file: string, transaction: ManualValidationTransaction): 
   return 'valid';
 }
 
+function readManualValidationGenerationReceipt(taskDir: string, transaction: ManualValidationTransaction): ManualValidationReceipt {
+  validateManualValidationGenerationArchive(taskDir, transaction, true);
+  const paths = manualValidationGenerationPaths(taskDir, transaction);
+  const file = fs.existsSync(paths.receipt.current) ? paths.receipt.current : paths.receipt.history;
+  const checked = validateManualValidationReceipt(JSON.parse(fs.readFileSync(file, 'utf8')) as unknown, {
+    transactionId: transaction.transactionId,
+    taskId: transaction.taskId,
+    prNumber: transaction.prNumber,
+    prHeadSha: transaction.prHeadSha,
+    evidenceDigest: transaction.evidenceDigest,
+    artifact: transaction.artifact
+  });
+  if (!checked.ok || checked.value.receiptDigest !== transaction.committedReceipt) {
+    throw new Error(checked.ok ? 'manual-validation receipt does not match the committed transaction' : checked.error.message);
+  }
+  return checked.value;
+}
+
+function readManualValidationGenerationSummarySource(taskDir: string, transaction: ManualValidationTransaction): string {
+  if (transaction.version !== 2) throw new Error('manual-validation summary source is only available for version 2 transactions');
+  validateManualValidationGenerationArchive(taskDir, transaction, true);
+  const paths = manualValidationGenerationPaths(taskDir, transaction);
+  const file = fs.existsSync(paths.source.current) ? paths.source.current : paths.source.history;
+  const source = fs.readFileSync(file, 'utf8');
+  if (summaryPreimageDigest(source) !== transaction.evidenceDigest) {
+    throw new Error('manual-validation summary source digest does not match the transaction evidence');
+  }
+  return source;
+}
+
 function validateManualValidationGenerationArchive(taskDir: string, transaction: ManualValidationTransaction, requireReceipt = false): void {
   const paths = manualValidationGenerationPaths(taskDir, transaction);
   const currentTransaction = fs.existsSync(paths.transaction.current);
@@ -337,6 +368,8 @@ export {
   createManualValidationTransaction,
   manualValidationSummarySourcePath,
   manualValidationTransactionPath,
+  readManualValidationGenerationReceipt,
+  readManualValidationGenerationSummarySource,
   readManualValidationSummarySource,
   validateManualValidationGenerationArchive,
   readManualValidationTransaction,

@@ -7,7 +7,7 @@ import { applyTaskEvent } from '../task/events.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { createManualValidationReceipt, manualValidationFinalSummaryDigest, readManualValidationReceipt, renderLegacyManualValidationHiddenSummary, renderManualValidationSummarySource, writeManualValidationReceiptAtomic } from '../task/manual-validation-receipt.ts';
-import { archiveManualValidationGeneration, createManualValidationTransaction, readManualValidationSummarySource, readManualValidationTransaction, retryManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, validateManualValidationGenerationArchive, writeManualValidationSummarySourceAtomic, writeManualValidationTransactionAtomic } from '../task/manual-validation-transaction.ts';
+import { archiveManualValidationGeneration, createManualValidationTransaction, readManualValidationGenerationReceipt, readManualValidationGenerationSummarySource, readManualValidationSummarySource, readManualValidationTransaction, retryManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, validateManualValidationGenerationArchive, writeManualValidationSummarySourceAtomic, writeManualValidationTransactionAtomic } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationReceipt } from '../task/manual-validation-receipt.ts';
 import { sha256File } from '../task/artifact-receipts.ts';
@@ -83,6 +83,37 @@ function desiredSummaryFromSource(
   return rendered.ok ? rendered : { ok: false, message: rendered.error.message };
 }
 
+function validateCommittedGeneration(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  transaction: ManualValidationTransaction,
+  currentBody: string
+): { ok: true; receipt: ManualValidationReceipt; shape: 'current' | 'hidden' | 'visible' } | { ok: false; message: string } {
+  let receipt: ManualValidationReceipt;
+  try { receipt = readManualValidationGenerationReceipt(resolved.taskDir, transaction); }
+  catch (error) { return { ok: false, message: error instanceof Error ? error.message : String(error) }; }
+  if (receipt.pendingSummaryDigest !== transaction.pendingSummaryDigest || receipt.finalSummaryDigest !== transaction.finalSummaryDigest) {
+    return { ok: false, message: 'manual-validation summary digests do not match the committed receipt' };
+  }
+  const current = normalizeCommentContent(currentBody);
+  if (transaction.version === 2) {
+    let source: string;
+    try { source = readManualValidationGenerationSummarySource(resolved.taskDir, transaction); }
+    catch (error) { return { ok: false, message: error instanceof Error ? error.message : String(error) }; }
+    const desired = desiredSummaryFromSource(resolved, source, receipt);
+    if (!desired.ok || normalizeCommentContent(desired.value) !== current) {
+      return { ok: false, message: desired.ok ? 'committed manual-validation summary no longer matches the generation source' : desired.message };
+    }
+    return { ok: true, receipt, shape: 'current' };
+  }
+  if (current === normalizeCommentContent(legacyHiddenSummaryBody(transaction.summaryPreimage.body, receipt))) {
+    return { ok: true, receipt, shape: 'hidden' };
+  }
+  if (current === normalizeCommentContent(legacyVisibleSummaryBody(transaction.summaryPreimage.body, receipt))) {
+    return { ok: true, receipt, shape: 'visible' };
+  }
+  return { ok: false, message: 'version 1 committed summary does not match an approved preimage recovery shape' };
+}
+
 function openManualValidationStarted(taskMdPath: string): { present: boolean; transactionId: string | null } {
   let content: string;
   try { content = fs.readFileSync(taskMdPath, 'utf8'); }
@@ -153,8 +184,13 @@ async function executeManualValidationTransactionLocked(
     const existing = readManualValidationTransaction(resolved.taskDir);
     if (!existing.ok) return result('failed', existing.error);
     if (!['aborted', 'recovery-required', 'committed'].includes(existing.value.phase)) return result('failed', transactionResult.error);
-    try { validateManualValidationGenerationArchive(resolved.taskDir, existing.value, existing.value.phase === 'committed'); }
-    catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: error instanceof Error ? error.message : String(error) }); }
+    if (existing.value.phase === 'committed') {
+      const verified = validateCommittedGeneration(resolved, existing.value, preimageBody);
+      if (!verified.ok) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: verified.message });
+    } else {
+      try { validateManualValidationGenerationArchive(resolved.taskDir, existing.value, false); }
+      catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: error instanceof Error ? error.message : String(error) }); }
+    }
     previousTransaction = existing.value;
     transactionResult = { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_MISSING', message: 'previous failed transaction was archived for a new pull-request head' } };
   }
@@ -162,43 +198,15 @@ async function executeManualValidationTransactionLocked(
   if (transactionResult.ok && transactionResult.value.version === 1 && transactionResult.value.phase !== 'committed') {
     return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'version 1 manual-validation transactions are only eligible for committed preimage recovery' });
   }
-  if (transactionResult.ok && transactionResult.value.version === 2) {
+  if (transactionResult.ok && transactionResult.value.version === 2 && transactionResult.value.phase !== 'committed') {
     const source = readManualValidationSummarySource(resolved.taskDir, transactionResult.value.evidenceDigest);
     if (!source.ok) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: source.error.message });
   }
   if (transactionResult.ok && transactionResult.value.phase === 'committed') {
     const committed = transactionResult.value;
-    const receiptResult = readManualValidationReceipt(resolved.taskDir, {
-      transactionId: committed.transactionId,
-      taskId: committed.taskId,
-      prNumber: committed.prNumber,
-      prHeadSha: committed.prHeadSha,
-      evidenceDigest: committed.evidenceDigest,
-      artifact: committed.artifact
-    });
-    if (!receiptResult.ok || receiptResult.value.receiptDigest !== committed.committedReceipt) {
-      return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: receiptResult.ok ? 'manual-validation receipt does not match the committed transaction' : receiptResult.error.message });
-    }
-    const receipt = receiptResult.value;
-    if (receipt.pendingSummaryDigest !== committed.pendingSummaryDigest || receipt.finalSummaryDigest !== committed.finalSummaryDigest) {
-      return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'manual-validation summary digests do not match the committed receipt' });
-    }
-    const current = normalizeCommentContent(preimageBody);
-    if (committed.version === 2) {
-      const source = readManualValidationSummarySource(resolved.taskDir, committed.evidenceDigest);
-      if (!source.ok) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: source.error.message });
-      const desired = desiredSummaryFromSource(resolved, source.value, receipt);
-      if (!desired.ok || normalizeCommentContent(desired.value) !== current) {
-        return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: desired.ok ? 'committed manual-validation summary no longer matches the generation source' : desired.message });
-      }
-      return result('applied', null, { transaction: committed, receipt, idempotent: true });
-    }
-    const expectedHidden = normalizeCommentContent(legacyHiddenSummaryBody(committed.summaryPreimage.body, receipt));
-    if (current === expectedHidden) return result('applied', null, { transaction: committed, receipt, idempotent: true });
-    const expectedVisible = normalizeCommentContent(legacyVisibleSummaryBody(committed.summaryPreimage.body, receipt));
-    if (current !== expectedVisible) {
-      return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'version 1 committed summary does not match an approved preimage recovery shape' });
-    }
+    const verified = validateCommittedGeneration(resolved, committed, preimageBody);
+    if (!verified.ok) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: verified.message });
+    if (verified.shape !== 'visible') return result('applied', null, { transaction: committed, receipt: verified.receipt, idempotent: true });
     try { validateManualValidationGenerationArchive(resolved.taskDir, committed, true); }
     catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: error instanceof Error ? error.message : String(error) }); }
     previousTransaction = committed;
