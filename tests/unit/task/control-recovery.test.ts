@@ -11,11 +11,11 @@ import {
 
 const criticalPhases = [...SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES];
 
-test('recovery registry covers lifecycle, finalization, route split, and orchestration intents', () => {
+test('recovery registry covers the remaining broker families', () => {
   assert.equal(findSandboxControlRecoveryOperation('task-lifecycle', 'complete')?.class, 'lifecycle-mutation');
   assert.equal(findSandboxControlRecoveryOperation('task-finalization', 'complete')?.class, 'finalization');
-  assert.equal(findSandboxControlRecoveryOperation('task-orchestration', 'route.read')?.class, 'read-only');
-  assert.equal(findSandboxControlRecoveryOperation('task-orchestration', 'route.clean-completion')?.class, 'route.clean-completion');
+  assert.equal(findSandboxControlRecoveryOperation('task-create', 'create')?.class, 'task-create');
+  assert.equal(findSandboxControlRecoveryOperation('codex-controller', 'verify')?.class, 'codex-controller');
   assert.equal(digestControlRecoveryIntent('task-lifecycle', 'complete').length, 64);
 });
 
@@ -28,41 +28,8 @@ test('recovery keeps started requests without a terminal result unknown and neve
   });
 });
 
-test('route clean-completion requires the completed run and reviewed-head evidence', () => {
-  const binding = operationRecoveryBinding('b'.repeat(32), 'generation-2', 'TASK-20260904-002407', 'task-orchestration', 'route.clean-completion');
-  const operation = findSandboxControlRecoveryOperation('task-orchestration', 'route.clean-completion')!;
-  const result = { requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId, intentDigest: binding.intentDigest, status: 'completed', changed: true };
-  const completeDomain = {
-    consistent: true, status: 'completed', pendingDelegation: null,
-    completionEvidence: {
-      kind: 'reviewed-head-clean', observedAt: '2026-09-07T00:00:00.000Z', head: 'head', headTree: 'tree',
-      worktreeTree: 'tree', lastReviewedCommit: 'head', prNumber: null, prHead: null
-    },
-    snapshot: { head: 'head', headTree: 'tree', worktreeTree: 'tree' },
-    lastReviewedCommit: 'head'
-  };
-  assert.equal(classifySandboxControlRecovery({
-    operation, binding, startedCommitted: true, terminalResult: result, domain: completeDomain, criticalPhases
-  }).outcome, 'success');
-  assert.equal(classifySandboxControlRecovery({
-    operation, binding, startedCommitted: true, terminalResult: result,
-    domain: { consistent: false, status: 'completed', pendingDelegation: null }, criticalPhases
-  }).outcome, 'unknown');
-  assert.equal(classifySandboxControlRecovery({
-    operation, binding, startedCommitted: true, terminalResult: result,
-    domain: {
-      consistent: true, status: 'completed', pendingDelegation: null,
-      completionEvidence: completeDomain.completionEvidence,
-      snapshot: { head: 'other', headTree: 'tree', worktreeTree: 'tree' },
-      lastReviewedCommit: 'head'
-    }, criticalPhases
-  }).outcome, 'unknown');
-});
-
-test('registered mutations require their declared recovery evidence', () => {
-  for (const operation of SANDBOX_CONTROL_RECOVERY_OPERATIONS.filter((candidate) => (
-    candidate.class !== 'read-only' && candidate.class !== 'route.clean-completion'
-  ))) {
+test('every registered mutation requires a matching domain contract', () => {
+  for (const operation of SANDBOX_CONTROL_RECOVERY_OPERATIONS) {
     const binding = operationRecoveryBinding(
       `${operation.family}-${operation.intent}`.padEnd(32, 'x').slice(0, 32),
       'generation', 'TASK-20260904-002407', operation.family, operation.intent
@@ -104,7 +71,7 @@ test('recover-started response loss stays unknown and is retried through the ide
   }).outcome, 'unknown');
 });
 
-test('recovery matrix distinguishes explicit failure, journal partial state, and read-only changes', () => {
+test('recovery matrix distinguishes explicit failure and journal partial state', () => {
   const lifecycle = findSandboxControlRecoveryOperation('task-lifecycle', 'complete')!;
   const lifecycleBinding = operationRecoveryBinding('c'.repeat(32), 'generation-3', 'TASK-20260904-002407', lifecycle.family, lifecycle.intent);
   const failed = { requestId: lifecycleBinding.requestId, generation: lifecycleBinding.generation, taskId: lifecycleBinding.taskId, intentDigest: lifecycleBinding.intentDigest, status: 'failed', changed: true };
@@ -117,24 +84,10 @@ test('recovery matrix distinguishes explicit failure, journal partial state, and
     operation: lifecycle, binding: lifecycleBinding, startedCommitted: true, terminalResult: applied,
     domain: { consistent: true }, journal: { exists: true, completedSteps: ['task-written'], failure: null }, criticalPhases
   }).outcome, 'in-progress');
-
-  for (const intent of ['route.read', 'status'] as const) {
-    const operation = findSandboxControlRecoveryOperation('task-orchestration', intent)!;
-    const binding = operationRecoveryBinding(`read-${intent}`, 'generation-4', 'TASK-20260904-002407', operation.family, intent);
-    const result = { requestId: binding.requestId, generation: binding.generation, taskId: binding.taskId, intentDigest: binding.intentDigest, status: 'running', changed: false };
-    assert.equal(classifySandboxControlRecovery({
-      operation, binding, startedCommitted: true, terminalResult: result,
-      domain: { consistent: true, snapshotValid: true }, criticalPhases
-    }).outcome, 'success', intent);
-    assert.equal(classifySandboxControlRecovery({
-      operation, binding, startedCommitted: true, terminalResult: { ...result, changed: true },
-      domain: { consistent: true, snapshotValid: true }, criticalPhases
-    }).outcome, 'unknown', `${intent} changed unexpectedly`);
-  }
 });
 
 test('recovery rejects durable terminal results with conflicting bindings', () => {
-  const operation = findSandboxControlRecoveryOperation('task-orchestration', 'advance')!;
+  const operation = findSandboxControlRecoveryOperation('task-create', 'create')!;
   const binding = operationRecoveryBinding('d'.repeat(32), 'generation-5', 'TASK-20260904-002407', operation.family, operation.intent);
   assert.equal(classifySandboxControlRecovery({
     operation, binding, startedCommitted: true,

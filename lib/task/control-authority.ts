@@ -23,11 +23,7 @@ import {
   sealOrchestrationDelegation,
   statusOrchestration
 } from './orchestration.ts';
-import type {
-  OrchestrationDiagnosticLogger,
-  OrchestrationOptions,
-  OrchestrationResult
-} from './orchestration.ts';
+import type { OrchestrationOptions, OrchestrationResult } from './orchestration.ts';
 import {
   applyTaskFinalization,
   type TaskFinalizationRequest,
@@ -540,7 +536,6 @@ export type TaskControlExecutionContext =
       generation: string;
       manifestPath: string;
       requestId: string;
-      diagnosticLog?: OrchestrationDiagnosticLogger;
       controllerBinding?: TaskControlControllerBinding | null;
       lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
     }>;
@@ -629,7 +624,6 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
   generation: string;
   manifestPath: string;
   requestId: string;
-  diagnosticLog?: OrchestrationDiagnosticLogger;
   controllerBinding?: TaskControlControllerBinding | null;
   lifecycleRecoveryAttestation?: LifecycleRecoveryAttestationV1 | null;
 }>): TaskControlExecutionContext {
@@ -650,7 +644,6 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
     generation: params.generation,
     manifestPath: absolute('manifestPath', params.manifestPath),
     requestId: params.requestId,
-    ...(params.diagnosticLog === undefined ? {} : { diagnosticLog: params.diagnosticLog }),
     ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) }),
     ...(params.lifecycleRecoveryAttestation === undefined ? {} : {
       lifecycleRecoveryAttestation: params.lifecycleRecoveryAttestation === null
@@ -695,11 +688,7 @@ function domainOptions(
 ): OrchestrationOptions {
   return {
     ...options,
-    repoRoot: context.repoRoot,
-    ...(context.source === 'sandbox-executor' && context.diagnosticLog !== undefined
-      ? { diagnosticLog: context.diagnosticLog }
-      : {}),
-    ...(context.source === 'sandbox-executor' ? { gitWorktreeRoot: context.worktreeRoot } : {})
+    repoRoot: context.repoRoot
   };
 }
 
@@ -924,7 +913,7 @@ const ORCHESTRATION_FLAGS = new Set([
   '--parent-id', '--before-fingerprint', '--stage', '--round', '--artifact', '--role',
   '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--actual-reasoning-effort',
   '--model-fallback-reason', '--reasoning-effort-fallback-reason', '--exit-code', '--after-fingerprint',
-  '--changed-paths', '--code', '--message', '--recoverable', '--git-worktree-root'
+  '--changed-paths', '--code', '--message', '--recoverable'
 ]);
 
 function parseValues(
@@ -1097,8 +1086,5 @@ export function parseTaskControlOperation(
     if (recoverable !== 'true' && recoverable !== 'false') operationInvalid('--recoverable must be true or false');
     input.code = value(values, '--code'); input.message = value(values, '--message'); input.recoverable = recoverable === 'true';
   }
-  const options = value(values, '--git-worktree-root') === undefined
-    ? undefined
-    : { gitWorktreeRoot: value(values, '--git-worktree-root') };
-  return { family, taskRef, intent: parsedIntent, input, ...(options ? { options } : {}) };
+  return { family, taskRef, intent: parsedIntent, input };
 }

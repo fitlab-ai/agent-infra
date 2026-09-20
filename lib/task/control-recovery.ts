@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { isCompletionEvidence } from './orchestration.ts';
 
 export type ControlRecoveryOutcome = 'not-executed' | 'in-progress' | 'success' | 'failure' | 'unknown' | 'rejected';
 
@@ -14,7 +13,7 @@ export function parseControlOutput(output: string | null): Record<string, unknow
 }
 
 export type ControlRecoveryOperation = Readonly<{
-  family: 'task-lifecycle' | 'task-finalization' | 'task-orchestration' | 'task-create' | 'codex-controller';
+  family: 'task-lifecycle' | 'task-finalization' | 'task-create' | 'codex-controller';
   intent: string;
   class: string;
 }>;
@@ -53,19 +52,9 @@ export type ControlRecoveryDecision = Readonly<{
 }>;
 
 const LIFECYCLE_INTENTS = ['block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore', 'recover-started'] as const;
-const ORCHESTRATION_INTENTS = [
-  'begin-or-resume', 'route.read', 'route.clean-completion', 'status', 'prepare', 'dispatch',
-  'await-activation', 'recover-prepared', 'hook-start', 'hook-stop', 'advance', 'pause'
-] as const;
-
 export const SANDBOX_CONTROL_RECOVERY_OPERATIONS: readonly ControlRecoveryOperation[] = Object.freeze([
   ...LIFECYCLE_INTENTS.map((intent) => ({ family: 'task-lifecycle' as const, intent, class: 'lifecycle-mutation' })),
   { family: 'task-finalization', intent: 'complete', class: 'finalization' },
-  ...ORCHESTRATION_INTENTS.map((intent) => ({
-    family: 'task-orchestration' as const,
-    intent,
-    class: intent === 'route.clean-completion' ? 'route.clean-completion' : intent === 'route.read' || intent === 'status' ? 'read-only' : 'orchestration'
-  })),
   { family: 'task-create', intent: 'create', class: 'task-create' },
   ...(['open', 'close', 'verify'] as const).map((intent) => ({ family: 'codex-controller' as const, intent, class: 'codex-controller' }))
 ]);
@@ -93,20 +82,6 @@ function domainEvidenceMatches(
   if (!domain) return false;
   if (domain.consistent !== true) return false;
   if (operation.family === 'task-lifecycle' && operation.intent === 'recover-started') return false;
-  if (operation.class === 'route.clean-completion') {
-    const completion = domain.completionEvidence as Record<string, unknown> | undefined;
-    const snapshot = domain.snapshot as Record<string, unknown> | undefined;
-    const lastReviewedCommit = domain.lastReviewedCommit;
-    return result.status === 'completed'
-      && domain.status === 'completed'
-      && domain.pendingDelegation === null
-      && isCompletionEvidence(completion)
-      && snapshot?.head === completion.head
-      && snapshot.headTree === completion.headTree
-      && snapshot.worktreeTree === completion.worktreeTree
-      && lastReviewedCommit === completion.lastReviewedCommit;
-  }
-  if (operation.class === 'read-only') return result.changed === false && domain.snapshotValid === true;
   return true;
 }
 
@@ -156,9 +131,7 @@ export function classifySandboxControlRecovery(input: ControlRecoveryInput): Con
   return {
     outcome: 'success',
     responseReconstructable: true,
-    reasonCode: input.operation.class === 'route.clean-completion' && result.changed === false
-      ? 'RECOVERY_ROUTE_COMPLETION_NOOP'
-      : 'RECOVERY_TERMINAL_AND_DOMAIN_MATCH'
+    reasonCode: 'RECOVERY_TERMINAL_AND_DOMAIN_MATCH'
   };
 }
 

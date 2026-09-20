@@ -5,11 +5,6 @@ import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 import type { SandboxAuthorityEvidenceV1 } from '../engines/authority.ts';
 import type { SandboxTaskView } from './task-view.ts';
-import {
-  validateLifecycleAuthorityRequest,
-  type LifecycleAuthorityRequestV1,
-  type LifecycleRecoveryAttestationV1
-} from '../../task/control-authority.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
 export const SANDBOX_CONTROL_MAX_LOGICAL_RECORDS = 1024;
@@ -20,7 +15,7 @@ export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
-export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-finalization', 'task-create', 'codex-controller'] as const;
+export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-finalization', 'task-create', 'codex-controller'] as const;
 export type SandboxControlTimingPolicy = Readonly<{
   controlTickMs: number;
   parkedBindingInitialMs: number;
@@ -60,9 +55,6 @@ export type SandboxControlExecutorGateV2 = Readonly<{
   nonce: string;
   owner: SandboxControlBrokerOwner;
   requestId: string;
-  operationId: string;
-  phase: 'orchestration.prepare' | 'artifact.preflight' | 'artifact.finalize-local' | 'task-event.completed';
-  authority: LifecycleRecoveryAttestationV1 | null;
 }>;
 type RequestBase = Readonly<{
   version: 3; id: string; token: string; generation: string; issuedAt: number; expiresAt: number;
@@ -70,8 +62,7 @@ type RequestBase = Readonly<{
   controllerProof: CodexControllerLeaseProofV1 | null;
 }>;
 export type SandboxTaskCommandRequest = RequestBase & Readonly<{
-  family: 'task-lifecycle' | 'task-orchestration'; args: string[];
-  authority?: LifecycleAuthorityRequestV1;
+  family: 'task-lifecycle'; args: string[];
 }>;
 export type SandboxTaskFinalizationRequest = RequestBase & Readonly<{
   family: 'task-finalization'; operation: 'complete'; agent: string; args: [];
@@ -301,9 +292,8 @@ export function validateSandboxControlRequest(
     }
     return request as SandboxTaskFinalizationRequest;
   }
-  const expected = ['args', 'authority', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
-  const baseExpected = expected.filter((key) => key !== 'authority');
-  if (![baseExpected, expected].some((keys) => Object.keys(request).sort().join(',') === keys.sort().join(','))
+  const expected = ['args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
+  if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
   }
@@ -313,39 +303,10 @@ export function validateSandboxControlRequest(
       "branch-only sandboxes cannot coordinate tasks; return to the host and run 'ai sandbox start --recreate <task-ref-or-correct-branch>'"
     );
   }
-  if (request.family === 'task-orchestration'
-    && request.args.some((arg) => arg === '--git-worktree-root' || arg.startsWith('--git-worktree-root='))) {
-    fail('SANDBOX_CONTROL_REQUEST_INVALID', 'worktree binding is reserved for the control broker');
-  }
-  if (request.controllerProcess !== null
-    || (request.controllerProof !== null && !validControllerProof(request.controllerProof))) {
+  if (request.controllerProcess !== null || request.controllerProof !== null) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller authority is invalid');
   }
-  if (request.family !== 'task-orchestration' && request.controllerProof !== null) {
-    fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller proof is not allowed for this family');
-  }
-  if (request.authority !== undefined) validateAuthoritySelector(request.authority, request, manifest);
   return request as SandboxTaskCommandRequest;
-}
-
-function validateAuthoritySelector(
-  value: unknown,
-  request: Record<string, unknown>,
-  manifest: SandboxControlManifest
-): asserts value is LifecycleAuthorityRequestV1 {
-  let authority: LifecycleAuthorityRequestV1;
-  try { authority = validateLifecycleAuthorityRequest(value); }
-  catch { fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'lifecycle authority selector is invalid'); }
-  if (authority.requestId !== request.id
-    || authority.taskId !== manifest.taskId
-    || authority.expectedControlGeneration !== manifest.generation) {
-    fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'lifecycle authority selector is not bound to this request');
-  }
-  const args = Array.isArray(request.args) ? request.args : [];
-  if (request.family === 'task-orchestration'
-    && (args[1] !== 'prepare' || authority.phase !== 'orchestration.prepare')) {
-    fail('SANDBOX_CONTROL_AUTHORITY_INVALID', 'orchestration authority is only valid for prepare');
-  }
 }
 
 export function bindSandboxControlTask(request: SandboxControlRequest, taskId: string): string[] {

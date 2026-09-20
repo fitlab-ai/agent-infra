@@ -794,8 +794,8 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
     generation: 'generation-1',
     issuedAt: 1_000,
     expiresAt: 3_000,
-    family: 'task-orchestration',
-    args: ['08', 'status'],
+    family: 'task-lifecycle',
+    args: ['08', 'complete'],
     controllerProcess: null,
     controllerProof: null
   };
@@ -842,21 +842,6 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
     probeProcess: () => 'alive'
   }), /SANDBOX_CONTROL_BRANCH_ONLY/);
   assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
-});
-
-test('task-orchestration requests cannot override the manifest worktree binding', () => {
-  assert.throws(() => validateSandboxControlRequest({
-    version: 3,
-    id: '12345678-1234-1234-1234-123456789abc',
-    token: 'secret',
-    generation: 'generation-1',
-    issuedAt: 1_000,
-    expiresAt: 3_000,
-    family: 'task-orchestration',
-    args: ['08', 'status', '--git-worktree-root', '/other'],
-    controllerProcess: null,
-    controllerProof: null
-  }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
 });
 
 test('control broker strips mixed-case sandbox authority from child environments', () => {
