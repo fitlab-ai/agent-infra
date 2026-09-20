@@ -45,10 +45,13 @@ import { getArtifactSchema } from "./artifact-schema.ts";
 import { inspectArtifactContract } from "./artifact-operations.ts";
 import type { VerificationShared } from "./verification-types.ts";
 import { normalizeVerificationRecord } from './gate-policy.ts';
-import { manualValidationFinalSummaryProjectionMatches } from "./manual-validation-receipt.ts";
+import { renderLegacyManualValidationHiddenSummary, renderManualValidationSummarySource } from "./manual-validation-receipt.ts";
+import { readManualValidationSummarySource } from "./manual-validation-transaction.ts";
 import { readManualValidationCompletion } from "./manual-validation-completion.ts";
 import { sha256File } from "./artifact-receipts.ts";
-import { summaryCommentState } from "../platform/pr-summary.ts";
+import { renderPullRequestSummary, summaryCommentState } from "../platform/pr-summary.ts";
+import { normalizeCommentContent } from "../platform/issue-comments.ts";
+import { readPrChangeReport } from "../platform/pr-change-report.ts";
 import { taskIssueIdentity } from "../platform/task-identities.ts";
 
 const TASK_ENUMS = {
@@ -915,6 +918,10 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   if (sha256File(resolved.path) !== receipt.artifactSha256) {
     return failResult("manual-validation", `Manual validation artifact digest does not match the receipt for ${artifactName}`);
   }
+  if (transaction.version === 2) {
+    const source = readManualValidationSummarySource(taskDir, transaction.evidenceDigest);
+    if (!source.ok) return failResult("manual-validation", `manual-validation summary source is unavailable: ${source.error.message}`);
+  }
   // 6. Timing correlation (PL-3 fix, PL-4 corrected): the completion entry must
   //    sit AFTER the latest review-code round's completion entry in the
   //    append-only Activity Log. indexOf is a literal search, so the artifactName
@@ -942,7 +949,26 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
     if (inspected.pullRequest.head.sha !== receipt.prHeadSha) return failResult("manual-validation", "manual validation receipt is stale for the current pull-request head");
     const summary = await summaryCommentState(task.metadata.id, { cwd: repositoryRoot });
     if (!summary.comment) return failResult("manual-validation", "canonical pull-request summary comment is unavailable");
-    if (!manualValidationFinalSummaryProjectionMatches(summary.comment.body, receipt)) return failResult("manual-validation", "canonical pull-request summary does not match the committed manual validation projection");
+    let desired: string;
+    if (transaction.version === 2) {
+      const source = readManualValidationSummarySource(taskDir, transaction.evidenceDigest);
+      if (!source.ok) return failResult("manual-validation", `manual-validation summary source is unavailable: ${source.error.message}`);
+      const report = readPrChangeReport(path.join(taskDir, "pr-change-report.json"));
+      if (!report.ok) return failResult("manual-validation", `pull-request change report is unavailable: ${report.error.message}`);
+      const rendered = renderPullRequestSummary({
+        taskId: task.metadata.id,
+        body: renderManualValidationSummarySource(source.value, 'final'),
+        headSha: receipt.prHeadSha,
+        taskContent: task.content,
+        report: report.value,
+        manualValidation: { phase: 'final', transactionId: receipt.transactionId, receiptDigest: receipt.receiptDigest, evidenceDigest: receipt.evidenceDigest, prHeadSha: receipt.prHeadSha, authority: 'coordinator' }
+      });
+      if (!rendered.ok) return failResult("manual-validation", `canonical pull-request summary cannot be rendered: ${rendered.error.message}`);
+      desired = rendered.value;
+    } else {
+      desired = renderLegacyManualValidationHiddenSummary(transaction.summaryPreimage.body, receipt);
+    }
+    if (normalizeCommentContent(summary.comment.body) !== normalizeCommentContent(desired)) return failResult("manual-validation", "canonical pull-request summary does not match the committed manual validation generation");
   }
   return passResult("manual-validation", `Manual validation completed → ${artifactName} (committed receipt and post-write verification)`);
 }

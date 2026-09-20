@@ -6,12 +6,14 @@ import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { applyTaskEvent } from '../task/events.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
-import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, createManualValidationReceipt, manualValidationFinalSummaryDigest, manualValidationFinalSummaryProjectionMatches, readManualValidationReceipt, writeManualValidationReceiptAtomic } from '../task/manual-validation-receipt.ts';
-import { archiveManualValidationGeneration, createManualValidationTransaction, readManualValidationTransaction, retryManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, validateManualValidationGenerationArchive, writeManualValidationTransactionAtomic } from '../task/manual-validation-transaction.ts';
+import { createManualValidationReceipt, manualValidationFinalSummaryDigest, readManualValidationReceipt, renderLegacyManualValidationHiddenSummary, renderManualValidationSummarySource, writeManualValidationReceiptAtomic } from '../task/manual-validation-receipt.ts';
+import { archiveManualValidationGeneration, createManualValidationTransaction, readManualValidationSummarySource, readManualValidationTransaction, retryManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, validateManualValidationGenerationArchive, writeManualValidationSummarySourceAtomic, writeManualValidationTransactionAtomic } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../task/manual-validation-transaction.ts';
 import type { ManualValidationReceipt } from '../task/manual-validation-receipt.ts';
 import { sha256File } from '../task/artifact-receipts.ts';
-import { summaryCommentState, syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { renderPullRequestSummary, summaryCommentState, syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { normalizeCommentContent } from '../platform/issue-comments.ts';
+import { readPrChangeReport } from '../platform/pr-change-report.ts';
 import type { PlatformClient } from '../platform/context.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
@@ -43,41 +45,42 @@ function printFailure(format: OutputFormat, error: { code: string; message: stri
   process.exitCode = 1;
 }
 
-const MANUAL_VALIDATION_STATUS_HEADING = /^###\s+(?:⚠️\s+(?:需人工校验|Manual Validation Required)|✅\s+(?:人工验证已通过|无需人工校验|Manual Validation Passed|No Manual Validation Required)|⏳\s+(?:人工验证待收尾|Manual Validation Pending))[ \t]*$/mu;
 const MANUAL_VALIDATION_STATUS_SECTION = /^###\s+(?:⚠️\s+(?:需人工校验|Manual Validation Required)|✅\s+(?:人工验证已通过|无需人工校验|Manual Validation Passed|No Manual Validation Required)|⏳\s+(?:人工验证待收尾|Manual Validation Pending))[ \t]*$[\s\S]*?(?=^#{1,3}\s|(?![\s\S]))/gmu;
-const TRAILING_CANONICAL_REPORT_PLACEHOLDER = /\n*<!--\s*canonical-pr-change-report\s*-->\s*$/u;
 
-function manualSummaryBody(body: string, phase: 'pending' | 'final', transactionId: string, receiptDigest = '', evidenceDigest = '', prHeadSha = ''): string {
+function legacyVisibleSummaryBody(body: string, receipt: ManualValidationReceipt): string {
   const chinese = /###\s+(?:⚠️\s+需人工校验|✅\s+(?:人工验证已通过|无需人工校验)|⏳\s+人工验证待收尾)\s*$/mu.test(body);
-  const heading = phase === 'pending'
-    ? chinese
-      ? '### ⏳ 人工验证待收尾'
-      : '### ⏳ Manual Validation Pending'
-    : chinese
-      ? '### ✅ 人工验证已通过'
-      : '### ✅ Manual Validation Passed';
-  const fallback = phase === 'pending'
-    ? chinese ? '人工验证正在等待事务提交。' : 'Manual validation is awaiting transaction completion.'
-    : chinese ? '人工验证已通过。' : 'Manual validation passed.';
-  const receiptMetadata = phase === 'final'
-    ? `\n\n${MANUAL_VALIDATION_RECEIPT_PLACEHOLDER}`
-    : '';
+  const section = chinese
+    ? `### ✅ 人工验证已通过\n\n人工验证已通过；transaction=${receipt.transactionId}; receipt=${receipt.receiptDigest}; evidence=${receipt.evidenceDigest}; head=${receipt.prHeadSha}.`
+    : `### ✅ Manual Validation Passed\n\nManual validation passed; transaction=${receipt.transactionId}; receipt=${receipt.receiptDigest}; evidence=${receipt.evidenceDigest}; head=${receipt.prHeadSha}.`;
   let inserted = false;
-  const updated = body.replace(MANUAL_VALIDATION_STATUS_SECTION, (matched) => {
+  const updated = body.replace(MANUAL_VALIDATION_STATUS_SECTION, () => {
     if (inserted) return '';
     inserted = true;
-    const previousHeading = MANUAL_VALIDATION_STATUS_HEADING.exec(matched)?.[0] ?? '';
-    const preserved = matched.slice(previousHeading.length);
-    const trailingPlaceholder = TRAILING_CANONICAL_REPORT_PLACEHOLDER.exec(preserved)?.[0];
-    const content = trailingPlaceholder
-      ? preserved.slice(0, -trailingPlaceholder.length).replace(/\s+$/u, '')
-      : preserved.replace(/\s+$/u, '');
-    const section = `${heading}${content || `\n\n${fallback}`}${receiptMetadata}`;
-    return trailingPlaceholder
-      ? `${trailingPlaceholder.trim()}\n\n${section}\n\n`
-      : `${section}\n\n`;
+    return `${section}\n\n`;
   });
-  return inserted ? `${updated.replace(/\s+$/u, '')}\n` : `${body.replace(/\s+$/u, '')}\n\n${heading}\n\n${fallback}${receiptMetadata}\n`;
+  return inserted ? `${updated.replace(/\s+$/u, '')}\n` : `${body.replace(/\s+$/u, '')}\n\n${section}\n`;
+}
+
+function legacyHiddenSummaryBody(body: string, receipt: ManualValidationReceipt): string {
+  return renderLegacyManualValidationHiddenSummary(body, receipt);
+}
+
+function desiredSummaryFromSource(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  source: string,
+  receipt: ManualValidationReceipt
+): { ok: true; value: string } | { ok: false; message: string } {
+  const report = readPrChangeReport(path.join(resolved.taskDir, 'pr-change-report.json'));
+  if (!report.ok) return { ok: false, message: report.error.message };
+  const rendered = renderPullRequestSummary({
+    taskId: resolved.taskId,
+    body: renderManualValidationSummarySource(source, 'final'),
+    headSha: receipt.prHeadSha,
+    taskContent: fs.readFileSync(resolved.taskMdPath, 'utf8'),
+    report: report.value,
+    manualValidation: { phase: 'final', transactionId: receipt.transactionId, receiptDigest: receipt.receiptDigest, evidenceDigest: receipt.evidenceDigest, prHeadSha: receipt.prHeadSha, authority: 'coordinator' }
+  });
+  return rendered.ok ? rendered : { ok: false, message: rendered.error.message };
 }
 
 function openManualValidationStarted(taskMdPath: string): { present: boolean; transactionId: string | null } {
@@ -134,12 +137,15 @@ async function executeManualValidationTransactionLocked(
 ) {
   const artifactPath = path.resolve(resolved.taskDir, values.artifact!);
   if (!prepareOnly && !fs.existsSync(artifactPath)) return result('failed', { code: 'MANUAL_VALIDATION_ARTIFACT_MISSING', message: `manual-validation artifact is missing: ${values.artifact}` });
+  let finalBodyWithoutReceipt: string;
+  try { finalBodyWithoutReceipt = fs.readFileSync(path.resolve(cwd, values.summaryFile!), 'utf8'); }
+  catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_ARGS_INVALID', message: error instanceof Error ? error.message : String(error) }); }
   const currentState = await summaryCommentState(taskRef, { cwd, client: options.client });
   if (!currentState.pullRequest) return result('failed', { code: 'MANUAL_VALIDATION_PR_REQUIRED', message: 'canonical pull-request head is unavailable' });
   const pullRequest = currentState.pullRequest;
   const preimageBody = currentState.comment?.body ?? '';
   const preimage = { commentId: currentState.comment?.id ?? null, body: preimageBody, digest: summaryPreimageDigest(preimageBody) };
-  const evidenceDigest = sha256File(path.resolve(cwd, values.summaryFile!));
+  const evidenceDigest = summaryPreimageDigest(finalBodyWithoutReceipt);
   const archiveGeneration = options.archiveGeneration ?? archiveManualValidationGeneration;
   let transactionResult = readManualValidationTransaction(resolved.taskDir, { taskId: resolved.taskId, prNumber: pullRequest.number, prHeadSha: pullRequest.head.sha, evidenceDigest, artifact: values.artifact! });
   let previousTransaction: ManualValidationTransaction | null = null;
@@ -153,7 +159,51 @@ async function executeManualValidationTransactionLocked(
     transactionResult = { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_MISSING', message: 'previous failed transaction was archived for a new pull-request head' } };
   }
   if (!transactionResult.ok && transactionResult.error.code !== 'MANUAL_VALIDATION_TRANSACTION_MISSING') return result('failed', transactionResult.error);
-  if (transactionResult.ok && transactionResult.value.phase === 'committed') return result('applied', null, { transaction: transactionResult.value, receipt: transactionResult.value.committedReceipt, idempotent: true });
+  if (transactionResult.ok && transactionResult.value.version === 1 && transactionResult.value.phase !== 'committed') {
+    return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'version 1 manual-validation transactions are only eligible for committed preimage recovery' });
+  }
+  if (transactionResult.ok && transactionResult.value.version === 2) {
+    const source = readManualValidationSummarySource(resolved.taskDir, transactionResult.value.evidenceDigest);
+    if (!source.ok) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: source.error.message });
+  }
+  if (transactionResult.ok && transactionResult.value.phase === 'committed') {
+    const committed = transactionResult.value;
+    const receiptResult = readManualValidationReceipt(resolved.taskDir, {
+      transactionId: committed.transactionId,
+      taskId: committed.taskId,
+      prNumber: committed.prNumber,
+      prHeadSha: committed.prHeadSha,
+      evidenceDigest: committed.evidenceDigest,
+      artifact: committed.artifact
+    });
+    if (!receiptResult.ok || receiptResult.value.receiptDigest !== committed.committedReceipt) {
+      return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: receiptResult.ok ? 'manual-validation receipt does not match the committed transaction' : receiptResult.error.message });
+    }
+    const receipt = receiptResult.value;
+    if (receipt.pendingSummaryDigest !== committed.pendingSummaryDigest || receipt.finalSummaryDigest !== committed.finalSummaryDigest) {
+      return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'manual-validation summary digests do not match the committed receipt' });
+    }
+    const current = normalizeCommentContent(preimageBody);
+    if (committed.version === 2) {
+      const source = readManualValidationSummarySource(resolved.taskDir, committed.evidenceDigest);
+      if (!source.ok) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: source.error.message });
+      const desired = desiredSummaryFromSource(resolved, source.value, receipt);
+      if (!desired.ok || normalizeCommentContent(desired.value) !== current) {
+        return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: desired.ok ? 'committed manual-validation summary no longer matches the generation source' : desired.message });
+      }
+      return result('applied', null, { transaction: committed, receipt, idempotent: true });
+    }
+    const expectedHidden = normalizeCommentContent(legacyHiddenSummaryBody(committed.summaryPreimage.body, receipt));
+    if (current === expectedHidden) return result('applied', null, { transaction: committed, receipt, idempotent: true });
+    const expectedVisible = normalizeCommentContent(legacyVisibleSummaryBody(committed.summaryPreimage.body, receipt));
+    if (current !== expectedVisible) {
+      return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'version 1 committed summary does not match an approved preimage recovery shape' });
+    }
+    try { validateManualValidationGenerationArchive(resolved.taskDir, committed, true); }
+    catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: error instanceof Error ? error.message : String(error) }); }
+    previousTransaction = committed;
+    transactionResult = { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_MISSING', message: 'version 1 visible summary requires a version 2 generation' } };
+  }
   const openStarted = transactionResult.ok ? { present: false, transactionId: null } : openManualValidationStarted(resolved.taskMdPath);
   if (openStarted.present && !openStarted.transactionId) {
     return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'open manual-validation started event has no recoverable transactionId' });
@@ -161,8 +211,7 @@ async function executeManualValidationTransactionLocked(
   const transactionId = transactionResult.ok
     ? transactionResult.value.transactionId
     : (openStarted.transactionId ?? values.transactionId ?? `mv-${Date.now()}`);
-  const finalBodyWithoutReceipt = fs.readFileSync(path.resolve(cwd, values.summaryFile!), 'utf8');
-  const pendingBody = manualSummaryBody(finalBodyWithoutReceipt, 'pending', transactionId);
+  const pendingBody = renderManualValidationSummarySource(finalBodyWithoutReceipt, 'pending');
   const createTransaction = (): ManualValidationTransaction => createManualValidationTransaction({
     transactionId,
     taskId: resolved.taskId,
@@ -171,7 +220,7 @@ async function executeManualValidationTransactionLocked(
     evidenceDigest,
     summaryPreimage: preimage,
     pendingSummaryDigest: summaryPreimageDigest(pendingBody),
-    finalSummaryDigest: manualValidationFinalSummaryDigest(manualSummaryBody(finalBodyWithoutReceipt, 'final', transactionId, '<receipt>', evidenceDigest, pullRequest.head.sha)),
+    finalSummaryDigest: manualValidationFinalSummaryDigest(renderManualValidationSummarySource(finalBodyWithoutReceipt, 'final')),
     artifact: values.artifact!,
     attempt: previousTransaction && transactionId === previousTransaction.transactionId
       ? previousTransaction.attempt + 1
@@ -190,6 +239,14 @@ async function executeManualValidationTransactionLocked(
     if (previousTransaction) {
       try { archiveGeneration(resolved.taskDir, previousTransaction, previousTransaction.phase === 'committed'); }
       catch (error) { return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: error instanceof Error ? error.message : String(error) }); }
+    }
+    const existingSource = readManualValidationSummarySource(resolved.taskDir, evidenceDigest);
+    if (existingSource.ok) {
+      if (!openStarted.present && !previousTransaction) return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'orphaned manual-validation summary source has no recoverable started identity' });
+    } else if (existingSource.error.code === 'MANUAL_VALIDATION_TRANSACTION_MISSING') {
+      writeManualValidationSummarySourceAtomic(resolved.taskDir, finalBodyWithoutReceipt, evidenceDigest);
+    } else {
+      return result('failed', { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: existingSource.error.message });
     }
     writeManualValidationTransactionAtomic(resolved.taskDir, transaction);
   } else {
@@ -266,12 +323,13 @@ async function executeManualValidationTransactionLocked(
       transitionAndPersist('final-promotion-in-progress');
     }
     const promoted = await syncPullRequestSummary(taskRef, {
-      cwd, client: options.client, agent, body: manualSummaryBody(finalBodyWithoutReceipt, 'final', transaction.transactionId, receipt.receiptDigest, receipt.evidenceDigest, receipt.prHeadSha), changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult, strict: true,
+      cwd, client: options.client, agent, body: renderManualValidationSummarySource(finalBodyWithoutReceipt, 'final'), changeReportFile: path.resolve(cwd, values.changeReportFile!), primaryResult, strict: true,
       manualValidation: { phase: 'final', transactionId: transaction.transactionId, receiptDigest: receipt.receiptDigest, evidenceDigest: receipt.evidenceDigest, prHeadSha: receipt.prHeadSha, authority: 'coordinator' }, lockAlreadyHeld: true
     });
     if (!['applied', 'no-op'].includes(promoted.status)) transactionFailure(promoted.error ?? { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary promotion failed' });
     const postWrite = await summaryCommentState(taskRef, { cwd, client: options.client });
-    if (!/^###\s+✅\s+(?:Manual Validation Passed|人工验证已通过)\s*$/mu.test(postWrite.comment?.body ?? '') || postWrite.pullRequest?.head.sha !== receipt.prHeadSha || !manualValidationFinalSummaryProjectionMatches(postWrite.comment?.body ?? '', receipt)) transactionFailure({ code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: 'final summary post-write verification failed' });
+    const desired = desiredSummaryFromSource(resolved, finalBodyWithoutReceipt, receipt);
+    if (!desired.ok || postWrite.pullRequest?.head.sha !== receipt.prHeadSha || normalizeCommentContent(postWrite.comment?.body ?? '') !== normalizeCommentContent(desired.ok ? desired.value : '')) transactionFailure({ code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: desired.ok ? 'final summary post-write verification failed' : desired.message });
     transitionAndPersist('committed', { postWriteVerified: true });
     return result('applied', null, { transaction, receipt, idempotent: false });
   } catch (error) {

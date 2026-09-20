@@ -15,6 +15,9 @@ import {
 const MANUAL_VALIDATION_RECEIPT_SCHEMA = 'agent-infra/manual-validation-receipt';
 const MANUAL_VALIDATION_RECEIPT_VERSION = 1;
 const MANUAL_VALIDATION_RECEIPT_PLACEHOLDER = '[[manual-validation-receipt]]';
+const MANUAL_VALIDATION_STATUS_HEADING = /^###\s+(?:⚠️\s+(?:需人工校验|Manual Validation Required)|✅\s+(?:人工验证已通过|无需人工校验|Manual Validation Passed|No Manual Validation Required)|⏳\s+(?:人工验证待收尾|Manual Validation Pending))[ \t]*$/mu;
+const MANUAL_VALIDATION_STATUS_SECTION = /^###\s+(?:⚠️\s+(?:需人工校验|Manual Validation Required)|✅\s+(?:人工验证已通过|无需人工校验|Manual Validation Passed|No Manual Validation Required)|⏳\s+(?:人工验证待收尾|Manual Validation Pending))[ \t]*$[\s\S]*?(?=^#{1,3}\s|(?![\s\S]))/gmu;
+const TRAILING_CANONICAL_REPORT_PLACEHOLDER = /\n*<!--\s*canonical-pr-change-report\s*-->\s*$/u;
 
 type ManualValidationReceipt = Readonly<{
   schema: typeof MANUAL_VALIDATION_RECEIPT_SCHEMA;
@@ -65,6 +68,37 @@ function canonicalPayload(receipt: ManualValidationReceipt | ManualValidationRec
 
 function manualValidationReceiptDigest(receipt: ManualValidationReceipt | ManualValidationReceiptInput): string {
   return createHash('sha256').update(JSON.stringify(canonicalPayload(receipt)), 'utf8').digest('hex');
+}
+
+function renderManualValidationSummarySource(body: string, phase: 'pending' | 'final'): string {
+  const normalizedBody = body.replace(/\r\n?/gu, '\n');
+  const chinese = /###\s+(?:⚠️\s+需人工校验|✅\s+(?:人工验证已通过|无需人工校验)|⏳\s+人工验证待收尾)\s*$/mu.test(normalizedBody);
+  const heading = phase === 'pending'
+    ? chinese ? '### ⏳ 人工验证待收尾' : '### ⏳ Manual Validation Pending'
+    : chinese ? '### ✅ 人工验证已通过' : '### ✅ Manual Validation Passed';
+  const fallback = phase === 'pending'
+    ? chinese ? '人工验证正在等待事务提交。' : 'Manual validation is awaiting transaction completion.'
+    : chinese ? '人工验证已通过。' : 'Manual validation passed.';
+  const receiptMetadata = phase === 'final' ? `\n\n${MANUAL_VALIDATION_RECEIPT_PLACEHOLDER}` : '';
+  let inserted = false;
+  const updated = normalizedBody.replace(MANUAL_VALIDATION_STATUS_SECTION, (matched) => {
+    if (inserted) return '';
+    inserted = true;
+    const previousHeading = MANUAL_VALIDATION_STATUS_HEADING.exec(matched)?.[0] ?? '';
+    const preserved = matched.slice(previousHeading.length);
+    const trailingPlaceholder = TRAILING_CANONICAL_REPORT_PLACEHOLDER.exec(preserved)?.[0];
+    const content = trailingPlaceholder
+      ? preserved.slice(0, -trailingPlaceholder.length).replace(/\s+$/u, '')
+      : preserved.replace(/\s+$/u, '');
+    const section = `${heading}${content || `\n\n${fallback}`}${receiptMetadata}`;
+    return trailingPlaceholder ? `${trailingPlaceholder.trim()}\n\n${section}\n\n` : `${section}\n\n`;
+  });
+  return inserted ? `${updated.replace(/\s+$/u, '')}\n` : `${normalizedBody.replace(/\s+$/u, '')}\n\n${heading}\n\n${fallback}${receiptMetadata}\n`;
+}
+
+function renderLegacyManualValidationHiddenSummary(body: string, receipt: ManualValidationReceipt): string {
+  const marker = `<!-- manual-validation-receipt: transaction=${receipt.transactionId}; receipt=${receipt.receiptDigest}; evidence=${receipt.evidenceDigest}; head=${receipt.prHeadSha} -->`;
+  return renderManualValidationSummarySource(body, 'final').replace(MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, marker);
 }
 
 function manualValidationFinalSummaryDigest(body: string): string {
@@ -145,7 +179,9 @@ export {
   createManualValidationReceipt,
   manualValidationFinalSummaryDigest,
   manualValidationFinalSummaryProjectionMatches,
+  renderManualValidationSummarySource,
   manualValidationReceiptDigest,
+  renderLegacyManualValidationHiddenSummary,
   manualValidationReceiptPath,
   readManualValidationReceipt,
   validateManualValidationReceipt,

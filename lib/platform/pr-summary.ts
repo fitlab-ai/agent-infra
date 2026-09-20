@@ -35,8 +35,9 @@ import type {
   MechanicalChangeReport,
   PrChangeReport
 } from './pr-change-report.ts';
-import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProjectionMatches } from '../task/manual-validation-receipt.ts';
+import { MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, manualValidationFinalSummaryProjectionMatches, renderManualValidationSummarySource } from '../task/manual-validation-receipt.ts';
 import { readManualValidationCompletion } from '../task/manual-validation-completion.ts';
+import { readManualValidationSummarySource } from '../task/manual-validation-transaction.ts';
 
 type SummaryComment = { id: number | string; body: string };
 type ChangeReportState = 'ready' | 'missing' | 'stale' | 'invalid';
@@ -62,6 +63,17 @@ type ManualValidationSummaryOptions = {
   prHeadSha?: string;
   authority?: 'coordinator';
 };
+type RenderPullRequestSummaryInput = Readonly<{
+  taskId: string;
+  body: string;
+  headSha: string;
+  taskContent: string;
+  report: PrChangeReport;
+  manualValidation?: ManualValidationSummaryOptions;
+}>;
+type RenderPullRequestSummaryResult =
+  | { ok: true; value: string }
+  | { ok: false; error: { code: string; message: string } };
 type ReportWriteResult = PlatformResult & {
   report: { path: string; status: 'written' | 'no-op' | 'planned'; precheckVerdict: 'clear' | 'needs-review'; nextAction: 'watch-pr' | 'review-code' } | null;
 };
@@ -99,6 +111,28 @@ function isSafeSummaryEnvelope(value: string, taskId: string): boolean {
     && (value.match(/<!--\s*sync-pr:/gi) || []).length === 1
     && (value.match(/<!--\s*last-commit:/gi) || []).length === 1
     && !/<!--\s*canonical-pr-change-report\b/i.test(value);
+}
+
+function renderPullRequestSummary(input: RenderPullRequestSummaryInput): RenderPullRequestSummaryResult {
+  const placeholder = CANONICAL_REPORT_PLACEHOLDER;
+  const split = splitDocumentPlaceholder(input.body, placeholder);
+  if (!split.ok) return { ok: false, error: { code: 'PR_SUMMARY_BODY_CONTRACT_INVALID', message: split.error.message } };
+  const prefix = sanitizeMarkdownDocument(split.value.prefix, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  const suffix = sanitizeMarkdownDocument(split.value.suffix, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
+  if (!prefix.ok) return { ok: false, error: { code: 'PR_SUMMARY_BODY_CONTRACT_INVALID', message: `${prefix.error.message} at offset ${prefix.error.offset}` } };
+  if (!suffix.ok) return { ok: false, error: { code: 'PR_SUMMARY_BODY_CONTRACT_INVALID', message: `${suffix.error.message} at offset ${suffix.error.offset}` } };
+  const replaced = replaceCanonicalReportPlaceholder(`${prefix.value}${placeholder}${suffix.value}`, input.report);
+  if (!replaced.ok) return { ok: false, error: { code: replaced.error.code, message: replaced.error.message } };
+  const manual = input.manualValidation;
+  const receiptMarker = manual?.phase === 'final'
+    ? `<!-- manual-validation-receipt: transaction=${manual.transactionId}; receipt=${manual.receiptDigest}; evidence=${manual.evidenceDigest}; head=${manual.prHeadSha} -->`
+    : null;
+  const renderedBody = receiptMarker === null
+    ? replaced.value
+    : replaced.value.replace(MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, receiptMarker);
+  const desired = buildPullRequestSummary(input.taskId, renderedBody, input.headSha, renderHumanOverrideAudit(input.taskContent));
+  if (!isSafeSummaryEnvelope(desired, input.taskId)) return { ok: false, error: { code: 'PR_SUMMARY_RENDER_INVALID', message: 'Summary contains an invalid or duplicated reserved control marker' } };
+  return { ok: true, value: desired };
 }
 
 function taskReportPath(taskDir: string): string {
@@ -601,6 +635,11 @@ async function syncPullRequestSummary(
           if (!completion.ok) return fail('failed', context, platformError(completion.error), prNumber);
           const { receipt, transaction } = completion.value;
           if (transaction.phase !== 'final-promotion-in-progress' || !transaction.eventAppended) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_PHASE_INVALID', message: 'final summary requires a receipt-backed promotion intent', retryable: false }, prNumber);
+          if (transaction.version === 2) {
+            const source = readManualValidationSummarySource(resolved.taskDir, transaction.evidenceDigest);
+            if (!source.ok) return fail('failed', context, { code: 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED', message: source.error.message, retryable: false }, prNumber);
+            if (normalizeCommentContent(renderManualValidationSummarySource(source.value, 'final')) !== normalizeCommentContent(options.body)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the generation source', retryable: false }, prNumber);
+          }
           if (!manualValidationFinalSummaryProjectionMatches(options.body, receipt)) return fail('failed', context, { code: 'MANUAL_VALIDATION_SUMMARY_PROJECTION_INVALID', message: 'final summary body does not match the canonical receipt projection', retryable: false }, prNumber);
         }
       }
@@ -611,43 +650,9 @@ async function syncPullRequestSummary(
       if (!report.ok) return fail('failed', context, platformError(report.error));
       const checked = currentReportCheck(report.value, initial.value, taskContent, resolved.repoRoot);
       if (!checked.ok) return fail('failed', context, checked.error);
-      const placeholder = CANONICAL_REPORT_PLACEHOLDER;
-      const split = splitDocumentPlaceholder(options.body, placeholder);
-      if (!split.ok) return fail('failed', context, {
-        code: 'PR_SUMMARY_BODY_CONTRACT_INVALID',
-        message: split.error.message,
-        retryable: false
-      });
-      const prefix = sanitizeMarkdownDocument(split.value.prefix, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
-      const suffix = sanitizeMarkdownDocument(split.value.suffix, { reservedMarkers: [CONTROL_MARKER_PATTERN] });
-      if (!prefix.ok) {
-        return fail('failed', context, {
-          code: 'PR_SUMMARY_BODY_CONTRACT_INVALID',
-          message: `${prefix.error.message} at offset ${prefix.error.offset}`,
-          retryable: false
-        });
-      }
-      if (!suffix.ok) {
-        return fail('failed', context, {
-          code: 'PR_SUMMARY_BODY_CONTRACT_INVALID',
-          message: `${suffix.error.message} at offset ${suffix.error.offset}`,
-          retryable: false
-        });
-      }
-      const replaced = replaceCanonicalReportPlaceholder(`${prefix.value}${placeholder}${suffix.value}`, report.value);
-      if (!replaced.ok) return fail('failed', context, platformError(replaced.error));
-      const receiptMarker = manual?.phase === 'final'
-        ? `<!-- manual-validation-receipt: transaction=${manual.transactionId}; receipt=${manual.receiptDigest}; evidence=${manual.evidenceDigest}; head=${manual.prHeadSha} -->`
-        : null;
-      const renderedBody = receiptMarker === null
-        ? replaced.value
-        : replaced.value.replace(MANUAL_VALIDATION_RECEIPT_PLACEHOLDER, receiptMarker);
-      const desired = buildPullRequestSummary(resolved.taskId, renderedBody, initial.value.head.sha, renderHumanOverrideAudit(taskContent));
-      if (!isSafeSummaryEnvelope(desired, resolved.taskId)) return fail('failed', context, {
-        code: 'PR_SUMMARY_RENDER_INVALID',
-        message: 'Summary contains an invalid or duplicated reserved control marker',
-        retryable: false
-      });
+      const rendered = renderPullRequestSummary({ taskId: resolved.taskId, body: options.body, headSha: initial.value.head.sha, taskContent, report: report.value, ...(manual ? { manualValidation: manual } : {}) });
+      if (!rendered.ok) return fail('failed', context, { ...rendered.error, retryable: false });
+      const desired = rendered.value;
       const listed = loaded.value.provider.comments?.list
         ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: prIdentity }).then((response) => response.ok
           ? { ok: true as const, value: response.value.map((comment) => ({ id: /^\d+$/.test(comment.id) ? Number(comment.id) : comment.id, body: comment.body })) }
@@ -736,6 +741,20 @@ async function syncPullRequestSummary(
           retryable: true
         }, prNumber);
       }
+      const verifiedComments = loaded.value.provider.comments?.list
+        ? await loaded.value.provider.comments.list({ context: providerOperationContext(loaded.value), parent: prIdentity })
+        : unsupportedProviderOperation(loaded.value.provider, 'comments.list');
+      if (!verifiedComments.ok) {
+        const compensated = await compensateWrittenSummary();
+        if (!compensated.ok) return fail('blocked', context, { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: `Summary body verification and compensation failed: ${compensated.error.message}`, retryable: true }, prNumber);
+        return fail('blocked', context, { code: 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED', message: 'Summary body could not be verified after writing; the previous summary was restored or the new comment was deleted', retryable: true }, prNumber);
+      }
+      const verified = reconcileSummaryComment(verifiedComments.value.map((comment) => ({ id: /^\d+$/.test(comment.id) ? Number(comment.id) : comment.id, body: comment.body })), resolved.taskId, desired);
+      if (verified.action !== 'no-op' || String(verified.commentId) !== String(id)) {
+        const compensated = await compensateWrittenSummary();
+        if (!compensated.ok) return fail('blocked', context, { code: 'PR_SUMMARY_RACE_COMPENSATION_FAILED', message: `Summary body drifted after writing and compensation failed: ${compensated.error.message}`, retryable: true }, prNumber);
+        return fail('blocked', context, { code: 'PR_SUMMARY_POSTWRITE_VERIFY_FAILED', message: 'Summary body drifted after writing; the previous summary was restored or the new comment was deleted', retryable: true }, prNumber);
+      }
       return {
         ...basePlatformResult('applied', context, resolved.taskId, prNumber),
         comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: Number.isInteger(id) ? [id] : [], parts: 1 },
@@ -757,6 +776,7 @@ async function syncPullRequestSummary(
 export {
   buildPullRequestSummary,
   reconcileSummaryComment,
+  renderPullRequestSummary,
   reportWrite,
   summaryCommentState,
   summaryContext,
@@ -764,4 +784,4 @@ export {
   syncPullRequestSummary,
   warningResultForPrimary
 };
-export type { ManualValidationSummaryOptions, PullRequestSummaryResult, ReportWriteOptions, ReportWriteResult, SummaryCommentStateResult, SummaryContextResult };
+export type { ManualValidationSummaryOptions, PullRequestSummaryResult, RenderPullRequestSummaryInput, RenderPullRequestSummaryResult, ReportWriteOptions, ReportWriteResult, SummaryCommentStateResult, SummaryContextResult };

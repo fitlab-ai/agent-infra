@@ -7,7 +7,7 @@ import path from 'node:path';
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
-import { createManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
+import { createManualValidationTransaction, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationSummarySourceAtomic, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
 
 // Branch matrix for the complete-task.preflight `manual-validation` check
 // (see plan-r6). Completion requires a committed receipt, transaction, artifact
@@ -40,7 +40,8 @@ function addCommittedManualValidation(taskDir: string, appendCompletion = true) 
   const artifact = path.join(taskDir, 'manual-validation.md');
   fs.writeFileSync(artifact, '# Manual Validation\n');
   const now = new Date().toISOString();
-  const evidenceDigest = 'a'.repeat(64);
+  const summarySource = '## Summary\n\n<!-- canonical-pr-change-report -->\n';
+  const evidenceDigest = summaryPreimageDigest(summarySource);
   const prHeadSha = 'b'.repeat(40);
   const transaction = createManualValidationTransaction({
     transactionId: 'mv-test-1',
@@ -79,6 +80,7 @@ function addCommittedManualValidation(taskDir: string, appendCompletion = true) 
   const committed = transitionManualValidationTransaction(promoting.value, 'committed', { postWriteVerified: true });
   assert.equal(committed.ok, true);
   writeManualValidationReceiptAtomic(taskDir, receipt);
+  writeManualValidationSummarySourceAtomic(taskDir, summarySource, evidenceDigest);
   writeManualValidationTransactionAtomic(taskDir, committed.value);
   const completion = `- 2026-01-01 00:00:01+00:00 — **Complete Manual Validation** by claude — Manual validation passed → manual-validation.md; human-confirmed validation and committed receipt; transaction=${transaction.transactionId}; receipt=${receipt.receiptDigest}; head=${prHeadSha}`;
   if (appendCompletion) {
@@ -143,6 +145,18 @@ test('manual-validation check passes on the standard flow when completion follow
   const result = await check(taskDir);
   assert.equal(result.status, 'pass');
   assert.match(result.message, /committed receipt and post-write verification/);
+});
+
+test('manual-validation check fails when a version 2 source snapshot is missing', async () => {
+  const taskDir = fixture([
+    '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md',
+  ]);
+  fs.writeFileSync(path.join(taskDir, 'review-code.md'), REVIEW_CODE_MV_1);
+  addCommittedManualValidation(taskDir);
+  fs.unlinkSync(path.join(taskDir, '.manual-validation', 'summary-source.md'));
+  const result = await check(taskDir);
+  assert.equal(result.status, 'fail');
+  assert.match(result.message, /summary source is unavailable/);
 });
 
 test('manual-validation check fails when completion predates a newer review-code round', async () => {

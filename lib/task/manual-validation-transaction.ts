@@ -15,14 +15,15 @@ import {
 } from './manual-validation-shared.ts';
 
 const MANUAL_VALIDATION_TRANSACTION_SCHEMA = 'agent-infra/manual-validation-transaction';
-const MANUAL_VALIDATION_TRANSACTION_VERSION = 1;
+const MANUAL_VALIDATION_TRANSACTION_VERSION = 2;
+const MANUAL_VALIDATION_TRANSACTION_VERSIONS = [1, MANUAL_VALIDATION_TRANSACTION_VERSION] as const;
 const TRANSACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 
 type ManualValidationTransactionPhase = 'prepared' | 'summary-staged' | 'receipt-committed' | 'final-promotion-in-progress' | 'committed' | 'aborted' | 'recovery-required';
 type ManualValidationSummaryPreimage = Readonly<{ commentId: number | string | null; body: string; digest: string }>;
 type ManualValidationTransaction = Readonly<{
   schema: typeof MANUAL_VALIDATION_TRANSACTION_SCHEMA;
-  version: typeof MANUAL_VALIDATION_TRANSACTION_VERSION;
+  version: (typeof MANUAL_VALIDATION_TRANSACTION_VERSIONS)[number];
   transactionId: string;
   taskId: string;
   prNumber: number;
@@ -56,7 +57,11 @@ type ManualValidationTransactionResult =
   | { ok: false; error: ManualValidationTransactionError };
 type ManualValidationGenerationArchiveOptions = Readonly<{
   afterReceiptMove?: () => void;
+  afterSourceMove?: () => void;
 }>;
+type ManualValidationSummarySourceResult =
+  | { ok: true; value: string }
+  | { ok: false; error: ManualValidationTransactionError };
 
 function invalid(message: string): ManualValidationTransactionResult {
   return { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_INVALID', message } };
@@ -71,7 +76,8 @@ function validateManualValidationTransaction(value: unknown, expected?: Partial<
   const keys = ['schema', 'version', 'transactionId', 'taskId', 'prNumber', 'prHeadSha', 'evidenceDigest', 'summaryPreimage', 'pendingSummaryDigest', 'finalSummaryDigest', 'artifact', 'phase', 'committedReceipt', 'eventAppended', 'attempt', 'postWriteVerified', 'createdAt', 'updatedAt', 'error'];
   const keyError = exactKeys(value, keys, 'transaction');
   if (keyError) return invalid(keyError);
-  if (value.schema !== MANUAL_VALIDATION_TRANSACTION_SCHEMA || value.version !== MANUAL_VALIDATION_TRANSACTION_VERSION) return invalid('transaction schema or version is unsupported');
+  // TODO(compat): Remove manual-validation transaction v1 reader and preimage classifier once inventory finds no active/current or partially archived v1 generation.
+  if (value.schema !== MANUAL_VALIDATION_TRANSACTION_SCHEMA || !MANUAL_VALIDATION_TRANSACTION_VERSIONS.includes(value.version as 1 | 2)) return invalid('transaction schema or version is unsupported');
   if (typeof value.transactionId !== 'string' || !TRANSACTION_ID.test(value.transactionId)) return invalid('transactionId is invalid');
   if (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId)) return invalid('taskId is invalid');
   const prNumber = value.prNumber;
@@ -178,8 +184,40 @@ function manualValidationTransactionPath(taskDir: string): string {
   return path.join(taskDir, '.manual-validation', 'transaction.json');
 }
 
+function manualValidationSummarySourcePath(taskDir: string): string {
+  return path.join(taskDir, '.manual-validation', 'summary-source.md');
+}
+
+function readManualValidationSummarySource(taskDir: string, evidenceDigest: string): ManualValidationSummarySourceResult {
+  const file = manualValidationSummarySourcePath(taskDir);
+  let value: string;
+  try { value = fs.readFileSync(file, 'utf8'); }
+  catch (error) {
+    return { ok: false, error: { code: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'MANUAL_VALIDATION_TRANSACTION_MISSING' : 'MANUAL_VALIDATION_TRANSACTION_INVALID', message: error instanceof Error ? error.message : String(error) } };
+  }
+  if (summaryPreimageDigest(value) !== evidenceDigest) {
+    return { ok: false, error: { code: 'MANUAL_VALIDATION_TRANSACTION_INVALID', message: 'manual-validation summary source digest does not match the transaction evidence' } };
+  }
+  return { ok: true, value };
+}
+
+function writeManualValidationSummarySourceAtomic(taskDir: string, value: string, evidenceDigest: string): string {
+  if (summaryPreimageDigest(value) !== evidenceDigest) throw new Error('manual-validation summary source digest does not match the transaction evidence');
+  const target = manualValidationSummarySourcePath(taskDir);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, value, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    fs.renameSync(temporary, target);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  return target;
+}
+
 function manualValidationGenerationPaths(taskDir: string, transaction: ManualValidationTransaction): {
   receipt: { current: string; history: string };
+  source: { current: string; history: string };
   transaction: { current: string; history: string };
 } {
   const stateDir = path.join(taskDir, '.manual-validation');
@@ -188,6 +226,10 @@ function manualValidationGenerationPaths(taskDir: string, transaction: ManualVal
     receipt: {
       current: path.join(stateDir, 'receipt.json'),
       history: path.join(historyDir, `receipt-${transaction.transactionId}-attempt-${transaction.attempt}.json`)
+    },
+    source: {
+      current: manualValidationSummarySourcePath(taskDir),
+      history: path.join(historyDir, `summary-source-${transaction.transactionId}-attempt-${transaction.attempt}.md`)
     },
     transaction: {
       current: manualValidationTransactionPath(taskDir),
@@ -237,6 +279,14 @@ function validateManualValidationGenerationArchive(taskDir: string, transaction:
   if (currentReceipt === 'valid' && archivedReceipt === 'valid') {
     throw new Error(`manual-validation archive has conflicting receipt files for ${transaction.transactionId}`);
   }
+  if (transaction.version === 2) {
+    const currentSource = fs.existsSync(paths.source.current);
+    const archivedSource = fs.existsSync(paths.source.history);
+    if (currentSource && archivedSource) throw new Error(`manual-validation archive has conflicting summary source files for ${transaction.transactionId}`);
+    if (!currentSource && !archivedSource) throw new Error(`manual-validation archive source is missing: ${paths.source.current}`);
+    const source = fs.readFileSync(currentSource ? paths.source.current : paths.source.history, 'utf8');
+    if (summaryPreimageDigest(source) !== transaction.evidenceDigest) throw new Error('manual-validation summary source digest does not match the transaction evidence');
+  }
 }
 
 function archiveManualValidationGeneration(
@@ -258,6 +308,8 @@ function archiveManualValidationGeneration(
   };
   move(paths.receipt.current, paths.receipt.history, requireReceipt);
   options.afterReceiptMove?.();
+  move(paths.source.current, paths.source.history, transaction.version === 2);
+  options.afterSourceMove?.();
   move(paths.transaction.current, paths.transaction.history, true);
 }
 
@@ -283,13 +335,16 @@ export {
   MANUAL_VALIDATION_TRANSACTION_VERSION,
   archiveManualValidationGeneration,
   createManualValidationTransaction,
+  manualValidationSummarySourcePath,
   manualValidationTransactionPath,
+  readManualValidationSummarySource,
   validateManualValidationGenerationArchive,
   readManualValidationTransaction,
   retryManualValidationTransaction,
   summaryPreimageDigest,
   transitionManualValidationTransaction,
   validateManualValidationTransaction,
+  writeManualValidationSummarySourceAtomic,
   writeManualValidationTransactionAtomic
 };
 export type {
@@ -300,5 +355,6 @@ export type {
   ManualValidationTransactionInput,
   ManualValidationTransactionPatch,
   ManualValidationTransactionPhase,
-  ManualValidationTransactionResult
+  ManualValidationTransactionResult,
+  ManualValidationSummarySourceResult
 };

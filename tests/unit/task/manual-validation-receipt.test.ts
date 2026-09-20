@@ -6,6 +6,7 @@ import {
   manualValidationFinalSummaryDigest,
   manualValidationFinalSummaryProjectionMatches,
   manualValidationReceiptDigest,
+  renderManualValidationSummarySource,
   validateManualValidationReceipt
 } from '../../../lib/task/manual-validation-receipt.ts';
 
@@ -30,6 +31,25 @@ test('manual-validation receipt has a canonical digest and validates its identit
   const mismatch = validateManualValidationReceipt(receipt, { transactionId: 'mv-other' });
   assert.equal(mismatch.ok, false);
   if (!mismatch.ok) assert.equal(mismatch.error.code, 'MANUAL_VALIDATION_RECEIPT_IDENTITY_MISMATCH');
+});
+
+test('manual-validation source renderer preserves the explanation and section position', () => {
+  const source = [
+    '## Summary',
+    '',
+    '### ⚠️ Manual Validation Required',
+    '',
+    '- Verify <role> &amp; permissions.',
+    '',
+    '### Decision',
+    '',
+    '- Keep least privilege.',
+    '',
+    '<!-- canonical-pr-change-report -->',
+    ''
+  ].join('\r\n');
+  const rendered = renderManualValidationSummarySource(source, 'final');
+  assert.match(rendered, /### ✅ Manual Validation Passed\r?\n\r?\n- Verify <role> &amp; permissions\.[\s\S]*\[\[manual-validation-receipt\]\][\s\S]*### Decision/u);
 });
 
 test('manual-validation receipt rejects tampered digest', () => {

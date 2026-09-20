@@ -14,7 +14,7 @@ import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import type { ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
-import { createManualValidationReceipt, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
+import { createManualValidationReceipt, manualValidationFinalSummaryDigest, renderLegacyManualValidationHiddenSummary, renderManualValidationSummarySource, writeManualValidationReceiptAtomic } from '../../../lib/task/manual-validation-receipt.ts';
 import { archiveManualValidationGeneration, createManualValidationTransaction, manualValidationTransactionPath, summaryPreimageDigest, transitionManualValidationTransaction, writeManualValidationTransactionAtomic } from '../../../lib/task/manual-validation-transaction.ts';
 import type { ManualValidationTransaction } from '../../../lib/task/manual-validation-transaction.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
@@ -259,9 +259,10 @@ function committedGeneration(fixture: Fixture, transactionId: string, prHeadSha:
   if (!promoting.ok) throw new Error(promoting.error.message);
   const committed = transitionManualValidationTransaction(promoting.value, 'committed', { postWriteVerified: true });
   if (!committed.ok) throw new Error(committed.error.message);
-  writeManualValidationTransactionAtomic(fixture.taskDir, committed.value);
+  const legacy = { ...committed.value, version: 1 as const };
+  writeManualValidationTransactionAtomic(fixture.taskDir, legacy);
   writeManualValidationReceiptAtomic(fixture.taskDir, receipt);
-  return { transaction: committed.value, receipt };
+  return { transaction: legacy, receipt };
 }
 
 function prepare(
@@ -411,6 +412,87 @@ test('actual coordinator execution converges on replay without repeated remote w
   assert.equal(second.transaction?.transactionId, first.transaction?.transactionId);
   assert.equal(state.writes, writesAfterFirst);
   assert.equal(countStarted(fixture.taskPath), 1);
+});
+
+test('version 2 committed replay fails closed when its source snapshot is deleted', async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const state: FakeGitHubState = { comments: [], writes: 0 };
+  const first = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
+  assert.equal(first.status, 'applied');
+  assert.equal(first.transaction?.version, 2);
+  const writes = state.writes;
+  fs.unlinkSync(path.join(fixture.taskDir, '.manual-validation', 'summary-source.md'));
+
+  const replay = await executeManualValidationTransaction(fixture.taskId, values(fixture), fixture.root, { client: fakeClient(fixture.baseSha, fixture.headSha, state) });
+
+  assert.equal(replay.status, 'failed');
+  assert.equal(replay.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
+  assert.equal(state.writes, writes);
+  assert.equal(countStarted(fixture.taskPath), 1);
+  assert.equal(fs.existsSync(manualValidationTransactionPath(fixture.taskDir)), true);
+});
+
+test('identical committed content is bridge-eligible only for version 1', async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const preimageBody = [
+    `<!-- sync-pr:${fixture.taskId}:summary -->`,
+    '',
+    '## Summary',
+    '',
+    '### ⚠️ Manual Validation Required',
+    '',
+    '- Verify production permissions.',
+    '',
+    '### Decision',
+    '',
+    '- Keep least privilege.',
+    '',
+    `<!-- last-commit:${fixture.headSha} -->`,
+    ''
+  ].join('\n');
+  const evidenceDigest = sha256File(fixture.summaryPath);
+  const pendingSummaryDigest = 'c'.repeat(64);
+  const finalSummaryDigest = manualValidationFinalSummaryDigest(renderManualValidationSummarySource(preimageBody, 'final'));
+  const prepared = createManualValidationTransaction({
+    transactionId: 'mv-version-bridge', taskId: fixture.taskId, prNumber: 42, prHeadSha: fixture.headSha, evidenceDigest,
+    summaryPreimage: { commentId: 9, body: preimageBody, digest: summaryPreimageDigest(preimageBody) },
+    pendingSummaryDigest, finalSummaryDigest, artifact: 'manual-validation.md', attempt: 1,
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+  });
+  const staged = transitionManualValidationTransaction(prepared, 'summary-staged');
+  assert.equal(staged.ok, true);
+  if (!staged.ok) return;
+  const receipt = createManualValidationReceipt({
+    transactionId: prepared.transactionId, taskId: prepared.taskId, prNumber: prepared.prNumber, prHeadSha: prepared.prHeadSha,
+    evidenceDigest, artifact: prepared.artifact, artifactSha256: sha256File(path.join(fixture.taskDir, 'manual-validation.md')),
+    pendingSummaryDigest, finalSummaryDigest, committedAt: '2026-01-01T00:00:00.000Z'
+  });
+  const receiptCommitted = transitionManualValidationTransaction(staged.value, 'receipt-committed', { committedReceipt: receipt.receiptDigest });
+  assert.equal(receiptCommitted.ok, true);
+  if (!receiptCommitted.ok) return;
+  const promoting = transitionManualValidationTransaction(receiptCommitted.value, 'final-promotion-in-progress', { eventAppended: true });
+  assert.equal(promoting.ok, true);
+  if (!promoting.ok) return;
+  const committed = transitionManualValidationTransaction(promoting.value, 'committed', { postWriteVerified: true });
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  const currentBody = renderLegacyManualValidationHiddenSummary(preimageBody, receipt);
+  const state: FakeGitHubState = { comments: [{ id: 9, body: currentBody }], writes: 0 };
+  writeManualValidationReceiptAtomic(fixture.taskDir, receipt);
+  writeManualValidationTransactionAtomic(fixture.taskDir, { ...committed.value, version: 1 as const });
+
+  const legacyReplay = await prepare(fixture, state);
+  assert.equal(legacyReplay.status, 'applied');
+  assert.equal(legacyReplay.idempotent, true);
+  assert.equal(state.writes, 0);
+
+  writeManualValidationTransactionAtomic(fixture.taskDir, committed.value);
+  const currentReplay = await prepare(fixture, state);
+  assert.equal(currentReplay.status, 'failed');
+  assert.equal(currentReplay.error?.code, 'MANUAL_VALIDATION_TRANSACTION_RECOVERY_REQUIRED');
+  assert.equal(state.writes, 0);
 });
 
 test('coordinator replaces the Chinese manual-validation status section in place', async (t) => {
