@@ -5,13 +5,11 @@ export function finalizationTerminalResponse(taskId: string, requestId: string, 
   const pendingSteps = [
     receipt.taskComment === 'pending' ? 'task-comment' : null,
     receipt.verification === 'pending' ? 'verification' : null,
-    receipt.summary === 'pending' ? 'summary' : null,
-    receipt.postSummaryVerification === 'pending' ? 'post-summary-verification' : null
+    receipt.summary === 'pending' ? 'summary' : null
   ].filter((step): step is string => step !== null);
   const completedSteps = [
     'lifecycle', receipt.taskComment === 'pending' ? null : 'task-comment',
-    receipt.verification === 'pending' ? null : 'verification', receipt.summary === 'pending' ? null : 'summary',
-    receipt.postSummaryVerification === 'pending' ? null : 'post-summary-verification'
+    receipt.verification === 'pending' ? null : 'verification', receipt.summary === 'pending' ? null : 'summary'
   ]
     .filter((step): step is string => step !== null);
   const warnings = receipt.warnings
@@ -19,11 +17,11 @@ export function finalizationTerminalResponse(taskId: string, requestId: string, 
     .map(({ status: _status, resolvedAt: _resolvedAt, ...warning }) => warning);
   const result = {
     status: 'completed', changed: false, taskId,
+    backfill: { status: 'no-op', changed: false, error: null },
     lifecycle: { status: 'no-op', changed: false, error: null },
     taskComment: receipt.taskComment === 'pending' ? null : { status: 'no-op', changed: false, error: null },
     verification: receipt.verification === 'pending' ? null : { status: 'no-op', changed: false, error: null },
     summary: receipt.summary === 'pending' ? null : { status: 'no-op', changed: false, error: null },
-    postSummaryVerification: receipt.postSummaryVerification === 'pending' ? null : { status: 'no-op', changed: false, error: null },
     completedSteps, pendingSteps,
     result: pendingSteps.length > 0 || receipt.warningProjection === 'pending' || warnings.length > 0
       ? 'completed_with_warnings' : 'completed',

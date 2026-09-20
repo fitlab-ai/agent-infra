@@ -274,7 +274,9 @@ test('platform-comment backfill syncs only completion artifacts and resolves onl
       '', '## Activity Log', ''
     ].join('\n'));
     const taskDir = path.dirname(taskMd);
-    for (const name of ['analysis.md', 'plan.md', 'code.md', 'pr-review.md']) {
+    for (const name of [
+      'analysis.md', 'plan.md', 'code.md', 'manual-validation.md', 'validation-run.md', 'pr-review.md'
+    ]) {
       fs.writeFileSync(path.join(taskDir, name), `# ${name}\n`);
     }
 
@@ -295,6 +297,13 @@ test('platform-comment backfill syncs only completion artifacts and resolves onl
     const direct = runComment(['sync', f.taskId, '--kind', 'artifact', '--artifact', 'pr-review.md', '--agent', 'codex'], f);
     assert.equal(direct.status, 0, direct.stderr || direct.stdout);
     assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+
+    for (const artifact of ['manual-validation.md', 'validation-run.md']) {
+      const rejected = runComment(['sync', f.taskId, '--kind', 'artifact', '--artifact', artifact, '--agent', 'codex'], f);
+      assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
+      assert.equal(JSON.parse(rejected.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
+      assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+    }
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

@@ -14,7 +14,7 @@ const taskId = 'TASK-20260904-002344';
 const requestId = '0123456789abcdef0123456789abcdef';
 const generation = 'generation-1';
 const receipt = {
-  version: 3,
+  version: 4,
   taskId,
   intent: 'complete',
   receiptId: 'receipt-1',
@@ -23,10 +23,8 @@ const receipt = {
   taskComment: 'done',
   verification: 'done',
   summary: 'pending',
-  postSummaryVerification: 'pending',
   warningProjection: 'done',
   warnings: [],
-  summarySha256: null,
   updatedAt: '2026-09-18T00:00:00.000Z',
   lastError: null,
   controlBinding: { generation, requestId }

@@ -48,7 +48,7 @@ function taskFixture(): { root: string; taskDir: string } {
   fs.writeFileSync(
     path.join(root, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`),
     `${JSON.stringify({
-      version: 3,
+      version: 4,
       taskId: TASK_ID,
       intent: 'complete',
       receiptId: 'receipt-1',
@@ -57,8 +57,6 @@ function taskFixture(): { root: string; taskDir: string } {
       taskComment: 'done',
       verification: 'done',
       summary: 'done',
-      postSummaryVerification: 'done',
-      summarySha256: null,
       warningProjection: 'done',
       warnings: [],
       updatedAt: '2026-01-01T00:00:00.000Z',
@@ -178,12 +176,12 @@ function writeBoundControlEvidence(root: string): string {
   fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`);
   const result = {
     status: 'completed', changed: false, taskId: TASK_ID,
+    backfill: { status: 'no-op', changed: false, error: null },
     lifecycle: { status: 'no-op', changed: false, error: null },
     taskComment: { status: 'no-op', changed: false, error: null },
     verification: { status: 'no-op', changed: false, error: null },
     summary: { status: 'no-op', changed: false, error: null },
-    postSummaryVerification: { status: 'no-op', changed: false, error: null },
-    completedSteps: ['lifecycle', 'task-comment', 'verification', 'summary', 'post-summary-verification'], pendingSteps: [],
+    completedSteps: ['lifecycle', 'task-comment', 'verification', 'summary'], pendingSteps: [],
     result: 'completed', warnings: [], error: null
   };
   fs.writeFileSync(path.join(channelDir, 'responses', `${requestId}.json`), `${JSON.stringify({

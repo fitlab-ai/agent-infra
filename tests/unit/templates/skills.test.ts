@@ -1660,21 +1660,22 @@ test("workflow skill docs update task comments before publishing artifact commen
   });
 });
 
-test("run-manual-validation uses complete typed comment sync intents in order", () => {
+test("run-manual-validation publishes the task projection before verification", () => {
   const taskSync = "platform-comment sync {task-id} --kind task --agent {standard-agent-token}";
-  const artifactSync = "platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}";
+  const completed = "task-event {task-id} validation-run.completed";
+  const verify = "task-verify {task-id} validation-run.completed --artifact {artifact}";
 
   skillDocPaths("run-manual-validation").forEach((relativePath) => {
     const content = read(relativePath);
+    const completedIndex = content.indexOf(completed);
     const taskSyncIndex = content.indexOf(taskSync);
-    const artifactSyncIndex = content.indexOf(artifactSync);
+    const verifyIndex = content.indexOf(verify);
 
+    assert.notEqual(completedIndex, -1, `${relativePath} should complete the validation lifecycle`);
     assert.notEqual(taskSyncIndex, -1, `${relativePath} should invoke the complete task comment sync intent`);
-    assert.notEqual(artifactSyncIndex, -1, `${relativePath} should invoke the complete artifact comment sync intent`);
-    assert.ok(
-      taskSyncIndex < artifactSyncIndex,
-      `${relativePath} should sync the task comment before publishing the artifact comment`
-    );
+    assert.notEqual(verifyIndex, -1, `${relativePath} should run typed validation verification`);
+    assert.ok(completedIndex < taskSyncIndex, `${relativePath} should complete lifecycle before task projection`);
+    assert.ok(taskSyncIndex < verifyIndex, `${relativePath} should sync the task projection before verification`);
   });
 });
 
@@ -1845,12 +1846,12 @@ test("complete-task docs keep remote preflight before host finalization", () => 
   skillDocPaths("complete-task").forEach((relativePath) => {
     const content = read(relativePath);
     const externalResolve = content.indexOf("platform-pr resolve-external {task-id}");
-    const artifactSync = content.indexOf("platform-comment backfill {task-id}");
+    const summaryStaging = content.indexOf("platform-comment stage-summary {task-id}");
     const preflight = content.indexOf("task-verify {task-id} complete-task.preflight");
     const finalization = content.indexOf("task-finalization {task-id} complete");
 
-    assert.ok(externalResolve >= 0 && externalResolve < artifactSync, `${relativePath} should resolve external delivery before platform backfill`);
-    assert.ok(artifactSync >= 0 && artifactSync < preflight, `${relativePath} should backfill completion artifacts before preflight`);
+    assert.ok(externalResolve >= 0 && externalResolve < summaryStaging, `${relativePath} should resolve external delivery before summary staging`);
+    assert.ok(summaryStaging >= 0 && summaryStaging < preflight, `${relativePath} should stage the summary before preflight`);
     assert.ok(preflight >= 0 && preflight < finalization, `${relativePath} should run preflight before host finalization`);
     assert.ok(content.includes("finalization-retry"), `${relativePath} should define the retry branch identifier`);
   });

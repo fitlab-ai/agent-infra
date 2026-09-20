@@ -21,7 +21,7 @@ Before generating the validation completion report, read `.agents/rules/evidence
 - This skill closes the manual-validation status in an existing PR summary comment; it does not create a parallel ordinary validation comment.
 - It must write `manual-validation.md` or `manual-validation-r{N}.md` so later PR summary refreshes can reuse the validation result.
 - If the `sync-pr` summary comment is missing, fail instead of creating a partial fallback summary; before the receipt, completion log, and final summary are all committed, the remote summary may only be pending/non-pass.
-- Before generating manual-validation artifact Markdown that will be synced to an Issue, read `.agents/rules/sync-content-generation.md` and follow its generator-side constraints; Issue sync remains transparent and does not parse or rewrite the body.
+- Before generating manual-validation artifact Markdown referenced by the task comment and PR summary, read `.agents/rules/sync-content-generation.md` and follow its generator-side constraints. Keep the artifact local instead of publishing it as an Issue artifact comment.
 - After this skill runs, update `task.md` immediately.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
@@ -106,7 +106,7 @@ The coordinator owns pending summary, receipt, completion log, final promotion, 
 
 After the transaction coordinator succeeds, the core has atomically recorded `manual-validation.completed` with the same transaction/receipt/head identity. Do not append the Activity Log manually.
 
-If the task has a valid `platform_issue_identity`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`.
+If the task has a valid `platform_issue_identity`, run only `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`. Keep the manual-validation artifact as local evidence and PR-summary input; do not publish it as an Issue comment.
 
 ### 8. Verification Gate
 

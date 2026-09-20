@@ -27,7 +27,6 @@ import {
 import { projectTaskComment } from './task-comment-projection.ts';
 import {
   canonicalizeCommentBody,
-  canonicalizeSummaryBody,
   escapeHtmlText,
   fenceRanges,
   renderSafeCodeFence
@@ -52,7 +51,6 @@ type SyncOptions = {
   client?: PlatformClient;
   runtimeVersion?: string;
   summaryAuthorization?: { sha256: string };
-  verifyOnly?: boolean;
 };
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
@@ -76,8 +74,6 @@ const ARTIFACT_TITLES: Record<string, string> = {
   'review-plan': '技术方案审查',
   code: '实现报告',
   'review-code': '代码审查',
-  'manual-validation': '人工验证报告',
-  'validation-run': '验证运行证据',
   'pr-review': 'PR 审查报告'
 };
 
@@ -154,7 +150,7 @@ function taskCommentLanguage(repoRoot: string): string {
 
 function artifactIdentity(artifact: string): { stem: string; title: string } {
   const stem = path.basename(artifact, '.md');
-  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run|pr-review)(?:-r(\d+))?$/);
+  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|pr-review)(?:-r(\d+))?$/);
   if (!match) throw new Error(`unsupported artifact '${artifact}'`);
   const base = ARTIFACT_TITLES[match[1]!]!;
   const round = match[2] ? Number(match[2]) : 1;
@@ -483,15 +479,6 @@ function summaryPosition(comments: RemoteComment[], taskId: string): { ok: boole
   return { ok: managed.every((comment) => sequence >= comment.createdSequence!), known: true, summary: summary[0]! };
 }
 
-function summaryDigest(comment: RemoteComment): string {
-  const body = normalizeCommentContent(comment.body)
-    .replace(/^<!-- sync-issue:[^\n]+:summary -->\n## [^\n]+\n\n> [^\n]+\n\n/u, '')
-    .replace(/^<details><summary>恢复元数据<\/summary>[\s\S]*?<\/details>\n\n/u, '')
-    .replace(/\n---\n\*[^\n]*\*$/u, '');
-  const canonical = canonicalizeSummaryBody(body);
-  return canonical.ok ? createHash('sha256').update(canonical.value).digest('hex') : '';
-}
-
 async function listedComments(provider: any, loaded: any, parent: ReturnType<typeof taskIssueIdentity>): Promise<any> {
   return provider.comments?.list
     ? provider.comments.list({ context: providerOperationContext(loaded), parent }).then((response: any) => response.ok
@@ -608,27 +595,6 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
       });
     }
   }
-
-  if (options.verifyOnly) {
-    if (options.kind !== 'summary' || !options.summaryAuthorization) {
-      return platformResult('failed', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue },
-        error: { code: 'SUMMARY_VERIFICATION_INVALID', message: 'summary verification requires durable authorization', retryable: false }
-      });
-    }
-    const position = summaryPosition(listed.value, resolved.taskId);
-    if (!position.ok || !position.summary || summaryDigest(position.summary) !== options.summaryAuthorization.sha256) {
-      return platformResult('failed', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue },
-        error: { code: 'SUMMARY_VERIFICATION_FAILED', message: 'summary marker, body digest, or managed comment order is invalid', retryable: true }
-      });
-    }
-    return platformResult('no-op', {
-      ...contextFields(context), changed: false, resource: { kind: 'issue', number: issue },
-      comment: { kind: options.kind, marker: desired[0]!.marker, ids: [position.summary.id], parts: 1 }, error: null
-    });
-  }
-
 
   // Backfill only supplies missing artifact comments; valid existing marker sets stay untouched.
   if (options.kind === 'artifact' && options.backfill && existing.length > 0) {
