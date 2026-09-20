@@ -67,12 +67,6 @@ function options(
     repoRoot,
     metadataProvider: () => METADATA,
     backfill: async () => platformResult('no-op') as any,
-    summaryRecovery: async () => ({
-      ...platformResult('failed', {
-        error: { code: 'SUMMARY_RECOVERY_UNAVAILABLE', message: 'test recovery unavailable', retryable: true }
-      }),
-      summary: null
-    }),
     commentSync,
     verify
   };
@@ -100,7 +94,7 @@ test('host finalization waits for completion backfill before lifecycle and repea
     const replay = await applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, async () => verification('pass')), backfill });
     assert.equal(first.result, 'completed');
     assert.equal(replay.result, 'completed');
-    assert.deepEqual(calls, ['backfill', 'task', 'summary', 'summary', 'backfill', 'summary']);
+    assert.deepEqual(calls, ['backfill', 'task', 'summary', 'backfill', 'summary']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -197,7 +191,7 @@ test('host finalization uses the canonical root and makes a successful replay a 
   }
 });
 
-test('host finalization publishes a staged summary after core verification and clears it only after post-summary verification', async () => {
+test('host finalization seals a staged summary after core verification and retains its retry input', async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';
   const stagingPath = path.join(f.taskDir, '.delivery-summary.json');
@@ -220,50 +214,16 @@ test('host finalization publishes a staged summary after core verification and c
     const result = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(result.result, 'completed');
-    assert.deepEqual(kinds, ['task', 'summary', 'summary']);
-    assert.equal(verifyCalls, 2);
+    assert.deepEqual(kinds, ['task', 'summary']);
+    assert.equal(verifyCalls, 1);
     assert.equal(receipt?.summary, 'done');
-    assert.equal(receipt?.postSummaryVerification, 'done');
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), false);
+    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), true);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
 
-test('host finalization reseals the summary after projecting and resolving a terminal warning', async () => {
-  const f = fixture();
-  const staged = 'Delivered summary.\n';
-  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
-  })}\n`);
-  const calls: string[] = [];
-  let verifyCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
-    calls.push(received.kind === 'summary' && received.verifyOnly ? 'summary-verify' : received.kind);
-    return platformResult(received.verifyOnly ? 'no-op' : 'applied');
-  };
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
-    verifyCalls += 1;
-    return verification(verifyCalls === 2 ? 'fail' : 'pass');
-  };
-  try {
-    const warned = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
-    assert.equal(warned.result, 'completed_with_warnings');
-    assert.equal(recovered.result, 'completed');
-    assert.deepEqual(calls, [
-      'task', 'summary', 'summary-verify', 'task',
-      'summary', 'summary-verify', 'task', 'summary', 'summary-verify'
-    ]);
-    assert.equal(receipt?.postSummaryVerification, 'done');
-    assert.equal(receipt?.warnings.some((warning) => warning.status === 'open'), false);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('host finalization rechecks terminal verification on a successful replay without publishing another summary', async () => {
+test('host finalization rechecks terminal verification and reseals from the retained summary on replay', async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
@@ -282,132 +242,8 @@ test('host finalization rechecks terminal verification on a successful replay wi
   try {
     assert.equal((await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
     assert.equal((await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
-    assert.equal(verifyCalls, 3);
-    assert.deepEqual(kinds, ['task', 'summary', 'summary', 'summary']);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('host finalization restores trusted remote summary body before repositioning after staging cleanup', async () => {
-  const f = fixture();
-  const staged = 'Delivered summary.\n';
-  const digest = createHash('sha256').update(staged).digest('hex');
-  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: digest
-  })}\n`);
-  let verifyOnlyCalls = 0;
-  let publishedSummaries = 0;
-  let recoveryCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
-    if (received.kind === 'summary' && received.verifyOnly) {
-      verifyOnlyCalls += 1;
-      if (verifyOnlyCalls === 2) return platformResult('failed', {
-        error: { code: 'SUMMARY_VERIFICATION_FAILED', message: 'late managed comment', retryable: true }
-      });
-    }
-    if (received.kind === 'summary' && !received.verifyOnly) publishedSummaries += 1;
-    return platformResult(received.kind === 'summary' && !received.verifyOnly ? 'applied' : 'no-op');
-  };
-  const summaryRecovery: NonNullable<TaskFinalizationOptions['summaryRecovery']> = async (_taskRef, received) => {
-    recoveryCalls += 1;
-    assert.equal(received.sha256, digest);
-    return {
-      ...platformResult('no-op'),
-      summary: { id: 42, body: staged, sha256: digest }
-    };
-  };
-  try {
-    const first = await applyTaskFinalization(request, {
-      ...options(f.repoRoot, commentSync, async () => verification('pass')), summaryRecovery
-    });
-    const completedDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
-    assert.equal(first.result, 'completed');
-    assert.equal(fs.existsSync(path.join(completedDir, '.delivery-summary.json')), false);
-
-    const replay = await applyTaskFinalization(request, {
-      ...options(f.repoRoot, commentSync, async () => verification('pass')), summaryRecovery
-    });
-    assert.equal(replay.result, 'completed');
-    assert.equal(recoveryCalls, 1);
-    assert.equal(publishedSummaries, 2);
-    assert.equal(fs.existsSync(path.join(completedDir, '.delivery-summary.json')), false);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('host finalization retries trusted summary recovery after a transient recovery failure', async () => {
-  const f = fixture();
-  const staged = 'Delivered summary.\n';
-  const digest = createHash('sha256').update(staged).digest('hex');
-  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: digest
-  })}\n`);
-  let verifyOnlyCalls = 0;
-  let recoveryCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
-    if (received.kind === 'summary' && received.verifyOnly) {
-      verifyOnlyCalls += 1;
-      if (verifyOnlyCalls === 2) return platformResult('failed', {
-        error: { code: 'SUMMARY_VERIFICATION_FAILED', message: 'late managed comment', retryable: true }
-      });
-    }
-    return platformResult(received.kind === 'summary' && !received.verifyOnly ? 'applied' : 'no-op');
-  };
-  const summaryRecovery: NonNullable<TaskFinalizationOptions['summaryRecovery']> = async () => {
-    recoveryCalls += 1;
-    if (recoveryCalls === 1) return {
-      ...platformResult('blocked', {
-        error: { code: 'NETWORK_ERROR', message: 'temporary recovery failure', retryable: true }
-      }),
-      summary: null
-    };
-    return { ...platformResult('no-op'), summary: { id: 42, body: staged, sha256: digest } };
-  };
-  try {
-    const configured = { ...options(f.repoRoot, commentSync, async () => verification('pass')), summaryRecovery };
-    assert.equal((await applyTaskFinalization(request, configured)).result, 'completed');
-    assert.equal((await applyTaskFinalization(request, configured)).result, 'completed_with_warnings');
-    assert.equal((await applyTaskFinalization(request, configured)).result, 'completed');
-    assert.equal(recoveryCalls, 2);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('host finalization records summary staging failures as an incomplete recovery', async () => {
-  const f = fixture();
-  const staged = 'Delivered summary.\n';
-  const digest = createHash('sha256').update(staged).digest('hex');
-  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
-    taskId: TASK_ID, body: staged, sha256: digest
-  })}\n`);
-  let verifyOnlyCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
-    if (received.kind === 'summary' && received.verifyOnly) {
-      verifyOnlyCalls += 1;
-      if (verifyOnlyCalls === 2) return platformResult('failed', {
-        error: { code: 'SUMMARY_VERIFICATION_FAILED', message: 'late managed comment', retryable: true }
-      });
-    }
-    return platformResult(received.kind === 'summary' && !received.verifyOnly ? 'applied' : 'no-op');
-  };
-  const summaryRecovery: NonNullable<TaskFinalizationOptions['summaryRecovery']> = async () => ({
-    ...platformResult('no-op'), summary: { id: 42, body: staged, sha256: digest }
-  });
-  try {
-    const configured = { ...options(f.repoRoot, commentSync, async () => verification('pass')), summaryRecovery };
-    assert.equal((await applyTaskFinalization(request, configured)).result, 'completed');
-    const completedDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
-    fs.mkdirSync(path.join(completedDir, '.delivery-summary.json'));
-    const failed = await applyTaskFinalization(request, configured);
-    const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
-    assert.equal(failed.result, 'completed_with_warnings');
-    assert.equal(receipt?.postSummaryVerification, 'pending');
-    assert.equal(receipt?.warnings.some((warning) => (
-      warning.step === 'post-summary-verification' && warning.status === 'open'
-    )), true);
+    assert.equal(verifyCalls, 2);
+    assert.deepEqual(kinds, ['task', 'summary', 'summary']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -423,7 +259,7 @@ test('host finalization records a replayed verification exception and recovers o
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
-    if (verifyCalls === 3) throw new Error('verification input unavailable');
+    if (verifyCalls === 2) throw new Error('verification input unavailable');
     return verification('pass');
   };
   try {
@@ -441,7 +277,7 @@ test('host finalization records a replayed verification exception and recovers o
     assert.equal(recovered.result, 'completed');
     assert.equal(recoveredReceipt?.verification, 'done');
     assert.equal(recoveredReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), false);
-    assert.equal(verifyCalls, 4);
+    assert.equal(verifyCalls, 3);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -449,7 +285,7 @@ test('host finalization records a replayed verification exception and recovers o
 
 test('host finalization keeps a receipt persistence error blocked when warnings are pending', () => {
   const receipt: TaskFinalizationReceipt = {
-    version: 3,
+    version: 4,
     taskId: TASK_ID,
     intent: 'complete',
     receiptId: 'receipt-1',
@@ -458,13 +294,11 @@ test('host finalization keeps a receipt persistence error blocked when warnings 
     taskComment: 'pending',
     verification: 'pending',
     summary: 'pending',
-    postSummaryVerification: 'pending',
     warningProjection: 'pending',
     warnings: [{
       code: 'VERIFY_FAILED', message: 'verification failed', retryable: true,
       step: 'verification', target: 'complete-task', severity: 'ACTION_REQUIRED', status: 'open', resolvedAt: null
     }],
-    summarySha256: null,
     updatedAt: '2026-09-18T00:00:00.000Z',
     lastError: null
   };
@@ -483,16 +317,16 @@ test('host finalization blocks when a warning-state replayed verification failur
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
     taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
   })}\n`);
-  const comments: Array<{ kind: string; verifyOnly: boolean }> = [];
+  const comments: string[] = [];
   let verifyCalls = 0;
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
-    comments.push({ kind: received.kind, verifyOnly: received.verifyOnly === true });
+    comments.push(received.kind);
     return platformResult('no-op');
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
-    if (verifyCalls === 3) return verification('fail');
-    if (verifyCalls === 4) {
+    if (verifyCalls === 2) return verification('fail');
+    if (verifyCalls === 3) {
       fs.chmodSync(receiptDirectory, 0o500);
       const error = new Error('terminal verification unavailable');
       Object.assign(error, { code: 'VERIFY_UNAVAILABLE', retryable: true });
@@ -519,8 +353,8 @@ test('host finalization blocks when a warning-state replayed verification failur
     assert.equal(blockedReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), true);
     assert.equal(recovered.result, 'completed');
     assert.equal(recoveredReceipt?.verification, 'done');
-    assert.equal(verifyCalls, 5);
-    assert.equal(comments.filter((item) => item.kind === 'summary' && !item.verifyOnly).length, 1);
+    assert.equal(verifyCalls, 4);
+    assert.equal(comments.filter((kind) => kind === 'summary').length, 2);
   } finally {
     if (fs.existsSync(receiptDirectory)) fs.chmodSync(receiptDirectory, 0o700);
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
@@ -536,8 +370,8 @@ test('host finalization resolves a summary warning after a successful retry', as
   let summaryCalls = 0;
   const calls: string[] = [];
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
-    calls.push(received.kind === 'summary' && received.verifyOnly ? 'summary-verify' : received.kind);
-    if (received.kind === 'summary' && !received.verifyOnly) {
+    calls.push(received.kind);
+    if (received.kind === 'summary') {
       summaryCalls += 1;
       return summaryCalls === 1
         ? platformResult('blocked', { error: { code: 'NETWORK_ERROR', message: 'temporary', retryable: true } })
@@ -549,12 +383,14 @@ test('host finalization resolves a summary warning after a successful retry', as
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const third = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(first.result, 'completed_with_warnings');
-    assert.equal(second.result, 'completed');
-    assert.deepEqual(calls.slice(-3), ['task', 'summary', 'summary-verify']);
+    assert.equal(second.result, 'completed_with_warnings');
+    assert.equal(third.result, 'completed');
+    assert.deepEqual(calls.slice(-2), ['task', 'summary']);
     assert.equal(receipt?.warnings.some((warning) => warning.step === 'summary' && warning.status === 'open'), false);
-    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), false);
+    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), true);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -579,7 +415,7 @@ test('host finalization revalidates canonical steps when the receipt is absent',
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
     assert.equal(second.lifecycle?.status, 'no-op');
-    assert.equal(commentCalls, 4);
+    assert.equal(commentCalls, 2);
     assert.equal(verifyCalls, 2);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
@@ -627,7 +463,7 @@ test('host finalization returns actionable verification gate failures and retrie
     assert.equal(failed.result, 'completed_with_warnings');
     assert.equal(failed.warnings[0]?.code, 'CHECK_FAILED');
     assert.match(failed.warnings[0]?.message ?? '', /Fix complete-task issues/);
-    assert.deepEqual(failed.pendingSteps, ['task-comment', 'verification', 'summary', 'post-summary-verification']);
+    assert.deepEqual(failed.pendingSteps, ['task-comment', 'verification', 'summary']);
     assert.equal(recovered.status, 'completed');
     assert.equal(replay.status, 'completed');
     assert.equal(verifyCalls, 3);
@@ -663,7 +499,7 @@ test('host finalization retries only the pending terminal steps after a comment 
     assert.equal(first.lifecycle?.status, 'applied');
     assert.equal(first.pendingSteps.includes('task-comment'), true);
     assert.equal(second.status, 'completed');
-    assert.equal(commentCalls, 3);
+    assert.equal(commentCalls, 2);
     assert.equal(verifyCalls, 1);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
     const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');

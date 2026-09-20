@@ -52,15 +52,6 @@ type SyncOptions = {
   client?: PlatformClient;
   runtimeVersion?: string;
   summaryAuthorization?: { sha256: string };
-  verifyOnly?: boolean;
-};
-type SummaryRecoveryOptions = {
-  sha256: string;
-  cwd?: string;
-  client?: PlatformClient;
-};
-type SummaryRecoveryResult = PlatformResult & {
-  summary: { id: number | string; body: string; sha256: string } | null;
 };
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
@@ -620,27 +611,6 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     }
   }
 
-  if (options.verifyOnly) {
-    if (options.kind !== 'summary' || !options.summaryAuthorization) {
-      return platformResult('failed', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue },
-        error: { code: 'SUMMARY_VERIFICATION_INVALID', message: 'summary verification requires durable authorization', retryable: false }
-      });
-    }
-    const position = summaryPosition(listed.value, resolved.taskId);
-    if (!position.ok || !position.summary || summaryDigest(position.summary) !== options.summaryAuthorization.sha256) {
-      return platformResult('failed', {
-        ...contextFields(context), resource: { kind: 'issue', number: issue },
-        error: { code: 'SUMMARY_VERIFICATION_FAILED', message: 'summary marker, body digest, or managed comment order is invalid', retryable: true }
-      });
-    }
-    return platformResult('no-op', {
-      ...contextFields(context), changed: false, resource: { kind: 'issue', number: issue },
-      comment: { kind: options.kind, marker: desired[0]!.marker, ids: [position.summary.id], parts: 1 }, error: null
-    });
-  }
-
-
   // Backfill only supplies missing artifact comments; valid existing marker sets stay untouched.
   if (options.kind === 'artifact' && options.backfill && existing.length > 0) {
     const operations = existing.map((comment): PlatformOperation => ({
@@ -788,54 +758,6 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   return result;
 }
 
-async function recoverPlatformSummary(taskRef: string, options: SummaryRecoveryOptions): Promise<SummaryRecoveryResult> {
-  const fail = (base: PlatformResult): SummaryRecoveryResult => ({ ...base, summary: null });
-  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
-  if (!resolved.ok) return fail(platformResult('failed', {
-    error: { code: resolved.code, message: resolved.message, retryable: false }
-  }));
-  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  let issueIdentityFromTask: ReturnType<typeof taskIssueIdentity>;
-  try { issueIdentityFromTask = taskIssueIdentity(parseTaskFrontmatter(taskContent)); }
-  catch (error) { return fail(platformResult('failed', { error: { ...taskIssueIdentityError(error), retryable: false } })); }
-  if (!issueIdentityFromTask) return fail(platformResult('no-op', {
-    error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
-  }));
-
-  const loaded = await resolvePlatformProviderContext({ cwd: resolved.repoRoot, client: options.client });
-  const context = loaded.ok ? loaded.value.context : loaded.context;
-  if (!hasResolvedPlatformContext(context) || !loaded.ok) return fail(context);
-  const issue = resourceIdentityNumber(issueIdentityFromTask);
-  const listed = await listedComments(loaded.value.provider, loaded.value, issueIdentityFromTask);
-  if (!listed.ok) return fail(platformResult(listed.error.retryable ? 'blocked' : 'failed', {
-    ...contextFields(context), resource: { kind: 'issue', number: issue }, error: listed.error
-  }));
-
-  const position = summaryPosition(listed.value, resolved.taskId);
-  if (!position.known || !position.summary) return fail(platformResult('failed', {
-    ...contextFields(context), resource: { kind: 'issue', number: issue },
-    error: { code: 'SUMMARY_RECOVERY_UNVERIFIED', message: 'summary marker uniqueness or managed comment ordering cannot be proven', retryable: false }
-  }));
-  const owner = position.summary.user?.login;
-  if (!owner || owner !== context.platform.currentUser) return fail(platformResult('failed', {
-    ...contextFields(context), resource: { kind: 'issue', number: issue },
-    error: { code: 'SUMMARY_RECOVERY_UNAUTHORIZED', message: 'summary recovery requires a comment owned by the current platform user', retryable: false }
-  }));
-  const body = summaryBody(position.summary);
-  const sha256 = body === null ? '' : createHash('sha256').update(body).digest('hex');
-  if (body === null || sha256 !== options.sha256) return fail(platformResult('failed', {
-    ...contextFields(context), resource: { kind: 'issue', number: issue },
-    error: { code: 'SUMMARY_RECOVERY_DIGEST_MISMATCH', message: 'remote summary body does not match the durable receipt digest', retryable: false }
-  }));
-  return {
-    ...platformResult('no-op', {
-      ...contextFields(context), resource: { kind: 'issue', number: issue },
-      comment: { kind: 'summary', marker: MARKERS.summary(resolved.taskId), ids: [position.summary.id], parts: 1 }, error: null
-    }),
-    summary: { id: position.summary.id, body, sha256 }
-  };
-}
-
 async function listPlatformComments(issue: string | number, cwd = process.cwd(), client?: PlatformClient): Promise<PlatformResult & { comments?: RemoteComment[] }> {
   const loaded = await resolvePlatformProviderContext({ cwd, client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
@@ -901,9 +823,8 @@ export {
   renderTaskComment,
   renderTaskCommentResult,
   isTaskCommentTooLarge,
-  recoverPlatformSummary,
   syncPlatformComment,
   validateRelatedMarkerSet,
   writeComment
 };
-export type { CommentKind, RemoteComment, RenderedChunk, SummaryRecoveryOptions, SummaryRecoveryResult, SyncOptions };
+export type { CommentKind, RemoteComment, RenderedChunk, SyncOptions };

@@ -56,11 +56,10 @@ function receiptIdentity(value: unknown, generation: string, requestId?: string)
   const binding = receipt.controlBinding;
   if (!binding || typeof binding !== 'object' || Array.isArray(binding)) return null;
   const controlBinding = binding as Record<string, unknown>;
-  if (receipt.version !== 3 || typeof receipt.receiptId !== 'string' || receipt.receiptId.length === 0
+  if (receipt.version !== 4 || typeof receipt.receiptId !== 'string' || receipt.receiptId.length === 0
     || !Number.isSafeInteger(receipt.revision) || (receipt.revision as number) < 0
     || receipt.lifecycle !== 'done'
     || !['pending', 'done', 'skipped'].includes(String(receipt.summary))
-    || !['pending', 'done', 'skipped'].includes(String(receipt.postSummaryVerification))
     || controlBinding.generation !== generation
     || typeof controlBinding.requestId !== 'string'
     || !/^[a-f0-9-]{16,64}$/u.test(controlBinding.requestId)

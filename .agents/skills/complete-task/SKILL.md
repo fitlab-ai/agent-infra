@@ -175,11 +175,11 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-finalization 按允许的 artifact backfill → lifecycle → task 评论 → core verification → warning task 评论更新 → summary seal → 最终远端顺序复读的固定顺序执行。每项 backfill 必须取得成功终态，否则不得进入 lifecycle。完成态重入需要重建摘要时，宿主只从唯一、自有且 digest 与 receipt 匹配的远端摘要恢复正文，先耐久暂存再删除重建。仅在所有步骤完成且无未解决 warning 后清理 staging record。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
+finalization 按允许的 artifact backfill → lifecycle → task 评论 → core verification → warning task 评论更新 → summary seal 的固定顺序执行。每项 backfill 必须取得成功终态，否则不得进入 lifecycle。summary seal 始终读取任务目录中保留的 durable staging record；平台入口负责校验 marker、owner 和 digest，必要时删除并重建摘要，再复读最终远端顺序。重入直接重复该幂等操作，不从远端评论反向恢复本地正文。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning 或 pending step，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
 
 ### 7. 处理 finalization 重试与结果
 
-场景 A 与场景 B `finalization-retry` 都从宿主执行同一个 `task-finalization` 入口。receipt 只是重入提示，不是 canonical truth：每次重入都要重新核对允许的 artifact 回填、终态 task 评论、完成校验和摘要远端顺序；只有任务已处于 `completed` 且短号 registry 已释放时，才可跳过不可逆的 lifecycle。不得拆开调用旧的 lifecycle、评论同步或完成校验命令。若回填、task 评论、摘要恢复或校验因网络问题返回 `blocked`，保留 receipt、staging 和已完成状态，修复网络后重跑 complete-task；若生命周期仍未完成，任务保持 active 并从 receipt 的待处理步骤继续。
+场景 A 与场景 B `finalization-retry` 都从宿主执行同一个 `task-finalization` 入口。receipt 只是重入提示，不是 canonical truth：每次重入都要重新核对允许的 artifact 回填、终态 task 评论、完成校验，并使用保留的 durable staging record 重做 summary seal；只有任务已处于 `completed` 且短号 registry 已释放时，才可跳过不可逆的 lifecycle。不得拆开调用旧的 lifecycle、评论同步或完成校验命令。若回填、task 评论、summary seal 或校验因网络问题返回 `blocked`，保留 receipt、durable staging record 和已完成状态，修复网络后重跑 complete-task；若生命周期仍未完成，任务保持 active 并从 receipt 的待处理步骤继续。
 
 完成结果必须直接消费本次宿主 finalization 的结构化输出、receipt 和 warning projection。`completed` 或 `completed_with_warnings` 才允许继续；`failed` / `blocked` / `unknown` 必须保留 receipt 并停止，之后通过同一 finalization 入口重试。不要在沙箱旧挂载中另行运行 `ls completed` 或 `task-verify complete-task.completed`，也不要用其结果推翻宿主结果。
 

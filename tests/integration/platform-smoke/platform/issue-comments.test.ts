@@ -11,7 +11,6 @@ import {
   MARKERS,
   chunkArtifactComment,
   findMarkerComments,
-  recoverPlatformSummary,
   renderTaskComment,
   renderTaskCommentResult,
   normalizeCommentContent,
@@ -295,63 +294,6 @@ test('comment sync rejects malformed content before reading or writing remote co
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'COMMENT_PAYLOAD_INVALID');
   assert.equal(calls, 0);
-});
-
-test('summary recovery returns only an owned canonical body matching the durable digest', async () => {
-  const root = syncFixture();
-  const body = 'Delivery &lt;summary&gt;.\n';
-  const comments = [{
-    id: 10,
-    body: [
-      MARKERS.summary('TASK-20260101-000001'),
-      '## 交付摘要',
-      '',
-      '> 任务同步 · TASK-20260101-000001',
-      '',
-      '<details><summary>恢复元数据</summary>',
-      '',
-      '```json',
-      '{}',
-      '```',
-      '',
-      '</details>',
-      '',
-      body.trimEnd(),
-      '',
-      '---',
-      '*由 codex 自动生成 · 内部追踪：TASK-20260101-000001*'
-    ].join('\n'),
-    user: { login: 'codex' }
-  }, {
-    id: 11,
-    body: `${MARKERS.task('TASK-20260101-000001')}\nlate task comment`,
-    user: { login: 'codex' }
-  }];
-  const client = {
-    version() { return { ok: true, value: '2.72.0' }; },
-    json(args: string[]) {
-      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
-      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
-      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
-      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
-      throw new Error(`unexpected request: ${args.join(' ')}`);
-    },
-    text() { throw new Error('write must not be attempted'); }
-  } as unknown as GitHubClient;
-
-  const recovered = await recoverPlatformSummary('TASK-20260101-000001', {
-    sha256: createHash('sha256').update(body).digest('hex'), cwd: root, client
-  });
-  assert.equal(recovered.status, 'no-op');
-  assert.deepEqual(recovered.summary, {
-    id: 10, body, sha256: createHash('sha256').update(body).digest('hex')
-  });
-
-  const rejected = await recoverPlatformSummary('TASK-20260101-000001', {
-    sha256: '0'.repeat(64), cwd: root, client
-  });
-  assert.equal(rejected.status, 'failed');
-  assert.equal(rejected.error?.code, 'SUMMARY_RECOVERY_DIGEST_MISMATCH');
 });
 
 test('comment sync excludes oversized process history from the task snapshot', async () => {

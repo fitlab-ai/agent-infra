@@ -401,7 +401,7 @@ function writeCompletedTaskWithConsumedPlan(repoDir: string, taskId: string, bra
   const receiptRoot = path.join(repoDir, ".agents", "workspace", ".task-finalization");
   fs.mkdirSync(receiptRoot, { recursive: true });
   fs.writeFileSync(path.join(receiptRoot, `${taskId}.json`), `${JSON.stringify({
-    version: 3,
+    version: 4,
     taskId,
     intent: "complete",
     receiptId: `${taskId}-receipt`,
@@ -410,8 +410,6 @@ function writeCompletedTaskWithConsumedPlan(repoDir: string, taskId: string, bra
     taskComment: "done",
     verification: "done",
     summary: "done",
-    postSummaryVerification: "done",
-    summarySha256: null,
     warningProjection: "done",
     warnings: [],
     updatedAt: new Date().toISOString(),
