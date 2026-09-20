@@ -7,6 +7,10 @@ import type {
   AgentClientCapabilityMap,
   AgentClientId
 } from './types.ts';
+import type {
+  OrchestrationOptions,
+  OrchestrationResult
+} from '../task/orchestration.ts';
 import {
   SANDBOX_HOOK_PHASES
 } from '../sandbox/tool-types.ts';
@@ -43,6 +47,41 @@ type AgentClientDelegationEvidence = Readonly<{
   actualReasoningEffort: 'host-event' | 'app-server' | 'spawn-ack' | 'unavailable';
 }>;
 
+type AgentClientLifecycleRecoveryRequest = Readonly<{
+  taskRef: string;
+  intent: 'recover-started';
+  agent: string;
+  auto: true;
+}>;
+
+type AgentClientLifecycleRecoveryResult = Readonly<{
+  status: 'applied' | 'no-op' | 'owner-unknown' | 'conflict';
+  changed: boolean;
+  targetState: 'active';
+  requestRef: string;
+  intent: 'recover-started';
+  taskId: string | null;
+  receiptId: string | null;
+  childId: string | null;
+  error: Readonly<{ code: string; message: string }> | null;
+}>;
+
+type AgentClientOrchestrationAdapter = Readonly<{
+  prepareDelegation?: (
+    taskRef: string,
+    input: Readonly<{
+      client: AgentClientId;
+      requestedModel?: string;
+      requestedReasoningEffort?: string;
+    }>,
+    options?: Readonly<{ repoRoot?: string; orchestrationOptions?: OrchestrationOptions }>
+  ) => Promise<OrchestrationResult>;
+  recoverStarted?: (
+    request: AgentClientLifecycleRecoveryRequest,
+    options: Readonly<{ repoRoot: string }>
+  ) => AgentClientLifecycleRecoveryResult | Promise<AgentClientLifecycleRecoveryResult>;
+}>;
+
 type AgentClientSeedCommand = Readonly<{
   templates: Readonly<{
     en: string;
@@ -75,6 +114,7 @@ type AgentClientAdapter = Readonly<{
   capabilities: AgentClientCapabilities;
   modelSelection: AgentClientModelSelectionContext;
   delegationEvidence: AgentClientDelegationEvidence;
+  orchestrationAdapter?: AgentClientOrchestrationAdapter;
   project: AgentClientProjectDescriptor;
   sandbox: AgentClientSandboxDescriptor;
 }>;
@@ -628,6 +668,9 @@ function defineAgentClientAdapter(
     capabilities: Object.freeze(capabilities),
     modelSelection: frozenModelSelection,
     delegationEvidence: Object.freeze({ ...evidence }),
+    ...(candidate.orchestrationAdapter === undefined
+      ? {}
+      : { orchestrationAdapter: Object.freeze({ ...candidate.orchestrationAdapter }) }),
     project: Object.freeze({
       ownedPathPrefixes: Object.freeze(paths),
       ...projectAssets,
@@ -650,6 +693,9 @@ export type {
   AgentClientCapabilities,
   AgentClientCustomCommandDescriptor,
   AgentClientDelegationEvidence,
+  AgentClientLifecycleRecoveryRequest,
+  AgentClientLifecycleRecoveryResult,
+  AgentClientOrchestrationAdapter,
   AgentClientManifestEntry,
   AgentClientModelSelectionContext,
   AgentClientProjectDescriptor,

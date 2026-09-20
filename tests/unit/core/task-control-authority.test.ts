@@ -74,26 +74,31 @@ test('authority parser owns lifecycle and finalization command shapes', () => {
   );
 });
 
-test('authority parser requires the recovery selector and rejects it for normal lifecycle intents', () => {
-  const recovery = parseTaskControlOperation('task-lifecycle', [
-    'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--stage', 'code',
-    '--round', '2', '--artifact', 'code-r2.md', '--reason', 'child terminated before result'
+test('authority parser accepts only automatic recovery', () => {
+  const automatic = parseTaskControlOperation('task-lifecycle', [
+    'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--auto'
   ]);
-  assert.equal(recovery.family, 'task-lifecycle');
-  if (recovery.family !== 'task-lifecycle') throw new Error('unexpected lifecycle operation family');
-  assert.deepEqual(recovery.request, {
-    taskRef: 'TASK-20260809-010203', intent: 'recover-started', agent: 'codex',
-    stage: 'code', round: 2, artifact: 'code-r2.md', reason: 'child terminated before result'
+  assert.equal(automatic.family, 'task-lifecycle');
+  if (automatic.family !== 'task-lifecycle') throw new Error('unexpected lifecycle operation family');
+  assert.deepEqual(automatic.request, {
+    taskRef: 'TASK-20260809-010203', intent: 'recover-started', agent: 'codex', auto: true
   });
   assert.throws(
     () => parseTaskControlOperation('task-lifecycle', [
-      'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--stage', 'code'
+      'TASK-20260809-010203', 'recover-started', '--agent', 'codex', '--auto',
+      '--stage', 'code', '--round', '1', '--artifact', 'code.md', '--reason', 'mixed mode'
     ]),
-    /option '--round' is required/u
+    /unknown option '--stage'/u
   );
   assert.throws(
     () => parseTaskControlOperation('task-lifecycle', [
-      'TASK-20260809-010203', 'cancel', '--agent', 'codex', '--reason', 'obsolete', '--stage', 'code'
+      'TASK-20260809-010203', 'recover-started', '--agent', 'codex'
+    ]),
+    /--auto is required/u
+  );
+  assert.throws(
+    () => parseTaskControlOperation('task-lifecycle', [
+      'TASK-20260809-010203', 'cancel', '--agent', 'codex', '--reason', 'obsolete', '--auto'
     ]),
     /only supported for recover-started/u
   );

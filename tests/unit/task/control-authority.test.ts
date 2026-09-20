@@ -426,8 +426,7 @@ test('production recovery authority and task-event share one task lock', async (
     '---', '', '# Recovery fixture', '', '## Activity Log', ''
   ].join('\n'));
   const recoveryOperation = parseTaskControlOperation('task-lifecycle', [
-    taskId, 'recover-started', '--agent', 'codex', '--stage', 'code', '--round', '1',
-    '--artifact', 'code.md', '--reason', 'competing recovery request'
+    taskId, 'recover-started', '--agent', 'codex', '--auto'
   ]);
   let recoveryPromise: Promise<unknown> | undefined;
   let eventResult: ReturnType<typeof applyTaskEvent> | undefined;

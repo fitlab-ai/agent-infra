@@ -1,6 +1,5 @@
 import { isCompletionEvidence, type CleanCompletionEvidence } from '../../task/orchestration.ts';
 import { parseControlOutput } from '../../task/control-recovery.ts';
-import { isRecoveryWarning } from '../../task/recovery-warning.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +14,6 @@ import type {
   SandboxControlPayload,
   SandboxControlReservation,
   SandboxControlResultEvidence,
-  SandboxControlRecoveryWarning,
   SandboxControlStatus
 } from './protocol.ts';
 import {
@@ -115,7 +113,6 @@ export type SandboxControlTerminalResult = Readonly<{
   status: string;
   changed: boolean | null;
   completionEvidence: CleanCompletionEvidence | null;
-  warning?: SandboxControlRecoveryWarning | null;
 }>;
 
 export function terminalResultPath(manifest: SandboxControlManifest, requestId: string): string {
@@ -133,7 +130,6 @@ export function createSandboxControlTerminalResult(
     ? nested.run as Record<string, unknown> : null;
   const rawCompletion = nested.completionEvidence ?? run?.completionEvidence;
   const operation = request.operation ?? (typeof nested.intent === 'string' ? nested.intent : null) ?? '';
-  const warning = isRecoveryWarning(nested.warning) ? nested.warning : null;
   return {
     version: 1,
     requestId: request.id,
@@ -143,8 +139,7 @@ export function createSandboxControlTerminalResult(
     targetState: typeof nested.targetState === 'string' ? nested.targetState : null,
     status: typeof nested.status === 'string' ? nested.status : 'completed',
     changed: typeof nested.changed === 'boolean' ? nested.changed : null,
-    completionEvidence: isCompletionEvidence(rawCompletion) ? rawCompletion : null,
-    ...(warning ? { warning } : {})
+    completionEvidence: isCompletionEvidence(rawCompletion) ? rawCompletion : null
   };
 }
 
@@ -176,9 +171,6 @@ export function readSandboxControlTerminalResult(filePath: string): SandboxContr
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
   if (value.completionEvidence !== null && !isCompletionEvidence(value.completionEvidence)) {
-    throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
-  }
-  if (value.warning !== undefined && value.warning !== null && !isRecoveryWarning(value.warning)) {
     throw new Error('SANDBOX_CONTROL_TERMINAL_RESULT_INVALID');
   }
   if (value.changed === undefined) {

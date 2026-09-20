@@ -7,10 +7,10 @@ import {
 import { lifecycleIntentCatalog } from '../task/lifecycle.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import type { TaskLifecycleResult } from '../task/lifecycle.ts';
-import type { LifecycleRecoveryResult } from '../task/lifecycle-recovery.ts';
+import type { AgentClientLifecycleRecoveryResult as LifecycleRecoveryResult } from '../agent-clients/adapter.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\nrecover-started: --stage <stage> --round <round> --artifact <artifact> --reason <reason>\nOverride: --override-ticket <ticket> --override-target <target> --override-scope <scope>\n`;
+const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\nrecover-started: --auto\nOverride: --override-ticket <ticket> --override-target <target> --override-scope <scope>\n`;
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'LIFECYCLE_PAYLOAD_INVALID', message } })}\n`);

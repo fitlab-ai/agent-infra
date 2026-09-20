@@ -58,7 +58,7 @@ type TaskLifecycleRequest =
   | { taskRef: string; intent: 'close-codescan'; agent: string; alertNumber: number; reason: string; dryRun?: boolean }
   | { taskRef: string; intent: 'close-dependabot'; agent: string; alertNumber: number; reason: string; dryRun?: boolean }
   | { taskRef: string; intent: 'restore'; agent: string; stagingDir: string; issueNumber: number; dryRun?: boolean }
-  | { taskRef: string; intent: 'recover-started'; agent: string; stage: 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code'; round: number; artifact: string; reason: string; dryRun?: boolean };
+  | { taskRef: string; intent: 'recover-started'; agent: string; auto: true; dryRun?: boolean };
 
 type HotState = 'active' | 'blocked' | 'completed';
 type SourceState = HotState | 'staging';
@@ -209,7 +209,7 @@ function actionAndNote(request: TaskLifecycleRequest, restoredFiles = 0): { acti
   if (request.intent === 'complete') return { action: 'Complete Task', note: 'Task moved to completed/' };
   if (request.intent === 'close-codescan') return { action: 'Close Codescan', note: `Code Scanning alert #${request.alertNumber} dismissed: ${request.reason}` };
   if (request.intent === 'close-dependabot') return { action: 'Close Dependabot', note: `Dependabot alert #${request.alertNumber} dismissed: ${request.reason}` };
-  if (request.intent === 'recover-started') return { action: 'Recover Started', note: request.reason };
+  if (request.intent === 'recover-started') return { action: 'Recover Started', note: 'automatic recovery' };
   return { action: 'Restore Task', note: `Restored ${restoredFiles} files from Issue #${request.issueNumber}` };
 }
 

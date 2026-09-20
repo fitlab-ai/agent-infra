@@ -553,6 +553,10 @@ test('registry exposes the exact built-in project asset matrix', () => {
 test('Codex adapter owns its lifecycle and recovery capabilities', () => {
   const adapter = getAgentClientAdapter('codex');
 
+  assert.equal(typeof adapter.orchestrationAdapter?.prepareDelegation, 'function');
+  assert.equal(typeof adapter.orchestrationAdapter?.recoverStarted, 'function');
+  assert.ok(Object.isFrozen(adapter.orchestrationAdapter));
+
   assert.deepEqual(
     adapter.sandbox.hooks.map(({ id, phase }) => ({ id, phase })),
     [{ id: 'codex-before-container-create', phase: 'before-container-create' }]

@@ -1417,19 +1417,34 @@ function recoverPreparedOrchestrationDelegation(
   }
 }
 
+type ActivatedRecoveryEvent = Readonly<{
+  receiptId: string;
+  stage: DelegationStage;
+  round: number;
+  artifact: string;
+  startedAgent: string;
+  childId: string;
+  stopRevision: number;
+  consumer: string;
+  consumedAt: string;
+}>;
+
+function recoveryReceiptMatches(
+  receipt: DelegationReceipt,
+  taskId: string,
+  event: ActivatedRecoveryEvent
+): boolean {
+  return receipt.taskId === taskId
+    && receipt.stage === event.stage
+    && receipt.round === event.round
+    && receipt.artifact === event.artifact
+    && receipt.childId === event.childId
+    && normalizeAgentToken(event.startedAgent) === normalizeAgentToken(receipt.client);
+}
+
 function recoverActivatedOrchestrationDelegationUnderLock(
   taskRef: string,
-  event: Readonly<{
-    receiptId: string;
-    stage: DelegationStage;
-    round: number;
-    artifact: string;
-    startedAgent: string;
-    childId: string;
-    stopRevision: number;
-    consumer: string;
-    consumedAt: string;
-  }>,
+  event: ActivatedRecoveryEvent,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
@@ -1442,14 +1457,7 @@ function recoverActivatedOrchestrationDelegationUnderLock(
   ];
   const receipt = matches.find((candidate) => candidate.id === event.receiptId);
   if (!receipt) return failed('ORCHESTRATION_DELEGATION_MISSING', 'recovery receipt does not exist', resolved.taskId);
-  if (
-    receipt.taskId !== resolved.taskId
-    || receipt.stage !== event.stage
-    || receipt.round !== event.round
-    || receipt.artifact !== event.artifact
-    || receipt.childId !== event.childId
-    || normalizeAgentToken(event.startedAgent) !== normalizeAgentToken(receipt.client)
-  ) {
+  if (!recoveryReceiptMatches(receipt, resolved.taskId, event)) {
     return failed('ORCHESTRATION_PROVENANCE_MISMATCH', 'recovery selector does not match the delegation receipt', resolved.taskId);
   }
   if (receipt.status === 'aborted' && run.pendingDelegation === null) {
@@ -1460,6 +1468,9 @@ function recoverActivatedOrchestrationDelegationUnderLock(
   }
   if (run.receipts.some((candidate) => candidate.id === receipt.id)) {
     return failed('ORCHESTRATION_RECEIPT_DUPLICATE', 'recovery receipt already exists in the completed receipt history', resolved.taskId);
+  }
+  if (run.status !== 'running' || run.pause !== null) {
+    return failed('ORCHESTRATION_RECOVERY_UNSAFE', 'activated recovery cannot replace an unrelated orchestration pause', resolved.taskId);
   }
   const aborted = abortActivatedDelegation(receipt, {
     childId: event.childId,

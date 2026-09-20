@@ -147,12 +147,22 @@ function waitForAuditEvent(auditPath: string, event: string, generation: string,
   throw new Error(`Timed out waiting for ${event} audit event in ${auditPath}`);
 }
 
-async function waitForStatusStateAsync(statusDir: string, state: string, timeoutMs: number): Promise<void> {
+async function waitForStatusStateAsync(
+  statusDir: string,
+  state: string,
+  timeoutMs: number,
+  previousBrokerId?: string
+): Promise<void> {
   const statusPath = path.join(statusDir, 'status.json');
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      if (JSON.parse(fs.readFileSync(statusPath, 'utf8')).state === state) return;
+      const status = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as {
+        state?: string;
+        broker?: { brokerId?: string };
+      };
+      if (status.state === state
+        && (previousBrokerId === undefined || status.broker?.brokerId !== previousBrokerId)) return;
     } catch {
       // Atomic publication may not have completed yet.
     }
@@ -1615,12 +1625,15 @@ test('broker recovery cleans up a normally published large-output terminal', asy
     fs.mkdirSync(processingDir, { recursive: true });
     for (const entry of evidence) fs.writeFileSync(path.join(processingDir, entry.name), entry.contents);
     fs.writeFileSync(acceptedPath, accepted);
+    const previousBrokerId = JSON.parse(
+      fs.readFileSync(path.join(manifest.publicStatusDir, 'status.json'), 'utf8')
+    ).broker.brokerId as string;
     controller = new AbortController();
     server = serveSandboxControl(manifestPath, controller.signal, {
       ...options,
       prepareExecution: async () => { throw new Error('Unexpected executor replay'); }
     });
-    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS);
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', SANDBOX_CONTROL_TEST_TIMEOUT_MS, previousBrokerId);
     assert.equal(fs.existsSync(processingDir), false);
     assert.equal(fs.existsSync(acceptedPath), false);
     assert.equal(fs.readFileSync(terminalPath, 'utf8'), terminal);

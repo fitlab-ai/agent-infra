@@ -155,7 +155,8 @@ test('generic Agent Client core contains no client-specific ID literals', () => 
       // (client IDs / activity-log agent tokens); adapters are client-scoped.
       return relative !== 'types.ts' && relative !== 'tokens.ts' && !relative.startsWith('adapters/');
     }),
-    filePath('lib/sandbox/agent-client-reconciler.ts')
+    filePath('lib/sandbox/agent-client-reconciler.ts'),
+    filePath('lib/task/control-authority.ts')
   ];
 
   const api = new API({ cwd: filePath('.') });
