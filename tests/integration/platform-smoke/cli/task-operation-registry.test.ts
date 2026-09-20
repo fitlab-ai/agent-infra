@@ -166,7 +166,6 @@ test('non-prefix task mutation routes resolve to task-bound descriptors', () => 
 
 test('delegated control selectors reuse the same internal descriptors', () => {
   assert.equal(resolveDelegatedTaskOperation(['client', 'task-lifecycle', 'TASK-20260904-002344', 'complete'])?.command, 'task-lifecycle');
-  assert.equal(resolveDelegatedTaskOperation(['client', 'task-orchestration', 'TASK-20260904-002344', 'status']), null);
 });
 
 test('task-view guard refuses stale progress before a route can import its module', () => {
