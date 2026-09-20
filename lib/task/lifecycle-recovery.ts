@@ -615,6 +615,14 @@ function resolveAutoRecoveryRequest(
 
   const candidates = new Map<string, LifecycleRecoverySelectorRequest>();
   const noteByReceipt = new Map(notes.map((note) => [note.receiptId, note]));
+  const noteOrderByReceipt = new Map(notes.map((note, index) => [note.receiptId, index]));
+  const dedicatedPause = run.status === 'paused'
+    && run.pause?.code === ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE;
+  let dedicatedPauseFallback: Readonly<{
+    receiptId: string;
+    request: LifecycleRecoverySelectorRequest;
+    noteOrder: number;
+  }> | null = null;
   const pending = run.pendingDelegation;
   if (pending?.status === 'activated') {
     if (pending.client !== 'codex') {
@@ -651,10 +659,17 @@ function resolveAutoRecoveryRequest(
       }
       retainedClaim = !('missing' in stored);
     }
-    const dedicatedPause = run.status === 'paused'
-      && run.pause?.code === ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE;
-    if (open.length > 0 || (note && (retainedClaim || dedicatedPause))) {
+    if (open.length > 0 || (note && retainedClaim)) {
       candidates.set(receipt.id, { ...selector, reason: note?.reason ?? AUTO_RECOVERY_REASON });
+    } else if (note && dedicatedPause) {
+      const noteOrder = noteOrderByReceipt.get(receipt.id) ?? -1;
+      if (!dedicatedPauseFallback || noteOrder > dedicatedPauseFallback.noteOrder) {
+        dedicatedPauseFallback = {
+          receiptId: receipt.id,
+          request: { ...selector, reason: note.reason },
+          noteOrder
+        };
+      }
     }
   }
 
@@ -662,6 +677,9 @@ function resolveAutoRecoveryRequest(
     if (!run.receipts.some((receipt) => receipt.id === note.receiptId)) {
       return { kind: 'failure', status: 'conflict', code: 'RECOVERY_REFERENCE_CONFLICT', message: 'recovery note references a missing orchestration receipt', taskId: resolved.taskId };
     }
+  }
+  if (candidates.size === 0 && dedicatedPauseFallback) {
+    candidates.set(dedicatedPauseFallback.receiptId, dedicatedPauseFallback.request);
   }
   if (candidates.size > 1) {
     return { kind: 'failure', status: 'conflict', code: 'RECOVERY_SELECTOR_AMBIGUOUS', message: 'automatic recovery found multiple candidate lifecycle attempts', taskId: resolved.taskId };

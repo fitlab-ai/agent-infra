@@ -18,7 +18,8 @@ import {
 } from '../../../lib/task/orchestration.ts';
 import {
   readLifecycleRecoveryDomainEvidence,
-  recoverStartedLifecycleUnderLock
+  recoverStartedLifecycleUnderLock,
+  renderRecoveryNote
 } from '../../../lib/task/lifecycle-recovery.ts';
 import type { LifecycleRecoveryOptions, LifecycleRecoveryRequest } from '../../../lib/task/lifecycle-recovery.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
@@ -107,6 +108,55 @@ function recoverAuto(
     autoRecoveryRequest,
     { repoRoot: path.resolve(f.taskDir, '../../../..'), lifecycleStore: f.store, releaseRecovery }
   ));
+}
+
+function addCompletedHistoricalRecovery(f: ReturnType<typeof fixture>): void {
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const run = JSON.parse(fs.readFileSync(runPath, 'utf8')) as {
+    pendingDelegation: Record<string, unknown> | null;
+    receipts: Record<string, unknown>[];
+  };
+  assert.ok(run.pendingDelegation);
+  const receiptId = 'receipt-historical';
+  const childId = 'historical-child';
+  const consumer = `lifecycle-recovery:${TASK_ID}:${receiptId}`;
+  const consumedAt = '2026-01-01T00:00:00.500Z';
+  run.receipts.push({
+    ...run.pendingDelegation,
+    id: receiptId,
+    stage: 'plan',
+    round: 1,
+    artifact: 'plan.md',
+    childId,
+    status: 'aborted',
+    hostEvidence: {
+      ...(run.pendingDelegation.hostEvidence as Record<string, unknown>),
+      stopRevision: 6,
+      consumer,
+      consumedAt
+    }
+  });
+  fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+  const note = renderRecoveryNote({
+    version: 1,
+    taskId: TASK_ID,
+    stage: 'plan',
+    round: 1,
+    artifact: 'plan.md',
+    startedAgent: 'codex',
+    receiptId,
+    childId,
+    stopRevision: 6,
+    consumer,
+    consumedAt,
+    owner: 'terminated',
+    reason: 'historical recovery completed'
+  });
+  fs.appendFileSync(
+    path.join(f.taskDir, 'task.md'),
+    `- 2026-01-01 00:00:01+00:00 — **Plan Task (Round 1) [started]** by codex — started\n`
+      + `- 2026-01-01 00:00:02+00:00 — **Plan Task (Round 1) [aborted]** by codex — ${note}\n`
+  );
 }
 
 test('recover-started auto is not needed before the first orchestration run', () => {
@@ -243,6 +293,56 @@ test('recover-started auto releases a retained claim before resuming its dedicat
 
     const recovered = recoverAuto(f, (child, consumer) => f.store.releaseRecovery(child, consumer));
     assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(readRun(f.taskDir)?.status, 'running');
+    assert.equal(readRun(f.taskDir)?.pause, null);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('recover-started auto ignores completed history when retrying a retained claim', () => {
+  const f = fixture();
+  try {
+    addCompletedHistoricalRecovery(f);
+    const first = recoverAuto(f, () => false);
+    assert.equal(first.status, 'applied', JSON.stringify(first));
+    assert.equal(first.warning?.code, 'RECOVERY_RELEASE_RETRY_REQUIRED');
+    pauseOrchestration(
+      TASK_ID,
+      ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+      'RECOVERY_RELEASE_RETRY_REQUIRED: claim retained',
+      true,
+      { repoRoot: f.root }
+    );
+
+    const recovered = recoverAuto(f, (child, consumer) => f.store.releaseRecovery(child, consumer));
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(recovered.receiptId, 'receipt-1');
+    assert.equal(readRun(f.taskDir)?.status, 'running');
+    assert.equal(readRun(f.taskDir)?.pause, null);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('recover-started auto selects the latest transaction after release precedes run persistence', () => {
+  const f = fixture();
+  try {
+    addCompletedHistoricalRecovery(f);
+    const first = recoverAuto(f, () => false);
+    assert.equal(first.warning?.code, 'RECOVERY_RELEASE_RETRY_REQUIRED');
+    assert.equal(f.store.releaseRecovery('child', `lifecycle-recovery:${TASK_ID}:receipt-1`), true);
+    pauseOrchestration(
+      TASK_ID,
+      ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+      'run persistence did not finish after lifecycle claim release',
+      true,
+      { repoRoot: f.root }
+    );
+
+    const recovered = recoverAuto(f);
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(recovered.receiptId, 'receipt-1');
     assert.equal(readRun(f.taskDir)?.status, 'running');
     assert.equal(readRun(f.taskDir)?.pause, null);
   } finally {
