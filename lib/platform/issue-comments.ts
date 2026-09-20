@@ -27,7 +27,6 @@ import {
 import { projectTaskComment } from './task-comment-projection.ts';
 import {
   canonicalizeCommentBody,
-  canonicalizeSummaryBody,
   escapeHtmlText,
   fenceRanges,
   renderSafeCodeFence
@@ -478,20 +477,6 @@ function summaryPosition(comments: RemoteComment[], taskId: string): { ok: boole
   }
   const sequence = summary[0]!.createdSequence!;
   return { ok: managed.every((comment) => sequence >= comment.createdSequence!), known: true, summary: summary[0]! };
-}
-
-function summaryBody(comment: RemoteComment): string | null {
-  const body = normalizeCommentContent(comment.body)
-    .replace(/^<!-- sync-issue:[^\n]+:summary -->\n## [^\n]+\n\n> [^\n]+\n\n/u, '')
-    .replace(/^<details><summary>恢复元数据<\/summary>[\s\S]*?<\/details>\n\n/u, '')
-    .replace(/\n---\n\*[^\n]*\*$/u, '');
-  const canonical = canonicalizeSummaryBody(body);
-  return canonical.ok ? canonical.value : null;
-}
-
-function summaryDigest(comment: RemoteComment): string {
-  const body = summaryBody(comment);
-  return body === null ? '' : createHash('sha256').update(body).digest('hex');
 }
 
 async function listedComments(provider: any, loaded: any, parent: ReturnType<typeof taskIssueIdentity>): Promise<any> {
