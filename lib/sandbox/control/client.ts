@@ -13,8 +13,7 @@ import {
   type SandboxTaskCreateRequest,
   type SandboxTaskCommandRequest,
   type SandboxTaskFinalizationRequest,
-  type SandboxCodexControllerRequest,
-  type SandboxTaskWorkflowRequest
+  type SandboxCodexControllerRequest
 } from './protocol.ts';
 import type {
   CodexControllerLeaseProofV1,
@@ -26,7 +25,6 @@ import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts'
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
 import { readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
-import type { TaskWorkflowRequest } from './task-workflow.ts';
 import type { LifecycleAuthorityRequestV1 } from '../../task/control-authority.ts';
 import { configuredShortIdLength, resolveShortIdReadOnly } from '../../task/short-id.ts';
 
@@ -120,7 +118,6 @@ function preflight(
 function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAccessEffect | null {
   if (request.family === 'task-lifecycle' || request.family === 'task-finalization') return 'progress';
   if (request.family === 'task-orchestration') return request.args[1] === 'status' ? 'diagnostic' : 'progress';
-  if (request.family === 'task-workflow') return request.workflow.operation === 'artifact-inspect' || request.workflow.operation === 'decision-next-id' ? 'diagnostic' : 'progress';
   return null;
 }
 
@@ -194,9 +191,7 @@ export function resolveVisibleActiveShortId(ref: string): string | null {
 // may be a documented short id. Compare canonical ids so a bound sandbox keeps
 // refusing other tasks without rejecting its own task's short id.
 function canonicalRequestTask(request: SandboxControlRequest): CanonicalRequestTask {
-  const ref = request.family === 'task-workflow'
-    ? request.workflow.taskId
-    : 'args' in request ? request.args[0] ?? null : null;
+  const ref = 'args' in request ? request.args[0] ?? null : null;
   if (!ref) return { kind: 'none' };
   if (CONTROL_TASK_ID_RE.test(ref)) return { kind: 'task', taskId: ref };
   if (!CONTROL_SHORT_ID_RE.test(ref)) return { kind: 'none' };
@@ -223,7 +218,7 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
         || (requestTask.kind === 'task' && requestTask.taskId !== identity.taskId))) {
       clientError('SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH', 'request task does not match the sandbox identity', false);
     }
-    if (identity.mode === 'branch-only' && (request.family === 'task-finalization' || request.family === 'task-workflow')) {
+    if (identity.mode === 'branch-only' && request.family === 'task-finalization') {
       clientError('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot finalize tasks', false);
     }
   }
@@ -384,7 +379,7 @@ export function requestSandboxControl(params: Readonly<{
   token?: string; generation?: string; timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isSandboxControlFamily(params.family)) clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' is not allowed`, false);
-  if (params.family === 'task-create' || params.family === 'codex-controller' || params.family === 'task-finalization' || params.family === 'task-workflow') {
+  if (params.family === 'task-create' || params.family === 'codex-controller' || params.family === 'task-finalization') {
     clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' requires a typed request`, false);
   }
   const auth = authority(params);
@@ -451,33 +446,6 @@ export function requestSandboxTaskFinalization(params: Readonly<{
     args: [],
     controllerProcess: null,
     controllerProof: null
-  };
-  return exchangeSandboxControl(request, params);
-}
-
-export function requestSandboxTaskWorkflow(params: Readonly<{
-  workflow: TaskWorkflowRequest;
-  channelDir?: string;
-  statusDir?: string;
-  token?: string;
-  generation?: string;
-  timeoutMs?: number;
-  authority?: LifecycleAuthorityRequestV1;
-}>): SandboxControlResponse {
-  const auth = authority(params);
-  const issuedAt = Date.now();
-  const request: SandboxTaskWorkflowRequest = {
-    version: 3,
-    id: params.workflow.id,
-    ...auth,
-    issuedAt,
-    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
-    family: 'task-workflow',
-    args: [],
-    controllerProcess: null,
-    controllerProof: null,
-    workflow: params.workflow,
-    ...(params.authority ? { authority: params.authority } : {})
   };
   return exchangeSandboxControl(request, params);
 }

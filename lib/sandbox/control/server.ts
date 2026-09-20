@@ -91,7 +91,6 @@ import { taskCreateOutputUnavailableResult } from '../../task/create-service.ts'
 import {
   consumeLifecycleRecoveryAttestation,
   issueLifecycleRecoveryAttestation,
-  recoverLifecycleRecoveryOperation,
   type LifecycleAuthorityResponseV1
 } from '../../task/control-authority.ts';
 import { createCodexCapabilityStore } from '../../agent-clients/adapters/codex-lifecycle/capability-store.ts';
@@ -130,9 +129,7 @@ function lifecycleAuthorityForRequest(
   manifestPath: string,
   request: SandboxControlRequest
 ): LifecycleAuthorityResponseV1 | undefined {
-  const selector = request.family === 'task-workflow' || request.family === 'task-orchestration'
-    ? request.authority
-    : undefined;
+  const selector = request.family === 'task-orchestration' ? request.authority : undefined;
   if (!selector) return undefined;
   let controllerBinding: { instanceDigest: string; controlGeneration: string } | null = null;
   try {
@@ -164,7 +161,6 @@ function operationKey(request: SandboxControlRequest, output?: string): string |
   if (request.family === 'task-finalization') return request.operation;
   if (request.family === 'task-create') return 'create';
   if (request.family === 'codex-controller') return request.command;
-  if (request.family === 'task-workflow') return request.workflow.operation;
   if (request.family !== 'task-lifecycle' && request.family !== 'task-orchestration') return null;
   if (request.family === 'task-orchestration' && request.args[1] === 'route') {
     if (!output) return 'route';
@@ -500,7 +496,7 @@ function readRecoveryDomain(
   payloadOutput: string | null
 ): RecoveryDomainEvidence {
   if (!operation) return { domain: null };
-  const taskRef = request.family === 'task-finalization' || request.family === 'task-workflow'
+  const taskRef = request.family === 'task-finalization'
     ? manifest.taskId
     : 'args' in request ? request.args[0] ?? null : manifest.taskId;
   const output = parseControlOutput(payloadOutput);
@@ -578,11 +574,6 @@ function readRecoveryDomain(
   if (operation.family === 'codex-controller') {
     return { domain: controllerDomainEvidence(manifest, manifestPath, request, output) };
   }
-  if (operation.family === 'task-workflow') {
-    return {
-      domain: { consistent: output?.status === terminalResult.status && output.changed === terminalResult.changed, snapshotValid: true }
-    };
-  }
   return { domain: null };
 }
 
@@ -616,27 +607,6 @@ export function recoveryResponse(
   }
   const finalization = request.family === 'task-finalization' ? finalizationRecoveryResponse(manifest, request.id, 0) : null;
   if (evidence.exitCode === 0 && finalization?.status === 'deferred') return null;
-  if (evidence.exitCode === 0 && request.family === 'task-workflow' && request.authority?.phase === 'task-event.completed') {
-    try {
-      const registration = readCodexControllerRegistration(manifestPath);
-      const recovered = recoverLifecycleRecoveryOperation(request.authority, {
-        repoRoot: manifest.repoRoot,
-        capabilityStore: createCodexCapabilityStore(),
-        buildIdentity: computeLifecycleBuildIdentity(manifest.repoRoot),
-        controllerBinding: {
-          instanceDigest: registration.controllerInstanceDigest,
-          controlGeneration: registration.controlGeneration
-        }
-      });
-      if (recovered.status !== 'committed') return null;
-    } catch (error) {
-      appendBrokerAudit(manifest, 'lifecycle-authority-recovery-failed', {
-        ...requestAuditFields(manifest, request),
-        errorCode: error instanceof Error ? error.name : 'LIFECYCLE_AUTHORITY_RECOVERY_FAILED'
-      });
-      return null;
-    }
-  }
   const recovery: RecoveryDomainEvidence = finalization
     ? { domain: { consistent: finalization.status === 'matched' } }
     : readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);

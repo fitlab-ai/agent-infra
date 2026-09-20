@@ -2102,9 +2102,9 @@ test(`sandbox control client and broker exchange a task-bound response with shor
           assert.equal(output.taskId, taskId, ref);
           assert.equal(output.next.name, 'analysis.md', ref);
         } else {
-          assert.equal(result.status, 1, ref);
+          assert.equal(result.status, ref === 'not-a-task' ? 2 : 1, `${ref}: ${result.stderr}${result.stdout}`);
           if (ref === 'not-a-task') {
-            assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_REQUEST_INVALID');
+            assert.equal(JSON.parse(result.stdout).error.code, 'INVALID_TASK_REF');
           } else {
             assert.match(result.stderr, /SANDBOX_TASK_REF_MISMATCH/, ref);
           }
@@ -2452,14 +2452,18 @@ test('branch-only broker persists a typed task-create request on the host', asyn
         acceptanceCriteria: [], openQuestions: []
       }
     };
-    const response = requestSandboxTaskCreate({
+    const response = withSandboxControlEnvironment({
+      AGENT_INFRA_TASK_ID: undefined,
+      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    }, () => requestSandboxTaskCreate({
       candidate,
       channelDir,
       statusDir,
       token,
       generation,
       timeoutMs: 5_000
-    });
+    }));
     assert.equal(response.exitCode, 0, response.stderr || response.stdout);
     const result = JSON.parse(response.stdout);
     assert.equal(result.status, 'applied');
