@@ -63,7 +63,7 @@ import {
   SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES
 } from '../../task/control-recovery.ts';
 import { readRun } from '../../task/orchestration.ts';
-import { readLifecycleRecoveryDomainEvidence } from '../../task/lifecycle-recovery.ts';
+import { readLifecycleRecoveryDomainEvidence } from '../../agent-clients/adapters/codex-lifecycle/recovery.ts';
 import { captureRepositorySnapshot } from '../../task/workspace-snapshot.ts';
 import { parseTypedTaskFrontmatter } from '../../task/frontmatter.ts';
 import { readLifecycleJournalEvidence } from '../../task/lifecycle.ts';
@@ -515,7 +515,7 @@ function readRecoveryDomain(
         return {
           domain: readLifecycleRecoveryDomainEvidence(
             manifest.repoRoot,
-            parsed.request,
+            parsed.request as never,
             { ...terminalResult, ...(output ?? {}) }
           ),
           journal: readLifecycleJournalEvidence(manifest.repoRoot, taskRef!)

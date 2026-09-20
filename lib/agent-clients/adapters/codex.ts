@@ -28,6 +28,16 @@ const codexAdapter = defineAgentClientAdapter({
     actualModel: 'app-server',
     actualReasoningEffort: 'app-server'
   },
+  orchestrationAdapter: {
+    prepareDelegation: async (...args) => {
+      const { prepareCodexOrchestrationDelegation } = await import('../../task/codex-orchestration.ts');
+      return prepareCodexOrchestrationDelegation(...args);
+    },
+    recoverStarted: async (...args) => {
+      const { recoverStartedLifecycleFromAdapter } = await import('./codex-lifecycle/recovery.ts');
+      return recoverStartedLifecycleFromAdapter(...args);
+    }
+  },
   project: {
     ownedPathPrefixes: ['.codex/'],
     managed: ['.codex/hooks.json', '.codex/agents/'],

@@ -18,10 +18,11 @@ import {
 } from '../../../lib/task/orchestration.ts';
 import {
   readLifecycleRecoveryDomainEvidence,
+  recoverStartedLifecycleFromAdapter,
   recoverStartedLifecycleUnderLock,
   renderRecoveryNote
-} from '../../../lib/task/lifecycle-recovery.ts';
-import type { LifecycleRecoveryOptions, LifecycleRecoveryRequest } from '../../../lib/task/lifecycle-recovery.ts';
+} from '../../../lib/agent-clients/adapters/codex-lifecycle/recovery.ts';
+import type { LifecycleRecoveryOptions, LifecycleRecoveryRequest } from '../../../lib/agent-clients/adapters/codex-lifecycle/recovery.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeTask } from '../../../lib/task/write.ts';
 
@@ -272,6 +273,28 @@ test('recover-started auto selects and completes one activated Codex delegation'
       { lifecycleStore: f.store }
     ), { consistent: true, recovery: true, targetState: 'active', recoveryState: 'released' });
     assert.equal(recoverAuto(f).status, 'no-op');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('client adapter owns the automatic retained-claim retry', () => {
+  const f = fixture();
+  let releases = 0;
+  try {
+    const recovered = withTaskExecutionLock(f.root, TASK_ID, 'test.adapter-recovery', () =>
+      recoverStartedLifecycleFromAdapter(autoRecoveryRequest, {
+        repoRoot: f.root,
+        lifecycleStore: f.store,
+        releaseRecovery: (child, consumer) => {
+          releases += 1;
+          return releases === 1 ? false : f.store.releaseRecovery(child, consumer);
+        }
+      })
+    );
+    assert.equal(releases, 2);
+    assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
+    assert.equal(recovered.warning, null);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

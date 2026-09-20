@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
 import { activateOrchestrationDelegation, beginOrResumeOrchestration, dispatchOrchestrationDelegation, prepareOrchestrationDelegation, readRun } from '../../../lib/task/orchestration.ts';
-import { readLifecycleRecoveryDomainEvidence, recoverStartedLifecycleUnderLock } from '../../../lib/task/lifecycle-recovery.ts';
+import { readLifecycleRecoveryDomainEvidence, recoverStartedLifecycleUnderLock } from '../../../lib/agent-clients/adapters/codex-lifecycle/recovery.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { genericRecoveryResponse, recoveryResponse } from '../../../lib/sandbox/control/server.ts';
 import type { SandboxControlManifest, SandboxControlRecoveryWarning, SandboxControlRequest, SandboxControlResultEvidence } from '../../../lib/sandbox/control/protocol.ts';

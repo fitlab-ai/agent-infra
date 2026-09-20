@@ -1,27 +1,31 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
-import type { StoredCodexLifecycle } from '../agent-clients/adapters/codex-lifecycle/store.ts';
-import { managedDelegationRole } from './delegation-receipts.ts';
-import type { DelegationReceipt } from './delegation-receipts.ts';
-import { normalizeAgentToken } from '../agent-clients/tokens.ts';
-import { artifactName, parseArtifactName } from './artifact-name.ts';
-import { locateActivityLog, pairEntries } from './activity-log.ts';
-import type { LogEntry, StepRow } from './activity-log.ts';
-import { captureTaskWriteMetadata, writeTask } from './write.ts';
-import { parseTypedTaskFrontmatter } from './frontmatter.ts';
-import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
-import { resolveAgentRuntimeStoreRoot } from '../runtime/agent-runtime.ts';
+import { createCodexLifecycleStore } from './store.ts';
+import type { StoredCodexLifecycle } from './store.ts';
+import { managedDelegationRole } from '../../../task/delegation-receipts.ts';
+import type { DelegationReceipt } from '../../../task/delegation-receipts.ts';
+import { normalizeAgentToken } from '../../tokens.ts';
+import { artifactName, parseArtifactName } from '../../../task/artifact-name.ts';
+import { locateActivityLog, pairEntries } from '../../../task/activity-log.ts';
+import type { LogEntry, StepRow } from '../../../task/activity-log.ts';
+import { captureTaskWriteMetadata, writeTask } from '../../../task/write.ts';
+import { parseTypedTaskFrontmatter } from '../../../task/frontmatter.ts';
+import { resolveTaskRef, TASK_ID_RE } from '../../../task/resolve-ref.ts';
+import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts';
 import {
   finishActivatedRecoveryOrchestrationUnderLock,
   ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
   recoverActivatedOrchestrationDelegationUnderLock,
   readRun
-} from './orchestration.ts';
-import type { OrchestrationOptions, OrchestrationRun } from './orchestration.ts';
-import { isRecoveryWarning, sameRecoveryWarning } from './recovery-warning.ts';
-import type { RecoveryWarning } from './recovery-warning.ts';
+} from '../../../task/orchestration.ts';
+import type { OrchestrationOptions, OrchestrationRun } from '../../../task/orchestration.ts';
+import { isRecoveryWarning, sameRecoveryWarning } from '../../../task/recovery-warning.ts';
+import type { RecoveryWarning } from '../../../task/recovery-warning.ts';
+import type {
+  AgentClientLifecycleRecoveryRequest,
+  AgentClientLifecycleRecoveryResult
+} from '../../adapter.ts';
 
 const RECOVERY_NOTE_PREFIX = 'lifecycle-recovery:v1 ';
 const RECOVERY_STAGES = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
@@ -54,23 +58,9 @@ type LifecycleRecoveryAutoRequest = Readonly<{
   agent: string;
   auto: true;
 }>;
-type LifecycleRecoveryRequest = LifecycleRecoverySelectorRequest | LifecycleRecoveryAutoRequest;
+type LifecycleRecoveryRequest = AgentClientLifecycleRecoveryRequest;
 type RecoveryCommitVerification = { ok: true; receipt: DelegationReceipt } | { ok: false; message: string };
-type LifecycleRecoveryResult = Readonly<{
-  status: 'applied' | 'no-op' | 'owner-unknown' | 'conflict';
-  changed: boolean;
-  targetState: 'active';
-  requestRef: string;
-  intent: 'recover-started';
-  taskId: string | null;
-  stage: RecoveryStage | null;
-  round: number | null;
-  artifact: string | null;
-  receiptId: string | null;
-  childId: string | null;
-  warning: RecoveryWarning | null;
-  error: Readonly<{ code: string; message: string }> | null;
-}>;
+type LifecycleRecoveryResult = AgentClientLifecycleRecoveryResult;
 type LifecycleRecoveryOptions = Readonly<{
   repoRoot?: string;
   now?: () => string;
@@ -980,11 +970,26 @@ function recoverStartedLifecycleUnderLock(
   return result(request, 'applied', { taskId, receiptId: receipt.id, childId: receipt.childId });
 }
 
+function recoverStartedLifecycleFromAdapter(
+  request: LifecycleRecoveryRequest,
+  options: LifecycleRecoveryOptions = {}
+): LifecycleRecoveryResult {
+  const first = recoverStartedLifecycleUnderLock(request, options);
+  if (
+    'auto' in request
+    && first.warning?.code === RECOVERY_RELEASE_RETRY_WARNING.code
+  ) {
+    return recoverStartedLifecycleUnderLock(request, options);
+  }
+  return first;
+}
+
 export {
   RECOVERY_NOTE_PREFIX,
   parseRecoveryNote,
   recoveryFailure,
   recoveryConsumer,
+  recoverStartedLifecycleFromAdapter,
   recoverStartedLifecycleUnderLock,
   renderRecoveryNote
 };

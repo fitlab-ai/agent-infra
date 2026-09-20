@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
+import { getAgentClientAdapter } from '../agent-clients/registry.ts';
 import { consumeHumanOverride, failureId, overrideDryRunConflict } from './human-override.ts';
 import {
   activateMatchingOrchestrationDelegation,
@@ -27,7 +28,6 @@ import type {
   OrchestrationOptions,
   OrchestrationResult
 } from './orchestration.ts';
-import { prepareCodexOrchestrationDelegation } from './codex-orchestration.ts';
 import {
   applyTaskFinalization,
   type TaskFinalizationRequest,
@@ -39,12 +39,10 @@ import {
   type TaskLifecycleRequest,
   type TaskLifecycleResult
 } from './lifecycle.ts';
-import {
-  recoverStartedLifecycleUnderLock,
-  recoveryFailure,
-  type LifecycleRecoveryResult
-} from './lifecycle-recovery.ts';
-import type { LifecycleRecoveryRequest } from './lifecycle-recovery.ts';
+import type {
+  AgentClientLifecycleRecoveryRequest as LifecycleRecoveryRequest,
+  AgentClientLifecycleRecoveryResult as LifecycleRecoveryResult
+} from '../agent-clients/adapter.ts';
 import { locateActivityLog } from './activity-log.ts';
 import { resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
@@ -725,7 +723,18 @@ async function applyLifecycleWithAuthority(
   }
   const execute = async (): Promise<(TaskLifecycleResult | LifecycleRecoveryResult) & { humanOverride?: unknown }> => {
     if (request.intent === 'recover-started') {
-      return recoverStartedLifecycleUnderLock(request as LifecycleRecoveryRequest, { repoRoot: context.repoRoot });
+      const adapter = isAgentClientId(request.agent)
+        ? getAgentClientAdapter(request.agent).orchestrationAdapter
+        : undefined;
+      if (!adapter?.recoverStarted) {
+        return {
+          status: 'no-op', changed: false, targetState: 'active',
+          requestRef: request.taskRef, intent: 'recover-started', taskId: null,
+          stage: null, round: null, artifact: null, receiptId: null, childId: null,
+          warning: null, error: null
+        };
+      }
+      return adapter.recoverStarted(request as LifecycleRecoveryRequest, { repoRoot: context.repoRoot });
     }
     const lifecycleResult = applyTaskLifecycle(request, { repoRoot: context.repoRoot });
     if (lifecycleResult.status !== 'failed' || !request.overrideTicket) return lifecycleResult;
@@ -761,7 +770,15 @@ async function applyLifecycleWithAuthority(
   } catch (error) {
     if (!(error instanceof TaskExecutionLockError)) throw error;
     if (request.intent === 'recover-started') {
-      return recoveryFailure(request as LifecycleRecoveryRequest, 'owner-unknown', error.code, error.message);
+      return {
+        status: 'owner-unknown', changed: false, targetState: 'active',
+        requestRef: request.taskRef, intent: 'recover-started', taskId,
+        stage: 'stage' in request ? String(request.stage) : null,
+        round: 'round' in request ? Number(request.round) : null,
+        artifact: 'artifact' in request ? String(request.artifact) : null,
+        receiptId: null, childId: null, warning: null,
+        error: { code: error.code, message: error.message }
+      };
     }
     return taskLifecycleFailure(request, { code: error.code, message: error.message }, taskId);
   }
@@ -790,8 +807,10 @@ function orchestration(
         requestedModel: input.requestedModel as string | undefined,
         requestedReasoningEffort: input.requestedReasoningEffort as string | undefined,
       };
-      if (prepareInput.client === 'codex') {
-        return prepareCodexOrchestrationDelegation(operation.taskRef, prepareInput, {
+      const prepareDelegation = getAgentClientAdapter(prepareInput.client)
+        .orchestrationAdapter?.prepareDelegation;
+      if (prepareDelegation) {
+        return prepareDelegation(operation.taskRef, prepareInput, {
           repoRoot: context.repoRoot,
           orchestrationOptions: options,
         });
@@ -995,7 +1014,6 @@ export function parseTaskControlOperation(
         operationInvalid('--auto cannot be combined with --stage, --round, --artifact, or --reason');
       }
       if (!automatic) required(values, selectorFlags);
-      if (automatic && agent !== 'codex') operationInvalid('--auto only supports the codex agent');
       if (automatic) return { family, request: input as unknown as TaskLifecycleControlRequest };
       const stage = value(values, '--stage');
       if (!['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'].includes(stage ?? '')) {
