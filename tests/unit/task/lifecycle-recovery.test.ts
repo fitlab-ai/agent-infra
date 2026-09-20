@@ -300,6 +300,31 @@ test('client adapter owns the automatic retained-claim retry', () => {
   }
 });
 
+test('client adapter persists a dedicated pause after consecutive release failures', () => {
+  const f = fixture();
+  let releases = 0;
+  try {
+    const recovered = withTaskExecutionLock(f.root, TASK_ID, 'test.adapter-recovery-pause', () =>
+      recoverStartedLifecycleFromAdapter(autoRecoveryRequest, {
+        repoRoot: f.root,
+        lifecycleStore: f.store,
+        releaseRecovery: () => {
+          releases += 1;
+          return false;
+        }
+      })
+    );
+    assert.equal(releases, 2);
+    assert.equal(recovered.status, 'owner-unknown', JSON.stringify(recovered));
+    assert.equal(recovered.error?.code, ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE);
+    assert.equal(readRun(f.taskDir)?.status, 'paused');
+    assert.equal(readRun(f.taskDir)?.pause?.code, ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE);
+    assert.equal(readRun(f.taskDir)?.pause?.recoverable, true);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('recover-started auto releases a retained claim before resuming its dedicated pause', () => {
   const f = fixture();
   try {

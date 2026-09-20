@@ -132,7 +132,7 @@ test('server recovery response retains release retry warning when output payload
   assert.match(response.stderr, /Action: retry recover-started/u);
 });
 
-test('server recovery wiring rebuilds consecutive release failures and converges after release', () => {
+test('server recovery wiring rebuilds consecutive release failures and converges after release', async () => {
   const f = recoveryFixture();
   const manifest = recoveryManifest(f);
   const manifestPath = path.join(path.dirname(manifest.publicStatusDir), 'manifest.json');
@@ -159,7 +159,7 @@ test('server recovery wiring rebuilds consecutive release failures and converges
     const first = recover(() => false);
     assert.equal(first.status, 'applied', JSON.stringify(first));
     const firstTerminal = terminalFor(manifest, request, first);
-    const firstResponse = recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, firstTerminal);
+    const firstResponse = await recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, firstTerminal);
     assert.ok(firstResponse);
     assert.match(firstResponse.stderr, /RECOVERY_RELEASE_RETRY_REQUIRED/u);
     assert.match(firstResponse.stderr, /Action: retry recover-started with the same selector and reason/u);
@@ -168,7 +168,7 @@ test('server recovery wiring rebuilds consecutive release failures and converges
     assert.equal(second.status, 'applied', JSON.stringify(second));
     assert.equal(second.changed, false);
     const secondTerminal = terminalFor(manifest, request, second);
-    const secondResponse = recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, secondTerminal);
+    const secondResponse = await recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, secondTerminal);
     assert.ok(secondResponse);
     assert.equal(secondResponse.outputState, 'unavailable');
     assert.match(secondResponse.stderr, /RECOVERY_RELEASE_RETRY_REQUIRED/u);
@@ -177,7 +177,7 @@ test('server recovery wiring rebuilds consecutive release failures and converges
     const released = recover((child, consumer) => f.store.releaseRecovery(child, consumer));
     assert.equal(released.status, 'applied', JSON.stringify(released));
     const releasedTerminal = terminalFor(manifest, request, released);
-    const releasedResponse = recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, releasedTerminal);
+    const releasedResponse = await recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, releasedTerminal);
     assert.ok(releasedResponse);
     assert.match(releasedResponse.stderr, /SANDBOX_CONTROL_OUTPUT_UNAVAILABLE/u);
     assert.doesNotMatch(releasedResponse.stderr, /RECOVERY_RELEASE_RETRY_REQUIRED/u);
@@ -189,7 +189,7 @@ test('server recovery wiring rebuilds consecutive release failures and converges
   }
 });
 
-test('server rebuilds automatic recovery success when the output payload is unavailable', () => {
+test('server rebuilds automatic recovery success when the output payload is unavailable', async () => {
   const f = recoveryFixture();
   const manifest = recoveryManifest(f);
   const manifestPath = path.join(path.dirname(manifest.publicStatusDir), 'manifest.json');
@@ -204,7 +204,7 @@ test('server rebuilds automatic recovery success when the output payload is unav
     ));
     assert.equal(recovered.status, 'applied', JSON.stringify(recovered));
     const terminal = terminalFor(manifest, request, recovered);
-    const response = recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, terminal);
+    const response = await recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, terminal);
     assert.ok(response);
     assert.equal(response.exitCode, 0);
     assert.equal(response.outputState, 'unavailable');
@@ -215,7 +215,7 @@ test('server rebuilds automatic recovery success when the output payload is unav
   }
 });
 
-test('server rebuilds repeated automatic release retries when output payloads are unavailable', () => {
+test('server rebuilds repeated automatic release retries when output payloads are unavailable', async () => {
   const f = recoveryFixture({ boundRuntime: true });
   const manifest = recoveryManifest(f);
   const manifestPath = path.join(path.dirname(manifest.publicStatusDir), 'manifest.json');
@@ -245,7 +245,7 @@ test('server rebuilds repeated automatic release retries when output payloads ar
         recoveryState: 'retry-required',
         warning: recovered.warning
       });
-      const response = recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, terminal);
+      const response = await recoveryResponse(manifest, manifestPath, request, resultEvidence(request.id), null, terminal);
       assert.ok(response);
       assert.equal(response.error, null, JSON.stringify(response));
       assert.equal(response.phase, 'completed');

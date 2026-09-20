@@ -92,6 +92,20 @@ type AgentClientOrchestrationAdapter = Readonly<{
     request: AgentClientLifecycleRecoveryRequest,
     options: Readonly<{ repoRoot: string }>
   ) => AgentClientLifecycleRecoveryResult | Promise<AgentClientLifecycleRecoveryResult>;
+  readRecoveryEvidence?: (
+    repoRoot: string,
+    request: AgentClientLifecycleRecoveryRequest,
+    result: Readonly<{
+      status: string;
+      changed: boolean | null;
+      targetState: string | null;
+      warning?: unknown | null;
+      receiptId?: unknown;
+      stage?: unknown;
+      round?: unknown;
+      artifact?: unknown;
+    }>
+  ) => Promise<Readonly<Record<string, unknown>>>;
 }>;
 
 type AgentClientSeedCommand = Readonly<{

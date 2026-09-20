@@ -63,7 +63,8 @@ import {
   SANDBOX_CONTROL_REQUIRED_COMPLETION_PHASES
 } from '../../task/control-recovery.ts';
 import { readRun } from '../../task/orchestration.ts';
-import { readLifecycleRecoveryDomainEvidence } from '../../agent-clients/adapters/codex-lifecycle/recovery.ts';
+import { getAgentClientAdapter } from '../../agent-clients/registry.ts';
+import { isAgentClientId } from '../../agent-clients/types.ts';
 import { captureRepositorySnapshot } from '../../task/workspace-snapshot.ts';
 import { parseTypedTaskFrontmatter } from '../../task/frontmatter.ts';
 import { readLifecycleJournalEvidence } from '../../task/lifecycle.ts';
@@ -487,14 +488,14 @@ function orchestrationDomainEvidence(
   };
 }
 
-function readRecoveryDomain(
+async function readRecoveryDomain(
   manifest: SandboxControlManifest,
   manifestPath: string,
   request: SandboxControlRequest,
   operation: ReturnType<typeof findSandboxControlRecoveryOperation>,
   terminalResult: ReturnType<typeof readSandboxControlTerminalResult>,
   payloadOutput: string | null
-): RecoveryDomainEvidence {
+): Promise<RecoveryDomainEvidence> {
   if (!operation) return { domain: null };
   const taskRef = request.family === 'task-finalization'
     ? manifest.taskId
@@ -512,8 +513,13 @@ function readRecoveryDomain(
         if (parsed.family !== 'task-lifecycle' || parsed.request.intent !== 'recover-started') {
           return { domain: null };
         }
+        const agent = parsed.request.agent;
+        const readRecoveryEvidence = isAgentClientId(agent)
+          ? getAgentClientAdapter(agent).orchestrationAdapter?.readRecoveryEvidence
+          : undefined;
+        if (!readRecoveryEvidence) return { domain: null };
         return {
-          domain: readLifecycleRecoveryDomainEvidence(
+          domain: await readRecoveryEvidence(
             manifest.repoRoot,
             parsed.request as never,
             { ...terminalResult, ...(output ?? {}) }
@@ -592,14 +598,14 @@ function readCommittedCriticalPhases(manifest: SandboxControlManifest, requestId
   });
 }
 
-export function recoveryResponse(
+export async function recoveryResponse(
   manifest: SandboxControlManifest,
   manifestPath: string,
   request: SandboxControlRequest,
   evidence: ReturnType<typeof readSandboxControlResultEvidence>,
   payload: ReturnType<typeof readSandboxControlPayload> | null,
   terminalResult: ReturnType<typeof readSandboxControlTerminalResult>
-): SandboxControlResponse | null {
+): Promise<SandboxControlResponse | null> {
   const operationName = recoveryOperationKey(request, terminalResult, payload?.stdout);
   const operation = operationName ? findSandboxControlRecoveryOperation(request.family, operationName) : null;
   if (!operation) return null;
@@ -613,7 +619,7 @@ export function recoveryResponse(
   if (evidence.exitCode === 0 && finalization?.status === 'deferred') return null;
   const recovery: RecoveryDomainEvidence = finalization
     ? { domain: { consistent: finalization.status === 'matched' } }
-    : readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);
+    : await readRecoveryDomain(manifest, manifestPath, request, operation, terminalResult, payload?.stdout ?? null);
   const binding = operationRecoveryBinding(request.id, manifest.generation, manifest.taskId, request.family, operationName!);
   const decision = classifySandboxControlRecovery({
     operation,
@@ -634,7 +640,7 @@ export function recoveryResponse(
   return genericRecoveryResponse(request, evidence.exitCode, payload, 'recovery', terminalResult.warning ?? null);
 }
 
-function terminalMatchesEvidence(
+async function terminalMatchesEvidence(
   manifest: SandboxControlManifest,
   manifestPath: string,
   request: SandboxControlRequest,
@@ -643,10 +649,10 @@ function terminalMatchesEvidence(
   payload: ReturnType<typeof readSandboxControlPayload> | null,
   payloadInvalid: boolean,
   terminalResult: ReturnType<typeof readSandboxControlTerminalResult> | null
-): { valid: boolean; payloadReferenced: boolean } {
+): Promise<{ valid: boolean; payloadReferenced: boolean }> {
   if (request.family === 'task-finalization' && evidence.exitCode === 0) {
     if (!terminalResult) return { valid: false, payloadReferenced: false };
-    const expected = recoveryResponse(manifest, manifestPath, request, evidence, payload, terminalResult);
+    const expected = await recoveryResponse(manifest, manifestPath, request, evidence, payload, terminalResult);
     return {
       valid: expected !== null && JSON.stringify(response) === JSON.stringify(expected),
       payloadReferenced: false
@@ -822,7 +828,7 @@ function assertCurrentSandboxControlIdentity(manifest: SandboxControlManifest, m
   }
 }
 
-function recoverProcessing(manifest: SandboxControlManifest, manifestPath: string, broker: BrokerOwner, brokerOwns: () => boolean): boolean {
+async function recoverProcessing(manifest: SandboxControlManifest, manifestPath: string, broker: BrokerOwner, brokerOwns: () => boolean): Promise<boolean> {
   for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/.test(entry.name)) continue;
     if (!brokerOwns()) return false;
@@ -929,7 +935,7 @@ function recoverProcessing(manifest: SandboxControlManifest, manifestPath: strin
       if (terminal && (!request || !resultEvidence)) continue;
       if (terminal && request && resultEvidence) {
         if (!terminalResult && request.family !== 'task-create') continue;
-        const reconciliation = terminalMatchesEvidence(
+        const reconciliation = await terminalMatchesEvidence(
           manifest,
           manifestPath,
           request,
@@ -963,7 +969,7 @@ function recoverProcessing(manifest: SandboxControlManifest, manifestPath: strin
       if (!terminal) {
         if (!brokerOwns()) return false;
         if (!resultEvidence || !request || payloadInvalid) continue;
-        const recovered = recoveryResponse(manifest, manifestPath, request, resultEvidence, payload, terminalResult!);
+        const recovered = await recoveryResponse(manifest, manifestPath, request, resultEvidence, payload, terminalResult!);
         if (!recovered) continue;
         if (request.family === 'task-finalization' && resultEvidence.exitCode === 0) {
           const view = publishFinalizationTaskView(manifest, broker, request.id, 'starting', null, null);
@@ -1114,7 +1120,7 @@ export async function serveSandboxControl(
       pid: broker.pid,
       brokerId: broker.brokerId
     });
-    if (!recoverProcessing(manifest, manifestPath, broker, brokerOwns)) return;
+    if (!await recoverProcessing(manifest, manifestPath, broker, brokerOwns)) return;
     try {
       const published = readSandboxControlStatus(manifest.publicStatusDir);
       if (published.generation === manifest.generation) taskView = published.taskView;

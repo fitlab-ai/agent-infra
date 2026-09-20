@@ -16,6 +16,7 @@ import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts'
 import {
   finishActivatedRecoveryOrchestrationUnderLock,
   ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+  pauseOrchestration,
   recoverActivatedOrchestrationDelegationUnderLock,
   readRun
 } from '../../../task/orchestration.ts';
@@ -979,7 +980,29 @@ function recoverStartedLifecycleFromAdapter(
     'auto' in request
     && first.warning?.code === RECOVERY_RELEASE_RETRY_WARNING.code
   ) {
-    return recoverStartedLifecycleUnderLock(request, options);
+    const second = recoverStartedLifecycleUnderLock(request, options);
+    if (second.warning?.code !== RECOVERY_RELEASE_RETRY_WARNING.code) return second;
+    const message = `${second.warning.code}: ${second.warning.message}`;
+    const paused = pauseOrchestration(
+      request.taskRef,
+      ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+      message,
+      true,
+      { ...options.orchestration, repoRoot: options.repoRoot, now: options.now }
+    );
+    return {
+      ...second,
+      status: 'owner-unknown',
+      changed: second.changed || paused.changed,
+      error: {
+        code: paused.status === 'paused'
+          ? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE
+          : paused.error?.code ?? ORCHESTRATION_LIFECYCLE_RECOVERY_INCOMPLETE,
+        message: paused.status === 'paused'
+          ? message
+          : paused.error?.message ?? message
+      }
+    };
   }
   return first;
 }

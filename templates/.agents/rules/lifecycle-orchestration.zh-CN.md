@@ -21,9 +21,9 @@
 ## Activated delegation 自动恢复
 
 - 总控在 `begin-or-resume` 前调用内部 `task-lifecycle <task> recover-started --agent <client> --auto`。该入口不公开给用户，也不从缺少存活证据推断 child 已终止。
-- 客户端适配器决定是否支持恢复，并负责候选选择、终态证据和受保护 claim；不支持时返回 `no-op`，证据不足、异常终态、身份冲突和多候选均失败关闭。
+- 客户端适配器决定是否支持恢复，并负责其候选、证据、重试和持久化状态；不支持时返回 `no-op`，无法确认安全完成时失败关闭。
 - `no-op/not-needed` 只表示没有适用的恢复事务；它不表示执行过恢复。随后仍由 `begin-or-resume` 和 route 处理既有状态。
-- 恢复事务在 receipt、terminal row、claim 和 run 全部一致前不得 route。可重试失败使用专用 pause；只有恢复 authority 完成复核后才能清除该暂停。
+- 只有结构化结果确认无需恢复或恢复完整完成时才能 route。适配器必须把可重试的未完成事务持久化为稳定暂停，并且只能恢复自己创建且已重新验证的暂停；公共总控不解释客户端事务细节。
 
 ## 模型策略
 

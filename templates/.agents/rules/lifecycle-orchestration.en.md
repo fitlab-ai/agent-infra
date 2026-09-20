@@ -21,9 +21,9 @@
 ## Activated Delegation Recovery
 
 - Before `begin-or-resume`, the orchestrator calls internal `task-lifecycle <task> recover-started --agent <client> --auto`. This entry is not user-facing and never infers child termination from missing liveness evidence.
-- The client adapter declares recovery support and owns candidate selection, terminal evidence, and protected claims. Unsupported adapters return `no-op`; insufficient evidence, abnormal terminal state, identity conflicts, and ambiguous candidates fail closed.
+- The client adapter declares recovery support and owns its candidates, evidence, retries, and persisted state. Unsupported adapters return `no-op`; any result that cannot prove safe completion fails closed.
 - `no-op/not-needed` means only that no recovery transaction applies. `begin-or-resume` and route still process the existing state.
-- Routing remains blocked until receipt, terminal row, claim, and run agree. Retryable failures use a dedicated pause that only recovery authority may clear after verification.
+- Routing is allowed only when the structured result confirms that recovery is unnecessary or complete. The adapter persists retryable incomplete work as a stable pause and may resume only a pause it created and revalidated; the common orchestrator does not interpret client transaction details.
 
 ## Model Policy
 

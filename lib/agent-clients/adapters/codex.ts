@@ -36,6 +36,10 @@ const codexAdapter = defineAgentClientAdapter({
     recoverStarted: async (...args) => {
       const { recoverStartedLifecycleFromAdapter } = await import('./codex-lifecycle/recovery.ts');
       return recoverStartedLifecycleFromAdapter(...args);
+    },
+    readRecoveryEvidence: async (...args) => {
+      const { readLifecycleRecoveryDomainEvidence } = await import('./codex-lifecycle/recovery.ts');
+      return readLifecycleRecoveryDomainEvidence(...args);
     }
   },
   project: {
