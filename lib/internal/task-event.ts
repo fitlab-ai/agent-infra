@@ -235,7 +235,7 @@ async function taskEvent(args: string[] = []): Promise<void> {
       });
       const values = request as Record<string, unknown>;
       if (current.status !== 'failed' || !values.overrideTicket) {
-        if (receipt && (current.status === 'applied' || current.status === 'no-op')) {
+        if (!request.dryRun && receipt && (current.status === 'applied' || current.status === 'no-op')) {
           if (committed && receipt.authorityMode === 'sandbox-active') {
             recoverCommittedLocalLifecycleAuthorityPhase(receipt.operationId);
           } else {
