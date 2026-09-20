@@ -59,7 +59,7 @@ function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANS
 let controlRouted = false;
 if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand)) {
   const transport = resolveSandboxControlTransport(process.env, {
-    localWorkflow: taskWorkflowCommand || manualValidationWorkflowCommand
+    localWorkflow: command === 'task-orchestration' || taskWorkflowCommand || manualValidationWorkflowCommand
   });
   switch (transport.kind) {
     case 'fail-closed': {

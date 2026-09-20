@@ -90,7 +90,7 @@ function controllerBroker(root: string, taskId = 'TASK-20260101-000001', generat
       active = false;
       return { version: 1 as const, status: 'closed' as const, changed, lease: null, error: null };
     }) as never,
-    requestControllerVerify: (() => ({
+    verifyController: (() => ({
       version: 1 as const,
       status: 'verified' as const,
       changed: false as const,
@@ -120,7 +120,6 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
       statusDir: '/status',
       runtimeDir: f.runtimeDir
     },
-    verifyTaskBinding: () => {},
     ...broker,
     codexVersion: () => '0.147.0',
     environment: { ...process.env, UNRELATED_CONTROLLER_SECRET: 'must-not-leak' }
@@ -173,7 +172,6 @@ test('sandbox controller rejects symlinked credentials before launch', () => {
     codexHome: f.codexHome,
     temporaryRoot: trackedTemporaryRoot('codex-controller-runtime-'),
     control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
-    verifyTaskBinding: () => {},
     ...broker,
     codexVersion: () => '0.147.0'
   }), /INPUT_INVALID/);
@@ -188,7 +186,6 @@ test('sandbox controller enforces a task lease and controller context binding', 
     codexHome: f.codexHome,
     temporaryRoot,
     control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
-    verifyTaskBinding: () => {},
     ...broker,
     codexVersion: () => '0.147.0'
   } as const;
@@ -199,40 +196,52 @@ test('sandbox controller enforces a task lease and controller context binding', 
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, extra: true })}\n`, { mode: 0o600 });
   assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
-    { repoRoot: f.root, control: options.control, requestControllerVerify: options.requestControllerVerify }
+    { repoRoot: f.root, control: options.control, requestControllerVerify: options.verifyController }
   ), /CONTEXT_INVALID/);
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, version: 1 })}\n`, { mode: 0o600 });
   assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
-    { repoRoot: f.root, control: options.control, requestControllerVerify: options.requestControllerVerify }
+    { repoRoot: f.root, control: options.control, requestControllerVerify: options.verifyController }
   ), /CONTEXT_INVALID/);
   fs.writeFileSync(prepared.contextPath, contextRaw, { mode: 0o600 });
   assert.throws(() => prepareCodexSandboxController({}, options), /CONTROLLER_BUSY/);
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, taskId: 'TASK-20260101-000002' })}\n`, { mode: 0o600 });
   assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
-    { repoRoot: f.root, control: options.control, requestControllerVerify: options.requestControllerVerify }
+    { repoRoot: f.root, control: options.control, requestControllerVerify: options.verifyController }
   ), /CONTEXT_INVALID/);
   assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
-    { repoRoot: f.root, control: { ...options.control, generation: 'other' }, requestControllerVerify: options.requestControllerVerify }
+    { repoRoot: f.root, control: { ...options.control, generation: 'other' }, requestControllerVerify: options.verifyController }
   ), /CONTEXT_INVALID/);
   prepared.cleanup();
 });
 
 test('sandbox controller closes a broker lease when the opened binding is invalid', () => {
   const f = fixture();
+  const broker = controllerBroker(f.root);
   const options = {
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot: trackedTemporaryRoot('codex-controller-invalid-binding-'),
     control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
-    verifyTaskBinding: () => {},
-    ...controllerBroker(f.root, 'TASK-20260101-000001', 'other-generation'),
+    ...broker,
+    verifyController: (() => ({
+      version: 1 as const,
+      status: 'verified' as const,
+      changed: false as const,
+      lease: null,
+      binding: {
+        taskId: 'TASK-20260101-000002',
+        controlGeneration: 'generation',
+        controllerInstanceDigest: 'e'.repeat(64)
+      },
+      error: null
+    })) as typeof broker.verifyController,
     codexVersion: () => '0.147.0'
   } as const;
   const prepare = () => prepareCodexSandboxController({}, options);
 
-  assert.throws(prepare, /SANDBOX_CONTROL_RESULT_INVALID/);
-  assert.throws(prepare, /SANDBOX_CONTROL_RESULT_INVALID/);
+  assert.throws(prepare, /CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID/);
+  assert.throws(prepare, /CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID/);
 });

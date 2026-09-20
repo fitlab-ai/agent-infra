@@ -277,6 +277,7 @@ export function resolveTaskOperation(
 export function resolveDelegatedTaskOperation(args: readonly string[]): TaskOperationDescriptor | null {
   const [operation, ...rest] = args;
   if (operation !== 'client' || !rest[0]) return null;
+  if (rest[0] === 'task-orchestration') return null;
   return resolveTaskOperation('internal', rest[0], rest.slice(1));
 }
 

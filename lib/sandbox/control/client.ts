@@ -11,7 +11,6 @@ import {
   type SandboxControlRequest,
   type SandboxControlResponse,
   type SandboxTaskCreateRequest,
-  type SandboxTaskCommandRequest,
   type SandboxTaskFinalizationRequest,
   type SandboxCodexControllerRequest
 } from './protocol.ts';
@@ -25,7 +24,6 @@ import { readSandboxControlPayload, readSandboxControlStatus } from './state.ts'
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 import { accessSandboxTaskView, taskViewFromStatus, type TaskViewAccessEffect } from './task-view.ts';
 import { readSandboxControlIdentitySentinel } from './identity-sentinel.ts';
-import type { LifecycleAuthorityRequestV1 } from '../../task/control-authority.ts';
 import { configuredShortIdLength, resolveShortIdReadOnly } from '../../task/short-id.ts';
 
 const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
@@ -117,7 +115,6 @@ function preflight(
 
 function taskViewEffectForRequest(request: SandboxControlRequest): TaskViewAccessEffect | null {
   if (request.family === 'task-lifecycle' || request.family === 'task-finalization') return 'progress';
-  if (request.family === 'task-orchestration') return request.args[1] === 'status' ? 'diagnostic' : 'progress';
   return null;
 }
 
@@ -387,37 +384,9 @@ export function requestSandboxControl(params: Readonly<{
   const request: SandboxControlRequest = {
     version: 3, id: randomUUID(), ...auth, issuedAt,
     expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
-    family: params.family as 'task-lifecycle' | 'task-orchestration', args: params.args,
+    family: params.family as 'task-lifecycle', args: params.args,
     controllerProcess: null,
     controllerProof: null
-  };
-  return exchangeSandboxControl(request, params);
-}
-
-export function requestSandboxTaskControl(params: Readonly<{
-  family: 'task-lifecycle' | 'task-orchestration';
-  args: string[];
-  controllerProof: CodexControllerLeaseProofV1 | null;
-  authority?: LifecycleAuthorityRequestV1;
-  channelDir?: string;
-  statusDir?: string;
-  token?: string;
-  generation?: string;
-  timeoutMs?: number;
-}>): SandboxControlResponse {
-  const auth = authority(params);
-  const issuedAt = Date.now();
-  const request: SandboxTaskCommandRequest = {
-    version: 3,
-    id: params.authority?.requestId ?? randomUUID(),
-    ...auth,
-    issuedAt,
-    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
-    family: params.family,
-    args: params.args,
-    controllerProcess: null,
-    controllerProof: params.authority ? null : params.controllerProof,
-    ...(params.authority ? { authority: params.authority } : {})
   };
   return exchangeSandboxControl(request, params);
 }

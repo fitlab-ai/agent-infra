@@ -14,7 +14,7 @@ description: >
 总控只编排，不直接执行任何阶段技能。执行前先读取 `.agents/rules/no-mid-flow-questions.md`、`.agents/rules/lifecycle-orchestration.md` 与 `reference/host-validation.md`。
 
 1. 解析规范任务 ID、当前 Agent Client，以及可选的原子策略 `--executor-model`、`--executor-reasoning-effort`、`--reviewer-model`、`--reviewer-reasoning-effort`，并执行 `agent-infra-internal task-snapshot {task-id} --format text`。任一显式策略字段出现时四个 role 字段必须完整，不得与配置拼接；两个角色可以使用同一模型。
-2. 使用当前宿主的原生子 Agent 启动、等待与结果接口。task-bound sandbox 通过现有 broker 转发任务操作；保留任务绑定与真实外部进程操作检查。
+2. 使用当前宿主的原生子 Agent 启动、等待与结果接口。task-bound sandbox 在当前 worktree 本地执行普通任务编排；Codex controller 的 `open`、`verify`、`close` 继续通过受限 broker 执行。保留任务绑定与真实外部进程操作检查。
 3. 每次进入循环时先调用 `agent-infra-internal task-lifecycle {task-id} recover-started --agent {client} --auto`。客户端适配器负责恢复能力和停止证据校验；没有该能力或无需恢复时返回 `no-op`。仅在结构化结果为 `no-op` 或 `applied` 时继续，其他结果安全停止；下一次人为调用按持久化状态幂等重试，不 route、不派发 child。
 4. 调用 `agent-infra-internal task-orchestration {task-id} begin-or-resume --client {client}` 并转发完整显式策略。完全没有显式策略时由核心读取当前 client 的 `agentClients[].orchestration`；existing run 使用持久化策略。磁盘状态不符合当前完整结构时核心失败关闭且不改写；升级前必须完成或清空 active run。仅当核心返回 `ORCHESTRATION_MODEL_POLICY_REQUIRED` 时，先用 `agent-client model-selection` 展示 complete/partial/interactive-only 来源，再一次收集完整策略；未回答则不创建 run。若为 paused/completed，按结构化结果停止。
 5. 调用 `route` 并读取结构化结果。若返回 `completed`，立即运行 `agent-infra-internal task-verify {task-id} run-task.completed --format text` 并停止；仅当返回 `running` 且 `next` 非空时读取唯一 action、role、round、artifact、`requestedModel` 和 `requestedReasoningEffort`，不得自行推断。

@@ -1271,7 +1271,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
       import { requestSandboxControl } from ${JSON.stringify(clientModule)};
       try {
         const response = requestSandboxControl({
-          family: 'task-orchestration', args: ['01', 'status'],
+          family: 'task-lifecycle', args: ['01', 'complete'],
           channelDir: ${JSON.stringify(channelDir)}, statusDir: ${JSON.stringify(statusDir)},
           token: 'response-secret', generation: 'response-generation', timeoutMs: 2_000
         });
@@ -1962,7 +1962,7 @@ test('task-finalization graceful shutdown retains recovery identity when executo
 });
 
 for (const shortIdLength of [2, 3]) {
-test(`sandbox control client and broker exchange a task-bound response with short-id width ${shortIdLength}`, async () => {
+test(`sandbox control broker enforces task binding with short-id width ${shortIdLength}`, async () => {
   const internalCliPath = path.resolve('bin/internal-cli.ts');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
   const channelDir = path.join(root, 'channel');
@@ -1977,11 +1977,8 @@ test(`sandbox control client and broker exchange a task-bound response with shor
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
-  const runPath = path.join(taskDir, 'orchestration.json');
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
-  fs.writeFileSync(runPath, '{"schemaVersion":3}\n');
-  const invalidRunBytes = fs.readFileSync(runPath, 'utf8');
   const shortId = '8'.padStart(shortIdLength, '0');
   const otherTaskId = 'TASK-20260809-010204';
   const otherTaskDir = path.join(root, '.agents', 'workspace', 'active', otherTaskId);
@@ -2027,72 +2024,10 @@ test(`sandbox control client and broker exchange a task-bound response with shor
   try {
     waitForFile(path.join(root, 'broker.json'), 5_000);
     waitForHealthyStatus(statusDir, 5_000);
-    const orchestrationResponse = withSandboxControlEnvironment({
-      AGENT_INFRA_TASK_ID: taskId,
-      AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
-    }, () => requestSandboxControl({
-      family: 'task-orchestration',
-      args: [taskId, 'status'],
-      channelDir,
-      statusDir,
-      token,
-      generation,
-      timeoutMs: 5_000
-    }));
-    assert.equal(orchestrationResponse.exitCode, 1);
-    assert.equal(JSON.parse(orchestrationResponse.stdout).error.code, 'ORCHESTRATION_STATE_INVALID');
-    assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
-    assert.equal(readSandboxControlManifest(manifestPath).taskId, taskId);
-
-    // The response becomes visible before the broker appends its publication audit.
-    waitForAuditEvent(path.join(root, 'audit.ndjson'), 'executor-result-published', generation, 2_000);
-    const audit = fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8')
-      .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-    const events = new Set(audit.map((entry) => entry.event));
-    for (const event of [
-      'broker-start', 'request-claimed', 'request-validated', 'request-gates-passed',
-      'executor-prepared', 'request-accepted', 'executor-start', 'executor-completed',
-      'executor-result-evidence-written', 'executor-result-published', 'executor-request-start',
-      'executor-request-validated', 'orchestration-state-read-failed',
-      'executor-request-finished'
-    ]) assert.equal(events.has(event), true, `missing audit event: ${event}`);
-    const brokerStart = audit.find((entry) => entry.event === 'broker-start');
-    assert.equal(brokerStart?.manifestPath, undefined);
-    assert.equal(brokerStart?.repoRoot, undefined);
-    const requestValidated = audit.find((entry) => entry.event === 'request-validated');
-    assert.equal(requestValidated?.requestId, orchestrationResponse.id);
-    assert.equal(requestValidated?.requestPath, undefined);
-    const stateFailure = audit.find((entry) => entry.event === 'orchestration-state-read-failed');
-    assert.equal(stateFailure?.taskDir, taskDir);
-    assert.equal(stateFailure?.file, runPath);
-    assert.equal(stateFailure?.reasonCodes, 'top-level-keys');
-
     // Resolve from a nested directory, as ordinary task-bound CLI commands do.
     const previousCwd = process.cwd();
     process.chdir(taskDir);
     try {
-      for (const ref of ['8', shortId, taskId, '9', otherTaskId, '7', '0', '9999']) {
-        waitForHealthyStatus(statusDir, 5_000);
-        const request = () => withSandboxControlEnvironment({
-          AGENT_INFRA_TASK_ID: taskId,
-          AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
-          AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
-        }, () => requestSandboxControl({
-          family: 'task-orchestration', args: [ref, 'status'], channelDir, statusDir,
-          token, generation, timeoutMs: 5_000
-        }));
-        if (['8', shortId, taskId].includes(ref)) {
-          const result = request();
-          assert.equal(result.phase, 'completed', ref);
-          assert.equal(JSON.parse(result.stdout).error.code, 'ORCHESTRATION_STATE_INVALID', ref);
-          assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
-        } else {
-          assert.throws(request, (error: unknown) => error instanceof SandboxControlClientError
-            && error.detail.code === 'SANDBOX_CONTROL_IDENTITY_TOPOLOGY_MISMATCH'
-            && !error.accepted, ref);
-        }
-      }
       for (const ref of ['8', shortId, taskId, '9', otherTaskId, '7', '0', '9999', 'not-a-task']) {
         waitForHealthyStatus(statusDir, 5_000);
         const result = withSandboxControlEnvironment({
@@ -2122,7 +2057,6 @@ test(`sandbox control client and broker exchange a task-bound response with shor
             assert.match(result.stderr, /SANDBOX_TASK_REF_MISMATCH/, ref);
           }
         }
-        assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
       }
     } finally { process.chdir(previousCwd); }
 
@@ -2378,7 +2312,7 @@ test('broker recovery terminates a live started executor before retaining unknow
     fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
       version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
       issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000,
-      family: 'task-orchestration', args: ['TASK-20260809-010203', 'status'],
+      family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
       controllerProcess: null, controllerProof: null
     })}\n`);
     fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
@@ -2547,7 +2481,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'request.json'), `${JSON.stringify({
     version: 3, id: recoverableId, token: 'recovery-secret', generation, issuedAt: Date.now() - 1_000,
-    expiresAt: Date.now() + 1_000, family: 'task-orchestration', args: ['TASK-20260809-010203', 'status'],
+    expiresAt: Date.now() + 1_000, family: 'task-lifecycle', args: ['TASK-20260809-010203', 'block', '--agent', 'codex'],
     controllerProcess: null, controllerProof: null
   })}\n`);
   fs.writeFileSync(path.join(processingDir, recoverableId, 'execution.json'), `${JSON.stringify({

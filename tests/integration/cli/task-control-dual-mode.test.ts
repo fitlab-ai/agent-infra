@@ -255,7 +255,7 @@ test('top-level usage and version aliases remain available in task-bound environ
   }
 });
 
-test('complete sandbox markers use the client entry without executing local authority', () => {
+test('task orchestration validates the mounted identity before local execution', () => {
   const result = run('task-orchestration', ['TASK-20260809-010203', 'status'], cleanEnv({
     AGENT_INFRA_TASK_ID: TASK_ID,
     AGENT_INFRA_CONTROL_TOKEN: 'token',
@@ -265,9 +265,8 @@ test('complete sandbox markers use the client entry without executing local auth
     AGENT_INFRA_CONTROL_STATUS_DIR: '/missing/status',
     AGENT_INFRA_RUNTIME_DIR: '/missing/runtime'
   }));
-  assert.equal(result.status, 75);
-  assert.match(result.stderr, /SANDBOX_CONTROL_BROKER_UNAVAILABLE/);
-  assert.equal(result.stdout, '');
+  assert.equal(result.status, 1);
+  assert.equal(JSON.parse(result.stdout).error.code, 'SANDBOX_CONTROL_IDENTITY_MISSING');
 });
 
 test('partial sandbox or executor markers fail closed before task parsing', () => {
@@ -399,7 +398,7 @@ function sandboxFixture(): SandboxFixture {
 
 function runSandboxClient(
   fixture: SandboxFixture,
-  family: 'task-lifecycle' | 'task-orchestration',
+  family: 'task-lifecycle',
   args: string[]
 ): { status: number | null; payload: Record<string, unknown>; stderr: string } {
   const result = spawnSync(process.execPath, [
@@ -516,97 +515,7 @@ function comparableLifecycle(value: unknown): unknown {
   };
 }
 
-function comparableReceipt(value: unknown): unknown {
-  const receipt = value as Record<string, unknown>;
-  return {
-    taskId: receipt.taskId,
-    role: receipt.role,
-    stage: receipt.stage,
-    round: receipt.round,
-    artifact: receipt.artifact,
-    client: receipt.client,
-    requestedModel: receipt.requestedModel,
-    requestedReasoningEffort: receipt.requestedReasoningEffort,
-    actualModel: receipt.actualModel,
-    actualReasoningEffort: receipt.actualReasoningEffort,
-    modelFallbackReason: receipt.modelFallbackReason,
-    reasoningEffortFallbackReason: receipt.reasoningEffortFallbackReason,
-    parentId: receipt.parentId,
-    childId: receipt.childId,
-    spawnMode: receipt.spawnMode,
-    agent: receipt.agent,
-    status: receipt.status,
-    workspaceSnapshotScope: receipt.workspaceSnapshotScope,
-    lifecycleProvenance: receipt.lifecycleProvenance,
-    hostEvidence: receipt.hostEvidence,
-    beforeFingerprint: comparableSnapshot(receipt.beforeFingerprint),
-    afterFingerprint: receipt.afterFingerprint,
-    changedPaths: receipt.changedPaths
-  };
-}
-
-function comparableSnapshot(value: unknown): unknown {
-  if (typeof value !== 'string' || !value.startsWith('ws2:')) return value;
-  const snapshot = JSON.parse(Buffer.from(value.slice(4), 'base64url').toString('utf8')) as {
-    version: number;
-    gitTree: string;
-    taskFiles: Array<{ path: string; mode: number; kind: string }>;
-  };
-  return {
-    version: snapshot.version,
-    gitTree: snapshot.gitTree,
-    taskFiles: snapshot.taskFiles
-  };
-}
-
-function comparableOrchestration(value: unknown): unknown {
-  const result = value as Record<string, unknown>;
-  const run = result.run as Record<string, unknown> | null;
-  const source = run?.modelPolicySource as Record<string, unknown> | undefined;
-  return {
-    status: result.status,
-    changed: result.changed,
-    taskId: result.taskId,
-    next: result.next,
-    error: result.error,
-    run: run ? {
-      taskId: run.taskId,
-      status: run.status,
-      nextStage: run.nextStage,
-      stepCount: run.stepCount,
-      maxSteps: run.maxSteps,
-      modelPolicy: run.modelPolicy,
-      modelPolicySource: source ? { kind: source.kind, client: source.client } : null,
-      recoveryHistory: run.recoveryHistory,
-      baseline: run.baseline,
-      pendingDelegation: run.pendingDelegation ? comparableReceipt(run.pendingDelegation) : null,
-      receipts: Array.isArray(run.receipts) ? run.receipts.map(comparableReceipt) : [],
-      commitAuthorization: run.commitAuthorization,
-      completionEvidence: run.completionEvidence
-    } : null
-  };
-}
-
-function assertTaskSnapshotShape(value: unknown, taskId: string): void {
-  assert.equal(typeof value, 'string');
-  assert.match(value as string, /^ws2:/u);
-  const snapshot = JSON.parse(Buffer.from((value as string).slice(4), 'base64url').toString('utf8')) as {
-    version: number;
-    gitTree: string;
-    taskFiles: Array<{ path: string; mode: number; kind: string; sha256: string }>;
-  };
-  assert.equal(snapshot.version, 2);
-  assert.match(snapshot.gitTree, /^[a-f0-9]{40}$/u);
-  assert.ok(snapshot.taskFiles.length > 0);
-  for (const file of snapshot.taskFiles) {
-    assert.match(file.path, new RegExp(`^\\.agents/workspace/active/${taskId}/`));
-    assert.ok(Number.isInteger(file.mode));
-    assert.ok(file.kind === 'file' || file.kind === 'symlink');
-    assert.match(file.sha256, /^[a-f0-9]{64}$/u);
-  }
-}
-
-test('direct-host and sandbox executor share lifecycle, orchestration, auto-hook, and failure results', async () => {
+test('direct-host and sandbox executor share lifecycle results', async () => {
   const directFixture = taskFixture();
   const sandboxFixture = taskFixture();
   try {
@@ -618,37 +527,6 @@ test('direct-host and sandbox executor share lifecycle, orchestration, auto-hook
     assert.equal(fs.readFileSync(path.join(directFixture.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md'), 'utf8').includes('status: blocked'), true);
     assert.equal(fs.readFileSync(path.join(sandboxFixture.root, '.agents', 'workspace', 'blocked', TASK_ID, 'task.md'), 'utf8').includes('status: blocked'), true);
 
-    const begin = {
-      family: 'task-orchestration' as const,
-      taskRef: TASK_ID,
-      intent: 'begin-or-resume' as const,
-      input: {
-        client: 'claude-code' as const,
-        maxSteps: 3,
-        modelPolicy: {
-          executor: { model: 'executor-model', reasoningEffort: 'high' },
-          reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
-        }
-      },
-      options: { id: () => 'run-id', now: () => '2026-08-09 01:02:03+00:00' }
-    };
-    const directBegin = await dispatchTaskControlOperation(direct.direct, begin);
-    const sandboxBegin = await dispatchTaskControlOperation(sandbox.sandbox, begin);
-    assert.deepEqual(sandboxBegin, directBegin);
-
-    const autoHook = {
-      family: 'task-orchestration' as const,
-      taskRef: TASK_ID,
-      intent: 'hook-start' as const,
-      input: {
-        auto: true,
-        client: 'claude-code' as const,
-        event: { nativeAgent: 'claude', childId: 'child', parentId: 'parent', spawnMode: 'fresh' }
-      }
-    };
-    const directAuto = await dispatchTaskControlOperation(direct.direct, autoHook);
-    const sandboxAuto = await dispatchTaskControlOperation(sandbox.sandbox, autoHook);
-    assert.deepEqual(sandboxAuto, directAuto);
   } finally {
     fs.rmSync(directFixture.root, { recursive: true, force: true });
     fs.rmSync(sandboxFixture.root, { recursive: true, force: true });
@@ -709,101 +587,13 @@ test('sandbox lifecycle uses the shared task lock and human override authority',
   }
 });
 
-test('direct-host and sandbox client transport preserve task state, receipts, snapshots, and recovery decisions', async () => {
+test('direct-host and sandbox client transport preserve lifecycle results', async () => {
   const directFixture = taskFixture(true, true);
   const sandbox = sandboxFixture();
   const broker = startSandboxFixtureBroker(sandbox);
   try {
     waitForHealthyStatus(sandbox.statusDir, 5_000);
     const directContext = createDirectHostExecutionContext({ repoRoot: directFixture.root });
-    const begin = {
-      family: 'task-orchestration' as const,
-      taskRef: TASK_ID,
-      intent: 'begin-or-resume' as const,
-      input: {
-        client: 'claude-code' as const,
-        maxSteps: 3,
-        modelPolicy: {
-          executor: { model: 'executor-model', reasoningEffort: 'high' },
-          reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
-        }
-      }
-    };
-    const directBegin = await dispatchTaskControlOperation(directContext, begin);
-    const sandboxBegin = runSandboxClient(sandbox, 'task-orchestration', [
-      TASK_ID, 'begin-or-resume', '--client', 'claude-code', '--max-steps', '3',
-      '--executor-model', 'executor-model', '--executor-reasoning-effort', 'high',
-      '--reviewer-model', 'reviewer-model', '--reviewer-reasoning-effort', 'high'
-    ]);
-    assert.equal(sandboxBegin.status, 0, sandboxBegin.stderr);
-    assert.deepEqual(comparableOrchestration(directBegin), comparableOrchestration(sandboxBegin.payload));
-
-    const route = {
-      family: 'task-orchestration' as const,
-      taskRef: TASK_ID,
-      intent: 'route' as const,
-      input: {}
-    };
-    const directRoute = await dispatchTaskControlOperation(directContext, route);
-    const sandboxRoute = runSandboxClient(sandbox, 'task-orchestration', [TASK_ID, 'route']);
-    assert.equal(sandboxRoute.status, 0, sandboxRoute.stderr);
-    assert.deepEqual(comparableOrchestration(directRoute), comparableOrchestration(sandboxRoute.payload));
-
-    const prepare = {
-      family: 'task-orchestration' as const,
-      taskRef: TASK_ID,
-      intent: 'prepare' as const,
-      input: {
-        client: 'claude-code' as const,
-        requestedModel: 'executor-model',
-        requestedReasoningEffort: 'high'
-      }
-    };
-    const directPrepare = await dispatchTaskControlOperation(directContext, prepare);
-    const sandboxPrepare = runSandboxClient(sandbox, 'task-orchestration', [
-      TASK_ID, 'prepare', '--client', 'claude-code',
-      '--requested-model', 'executor-model', '--requested-reasoning-effort', 'high'
-    ]);
-    assert.equal(sandboxPrepare.status, 0, sandboxPrepare.stderr);
-    assert.deepEqual(comparableOrchestration(directPrepare), comparableOrchestration(sandboxPrepare.payload));
-    const directReceipt = (directPrepare as { run?: { pendingDelegation?: Record<string, unknown> | null } }).run?.pendingDelegation;
-    const sandboxReceipt = (sandboxPrepare.payload.run as { pendingDelegation?: Record<string, unknown> | null }).pendingDelegation;
-    assert.ok(directReceipt);
-    assert.ok(sandboxReceipt);
-    assert.equal(directReceipt?.workspaceSnapshotScope, 'task');
-    assert.equal(sandboxReceipt?.workspaceSnapshotScope, 'task');
-    assert.equal(directReceipt?.lifecycleProvenance, null);
-    assert.equal(sandboxReceipt?.lifecycleProvenance, null);
-    assertTaskSnapshotShape(directReceipt?.beforeFingerprint, TASK_ID);
-    assertTaskSnapshotShape(sandboxReceipt?.beforeFingerprint, TASK_ID);
-
-    const recover = {
-      family: 'task-orchestration' as const,
-      taskRef: TASK_ID,
-      intent: 'recover-prepared' as const,
-      input: {}
-    };
-    const directRecover = await dispatchTaskControlOperation(directContext, recover);
-    const sandboxRecover = runSandboxClient(sandbox, 'task-orchestration', [TASK_ID, 'recover-prepared']);
-    assert.equal(sandboxRecover.status, 0, sandboxRecover.stderr);
-    assert.deepEqual(comparableOrchestration(directRecover), comparableOrchestration(sandboxRecover.payload));
-    assert.equal((directRecover as { run?: { pendingDelegation?: unknown } }).run?.pendingDelegation, null);
-    assert.equal((sandboxRecover.payload.run as { pendingDelegation?: unknown }).pendingDelegation, null);
-    assert.equal((directRecover as { next?: unknown }).next, null);
-    assert.equal((sandboxRecover.payload as { next?: unknown }).next, null);
-
-    const advance = {
-      family: 'task-orchestration' as const,
-      taskRef: TASK_ID,
-      intent: 'advance' as const,
-      input: {}
-    };
-    const directAdvance = await dispatchTaskControlOperation(directContext, advance);
-    const sandboxAdvance = runSandboxClient(sandbox, 'task-orchestration', [TASK_ID, 'advance']);
-    assert.equal(sandboxAdvance.status, 1, sandboxAdvance.stderr);
-    assert.deepEqual(comparableOrchestration(directAdvance), comparableOrchestration(sandboxAdvance.payload));
-    assert.equal((directAdvance as { error?: { code?: string } }).error?.code, 'ORCHESTRATION_DELEGATION_MISSING');
-
     const directLifecycle = await dispatchTaskControlOperation(directContext, lifecycleOperation());
     const sandboxLifecycle = runSandboxClient(sandbox, 'task-lifecycle', [
       TASK_ID, 'block', '--agent', 'codex', '--reason', 'pause for dual-mode verification',

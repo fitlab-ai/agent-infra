@@ -9,10 +9,8 @@ import * as toml from 'smol-toml';
 import {
   requestCodexControllerClose,
   requestCodexControllerOpen,
-  requestCodexControllerVerify,
-  requestSandboxControl
+  requestCodexControllerVerify
 } from '../../../sandbox/control/client.ts';
-import { readSandboxControlStatus } from '../../../sandbox/control/state.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
 import { LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
 import {
@@ -46,7 +44,7 @@ type ControllerOptions = Readonly<{
   control?: ControllerControl;
   now?: () => number;
   codexVersion?: () => string;
-  verifyTaskBinding?: (taskId: string, control: ControllerControl) => void;
+  verifyController?: typeof requestCodexControllerVerify;
   openController?: typeof requestCodexControllerOpen;
   closeController?: typeof requestCodexControllerClose;
   environment?: NodeJS.ProcessEnv;
@@ -117,40 +115,22 @@ function verifyRuntime(runtimeDir: string): void {
   }
 }
 
-function verifyControl(taskId: string, control: ControllerControl): void {
+function verifyControllerBinding(
+  context: CodexSandboxControllerContextV2,
+  control: ControllerControl,
+  requestControllerVerify: typeof requestCodexControllerVerify
+): void {
   verifyRuntime(control.runtimeDir);
-  let status: ReturnType<typeof readSandboxControlStatus> | null = null;
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      status = readSandboxControlStatus(control.statusDir);
-      break;
-    } catch (error) {
-      lastError = error;
-      if (attempt < 4) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-    }
-  }
-  if (!status) {
-    throw new Error(`CODEX_SANDBOX_CONTROLLER_CONTROL_UNAVAILABLE: ${String(lastError)}`);
-  }
-  if (status.generation !== control.generation
-    || status.state !== 'healthy'
-    || Date.now() - status.updatedAt > 1_500) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_CONTROL_UNAVAILABLE');
-  }
-  const response = requestSandboxControl({
-    family: 'task-orchestration',
-    args: [taskId, 'status'],
+  const verified = requestControllerVerify({
+    controllerProof: controllerProofFromContext(context),
     ...control,
     timeoutMs: 30_000
   });
-  let payload: { taskId?: unknown } = {};
-  try {
-    payload = JSON.parse(response.stdout) as { taskId?: unknown };
-  } catch {
+  if (verified.binding.taskId !== context.taskId
+    || verified.binding.controlGeneration !== context.controlGeneration
+    || verified.binding.controllerInstanceDigest !== context.controllerInstanceDigest) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID');
   }
-  if (payload.taskId !== taskId) throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID');
 }
 
 function verifyCodexSandboxControllerContextWithWarnings(
@@ -349,7 +329,7 @@ function prepareCodexSandboxController(
       || opened.lease.controllerProcess.startTime !== parentStartTime) {
       throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
     }
-    (options.verifyTaskBinding ?? verifyControl)(taskId, control);
+    verifyControllerBinding(context, control, options.verifyController ?? requestCodexControllerVerify);
     const contextPath = path.join(home, 'controller-context.json');
     writeCodexSandboxControllerContext(contextPath, context);
 
