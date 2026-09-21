@@ -105,6 +105,15 @@ test('completion backfill eligibility accepts only structured artifact warnings 
     fs.appendFileSync(taskMd, warningTable('analysis.md sync failed'));
     assert.equal(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }).eligible, true);
 
+    fs.rmSync(path.join(f.taskDir, 'analysis.md'));
+    fs.mkdirSync(path.join(f.taskDir, 'analysis.md'));
+    assert.equal(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }).status, 'failed');
+
+    fs.rmSync(path.join(f.taskDir, 'analysis.md'), { recursive: true });
+    assert.equal(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }).status, 'failed');
+
+    fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# analysis\n');
+
     fs.writeFileSync(path.join(f.taskDir, 'pr-review.md'), '# review\n');
     fs.writeFileSync(taskMd, fs.readFileSync(taskMd, 'utf8').replace('analysis.md sync failed', 'unsupported pr-review.md'));
     assert.equal(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }).eligible, true);
@@ -112,6 +121,27 @@ test('completion backfill eligibility accepts only structured artifact warnings 
     fs.writeFileSync(taskMd, fs.readFileSync(taskMd, 'utf8').replace('unsupported pr-review.md', 'analysis.md sync failed').replace('| complete-task |', '| issue-sync |'));
     assert.equal(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }).eligible, false);
     assert.equal(inspectCompletionBackfillEligibility('TASK-20990101-000000', { cwd: f.repoRoot }).status, 'failed');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('completion backfill eligibility rejects a referenced artifact symlink', onPlatforms('linux', 'darwin'), () => {
+  const f = fixture();
+  const taskMd = path.join(f.taskDir, 'task.md');
+  try {
+    fs.symlinkSync('task.md', path.join(f.taskDir, 'analysis.md'));
+    fs.appendFileSync(taskMd, [
+      '## Workflow Warnings', '',
+      '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
+      '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
+      '| WW-1 | 2026-08-07 09:00:00+08:00 | complete-task | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | analysis.md sync failed | retry |  |  |',
+      ''
+    ].join('\n'));
+
+    const eligibility = inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot });
+    assert.equal(eligibility.status, 'failed');
+    assert.equal(eligibility.error?.code, 'ARTIFACT_TOPOLOGY_CONFLICT');
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -232,6 +262,46 @@ test('completed finalization schedules backfill from an eligible task artifact w
     });
     assert.equal(replay.status, 'completed');
     assert.equal(backfillCalls, 2);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('completed finalization fails closed when an artifact warning references a symlink', onPlatforms('linux', 'darwin'), async () => {
+  const f = fixture();
+  const staged = 'Delivered summary.\n';
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
+    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+  })}\n`);
+  let backfillCalls = 0;
+  let verifyCalls = 0;
+  const backfill: NonNullable<TaskFinalizationOptions['backfill']> = async () => {
+    backfillCalls += 1;
+    return platformResult('no-op') as any;
+  };
+  try {
+    await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => { verifyCalls += 1; return verification('pass'); }), backfill
+    });
+    const taskDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+    const taskMd = path.join(taskDir, 'task.md');
+    fs.symlinkSync('task.md', path.join(taskDir, 'analysis.md'));
+    fs.writeFileSync(taskMd, fs.readFileSync(taskMd, 'utf8').replace('## Activity Log', [
+      '## Workflow Warnings', '',
+      '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
+      '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
+      '| WW-1 | 2026-08-07 09:00:00+08:00 | complete-task | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | analysis.md sync failed | retry |  |  |',
+      '', '## Activity Log'
+    ].join('\n')));
+
+    const replay = await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => { verifyCalls += 1; return verification('pass'); }), backfill
+    });
+    assert.equal(replay.status, 'failed');
+    assert.equal(replay.error?.code, 'ARTIFACT_TOPOLOGY_CONFLICT');
+    assert.equal(replay.lifecycle, null);
+    assert.equal(backfillCalls, 1);
+    assert.equal(verifyCalls, 1);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

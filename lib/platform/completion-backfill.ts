@@ -24,6 +24,19 @@ type CompletionBackfillEligibility = Readonly<{
   eligible: boolean;
   error: { code: string; message: string; retryable: boolean } | null;
 }>;
+type BackfillArtifactReference = Readonly<
+  | { status: 'ignored'; artifact: null; error: null }
+  | { status: 'ready'; artifact: string; error: null }
+  | { status: 'failed'; artifact: null; error: { code: string; message: string; retryable: false } }
+>;
+type BackfillWarningMatch = Readonly<{
+  warning: ReturnType<typeof getOpenWorkflowWarnings>[number];
+  artifact: string;
+}>;
+type BackfillWarningMatches = Readonly<
+  | { status: 'ready'; matches: BackfillWarningMatch[]; error: null }
+  | { status: 'failed'; matches: []; error: { code: string; message: string; retryable: false } }
+>;
 
 function result(
   base: PlatformResult,
@@ -33,27 +46,44 @@ function result(
   return { ...base, artifacts, warnings };
 }
 
-function referencedBackfillArtifact(taskDir: string, message: string): string | null {
+function referencedBackfillArtifact(taskDir: string, message: string): BackfillArtifactReference {
   const names = [...message.matchAll(/(?:^|[^A-Za-z0-9_-])([a-z][a-z-]*(?:-r[1-9]\d*)?\.md)(?=$|[^A-Za-z0-9_.-])/g)]
     .map((match) => match[1]!);
-  if (names.length !== 1) return null;
+  if (names.length !== 1) return { status: 'ignored', artifact: null, error: null };
   const parsed = parseArtifactName(names[0]!);
-  if (!parsed || (parsed.family !== 'pr-review' && !COMPLETION_BACKFILL_FAMILIES.includes(parsed.family as typeof COMPLETION_BACKFILL_FAMILIES[number]))) return null;
+  if (!parsed || (parsed.family !== 'pr-review' && !COMPLETION_BACKFILL_FAMILIES.includes(parsed.family as typeof COMPLETION_BACKFILL_FAMILIES[number]))) {
+    return { status: 'ignored', artifact: null, error: null };
+  }
   const artifactPath = path.join(taskDir, parsed.name);
   try {
     const stat = fs.lstatSync(artifactPath);
-    return stat.isFile() && !stat.isSymbolicLink() ? parsed.name : null;
-  } catch {
-    return null;
+    if (stat.isSymbolicLink()) return {
+      status: 'failed', artifact: null,
+      error: { code: 'ARTIFACT_TOPOLOGY_CONFLICT', message: `SYMBOLIC_LINK: symbolic links are not workflow artifacts: ${parsed.name}`, retryable: false }
+    };
+    if (!stat.isFile()) return {
+      status: 'failed', artifact: null,
+      error: { code: 'ARTIFACT_TOPOLOGY_CONFLICT', message: `NON_REGULAR_FILE: artifact is not a regular file: ${parsed.name}`, retryable: false }
+    };
+    fs.accessSync(artifactPath, fs.constants.R_OK);
+    return { status: 'ready', artifact: parsed.name, error: null };
+  } catch (error) {
+    return {
+      status: 'failed', artifact: null,
+      error: { code: 'ARTIFACT_READ_FAILED', message: `Unable to inspect referenced artifact '${parsed.name}': ${error instanceof Error ? error.message : String(error)}`, retryable: false }
+    };
   }
 }
 
-function matchingBackfillWarnings(taskDir: string, content: string) {
-  return getOpenWorkflowWarnings(content).flatMap((warning) => {
-    if (warning.step !== 'complete-task' || warning.code !== 'COMMENT_SYNC_FAILED' || warning.target !== 'artifact') return [];
-    const artifact = referencedBackfillArtifact(taskDir, warning.message);
-    return artifact ? [{ warning, artifact }] : [];
-  });
+function matchingBackfillWarnings(taskDir: string, content: string): BackfillWarningMatches {
+  const matches: BackfillWarningMatch[] = [];
+  for (const warning of getOpenWorkflowWarnings(content)) {
+    if (warning.step !== 'complete-task' || warning.code !== 'COMMENT_SYNC_FAILED' || warning.target !== 'artifact') continue;
+    const reference = referencedBackfillArtifact(taskDir, warning.message);
+    if (reference.status === 'failed') return { status: 'failed', matches: [], error: reference.error };
+    if (reference.status === 'ready') matches.push({ warning, artifact: reference.artifact });
+  }
+  return { status: 'ready', matches, error: null };
 }
 
 function inspectCompletionBackfillEligibility(
@@ -67,7 +97,9 @@ function inspectCompletionBackfillEligibility(
   };
   try {
     const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-    return { status: 'ready', eligible: matchingBackfillWarnings(resolved.taskDir, content).length > 0, error: null };
+    const matching = matchingBackfillWarnings(resolved.taskDir, content);
+    if (matching.status === 'failed') return { status: 'failed', eligible: false, error: matching.error };
+    return { status: 'ready', eligible: matching.matches.length > 0, error: null };
   } catch (error) {
     return {
       status: 'failed', eligible: false,
@@ -93,6 +125,8 @@ async function backfillCompletionComments(
     }
   }), [], []);
   const initialContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+  const matching = matchingBackfillWarnings(resolved.taskDir, initialContent);
+  if (matching.status === 'failed') return result(platformResult('failed', { error: matching.error }), [], []);
   const issueIdentity = taskIssueIdentity(parseTaskFrontmatter(initialContent));
   if (!issueIdentity) return result(platformResult('no-op', {
     error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false }
@@ -125,10 +159,9 @@ async function backfillCompletionComments(
     }), artifacts, []);
   }
 
-  const matching = matchingBackfillWarnings(resolved.taskDir, initialContent);
   const warnings: CompletionBackfillResult['warnings'] = [];
   let metadata: ReturnType<typeof captureTaskWriteMetadata> | null = null;
-  for (const { warning, artifact } of matching) {
+  for (const { warning, artifact } of matching.matches) {
     metadata ??= captureTaskWriteMetadata();
     const resolution = [
       `artifact=${artifact}`,
