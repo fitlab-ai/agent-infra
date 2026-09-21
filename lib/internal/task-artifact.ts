@@ -1,7 +1,7 @@
 import { parseArtifactCommand, executeArtifactCommand } from '../task/artifact-command.ts';
 import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n       agent-infra-internal task-artifact <N | TASK-id> init --family <family> --artifact <artifact> [--locale <zh-CN|en>]\n       agent-infra-internal task-artifact <N | TASK-id> preflight|finalize-local --family <analysis|plan|code> --artifact <artifact>\n\nInspect, initialize, preflight, or finalize a workflow artifact without changing task state.\n`;
+const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family> [--source-finding <id> --source-artifact <name> --source-sha256 <digest>]\n       agent-infra-internal task-artifact <N | TASK-id> init --family <family> --artifact <artifact> [--locale <zh-CN|en>]\n       agent-infra-internal task-artifact <N | TASK-id> preflight|finalize-local --family <analysis|plan|code> --artifact <artifact>\n       agent-infra-internal task-artifact <N | TASK-id> convert-facts [--dry-run]\n\nInspect, initialize, preflight, finalize, or explicitly convert workflow artifact facts.\n`;
 
 
 function taskArtifact(args: string[] = []): void {

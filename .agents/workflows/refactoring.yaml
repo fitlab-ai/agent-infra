@@ -32,7 +32,7 @@ steps:
       outputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "扫描现有分析产物；首轮创建 analysis.md，后续修订创建 analysis-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "由 task-artifact 选择器决定：输入与实质结果未变化时复用已完成产物；仅在新输入、新返工证据或结果变化时创建下一轮"
     outputs:
       - 包含依赖关系图的范围分析
       - 风险评估
@@ -59,7 +59,7 @@ steps:
       outputs:
         - name: review-analysis
           pattern: "review-analysis.md | review-analysis-r{N}.md"
-          rule: "扫描现有需求分析审查产物；首轮创建 review-analysis.md，后续轮次创建 review-analysis-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "由 task-artifact 选择器决定：输入与实质结果未变化时复用已完成产物；仅在新输入、新返工证据或结果变化时创建下一轮"
     outputs:
       - 需求分析审查报告
       - 待修正问题列表（如有）
@@ -88,7 +88,7 @@ steps:
       outputs:
         - name: plan
           pattern: "plan.md | plan-r{N}.md"
-          rule: "扫描现有方案产物；首轮创建 plan.md，后续修订创建 plan-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "由 task-artifact 选择器决定：输入与实质结果未变化时复用已完成产物；仅在新输入、新返工证据或结果变化时创建下一轮"
     outputs:
       - 包含增量步骤的重构计划
       - 前置测试列表
@@ -115,7 +115,7 @@ steps:
       outputs:
         - name: review-plan
           pattern: "review-plan.md | review-plan-r{N}.md"
-          rule: "扫描现有方案审查产物；首轮创建 review-plan.md，后续轮次创建 review-plan-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "由 task-artifact 选择器决定：输入与实质结果未变化时复用已完成产物；仅在新输入、新返工证据或结果变化时创建下一轮"
     outputs:
       - 技术方案审查报告
       - 待修正问题列表（如有）
@@ -152,7 +152,7 @@ steps:
       outputs:
         - name: code
           pattern: "code.md | code-r{N}.md"
-          rule: "扫描现有实现产物；首轮创建 code.md，后续修复或重实现创建 code-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "由 task-artifact 选择器决定：输入与实质结果未变化时复用已完成产物；仅在新输入、新返工证据或结果变化时创建下一轮"
     outputs:
       - 包含变更的重构分支
       - 更新或新增的测试文件
@@ -181,7 +181,7 @@ steps:
       outputs:
         - name: review-code
           pattern: "review-code.md | review-code-r{N}.md"
-          rule: "扫描现有代码审查产物；首轮创建 review-code.md，后续轮次创建 review-code-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "由 task-artifact 选择器决定：输入与实质结果未变化时复用已完成产物；仅在新输入、新返工证据或结果变化时创建下一轮"
     outputs:
       - 代码审查报告
       - 问题列表（如有）

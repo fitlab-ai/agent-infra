@@ -34,7 +34,7 @@ steps:
       outputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "Scan existing analysis artifacts; create analysis.md for round 1 and analysis-r{N}.md for later revisions (N = current highest round + 1)"
+          rule: "Let the task-artifact selector decide: reuse a completed artifact when inputs and substantive results match; create the next round only for new inputs, rework evidence, or result changes"
     outputs:
       - Root-cause analysis
       - Affected files list
@@ -61,7 +61,7 @@ steps:
       outputs:
         - name: review-analysis
           pattern: "review-analysis.md | review-analysis-r{N}.md"
-          rule: "Scan existing requirement-analysis review artifacts; create review-analysis.md for round 1 and review-analysis-r{N}.md for later rounds (N = current highest round + 1)"
+          rule: "Let the task-artifact selector decide: reuse a completed artifact when inputs and substantive results match; create the next round only for new inputs, rework evidence, or result changes"
     outputs:
       - Requirement analysis review report
       - Findings to fix, if any
@@ -89,7 +89,7 @@ steps:
       outputs:
         - name: plan
           pattern: "plan.md | plan-r{N}.md"
-          rule: "Scan existing plan artifacts; create plan.md for round 1 and plan-r{N}.md for later revisions (N = current highest round + 1)"
+          rule: "Let the task-artifact selector decide: reuse a completed artifact when inputs and substantive results match; create the next round only for new inputs, rework evidence, or result changes"
     outputs:
       - Fix plan
       - Regression test list
@@ -115,7 +115,7 @@ steps:
       outputs:
         - name: review-plan
           pattern: "review-plan.md | review-plan-r{N}.md"
-          rule: "Scan existing plan review artifacts; create review-plan.md for round 1 and review-plan-r{N}.md for later rounds (N = current highest round + 1)"
+          rule: "Let the task-artifact selector decide: reuse a completed artifact when inputs and substantive results match; create the next round only for new inputs, rework evidence, or result changes"
     outputs:
       - Plan review report
       - Findings to fix, if any
@@ -151,7 +151,7 @@ steps:
       outputs:
         - name: code
           pattern: "code.md | code-r{N}.md"
-          rule: "Scan existing code artifacts; create code.md for round 1 and code-r{N}.md for later fixes or reimplementation (N = current highest round + 1)"
+          rule: "Let the task-artifact selector decide: reuse a completed artifact when inputs and substantive results match; create the next round only for new inputs, rework evidence, or result changes"
     outputs:
       - Bug-fix branch with implementation or fixes
       - Regression test files
@@ -178,7 +178,7 @@ steps:
       outputs:
         - name: review-code
           pattern: "review-code.md | review-code-r{N}.md"
-          rule: "Scan existing code review artifacts; create review-code.md for round 1 and review-code-r{N}.md for later rounds (N = current highest round + 1)"
+          rule: "Let the task-artifact selector decide: reuse a completed artifact when inputs and substantive results match; create the next round only for new inputs, rework evidence, or result changes"
     outputs:
       - Code review report
       - Findings list, if any

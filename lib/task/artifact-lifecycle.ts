@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { ARTIFACT_FAMILY_CATALOG, artifactName, parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
@@ -15,6 +16,12 @@ import { validateQualificationAudit } from './qualification-audit.ts';
 import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-name.ts';
 import { parseLifecyclePathDecision, pathIncludes } from './lifecycle-path.ts';
 import type { LifecyclePathState } from './lifecycle-path.ts';
+import { parseTypedTaskFrontmatter } from './frontmatter.ts';
+import { artifactSubstantiveDigest } from './artifact-operations.ts';
+import { captureWorktreeTree } from './workspace-snapshot.ts';
+import { parseReworkIntentDocument } from './rework-intent.ts';
+import { buildArtifactInputDigest, parseCompletionFacts, selectArtifactDisposition } from './artifact-selection.ts';
+import type { ArtifactSelection } from './artifact-selection.ts';
 
 const artifactFamilyCatalog = ARTIFACT_FAMILY_CATALOG;
 const ARTIFACT_STEPS: Readonly<Record<string, string>> = {
@@ -60,7 +67,9 @@ type ArtifactErrorCode =
   | 'LIFECYCLE_PATH_INVALID' | 'ARTIFACT_STAGE_NOT_SELECTED'
   | 'ARTIFACT_IDENTITY_INVALID' | 'ARTIFACT_NOT_FOUND'
   | 'ARTIFACT_NOT_REGULAR' | 'ARTIFACT_NOT_READABLE' | 'ARTIFACT_VERDICT_INVALID'
-  | 'ARTIFACT_MODE_REFUSED' | 'ARTIFACT_INVALIDATION_INVALID';
+  | 'ARTIFACT_MODE_REFUSED' | 'ARTIFACT_INVALIDATION_INVALID'
+  | 'ARTIFACT_SELECTION_FACT_INVALID' | 'ARTIFACT_SELECTION_FACT_VERSION_UNSUPPORTED'
+  | 'ARTIFACT_SELECTION_INDETERMINATE';
 
 type ArtifactError = { code: ArtifactErrorCode; message: string };
 type ArtifactInventoryResult = {
@@ -83,6 +92,7 @@ type CodeArtifactMode = 'init' | 'fix' | 'decision' | 'refused' | 'error';
 type ArtifactContextResult = Omit<ArtifactInventoryResult, 'status'> & {
   status: ArtifactContextStatus;
   inputs: readonly ArtifactIdentity[];
+  selection?: ArtifactSelection | null;
   codeMode: {
     mode: CodeArtifactMode;
     codeMax: number;
@@ -95,7 +105,13 @@ type ArtifactContextResult = Omit<ArtifactInventoryResult, 'status'> & {
     message: string;
   } | null;
 };
-type InspectOptions = { repoRoot?: string };
+type InspectOptions = {
+  repoRoot?: string;
+  sourceFinding?: string;
+  sourceArtifact?: string;
+  sourceSha256?: string;
+  selectionOnly?: boolean;
+};
 
 const BLOCKING_DIAGNOSTICS = new Set<ArtifactDiagnosticCode>([
   'NONCANONICAL_NAME', 'ROUND_OUT_OF_RANGE', 'MISSING_BASE', 'ROUND_GAP',
@@ -307,6 +323,140 @@ const OPTIONAL_CONTEXT: Partial<Record<ArtifactFamily, { family: ArtifactFamily;
 };
 const QUALIFICATION_RECOVERY_OPTIONAL_CONTEXT_CONSUMERS = new Set<ArtifactFamily>(['analysis', 'plan']);
 
+function selectionEvidenceDigest(
+  content: string,
+  family: ArtifactFamily,
+  options: InspectOptions,
+  context: ArtifactContextResult
+): string | null {
+  const evidence: unknown[] = [];
+  if (options.sourceFinding && options.sourceArtifact && options.sourceSha256) {
+    evidence.push({
+      kind: 'explicit-source',
+      finding: options.sourceFinding,
+      artifact: options.sourceArtifact,
+      sha256: options.sourceSha256
+    });
+  }
+  const target = family === 'analysis' ? 'analysis' : family === 'plan' ? 'plan' : family === 'code' ? 'code' : null;
+  if (target) {
+    const parsed = parseReworkIntentDocument(content);
+    if (!parsed.ok) throw new Error(`${parsed.code}: ${parsed.message}`);
+    for (const intent of parsed.intents) {
+      if (intent.status === 'pending' && intent.target === target) {
+        evidence.push({
+          kind: 'rework', id: intent.intentId, finding: intent.findingId,
+          sourceArtifact: intent.sourceArtifact, sourceSha256: intent.sourceSha256,
+          evidenceDigest: intent.evidenceDigest, taskFactDigest: intent.taskFactDigest
+        });
+      }
+    }
+  }
+  if (family === 'code') {
+    for (const input of parseImplementationInputs(content).rows) {
+      if (input.needsImplementation && input.status === 'pending') {
+        evidence.push({ kind: 'implementation-input', id: input.id, decisionEvidence: input.decisionEvidence });
+      }
+    }
+  }
+  for (const input of context.inputs.filter((candidate) => candidate.family.startsWith('review-'))) {
+    const verdict = parseVerdict(input.path);
+    if (verdict.ok && verdict.verdict === 'Changes Requested') {
+      evidence.push({ kind: 'review-finding', artifact: input.name, sha256: sha256File(input.path) });
+    }
+  }
+  if (evidence.length === 0) return null;
+  return createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+}
+
+function permanentSelectionInput(family: ArtifactFamily, input: ArtifactIdentity): boolean {
+  if (family === 'analysis') return false;
+  if (family.startsWith('review-')) {
+    const reviewedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
+    return input.family === reviewedFamily;
+  }
+  return (family === 'plan' && input.family === 'analysis')
+    || (family === 'code' && (input.family === 'analysis' || input.family === 'plan'));
+}
+
+function selectionRelation(family: ArtifactFamily): string {
+  return family.startsWith('review-') ? 'reviewed-input' : 'required-input';
+}
+
+function attachArtifactSelection(
+  context: ArtifactContextResult,
+  pathState: LifecyclePathState,
+  options: InspectOptions
+): ArtifactContextResult {
+  if (context.status !== 'ready' || !context.taskDir || !context.taskId
+    || (context.family !== 'analysis' && pathState.status !== 'valid')) return context;
+  const family = context.family as ArtifactFamily;
+  const fail = (code: ArtifactErrorCode, message: string): ArtifactContextResult => ({
+    ...context, status: 'failed', selection: null, error: { code, message }
+  });
+  if (!context.next) return fail('ARTIFACT_SELECTION_INDETERMINATE', 'artifact inventory did not provide a writable identity');
+  let taskContent: string;
+  let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
+  try {
+    taskContent = fs.readFileSync(path.join(context.taskDir, 'task.md'), 'utf8');
+    frontmatter = parseTypedTaskFrontmatter(taskContent);
+  } catch (error) {
+    return fail('ARTIFACT_SELECTION_INDETERMINATE', error instanceof Error ? error.message : String(error));
+  }
+  const openLatest = context.latest ? hasOpenArtifactRound(taskContent, family, context.latest.round) : false;
+  const openNext = hasOpenArtifactRound(taskContent, family, context.next.round);
+  const open = openLatest || openNext;
+  const selectedIdentity = openLatest ? context.latest! : context.next;
+  try {
+    const upstream = context.inputs.filter((input) => permanentSelectionInput(family, input)).map((input) => ({
+      family: input.family,
+      artifact: input.name,
+      round: input.round,
+      sha256: sha256File(input.path),
+      relation: selectionRelation(family)
+    }));
+    const inputDigest = buildArtifactInputDigest({
+      family,
+      taskInput: `${extractSection(taskContent, ['任务输入', 'Task Input'])}\n${extractSection(taskContent, ['需求', 'Requirements'])}`,
+      lifecyclePath: family === 'analysis' ? 'analysis-input' : pathState.status === 'valid' ? pathState.decision.path : 'analysis-input',
+      upstream
+    });
+    const changeEvidenceDigest = selectionEvidenceDigest(taskContent, family, options, context);
+    const resultDigest = context.latest
+      ? createHash('sha256').update(JSON.stringify({
+        artifact: artifactSubstantiveDigest(fs.readFileSync(context.latest.path, 'utf8')),
+        ...(family === 'code' ? { worktreeTree: captureWorktreeTree(options.repoRoot ?? process.cwd(), null) } : {})
+      })).digest('hex')
+      : null;
+    let completionFact = null;
+    if (context.latest && !openLatest) {
+      const parsed = parseCompletionFacts(frontmatter.completion_facts);
+      if (!parsed.ok) return fail(parsed.code, parsed.message);
+      completionFact = parsed.facts.find((fact) => fact.output === context.latest!.name) ?? null;
+      if (completionFact && completionFact.outputSha256 !== sha256File(context.latest.path)) {
+        return fail('ARTIFACT_SELECTION_INDETERMINATE', `completed artifact '${context.latest.name}' no longer matches its completion fact`);
+      }
+    }
+    const selection = selectArtifactDisposition({
+      family,
+      next: { family, round: selectedIdentity.round, name: selectedIdentity.name },
+      latest: context.latest,
+      open,
+      inputDigest,
+      resultDigest,
+      changeEvidenceDigest,
+      completionFact
+    });
+    return {
+      ...context,
+      selection,
+      next: selection.writeRequired ? { round: selection.artifact.round, name: selection.artifact.name } : null
+    };
+  } catch (error) {
+    return fail('ARTIFACT_SELECTION_INDETERMINATE', error instanceof Error ? error.message : String(error));
+  }
+}
+
 function resolveArtifactContext(taskRef: string, family: string, options: InspectOptions = {}): ArtifactContextResult {
   const inventory = inspectTaskArtifacts(taskRef, family, options);
   if (inventory.status === 'failed') return { ...inventory, inputs: [], codeMode: null };
@@ -320,7 +470,7 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
     && !pathIncludes(pathState, inventory.family as never)) {
     return contextFailure(inventory, 'ARTIFACT_STAGE_NOT_SELECTED', `${inventory.family} is not in ${pathState.decision.path}`);
   }
-  if (inventory.family === 'code') return resolveCodeContext(inventory, options);
+  if (inventory.family === 'code') return attachArtifactSelection(resolveCodeContext(inventory, options), pathState, options);
   const required = REQUIRED_INPUT[inventory.family as ArtifactFamily];
   const inputs: ArtifactIdentity[] = [];
   if (required) {
@@ -329,7 +479,7 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
       return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_INPUT_MISSING', message: `latest ${required} artifact is required` } };
     }
     const qualificationError = qualificationErrorForArtifact(input.latest);
-    if (qualificationError) return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: qualificationError } };
+    if (qualificationError && !options.selectionOnly) return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: qualificationError } };
     inputs.push(input.latest);
     if (inventory.family === 'plan' && pathState.status === 'valid' && pathState.decision.path === 'full') {
       const review = inspectTaskArtifacts(taskRef, 'review-analysis', options);
@@ -346,16 +496,19 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
     const context = inspectTaskArtifacts(taskRef, optional.family, options);
     if (context.status === 'ready' && context.latest) {
       if (optional.requireReference && !context.reviewedInput) {
-        return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: `${context.latest.name} has no valid reviewed input` } };
+        if (!options.selectionOnly) {
+          return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: `${context.latest.name} has no valid reviewed input` } };
+        }
+      } else {
+        const qualificationError = qualificationErrorForArtifact(context.latest);
+        if (qualificationError && !options.selectionOnly && !QUALIFICATION_RECOVERY_OPTIONAL_CONTEXT_CONSUMERS.has(inventory.family as ArtifactFamily)) {
+          return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: qualificationError } };
+        }
+        inputs.push(context.latest);
       }
-      const qualificationError = qualificationErrorForArtifact(context.latest);
-      if (qualificationError && !QUALIFICATION_RECOVERY_OPTIONAL_CONTEXT_CONSUMERS.has(inventory.family as ArtifactFamily)) {
-        return { ...inventory, status: 'failed', inputs, codeMode: null, error: { code: 'ARTIFACT_REFERENCE_INVALID', message: qualificationError } };
-      }
-      inputs.push(context.latest);
     }
   }
-  return { ...inventory, inputs, codeMode: null };
+  return attachArtifactSelection({ ...inventory, inputs, codeMode: null }, pathState, options);
 }
 
 function qualificationErrorForArtifact(artifact: ArtifactIdentity): string | null {
@@ -383,14 +536,14 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   const reviewMax = reviewCode.latest?.round ?? 0;
   const inputs = [source.latest];
   const planQualificationError = qualificationErrorForArtifact(source.latest);
-  if (planQualificationError) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', planQualificationError);
+  if (planQualificationError && !options.selectionOnly) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', planQualificationError);
   if (latestCode) {
     const qualificationError = qualificationErrorForArtifact(latestCode);
-    if (qualificationError) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, latestCode.name);
+    if (qualificationError && !options.selectionOnly) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, latestCode.name);
   }
   if (reviewCode.latest) {
     const qualificationError = qualificationErrorForArtifact(reviewCode.latest);
-    if (qualificationError) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, reviewCode.latest.name);
+    if (qualificationError && !options.selectionOnly) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, reviewCode.latest.name);
   }
   if (!latestCode) {
     if (pathState.decision.path === 'full') {
@@ -418,7 +571,7 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   }
   if (reviewPlan.latest) {
     const qualificationError = qualificationErrorForArtifact(reviewPlan.latest);
-    if (qualificationError) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, reviewPlan.latest.name);
+    if (qualificationError && !options.selectionOnly) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, reviewPlan.latest.name);
   }
   if (pathState.decision.path === 'full' && reviewPlan.latest && reviewPlan.reviewedInput?.name === source.latest.name) {
     const verdict = parseVerdict(reviewPlan.latest.path);
@@ -447,6 +600,20 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
       verdict.verdict, review.name, `Implementation input ${decision.input.id} requires a new code round.`,
       decision.input.id, decision.input.ledgerId, decision.input.decisionEvidence
     );
+  }
+  try {
+    const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
+    const rework = parseReworkIntentDocument(taskContent);
+    const reviewSha256 = sha256File(review.path);
+    if (rework.ok && rework.intents.some((intent) => intent.status === 'pending'
+      && intent.target === 'code'
+      && intent.sourceArtifact === review.name
+      && intent.sourceSha256 === reviewSha256)) {
+      return withCodeMode(inventory, [...inputs, review], 'ready', 'fix', codeMax, reviewMax, verdict.verdict, review.name,
+        `Pending rework evidence requires a new code round after ${review.name}.`);
+    }
+  } catch (error) {
+    return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error), review.name);
   }
   if (verdict.verdict === 'Approved' || verdict.verdict === 'Rejected') {
     return withCodeMode(inventory, [...inputs, review], 'refused', 'refused', codeMax, reviewMax, verdict.verdict, review.name,

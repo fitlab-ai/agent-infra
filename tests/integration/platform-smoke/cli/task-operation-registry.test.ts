@@ -59,12 +59,13 @@ function routeKeysFromHandlerBranches(): Set<string> {
   }
   // Shared domain commands have no CLI-local branch marker: exercise their parsers.
   for (const [command, selector] of [
-    ...['inspect', 'init', 'preflight', 'finalize-local'].map((selector) => ['task-artifact', selector] as const),
+    ...['inspect', 'init', 'preflight', 'finalize-local', 'convert-facts'].map((selector) => ['task-artifact', selector] as const),
     ...['preflight', 'finalize-summary'].map((selector) => ['task-review', selector] as const)
   ]) {
     if (command === 'task-artifact') {
-      const args = ['TASK-20260101-000001', selector, '--family', 'plan'];
-      if (selector !== 'inspect') args.push('--artifact', 'plan.md');
+      const args = ['TASK-20260101-000001', selector];
+      if (selector !== 'convert-facts') args.push('--family', 'plan');
+      if (!['inspect', 'convert-facts'].includes(selector)) args.push('--artifact', 'plan.md');
       keys.add(routeKey(command, parseArtifactCommand(args).operation));
     } else if (command === 'task-review') {
       parseReviewCommand(['TASK-20260101-000001', selector, '--stage', 'analysis', '--artifact', 'review-analysis.md']);

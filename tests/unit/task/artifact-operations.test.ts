@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import {
+  artifactSubstantiveDigest,
   canonicalSemanticDigest,
   initializeArtifactSkeleton,
   inspectArtifactContract,
@@ -29,6 +30,14 @@ id: TASK-20260101-000001
 | --- | --- | --- | --- | --- | --- |
 | A | Use the current implementation. | pending | C-1 | requires qualification | unit test |
 `;
+
+test('substantive artifact digest ignores controlled evidence sections but retains business content', () => {
+  const first = '# Report\n\n## Result\n\nApproved.\n\n## 状态核对\n\n$ command one\n\n## 资格审计\n\n| a |\n| --- |\n| one |\n';
+  const evidenceOnly = first.replace('$ command one', '$ command two').replace('| one |', '| two |');
+  const changed = first.replace('Approved.', 'Changes requested.');
+  assert.equal(artifactSubstantiveDigest(first), artifactSubstantiveDigest(evidenceOnly));
+  assert.notEqual(artifactSubstantiveDigest(first), artifactSubstantiveDigest(changed));
+});
 
 test('artifact initialization renders a valid qualification audit for every workflow family', () => {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-init-qualification-')));

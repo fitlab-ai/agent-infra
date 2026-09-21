@@ -23,6 +23,7 @@ import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 
 const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n';
 
@@ -100,6 +101,7 @@ function fixture(step = 'requirement-analysis-review') {
   const explicitStep = arguments.length > 0;
   const root = makeTempDir('task-event-');
   spawnSync('git', ['init', '-q'], { cwd: root });
+  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
@@ -910,7 +912,10 @@ test('orchestrated completion advances one matching activated delegation', () =>
 
 test('orchestrated completion reports a distinct partial-write error when the run commit fails', () => {
   const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  assert.equal(run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', `test:${f.id}:plan`, '--reason-code', 'user-request'
+  ]).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
@@ -923,6 +928,8 @@ test('orchestrated completion reports a distinct partial-write error when the ru
     artifact: 'plan.md'
   });
   assert.equal(finalized.status, 'passed', finalized.error?.message);
+  const selection = JSON.parse(String(parseTypedTaskFrontmatter(fs.readFileSync(f.file, 'utf8')).open_artifact_selection));
+  assert.equal(selection.requestId, `test:${f.id}:plan`);
   const taskBefore = fs.readFileSync(f.file);
 
   const result = applyTaskEvent({
@@ -942,7 +949,7 @@ test('orchestrated completion reports a distinct partial-write error when the ru
   });
 
   assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'EVENT_ORCHESTRATION_COMMIT_FAILED');
+  assert.equal(result.error?.code, 'EVENT_ORCHESTRATION_COMMIT_FAILED', JSON.stringify(result));
   assert.notDeepEqual(fs.readFileSync(f.file), taskBefore);
   assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.status, 'activated');
 });
@@ -1091,7 +1098,8 @@ test('streamlined design rework is consumed after the analysis upgrade step', ()
     fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis').replace('完整路径', '标准路径'));
     const completed = run(f.root, [
       f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
-      ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+      ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis'), '--initiator', 'model',
+      '--request-id', `${f.id}:design-rework`, '--reason-code', 'review-finding'
     ]);
     assert.equal(completed.status, 0, completed.stdout || completed.stderr);
     const parsed = parseReworkIntentDocument(fs.readFileSync(f.file, 'utf8'));

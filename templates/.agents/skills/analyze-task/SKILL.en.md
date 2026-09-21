@@ -65,7 +65,7 @@ If `task.md` is missing, tell the user to create or import the task first.
 
 ### 2. Resolve the Analysis Context
 
-Run `agent-infra-internal task-artifact {task-id} inspect --family analysis`. Continue only for `ready`; take `{analysis-round}` / `{analysis-artifact}` from `next.round` / `next.name` and revision inputs from `inputs`. Do not scan rounds or construct names in the skill.
+Run `agent-infra-internal task-artifact {task-id} inspect --family analysis`. Continue only for `ready`. When `selection.disposition` is `reuse-completed`, reuse `selection.artifact`, do not run started/init or write a new artifact, and continue directly to completion verification and next-step guidance. Otherwise take `{analysis-round}` / `{analysis-artifact}` from `next.round` / `next.name` and revision inputs from `inputs`. Do not scan rounds or construct names in the skill.
 
 ### 3. Read Task Context
 

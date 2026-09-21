@@ -66,7 +66,7 @@ If any required file is missing, prompt the user to complete the prerequisite st
 
 ### 2. Resolve the Artifact Context
 
-Run `agent-infra-internal task-artifact {task-id} inspect --family plan`. Continue only for `ready`; take the latest `{analysis-artifact}` from `inputs` and `{plan-round}` / `{plan-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. Then run the started event and verify the returned identity.
+Run `agent-infra-internal task-artifact {task-id} inspect --family plan`. Continue only for `ready`. When `selection.disposition` is `reuse-completed`, reuse `selection.artifact`, do not run started/init or write a new artifact, and continue directly to completion verification and next-step guidance. Otherwise take the latest `{analysis-artifact}` from `inputs` and `{plan-round}` / `{plan-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. Then run the started event and verify the returned identity.
 
 ### 3. Read Requirements Analysis
 

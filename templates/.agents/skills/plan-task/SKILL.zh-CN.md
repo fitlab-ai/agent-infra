@@ -69,7 +69,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
 
 ### 2. 解析方案上下文
 
-运行 `agent-infra-internal task-artifact {task-id} inspect --family plan`。仅当结果为 `ready` 时继续；从 `inputs` 取得最新 `{analysis-artifact}`，从 `next.round` / `next.name` 取得 `{plan-round}` / `{plan-artifact}`。不得自行扫描轮次或拼装文件名。随后执行 started 事件并复核返回身份。
+运行 `agent-infra-internal task-artifact {task-id} inspect --family plan`。仅当结果为 `ready` 时继续。若 `selection.disposition` 为 `reuse-completed`，复用 `selection.artifact`，不得执行 started、init 或写入新产物，并直接进入完成校验与下一步提示。其他状态从 `inputs` 取得最新 `{analysis-artifact}`，从 `next.round` / `next.name` 取得 `{plan-round}` / `{plan-artifact}`；不得自行扫描轮次或拼装文件名。随后执行 started 事件并复核返回身份。
 
 ### 3. 阅读需求分析
 

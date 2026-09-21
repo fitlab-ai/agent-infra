@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
+import { execFileSync } from 'node:child_process';
 
 import {
   activateMatchingOrchestrationDelegation,
@@ -547,6 +548,7 @@ test('route requires the latest review to bind the latest artifact structurally'
 
 test('route uses the same recommendation facts as lifecycle capability checks', () => {
   const f = approvedCodeFixture();
+  execFileSync('git', ['init'], { cwd: f.root, stdio: 'ignore' });
   const taskPath = path.join(f.taskDir, 'task.md');
   const content = fs.readFileSync(taskPath, 'utf8');
   const intent = {

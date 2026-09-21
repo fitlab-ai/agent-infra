@@ -68,7 +68,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {standard-agen
 
 ### 2. 解析分析上下文
 
-运行 `agent-infra-internal task-artifact {task-id} inspect --family analysis`。仅当结果为 `ready` 时继续；从 `next.round` / `next.name` 记录 `{analysis-round}` / `{analysis-artifact}`，从 `inputs` 读取修订上下文。不得自行扫描轮次或拼装文件名。随后执行 started 事件，并以事件返回的 `artifactContext` 复核同一身份。
+运行 `agent-infra-internal task-artifact {task-id} inspect --family analysis`。仅当结果为 `ready` 时继续。若 `selection.disposition` 为 `reuse-completed`，复用 `selection.artifact`，不得执行 started、init 或写入新产物，并直接进入完成校验与下一步提示。其他状态从 `next.round` / `next.name` 记录 `{analysis-round}` / `{analysis-artifact}`，从 `inputs` 读取修订上下文；不得自行扫描轮次或拼装文件名。随后执行 started 事件，并以事件返回的 `artifactContext` 复核同一身份。
 
 ### 3. 阅读任务上下文
 
