@@ -160,6 +160,13 @@ function assetMatches(entry, target) {
     : normalizedTarget === normalizedEntry;
 }
 
+function isOwnedByDisabledAgentClient(target, enabledSet) {
+  return AGENT_CLIENT_MANIFEST.some((adapter) =>
+    !enabledSet.has(adapter.id)
+    && adapter.ownedPathPrefixes.some((prefix) => assetMatches(prefix, target))
+  );
+}
+
 function adapterAssets(adapters, category) {
   return adapters.flatMap((adapter) => adapter[category]);
 }
@@ -1711,6 +1718,15 @@ function syncTemplates(projectRoot, templateRootOverride) {
   }
 
   const mergedMap = new Map();
+  const addMergedTarget = (target, source) => {
+    if (
+      isOwnedByDisabledAgentClient(target, enabledTUIs)
+      && !isCustomProtected(target, protectedCustomSkills, customCommandTargets)
+    ) {
+      return;
+    }
+    if (!mergedMap.has(target)) mergedMap.set(target, source);
+  };
   for (const entry of merged) {
     if (isPathOwnedByOtherPlatform(entry, platformType)) {
       report.managed.skippedPlatform.push(entry);
@@ -1722,13 +1738,13 @@ function syncTemplates(projectRoot, templateRootOverride) {
         return globMatch(entry, t);
       });
       for (const [t, s] of platformSelect(langSelect(hits, lang, allSet, project), platformType, project)) {
-        if (!mergedMap.has(t)) mergedMap.set(t, s);
+        addMergedTarget(t, s);
       }
     } else {
       const rels = entryVariantRels(entry, allSet, platformType);
       const selected = platformSelect(langSelect(rels, lang, allSet, project), platformType, project);
       for (const [t, s] of selected) {
-        if (!mergedMap.has(t)) mergedMap.set(t, s);
+        addMergedTarget(t, s);
       }
     }
   }
