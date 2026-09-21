@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>从 Issue 到合并 PR，只需 11 条命令。</strong> 定义需求，让 AI 完成分析、方案设计、编码与三阶段审查 —— 你只需在关键节点介入。
+  <strong>从 Issue 到合并 PR，由风险选择相称的生命周期。</strong> 每个任务都先分析，每份实现都接受独立代码审查。
 </p>
 
 <p align="center">
@@ -50,14 +50,22 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 
 > AI 读取 `.agents/.airc.json`，自动定位已安装的模板根目录，并通过 `sync-templates.js` 确定性地同步最新的 skill 清单、managed 文件和注册表。
 
-**场景**：Issue #42 报告 *"登录接口在邮箱包含加号时返回 500"*。以下是完整的修复流程 —— AI 执行主要工作，你掌控方向：
+**场景**：Issue #42 报告 *"登录接口在邮箱包含加号时返回 500"*。每个任务都从分析开始，并由分析根据可观察事实记录一条规范路径：
+
+| 路径 | 阶段 | 适用条件 |
+|------|------|----------|
+| 精简路径 | `analyze → code → review-code` | 范围和验收明确，不需要独立设计或文档审计决策 |
+| 标准路径 | `analyze → plan → code → review-code` | 实现需要明确跨模块契约、数据流或测试策略 |
+| 完整路径 | `analyze → review-analysis → plan → review-plan → code → review-code` | 存在具体的验收争议、高代价接口/schema/迁移选择，或真实外部/安全边界，需要独立审查 |
+
+文件数量、模块数量或可能存在的风险不能单独触发完整路径。后续 finding 只有在新证据成立时才会把工作返回分析、方案或实现阶段；每条路径都保留独立 `review-code`。
+
+假设分析认为应用层边界需要明确方案，因此选择**标准路径**：
 
 ```bash
 /import-issue 42           # AI 读取 Issue，创建任务，提取需求
-/analyze-task --task <task-id>    # AI 扫描代码库，定位根因，输出 analysis.md
-/review-analysis --task <task-id> # 隔离 reviewer 审查分析产物
+/analyze-task --task <task-id>    # AI 扫描代码库、记录所选路径，输出 analysis.md
 /plan-task --task <task-id>       # AI 提出修复方案
-/review-plan --task <task-id>     # fresh 隔离 reviewer 审查方案
 ```
 
 > **你审查方案后用自然语言回复：**
@@ -78,7 +86,7 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 /complete-task --task <task-id>   # 任务归档
 ```
 
-**11 条命令，1 次自然语言纠正，从 Issue 到合并 PR。** 这就是完整的 SOP —— 编程也可以有标准作业流程。
+**一条由分析选择的路径、一次自然语言纠正和一次独立代码审查。** 生命周期会让证据与审查深度和任务风险相称。
 
 以上每条命令在 Claude Code、Codex、Antigravity CLI、OpenCode 中完全通用。任务进行到一半切换工具，工作流状态照常延续。每个 skill 背后做了什么，见 [内置 AI Skills](./docs/zh-CN/skills.md)。
 
@@ -192,8 +200,9 @@ ai agent-client configure
 |------|------|
 | `create-task` / `import-issue` | 从描述或 GitHub Issue 创建任务 |
 | `run-task` | 当所选客户端能提供已验证的 actual model/effort 证据时，用 fresh 隔离 executor/reviewer 续跑生命周期；Codex 现已具备实验性的 Hooks + App Server 证据通道，但在该通道接入 delegation receipt 前仍不会启用 orchestration |
-| `analyze-task` → `review-analysis` | 明确范围与风险，再审查分析 |
-| `plan-task` → `review-plan` | 设计实现路径，再审查方案 |
+| `analyze-task` | 明确范围与风险，再选择精简、标准或完整路径 |
+| `review-analysis` | 仅在完整路径需要独立需求检查点时审查分析 |
+| `plan-task` / `review-plan` | 标准和完整路径需要设计方案；只有完整路径独立审查方案 |
 | `code-task` → `review-code` | 实现并测试；`code-task` 创建本地 checkpoint，再由结构化审查检视该 checkpoint |
 | `create-pr` → `complete-task` | 将已通过审查的 checkpoint 发布到任务绑定目标分支，并在合并和最终门禁通过后归档 |
 
