@@ -418,7 +418,7 @@ test('lifecycle facts use completed review receipts rather than review body form
     const taskDir = path.join(root, 'task');
     fs.mkdirSync(taskDir, { recursive: true });
     const artifacts = {
-      'analysis.md': '# Analysis\n',
+      'analysis.md': '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：需要独立审查。\n- **未满足的更高路径条件**：已选最高路径。\n- **升级触发条件**：无。\n',
       'review-analysis.md': '# Review\n\n- **审查输入**：analysis.md\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n',
       'plan.md': '# Plan\n',
       'review-plan.md': '# Review\n\n- **审查输入**：plan.md\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n',
