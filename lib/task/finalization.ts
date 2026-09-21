@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { syncPlatformComment } from '../platform/issue-comments.ts';
 import { canonicalizeSummaryBody } from '../platform/comment-safety.ts';
-import { backfillCompletionComments } from '../platform/completion-backfill.ts';
+import { backfillCompletionComments, inspectCompletionBackfillEligibility } from '../platform/completion-backfill.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
@@ -385,6 +385,7 @@ function applyVerificationWarnings(
   receipt: TaskFinalizationReceipt,
   result: TaskVerificationResult
 ): readonly FinalizationWarning[] {
+  if (result.status === 'pass') return resolveStepWarnings(receipt, 'verification');
   const observed = new Map<string, 'pass' | OperationWarning>();
   for (const invocation of result.invocations) {
     const checks = Array.isArray(invocation.payload.checks) ? invocation.payload.checks : [invocation.payload];
@@ -398,9 +399,9 @@ function applyVerificationWarnings(
     }
   }
   for (const warning of verificationWarnings(result)) observed.set(warning.target, warning);
-  if (observed.size === 0) return result.status === 'pass'
-    ? resolveStepWarnings(receipt, 'verification')
-    : replaceWarning(receipt, warningFromError('verification', verificationFailure(result)), 'open');
+  if (observed.size === 0) {
+    return replaceWarning(receipt, warningFromError('verification', verificationFailure(result)), 'open');
+  }
   let warnings = [...receipt.warnings];
   for (const [target, current] of observed) {
     if (current === 'pass') {
@@ -797,7 +798,14 @@ async function applyUnderLock(
 
   let changed = false;
   let backfillResult: TaskFinalizationStep | null = null;
-  const runBackfill = shouldRunBackfill(receipt);
+  let runBackfill = shouldRunBackfill(receipt);
+  if (!runBackfill && receipt.lifecycle === 'done') {
+    const eligibility = inspectCompletionBackfillEligibility(taskId, { cwd: repoRoot });
+    if (eligibility.status === 'failed') return failed(taskId, eligibility.error!, {
+      completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+    });
+    runBackfill = eligibility.eligible;
+  }
   if (receipt.lifecycle === 'done' && runBackfill && receipt.summary === 'done') {
     receipt = updateReceipt(repoRoot, receipt, { summary: 'pending' });
   }
@@ -817,6 +825,10 @@ async function applyUnderLock(
       const warnings = replaceWarning(receipt, warningFromError('backfill', detail), 'open');
       receipt = updateReceipt(repoRoot, receipt, { warningProjection: 'pending', warnings, lastError: detail });
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      if (!detail.retryable) return failed(taskId, detail, {
+        changed, backfill: backfillResult, completedSteps: completedSteps(receipt),
+        pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+      });
       return terminalResult(taskId, receipt, { backfill: backfillResult }, changed, detail);
     }
     changed = result.changed;
@@ -915,34 +927,32 @@ async function applyUnderLock(
   }
 
   let verification: TaskFinalizationStep | null = null;
-  try {
+  if (receipt.verification !== 'pending') {
+    verification = { status: receipt.verification === 'skipped' ? 'skipped' : 'no-op', changed: false, error: null };
+  } else {
+    try {
     receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-    const verificationPending = receipt.verification === 'pending';
     const result = await verify(
       { taskRef: taskId, event: 'complete-task.completed' },
       { repoRoot }
     );
     verification = verificationStep(result);
     if (result.status === 'pass') {
-      if (verificationPending) {
-        const resolvedTaskWarning = receipt.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
-        const warnings = applyVerificationWarnings(receipt, result);
-        receipt = updateReceipt(repoRoot, receipt, {
-          verification: 'done', taskComment: resolvedTaskWarning ? 'pending' : receipt.taskComment,
-          warningProjection: warnings.length > 0 ? 'pending' : 'done', warnings, lastError: null
-        });
-        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-        const finalComment = await syncPendingTaskComment({
-          repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
-        });
-        receipt = finalComment.receipt;
-        if (finalComment.step.status !== 'no-op') taskComment = finalComment.step;
-        changed = changed || finalComment.changed;
-        if (finalComment.error) {
-          return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification }, changed, finalComment.error);
-        }
-      } else {
-        receipt = updateReceipt(repoRoot, receipt, { lastError: null });
+      const resolvedTaskWarning = receipt.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
+      const warnings = applyVerificationWarnings(receipt, result);
+      receipt = updateReceipt(repoRoot, receipt, {
+        verification: 'done', taskComment: resolvedTaskWarning ? 'pending' : receipt.taskComment,
+        warningProjection: warnings.length > 0 ? 'pending' : 'done', warnings, lastError: null
+      });
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      const finalComment = await syncPendingTaskComment({
+        repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
+      });
+      receipt = finalComment.receipt;
+      if (finalComment.step.status !== 'no-op') taskComment = finalComment.step;
+      changed = changed || finalComment.changed;
+      if (finalComment.error) {
+        return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification }, changed, finalComment.error);
       }
     } else {
       const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
@@ -951,12 +961,6 @@ async function applyUnderLock(
         verification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: detail
       });
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-      if (!verificationPending) {
-        const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities });
-        receipt = warningComment.receipt;
-        if (warningComment.step.status !== 'no-op') taskComment = warningComment.step;
-        changed = changed || warningComment.changed;
-      }
       return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification }, changed, detail);
     }
   } catch (error) {
@@ -985,6 +989,7 @@ async function applyUnderLock(
       changed = changed || warningComment.changed;
     } catch { /* preserve the primary error */ }
     return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification: { status: 'blocked', changed: false, error: detail } }, changed, detail);
+    }
   }
 
   let summary = receipt.summary === 'pending'

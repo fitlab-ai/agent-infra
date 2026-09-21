@@ -3,13 +3,12 @@ import type { SandboxControlResponse } from './protocol.ts';
 
 export function finalizationTerminalResponse(taskId: string, requestId: string, receipt: TaskFinalizationReceipt): SandboxControlResponse {
   const pendingSteps = [
-    receipt.warnings.some((warning) => warning.step === 'backfill' && warning.status === 'open') ? 'backfill' : null,
     receipt.taskComment === 'pending' ? 'task-comment' : null,
     receipt.verification === 'pending' ? 'verification' : null,
     receipt.summary === 'pending' ? 'summary' : null
   ].filter((step): step is string => step !== null);
   const completedSteps = [
-    'lifecycle', receipt.warnings.some((warning) => warning.step === 'backfill' && warning.status === 'open') ? null : 'backfill', receipt.taskComment === 'pending' ? null : 'task-comment',
+    'lifecycle', receipt.taskComment === 'pending' ? null : 'task-comment',
     receipt.verification === 'pending' ? null : 'verification', receipt.summary === 'pending' ? null : 'summary'
   ]
     .filter((step): step is string => step !== null);

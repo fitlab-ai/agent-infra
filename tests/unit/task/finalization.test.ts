@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { onPlatforms } from '../../helpers.ts';
 import { platformResult } from '../../../lib/platform/types.ts';
+import { inspectCompletionBackfillEligibility } from '../../../lib/platform/completion-backfill.ts';
 import {
   applyFinalizationReceiptMutation,
   applyTaskFinalization,
@@ -85,6 +86,36 @@ function options(
 }
 
 const request: TaskFinalizationRequest = { taskRef: TASK_ID, intent: 'complete', agent: 'codex' };
+
+test('completion backfill eligibility accepts only structured artifact warnings with controlled identities', () => {
+  const f = fixture();
+  const taskMd = path.join(f.taskDir, 'task.md');
+  const warningTable = (message: string, step = 'complete-task') => [
+    '## Workflow Warnings', '',
+    '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
+    '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
+    `| WW-1 | 2026-08-07 09:00:00+08:00 | ${step} | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | ${message} | retry |  |  |`,
+    ''
+  ].join('\n');
+  try {
+    assert.deepEqual(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }), {
+      status: 'ready', eligible: false, error: null
+    });
+    fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# analysis\n');
+    fs.appendFileSync(taskMd, warningTable('analysis.md sync failed'));
+    assert.equal(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }).eligible, true);
+
+    fs.writeFileSync(path.join(f.taskDir, 'pr-review.md'), '# review\n');
+    fs.writeFileSync(taskMd, fs.readFileSync(taskMd, 'utf8').replace('analysis.md sync failed', 'unsupported pr-review.md'));
+    assert.equal(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }).eligible, true);
+
+    fs.writeFileSync(taskMd, fs.readFileSync(taskMd, 'utf8').replace('unsupported pr-review.md', 'analysis.md sync failed').replace('| complete-task |', '| issue-sync |'));
+    assert.equal(inspectCompletionBackfillEligibility(TASK_ID, { cwd: f.repoRoot }).eligible, false);
+    assert.equal(inspectCompletionBackfillEligibility('TASK-20990101-000000', { cwd: f.repoRoot }).status, 'failed');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
 
 test('host finalization waits for completion backfill before lifecycle and repeats the idempotent check on replay', async () => {
   const f = fixture();
@@ -170,6 +201,74 @@ test('completed finalization persists a retryable backfill failure without repla
   }
 });
 
+test('completed finalization schedules backfill from an eligible task artifact warning', async () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# analysis\n');
+  const staged = 'Delivered summary.\n';
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
+    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+  })}\n`);
+  let backfillCalls = 0;
+  const backfill: NonNullable<TaskFinalizationOptions['backfill']> = async () => {
+    backfillCalls += 1;
+    return platformResult('no-op') as any;
+  };
+  try {
+    await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
+    });
+    const taskMd = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md');
+    const content = fs.readFileSync(taskMd, 'utf8');
+    fs.writeFileSync(taskMd, content.replace('## Activity Log', [
+      '## Workflow Warnings', '',
+      '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
+      '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
+      '| WW-1 | 2026-08-07 09:00:00+08:00 | complete-task | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | analysis.md sync failed | retry |  |  |',
+      '', '## Activity Log'
+    ].join('\n')));
+
+    const replay = await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
+    });
+    assert.equal(replay.status, 'completed');
+    assert.equal(backfillCalls, 2);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('completed finalization keeps deterministic backfill errors fail-closed', async () => {
+  const f = fixture();
+  let backfillCalls = 0;
+  const backfill: NonNullable<TaskFinalizationOptions['backfill']> = async () => {
+    backfillCalls += 1;
+    return backfillCalls === 1 ? platformResult('no-op') as any : platformResult('failed', {
+      error: { code: 'ARTIFACT_TOPOLOGY_CONFLICT', message: 'invalid topology', retryable: false }
+    }) as any;
+  };
+  try {
+    await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
+    });
+    const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
+    fs.writeFileSync(receiptPath, `${JSON.stringify({
+      ...receipt,
+      warnings: [{ code: 'BACKFILL_PENDING', message: 'retry', retryable: true, step: 'backfill', target: 'artifact', severity: 'ACTION_REQUIRED', status: 'open', resolvedAt: null }]
+    })}\n`);
+
+    const replay = await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
+    });
+    assert.equal(replay.status, 'failed');
+    assert.equal(replay.result, 'failed');
+    assert.equal(replay.error?.code, 'ARTIFACT_TOPOLOGY_CONFLICT');
+    assert.equal(replay.completedSteps.includes('lifecycle'), true);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization receipt records the sandbox generation and request binding', async () => {
   const f = fixture();
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
@@ -225,7 +324,8 @@ test('host finalization uses the canonical root and makes a successful replay a 
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
     assert.equal(commentCalls, 2);
-    assert.equal(verifyCalls, 2);
+    assert.equal(verifyCalls, 1);
+    assert.equal(second.verification?.status, 'no-op');
     assert.equal(second.taskComment?.status, 'no-op');
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
     assert.equal((fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
@@ -266,7 +366,7 @@ test('host finalization seals a staged summary after core verification and retai
   }
 });
 
-test('host finalization rechecks terminal verification and reseals from the retained summary on replay', async () => {
+test('host finalization skips terminal verification and summary when no recovery fact is pending', async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';
   fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
@@ -285,7 +385,7 @@ test('host finalization rechecks terminal verification and reseals from the reta
   try {
     assert.equal((await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
     assert.equal((await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
-    assert.equal(verifyCalls, 2);
+    assert.equal(verifyCalls, 1);
     assert.deepEqual(kinds, ['task', 'summary']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
@@ -303,17 +403,20 @@ test('host finalization records a replayed verification exception and recovers o
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
     if (verifyCalls === 2) throw new Error('verification input unavailable');
-    return verification('pass');
+    return verifyCalls === 3 ? verificationChecks('pass') : verification('pass');
   };
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
+    const completedReceipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
+    fs.writeFileSync(receiptPath, `${JSON.stringify({ ...completedReceipt, verification: 'pending' })}\n`);
     const replay = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const replayReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recoveredReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(first.result, 'completed');
     assert.equal(replay.result, 'completed_with_warnings');
-    assert.deepEqual(replay.pendingSteps, ['verification']);
+    assert.deepEqual(replay.pendingSteps, ['verification', 'summary']);
     assert.equal(replay.error, null);
     assert.equal(replayReceipt?.verification, 'pending');
     assert.equal(replayReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.code === 'VERIFY_FAILED' && warning.status === 'open'), true);
@@ -379,6 +482,9 @@ test('host finalization blocks when a warning-state replayed verification failur
   };
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const receiptPath = path.join(receiptDirectory, `${TASK_ID}.json`);
+    const completedReceipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
+    fs.writeFileSync(receiptPath, `${JSON.stringify({ ...completedReceipt, verification: 'pending' })}\n`);
     const warned = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const blocked = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const blockedReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
@@ -509,7 +615,7 @@ test('host finalization returns actionable verification gate failures and retrie
     assert.deepEqual(failed.pendingSteps, ['task-comment', 'verification', 'summary']);
     assert.equal(recovered.status, 'completed');
     assert.equal(replay.status, 'completed');
-    assert.equal(verifyCalls, 3);
+    assert.equal(verifyCalls, 2);
     assert.equal(commentCalls, 4);
     assert.doesNotMatch(commentSnapshots[0]!, /CHECK_FAILED/);
     assert.match(commentSnapshots[1]!, /\| CHECK_FAILED \| open \|/);
