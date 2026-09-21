@@ -74,6 +74,10 @@ function semanticDigest(value: string): string {
   return createHash('sha256').update(value.normalize('NFKC').replace(/\s+/g, ' ').trim()).digest('hex');
 }
 
+function normalizedTaskFact(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/g, ' ').trim();
+}
+
 function semanticFindingEvidence(reviewContent: string, heading: ReturnType<typeof scanVisibleMarkdown>['headings'][number], end: number): string {
   const title = heading.text.replace(/^\d+[.、：:]\s*/, '').trim();
   return `${title}\n${reviewContent.slice(heading.end, end)}`;
@@ -104,8 +108,8 @@ function taskFactDigest(taskDir: string, content: string): string {
   const latest = analysisNames.map((name) => ({ name, round: parseArtifactName(name)?.round ?? 0 })).sort((a, b) => b.round - a.round)[0];
   const flow = latest ? parseLifecyclePathDecision(fs.readFileSync(path.join(taskDir, latest.name), 'utf8')) : null;
   return semanticDigest(JSON.stringify({
-    taskInput: extractSection(content, ['任务输入', 'Task Input']),
-    requirements: extractSection(content, ['需求', 'Requirements']),
+    taskInput: normalizedTaskFact(extractSection(content, ['任务输入', 'Task Input'])),
+    requirements: normalizedTaskFact(extractSection(content, ['需求', 'Requirements'])),
     flow: flow?.status === 'valid' ? flow.decision.semanticDigest : flow?.status ?? 'missing'
   }));
 }

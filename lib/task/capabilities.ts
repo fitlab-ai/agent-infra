@@ -9,7 +9,7 @@ import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.ts';
 import { parseReworkIntentDocument } from './rework-intent.ts';
-import type { ReworkIntent } from './rework-intent.ts';
+import type { ReworkIntent, ReworkTarget } from './rework-intent.ts';
 import { sha256File } from './artifact-receipts.ts';
 import { hasOpenLifecycleExecution } from './activity-log.ts';
 import { parseQualificationAudit, parseTaskQualification } from './qualification-audit.ts';
@@ -86,6 +86,11 @@ function hasArtifact(facts: LifecycleFacts, action: LifecycleAction): boolean {
   return (facts.artifacts[action]?.length ?? 0) > 0;
 }
 
+function effectiveReworkTarget(target: ReworkTarget, pathState: LifecyclePathState | undefined): ReworkTarget {
+  if (target === 'plan' && pathState?.status === 'valid' && !pathIncludes(pathState, 'plan')) return 'analysis';
+  return target;
+}
+
 function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: ExplicitTrigger): CapabilityResult {
   if (!trigger || trigger.requestedAction !== action) return deny('TRIGGER_ACTION_MISMATCH', `requested=${trigger?.requestedAction ?? 'missing'}`);
   if (!trigger.requestId || !trigger.requestId.trim()) return deny('TRIGGER_REQUEST_ID_REQUIRED');
@@ -106,9 +111,10 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
 
   const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
   if (pendingIntent) {
+    const target = effectiveReworkTarget(pendingIntent.target, facts.pathState);
     const requirementRestart = action === 'analysis' && trigger.reasonCode === 'new-requirement';
-    if (!requirementRestart && (pendingIntent.target === 'pause' || pendingIntent.target !== action)) {
-      return deny(pendingIntent.target === 'pause' ? 'REWORK_PAUSED' : 'REWORK_INTENT_TARGET_MISMATCH', pendingIntent.intentId);
+    if (!requirementRestart && (target === 'pause' || target !== action)) {
+      return deny(target === 'pause' ? 'REWORK_PAUSED' : 'REWORK_INTENT_TARGET_MISMATCH', pendingIntent.intentId);
     }
   }
 
@@ -243,7 +249,10 @@ function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
     return { action: null, reasonCode: 'REWORK_CLASSIFICATION_REQUIRED', evidence: facts.reworkClassificationRequired ?? [] };
   }
   const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
-  if (pendingIntent) return { action: pendingIntent.target === 'pause' ? null : pendingIntent.target, reasonCode: pendingIntent.target === 'pause' ? 'REWORK_PAUSED' : 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
+  if (pendingIntent) {
+    const target = effectiveReworkTarget(pendingIntent.target, facts.pathState);
+    return { action: target === 'pause' ? null : target, reasonCode: target === 'pause' ? 'REWORK_PAUSED' : 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
+  }
   if (facts.pathState && facts.pathState.status !== 'valid') {
     return { action: 'analysis', reasonCode: facts.pathState.status === 'missing' ? 'LIFECYCLE_PATH_MISSING' : 'LIFECYCLE_PATH_INVALID', evidence: [facts.pathState.message] };
   }
@@ -450,5 +459,5 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
   }
 }
 
-export { buildLifecycleFacts, canStart, recommendNext };
+export { buildLifecycleFacts, canStart, effectiveReworkTarget, recommendNext };
 export type { CapabilityResult, ExplicitTrigger, LifecycleAction, LifecycleFacts, LifecycleFactsResult, LifecycleRecommendation, TriggerInitiator, TriggerReason };

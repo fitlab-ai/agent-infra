@@ -290,6 +290,37 @@ test('rework intent permits a new classification once and blocks its unchanged r
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
 
+test('rework task facts ignore formatting-only whitespace and retain real requirement changes', () => {
+  const f = fixture(['| PL-1 | plan | 1 | major | open | review-plan.md#1 |']);
+  try {
+    const reviewPath = path.join(path.dirname(f.taskMd), 'review-plan.md');
+    fs.writeFileSync(reviewPath, '# Review\n\n#### 1. Stable finding\n\nThe implementation misses the required guard.\n');
+    fs.appendFileSync(f.taskMd, '\n## Requirements\n\n- Keep validation.\n- Keep review.\n');
+    const sourceSha256 = createHash('sha256').update(fs.readFileSync(reviewPath)).digest('hex');
+    const options = { repoRoot: f.repoRoot, metadataProvider: () => METADATA };
+    const request = (intentId: string) => applyLedgerIntent({
+      kind: 'rework-intent-upsert', taskRef: f.taskId, intentId, findingId: 'PL-1',
+      sourceArtifact: 'review-plan.md', sourceSha256, classification: 'implementation'
+    }, options);
+
+    assert.equal(request('RI-1').status, 'applied');
+    assert.equal(request('RI-2').status, 'applied');
+    fs.writeFileSync(f.taskMd, fs.readFileSync(f.taskMd, 'utf8').replace('- Keep validation.\n- Keep review.', '- Keep validation.\n\n- Keep review.'));
+    assert.equal(request('RI-3').status, 'applied');
+    fs.writeFileSync(f.taskMd, fs.readFileSync(f.taskMd, 'utf8').replace('- Keep validation.', '- Require validation.'));
+    assert.equal(request('RI-4').status, 'applied');
+
+    const parsed = parseReworkIntentDocument(fs.readFileSync(f.taskMd, 'utf8'));
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) {
+      assert.equal(parsed.intents[0]?.classification, 'implementation');
+      assert.equal(parsed.intents[1]?.classification, 'insufficient-evidence');
+      assert.equal(parsed.intents[2]?.classification, 'insufficient-evidence');
+      assert.equal(parsed.intents[3]?.classification, 'implementation');
+    }
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
 test('rework intent rejects a missing review evidence anchor without changing task bytes', () => {
   const f = fixture(['| PL-1 | plan | 1 | major | open | review-plan.md#9 |']);
   try {

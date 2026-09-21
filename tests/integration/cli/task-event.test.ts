@@ -19,6 +19,8 @@ import {
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
+import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
+import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
@@ -1072,6 +1074,33 @@ test('analysis can restart from code when task requirements expand', () => {
   assert.match(content, /current_step: requirement-analysis/);
   assert.match(content, /Analyze Task \(Round 2\) \[started\]/);
   assert.match(content, /`analysis-r2\.md`/);
+});
+
+test('streamlined design rework is consumed after the analysis upgrade step', () => {
+  const f = fixture('code-review');
+  try {
+    fs.writeFileSync(path.join(f.dir, 'analysis.md'), FULL_ANALYSIS.replace('完整路径', '精简路径'));
+    const sourceSha256 = sha256File(path.join(f.dir, 'review-code.md'));
+    fs.appendFileSync(f.file, `\n## 返工意图\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| RI-1 | CD-1 | review-code.md | ${sourceSha256} | plan | design | ${'a'.repeat(64)} | ${'b'.repeat(64)} | pending | 2026-01-01T00:00:00.000Z |  |\n`);
+
+    const started = run(f.root, [
+      f.id, 'analyze.started', '--agent', 'codex', '--initiator', 'model',
+      '--request-id', `${f.id}:design-rework`, '--reason-code', 'review-finding'
+    ]);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis').replace('完整路径', '标准路径'));
+    const completed = run(f.root, [
+      f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
+      ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const parsed = parseReworkIntentDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) assert.equal(parsed.intents[0]?.status, 'consumed');
+    const facts = buildLifecycleFacts(f.dir, fs.readFileSync(f.file, 'utf8'));
+    assert.equal(facts.ok, true);
+    if (facts.ok) assert.equal(recommendNext(facts.facts).action, 'plan');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
 test('source completion records resumable invalidation and lifecycle starts reconcile before continuing', () => {

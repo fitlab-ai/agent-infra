@@ -60,6 +60,30 @@ test('pending rework pauses authorization except for an explicit new requirement
   assert.equal(canStart('analysis', paused, { ...trigger, reasonCode: 'new-requirement' }).allowed, true);
 });
 
+test('streamlined design rework routes through analysis before plan', () => {
+  const routed = {
+    ...facts('code'),
+    pathState: pathState('精简路径'),
+    artifacts: { ...facts('code').artifacts, analysis: ['analysis.md'], code: ['code.md'], 'review-code': ['review-code.md'] },
+    reworkIntents: [{
+      intentId: 'RI-1', findingId: 'CD-1', sourceArtifact: 'review-code.md', sourceSha256: 'a'.repeat(64),
+      target: 'plan' as const, classification: 'design' as const,
+      evidenceDigest: 'b'.repeat(64), taskFactDigest: 'c'.repeat(64), status: 'pending' as const,
+      declaredAt: '2026-01-01T00:00:00.000Z', consumedAt: ''
+    }]
+  } satisfies LifecycleFacts;
+
+  assert.deepEqual(recommendNext(routed), {
+    action: 'analysis', reasonCode: 'REWORK_INTENT_PENDING', evidence: ['RI-1', 'CD-1']
+  });
+  assert.equal(canStart('analysis', routed, { ...trigger, requestedAction: 'analysis', reasonCode: 'review-finding' }).allowed, true);
+  assert.equal(canStart('plan', routed, { ...trigger, requestedAction: 'plan', reasonCode: 'review-finding' }).reasonCode, 'REWORK_INTENT_TARGET_MISMATCH');
+
+  const standard = { ...routed, pathState: pathState('标准路径') } satisfies LifecycleFacts;
+  assert.equal(recommendNext(standard).action, 'plan');
+  assert.equal(canStart('plan', standard, { ...trigger, requestedAction: 'plan', reasonCode: 'review-finding' }).allowed, true);
+});
+
 test('resolved human decisions route every stage back to review and code decisions honor implementation intent', () => {
   for (const stage of ['analysis', 'plan', 'code'] as const) {
     const review = `review-${stage}` as 'review-analysis' | 'review-plan' | 'review-code';

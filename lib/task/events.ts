@@ -35,12 +35,13 @@ import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from 
 import { allowsManualOverride } from './guard-override.ts';
 import { validateLocalArtifact } from './local-artifact-finalization.ts';
 import type { LocalArtifactFamily } from './local-artifact-finalization.ts';
-import { buildLifecycleFacts, canStart } from './capabilities.ts';
+import { buildLifecycleFacts, canStart, effectiveReworkTarget } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
 import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
 import type { InvalidationTargetKind } from './invalidation.ts';
 import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
+import type { ReworkTarget } from './rework-intent.ts';
 import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
 import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
@@ -52,6 +53,7 @@ import {
   type LifecycleRecoveryAttestationV1
 } from './control-authority.ts';
 import { readManualValidationCompletion } from './manual-validation-completion.ts';
+import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -586,7 +588,20 @@ function reworkIntentMutationForCompletion(
       try { return [[name, sha256File(path.join(taskDir, name))]]; }
       catch { return []; }
     }));
-    next = consumeReworkIntents(next, family === 'analyze' ? 'analysis' : family, hashes, timestamp).intents;
+    const action = family === 'analyze' ? 'analysis' : family;
+    let target: ReworkTarget = action;
+    if (family === 'analyze') {
+      const previousAnalysis = fs.readdirSync(taskDir)
+        .map((name) => parseArtifactName(name))
+        .filter((identity) => identity?.family === 'analysis' && identity.name !== artifact.name)
+        .sort((left, right) => right!.round - left!.round || left!.name.localeCompare(right!.name))[0];
+      const pathState = previousAnalysis
+        ? parseLifecyclePathDecision(fs.readFileSync(path.join(taskDir, previousAnalysis.name), 'utf8'))
+        : undefined;
+      const pending = next.find((intent) => intent.status === 'pending');
+      if (pending && effectiveReworkTarget(pending.target, pathState) === action) target = pending.target;
+    }
+    next = consumeReworkIntents(next, target, hashes, timestamp).intents;
   }
   if (family === 'review-analysis' || family === 'review-plan' || family === 'review-code') {
     next = supersedeReworkIntents(next, artifact.name, hash, timestamp).intents;
