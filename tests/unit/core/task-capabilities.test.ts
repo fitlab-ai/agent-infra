@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleAction, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
 import { invalidationMutation, createInvalidationOperation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
@@ -42,6 +43,95 @@ test('selected lifecycle path controls authorization without removing code revie
   const invalid = { ...facts('plan'), pathState: { status: 'invalid' as const, decision: null, message: 'bad flow decision' } };
   assert.equal(canStart('analysis', invalid, trigger).allowed, true);
   assert.equal(canStart('code', invalid, { ...trigger, requestedAction: 'code' }).reasonCode, 'LIFECYCLE_PATH_INVALID');
+});
+
+test('pending rework pauses authorization except for an explicit new requirement', () => {
+  const paused = {
+    ...facts('code'),
+    reworkIntents: [{
+      intentId: 'RI-1', findingId: 'CD-1', sourceArtifact: 'review-code.md', sourceSha256: 'a'.repeat(64),
+      target: 'pause' as const, classification: 'insufficient-evidence' as const,
+      evidenceDigest: 'b'.repeat(64), taskFactDigest: 'c'.repeat(64), status: 'pending' as const,
+      declaredAt: '2026-01-01T00:00:00.000Z', consumedAt: ''
+    }]
+  };
+  assert.equal(canStart('code', paused, { ...trigger, requestedAction: 'code' }).reasonCode, 'REWORK_PAUSED');
+  assert.equal(canStart('analysis', paused, trigger).reasonCode, 'REWORK_PAUSED');
+  assert.equal(canStart('analysis', paused, { ...trigger, reasonCode: 'new-requirement' }).allowed, true);
+});
+
+test('resolved human decisions route every stage back to review and code decisions honor implementation intent', () => {
+  for (const stage of ['analysis', 'plan', 'code'] as const) {
+    const review = `review-${stage}` as 'review-analysis' | 'review-plan' | 'review-code';
+    const state = {
+      ...facts(stage), pathState: pathState('完整路径'),
+      artifacts: {
+        analysis: ['analysis.md'], 'review-analysis': ['review-analysis.md'],
+        plan: ['plan.md'], 'review-plan': ['review-plan.md'], code: ['code.md'], 'review-code': ['review-code.md']
+      },
+      reviewedInputs: { 'review-analysis': 'analysis.md', 'review-plan': 'plan.md', 'review-code': 'code.md' },
+      reviews: {
+        'review-analysis': stage === 'analysis' ? 'changes-requested' : 'approved',
+        'review-plan': stage === 'plan' ? 'changes-requested' : 'approved',
+        'review-code': stage === 'code' ? 'changes-requested' : 'approved'
+      },
+      resolvedHumanDecisions: { [stage]: 'review' as const }
+    } satisfies LifecycleFacts;
+    assert.equal(recommendNext(state).action, review, stage);
+  }
+  const implementation = {
+    ...facts('code'), pathState: pathState('完整路径'),
+    artifacts: {
+      analysis: ['analysis.md'], 'review-analysis': ['review-analysis.md'],
+      plan: ['plan.md'], 'review-plan': ['review-plan.md'], code: ['code.md'], 'review-code': ['review-code.md']
+    },
+    reviewedInputs: { 'review-analysis': 'analysis.md', 'review-plan': 'plan.md', 'review-code': 'code.md' },
+    reviews: { 'review-analysis': 'approved', 'review-plan': 'approved', 'review-code': 'changes-requested' },
+    resolvedHumanDecisions: { code: 'implementation' as const }
+  } satisfies LifecycleFacts;
+  assert.equal(recommendNext(implementation).action, 'code');
+  assert.equal(canStart('code', implementation, {
+    ...trigger, requestedAction: 'code', implementationInput: 'II-1'
+  }).allowed, true);
+});
+
+test('rework classification uses ordered completed review cycles and ignores an approved boundary', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-rework-cycles-'));
+  try {
+    const taskDir = path.join(root, 'task');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const analysis = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：需审查。\n- **未满足的更高路径条件**：无。\n- **升级触发条件**：无。\n';
+    fs.writeFileSync(path.join(taskDir, 'analysis.md'), analysis);
+    const rows: string[] = [];
+    for (const round of [1, 2, 3]) {
+      const input = round === 1 ? 'code.md' : `code-r${round}.md`;
+      const output = round === 1 ? 'review-code.md' : `review-code-r${round}.md`;
+      fs.writeFileSync(path.join(taskDir, input), `# Code ${round}\n`);
+      fs.writeFileSync(path.join(taskDir, output), `# Review\n\n- **审查输入**：\`${input}\`\n\n## 审查摘要\n\n- **总体结论**：${round === 2 ? '通过' : '需要修改'}\n- **发现（AI 可处理）**：1 阻塞项，0 主要，0 次要 / **人工校验**：0\n`);
+      const hash = createHash('sha256').update(fs.readFileSync(path.join(taskDir, input))).digest('hex');
+      rows.unshift(`| review-code.completed | ${output} | ${input} | ${hash} | 2026-01-0${round} 00:00:00+00:00 |`);
+    }
+    let content = `---\nid: TASK-20260101-000001\nstatus: active\n---\n# Task\n\n## 产物生命周期收据\n\n| event | output | input | input_sha256 | completed_at |\n| --- | --- | --- | --- | --- |\n${rows.join('\n')}\n`;
+    fs.writeFileSync(path.join(taskDir, 'task.md'), content);
+    let result = buildLifecycleFacts(taskDir, content);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.facts.reworkClassificationRequired, []);
+
+    const approved = fs.readFileSync(path.join(taskDir, 'review-code-r2.md'), 'utf8').replace('通过', '需要修改');
+    fs.writeFileSync(path.join(taskDir, 'review-code-r2.md'), approved);
+    result = buildLifecycleFacts(taskDir, content);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.facts.reworkClassificationRequired, ['code']);
+
+    const latestHash = createHash('sha256').update(fs.readFileSync(path.join(taskDir, 'review-code-r3.md'))).digest('hex');
+    content += `\n## 返工意图\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| RI-1 | CD-1 | review-code-r3.md | ${latestHash} | code | implementation | ${'a'.repeat(64)} | ${'b'.repeat(64)} | consumed | 2026-01-03T00:00:00.000Z | 2026-01-03T01:00:00.000Z |\n`;
+    fs.writeFileSync(path.join(taskDir, 'task.md'), content);
+    result = buildLifecycleFacts(taskDir, content);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.facts.reworkClassificationRequired, []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 function qualificationTask() {

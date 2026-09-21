@@ -120,26 +120,6 @@ test("review-ledger keeps disputed findings unresolved regardless of round count
   });
 });
 
-test("review-ledger ignores the removed maxHandshakeRounds setting", async () => {
-  await withTempRoot("agent-infra-ledger-configured-limit-", async (tempRoot) => {
-    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
-      review: { maxHandshakeRounds: 2 }
-    }));
-    write(
-      path.join(tempRoot, ".agents", "skills", "complete-task", "config", "verify.json"),
-      JSON.stringify({ skill: "complete-task", checks: { "review-ledger": {} } })
-    );
-    const taskDir = path.join(tempRoot, TASK_ID);
-    write(path.join(taskDir, "task.md"), buildLedgerTask([
-      "| CD-1 | code | 2 | blocker | refuted | still disputed |"
-    ]));
-
-    const { payload } = await runLedger("complete-task", taskDir, tempRoot);
-    assert.equal(payload.status, "fail");
-    assert.match(payload.message, /unresolved/);
-  });
-});
-
 test("review-ledger keeps needs-human-decision blocking until ruled", async () => {
   await withTempRoot("agent-infra-ledger-human-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);

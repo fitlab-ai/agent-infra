@@ -1,8 +1,8 @@
 ---
 name: code-task
 description: >
-  根据技术方案编码任务并输出报告。
-  当技术方案已批准需要落地实现，或代码审查发现问题需要修复时使用。
+  根据生命周期输入编码任务并输出报告。
+  当分析或技术方案已按所选路径准备完成，或代码审查发现问题需要修复时使用。
   仅当对话包含可解析的任务引用时才可自动调用本技能。
 ---
 
@@ -11,7 +11,7 @@ description: >
 
 若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。生命周期事件还必须携带显式触发信息：编排调用使用 `{trigger-initiator}=orchestrator`，否则使用 `model`；`{request-id}` 是本任务与本轮产物的稳定单行标识，`{reason-code}` 初次实现使用 `user-request`，修复或裁决使用 `review-finding`；started 与 completed 使用同一组值。
 
-根据已批准的技术方案编码任务，并产出 `code.md` 或 `code-r{N}.md`。本技能支持初次实现、基于 `review-code` 反馈的修复，以及人工裁决驱动实现三种模式。
+根据所选生命周期路径的实现输入编码任务，并产出 `code.md` 或 `code-r{N}.md`。本技能支持初次实现、基于 `review-code` 反馈的修复，以及人工裁决驱动实现三种模式。
 
 ## 行为边界 / 关键规则
 
@@ -24,7 +24,7 @@ description: >
 生成实现报告时，先读取 `.agents/rules/evidence-reporting.md`。成功测试记录命令、目标范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议保留复现入口、准确位置和决定性摘录，不默认粘贴完整成功 stdout。
 
 - 涉及候选资格或 `HD-N` 判断时，先读取 `.agents/rules/decision-qualification.md`，基于 task.md 规范化约束/候选完成资格审计，并在实现报告记录五张资格审计表；不得把来源不明或未确认约束自动升级为排除条件
-- 严格遵循最新方案产物：`plan.md` 或 `plan-r{N}.md`
+- 严格遵循核心选择的最新生命周期输入：精简路径为 `analysis.md` / `analysis-r{N}.md`，标准或完整路径为 `plan.md` / `plan-r{N}.md`
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 实现前读取 `.agents/rules/compatibility-policy.md`；只实现方案明确批准的兼容预算，不以“稳妥”为由保留旧分支、旧结果契约或迁移 shim
 - 修复模式逐条核实最新 `review-code` 的发现：成立则修复，判定为不成立/幻觉则在报告中反驳并记入 unresolved；不擅自扩大到审查未列出的问题；manual-validation 项不在修复范围
@@ -44,7 +44,7 @@ description: >
 |------|------|
 | 「代码太简单，不需要测试」 | 简单代码也会回归；没有"失败→通过"的用例就没有完成标志，先写验证业务行为的测试。 |
 | 「先写代码再补测试更高效」 | 后补测试常沦为对实现的镜像；目标驱动应先定义可验证用例再让它通过。 |
-| 「方案这里不合理，顺手改更好」 | 偏离 `{plan-artifact}` 必须在报告中记录原因；有异议先停下确认，不擅自改方向。 |
+| 「输入这里不合理，顺手改更好」 | 偏离 `{lifecycle-input-artifact}` 必须在报告中记录原因；有异议按任务规则处理，不擅自改方向。 |
 | 「测试过了，顺便推送一下」 | 本技能只创建本地 checkpoint；远端推送是 `create-pr` 的唯一边界。 |
 | 「审查既然写了，照着改就行」 | 审查可能基于错误 `file:line` 或幻觉；动手前先 Read/Grep 核实，成立才修，不成立就反驳并记入 unresolved，不盲从。 |
 | 「保留旧入口更稳妥，反正只多一个分支」 | 未获批准的兼容是范围扩张和长期债务；没有对象、必要性、期限和退出条件就只实现当前契约。 |
@@ -76,9 +76,8 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 先检查：
 - `.agents/workspace/active/{task-id}/task.md`
-- 至少一个技术方案产物：`plan.md` 或 `plan-r{N}.md`
 
-如果缺少任一文件，立即停止并提示用户先完成前置步骤。
+如果缺少任务文件，立即停止。生命周期输入由步骤 4 的核心查询按已选路径验证；技能不得预先固定要求方案产物。
 
 ### 2. 确保任务分支
 
@@ -122,13 +121,13 @@ echo "$result"
 
 > 双模式判定规则见 `reference/dual-mode.md`。执行此步骤前先读取 `reference/dual-mode.md`。
 
-### 5. 确定输入方案
+### 5. 确定生命周期输入
 
-只使用步骤 4 的结构化结果：从 `inputs` 取得 `{plan-artifact}`，从 `next_round` / `next_artifact` 取得 `{code-round}` / `{code-artifact}`；修复模式从 `review_artifact` 取得 `{review-artifact}`；裁决模式从 `implementation_input`、`decision_id`、`decision_evidence` 取得统一输入身份。不得自行扫描轮次或拼装文件名。
+只使用步骤 4 的结构化结果：从 `inputs` 取得核心选择的 `{lifecycle-input-artifact}`（精简路径为 analysis，其他路径为 plan），从 `next_round` / `next_artifact` 取得 `{code-round}` / `{code-artifact}`；修复模式从 `review_artifact` 取得 `{review-artifact}`；裁决模式从 `implementation_input`、`decision_id`、`decision_evidence` 取得统一输入身份。不得自行扫描轮次或拼装文件名。
 
-### 6. 阅读技术方案
+### 6. 阅读生命周期输入
 
-仔细阅读 `{plan-artifact}`，提取：
+仔细阅读 `{lifecycle-input-artifact}`，提取：
 - 实施步骤
 - 需要创建或修改的文件
 - 测试策略
@@ -241,11 +240,11 @@ agent-infra-internal task-verify {task-id} code.completed --artifact {code-artif
 ## 注意事项
 
 - 首轮实现使用 `code.md`，后续轮次使用 `code-r{N}.md`
-- 如偏离 `{plan-artifact}`，必须在报告中记录原因
+- 如偏离 `{lifecycle-input-artifact}`，必须在报告中记录原因
 - 新测试必须验证有意义的业务行为，而不是机械透传
 
 ## 错误处理
 
 - 任务未找到：`Task {task-id} not found`
-- 缺少方案：`Technical plan not found, please run the plan-task skill first`
+- 缺少生命周期输入：透传步骤 4 返回的 `ARTIFACT_INPUT_MISSING`，按所选路径补充 analysis 或 plan
 - 本地修复后仍无法通过测试：说明外部阻塞并停止，且不要创建实现产物

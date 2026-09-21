@@ -255,6 +255,19 @@ test("code-task decision mode selects the earliest pending input", () => {
   assert.equal(result.output.decision_evidence, "task.md#HDR-1");
 });
 
+test("code-task decision mode takes precedence over an old Changes Requested verdict", () => {
+  const result = runDetect({
+    "task.md": decisionTask([
+      "| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 10:02:00+08:00 | pending | |"
+    ]),
+    "code.md": "# code",
+    "review-code.md": zhReview("需要修改", "0 阻塞项，1 主要，0 次要 / **人工校验**：0")
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "decision");
+  assert.equal(result.output.implementation_input, "II-1");
+});
+
 test("code-task decision mode ignores not-required and consumed inputs", () => {
   const result = runDetect({
     "task.md": decisionTask([

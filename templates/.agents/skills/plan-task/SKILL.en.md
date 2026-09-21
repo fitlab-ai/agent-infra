@@ -23,7 +23,7 @@ Before generating the plan report, read `.agents/rules/evidence-reporting.md`. R
 
 - When evaluating candidate qualification or `HD-N`, read `.agents/rules/decision-qualification.md`, audit normalized task constraints/candidates, and record the five qualification-audit tables in the plan artifact; unknown or unconfirmed constraints must not automatically exclude a candidate
 - This skill only outputs a technical plan document (`plan.md` or `plan-r{N}.md`) and does not modify any business code
-- This is a **mandatory human review checkpoint**; do not automatically proceed to implementation
+- The full path proceeds to plan review; the standard path may proceed directly to implementation
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - When the plan touches compatibility, migration, old formats, or old entry points, read `.agents/rules/compatibility-policy.md` first. Do not design adapters, shims, dual writes, or parallel state machines without passing its admission gate
 - After executing this skill, you **must** immediately update task status in task.md
@@ -173,7 +173,9 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Output format:
-Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill review-plan --task-ref {task-ref}`.
+Select one command from the canonical path to populate `{next-step-commands}`:
+- Standard: `agent-infra-internal agent-client next-steps --skill code-task --task-ref {task-ref}`
+- Full: `agent-infra-internal agent-client next-steps --skill review-plan --task-ref {task-ref}`
 
 ```
 Technical plan complete for task {task-id}.
@@ -188,10 +190,7 @@ Plan summary:
 Output file:
 - Technical plan: .agents/workspace/active/{task-id}/{plan-artifact}
 
-Important: human review checkpoint.
-Please review the technical plan before continuing to implementation.
-
-Next step - review the technical plan:
+Next step - continue on the selected path:
 {next-step-commands}
 ```
 
@@ -205,18 +204,18 @@ Next step - review the technical plan:
 - [ ] Recorded `{plan-artifact}` as a completed artifact in task.md
 - [ ] Marked technical-design as complete in workflow progress
 - [ ] Appended an Activity Log entry to task.md
-- [ ] Informed the user that this is a human review checkpoint
+- [ ] Selected code implementation or plan review from the canonical path
 - [ ] Rendered the selected next-step commands through the shared helper
 
 ## STOP
 
 After completing the checklist, **stop immediately**.
-This is a **mandatory human review checkpoint**; the user must review and approve the plan before implementation can continue.
+The full path proceeds to plan review here; the standard path proceeds directly to code implementation.
 
 ## Notes
 
 1. **Prerequisite**: at least one round of requirements analysis must already be complete (`analysis.md` or `analysis-r{N}.md` exists)
-2. **Human review**: this is a mandatory checkpoint; do not automatically proceed to implementation
+2. **Next stage**: standard proceeds to code implementation; full proceeds to plan review
 3. **Plan quality**: the plan should be detailed enough that another AI agent can implement it without extra context
 4. **Versioning rule**: the first plan uses `plan.md`; later revisions use `plan-r{N}.md`
 

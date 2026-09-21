@@ -8,9 +8,9 @@
 agent-infra-internal task-artifact {task-id} inspect --family code
 ```
 
-核心扫描任务目录中的 `plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md` 和 `review-code.md` / `review-code-r{N}.md`。
+核心读取最新 analysis 的路径裁定，并选择生命周期输入：精简路径使用 analysis，标准或完整路径使用 plan；完整路径还校验对应 review-plan。随后扫描 code 与 review-code 产物。
 
-`code.started` 会在 task.md frontmatter 中绑定本轮方案文件及其 SHA-256。`code.completed` 使用该开始上下文并校验当前最新 plan；内容变化失败关闭。实现报告的“方案输入”/“Plan Input”仅供读者追溯，不参与生命周期身份校验。
+`code.started` 会在 task.md frontmatter 中绑定本轮生命周期输入及其 SHA-256。`code.completed` 使用该开始上下文并校验当前最新输入；内容变化失败关闭。实现报告的“生命周期输入”仅供读者追溯，不参与生命周期身份校验。
 
 ## 8 个分支
 
@@ -18,8 +18,8 @@ agent-infra-internal task-artifact {task-id} inspect --family code
 
 | 条件 | mode | exit | 行为 |
 |---|---|---:|---|
-| 无 code 产物，且最新 review-plan 精确为 `Approved` 并引用最新 plan | `init` | 0 | 初次实现，产物为 `code.md`；缺少匹配审批或为 `Approved-with-issues` 时返回 error |
-| 最新 review-plan 精确为 `Approved`，且其「审查输入」/「Review Input」字段引用最新 plan，而最新 code 的完成 receipt 未绑定相同 plan 摘要 | `init` | 0 | plan 内容在 code 输入之后获批；进入新一轮实现。`Approved-with-issues` 仅保留历史解析兼容，不构成跨阶段批准；缺失或无效 receipt 失败关闭 |
+| 无 code 产物，且所选生命周期输入有效；完整路径的最新 review-plan 还必须精确为 `Approved` 并引用最新 plan | `init` | 0 | 初次实现，产物为 `code.md` |
+| 最新 analysis 或 plan 生命周期输入未被最新 code 完成 receipt 绑定 | `init` | 0 | 输入在上轮 code 后发生有效变化，进入新一轮实现；缺失或无效 receipt 失败关闭 |
 | 最新 review-code 的完成收据未绑定最新 code identity/SHA | `error` | 2 | 最新代码未审查，先运行 `review-code`；code 与 review-code 的 family 轮次可独立增长 |
 | 最新 review-code 为 Approved 且存在审查完成后产生的 pending 实现输入 | `decision` | 0 | 选择最早 `II-N`，进入裁决驱动实现；false/not-required 与 consumed 输入不触发 |
 | 最新 review-code 为 Approved 且 0/0/0 | `refused` | 1 | 已通过，无需再次运行 `code-task` |

@@ -19,6 +19,7 @@ const FLAGS: Record<string, string> = {
 };
 const NUMERIC = new Set(['ordinal', 'round']);
 const BOOLEAN = new Set(['needsImplementation']);
+const REWORK_CLASSIFICATIONS = new Set(['scope-or-requirement', 'design', 'implementation', 'human-decision', 'insufficient-evidence']);
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'LEDGER_PAYLOAD_INVALID', message } })}\n`);
@@ -87,6 +88,9 @@ async function taskLedger(args: string[] = []): Promise<void> {
   if (missing) { usageFailure(`${kind} requires '${missing}'`); return; }
   const dryRunConflict = overrideDryRunConflict(values);
   if (dryRunConflict) { usageFailure(dryRunConflict.message); return; }
+  if (values.classification !== undefined && !REWORK_CLASSIFICATIONS.has(String(values.classification))) {
+    usageFailure(`invalid rework classification '${values.classification}'`); return;
+  }
   if (kind === 'stage-status') {
     if (!isReviewStage(String(values.stage))) { usageFailure(`stage-status requires a valid review stage`); return; }
     const resolved = resolveTaskRef(taskRef);

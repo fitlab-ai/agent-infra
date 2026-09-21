@@ -32,6 +32,15 @@ test('receipt upsert creates a portable task section and parses it back', () => 
   assert.deepEqual(receiptForOutput(updated, 'review-plan.md'), RECEIPT);
 });
 
+test('code completion receipts accept the selected analysis or plan lifecycle input', () => {
+  for (const input of ['analysis.md', 'plan.md']) {
+    assert.doesNotThrow(() => upsertArtifactReceipt('# Task\n', {
+      event: 'code.completed', output: 'code.md', input,
+      inputSha256: 'a'.repeat(64), completedAt: '2026-08-19 20:00:00+00:00'
+    }));
+  }
+});
+
 test('receipt parsing fails closed for invalid digest and duplicate output', () => {
   const invalid = `## 产物生命周期收据\n\n| event | output | input | input_sha256 | completed_at |\n|---|---|---|---|---|\n| review-plan.completed | review-plan.md | plan.md | invalid | 2026-08-19 20:00:00+00:00 |\n`;
   assert.throws(() => parseArtifactReceipts(invalid), ArtifactReceiptError);

@@ -8,9 +8,9 @@ This file documents the core artifact lifecycle's code-mode decision. The `task-
 agent-infra-internal task-artifact {task-id} inspect --family code
 ```
 
-The core scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md` in the task directory.
+The core reads the path decision from the latest analysis and selects the lifecycle input: analysis for streamlined, plan for standard or full. The full path also validates review-plan before scanning code and review-code artifacts.
 
-`code.started` persists the plan identity and SHA-256 for the round in task.md frontmatter. `code.completed` uses that start context and verifies the current latest plan; changed input fails closed. The implementation report's `Plan Input` field is reader-facing traceability, not lifecycle identity validation.
+`code.started` persists the lifecycle input identity and SHA-256 for the round in task.md frontmatter. `code.completed` verifies the current latest input against that context; changed input fails closed. The implementation report field is reader-facing traceability only.
 
 ## Eight Branches
 
@@ -18,8 +18,8 @@ The core scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.
 
 | Condition | mode | exit | Behavior |
 |---|---|---:|---|
-| no code artifact, and the latest review-plan is exactly `Approved` and references the latest plan | `init` | 0 | initial implementation, output `code.md`; a missing matching approval or `Approved-with-issues` returns an error |
-| latest review-plan is exactly `Approved`, references the latest plan, and the latest code completion receipt does not bind the same plan digest | `init` | 0 | enter a new implementation round. `Approved-with-issues` remains parse-compatible for history but is not cross-stage approval; missing or invalid receipts fail closed |
+| no code artifact and the selected lifecycle input is valid; full also requires an exactly `Approved` review-plan bound to the latest plan | `init` | 0 | initial implementation, output `code.md` |
+| the latest analysis or plan lifecycle input is not bound by the latest code completion receipt | `init` | 0 | enter a new implementation round; missing or invalid receipts fail closed |
 | the latest review-code completion receipt does not bind the latest code identity/SHA | `error` | 2 | latest code is unreviewed; run `review-code`; code and review-code family rounds may advance independently |
 | latest review-code is Approved and a pending implementation input was decided after that review completed | `decision` | 0 | select the earliest `II-N` and enter decision-driven implementation; false/not-required and consumed inputs do not trigger |
 | latest review-code is Approved with 0/0/0 | `refused` | 1 | already approved; do not run `code-task` again |

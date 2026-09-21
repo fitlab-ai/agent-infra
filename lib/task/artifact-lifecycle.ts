@@ -439,16 +439,14 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   if (!review) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', 'latest review-code artifact is required');
   const verdict = parseVerdict(review.path);
   if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, review.name);
-  if (verdict.verdict === 'Approved') {
-    const decision = resolveDecisionImplementationInput(inventory, review);
-    if ('error' in decision) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', decision.error, review.name);
-    if (decision.input) {
-      return withCodeMode(
-        inventory, [...inputs, review], 'ready', 'decision', codeMax, reviewMax,
-        verdict.verdict, review.name, `Implementation input ${decision.input.id} requires a new code round.`,
-        decision.input.id, decision.input.ledgerId, decision.input.decisionEvidence
-      );
-    }
+  const decision = resolveDecisionImplementationInput(inventory, review);
+  if ('error' in decision) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', decision.error, review.name);
+  if (decision.input) {
+    return withCodeMode(
+      inventory, [...inputs, review], 'ready', 'decision', codeMax, reviewMax,
+      verdict.verdict, review.name, `Implementation input ${decision.input.id} requires a new code round.`,
+      decision.input.id, decision.input.ledgerId, decision.input.decisionEvidence
+    );
   }
   if (verdict.verdict === 'Approved' || verdict.verdict === 'Rejected') {
     return withCodeMode(inventory, [...inputs, review], 'refused', 'refused', codeMax, reviewMax, verdict.verdict, review.name,

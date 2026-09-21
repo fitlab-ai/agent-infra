@@ -19,6 +19,7 @@ import { parseLegacyReworkIntentDocument, parseReworkIntentDocument, reworkInten
 import type { ReworkClassification, ReworkIntent, ReworkTarget } from './rework-intent.ts';
 import { extractSection, extractSubSection } from './sections.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
+import { scanVisibleMarkdown } from './markdown.ts';
 
 type ReviewSeverity = 'blocker' | 'major' | 'minor';
 type ExecutorResponse = 'accepted' | 'adjusted' | 'refuted' | 'cannot-judge';
@@ -71,6 +72,26 @@ const CLASSIFICATION_TARGET: Record<ReworkClassification, ReworkTarget> = {
 
 function semanticDigest(value: string): string {
   return createHash('sha256').update(value.normalize('NFKC').replace(/\s+/g, ' ').trim()).digest('hex');
+}
+
+function findingEvidence(reviewContent: string, evidence: string): string | null {
+  const anchor = evidence.split('#')[1];
+  if (!anchor) return null;
+  const markdown = scanVisibleMarkdown(reviewContent);
+  const explicit = markdown.anchors.find((candidate) => candidate.id === anchor);
+  if (explicit) {
+    const heading = markdown.headings.find((candidate) => candidate.start > explicit.start);
+    const next = heading && markdown.headings.find((candidate) => candidate.start > heading.start && candidate.level <= heading.level);
+    const end = next?.start ?? reviewContent.length;
+    return reviewContent.slice(explicit.start, end);
+  }
+  const heading = markdown.headings.find((candidate) => {
+    if (candidate.text === anchor || candidate.text.startsWith(`${anchor} `)) return true;
+    return /^\d+$/.test(anchor) && new RegExp(`^${anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[.、：:]`).test(candidate.text);
+  });
+  if (!heading) return null;
+  const next = markdown.headings.find((candidate) => candidate.start > heading.start && candidate.level <= heading.level);
+  return reviewContent.slice(heading.start, next?.start ?? reviewContent.length);
 }
 
 function taskFactDigest(taskDir: string, content: string): string {
@@ -157,7 +178,9 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
       const parsed = parseReworkIntentDocument(content);
       if (!parsed.ok) return failed(intent, parsed.code, parsed.message, resolved.taskId, intent.intentId);
       const reviewContent = fs.readFileSync(path.join(resolved.taskDir, intent.sourceArtifact), 'utf8');
-      const evidenceDigest = semanticDigest(extractSubSection(reviewContent, intent.findingId) || finding.evidence);
+      const evidenceBlock = findingEvidence(reviewContent, finding.evidence);
+      if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${finding.evidence}' was not found`, resolved.taskId, intent.intentId);
+      const evidenceDigest = semanticDigest(evidenceBlock);
       const factsDigest = taskFactDigest(resolved.taskDir, content);
       const requestedIntent: ReworkIntent = {
         intentId: intent.intentId, findingId: intent.findingId, sourceArtifact: intent.sourceArtifact,
@@ -171,8 +194,8 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
           return { status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: intent.intentId, before: null, after: null, operations: [], error: null };
         }
       }
-      const same = parsed.intents.find((candidate) => candidate.status === 'pending' && candidate.findingId === intent.findingId
-        && candidate.classification === intent.classification && candidate.evidenceDigest === evidenceDigest && candidate.taskFactDigest === factsDigest);
+      const same = parsed.intents.find((candidate) => candidate.findingId === intent.findingId
+        && candidate.evidenceDigest === evidenceDigest && candidate.taskFactDigest === factsDigest);
       const classification: ReworkClassification = same ? 'insufficient-evidence' : intent.classification;
       const nextIntent: ReworkIntent = {
         ...requestedIntent, target: CLASSIFICATION_TARGET[classification], classification
@@ -194,6 +217,15 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
     const beforeSha256 = createHash('sha256').update(content).digest('hex');
     const supplied = [intent.findingId, intent.sourceArtifact, intent.sourceSha256, intent.classification].filter((value) => value !== undefined).length;
     if (supplied !== 0 && supplied !== 4) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rebuild binding options must be provided together', resolved.taskId);
+    const current = parseReworkIntentDocument(content);
+    if (current.ok && current.present) {
+      if (supplied !== 0) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'current rework intent format does not accept rebuild binding options', resolved.taskId);
+      return {
+        status: 'no-op', changed: false, intent: intent.kind, taskId: resolved.taskId, entityId: null,
+        before: null, after: null, operations: [], error: null,
+        rebuild: { mode: 'format-only', beforeSha256, afterSha256: beforeSha256, converted: current.intents.length, newIntentId: null }
+      };
+    }
     const legacy = parseLegacyReworkIntentDocument(content);
     if (!legacy.ok) return failed(intent, legacy.code, legacy.message, resolved.taskId);
     const pending = legacy.intents.filter((row) => row.status === 'pending');
@@ -205,6 +237,18 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
     if (pending.length > 0) {
       const finding = rows.find((row) => row.id === intent.findingId);
       if (!finding || finding.severity === 'decision' || finding.evidence.split('#')[0] !== intent.sourceArtifact) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild binding does not match a review finding', resolved.taskId);
+      if (intent.classification === 'human-decision' && finding.status !== 'needs-human-decision') {
+        return failed(intent, 'LEDGER_TRANSITION_INVALID', 'human-decision classification requires a needs-human-decision finding', resolved.taskId);
+      }
+      const sourceIdentity = parseArtifactName(intent.sourceArtifact!);
+      const expectedFamily = `review-${finding.stage}`;
+      const latestSource = fs.readdirSync(resolved.taskDir)
+        .map((name) => parseArtifactName(name))
+        .filter((identity) => identity?.family === expectedFamily)
+        .sort((left, right) => right!.round - left!.round || left!.name.localeCompare(right!.name))[0];
+      if (!sourceIdentity || sourceIdentity.family !== expectedFamily || latestSource?.name !== sourceIdentity.name) {
+        return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild source artifact is not the latest review for the finding stage', resolved.taskId);
+      }
       const sourcePath = path.join(resolved.taskDir, intent.sourceArtifact!);
       const actualHash = createHash('sha256').update(fs.readFileSync(sourcePath)).digest('hex');
       if (actualHash !== intent.sourceSha256) return failed(intent, 'LEDGER_IDENTITY_CONFLICT', 'rebuild source artifact hash does not match', resolved.taskId);
@@ -212,10 +256,13 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
       entityId = `RI-${max + 1}`;
       const reviewContent = fs.readFileSync(sourcePath, 'utf8');
       const classification = intent.classification!;
+      if (!(classification in CLASSIFICATION_TARGET)) return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'rebuild classification is invalid', resolved.taskId);
+      const evidenceBlock = findingEvidence(reviewContent, finding.evidence);
+      if (!evidenceBlock) return failed(intent, 'LEDGER_EVIDENCE_INVALID', `finding evidence anchor '${finding.evidence}' was not found`, resolved.taskId);
       next = [...next, {
         intentId: entityId, findingId: intent.findingId!, sourceArtifact: intent.sourceArtifact!, sourceSha256: intent.sourceSha256!,
         target: CLASSIFICATION_TARGET[classification], classification,
-        evidenceDigest: semanticDigest(extractSubSection(reviewContent, intent.findingId!) || finding.evidence),
+        evidenceDigest: semanticDigest(evidenceBlock),
         taskFactDigest: taskFactDigest(resolved.taskDir, content), status: 'pending', declaredAt: now, consumedAt: ''
       }];
     }
