@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { buildLifecycleFacts, canStart, recommendNext, type ExplicitTrigger, type LifecycleAction, type LifecycleFacts } from '../../../lib/task/capabilities.ts';
+import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 import { invalidationMutation, createInvalidationOperation, targetIdFor, type InvalidationTarget } from '../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
@@ -408,6 +409,48 @@ test('approved reviews without latest input bindings cannot authorize downstream
     const result = canStart(action, stale, actionTrigger);
     assert.equal(result.allowed, false, `${action} should reject a stale approval`);
     assert.equal(result.reasonCode, reasonCode);
+  }
+});
+
+test('lifecycle facts use completed review receipts rather than review body formatting', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-review-receipt-'));
+  try {
+    const taskDir = path.join(root, 'task');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const artifacts = {
+      'analysis.md': '# Analysis\n',
+      'review-analysis.md': '# Review\n\n- **审查输入**：analysis.md\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n',
+      'plan.md': '# Plan\n',
+      'review-plan.md': '# Review\n\n- **审查输入**：plan.md\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n',
+      'code.md': '# Code\n',
+      'review-code.md': '# Review\n\n- **审查输入**：code.md\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n'
+    };
+    for (const [name, value] of Object.entries(artifacts)) fs.writeFileSync(path.join(taskDir, name), value);
+    const receipt = (event: string, output: string, input: string) =>
+      `| ${event} | ${output} | ${input} | ${sha256File(path.join(taskDir, input))} | 2026-01-01 00:00:00+00:00 |`;
+    const content = [
+      '---', 'id: TASK-20260101-000001', 'status: active', 'current_step: code-review', '---', '', '# Task', '',
+      '## 产物生命周期收据', '',
+      '| event | output | input | input_sha256 | completed_at |',
+      '| --- | --- | --- | --- | --- |',
+      receipt('review-analysis.completed', 'review-analysis.md', 'analysis.md'),
+      receipt('review-plan.completed', 'review-plan.md', 'plan.md'),
+      receipt('review-code.completed', 'review-code.md', 'code.md'),
+      '', '## Activity Log', ''
+    ].join('\n');
+    fs.writeFileSync(path.join(taskDir, 'task.md'), content);
+
+    const result = buildLifecycleFacts(taskDir, content, 'active');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.facts.reviewedInputs, {
+      'review-analysis': 'analysis.md', 'review-plan': 'plan.md', 'review-code': 'code.md'
+    });
+    assert.equal(canStart('plan', result.facts, { ...trigger, requestedAction: 'plan' }).allowed, true);
+    assert.equal(canStart('code', result.facts, { ...trigger, requestedAction: 'code' }).allowed, true);
+    assert.equal(canStart('manual-validation', result.facts, { ...trigger, requestedAction: 'manual-validation' }).allowed, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

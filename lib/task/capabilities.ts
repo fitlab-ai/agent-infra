@@ -196,14 +196,6 @@ function latestArtifact(names: readonly string[]): string | null {
     .sort((left, right) => right.round - left.round || left.name.localeCompare(right.name))[0]?.name ?? null;
 }
 
-function reviewedInputName(content: string, expectedFamily: 'analysis' | 'plan' | 'code'): string | null {
-  const header = content.split(/\r?\n/).findIndex((line) => /\*\*(?:审查输入|Review Input)\*\*[:：]/.test(line));
-  if (header < 0) return null;
-  const referenceBlock = content.split(/\r?\n/).slice(header, header + 12).join('\n');
-  const expected = new RegExp('`' + expectedFamily + '(?:-r[2-9]|-r[1-9]\\d+)?\\.md`');
-  return expected.exec(referenceBlock)?.[0].slice(1, -1) ?? null;
-}
-
 function reviewMatchesLatest(facts: LifecycleFacts, source: 'analysis' | 'plan' | 'code', review: 'review-analysis' | 'review-plan' | 'review-code'): boolean {
   const latestSource = latestArtifact(facts.artifacts[source] ?? []);
   return Boolean(latestSource && facts.reviewedInputs?.[review] === latestSource);
@@ -383,9 +375,14 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       if (!latest) continue;
       const reviewContent = fs.readFileSync(path.join(taskDir, latest), 'utf8');
       const expectedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
-      const input = reviewedInputName(reviewContent, expectedFamily);
-      const receipt = input ? receiptForOutput(content, latest) : null;
-      if (input && receipt?.input === input && artifactHashes[input] === receipt.inputSha256) reviewedInputs[family] = input;
+      const receipt = receiptForOutput(content, latest);
+      const input = receipt?.input;
+      if (
+        input
+        && parseArtifactName(input)?.family === expectedFamily
+        && (artifacts[expectedFamily] ?? []).includes(input)
+        && artifactHashes[input] === receipt.inputSha256
+      ) reviewedInputs[family] = input;
       const parsed = parseReviewSummary(reviewContent);
       if (!parsed.ok) continue;
       const verdict = resolveCanonicalVerdict(parsed.summary);
