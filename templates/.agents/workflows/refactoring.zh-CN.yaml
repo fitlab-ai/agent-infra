@@ -8,6 +8,11 @@
 name: refactoring
 description: 安全且结构化的代码重构工作流。
 
+lifecycle_paths:
+  streamlined: [analysis, code, code-review]
+  standard: [analysis, design, code, code-review]
+  full: [analysis, analysis-review, design, design-review, code, code-review]
+
 steps:
   - name: analysis
     description: 分析当前代码并确定重构范围。

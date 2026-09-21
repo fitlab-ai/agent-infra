@@ -9,6 +9,11 @@
 name: bug-fix
 description: Workflow for diagnosing and fixing a defect.
 
+lifecycle_paths:
+  streamlined: [analysis, code, code-review]
+  standard: [analysis, design, code, code-review]
+  full: [analysis, analysis-review, design, design-review, code, code-review]
+
 steps:
   - name: analysis
     description: Reproduce the defect, identify the root cause, and define the fix scope.

@@ -78,7 +78,6 @@ const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Review disagreement ledger (see .agents/rules/review-handshake.md).
 const LEDGER_SECTION_NAMES = ["审查分歧账本", "Review Disagreement Ledger"];
-const DEFAULT_MAX_HANDSHAKE_ROUNDS = 3;
 const POST_REVIEW_COMMIT_STAGE = "post-review-commit";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
 
@@ -818,12 +817,11 @@ function checkReviewLedger({ taskDir, config, repositoryRoot }: any): any {
   }
 
   const stageScope = Array.isArray(config.stage_scope) ? config.stage_scope : null;
-  const maxRounds = Number(resolveReviewSetting(config, "maxHandshakeRounds", DEFAULT_MAX_HANDSHAKE_ROUNDS, repositoryRoot));
   const problems = [];
   let inScopeCount = 0;
 
   for (const row of rows) {
-    const { id, stage, round: roundRaw, status, evidence } = row;
+    const { id, stage, status, evidence } = row;
     const stageScoped = stageScope ? stageScope.includes(stage) : true;
     // post-review-commit exemption rows are consumed by the post-review-commit
     // check, not enforced here.
@@ -842,15 +840,6 @@ function checkReviewLedger({ taskDir, config, repositoryRoot }: any): any {
     }
     if (status !== "open" && evidence === "") {
       problems.push(`${id}: status '${status}' requires evidence`);
-    }
-    const round = Number.parseInt(roundRaw!, 10);
-    if (
-      Number.isFinite(round) &&
-      round >= maxRounds &&
-      !LEDGER_TERMINAL.has(status!) &&
-      status !== "needs-human-decision"
-    ) {
-      problems.push(`${id}: round ${round} reached limit ${maxRounds} without convergence; escalate to needs-human-decision`);
     }
     if (!LEDGER_TERMINAL.has(status!)) {
       problems.push(`${id}: unresolved (status '${status}')`);

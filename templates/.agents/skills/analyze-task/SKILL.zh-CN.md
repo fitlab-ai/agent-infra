@@ -13,6 +13,10 @@ description: >
 
 ## 行为边界 / 关键规则
 
+### 流程裁定
+
+分析产物必须在 `## 流程裁定` 中记录本任务路径、判定依据、未满足的更高路径条件和事实型升级触发条件。路径仅可为精简、标准或完整；文件数、模块数和推测性风险不能单独升级路径。
+
 ### 持久化报告证据
 
 生成分析报告时，先读取 `.agents/rules/evidence-reporting.md`。状态核对和成功检查记录命令、目标范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议才附决定性原文摘录。
@@ -261,7 +265,10 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 输出格式：
-使用 `agent-infra-internal agent-client next-steps --skill review-analysis --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+按分析中的规范路径选择一条命令生成 `{next-step-commands}`：
+- 精简路径：`agent-infra-internal agent-client next-steps --skill code-task --task-ref {task-ref}`
+- 标准路径：`agent-infra-internal agent-client next-steps --skill plan-task --task-ref {task-ref}`
+- 完整路径：`agent-infra-internal agent-client next-steps --skill review-analysis --task-ref {task-ref}`
 
 ```
 任务 {task-id} 分析完成。
@@ -274,7 +281,7 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 产出文件：
 - 分析报告：.agents/workspace/active/{task-id}/{analysis-artifact}
 
-下一步 - 审查需求分析：
+下一步 - 按所选路径继续：
 {next-step-commands}
 ```
 
@@ -292,7 +299,7 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 
 ## 停止
 
-完成检查清单后，**立即停止**。等待用户审查分析结果并手动调用 `plan-task` 技能。
+完成检查清单后，**立即停止**。等待用户调用上述所选路径的下一阶段。
 
 ## 注意事项
 

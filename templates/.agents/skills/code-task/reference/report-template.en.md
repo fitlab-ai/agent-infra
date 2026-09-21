@@ -17,7 +17,7 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 ## Implementation Input
 
 - **Mode**: {init / fix / decision}
-- **Plan Input**: `{plan-artifact}`
+- **Lifecycle Input**: `{lifecycle-input-artifact}`
 - **Review Input**: `{review-artifact or N/A}`
 - **Decision Input**: `{implementation-input or N/A}`
 - **Ledger ID**: `{decision-id or N/A}`

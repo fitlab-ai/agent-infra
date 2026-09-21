@@ -180,6 +180,7 @@ function createFixture(): Fixture {
     ''
   ].join('\n'));
   fs.writeFileSync(path.join(taskDir, 'code.md'), '# Code\n');
+  fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖人工校验。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n');
   fs.writeFileSync(path.join(taskDir, 'review-code.md'), approvedReviewArtifact());
   const reviewReceipt: ArtifactReceipt = {
     event: 'review-code.completed',

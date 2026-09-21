@@ -86,20 +86,32 @@ test('task-ledger records a hash-bound rework intent and replays it idempotently
   try {
     const reviewArtifact = 'review-plan.md';
     const reviewPath = path.join(path.dirname(f.file), reviewArtifact);
-    fs.writeFileSync(reviewPath, '# Review Plan\n\n- PL-1\n');
+    fs.writeFileSync(reviewPath, '# Review Plan\n\n### PL-1\n\nFinding details.\n');
     fs.appendFileSync(f.file, `| PL-1 | plan | 1 | major | open | ${reviewArtifact}#PL-1 |\n`);
     const sourceSha256 = createHash('sha256').update(fs.readFileSync(reviewPath)).digest('hex');
     const args = [f.id, 'rework-intent-upsert', '--intent-id', 'RI-1', '--finding-id', 'PL-1',
-      '--source-artifact', reviewArtifact, '--source-sha256', sourceSha256, '--target', 'plan'];
+      '--source-artifact', reviewArtifact, '--source-sha256', sourceSha256, '--classification', 'design'];
     const applied = run(f.root, args);
     assert.equal(applied.status, 0, applied.stderr || applied.stdout);
     assert.equal(JSON.parse(applied.stdout).status, 'applied');
     assert.match(fs.readFileSync(f.file, 'utf8'), /\| RI-1 \| PL-1 \| review-plan\.md \|/);
     assert.equal(JSON.parse(run(f.root, args).stdout).status, 'no-op');
 
-    const conflict = run(f.root, [...args.slice(0, -2), '--target', 'code']);
+    const conflict = run(f.root, [...args.slice(0, -2), '--classification', 'implementation']);
     assert.equal(conflict.status, 1);
     assert.equal(JSON.parse(conflict.stdout).error.code, 'LEDGER_IDENTITY_CONFLICT');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('task-ledger rejects invalid rebuild classification before touching task bytes', () => {
+  const f = fixture();
+  try {
+    const before = fs.readFileSync(f.file);
+    const result = run(f.root, [f.id, 'rework-intent-rebuild', '--finding-id', 'PL-1',
+      '--source-artifact', 'review-plan.md', '--source-sha256', 'a'.repeat(64), '--classification', 'bogus']);
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stdout).error.code, 'LEDGER_PAYLOAD_INVALID');
+    assert.deepEqual(fs.readFileSync(f.file), before);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 

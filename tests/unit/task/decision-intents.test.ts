@@ -83,6 +83,21 @@ test('human decision atomically updates ledger, HDR, activity and implementation
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
 
+test('human decision consumes only the matching human-decision pause', () => {
+  const f = fixture();
+  try {
+    fs.appendFileSync(f.taskMd, `\n## Rework Intent\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| RI-1 | CD-1 | review-code.md | ${'a'.repeat(64)} | pause | human-decision | ${'b'.repeat(64)} | ${'c'.repeat(64)} | pending | 2026-01-01T00:00:00.000Z | |\n| RI-2 | CD-2 | review-code.md | ${'d'.repeat(64)} | pause | insufficient-evidence | ${'e'.repeat(64)} | ${'f'.repeat(64)} | pending | 2026-01-01T00:00:00.000Z | |\n`);
+    const result = applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use A', needsImplementation: false }, {
+      repoRoot: f.repoRoot,
+      metadataProvider: () => ({ timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' })
+    });
+    assert.equal(result.status, 'applied');
+    const content = fs.readFileSync(f.taskMd, 'utf8');
+    assert.match(content, /\| RI-1 \| CD-1 \|[^\n]+\| consumed \|/);
+    assert.match(content, /\| RI-2 \| CD-2 \|[^\n]+\| pending \|/);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
 test('a different ruling for an already decided row fails without writes', () => {
   const f = fixture();
   try {

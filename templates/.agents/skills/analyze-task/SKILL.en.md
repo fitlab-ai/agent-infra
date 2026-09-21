@@ -13,6 +13,10 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 ## Boundary / Critical Rules
 
+### Flow decision
+
+The analysis artifact must record the selected path, factual basis, unmet higher-path conditions, and factual upgrade triggers in `## Flow Decision`. The path is streamlined, standard, or full; file count, module count, and speculative risk cannot upgrade it by themselves.
+
 ### Persisted Report Evidence
 
 Before generating the analysis report, read `.agents/rules/evidence-reporting.md`. Record the command, target scope, status or structured result, actual result, and uncovered parts for state checks and successful checks; include decisive raw excerpts only for failures, blocking conditions, or disputes.
@@ -261,7 +265,10 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Output format:
-Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill review-analysis --task-ref {task-ref}`.
+Select one command from the canonical path to populate `{next-step-commands}`:
+- Streamlined: `agent-infra-internal agent-client next-steps --skill code-task --task-ref {task-ref}`
+- Standard: `agent-infra-internal agent-client next-steps --skill plan-task --task-ref {task-ref}`
+- Full: `agent-infra-internal agent-client next-steps --skill review-analysis --task-ref {task-ref}`
 
 ```
 Analysis complete for task {task-id}.
@@ -274,7 +281,7 @@ Summary:
 Output file:
 - Analysis report: .agents/workspace/active/{task-id}/{analysis-artifact}
 
-Next step - review the analysis:
+Next step - continue on the selected path:
 {next-step-commands}
 ```
 
@@ -292,7 +299,7 @@ Next step - review the analysis:
 
 ## STOP
 
-After completing the checklist, **stop immediately**. Wait for the user to review the analysis result and manually invoke the `plan-task` skill.
+After completing the checklist, **stop immediately**. Wait for the user to invoke the next stage selected above.
 
 ## Notes
 

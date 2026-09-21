@@ -19,8 +19,16 @@ import {
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
+import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
+import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+
+const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n';
+
+function lifecycleInput(name: string, suffix = ''): string {
+  return name.startsWith('analysis') ? `${FULL_ANALYSIS}${suffix}` : `# ${name}${suffix}\n`;
+}
 test('review completion accepts the current valid review artifact', () => {
   const f = fixture('requirement-analysis');
   try {
@@ -58,6 +66,12 @@ function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
   const taskId = taskContent.match(/^id:\s*(TASK-\d{8}-\d{6})\s*$/m)?.[1] ?? 'TASK-20260101-000001';
   const family = identity.family;
   let content = renderArtifactSkeleton({ taskId, family, artifact: path.basename(artifactPath) }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+  if (family === 'analysis') {
+    content = content.replace(
+      '## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n内容',
+      '## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。'
+    );
+  }
   content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
   content = appendReviewContract(content, family);
   fs.writeFileSync(artifactPath, `${content}\n## 资格审计\n\n${renderQualificationAudit(built.audit)}\n`);
@@ -90,7 +104,7 @@ function fixture(step = 'requirement-analysis-review') {
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
-  fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(dir, 'analysis.md'), FULL_ANALYSIS);
   if ((!explicitStep && step === 'requirement-analysis-review') || step === 'commit') {
     fs.writeFileSync(path.join(dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
     addReceipt(path.join(dir, 'task.md'), {
@@ -221,6 +235,12 @@ function testTimestamp(offsetSeconds: number): string {
 
 function localArtifact(family: LocalArtifactFamily, suffix = '') {
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
+  if (family === 'analysis') {
+    content = content.replace(
+      '## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n内容',
+      '## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。'
+    );
+  }
   content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
   if (family === 'code') content = content.replace('## 证据原文\n<!-- artifact-section:code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:code:evidence -->\n验证输出');
   return `${content}${suffix}`;
@@ -289,7 +309,7 @@ function prepareReview(
   counts: ReviewCounts = { blockers: 0, major: 0, minor: 0 }
 ) {
   const f = fixture(scenario.step);
-  fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input}\n`);
+  fs.writeFileSync(path.join(f.dir, scenario.input), lifecycleInput(scenario.input));
   setLedger(f.file, rows);
   const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
@@ -781,8 +801,8 @@ test('plan event rejects an approved review whose input hash is stale', () => {
   const blocked = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
   assert.equal(blocked.status, 1);
   const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
-  assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
-  assert.match(result.error.message, /ANALYSIS_REVIEW_NOT_LATEST/);
+  assert.equal(result.error.code, 'ARTIFACT_INPUT_MISSING');
+  assert.match(result.error.message, /requires a matching approved review-analysis/);
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
@@ -1056,6 +1076,33 @@ test('analysis can restart from code when task requirements expand', () => {
   assert.match(content, /`analysis-r2\.md`/);
 });
 
+test('streamlined design rework is consumed after the analysis upgrade step', () => {
+  const f = fixture('code-review');
+  try {
+    fs.writeFileSync(path.join(f.dir, 'analysis.md'), FULL_ANALYSIS.replace('完整路径', '精简路径'));
+    const sourceSha256 = sha256File(path.join(f.dir, 'review-code.md'));
+    fs.appendFileSync(f.file, `\n## 返工意图\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| RI-1 | CD-1 | review-code.md | ${sourceSha256} | plan | design | ${'a'.repeat(64)} | ${'b'.repeat(64)} | pending | 2026-01-01T00:00:00.000Z |  |\n`);
+
+    const started = run(f.root, [
+      f.id, 'analyze.started', '--agent', 'codex', '--initiator', 'model',
+      '--request-id', `${f.id}:design-rework`, '--reason-code', 'review-finding'
+    ]);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis').replace('完整路径', '标准路径'));
+    const completed = run(f.root, [
+      f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
+      ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const parsed = parseReworkIntentDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) assert.equal(parsed.intents[0]?.status, 'consumed');
+    const facts = buildLifecycleFacts(f.dir, fs.readFileSync(f.file, 'utf8'));
+    assert.equal(facts.ok, true);
+    if (facts.ok) assert.equal(recommendNext(facts.facts).action, 'plan');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('source completion records resumable invalidation and lifecycle starts reconcile before continuing', () => {
   const f = fixture('code');
   fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
@@ -1206,7 +1253,7 @@ for (const scenario of [
 ] as const) {
   test(`${scenario.family} event completes a supplemental round from its review stage`, () => {
     const f = fixture(scenario.step);
-    fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input}\n`);
+    fs.writeFileSync(path.join(f.dir, scenario.input), lifecycleInput(scenario.input));
     fs.writeFileSync(path.join(f.dir, scenario.first), reviewArtifact(scenario.title, scenario.input));
 
     const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
@@ -1242,7 +1289,7 @@ for (const scenario of [
 ] as const) {
   test(`${scenario.family} event is authorized by explicit intent without current-step adjacency`, () => {
     const f = fixture(scenario.step);
-    fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input}\n`);
+    fs.writeFileSync(path.join(f.dir, scenario.input), lifecycleInput(scenario.input));
 
     const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
     assert.equal(started.status, 0, started.stdout || started.stderr);
@@ -1273,7 +1320,7 @@ test('review-code event completes the regular code review path', () => {
 
 test('review completion rejects the same missing schema pattern used by finalization', () => {
   const f = fixture('requirement-analysis-review');
-  fs.writeFileSync(path.join(f.dir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(f.dir, 'analysis.md'), FULL_ANALYSIS);
   const started = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
   fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md').replace('\n### 审查决定\n通过\n', '\n'));
@@ -1350,7 +1397,7 @@ for (const scenario of reviewScenarios) {
 for (const scenario of reviewScenarios) {
   test(`${scenario.family} rejects input changes after the review artifact is written`, () => {
     const f = prepareReview(scenario, []);
-    fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input} changed\n`);
+    fs.writeFileSync(path.join(f.dir, scenario.input), lifecycleInput(scenario.input, 'changed\n'));
     const before = fs.readFileSync(f.file);
     const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
     const result = JSON.parse(completed.stdout);

@@ -29,11 +29,11 @@ After the executor gives `adjusted` / `refuted` / `cannot-judge`, the reviewer m
 - **Hold with new evidence** → set back to `open` (with new evidence, returned to the executor).
 - **Escalate to human** → set to `needs-human-decision`.
 
-## Convergence termination (loop guard)
+## Evidence-driven rework convergence
 
-- The per-finding handshake round limit is `MAX_HANDSHAKE_ROUNDS`, default **3**, overridable via `review.maxHandshakeRounds` in `.agents/.airc.json`.
-- When a finding's `round` reaches the limit without entering a terminal state, it must be forced to `needs-human-decision`; the gate rejects rows that hit the limit without escalating.
-- `needs-human-decision` keeps blocking completion until a human records a ruling in the task.md `## 人工裁决` section and flips the row to `human-decided`.
+- The first Changes Requested verdict permits an ordinary revision. After one revision-review cycle, another Changes Requested verdict must classify the problem as scope or requirements, design, implementation, human decision, or insufficient evidence before another executor artifact is created.
+- Classification binds the finding, source review SHA, and stable task-fact digest. Artifact names, rounds, and retry counts are not evidence by themselves.
+- Human choice and insufficient evidence pause stably; implementation can continue when new decisive evidence exists. Retry count alone never forces a human escalation.
 
 ## Same-model convergence-bias mitigation (documentation-level discipline)
 

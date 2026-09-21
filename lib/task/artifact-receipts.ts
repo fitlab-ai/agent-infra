@@ -64,7 +64,10 @@ function validateReceiptShape(event: ArtifactReceiptEvent, output: string, input
   const inputIdentity = parseArtifactName(input);
   if (!outputIdentity || !inputIdentity) throw new ArtifactReceiptError(`receipt artifact identity is invalid: ${output} -> ${input}`);
   const shape = RECEIPT_SHAPES[event];
-  if (outputIdentity.family !== shape.output || inputIdentity.family !== shape.input) {
+  const inputMatches = event === 'code.completed'
+    ? inputIdentity.family === 'analysis' || inputIdentity.family === 'plan'
+    : inputIdentity.family === shape.input;
+  if (outputIdentity.family !== shape.output || !inputMatches) {
     throw new ArtifactReceiptError(`receipt event '${event}' does not match ${output} -> ${input}`);
   }
 }

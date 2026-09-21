@@ -14,7 +14,7 @@ Follow the `code` step in `.agents/workflows/feature-development.yaml`.
 - [ ] follow project coding standards
 
 **Implementation principles**:
-1. **Follow the plan strictly**: do not deviate from the technical plan
+1. **Follow the input strictly**: do not deviate from the analysis or plan lifecycle input selected by core
 2. **Work step by step**: execute the planned sequence
 3. **Keep testing continuously**: run the **fast smoke subset** continuously as work progresses (see the `test` skill)
 4. **Keep it simple**: do not add unplanned features
@@ -46,7 +46,7 @@ Two-way failure handling:
 
 ## Notes
 
-1. **Prerequisite**: the approved technical plan must exist (`plan.md` or `plan-r{N}.md`)
+1. **Prerequisite**: the analysis or plan lifecycle input selected by core must exist
 2. **No auto-commit**: do not run `git commit` or `git add`
 3. **Test quality**: new tests must validate meaningful business logic
 4. **Code quality**: follow project coding conventions

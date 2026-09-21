@@ -17,7 +17,7 @@
 ## 实现输入
 
 - **模式**：{init / fix / decision}
-- **方案输入**：`{plan-artifact}`
+- **生命周期输入**：`{lifecycle-input-artifact}`
 - **审查输入**：`{review-artifact 或 N/A}`
 - **裁决输入**：`{implementation-input 或 N/A}`
 - **账本 ID**：`{decision-id 或 N/A}`

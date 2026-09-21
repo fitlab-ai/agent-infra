@@ -53,7 +53,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'pr-review-grade': ['decide', 'resolve-host', 'verify-artifact'],
   'platform-checks': ['inspect', 'watch', 'resolve-run', 'logs'],
   'task-context': ['resolve'],
-  'task-ledger': ['decision-next-id', 'stage-status', 'finding-upsert', 'finding-respond', 'finding-review', 'decision-upsert', 'rework-intent-upsert'],
+  'task-ledger': ['decision-next-id', 'stage-status', 'finding-upsert', 'finding-respond', 'finding-review', 'decision-upsert', 'rework-intent-upsert', 'rework-intent-rebuild'],
   'task-warning': ['list', 'add', 'set-status'],
   'task-activity': ['pr-review-inspect', 'pr-review-start', 'pr-review-complete', 'pr-review-terminate'],
   'task-artifact': ['inspect', 'init', 'preflight', 'finalize-local'],

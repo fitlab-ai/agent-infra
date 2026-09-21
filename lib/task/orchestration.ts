@@ -644,7 +644,7 @@ function validateSavedCurrentDiffBase(
 
 function routeFromFacts(facts: LifecycleFacts): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | { completion: true } | null {
   const recommendation = recommendNext(facts);
-  if (!recommendation.action) return { completion: true };
+  if (!recommendation.action) return recommendation.reasonCode === 'LIFECYCLE_REVIEWED' ? { completion: true } : null;
   const action = recommendation.action;
   if (action === 'manual-validation' || action === 'validation-run') return null;
   const family = action === 'analysis' ? 'analysis' : action;

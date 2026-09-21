@@ -386,6 +386,8 @@ type StatusModel = {
   orchestration: OrchestrationInfo;
   invalidation?: { status: string; processed: number; total: number; pendingIntents: number };
   recommendation?: string;
+  recommendationReason?: string;
+  lifecyclePath?: string;
   git: GitInfo;
 };
 
@@ -444,7 +446,11 @@ function renderStatus(model: StatusModel): string[] {
     ])
   );
 
-  lines.push('', 'Recommendation', ...renderPairs([['action', model.recommendation ?? DASH]]));
+  lines.push('', 'Recommendation', ...renderPairs([
+    ['path', model.lifecyclePath ?? DASH],
+    ['action', model.recommendation ?? DASH],
+    ['reason', model.recommendationReason ?? DASH]
+  ]));
 
   lines.push(
     '',
@@ -546,7 +552,8 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
         pendingIntents
       };
   const facts = buildLifecycleFacts(input.taskDir, content, fm.status ?? 'active');
-  const recommendation = facts.ok ? (recommendNext(facts.facts).action ?? DASH) : DASH;
+  const next = facts.ok ? recommendNext(facts.facts) : null;
+  const recommendation = next?.action ?? DASH;
 
   return {
     taskId: input.taskId,
@@ -560,6 +567,8 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
     orchestration: collectOrchestration(input.taskDir),
     invalidation: invalidationInfo,
     recommendation,
+    recommendationReason: next?.reasonCode ?? 'TASK_CAPABILITY_FACTS_INVALID',
+    lifecyclePath: facts.ok && facts.facts.pathState?.status === 'valid' ? facts.facts.pathState.decision.path : facts.ok ? facts.facts.pathState?.status ?? DASH : DASH,
     git: collectGit(fm.branch ?? '', run)
   };
 }

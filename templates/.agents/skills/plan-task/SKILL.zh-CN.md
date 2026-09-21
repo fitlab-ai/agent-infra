@@ -13,6 +13,10 @@ description: >
 
 ## 行为边界 / 关键规则
 
+### 路径与返工
+
+本阶段只消费核心从最新有效分析产物解析出的规范路径事实；未被所选路径包含的阶段不得创建产物。同阶段完成一次修订—复审后再次收到 Changes Requested 时，必须在下一执行产物前提交绑定 finding、来源 SHA 和稳定任务事实摘要的返工分类；轮次或文件名变化不是新证据。
+
 ### 持久化报告证据
 
 生成方案报告时，先读取 `.agents/rules/evidence-reporting.md`。状态核对和验证记录命令、目标范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议才附决定性原文摘录。
@@ -20,7 +24,7 @@ description: >
 - 涉及候选资格或 `HD-N` 判断时，先读取 `.agents/rules/decision-qualification.md`，基于 task.md 规范化约束/候选完成资格审计，并在方案产物记录五张资格审计表；不得把来源不明或未确认约束自动升级为排除条件
 - 本技能仅产出技术方案文档（`plan.md` 或 `plan-r{N}.md`）—— 不修改任何业务代码
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
-- 这是一个**强制性的人工审查检查点** —— 不要自动进入实现阶段
+- 完整路径进入方案审查；标准路径完成方案后可直接进入实现阶段
 - 方案涉及兼容、迁移、旧格式或旧入口时，先读取 `.agents/rules/compatibility-policy.md`；未通过准入门槛时不得设计 adapter、shim、双写或并行状态机
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
@@ -165,7 +169,9 @@ agent-infra-internal task-verify {task-id} plan.completed --artifact {plan-artif
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 输出格式：
-使用 `agent-infra-internal agent-client next-steps --skill review-plan --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+按分析中的规范路径选择一条命令生成 `{next-step-commands}`：
+- 标准路径：`agent-infra-internal agent-client next-steps --skill code-task --task-ref {task-ref}`
+- 完整路径：`agent-infra-internal agent-client next-steps --skill review-plan --task-ref {task-ref}`
 
 ```
 任务 {task-id} 技术方案完成。
@@ -180,10 +186,7 @@ agent-infra-internal task-verify {task-id} plan.completed --artifact {plan-artif
 产出文件：
 - 技术方案：.agents/workspace/active/{task-id}/{plan-artifact}
 
-重要：人工审查检查点。
-请在继续实现之前审查技术方案。
-
-下一步 - 审查技术方案：
+下一步 - 按所选路径继续：
 {next-step-commands}
 ```
 
@@ -197,18 +200,18 @@ agent-infra-internal task-verify {task-id} plan.completed --artifact {plan-artif
 - [ ] 在 task.md 中记录了 `{plan-artifact}` 为已完成产物
 - [ ] 在工作流进度中标记了 technical-design 为已完成
 - [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 告知了用户这是人工审查检查点
+- [ ] 已按所选路径选择代码实现或方案审查
 - [ ] 已通过统一 helper 渲染已选场景的下一步命令
 
 ## 停止
 
 完成检查清单后，**立即停止**。
-这是一个**强制性的人工审查检查点** —— 用户必须审查并批准计划后才能继续实现。
+完整路径在此进入方案审查；标准路径直接进入代码实现。
 
 ## 注意事项
 
 1. **前置条件**：必须已完成至少一轮需求分析（`analysis.md` 或 `analysis-r{N}.md` 存在）
-2. **人工审查**：这是强制性检查点 —— 不要自动进入实现阶段
+2. **后续阶段**：标准路径进入代码实现，完整路径进入方案审查
 3. **计划质量**：计划应足够具体，使另一个 AI 代理无需额外上下文即可实现
 4. **版本化规则**：首轮方案使用 `plan.md`；后续修订使用 `plan-r{N}.md`
 

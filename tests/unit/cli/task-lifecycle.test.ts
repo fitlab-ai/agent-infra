@@ -197,6 +197,7 @@ test('restore transports task receipts with artifacts without using mtime', () =
   const taskPath = path.join(staging, 'task.md');
   fs.writeFileSync(taskPath, `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(staging, 'plan.md'), '# Plan\n');
+  fs.writeFileSync(path.join(staging, 'analysis.md'), '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：需要独立审查。\n- **未满足的更高路径条件**：已选最高路径。\n- **升级触发条件**：无。\n');
   fs.writeFileSync(path.join(staging, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n');
   let content = fs.readFileSync(taskPath, 'utf8');
   const mutation = upsertArtifactReceipt(content, {

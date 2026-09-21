@@ -9,6 +9,11 @@
 name: feature-development
 description: End-to-end workflow for developing a new feature.
 
+lifecycle_paths:
+  streamlined: [analysis, code, code-review]
+  standard: [analysis, design, code, code-review]
+  full: [analysis, analysis-review, design, design-review, code, code-review]
+
 steps:
   - name: analysis
     description: Analyze feature requirements, explore the codebase, and identify affected areas.

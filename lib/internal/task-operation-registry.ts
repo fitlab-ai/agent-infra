@@ -125,6 +125,7 @@ function internalTaskRoutes(): TaskOperationDescriptor[] {
     descriptor('internal', 'task-ledger', 'finding-review', 'task-bound', 'progress'),
     descriptor('internal', 'task-ledger', 'decision-upsert', 'task-bound', 'progress'),
     descriptor('internal', 'task-ledger', 'rework-intent-upsert', 'task-bound', 'progress'),
+    descriptor('internal', 'task-ledger', 'rework-intent-rebuild', 'task-bound', 'progress'),
     descriptor('internal', 'task-warning', 'list', 'task-bound', 'diagnostic'),
     descriptor('internal', 'task-warning', 'add', 'task-bound', 'progress'),
     descriptor('internal', 'task-warning', 'set-status', 'task-bound', 'progress'),

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>From issue to merged PR in 11 commands.</strong> Define a requirement, let AI handle analysis, planning, coding, and three-stage review — you only step in when it matters.
+  <strong>From issue to merged PR through a risk-selected lifecycle.</strong> Every task starts with analysis, and every implementation receives an independent code review.
 </p>
 
 <p align="center">
@@ -51,14 +51,22 @@ Once initialized, open the project in your AI TUI and install the latest skills:
 
 > AI reads `.agents/.airc.json`, auto-locates the installed template root, and syncs the latest skill manifests, managed files, and registry deterministically via `sync-templates.js`.
 
-**Scenario**: Issue #42 reports *"Login API returns 500 when email contains a plus sign"*. Here is the full fix lifecycle — AI does the heavy lifting, you stay in control:
+**Scenario**: Issue #42 reports *"Login API returns 500 when email contains a plus sign"*. Every task starts with analysis, which records one canonical path from observable facts:
+
+| Path | Stages | Use when |
+|------|--------|----------|
+| Streamlined | `analyze → code → review-code` | Scope and acceptance are clear, with no separate design or document-audit decision |
+| Standard | `analyze → plan → code → review-code` | The implementation needs an explicit cross-module contract, data flow, or test strategy |
+| Full | `analyze → review-analysis → plan → review-plan → code → review-code` | Concrete acceptance disputes, costly interface/schema/migration choices, or real external/security boundaries require independent review |
+
+File count, module count, or a merely possible risk does not select the full path. A later finding can return work to analysis, planning, or code when new evidence justifies it; independent `review-code` remains part of every path.
+
+Suppose the analysis selects the **standard path** because the application-layer boundary needs an explicit plan:
 
 ```bash
 /import-issue 42           # AI reads the issue, creates a task, extracts requirements
-/analyze-task --task <task-id>    # AI scans the codebase, finds the root cause, writes analysis.md
-/review-analysis --task <task-id> # An isolated reviewer checks the analysis
+/analyze-task --task <task-id>    # AI scans the codebase, records the selected path, writes analysis.md
 /plan-task --task <task-id>       # AI proposes a fix plan
-/review-plan --task <task-id>     # A fresh isolated reviewer checks the plan
 ```
 
 > **You review the plan and reply in natural language:**
@@ -79,7 +87,7 @@ Just fix it at the application layer in LoginService.
 /complete-task --task <task-id>   # task archived
 ```
 
-**11 commands. 1 natural-language correction. From issue to merged PR.** That is the entire SOP — programming can have a standard operating procedure too.
+**One analysis-selected path, one natural-language correction, and an independent code review.** The lifecycle keeps the evidence and review depth proportional to the task.
 
 Every command above works the same way in Claude Code, Codex, Antigravity CLI, and OpenCode. Switch tools mid-task — the workflow state follows. For what each skill does under the hood, see [Built-in AI Skills](./docs/en/skills.md).
 
@@ -193,8 +201,9 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 |---------|---------|
 | `create-task` / `import-issue` | Start a task from a description or a GitHub Issue |
 | `run-task` | Resume the lifecycle with fresh isolated executors/reviewers when the selected client exposes verified actual model/effort evidence; Codex now has an experimental Hooks + App Server evidence channel, but orchestration remains disabled until that channel is connected to delegation receipts |
-| `analyze-task` → `review-analysis` | Capture scope and risks, then review the analysis |
-| `plan-task` → `review-plan` | Design the approach, then review the plan |
+| `analyze-task` | Capture scope and risks, then select the streamlined, standard, or full path |
+| `review-analysis` | Review the analysis when the selected full path requires an independent requirement checkpoint |
+| `plan-task` / `review-plan` | Design the approach on standard/full paths; independently review it only on the full path |
 | `code-task` → `review-code` | Implement and test; `code-task` creates a local checkpoint, then a structured review checks that checkpoint |
 | `create-pr` → `complete-task` | Publish the approved checkpoint to the task-bound target branch, then archive after merge and final gates |
 

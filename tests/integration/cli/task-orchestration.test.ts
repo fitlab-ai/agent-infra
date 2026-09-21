@@ -12,6 +12,8 @@ import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { buildBoundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 
+const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n';
+
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-orchestration-cli-'));
   spawnSync('git', ['init', '-q'], { cwd: root });
@@ -62,7 +64,7 @@ function approvedRouteFixture(
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const fact = encodePrDeliveryFact(buildBoundFact({ identity: { resource: { kind: 'number', value: 42 }, repository: 'fitlab-ai/agent-infra', url: 'https://github.com/fitlab-ai/agent-infra/pull/42', head: { repository: 'fitlab-ai/agent-infra', ref: 'feature', sha: head }, base: { repository: 'fitlab-ai/agent-infra', ref: 'main', sha: 'b'.repeat(40) } }, source: 'created', verifiedAt: '2026-01-01T00:00:00.000Z', remoteState: 'open' }));
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\ncurrent_step: code-review\npr_delivery_fact: ${JSON.stringify(fact)}\nlast_reviewed_commit: ${head}\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
-  fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(dir, 'analysis.md'), FULL_ANALYSIS);
   fs.writeFileSync(path.join(dir, 'review-analysis.md'), '# Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(dir, 'plan.md'), '# Plan\n');
   const completedAt = '2026-01-01 00:00:00+00:00';

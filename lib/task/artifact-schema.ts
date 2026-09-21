@@ -30,6 +30,7 @@ const LOCAL_SECTIONS = {
     ['impact', '影响评估', 'Impact Assessment'],
     ['risks', '技术风险', 'Technical Risks'],
     ['effort', '工作量和复杂度评估', 'Effort and Complexity Assessment'],
+    ['flow-decision', '流程裁定', 'Flow Decision'],
     ['state-check', '状态核对', 'State Check']
   ],
   plan: [

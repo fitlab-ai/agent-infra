@@ -35,12 +35,13 @@ import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from 
 import { allowsManualOverride } from './guard-override.ts';
 import { validateLocalArtifact } from './local-artifact-finalization.ts';
 import type { LocalArtifactFamily } from './local-artifact-finalization.ts';
-import { buildLifecycleFacts, canStart } from './capabilities.ts';
+import { buildLifecycleFacts, canStart, effectiveReworkTarget } from './capabilities.ts';
 import type { ExplicitTrigger, LifecycleAction, TriggerInitiator, TriggerReason } from './capabilities.ts';
 import { createInvalidationOperation, invalidationMutation, parseInvalidationDocument, targetIdFor, upsertInvalidation } from './invalidation.ts';
 import type { InvalidationTargetKind } from './invalidation.ts';
 import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
+import type { ReworkTarget } from './rework-intent.ts';
 import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
 import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
@@ -52,6 +53,7 @@ import {
   type LifecycleRecoveryAttestationV1
 } from './control-authority.ts';
 import { readManualValidationCompletion } from './manual-validation-completion.ts';
+import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -586,7 +588,20 @@ function reworkIntentMutationForCompletion(
       try { return [[name, sha256File(path.join(taskDir, name))]]; }
       catch { return []; }
     }));
-    next = consumeReworkIntents(next, family === 'analyze' ? 'analysis' : family, hashes, timestamp).intents;
+    const action = family === 'analyze' ? 'analysis' : family;
+    let target: ReworkTarget = action;
+    if (family === 'analyze') {
+      const previousAnalysis = fs.readdirSync(taskDir)
+        .map((name) => parseArtifactName(name))
+        .filter((identity) => identity?.family === 'analysis' && identity.name !== artifact.name)
+        .sort((left, right) => right!.round - left!.round || left!.name.localeCompare(right!.name))[0];
+      const pathState = previousAnalysis
+        ? parseLifecyclePathDecision(fs.readFileSync(path.join(taskDir, previousAnalysis.name), 'utf8'))
+        : undefined;
+      const pending = next.find((intent) => intent.status === 'pending');
+      if (pending && effectiveReworkTarget(pending.target, pathState) === action) target = pending.target;
+    }
+    next = consumeReworkIntents(next, target, hashes, timestamp).intents;
   }
   if (family === 'review-analysis' || family === 'review-plan' || family === 'review-code') {
     next = supersedeReworkIntents(next, artifact.name, hash, timestamp).intents;
@@ -614,13 +629,15 @@ function buildCompletionReceipt(
       ? frontmatter.code_input_artifact : existing?.input ?? '';
     const startedSha256 = typeof frontmatter.code_input_sha256 === 'string'
       ? frontmatter.code_input_sha256 : existing?.inputSha256 ?? '';
-    if (!startedInput || !startedSha256) return { ok: false, message: 'code.started plan input context is missing' };
-    const plan = inspectArtifactDirectory(taskDir, 'plan');
-    if (plan.status !== 'ready' || !plan.latest || plan.latest.name !== startedInput) {
-      return { ok: false, message: `code input '${startedInput}' is not the latest plan artifact` };
+    if (!startedInput || !startedSha256) return { ok: false, message: 'code.started lifecycle input context is missing' };
+    const inputIdentity = parseArtifactName(startedInput);
+    if (!inputIdentity || !['analysis', 'plan'].includes(inputIdentity.family)) return { ok: false, message: `code input '${startedInput}' has an invalid family` };
+    const lifecycleInput = inspectArtifactDirectory(taskDir, inputIdentity.family);
+    if (lifecycleInput.status !== 'ready' || !lifecycleInput.latest || lifecycleInput.latest.name !== startedInput) {
+      return { ok: false, message: `code input '${startedInput}' is not the latest ${inputIdentity.family} artifact` };
     }
     try {
-      const inputSha256 = sha256File(plan.latest.path);
+      const inputSha256 = sha256File(lifecycleInput.latest.path);
       if (inputSha256 !== startedSha256) return { ok: false, message: `code input ${startedInput} changed after code.started` };
       return {
         ok: true,
@@ -630,7 +647,7 @@ function buildCompletionReceipt(
         }
       };
     } catch (error) {
-      return { ok: false, message: `cannot hash code input plan: ${error instanceof Error ? error.message : String(error)}` };
+      return { ok: false, message: `cannot hash code lifecycle input: ${error instanceof Error ? error.message : String(error)}` };
     }
   }
   if (!family.startsWith('review-')) return null;
@@ -992,8 +1009,8 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     }
   }
   if (eventIdentity.phase === 'started' && eventIdentity.family === 'code') {
-    const planInput = artifactContext?.inputs.find((input) => input.family === 'plan');
-    if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started plan input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    const planInput = artifactContext?.inputs.find((input) => input.family === 'plan' || input.family === 'analysis');
+    if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started lifecycle input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
     try {
       frontmatterSet.code_input_artifact = planInput.name;
       frontmatterSet.code_input_sha256 = sha256File(planInput.path);

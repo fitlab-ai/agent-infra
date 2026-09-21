@@ -29,11 +29,11 @@
 - **补充新证据后坚持** → 账本置回 `open`（带新证据，回到执行方）。
 - **升级人工裁决** → 账本置 `needs-human-decision`。
 
-## 收敛终止语义（防死循环）
+## 证据驱动的返工收敛
 
-- 单条 finding 的握手轮次上限 `MAX_HANDSHAKE_ROUNDS`，默认 **3**，可在 `.agents/.airc.json` 的 `review.maxHandshakeRounds` 覆盖。
-- 某条 finding 的 `round` 达到上限仍未进入终态，必须强制置 `needs-human-decision`；gate 会拦截"达限却未升级"的行。
-- `needs-human-decision` 持续阻塞完成，直到人工在 task.md `## 人工裁决` 段记录裁定并把该行翻为 `human-decided`。
+- 首次 Changes Requested 允许正常修订。完成一次修订—复审后再次收到 Changes Requested 时，必须在下一执行产物前把问题分类为范围或需求、方案、实现、人工裁决或证据不足。
+- 分类必须绑定 finding、来源审查 SHA 和稳定任务事实摘要。文件名、artifact round 或返工次数本身不构成新证据。
+- 人工选择或证据不足进入稳定暂停；具有新决定性证据的实现缺陷可以继续修订。不得仅因次数达到阈值强制升级人工裁决。
 
 ## 同源模型收敛偏差缓解（文档级纪律）
 

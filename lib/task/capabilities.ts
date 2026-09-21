@@ -4,16 +4,19 @@ import path from 'node:path';
 import { parseArtifactName } from './artifact-name.ts';
 import type { InvalidationDocument } from './invalidation.ts';
 import { invalidationBlocks, isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
-import { receiptForOutput } from './artifact-receipts.ts';
+import { parseArtifactReceipts, receiptForOutput } from './artifact-receipts.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.ts';
 import { parseReworkIntentDocument } from './rework-intent.ts';
-import type { ReworkIntent } from './rework-intent.ts';
+import type { ReworkIntent, ReworkTarget } from './rework-intent.ts';
 import { sha256File } from './artifact-receipts.ts';
 import { hasOpenLifecycleExecution } from './activity-log.ts';
 import { parseQualificationAudit, parseTaskQualification } from './qualification-audit.ts';
 import type { QualificationAudit, TaskQualification } from './qualification-audit.ts';
+import { parseLifecyclePathDecision, pathIncludes } from './lifecycle-path.ts';
+import type { LifecyclePathState } from './lifecycle-path.ts';
+import { parseImplementationInputs } from './implementation-inputs.ts';
 
 const ARTIFACT_AUDIT_FAMILIES = new Set(['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code']);
 
@@ -49,6 +52,9 @@ type LifecycleFacts = {
   recommendedAction?: LifecycleAction | null;
   qualificationStale?: boolean;
   qualificationStaleArtifacts?: readonly string[];
+  pathState?: LifecyclePathState;
+  reworkClassificationRequired?: readonly ('analysis' | 'plan' | 'code')[];
+  resolvedHumanDecisions?: Partial<Record<'analysis' | 'plan' | 'code', 'review' | 'implementation'>>;
 };
 type CapabilityResult = {
   allowed: boolean;
@@ -80,6 +86,11 @@ function hasArtifact(facts: LifecycleFacts, action: LifecycleAction): boolean {
   return (facts.artifacts[action]?.length ?? 0) > 0;
 }
 
+function effectiveReworkTarget(target: ReworkTarget, pathState: LifecyclePathState | undefined): ReworkTarget {
+  if (target === 'plan' && pathState?.status === 'valid' && !pathIncludes(pathState, 'plan')) return 'analysis';
+  return target;
+}
+
 function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: ExplicitTrigger): CapabilityResult {
   if (!trigger || trigger.requestedAction !== action) return deny('TRIGGER_ACTION_MISMATCH', `requested=${trigger?.requestedAction ?? 'missing'}`);
   if (!trigger.requestId || !trigger.requestId.trim()) return deny('TRIGGER_REQUEST_ID_REQUIRED');
@@ -98,6 +109,30 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   }
   if (facts.executionBusy) return deny('EXECUTION_BUSY');
 
+  const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
+  if (pendingIntent) {
+    const target = effectiveReworkTarget(pendingIntent.target, facts.pathState);
+    const requirementRestart = action === 'analysis' && trigger.reasonCode === 'new-requirement';
+    if (!requirementRestart && (target === 'pause' || target !== action)) {
+      return deny(target === 'pause' ? 'REWORK_PAUSED' : 'REWORK_INTENT_TARGET_MISMATCH', pendingIntent.intentId);
+    }
+  }
+
+  if (facts.pathState && facts.pathState.status !== 'valid') {
+    return action === 'analysis'
+      ? allow(`lifecycle-path-${facts.pathState.status}`)
+      : deny('LIFECYCLE_PATH_INVALID', facts.pathState.message);
+  }
+  if (facts.pathState?.status === 'valid'
+    && ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'].includes(action)
+    && !pathIncludes(facts.pathState, action as never)) {
+    return deny('ARTIFACT_STAGE_NOT_SELECTED', `path=${facts.pathState.decision.path}`, `stage=${action}`);
+  }
+  if (facts.reworkClassificationRequired?.includes(action as 'analysis' | 'plan' | 'code')
+    && !(facts.reworkIntents ?? []).some((intent) => intent.status === 'pending')) {
+    return deny('REWORK_CLASSIFICATION_REQUIRED', `stage=${action}`);
+  }
+
   const implicit = trigger.explicitRequest === false;
   if (action === 'analysis') {
     if (!implicit || hasArtifact(facts, 'analysis') || facts.recommendedAction === 'analysis') return allow('analysis-capability');
@@ -107,6 +142,9 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
     return hasArtifact(facts, 'analysis') ? allow('analysis-artifact') : deny('ANALYSIS_ARTIFACT_REQUIRED');
   }
   if (action === 'plan') {
+    if (facts.pathState?.status === 'valid' && facts.pathState.decision.path === 'standard') {
+      return hasArtifact(facts, 'analysis') ? allow('analysis-artifact') : deny('ANALYSIS_ARTIFACT_REQUIRED');
+    }
     if (!hasArtifact(facts, 'review-analysis')) return deny('ANALYSIS_REVIEW_REQUIRED');
     if (!reviewMatchesLatest(facts, 'analysis', 'review-analysis')) return deny('ANALYSIS_REVIEW_NOT_LATEST');
     if (facts.reviews['review-analysis'] !== 'approved') return deny('ANALYSIS_REVIEW_NOT_APPROVED');
@@ -118,10 +156,21 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   }
   if (action === 'code') {
     if (trigger.implementationInput) {
+      if (facts.resolvedHumanDecisions?.code === 'implementation') return allow('human-decision-implementation-input');
       if (!hasArtifact(facts, 'review-code')) return deny('CODE_REVIEW_REQUIRED');
       if (!reviewMatchesLatest(facts, 'code', 'review-code')) return deny('CODE_REVIEW_NOT_LATEST');
       if (facts.reviews['review-code'] !== 'approved') return deny('CODE_REVIEW_NOT_APPROVED');
       return allow('implementation-input');
+    }
+    if (facts.pathState?.status === 'valid' && facts.pathState.decision.path === 'streamlined') {
+      if (!hasArtifact(facts, 'analysis')) return deny('ANALYSIS_ARTIFACT_REQUIRED');
+      if (facts.unresolvedLedger.analysis > 0) return deny('ANALYSIS_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.analysis}`);
+      return allow('analysis-path-approved');
+    }
+    if (facts.pathState?.status === 'valid' && facts.pathState.decision.path === 'standard') {
+      if (!hasArtifact(facts, 'plan')) return deny('PLAN_ARTIFACT_REQUIRED');
+      if (facts.unresolvedLedger.plan > 0) return deny('PLAN_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.plan}`);
+      return allow('plan-path-approved');
     }
     if (!hasArtifact(facts, 'review-plan')) return deny('PLAN_REVIEW_REQUIRED');
     if (!reviewMatchesLatest(facts, 'plan', 'review-plan')) return deny('PLAN_REVIEW_NOT_LATEST');
@@ -195,8 +244,52 @@ function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
       evidence: facts.qualificationStaleArtifacts ?? ['qualification audit is stale']
     };
   }
+  if ((facts.reworkClassificationRequired?.length ?? 0) > 0
+    && !(facts.reworkIntents ?? []).some((intent) => intent.status === 'pending')) {
+    return { action: null, reasonCode: 'REWORK_CLASSIFICATION_REQUIRED', evidence: facts.reworkClassificationRequired ?? [] };
+  }
   const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
-  if (pendingIntent) return { action: pendingIntent.target, reasonCode: 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
+  if (pendingIntent) {
+    const target = effectiveReworkTarget(pendingIntent.target, facts.pathState);
+    return { action: target === 'pause' ? null : target, reasonCode: target === 'pause' ? 'REWORK_PAUSED' : 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
+  }
+  if (facts.pathState && facts.pathState.status !== 'valid') {
+    return { action: 'analysis', reasonCode: facts.pathState.status === 'missing' ? 'LIFECYCLE_PATH_MISSING' : 'LIFECYCLE_PATH_INVALID', evidence: [facts.pathState.message] };
+  }
+  if (facts.pathState?.status === 'valid') {
+    for (const stage of facts.pathState.decision.stages) {
+      if (stage === 'analysis' && !hasArtifact(facts, stage)) return { action: stage, reasonCode: 'ANALYSIS_ARTIFACT_MISSING', evidence: ['analysis artifact is absent'] };
+      if (stage === 'review-analysis' && (!reviewMatchesLatest(facts, 'analysis', stage) || facts.reviews[stage] !== 'approved')) {
+        if (facts.reviews[stage] === 'changes-requested' && facts.resolvedHumanDecisions?.analysis === 'review') {
+          return { action: stage, reasonCode: 'HUMAN_DECISION_REVIEW_REQUIRED', evidence: ['analysis decision was resolved'] };
+        }
+        return facts.reviews[stage] === 'changes-requested'
+          ? { action: 'analysis', reasonCode: 'ANALYSIS_REWORK_REQUIRED', evidence: ['analysis review is not approved'] }
+          : { action: stage, reasonCode: 'ANALYSIS_REVIEW_MISSING', evidence: ['analysis review does not bind the latest analysis artifact'] };
+      }
+      if (stage === 'plan' && !hasArtifact(facts, stage)) return { action: stage, reasonCode: 'PLAN_ARTIFACT_MISSING', evidence: ['plan artifact is absent'] };
+      if (stage === 'review-plan' && (!reviewMatchesLatest(facts, 'plan', stage) || facts.reviews[stage] !== 'approved')) {
+        if (facts.reviews[stage] === 'changes-requested' && facts.resolvedHumanDecisions?.plan === 'review') {
+          return { action: stage, reasonCode: 'HUMAN_DECISION_REVIEW_REQUIRED', evidence: ['plan decision was resolved'] };
+        }
+        return facts.reviews[stage] === 'changes-requested'
+          ? { action: 'plan', reasonCode: 'PLAN_REWORK_REQUIRED', evidence: ['plan review is not approved'] }
+          : { action: stage, reasonCode: 'PLAN_REVIEW_MISSING', evidence: ['plan review does not bind the latest plan artifact'] };
+      }
+      if (stage === 'code' && !hasArtifact(facts, stage)) return { action: stage, reasonCode: 'CODE_ARTIFACT_MISSING', evidence: ['code artifact is absent'] };
+      if (stage === 'review-code' && (!reviewMatchesLatest(facts, 'code', stage) || facts.reviews[stage] !== 'approved')) {
+        if (facts.reviews[stage] === 'changes-requested' && facts.resolvedHumanDecisions?.code) {
+          return facts.resolvedHumanDecisions.code === 'implementation'
+            ? { action: 'code', reasonCode: 'HUMAN_DECISION_IMPLEMENTATION_REQUIRED', evidence: ['code decision requires implementation'] }
+            : { action: stage, reasonCode: 'HUMAN_DECISION_REVIEW_REQUIRED', evidence: ['code decision requires no implementation'] };
+        }
+        return facts.reviews[stage] === 'changes-requested'
+          ? { action: 'code', reasonCode: 'CODE_REWORK_REQUIRED', evidence: ['code review is not approved'] }
+          : { action: stage, reasonCode: 'CODE_REVIEW_MISSING', evidence: ['code review does not bind the latest code artifact'] };
+      }
+    }
+    return { action: null, reasonCode: 'LIFECYCLE_REVIEWED', evidence: ['selected lifecycle path is complete'] };
+  }
   if (!hasArtifact(facts, 'analysis')) return { action: 'analysis', reasonCode: 'ANALYSIS_ARTIFACT_MISSING', evidence: ['analysis artifact is absent'] };
   if (!hasArtifact(facts, 'review-analysis') || !reviewMatchesLatest(facts, 'analysis', 'review-analysis')) {
     return { action: 'review-analysis', reasonCode: 'ANALYSIS_REVIEW_MISSING', evidence: ['analysis review does not bind the latest analysis artifact'] };
@@ -247,8 +340,10 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       const family = familyFor(name);
       return !family || !isArtifactInvalidated(invalidation.document, family, name);
     });
+    const allArtifactHashes: Record<string, string> = {};
+    for (const name of files) allArtifactHashes[name] = sha256File(path.join(taskDir, name));
     const artifactHashes: Record<string, string> = {};
-    for (const name of activeFiles) artifactHashes[name] = sha256File(path.join(taskDir, name));
+    for (const name of activeFiles) artifactHashes[name] = allArtifactHashes[name]!;
     const artifacts: Partial<Record<LifecycleAction, readonly string[]>> = Object.fromEntries(
       artifactFamilies.map((family) => [
         family, activeFiles.filter((name) => familyFor(name) === family)
@@ -296,9 +391,53 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       const verdict = resolveCanonicalVerdict(parsed.summary);
       if (verdict.ok) reviews[family] = verdict.verdict === 'Approved' ? 'approved' : verdict.verdict === 'Changes Requested' ? 'changes-requested' : 'rejected';
     }
+    const reworkClassificationRequired: Array<'analysis' | 'plan' | 'code'> = [];
+    const receipts = parseArtifactReceipts(content).rows;
+    for (const [reviewFamily, stage] of [['review-analysis', 'analysis'], ['review-plan', 'plan'], ['review-code', 'code']] as const) {
+      const cycles = receipts.filter((receipt) => receipt.event === `${reviewFamily}.completed` && files.includes(receipt.output)
+        && allArtifactHashes[receipt.input] === receipt.inputSha256).map((receipt) => {
+        const parsed = parseReviewSummary(fs.readFileSync(path.join(taskDir, receipt.output), 'utf8'));
+        const verdict = parsed.ok ? resolveCanonicalVerdict(parsed.summary) : null;
+        return {
+          input: receipt.input,
+          output: receipt.output,
+          outputRound: parseArtifactName(receipt.output)?.round ?? 0,
+          inputRound: parseArtifactName(receipt.input)?.round ?? 0,
+          verdict: verdict?.ok ? verdict.verdict : null
+        };
+      }).sort((left, right) => left.inputRound - right.inputRound || left.outputRound - right.outputRound || left.output.localeCompare(right.output));
+      const latest = cycles.at(-1);
+      const trailingInputRounds = new Set<number>();
+      for (let index = cycles.length - 1; index >= 0 && cycles[index]!.verdict === 'Changes Requested'; index -= 1) {
+        trailingInputRounds.add(cycles[index]!.inputRound);
+      }
+      const handled = latest && (rework.intents ?? []).some((intent) => intent.sourceArtifact === latest.output
+        && intent.sourceSha256 === allArtifactHashes[latest.output]);
+      const latestActiveReview = latestArtifact(artifacts[reviewFamily] ?? []);
+      const latestActiveInput = latestArtifact(artifacts[stage] ?? []);
+      const latestCycleIsActive = latest?.output === latestActiveReview && latest.input === latestActiveInput;
+      if (latestCycleIsActive && latest.verdict === 'Changes Requested' && trailingInputRounds.size >= 2 && !handled) reworkClassificationRequired.push(stage);
+    }
     const unresolvedLedger = { analysis: 0, plan: 0, code: 0 };
     if (ledger.present) {
       for (const stage of ['analysis', 'plan', 'code'] as const) unresolvedLedger[stage] = summarizeLedgerStage(ledger.rows, stage).unresolved.length;
+    }
+    const latestAnalysis = latestArtifact(artifacts.analysis ?? []);
+    const pathState = latestAnalysis
+      ? parseLifecyclePathDecision(fs.readFileSync(path.join(taskDir, latestAnalysis), 'utf8'), latestAnalysis, artifactHashes[latestAnalysis] ?? '')
+      : { status: 'missing' as const, decision: null, message: 'analysis artifact is missing' };
+    const resolvedHumanDecisions: NonNullable<LifecycleFacts['resolvedHumanDecisions']> = {};
+    const implementationInputs = parseImplementationInputs(content).rows;
+    for (const stage of ['analysis', 'plan', 'code'] as const) {
+      const reviewFamily = `review-${stage}` as 'review-analysis' | 'review-plan' | 'review-code';
+      const latestReview = latestArtifact(artifacts[reviewFamily] ?? []);
+      if (!latestReview || reviews[reviewFamily] !== 'changes-requested') continue;
+      const latestHash = artifactHashes[latestReview];
+      const decision = rework.intents.find((intent) => intent.status === 'consumed'
+        && intent.classification === 'human-decision' && intent.sourceArtifact === latestReview && intent.sourceSha256 === latestHash);
+      if (!decision) continue;
+      const implementationInput = implementationInputs.find((input) => input.ledgerId === decision.findingId);
+      resolvedHumanDecisions[stage] = stage === 'code' && implementationInput?.status === 'pending' ? 'implementation' : 'review';
     }
     const facts: LifecycleFacts = {
       taskState, currentStep: String(metadata.current_step ?? ''), artifacts, reviews,
@@ -309,6 +448,9 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       recommendedAction: null,
       qualificationStale: qualificationStaleArtifacts.length > 0,
       qualificationStaleArtifacts
+      , pathState
+      , reworkClassificationRequired
+      , resolvedHumanDecisions
     };
     facts.recommendedAction = recommendNext(facts).action;
     return { ok: true, facts };
@@ -317,5 +459,5 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
   }
 }
 
-export { buildLifecycleFacts, canStart, recommendNext };
+export { buildLifecycleFacts, canStart, effectiveReworkTarget, recommendNext };
 export type { CapabilityResult, ExplicitTrigger, LifecycleAction, LifecycleFacts, LifecycleFactsResult, LifecycleRecommendation, TriggerInitiator, TriggerReason };

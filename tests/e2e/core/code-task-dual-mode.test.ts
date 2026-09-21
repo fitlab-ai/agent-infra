@@ -10,6 +10,7 @@ import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-re
 import { upsertSection } from "../../../lib/task/sections.ts";
 
 const TASK_ID = "TASK-20260101-000001";
+const FULL_ANALYSIS = "# Analysis\n\n## Flow Decision\n\n- **Path**: full.\n- **Basis**: The fixture covers the complete lifecycle.\n- **Unmet Higher-path Conditions**: There is no higher path.\n- **Upgrade Triggers**: Lifecycle facts change.\n";
 
 function makeFixture(files: Record<string, string>) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-detect-mode-"));
@@ -18,7 +19,8 @@ function makeFixture(files: Record<string, string>) {
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: technical-design-review\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const withPlan = files["plan.md"] ? files : { "plan.md": "# plan", ...files };
-  for (const [name, content] of Object.entries(withPlan)) fs.writeFileSync(path.join(taskDir, name), content);
+  const withAnalysis = withPlan["analysis.md"] ? withPlan : { "analysis.md": FULL_ANALYSIS, ...withPlan };
+  for (const [name, content] of Object.entries(withAnalysis)) fs.writeFileSync(path.join(taskDir, name), content);
   seedLifecycleReceipts(taskDir);
   return { root, taskDir };
 }
@@ -251,6 +253,19 @@ test("code-task decision mode selects the earliest pending input", () => {
   assert.equal(result.output.implementation_input, "II-1");
   assert.equal(result.output.decision_id, "CD-1");
   assert.equal(result.output.decision_evidence, "task.md#HDR-1");
+});
+
+test("code-task decision mode takes precedence over an old Changes Requested verdict", () => {
+  const result = runDetect({
+    "task.md": decisionTask([
+      "| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 10:02:00+08:00 | pending | |"
+    ]),
+    "code.md": "# code",
+    "review-code.md": zhReview("需要修改", "0 阻塞项，1 主要，0 次要 / **人工校验**：0")
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "decision");
+  assert.equal(result.output.implementation_input, "II-1");
 });
 
 test("code-task decision mode ignores not-required and consumed inputs", () => {

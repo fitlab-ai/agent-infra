@@ -504,7 +504,11 @@ test('merge workspace transports receipt-backed review context across mtime chan
     const sourceTaskDir = writeFlatTask(sourceWorkspace, 'active', taskId, {
       title: 'receipt-backed task',
       updatedAt: '2026-04-09 12:13:13',
-      extraFiles: { 'plan.md': '# Plan\n', 'review-plan.md': review }
+      extraFiles: {
+        'analysis.md': '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n',
+        'plan.md': '# Plan\n',
+        'review-plan.md': review
+      }
     });
     const taskPath = path.join(sourceTaskDir, 'task.md');
     const content = fs.readFileSync(taskPath, 'utf8');

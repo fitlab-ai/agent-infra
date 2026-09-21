@@ -8,17 +8,18 @@ import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = `Usage: agent-infra-internal task-ledger <task-ref> <intent> [intent flags] [--dry-run]\n\nIntents: finding-upsert, finding-respond, finding-review, decision-next-id, decision-upsert, rework-intent-upsert, stage-status\n`;
+const USAGE = `Usage: agent-infra-internal task-ledger <task-ref> <intent> [intent flags] [--dry-run]\n\nIntents: finding-upsert, finding-respond, finding-review, decision-next-id, decision-upsert, rework-intent-upsert, rework-intent-rebuild, stage-status\n`;
 const FLAGS: Record<string, string> = {
   '--stage': 'stage', '--review-artifact': 'reviewArtifact', '--ordinal': 'ordinal',
   '--severity': 'severity', '--evidence': 'evidence', '--id': 'id', '--round': 'round',
   '--status': 'status', '--artifact': 'artifact', '--needs-implementation': 'needsImplementation',
   '--intent-id': 'intentId', '--finding-id': 'findingId', '--source-artifact': 'sourceArtifact',
-  '--source-sha256': 'sourceSha256', '--target': 'target',
+  '--source-sha256': 'sourceSha256', '--classification': 'classification',
   '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
 };
 const NUMERIC = new Set(['ordinal', 'round']);
 const BOOLEAN = new Set(['needsImplementation']);
+const REWORK_CLASSIFICATIONS = new Set(['scope-or-requirement', 'design', 'implementation', 'human-decision', 'insufficient-evidence']);
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'LEDGER_PAYLOAD_INVALID', message } })}\n`);
@@ -38,6 +39,7 @@ async function taskLedger(args: string[] = []): Promise<void> {
     internalHandlerRoute('task-ledger', 'decision-next-id', kind),
     internalHandlerRoute('task-ledger', 'decision-upsert', kind),
     internalHandlerRoute('task-ledger', 'rework-intent-upsert', kind),
+    internalHandlerRoute('task-ledger', 'rework-intent-rebuild', kind),
     internalHandlerRoute('task-ledger', 'stage-status', kind)
   ].some(Boolean)) {
     usageFailure(`unknown ledger intent '${kind}'`); return;
@@ -67,14 +69,16 @@ async function taskLedger(args: string[] = []): Promise<void> {
     'finding-review': ['id', 'status', 'evidence'],
     'decision-next-id': [],
     'decision-upsert': ['id', 'stage', 'artifact'],
-    'rework-intent-upsert': ['intentId', 'findingId', 'sourceArtifact', 'sourceSha256', 'target'],
+    'rework-intent-upsert': ['intentId', 'findingId', 'sourceArtifact', 'sourceSha256', 'classification'],
+    'rework-intent-rebuild': [],
     'stage-status': ['stage']
   };
   const optional: Record<string, string[]> = {
     'finding-review': ['needsImplementation'],
-    'decision-upsert': ['needsImplementation']
+    'decision-upsert': ['needsImplementation'],
+    'rework-intent-rebuild': ['findingId', 'sourceArtifact', 'sourceSha256', 'classification']
   };
-  const overrideFields = kind === 'stage-status' || kind === 'decision-next-id' || kind === 'rework-intent-upsert'
+  const overrideFields = kind === 'stage-status' || kind === 'decision-next-id' || kind === 'rework-intent-upsert' || kind === 'rework-intent-rebuild'
     ? []
     : ['overrideTicket', 'overrideTarget', 'overrideScope'];
   const allowed = new Set(['kind', 'taskRef', 'dryRun', ...required[kind]!, ...(optional[kind] ?? []), ...overrideFields]);
@@ -84,6 +88,9 @@ async function taskLedger(args: string[] = []): Promise<void> {
   if (missing) { usageFailure(`${kind} requires '${missing}'`); return; }
   const dryRunConflict = overrideDryRunConflict(values);
   if (dryRunConflict) { usageFailure(dryRunConflict.message); return; }
+  if (values.classification !== undefined && !REWORK_CLASSIFICATIONS.has(String(values.classification))) {
+    usageFailure(`invalid rework classification '${values.classification}'`); return;
+  }
   if (kind === 'stage-status') {
     if (!isReviewStage(String(values.stage))) { usageFailure(`stage-status requires a valid review stage`); return; }
     const resolved = resolveTaskRef(taskRef);

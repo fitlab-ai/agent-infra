@@ -106,8 +106,8 @@ delivery_remote_head:          # Most recent successfully delivered task branch 
 
 ## Rework Intent
 
-| intent_id | finding_id | source_artifact | source_sha256 | target | status | declared_at | consumed_at |
-|-----------|------------|----------------|---------------|--------|--------|-------------|-------------|
+| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |
+|-----------|------------|----------------|---------------|--------|----------------|-----------------|------------------|--------|-------------|-------------|
 
 ## Artifact Invalidation
 

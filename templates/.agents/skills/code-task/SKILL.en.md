@@ -1,8 +1,8 @@
 ---
 name: code-task
 description: >
-  Implement code from the technical plan and output a report.
-  Use when an approved technical plan needs implementing, or code review found issues to fix.
+  Implement code from the selected lifecycle input and output a report.
+  Use when analysis or a technical plan is ready for the selected path, or code review found issues to fix.
   Only invoke this skill automatically when the conversation includes a resolvable task reference.
 ---
 
@@ -11,16 +11,20 @@ description: >
 
 If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to the completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts. Lifecycle events also require explicit trigger data: use `{trigger-initiator}=orchestrator` for orchestration and `model` otherwise; `{request-id}` is a stable single-line identifier for this task and artifact round, and `{reason-code}` is `user-request` for initial work and `review-finding` for fixes or decisions. Reuse the same values for started and completed.
 
-Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill supports initial implementation, fix mode based on `review-code` feedback, and human-decision-driven implementation.
+Implement from the input selected by the lifecycle path and produce `code.md` or `code-r{N}.md`. This skill supports initial implementation, fix mode based on `review-code` feedback, and human-decision-driven implementation.
 
 ## Boundary / Critical Rules
+
+### Path and rework
+
+This stage consumes only the canonical path fact parsed by core from the latest valid analysis artifact; a stage omitted by that path must not create an artifact. When another Changes Requested verdict follows one completed revision-review cycle in the same stage, classify the rework before the next executor artifact and bind it to the finding, source SHA, and stable task-fact digest. A round or filename change is not new evidence.
 
 ### Persisted Report Evidence
 
 Before generating the implementation report, read `.agents/rules/evidence-reporting.md`. Successful tests record the command, target scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt instead of complete successful stdout.
 
 - When evaluating candidate qualification or `HD-N`, read `.agents/rules/decision-qualification.md`, audit normalized task constraints/candidates, and record the five qualification-audit tables in the implementation report; unknown or unconfirmed constraints must not automatically exclude a candidate
-- Follow the latest plan artifact: `plan.md` or `plan-r{N}.md`
+- Follow the lifecycle input selected by core: `analysis.md` / `analysis-r{N}.md` for the streamlined path, and `plan.md` / `plan-r{N}.md` for the standard or full path
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”
 - Fix mode verifies each finding of the latest `review-code` one by one: fix it if it holds, or rebut it and record it under unresolved if it is unfounded/hallucinated; do not expand to issues the review did not list; manual-validation items are out of scope
@@ -56,7 +60,7 @@ After prerequisites and mode are confirmed and before this round's first artifac
 
 ### 1. Verify Prerequisites
 
-Require `task.md` and at least one plan artifact: `plan.md` or `plan-r{N}.md`.
+Require `task.md`. Step 4 validates the lifecycle input selected by the chosen path; the skill must not require a plan artifact unconditionally.
 
 ### 2. Ensure the Task Branch
 
@@ -90,11 +94,11 @@ Dispatch by `$status` and `result.mode`:
 
 ### 5. Read Structured Inputs
 
-Use only the structured result from step 4: read the selected plan artifact and, in fix mode, the selected review artifact. Use `next.name` as `{code-artifact}` and `next.round` as `{code-round}`. In decision mode, take the unified identity from `implementation_input`, `decision_id`, and `decision_evidence`; do not rescan or construct identities in the skill.
+Use only the structured result from step 4: read `{lifecycle-input-artifact}` from `inputs` (analysis for the streamlined path, plan otherwise) and, in fix mode, the selected review artifact. Use `next.name` as `{code-artifact}` and `next.round` as `{code-round}`. In decision mode, take the unified identity from `implementation_input`, `decision_id`, and `decision_evidence`; do not rescan or construct identities in the skill.
 
-### 6. Read the Technical Plan
+### 6. Read the Lifecycle Input
 
-Extract implementation steps, files, test strategy, constraints, risks, and approved tradeoffs. In decision mode, also read the `{input-id}` row and its `{decision-evidence}` record in task.md, and implement only that ruling's requested behavior change.
+Extract implementation steps, files, test strategy, constraints, risks, and approved tradeoffs from `{lifecycle-input-artifact}`. In decision mode, also read the `{input-id}` row and its `{decision-evidence}` record in task.md, and implement only that ruling's requested behavior change.
 
 ### 7. Implement the Code
 
