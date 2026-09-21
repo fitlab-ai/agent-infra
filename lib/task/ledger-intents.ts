@@ -74,6 +74,11 @@ function semanticDigest(value: string): string {
   return createHash('sha256').update(value.normalize('NFKC').replace(/\s+/g, ' ').trim()).digest('hex');
 }
 
+function semanticFindingEvidence(reviewContent: string, heading: ReturnType<typeof scanVisibleMarkdown>['headings'][number], end: number): string {
+  const title = heading.text.replace(/^\d+[.、：:]\s*/, '').trim();
+  return `${title}\n${reviewContent.slice(heading.end, end)}`;
+}
+
 function findingEvidence(reviewContent: string, evidence: string): string | null {
   const anchor = evidence.split('#')[1];
   if (!anchor) return null;
@@ -83,7 +88,7 @@ function findingEvidence(reviewContent: string, evidence: string): string | null
     const heading = markdown.headings.find((candidate) => candidate.start > explicit.start);
     const next = heading && markdown.headings.find((candidate) => candidate.start > heading.start && candidate.level <= heading.level);
     const end = next?.start ?? reviewContent.length;
-    return reviewContent.slice(explicit.start, end);
+    return heading ? semanticFindingEvidence(reviewContent, heading, end) : reviewContent.slice(explicit.end, end);
   }
   const heading = markdown.headings.find((candidate) => {
     if (candidate.text === anchor || candidate.text.startsWith(`${anchor} `)) return true;
@@ -91,7 +96,7 @@ function findingEvidence(reviewContent: string, evidence: string): string | null
   });
   if (!heading) return null;
   const next = markdown.headings.find((candidate) => candidate.start > heading.start && candidate.level <= heading.level);
-  return reviewContent.slice(heading.start, next?.start ?? reviewContent.length);
+  return semanticFindingEvidence(reviewContent, heading, next?.start ?? reviewContent.length);
 }
 
 function taskFactDigest(taskDir: string, content: string): string {
@@ -195,7 +200,8 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
         }
       }
       const same = parsed.intents.find((candidate) => candidate.findingId === intent.findingId
-        && candidate.evidenceDigest === evidenceDigest && candidate.taskFactDigest === factsDigest);
+        && candidate.evidenceDigest === evidenceDigest && candidate.taskFactDigest === factsDigest
+        && candidate.classification === intent.classification && candidate.target === CLASSIFICATION_TARGET[intent.classification]);
       const classification: ReworkClassification = same ? 'insufficient-evidence' : intent.classification;
       const nextIntent: ReworkIntent = {
         ...requestedIntent, target: CLASSIFICATION_TARGET[classification], classification

@@ -249,10 +249,11 @@ test('rework intent semantic evidence survives review renames and blocks unchang
       sourceArtifact: 'review-plan.md', sourceSha256: firstHash, classification: 'design'
     }, options).status, 'applied');
     let content = fs.readFileSync(f.taskMd, 'utf8').replace(/\| pending \| ([^|]+) \|  \|/, '| consumed | $1 | 2026-07-19T12:01:00.000Z |');
-    content = content.replace('review-plan.md#1', 'review-plan-r2.md#1');
+    content = content.replace('review-plan.md#1', 'review-plan-r2.md#2');
     fs.writeFileSync(f.taskMd, content);
-    fs.writeFileSync(path.join(taskDir, 'review-plan-r2.md'), review);
-    const secondHash = createHash('sha256').update(review).digest('hex');
+    const renumberedReview = review.replace('#### 1. Stable finding', '#### 2. Stable finding');
+    fs.writeFileSync(path.join(taskDir, 'review-plan-r2.md'), renumberedReview);
+    const secondHash = createHash('sha256').update(renumberedReview).digest('hex');
     const second = applyLedgerIntent({
       kind: 'rework-intent-upsert', taskRef: f.taskId, intentId: 'RI-2', findingId: 'PL-1',
       sourceArtifact: 'review-plan-r2.md', sourceSha256: secondHash, classification: 'design'
@@ -261,6 +262,31 @@ test('rework intent semantic evidence survives review renames and blocks unchang
     const parsed = parseReworkIntentDocument(fs.readFileSync(f.taskMd, 'utf8'));
     assert.equal(parsed.ok, true);
     if (parsed.ok) assert.equal(parsed.intents.at(-1)?.classification, 'insufficient-evidence');
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+test('rework intent permits a new classification once and blocks its unchanged retry', () => {
+  const f = fixture(['| PL-1 | plan | 1 | major | open | review-plan.md#1 |']);
+  try {
+    const reviewPath = path.join(path.dirname(f.taskMd), 'review-plan.md');
+    fs.writeFileSync(reviewPath, '# Review\n\n#### 1. Stable finding\n\nThe implementation misses the required guard.\n');
+    const sourceSha256 = createHash('sha256').update(fs.readFileSync(reviewPath)).digest('hex');
+    const options = { repoRoot: f.repoRoot, metadataProvider: () => METADATA };
+    const request = (intentId: string, classification: 'implementation' | 'design') => applyLedgerIntent({
+      kind: 'rework-intent-upsert', taskRef: f.taskId, intentId, findingId: 'PL-1',
+      sourceArtifact: 'review-plan.md', sourceSha256, classification
+    }, options);
+
+    assert.equal(request('RI-1', 'implementation').status, 'applied');
+    assert.equal(request('RI-2', 'design').status, 'applied');
+    assert.equal(request('RI-3', 'design').status, 'applied');
+    const parsed = parseReworkIntentDocument(fs.readFileSync(f.taskMd, 'utf8'));
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) {
+      assert.equal(parsed.intents[0]?.classification, 'implementation');
+      assert.equal(parsed.intents[1]?.classification, 'design');
+      assert.equal(parsed.intents[2]?.classification, 'insufficient-evidence');
+    }
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
 

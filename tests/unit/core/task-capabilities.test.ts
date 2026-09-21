@@ -209,6 +209,59 @@ test('lifecycle facts derive execution busy from an open lifecycle activity', ()
   }
 });
 
+test('invalidated review history does not require rework classification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-invalidated-rework-'));
+  try {
+    const taskDir = path.join(root, 'task');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：精简路径。\n- **判定依据**：边界明确。\n- **未满足的更高路径条件**：无需额外设计。\n- **升级触发条件**：范围变化。\n');
+    const receipts: string[] = [];
+    const names = [
+      { input: 'code.md', output: 'review-code.md', round: 1 },
+      { input: 'code-r2.md', output: 'review-code-r2.md', round: 2 }
+    ] as const;
+    for (const { input, output, round } of names) {
+      fs.writeFileSync(path.join(taskDir, input), `# Code ${round}\n`);
+      fs.writeFileSync(path.join(taskDir, output), `# Review\n\n- **审查输入**：\`${input}\`\n\n## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n`);
+      const inputHash = createHash('sha256').update(fs.readFileSync(path.join(taskDir, input))).digest('hex');
+      receipts.push(`| review-code.completed | ${output} | ${input} | ${inputHash} | 2026-01-0${round} 00:00:00+00:00 |`);
+    }
+    let content = `---\nid: TASK-20260101-000001\nstatus: active\n---\n# Task\n\n## 产物生命周期收据\n\n| event | output | input | input_sha256 | completed_at |\n| --- | --- | --- | --- | --- |\n${receipts.join('\n')}\n`;
+    const source = {
+      sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
+      sourceSha256: 'a'.repeat(64), createdAt: '2026-01-03 00:00:00+00:00', updatedAt: '2026-01-03 00:00:00+00:00'
+    };
+    const operation = createInvalidationOperation(source);
+    const targets = names.flatMap(({ input, output, round }) => [
+      { targetKind: 'artifact' as const, targetFamily: 'code', targetArtifact: input, targetRound: round },
+      { targetKind: 'artifact' as const, targetFamily: 'review-code', targetArtifact: output, targetRound: round }
+    ]).map((shape) => {
+      const targetShape = {
+        ...shape,
+        targetSha256: createHash('sha256').update(fs.readFileSync(path.join(taskDir, shape.targetArtifact))).digest('hex')
+      };
+      return {
+        ...targetShape, targetId: targetIdFor(operation.operationId, targetShape), operationId: operation.operationId,
+        status: 'completed' as const, reasonCode: 'upstream-replaced', updatedAt: source.updatedAt
+      };
+    });
+    content = upsertSection(content, invalidationMutation(content, {
+      operations: [{ ...operation, status: 'completed', processed: targets.length, total: targets.length, completedAt: source.updatedAt }],
+      targets
+    })).content;
+    fs.writeFileSync(path.join(taskDir, 'task.md'), content);
+
+    const result = buildLifecycleFacts(taskDir, content, 'active');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.facts.artifacts.code, []);
+    assert.deepEqual(result.facts.artifacts['review-code'], []);
+    assert.deepEqual(result.facts.reworkClassificationRequired, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('execution busy fact blocks capability authorization', () => {
   const result = canStart('analysis', { ...facts('code'), executionBusy: true }, trigger);
   assert.equal(result.allowed, false);

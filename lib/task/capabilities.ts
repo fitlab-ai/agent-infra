@@ -390,6 +390,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
         const parsed = parseReviewSummary(fs.readFileSync(path.join(taskDir, receipt.output), 'utf8'));
         const verdict = parsed.ok ? resolveCanonicalVerdict(parsed.summary) : null;
         return {
+          input: receipt.input,
           output: receipt.output,
           outputRound: parseArtifactName(receipt.output)?.round ?? 0,
           inputRound: parseArtifactName(receipt.input)?.round ?? 0,
@@ -403,7 +404,10 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       }
       const handled = latest && (rework.intents ?? []).some((intent) => intent.sourceArtifact === latest.output
         && intent.sourceSha256 === allArtifactHashes[latest.output]);
-      if (latest?.verdict === 'Changes Requested' && trailingInputRounds.size >= 2 && !handled) reworkClassificationRequired.push(stage);
+      const latestActiveReview = latestArtifact(artifacts[reviewFamily] ?? []);
+      const latestActiveInput = latestArtifact(artifacts[stage] ?? []);
+      const latestCycleIsActive = latest?.output === latestActiveReview && latest.input === latestActiveInput;
+      if (latestCycleIsActive && latest.verdict === 'Changes Requested' && trailingInputRounds.size >= 2 && !handled) reworkClassificationRequired.push(stage);
     }
     const unresolvedLedger = { analysis: 0, plan: 0, code: 0 };
     if (ledger.present) {
