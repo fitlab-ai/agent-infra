@@ -58,6 +58,18 @@ function verification(status: 'pass' | 'fail' | 'blocked'): TaskVerificationResu
   };
 }
 
+function verificationChecks(status: 'pass' | 'fail' | 'blocked', target = 'artifact'): TaskVerificationResult {
+  const payload = {
+    gate: status,
+    checks: [{ checkId: target, status, effectiveStatus: status, reason: `CHECK_${status.toUpperCase()}`, message: `${target} ${status}`, action: 're-run verification' }]
+  };
+  return {
+    status, changed: false, event: 'complete-task.completed', requestRef: TASK_ID, taskId: TASK_ID,
+    taskDir: `/completed/${TASK_ID}`, taskState: 'completed', skill: 'complete-task', mode: 'gate', artifact: null,
+    invocations: [{ status, exitCode: ({ pass: 0, fail: 1, blocked: 2 } as const)[status], payload }], error: null
+  };
+}
+
 function options(
   repoRoot: string,
   commentSync: NonNullable<TaskFinalizationOptions['commentSync']>,
@@ -94,7 +106,7 @@ test('host finalization waits for completion backfill before lifecycle and repea
     const replay = await applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, async () => verification('pass')), backfill });
     assert.equal(first.result, 'completed');
     assert.equal(replay.result, 'completed');
-    assert.deepEqual(calls, ['backfill', 'task', 'summary', 'backfill', 'summary']);
+    assert.deepEqual(calls, ['backfill', 'task', 'summary']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -122,6 +134,37 @@ test('host finalization stops before lifecycle when completion backfill has no s
     assert.equal(commentCalls, 0);
     assert.equal(verifyCalls, 0);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md')), true);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('completed finalization persists a retryable backfill failure without replaying lifecycle', async () => {
+  const f = fixture();
+  let calls = 0;
+  const backfill: NonNullable<TaskFinalizationOptions['backfill']> = async () => {
+    calls += 1;
+    return calls === 1 ? platformResult('no-op') as any : platformResult('blocked', {
+      error: { code: 'BACKFILL_PENDING', message: 'retry later', retryable: true }
+    }) as any;
+  };
+  try {
+    await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
+    });
+    const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
+    fs.writeFileSync(receiptPath, `${JSON.stringify({
+      ...receipt,
+      warnings: [{ code: 'BACKFILL_PENDING', message: 'retry later', retryable: true, step: 'backfill', target: 'artifact', severity: 'ACTION_REQUIRED', status: 'open', resolvedAt: null }]
+    })}\n`);
+
+    const retry = await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
+    });
+    assert.equal(retry.result, 'completed_with_warnings');
+    assert.equal(retry.lifecycle, null);
+    assert.equal(retry.warnings.some((warning) => warning.step === 'backfill'), true);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -243,7 +286,7 @@ test('host finalization rechecks terminal verification and reseals from the reta
     assert.equal((await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
     assert.equal((await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
     assert.equal(verifyCalls, 2);
-    assert.deepEqual(kinds, ['task', 'summary', 'summary']);
+    assert.deepEqual(kinds, ['task', 'summary']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -471,6 +514,31 @@ test('host finalization returns actionable verification gate failures and retrie
     assert.doesNotMatch(commentSnapshots[0]!, /CHECK_FAILED/);
     assert.match(commentSnapshots[1]!, /\| CHECK_FAILED \| open \|/);
     assert.match(commentSnapshots[2]!, /\| CHECK_FAILED \| resolved \|/);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization supersedes an observed verification target without resolving unobserved targets', async () => {
+  const f = fixture();
+  let calls = 0;
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
+    calls += 1;
+    return verificationChecks(calls === 1 ? 'blocked' : calls === 2 ? 'fail' : 'pass');
+  };
+  try {
+    await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
+    const blocked = readTaskFinalizationReceipt(f.repoRoot, TASK_ID)!;
+    assert.equal(blocked.warnings.some((warning) => warning.target === 'artifact' && warning.code === 'CHECK_BLOCKED' && warning.status === 'open'), true);
+
+    await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
+    const failed = readTaskFinalizationReceipt(f.repoRoot, TASK_ID)!;
+    assert.equal(failed.warnings.some((warning) => warning.target === 'artifact' && warning.code === 'CHECK_BLOCKED' && warning.status === 'resolved'), true);
+    assert.equal(failed.warnings.some((warning) => warning.target === 'artifact' && warning.code === 'CHECK_FAILED' && warning.status === 'open'), true);
+
+    await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
+    const passed = readTaskFinalizationReceipt(f.repoRoot, TASK_ID)!;
+    assert.equal(passed.warnings.some((warning) => warning.target === 'artifact' && warning.status === 'open'), false);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

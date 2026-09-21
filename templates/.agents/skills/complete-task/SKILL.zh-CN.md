@@ -9,7 +9,7 @@ description: >
 # 完成任务
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
-宿主 finalization 使用 receipt v3（不可变 `receiptId`、单调 `revision`、摘要暂存和 canonical warnings）。生命周期/身份/required PR 等硬失败返回 `result: failed|blocked`；生命周期完成后，评论、外围验证和其他同步失败返回 `result: completed_with_warnings` 及六字段 warning，并仅重试 receipt 中的 pending step。
+宿主 finalization 使用 receipt v4（不可变 `receiptId`、单调 `revision`、摘要暂存和 canonical warnings）。生命周期/身份/required PR 等硬失败返回 `result: failed|blocked`；生命周期完成后，只重试 receipt 指出的 pending 外围步骤或 open backfill warning。逐检查 verification warning 以 observed target 为单位转换：新观察替代旧 code 时保留旧行 resolved 历史，未观察的 target 不变。
 
 
 ## 行为边界 / 关键规则
@@ -175,7 +175,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-finalization 按允许的 artifact backfill → lifecycle → task 评论 → core verification → warning task 评论更新 → summary seal 的固定顺序执行。每项 backfill 必须取得成功终态，否则不得进入 lifecycle。summary seal 始终读取任务目录中保留的 durable staging record；平台入口负责校验 marker、owner 和 digest，必要时删除并重建摘要，再复读最终远端顺序。重入直接重复该幂等操作，不从远端评论反向恢复本地正文。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning 或 pending step，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
+finalization 按允许的 artifact backfill → lifecycle → task 评论 → core verification → warning task 评论更新 → summary seal 的固定顺序执行。每项实际运行的 backfill 必须取得成功终态，否则不得进入 lifecycle；完整 receipt 且无恢复事实的普通重入不执行 backfill、评论、验证或 summary。任何可能写入 managed comment 的 completed 恢复会先把 done summary 持久化为 pending，恢复末尾才重新 seal。summary seal 始终读取任务目录中保留的 durable staging record；平台入口负责校验 marker、owner 和 digest，必要时删除并重建摘要，再复读最终远端顺序。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning 或 pending step，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
 
 ### 7. 处理 finalization 重试与结果
 

@@ -137,7 +137,7 @@ function applyWorkflowWarningIntent(intent: WorkflowWarningIntent, options: Task
 function projectFinalizationWarning(
   taskRef: string,
   warning: OperationWarning & { status: 'open' | 'resolved'; resolvedAt: string | null },
-  options: TaskWriteOptions = {}
+  options: TaskWriteOptions & { resolution?: 'passed' | 'superseded' } = {}
 ): FinalizationWarningProjectionResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return { status: 'failed', changed: false, error: { code: resolved.code, message: resolved.message } };
@@ -160,13 +160,17 @@ function projectFinalizationWarning(
       message: warning.message,
       action: retryHintForWarning(warning),
       resolvedAt: warning.resolvedAt || (warning.status === 'resolved' ? metadata.timestamp : ''),
-      resolution: warning.status === 'resolved' ? 'Resolved by a successful finalization retry' : ''
+      resolution: warning.status === 'resolved'
+        ? options.resolution === 'superseded' ? 'Superseded by a later verification observation' : 'Resolved by a successful finalization retry'
+        : ''
     }
     : {
       id: nextWarningId(rows), time: metadata.timestamp, step: warning.step,
       severity: warning.severity, code: warning.code, status: warning.status,
       target: warning.target, message: warning.message, action: retryHintForWarning(warning),
-      resolvedAt: warning.resolvedAt || '', resolution: warning.status === 'resolved' ? 'Resolved by a successful finalization retry' : ''
+      resolvedAt: warning.resolvedAt || '', resolution: warning.status === 'resolved'
+        ? options.resolution === 'superseded' ? 'Superseded by a later verification observation' : 'Resolved by a successful finalization retry'
+        : ''
     };
   if (existing && JSON.stringify(existing) === JSON.stringify(after)) return { status: 'no-op', changed: false, error: null };
   const written = writeTask({
