@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { applyLedgerIntent } from '../../../lib/task/ledger-intents.ts';
+import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
 
 const METADATA = { timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' };
 
@@ -166,7 +167,7 @@ test('finding review accepts every legal disposition and rejects every other dis
   }
 });
 
-test('finding responses cover all executor states and reopening stops at the round limit', () => {
+test('finding responses cover all executor states and reopening remains evidence-driven across rounds', () => {
   for (const [index, status] of (['accepted', 'adjusted', 'refuted', 'cannot-judge'] as const).entries()) {
     const f = fixture([`| CD-1 | code | 1 | major | open | review-code.md#CD-1 |`]);
     try {
@@ -179,14 +180,26 @@ test('finding responses cover all executor states and reopening stops at the rou
   }
   const limited = fixture(['| PL-1 | plan | 3 | major | adjusted | plan-r3.md#PL-1 |']);
   try {
-    const before = fs.readFileSync(limited.taskMd);
     const result = applyLedgerIntent({
       kind: 'finding-review', taskRef: limited.taskId, id: 'PL-1', status: 'open',
       evidence: 'review-plan-r3.md#PL-1'
     }, { repoRoot: limited.repoRoot, metadataProvider: () => METADATA });
-    assert.equal(result.error?.code, 'LEDGER_TRANSITION_INVALID');
-    assert.deepEqual(fs.readFileSync(limited.taskMd), before);
+    assert.equal(result.status, 'applied');
   } finally { fs.rmSync(limited.repoRoot, { recursive: true, force: true }); }
+});
+
+test('legacy rework tables rebuild without inventing findings for format-only data', () => {
+  for (const row of ['', `| RI-1 | PL-1 | review-plan.md | ${'a'.repeat(64)} | plan | consumed | 2026-01-01T00:00:00.000Z | 2026-01-01T00:01:00.000Z |`]) {
+    const f = fixture();
+    try {
+      fs.appendFileSync(f.taskMd, `\n## Rework Intent\n\n| intent_id | finding_id | source_artifact | source_sha256 | target | status | declared_at | consumed_at |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${row}\n`);
+      const result = applyLedgerIntent({ kind: 'rework-intent-rebuild', taskRef: f.taskId }, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
+      assert.equal(result.status, 'applied');
+      const parsed = parseReworkIntentDocument(fs.readFileSync(f.taskMd, 'utf8'));
+      assert.equal(parsed.ok, true);
+      if (parsed.ok) assert.equal(parsed.intents.some((intent) => intent.status === 'pending'), false);
+    } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+  }
 });
 
 test('decision ids are global and decision upsert is dry-run safe', () => {

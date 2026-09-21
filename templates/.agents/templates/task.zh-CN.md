@@ -106,8 +106,8 @@ delivery_remote_head:          # 最近一次成功交付到 remote 的任务分
 
 ## 返工意图
 
-| intent_id | finding_id | source_artifact | source_sha256 | target | status | declared_at | consumed_at |
-|-----------|------------|----------------|---------------|--------|--------|-------------|-------------|
+| intent_id | finding_id | source_artifact | source_sha256 | target | classification | evidence_digest | task_fact_digest | status | declared_at | consumed_at |
+|-----------|------------|----------------|---------------|--------|----------------|-----------------|------------------|--------|-------------|-------------|
 
 ## 产物失效记录
 

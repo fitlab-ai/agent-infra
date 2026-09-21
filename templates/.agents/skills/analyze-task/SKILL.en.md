@@ -13,6 +13,10 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 ## Boundary / Critical Rules
 
+### Flow decision
+
+The analysis artifact must record the selected path, factual basis, unmet higher-path conditions, and factual upgrade triggers in `## Flow Decision`. The path is streamlined, standard, or full; file count, module count, and speculative risk cannot upgrade it by themselves.
+
 ### Persisted Report Evidence
 
 Before generating the analysis report, read `.agents/rules/evidence-reporting.md`. Record the command, target scope, status or structured result, actual result, and uncovered parts for state checks and successful checks; include decisive raw excerpts only for failures, blocking conditions, or disputes.

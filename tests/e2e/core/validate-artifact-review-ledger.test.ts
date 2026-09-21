@@ -107,7 +107,7 @@ test("review-ledger fails on an illegal status value", async () => {
   });
 });
 
-test("review-ledger forces escalation once a finding reaches the round limit", async () => {
+test("review-ledger keeps disputed findings unresolved regardless of round count", async () => {
   await withTempRoot("agent-infra-ledger-converge-", async (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);
     write(path.join(taskDir, "task.md"), buildLedgerTask([
@@ -116,11 +116,11 @@ test("review-ledger forces escalation once a finding reaches the round limit", a
 
     const { payload } = await runLedger("complete-task", taskDir);
     assert.equal(payload.status, "fail");
-    assert.match(payload.message, /without convergence|needs-human-decision/);
+    assert.match(payload.message, /unresolved/);
   });
 });
 
-test("review-ledger honors the project maxHandshakeRounds override", async () => {
+test("review-ledger ignores the removed maxHandshakeRounds setting", async () => {
   await withTempRoot("agent-infra-ledger-configured-limit-", async (tempRoot) => {
     write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
       review: { maxHandshakeRounds: 2 }
@@ -136,7 +136,7 @@ test("review-ledger honors the project maxHandshakeRounds override", async () =>
 
     const { payload } = await runLedger("complete-task", taskDir, tempRoot);
     assert.equal(payload.status, "fail");
-    assert.match(payload.message, /reached limit 2/);
+    assert.match(payload.message, /unresolved/);
   });
 });
 

@@ -15,6 +15,10 @@ Review the latest plan artifact and produce `review-plan.md` or `review-plan-r{N
 
 ## Boundary / Critical Rules
 
+### Path and rework
+
+This stage consumes only the canonical path fact parsed by core from the latest valid analysis artifact; a stage omitted by that path must not create an artifact. When another Changes Requested verdict follows one completed revision-review cycle in the same stage, classify the rework before the next executor artifact and bind it to the finding, source SHA, and stable task-fact digest. A round or filename change is not new evidence.
+
 ### Persisted Report Evidence
 
 Before generating the review report, read `.agents/rules/evidence-reporting.md`. Normal inspection records the command, scope, structured result, actual conclusion, and uncovered parts; findings, blocking conditions, or disputes retain reproducible locations and decisive excerpts, while identity fields remain exact.

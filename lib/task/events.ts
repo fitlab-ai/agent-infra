@@ -614,13 +614,15 @@ function buildCompletionReceipt(
       ? frontmatter.code_input_artifact : existing?.input ?? '';
     const startedSha256 = typeof frontmatter.code_input_sha256 === 'string'
       ? frontmatter.code_input_sha256 : existing?.inputSha256 ?? '';
-    if (!startedInput || !startedSha256) return { ok: false, message: 'code.started plan input context is missing' };
-    const plan = inspectArtifactDirectory(taskDir, 'plan');
-    if (plan.status !== 'ready' || !plan.latest || plan.latest.name !== startedInput) {
-      return { ok: false, message: `code input '${startedInput}' is not the latest plan artifact` };
+    if (!startedInput || !startedSha256) return { ok: false, message: 'code.started lifecycle input context is missing' };
+    const inputIdentity = parseArtifactName(startedInput);
+    if (!inputIdentity || !['analysis', 'plan'].includes(inputIdentity.family)) return { ok: false, message: `code input '${startedInput}' has an invalid family` };
+    const lifecycleInput = inspectArtifactDirectory(taskDir, inputIdentity.family);
+    if (lifecycleInput.status !== 'ready' || !lifecycleInput.latest || lifecycleInput.latest.name !== startedInput) {
+      return { ok: false, message: `code input '${startedInput}' is not the latest ${inputIdentity.family} artifact` };
     }
     try {
-      const inputSha256 = sha256File(plan.latest.path);
+      const inputSha256 = sha256File(lifecycleInput.latest.path);
       if (inputSha256 !== startedSha256) return { ok: false, message: `code input ${startedInput} changed after code.started` };
       return {
         ok: true,
@@ -630,7 +632,7 @@ function buildCompletionReceipt(
         }
       };
     } catch (error) {
-      return { ok: false, message: `cannot hash code input plan: ${error instanceof Error ? error.message : String(error)}` };
+      return { ok: false, message: `cannot hash code lifecycle input: ${error instanceof Error ? error.message : String(error)}` };
     }
   }
   if (!family.startsWith('review-')) return null;
@@ -992,8 +994,8 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     }
   }
   if (eventIdentity.phase === 'started' && eventIdentity.family === 'code') {
-    const planInput = artifactContext?.inputs.find((input) => input.family === 'plan');
-    if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started plan input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    const planInput = artifactContext?.inputs.find((input) => input.family === 'plan' || input.family === 'analysis');
+    if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started lifecycle input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
     try {
       frontmatterSet.code_input_artifact = planInput.name;
       frontmatterSet.code_input_sha256 = sha256File(planInput.path);

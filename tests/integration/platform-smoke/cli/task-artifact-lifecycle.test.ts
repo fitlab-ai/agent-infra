@@ -19,6 +19,7 @@ import { buildQualificationAudit, renderQualificationAudit } from '../../../../l
 import { upsertSection } from '../../../../lib/task/sections.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
+const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：变更需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现权限、持久化或外部契约变更。\n';
 
 function fixture(files: Record<string, string> = {}) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-lifecycle-'));
@@ -48,7 +49,8 @@ function writeQualifiedArtifact(f: ReturnType<typeof fixture>, name: string) {
   const built = buildQualificationAudit(taskContent);
   assert.equal(built.ok, true);
   if (!built.ok) return;
-  fs.writeFileSync(path.join(f.taskDir, name), `# ${name}\n\n## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
+  const lifecycle = parseArtifactName(name)?.family === 'analysis' ? `${STANDARD_ANALYSIS}\n` : `# ${name}\n\n`;
+  fs.writeFileSync(path.join(f.taskDir, name), `${lifecycle}## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
 }
 
 test('catalog exposes exactly the approved artifact families', () => {
@@ -165,8 +167,8 @@ test('automatic artifact references use code text and remain idempotent', () => 
 
 test('context resolves required latest inputs from review receipts', () => {
   const f = fixture({
-    'analysis.md': '# analysis',
-    'analysis-r2.md': '# analysis 2',
+    'analysis.md': STANDARD_ANALYSIS,
+    'analysis-r2.md': STANDARD_ANALYSIS.replace('# Analysis', '# Analysis 2'),
     'plan.md': '# plan',
     'plan-r2.md': '# plan 2',
     'review-plan.md': '# Review Plan\n\n本轮检视了 `plan-r2.md`。\n'
@@ -177,11 +179,29 @@ test('context resolves required latest inputs from review receipts', () => {
   });
   const plan = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
   const review = resolveArtifactContext(TASK_ID, 'review-plan', { repoRoot: f.repoRoot });
-  assert.equal(plan.status, 'ready');
+  assert.equal(plan.status, 'ready', JSON.stringify(plan.error));
   assert.deepEqual(plan.inputs.map((item) => item.name), ['analysis-r2.md', 'review-plan.md']);
-  assert.equal(review.status, 'ready');
-  assert.deepEqual(review.inputs.map((item) => item.name), ['plan-r2.md']);
+  assert.equal(review.status, 'failed');
+  assert.equal(review.error?.code, 'ARTIFACT_STAGE_NOT_SELECTED');
   assert.equal(inspectTaskArtifacts(TASK_ID, 'review-plan', { repoRoot: f.repoRoot }).reviewedInput?.name, 'plan-r2.md');
+});
+
+test('code context selects analysis or plan from the canonical lifecycle path', () => {
+  const analysis = (pathName: string) => `# Analysis\n\n## 流程裁定\n\n- **本任务路径**：${pathName}。\n- **判定依据**：事实充分。\n- **未满足的更高路径条件**：没有更高路径事实。\n- **升级触发条件**：出现真实外部边界。\n`;
+  const streamlined = fixture({ 'analysis.md': analysis('精简路径') });
+  const streamlinedCode = resolveArtifactContext(TASK_ID, 'code', { repoRoot: streamlined.repoRoot });
+  assert.equal(streamlinedCode.status, 'ready');
+  assert.deepEqual(streamlinedCode.inputs.map((item) => item.name), ['analysis.md']);
+
+  const standard = fixture({ 'analysis.md': analysis('标准路径'), 'plan.md': '# Plan\n' });
+  const standardCode = resolveArtifactContext(TASK_ID, 'code', { repoRoot: standard.repoRoot });
+  assert.equal(standardCode.status, 'ready');
+  assert.deepEqual(standardCode.inputs.map((item) => item.name), ['plan.md']);
+
+  const invalid = fixture({ 'analysis.md': '# Analysis\n', 'plan.md': '# Plan\n' });
+  const rejected = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: invalid.repoRoot });
+  assert.equal(rejected.status, 'failed');
+  assert.equal(rejected.error?.code, 'LIFECYCLE_PATH_INVALID');
 });
 
 test('qualification recovery accepts legacy optional context for analysis and plan but rejects a legacy required input', () => {
@@ -207,7 +227,7 @@ test('qualification recovery accepts legacy optional context for analysis and pl
 
   const required = resolveArtifactContext(TASK_ID, 'review-plan', { repoRoot: f.repoRoot });
   assert.equal(required.status, 'failed');
-  assert.equal(required.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+  assert.equal(required.error?.code, 'LIFECYCLE_PATH_INVALID');
 
   writeQualifiedArtifact(f, 'analysis.md');
   const planRecovery = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
@@ -216,7 +236,7 @@ test('qualification recovery accepts legacy optional context for analysis and pl
 });
 
 test('qualification recovery rejects legacy optional context outside analysis and plan', () => {
-  const codeFixture = fixture({ 'plan.md': '# plan\n', 'code.md': '# legacy code\n' });
+  const codeFixture = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# plan\n', 'code.md': '# legacy code\n' });
   enableQualification(codeFixture);
   writeQualifiedArtifact(codeFixture, 'plan.md');
   const code = resolveArtifactContext(TASK_ID, 'code', { repoRoot: codeFixture.repoRoot });
@@ -224,6 +244,7 @@ test('qualification recovery rejects legacy optional context outside analysis an
   assert.equal(code.error?.code, 'ARTIFACT_REFERENCE_INVALID');
 
   const reviewCodeFixture = fixture({
+    'analysis.md': STANDARD_ANALYSIS,
     'code.md': '# code\n',
     'plan.md': '# plan\n',
     'review-plan.md': '**\u5ba1\u67e5\u8f93\u5165**\uff1a`plan.md`\n'
@@ -235,7 +256,7 @@ test('qualification recovery rejects legacy optional context outside analysis an
   assert.equal(reviewCode.error?.code, 'ARTIFACT_REFERENCE_INVALID');
 
   for (const family of ['manual-validation', 'validation-run'] as const) {
-    const f = fixture({ 'review-code.md': '# legacy review code\n' });
+    const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'review-code.md': '# legacy review code\n' });
     enableQualification(f);
     const result = resolveArtifactContext(TASK_ID, family, { repoRoot: f.repoRoot });
     assert.equal(result.status, 'failed');
@@ -264,8 +285,9 @@ test('review references ignore mtime order and fail closed on content changes', 
   assert.equal(changed.error?.code, 'ARTIFACT_REFERENCE_INVALID');
 });
 
-test('code replan routing compares plan content with the code input receipt', () => {
+test('standard-path code replan routing compares plan content with the code input receipt', () => {
   const f = fixture({
+    'analysis.md': STANDARD_ANALYSIS,
     'plan.md': '# new plan\n',
     'code.md': '# code\n',
     'review-plan.md': '**审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n'
@@ -282,12 +304,13 @@ test('code replan routing compares plan content with the code input receipt', ()
   const result = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
   assert.equal(result.status, 'ready');
   assert.equal(result.codeMode?.mode, 'init');
-  assert.equal(result.codeMode?.reviewArtifact, 'review-plan.md');
+  assert.equal(result.codeMode?.reviewArtifact, null);
 });
 
 test('code fix routing trusts the review receipt when code and review family rounds differ', () => {
   const f = fixture();
   enableQualification(f);
+  writeQualifiedArtifact(f, 'analysis.md');
   writeQualifiedArtifact(f, 'plan.md');
   writeQualifiedArtifact(f, 'code.md');
   writeQualifiedArtifact(f, 'code-r2.md');

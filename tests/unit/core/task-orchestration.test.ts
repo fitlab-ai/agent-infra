@@ -32,6 +32,7 @@ const modelPolicy = {
   reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
 } as const;
 const fixtureRoots = new Set<string>();
+const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：需要独立审查。\n- **未满足的更高路径条件**：已选最高路径。\n- **升级触发条件**：无。\n';
 after(() => {
   for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
 });
@@ -112,7 +113,7 @@ function approvedCodeFixture(manualValidation = 0) {
   const f = fixture('code-review');
   fs.mkdirSync(path.join(f.root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), '{}\n');
-  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
   fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), '# Analysis Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(f.taskDir, 'plan.md'), '# Plan\n');
   fs.writeFileSync(path.join(f.taskDir, 'review-plan.md'), '# Plan Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
@@ -508,14 +509,14 @@ test('route selects one fresh role from existing lifecycle facts', () => {
   });
 
   const review = fixture('requirement-analysis-review');
-  fs.writeFileSync(path.join(review.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(review.taskDir, 'analysis.md'), FULL_ANALYSIS);
   assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: review.root }).next, {
     action: 'review-analysis', role: 'reviewer', stage: 'review-analysis', round: 1, artifact: 'review-analysis.md',
     requestedModel: null, requestedReasoningEffort: null
   });
 
   const code = fixture('technical-design-review');
-  fs.writeFileSync(path.join(code.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(code.taskDir, 'analysis.md'), FULL_ANALYSIS);
   fs.writeFileSync(path.join(code.taskDir, 'review-analysis.md'), '# Analysis Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(code.taskDir, 'plan.md'), '# Plan\n');
   fs.writeFileSync(path.join(code.taskDir, 'review-plan.md'), '# Plan Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
@@ -915,7 +916,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
     capturedScopes.push(taskId);
     return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
   };
-  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -956,7 +957,7 @@ test('native hooks reject pending receipts missing the current snapshot scope', 
     capturedScopes.push(taskId);
     return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
   };
-  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -977,7 +978,7 @@ test('native hooks reject pending receipts missing the current snapshot scope', 
 
 test('replaying a start event with blank actual model/effort is idempotent, not a replay conflict', () => {
   const f = fixture('requirement-analysis-review');
-  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
@@ -1001,7 +1002,7 @@ test('replaying a start event with blank actual model/effort is idempotent, not 
 
 test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () => {
   const f = fixture('requirement-analysis-review');
-  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), FULL_ANALYSIS);
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
     client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'

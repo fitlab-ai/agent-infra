@@ -8,6 +8,8 @@ import { spawnSync } from 'node:child_process';
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
+const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：夹具需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现高风险边界。\n';
+
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-artifact-cli-'));
   spawnSync('git', ['init', '-q'], { cwd: root });
@@ -15,7 +17,7 @@ function fixture() {
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: requirement-analysis-review\n---\n\n# Task\n\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — started\n`);
-  fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(dir, 'analysis.md'), STANDARD_ANALYSIS);
   return { root, id, dir };
 }
 

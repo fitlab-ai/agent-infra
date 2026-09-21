@@ -15,6 +15,10 @@ Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill 
 
 ## Boundary / Critical Rules
 
+### Path and rework
+
+This stage consumes only the canonical path fact parsed by core from the latest valid analysis artifact; a stage omitted by that path must not create an artifact. When another Changes Requested verdict follows one completed revision-review cycle in the same stage, classify the rework before the next executor artifact and bind it to the finding, source SHA, and stable task-fact digest. A round or filename change is not new evidence.
+
 ### Persisted Report Evidence
 
 Before generating the implementation report, read `.agents/rules/evidence-reporting.md`. Successful tests record the command, target scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt instead of complete successful stdout.

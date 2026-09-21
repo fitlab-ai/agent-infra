@@ -13,6 +13,10 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 ## Boundary / Critical Rules
 
+### Path and rework
+
+This stage consumes only the canonical path fact parsed by core from the latest valid analysis artifact; a stage omitted by that path must not create an artifact. When another Changes Requested verdict follows one completed revision-review cycle in the same stage, classify the rework before the next executor artifact and bind it to the finding, source SHA, and stable task-fact digest. A round or filename change is not new evidence.
+
 ### Persisted Report Evidence
 
 Before generating the plan report, read `.agents/rules/evidence-reporting.md`. Record the command, target scope, status or structured result, actual result, and uncovered parts for state checks and verification; include decisive raw excerpts only for failures, blocking conditions, or disputes.

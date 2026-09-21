@@ -14,6 +14,7 @@ test('rework intent round-trips and duplicate identity is idempotent', () => {
   const intent: ReworkIntent = {
     intentId: 'RI-1', findingId: 'PL-1', sourceArtifact: 'review-plan.md',
     sourceSha256: 'a'.repeat(64), target: 'plan', status: 'pending',
+    classification: 'design', evidenceDigest: 'b'.repeat(64), taskFactDigest: 'c'.repeat(64),
     declaredAt: '2026-01-01 00:00:00+00:00', consumedAt: ''
   };
   const content = renderReworkIntents([intent]);
@@ -28,6 +29,7 @@ test('conflicting rework intent identity fails closed', () => {
   const existing: ReworkIntent = {
     intentId: 'RI-1', findingId: 'PL-1', sourceArtifact: 'review-plan.md',
     sourceSha256: 'a'.repeat(64), target: 'plan', status: 'pending',
+    classification: 'design', evidenceDigest: 'b'.repeat(64), taskFactDigest: 'c'.repeat(64),
     declaredAt: '2026-01-01 00:00:00+00:00', consumedAt: ''
   };
   assert.throws(
@@ -40,6 +42,7 @@ test('rework intents consume on matching target input and supersede on source re
   const intent: ReworkIntent = {
     intentId: 'RI-1', findingId: 'PL-1', sourceArtifact: 'review-plan.md',
     sourceSha256: 'a'.repeat(64), target: 'plan', status: 'pending',
+    classification: 'design', evidenceDigest: 'b'.repeat(64), taskFactDigest: 'c'.repeat(64),
     declaredAt: '2026-01-01 00:00:00+00:00', consumedAt: ''
   };
   const consumed = consumeReworkIntents([intent], 'plan', { 'review-plan.md': 'a'.repeat(64) }, '2026-01-01 00:01:00+00:00');

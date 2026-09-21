@@ -9,6 +9,11 @@
 name: refactoring
 description: Safe and structured workflow for code refactoring.
 
+lifecycle_paths:
+  streamlined: [analysis, code, code-review]
+  standard: [analysis, design, code, code-review]
+  full: [analysis, analysis-review, design, design-review, code, code-review]
+
 steps:
   - name: analysis
     description: Analyze the current code and define the refactoring scope.

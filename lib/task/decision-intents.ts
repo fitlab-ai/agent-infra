@@ -17,6 +17,7 @@ import { extractSection, extractSubSection, findSectionHeading } from './section
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
 import { allowsManualOverride } from './guard-override.ts';
+import { consumeHumanDecisionReworkIntents, parseReworkIntentDocument, reworkIntentMutation } from './rework-intent.ts';
 
 type HumanDecisionRequest = {
   taskRef?: string;
@@ -177,6 +178,14 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
     kind: 'section', aliases: ACTIVITY_ALIASES, heading: activity.heading,
     body: appendActivityEntry(activity, { time: metadata.timestamp, step: 'Human Decision', agent: 'human', note: `${row.id} decided → ${recordId}` })
   });
+  try {
+    const parsedRework = parseReworkIntentDocument(content);
+    if (!parsedRework.ok) return failed('DECISION_DOCUMENT_INVALID', parsedRework.message, resolved.taskId, row.id);
+    const consumed = consumeHumanDecisionReworkIntents(parsedRework.intents, row.id, metadata.timestamp);
+    if (consumed.changed) mutations.push(reworkIntentMutation(content, consumed.intents));
+  } catch (error) {
+    return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, row.id);
+  }
   const writeResult = writeTask({ taskRef: resolved.taskId, expectedState: stateOverride ? resolved.state : 'active', mutations, dryRun: request.dryRun }, {
     ...options,
     taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state },

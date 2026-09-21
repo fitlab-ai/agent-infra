@@ -14,6 +14,8 @@ import { sha256File } from './artifact-receipts.ts';
 import { hasOpenLifecycleExecution } from './activity-log.ts';
 import { parseQualificationAudit, parseTaskQualification } from './qualification-audit.ts';
 import type { QualificationAudit, TaskQualification } from './qualification-audit.ts';
+import { parseLifecyclePathDecision, pathIncludes } from './lifecycle-path.ts';
+import type { LifecyclePathState } from './lifecycle-path.ts';
 
 const ARTIFACT_AUDIT_FAMILIES = new Set(['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code']);
 
@@ -49,6 +51,8 @@ type LifecycleFacts = {
   recommendedAction?: LifecycleAction | null;
   qualificationStale?: boolean;
   qualificationStaleArtifacts?: readonly string[];
+  pathState?: LifecyclePathState;
+  reworkClassificationRequired?: readonly ('analysis' | 'plan' | 'code')[];
 };
 type CapabilityResult = {
   allowed: boolean;
@@ -98,6 +102,21 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   }
   if (facts.executionBusy) return deny('EXECUTION_BUSY');
 
+  if (facts.pathState && facts.pathState.status !== 'valid') {
+    return action === 'analysis'
+      ? allow(`lifecycle-path-${facts.pathState.status}`)
+      : deny('LIFECYCLE_PATH_INVALID', facts.pathState.message);
+  }
+  if (facts.pathState?.status === 'valid'
+    && ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'].includes(action)
+    && !pathIncludes(facts.pathState, action as never)) {
+    return deny('ARTIFACT_STAGE_NOT_SELECTED', `path=${facts.pathState.decision.path}`, `stage=${action}`);
+  }
+  if (facts.reworkClassificationRequired?.includes(action as 'analysis' | 'plan' | 'code')
+    && !(facts.reworkIntents ?? []).some((intent) => intent.status === 'pending')) {
+    return deny('REWORK_CLASSIFICATION_REQUIRED', `stage=${action}`);
+  }
+
   const implicit = trigger.explicitRequest === false;
   if (action === 'analysis') {
     if (!implicit || hasArtifact(facts, 'analysis') || facts.recommendedAction === 'analysis') return allow('analysis-capability');
@@ -107,6 +126,9 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
     return hasArtifact(facts, 'analysis') ? allow('analysis-artifact') : deny('ANALYSIS_ARTIFACT_REQUIRED');
   }
   if (action === 'plan') {
+    if (facts.pathState?.status === 'valid' && facts.pathState.decision.path === 'standard') {
+      return hasArtifact(facts, 'analysis') ? allow('analysis-artifact') : deny('ANALYSIS_ARTIFACT_REQUIRED');
+    }
     if (!hasArtifact(facts, 'review-analysis')) return deny('ANALYSIS_REVIEW_REQUIRED');
     if (!reviewMatchesLatest(facts, 'analysis', 'review-analysis')) return deny('ANALYSIS_REVIEW_NOT_LATEST');
     if (facts.reviews['review-analysis'] !== 'approved') return deny('ANALYSIS_REVIEW_NOT_APPROVED');
@@ -122,6 +144,16 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
       if (!reviewMatchesLatest(facts, 'code', 'review-code')) return deny('CODE_REVIEW_NOT_LATEST');
       if (facts.reviews['review-code'] !== 'approved') return deny('CODE_REVIEW_NOT_APPROVED');
       return allow('implementation-input');
+    }
+    if (facts.pathState?.status === 'valid' && facts.pathState.decision.path === 'streamlined') {
+      if (!hasArtifact(facts, 'analysis')) return deny('ANALYSIS_ARTIFACT_REQUIRED');
+      if (facts.unresolvedLedger.analysis > 0) return deny('ANALYSIS_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.analysis}`);
+      return allow('analysis-path-approved');
+    }
+    if (facts.pathState?.status === 'valid' && facts.pathState.decision.path === 'standard') {
+      if (!hasArtifact(facts, 'plan')) return deny('PLAN_ARTIFACT_REQUIRED');
+      if (facts.unresolvedLedger.plan > 0) return deny('PLAN_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.plan}`);
+      return allow('plan-path-approved');
     }
     if (!hasArtifact(facts, 'review-plan')) return deny('PLAN_REVIEW_REQUIRED');
     if (!reviewMatchesLatest(facts, 'plan', 'review-plan')) return deny('PLAN_REVIEW_NOT_LATEST');
@@ -195,8 +227,38 @@ function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
       evidence: facts.qualificationStaleArtifacts ?? ['qualification audit is stale']
     };
   }
+  if ((facts.reworkClassificationRequired?.length ?? 0) > 0
+    && !(facts.reworkIntents ?? []).some((intent) => intent.status === 'pending')) {
+    return { action: null, reasonCode: 'REWORK_CLASSIFICATION_REQUIRED', evidence: facts.reworkClassificationRequired ?? [] };
+  }
   const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
-  if (pendingIntent) return { action: pendingIntent.target, reasonCode: 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
+  if (pendingIntent) return { action: pendingIntent.target === 'pause' ? null : pendingIntent.target, reasonCode: pendingIntent.target === 'pause' ? 'REWORK_PAUSED' : 'REWORK_INTENT_PENDING', evidence: [pendingIntent.intentId, pendingIntent.findingId] };
+  if (facts.pathState && facts.pathState.status !== 'valid') {
+    return { action: 'analysis', reasonCode: facts.pathState.status === 'missing' ? 'LIFECYCLE_PATH_MISSING' : 'LIFECYCLE_PATH_INVALID', evidence: [facts.pathState.message] };
+  }
+  if (facts.pathState?.status === 'valid') {
+    for (const stage of facts.pathState.decision.stages) {
+      if (stage === 'analysis' && !hasArtifact(facts, stage)) return { action: stage, reasonCode: 'ANALYSIS_ARTIFACT_MISSING', evidence: ['analysis artifact is absent'] };
+      if (stage === 'review-analysis' && (!reviewMatchesLatest(facts, 'analysis', stage) || facts.reviews[stage] !== 'approved')) {
+        return facts.reviews[stage] === 'changes-requested'
+          ? { action: 'analysis', reasonCode: 'ANALYSIS_REWORK_REQUIRED', evidence: ['analysis review is not approved'] }
+          : { action: stage, reasonCode: 'ANALYSIS_REVIEW_MISSING', evidence: ['analysis review does not bind the latest analysis artifact'] };
+      }
+      if (stage === 'plan' && !hasArtifact(facts, stage)) return { action: stage, reasonCode: 'PLAN_ARTIFACT_MISSING', evidence: ['plan artifact is absent'] };
+      if (stage === 'review-plan' && (!reviewMatchesLatest(facts, 'plan', stage) || facts.reviews[stage] !== 'approved')) {
+        return facts.reviews[stage] === 'changes-requested'
+          ? { action: 'plan', reasonCode: 'PLAN_REWORK_REQUIRED', evidence: ['plan review is not approved'] }
+          : { action: stage, reasonCode: 'PLAN_REVIEW_MISSING', evidence: ['plan review does not bind the latest plan artifact'] };
+      }
+      if (stage === 'code' && !hasArtifact(facts, stage)) return { action: stage, reasonCode: 'CODE_ARTIFACT_MISSING', evidence: ['code artifact is absent'] };
+      if (stage === 'review-code' && (!reviewMatchesLatest(facts, 'code', stage) || facts.reviews[stage] !== 'approved')) {
+        return facts.reviews[stage] === 'changes-requested'
+          ? { action: 'code', reasonCode: 'CODE_REWORK_REQUIRED', evidence: ['code review is not approved'] }
+          : { action: stage, reasonCode: 'CODE_REVIEW_MISSING', evidence: ['code review does not bind the latest code artifact'] };
+      }
+    }
+    return { action: null, reasonCode: 'LIFECYCLE_REVIEWED', evidence: ['selected lifecycle path is complete'] };
+  }
   if (!hasArtifact(facts, 'analysis')) return { action: 'analysis', reasonCode: 'ANALYSIS_ARTIFACT_MISSING', evidence: ['analysis artifact is absent'] };
   if (!hasArtifact(facts, 'review-analysis') || !reviewMatchesLatest(facts, 'analysis', 'review-analysis')) {
     return { action: 'review-analysis', reasonCode: 'ANALYSIS_REVIEW_MISSING', evidence: ['analysis review does not bind the latest analysis artifact'] };
@@ -296,10 +358,24 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       const verdict = resolveCanonicalVerdict(parsed.summary);
       if (verdict.ok) reviews[family] = verdict.verdict === 'Approved' ? 'approved' : verdict.verdict === 'Changes Requested' ? 'changes-requested' : 'rejected';
     }
+    const reworkClassificationRequired: Array<'analysis' | 'plan' | 'code'> = [];
+    for (const [reviewFamily, stage] of [['review-analysis', 'analysis'], ['review-plan', 'plan'], ['review-code', 'code']] as const) {
+      const changes = (artifacts[reviewFamily] ?? []).map((name) => {
+        const parsed = parseReviewSummary(fs.readFileSync(path.join(taskDir, name), 'utf8'));
+        const verdict = parsed.ok ? resolveCanonicalVerdict(parsed.summary) : null;
+        const receipt = receiptForOutput(content, name);
+        return verdict?.ok && verdict.verdict === 'Changes Requested' && receipt ? parseArtifactName(receipt.input)?.round ?? null : null;
+      }).filter((round): round is number => round !== null);
+      if (changes.length >= 2 && changes[changes.length - 1]! > changes[changes.length - 2]!) reworkClassificationRequired.push(stage);
+    }
     const unresolvedLedger = { analysis: 0, plan: 0, code: 0 };
     if (ledger.present) {
       for (const stage of ['analysis', 'plan', 'code'] as const) unresolvedLedger[stage] = summarizeLedgerStage(ledger.rows, stage).unresolved.length;
     }
+    const latestAnalysis = latestArtifact(artifacts.analysis ?? []);
+    const pathState = latestAnalysis
+      ? parseLifecyclePathDecision(fs.readFileSync(path.join(taskDir, latestAnalysis), 'utf8'), latestAnalysis, artifactHashes[latestAnalysis] ?? '')
+      : { status: 'missing' as const, decision: null, message: 'analysis artifact is missing' };
     const facts: LifecycleFacts = {
       taskState, currentStep: String(metadata.current_step ?? ''), artifacts, reviews,
       staleArtifacts, reviewedInputs, artifactHashes,
@@ -309,6 +385,8 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       recommendedAction: null,
       qualificationStale: qualificationStaleArtifacts.length > 0,
       qualificationStaleArtifacts
+      , pathState
+      , reworkClassificationRequired
     };
     facts.recommendedAction = recommendNext(facts).action;
     return { ok: true, facts };
