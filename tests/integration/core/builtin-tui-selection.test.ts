@@ -11,6 +11,24 @@ type SyncReport = ReturnType<SyncTemplatesModule["syncTemplates"]> & {
   managed: { skippedTUI?: string[] };
 };
 
+const SHARED_MERGED_TARGET = ".agents/skills/release/SKILL.md";
+const CLIENT_MERGED_TARGETS: Record<string, string> = {
+  "claude-code": ".claude/commands/release.md",
+  opencode: ".opencode/commands/release.md",
+  traecli: ".traecli/commands/release.md"
+};
+
+function mergedPendingTargets(report: SyncReport) {
+  return report.merged.pending.map(({ target }) => target).sort();
+}
+
+function expectedMergedTargets(enabled: readonly string[]) {
+  return [
+    SHARED_MERGED_TARGET,
+    ...enabled.flatMap((id) => CLIENT_MERGED_TARGETS[id] ? [CLIENT_MERGED_TARGETS[id]] : [])
+  ].sort();
+}
+
 function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -39,10 +57,24 @@ function makeTemplateRoot(tmpDir: string) {
       ""
     ].join("\n")
   );
+  writeFile(
+    templateRoot,
+    ".agents/skills/release/SKILL.en.md",
+    [
+      "---",
+      "name: release",
+      'description: "Create a release"',
+      "---",
+      ""
+    ].join("\n")
+  );
   // Built-in TUI template files so the sync loop finds something to write.
   writeFile(templateRoot, ".claude/commands/update-agent-infra.md", "claude command\n");
+  writeFile(templateRoot, ".claude/commands/release.en.md", "claude release\n");
   writeFile(templateRoot, ".claude/rules/tool-preferences.en.md", "managed rule\n");
   writeFile(templateRoot, ".opencode/commands/update-agent-infra.md", "opencode command\n");
+  writeFile(templateRoot, ".opencode/commands/release.en.md", "opencode release\n");
+  writeFile(templateRoot, ".traecli/commands/release.en.md", "trae release\n");
   writeFile(templateRoot, ".codex/hooks.json", "{}\n");
   return templateRoot;
 }
@@ -105,6 +137,10 @@ test("syncTemplates: canonical agentClients keep full built-in client behavior",
     assert.ok(fs.existsSync(path.join(projectRoot, ".claude/commands/update-agent-infra.md")));
     assert.ok(fs.existsSync(path.join(projectRoot, ".opencode/commands/update-agent-infra.md")));
     assert.ok(fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
+    assert.deepEqual(
+      mergedPendingTargets(report),
+      expectedMergedTargets(["claude-code", "codex", "antigravity-cli", "opencode", "traecli"])
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -127,6 +163,7 @@ test("syncTemplates: canonical client subset skips owned managed/merged entries"
     assert.ok(skipped.includes(".codex/hooks.json"));
     assert.ok(fs.existsSync(path.join(projectRoot, ".claude/commands/update-agent-infra.md")));
     assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
+    assert.deepEqual(mergedPendingTargets(report), expectedMergedTargets(["claude-code"]));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -235,9 +272,32 @@ test("syncTemplates: customTUI dir under disabled built-in TUI owned prefix is p
     // Seed a customTUI reference file under the disabled-TUI owned prefix.
     writeFile(
       projectRoot,
-      ".codex/commands/analyze-task.cmd",
+      ".codex/commands/analyze-task.md",
       "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
     );
+    writeFile(
+      projectRoot,
+      ".agents/skills/analyze-task/SKILL.md",
+      [
+        "---",
+        "name: analyze-task",
+        'description: "Analyze requirements for analyze-task"',
+        "---",
+        ""
+      ].join("\n")
+    );
+    writeFile(
+      projectRoot,
+      ".agents/skills/test/SKILL.md",
+      [
+        "---",
+        "name: test",
+        'description: "Run local tests"',
+        "---",
+        ""
+      ].join("\n")
+    );
+    writeFile(templateRoot, ".codex/commands/test.en.md", "codex test\n");
     // Also seed .codex/hooks.json — this is NOT customTUI-protected and SHOULD be removed.
     writeFile(projectRoot, ".codex/hooks.json", "{}\n");
 
@@ -248,10 +308,11 @@ test("syncTemplates: customTUI dir under disabled built-in TUI owned prefix is p
 
     // customTUI file under disabled-owned prefix must survive.
     assert.ok(
-      fs.existsSync(path.join(projectRoot, ".codex/commands/analyze-task.cmd")),
+      fs.existsSync(path.join(projectRoot, ".codex/commands/analyze-task.md")),
       "customTUI file under .codex/ must not be deleted"
     );
-    assert.ok(!report.managed.removed.includes(".codex/commands/analyze-task.cmd"));
+    assert.ok(!report.managed.removed.includes(".codex/commands/analyze-task.md"));
+    assert.ok(mergedPendingTargets(report as SyncReport).includes(".codex/commands/test.md"));
     // .codex/hooks.json (built-in managed, not custom-protected) IS removed.
     assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
     assert.ok(report.managed.removed.includes(".codex/hooks.json"));
@@ -281,6 +342,7 @@ test("syncTemplates: empty canonical state disables every built-in client", asyn
     assert.ok(!fs.existsSync(path.join(projectRoot, ".claude/commands/update-agent-infra.md")));
     assert.ok(!fs.existsSync(path.join(projectRoot, ".opencode/commands/update-agent-infra.md")));
     assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
+    assert.deepEqual(mergedPendingTargets(report), expectedMergedTargets([]));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -386,7 +448,7 @@ test("syncTemplates: every built-in client subset converges idempotently", async
       const enabled = ids.filter((_, index) => (mask & (1 << index)) !== 0);
       makeProject(projectRoot, { agentClients: canonicalAgentClients(enabled) });
 
-      syncTemplates(projectRoot, templateRoot);
+      const first = syncTemplates(projectRoot, templateRoot) as SyncReport;
       const cfgPath = path.join(projectRoot, ".agents/.airc.json");
       const afterFirst = fs.readFileSync(cfgPath, "utf8");
       const second = syncTemplates(projectRoot, templateRoot);
@@ -396,6 +458,16 @@ test("syncTemplates: every built-in client subset converges idempotently", async
       assert.deepEqual(second.managed.created, [], `subset ${mask}: unexpected create`);
       assert.deepEqual(second.managed.written, [], `subset ${mask}: unexpected write`);
       assert.deepEqual(second.managed.removed, [], `subset ${mask}: unexpected removal`);
+      assert.deepEqual(
+        mergedPendingTargets(second as SyncReport),
+        expectedMergedTargets(enabled),
+        `subset ${mask}: merged pending targets`
+      );
+      assert.deepEqual(
+        mergedPendingTargets(second as SyncReport),
+        mergedPendingTargets(first),
+        `subset ${mask}: merged pending targets must be idempotent`
+      );
       const config = JSON.parse(afterSecond);
       for (const [index, id] of ids.entries()) {
         const adapterPath = {
