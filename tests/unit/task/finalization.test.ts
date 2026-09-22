@@ -416,13 +416,16 @@ test('host finalization seals a staged summary after core verification and retai
     sha256: createHash('sha256').update(staged).digest('hex')
   })}\n`);
   const kinds: string[] = [];
+  const timeline: string[] = [];
   let verifyCalls = 0;
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
     kinds.push(received.kind);
+    timeline.push(received.kind);
     return platformResult('applied');
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
+    timeline.push('verify');
     return verification('pass');
   };
   try {
@@ -430,6 +433,7 @@ test('host finalization seals a staged summary after core verification and retai
     const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(result.result, 'completed');
     assert.deepEqual(kinds, ['task', 'summary']);
+    assert.deepEqual(timeline, ['verify', 'task', 'summary']);
     assert.equal(verifyCalls, 1);
     assert.equal(receipt?.summary, 'done');
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), true);
@@ -666,14 +670,17 @@ test('host finalization returns actionable verification gate failures and retrie
   const f = fixture();
   let commentCalls = 0;
   const commentSnapshots: string[] = [];
+  const timeline: string[] = [];
   let verifyCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => {
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
     commentCalls += 1;
+    timeline.push(received.kind);
     commentSnapshots.push(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md'), 'utf8'));
     return platformResult(commentCalls === 1 ? 'applied' : 'no-op');
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
+    timeline.push('verify');
     return verification(verifyCalls === 1 ? 'fail' : 'pass');
   };
   try {
@@ -684,14 +691,14 @@ test('host finalization returns actionable verification gate failures and retrie
     assert.equal(failed.result, 'failed');
     assert.equal(failed.warnings[0]?.code, 'CHECK_FAILED');
     assert.match(failed.warnings[0]?.message ?? '', /Fix complete-task issues/);
-    assert.deepEqual(failed.pendingSteps, ['lifecycle', 'task-comment', 'verification', 'summary']);
+    assert.deepEqual(failed.pendingSteps, ['lifecycle', 'verification', 'summary']);
     assert.equal(recovered.status, 'completed');
     assert.equal(replay.status, 'completed');
     assert.equal(verifyCalls, 2);
-    assert.equal(commentCalls, 3);
-    assert.doesNotMatch(commentSnapshots[0]!, /CHECK_FAILED/);
-    assert.match(commentSnapshots[1]!, /\| CHECK_FAILED \| open \|/);
-    assert.match(commentSnapshots[2]!, /\| CHECK_FAILED \| resolved \|/);
+    assert.equal(commentCalls, 2);
+    assert.deepEqual(timeline, ['verify', 'task', 'verify', 'task']);
+    assert.match(commentSnapshots[0]!, /\| CHECK_FAILED \| open \|/);
+    assert.match(commentSnapshots[1]!, /\| CHECK_FAILED \| resolved \|/);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

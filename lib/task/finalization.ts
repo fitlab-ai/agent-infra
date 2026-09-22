@@ -913,15 +913,6 @@ async function prepareUnderLock(
 
   let taskComment: TaskFinalizationStep | null = null;
   receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-  const initialComment = await syncPendingTaskComment({
-    repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
-  });
-  receipt = initialComment.receipt;
-  taskComment = initialComment.step;
-  changed = changed || initialComment.changed;
-  if (initialComment.error) {
-    return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification: null }, changed, initialComment.error);
-  }
 
   let verification: TaskFinalizationStep | null = null;
   if (receipt.verification !== 'pending') {
@@ -958,6 +949,15 @@ async function prepareUnderLock(
         verification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: detail
       });
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      const warningComment = await syncPendingTaskComment({
+        repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
+      });
+      receipt = warningComment.receipt;
+      taskComment = warningComment.step;
+      changed = changed || warningComment.changed;
+      if (warningComment.error) {
+        return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification }, changed, warningComment.error);
+      }
       return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification }, changed, detail);
     }
   } catch (error) {
