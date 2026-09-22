@@ -1733,7 +1733,7 @@ test('task-finalization publishes its executor result when the receipt disappear
       statusDir: manifest.publicStatusDir,
       token: manifest.token,
       generation,
-      timeoutMs: 1_500
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
     });
     const evidence = await resultEvidence;
     fs.rmSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`));
