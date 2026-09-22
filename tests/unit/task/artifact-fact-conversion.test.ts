@@ -108,3 +108,71 @@ test('fact conversion leaves malformed legacy evidence unchanged', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+function planConversionFixture(upstreamCount: 0 | 1) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-plan-conversion-'));
+  const id = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', id);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const taskPath = path.join(taskDir, 'task.md');
+  const task = [
+    '---', `id: ${id}`, 'status: active', 'current_step: technical-design', 'agent_infra_version: v0.11.4-alpha.0',
+    '---', '', '# Task', '', '## Task Input', '', 'Stable input.', '',
+    '## Constraints', '',
+    '| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| C-1 | Preserve history | assumption | task-input | task.md | task.md#constraints |  |  |', '',
+    '## Candidate and Rejected Options', '',
+    '| candidate_id | statement | status | constraint_ids | impact | evidence |',
+    '| --- | --- | --- | --- | --- | --- |', '',
+    '## Review Disagreement Ledger', '',
+    '| id | stage | round | severity | status | evidence |',
+    '| --- | --- | --- | --- | --- | --- |', ''
+  ].join('\n');
+  fs.writeFileSync(taskPath, task);
+  const analysisName = 'analysis.md';
+  const analysis = [
+    '# Analysis', '', '## Flow Decision', '', '- **Path**: standard', '- **Basis**: bounded change',
+    '- **Unmet Higher-path Conditions**: none', '- **Upgrade Triggers**: new scope', ''
+  ].join('\n');
+  fs.writeFileSync(path.join(taskDir, analysisName), analysis);
+  const relations = upstreamCount === 1 ? [{
+    upstreamFamily: 'analysis' as const, upstreamArtifact: analysisName, upstreamRound: 1,
+    upstreamSha256: sha256File(path.join(taskDir, analysisName)), relation: 'required-input' as const
+  }] : [];
+  const audit = buildQualificationAudit(task, { upstreamRelations: relations });
+  if (!audit.ok) throw new Error(audit.message);
+  const plan = `# Plan\n\n## Qualification Audit\n\n${renderQualificationAudit(audit.audit)}\n`;
+  const planPath = path.join(taskDir, 'plan.md');
+  fs.writeFileSync(planPath, plan);
+  const legacy = [{
+    event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(planPath),
+    semanticDigest: canonicalSemanticDigest(plan), requestId: 'plan-1', result: '{}'
+  }];
+  fs.writeFileSync(taskPath, updateTaskFrontmatter(task, { completion_facts: JSON.stringify(legacy) }));
+  return { root, taskPath };
+}
+
+test('fact conversion accepts a plan with one verified qualification upstream', () => {
+  const f = planConversionFixture(1);
+  try {
+    const result = convertCompletionFacts('TASK-20260101-000001', { repoRoot: f.root });
+    assert.equal(result.status, 'applied', JSON.stringify(result));
+    assert.equal(result.converted, 1);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('fact conversion rejects a plan without unique qualification provenance', () => {
+  const f = planConversionFixture(0);
+  const before = fs.readFileSync(f.taskPath);
+  try {
+    const result = convertCompletionFacts('TASK-20260101-000001', { repoRoot: f.root });
+    assert.equal(result.status, 'failed');
+    assert.match(result.error?.message ?? '', /exactly one verified analysis input/u);
+    assert.deepEqual(fs.readFileSync(f.taskPath), before);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});

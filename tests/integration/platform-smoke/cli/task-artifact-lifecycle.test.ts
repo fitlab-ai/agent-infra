@@ -415,6 +415,43 @@ test('review-code selection binds the current implementation snapshot', () => {
   assert.equal(changed.selection?.reasonCode, 'input-changed');
 });
 
+test('review-code selection binds the delivery target and diff base', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# plan\n', 'code.md': '# code\n' });
+  fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+    delivery: { remote: 'origin', baseRef: 'target' }
+  }));
+  const taskPath = path.join(f.taskDir, 'task.md');
+  fs.writeFileSync(taskPath, updateTaskFrontmatter(fs.readFileSync(taskPath, 'utf8'), {
+    delivery_remote: 'origin', delivery_base_ref: 'target'
+  }));
+  fs.writeFileSync(path.join(f.repoRoot, 'app.txt'), 'version A\n');
+  spawnSync('git', ['add', '.'], { cwd: f.repoRoot });
+  spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'A'], { cwd: f.repoRoot });
+  const targetA = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.repoRoot, encoding: 'utf8' }).stdout.trim();
+  fs.writeFileSync(path.join(f.repoRoot, 'app.txt'), 'version B\n');
+  spawnSync('git', ['add', 'app.txt'], { cwd: f.repoRoot });
+  spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'B'], { cwd: f.repoRoot });
+  const targetB = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.repoRoot, encoding: 'utf8' }).stdout.trim();
+  fs.writeFileSync(path.join(f.repoRoot, 'app.txt'), 'version C\n');
+  spawnSync('git', ['add', 'app.txt'], { cwd: f.repoRoot });
+  spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'C'], { cwd: f.repoRoot });
+  spawnSync('git', ['branch', 'target', targetA], { cwd: f.repoRoot });
+  spawnSync('git', ['remote', 'add', 'origin', f.repoRoot], { cwd: f.repoRoot });
+  fs.writeFileSync(path.join(f.taskDir, 'review-code.md'), '# Review Code\n');
+  addReceipt(f, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt: '2026-01-01 00:01:00+00:00'
+  });
+  seedCompletionFact(f, 'review-code');
+  assert.equal(resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot }).selection?.disposition, 'reuse-completed');
+
+  spawnSync('git', ['branch', '-f', 'target', targetB], { cwd: f.repoRoot });
+  const changed = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(changed.selection?.disposition, 'create-next');
+  assert.equal(changed.selection?.reasonCode, 'input-changed');
+});
+
 test('revision context fails closed when a review points to a future input', () => {
   const f = fixture({ 'analysis.md': '# analysis', 'review-analysis.md': '**Review Input**: `analysis.md`\n' });
   const reviewPath = path.join(f.taskDir, 'review-analysis.md');

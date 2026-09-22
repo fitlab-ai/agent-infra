@@ -20,6 +20,7 @@ import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { artifactSubstantiveDigest } from './artifact-operations.ts';
 import { captureRepositorySnapshot, captureWorktreeTree } from './workspace-snapshot.ts';
 import type { RepositorySnapshot } from './workspace-snapshot.ts';
+import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead } from './delivery-target.ts';
 import { parseReworkIntentDocument } from './rework-intent.ts';
 import { buildArtifactInputDigest, parseCompletionFacts, selectArtifactDisposition } from './artifact-selection.ts';
 import type { ArtifactSelection } from './artifact-selection.ts';
@@ -386,14 +387,38 @@ function selectionRelation(family: ArtifactFamily): string {
   return family.startsWith('review-') ? 'reviewed-input' : 'required-input';
 }
 
-function reviewImplementationSnapshot(options: InspectOptions): RepositorySnapshot {
+type ReviewImplementationSnapshot = RepositorySnapshot & Readonly<{
+  deliveryRemote: string;
+  deliveryBaseRef: string;
+  targetHead: string;
+  diffBase: string;
+}>;
+
+function reviewImplementationSnapshot(
+  options: InspectOptions,
+  frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>
+): ReviewImplementationSnapshot {
   const repoRoot = options.repoRoot ?? process.cwd();
+  let snapshot: RepositorySnapshot;
   try {
-    return (options.captureRepositorySnapshot ?? captureRepositorySnapshot)(repoRoot);
+    snapshot = (options.captureRepositorySnapshot ?? captureRepositorySnapshot)(repoRoot);
   } catch {
     const worktreeTree = (options.captureWorktreeTree ?? captureWorktreeTree)(repoRoot, null);
-    return { head: 'unborn', headTree: 'unborn', worktreeTree };
+    snapshot = { head: 'unborn', headTree: 'unborn', worktreeTree };
   }
+  const deliveryRemote = typeof frontmatter.delivery_remote === 'string' ? frontmatter.delivery_remote : '';
+  const deliveryBaseRef = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref : '';
+  if (!deliveryRemote || !deliveryBaseRef || snapshot.head === 'unborn') {
+    return { ...snapshot, deliveryRemote, deliveryBaseRef, targetHead: 'unbound', diffBase: 'unbound' };
+  }
+  const target = resolveDeliveryTarget(repoRoot, { remote: deliveryRemote, baseRef: deliveryBaseRef });
+  if (!target.ok) throw new Error(`${target.code}: ${target.message}`);
+  const targetHead = resolveTargetHead(repoRoot, target.value);
+  if (!targetHead.ok) throw new Error(`${targetHead.code}: ${targetHead.message}`);
+  if (!targetHead.head) throw new Error('DELIVERY_TARGET_UNAVAILABLE: delivery target head is missing');
+  const diffBase = resolveDiffBase(repoRoot, snapshot.head, targetHead.head);
+  if (!diffBase.ok) throw new Error(`${diffBase.code}: ${diffBase.message}`);
+  return { ...snapshot, deliveryRemote, deliveryBaseRef, targetHead: targetHead.head, diffBase: diffBase.diffBase };
 }
 
 function attachArtifactSelection(
@@ -434,11 +459,7 @@ function attachArtifactSelection(
       lifecyclePath: family === 'analysis' ? 'analysis-input' : pathState.status === 'valid' ? pathState.decision.path : 'analysis-input',
       upstream,
       implementationSnapshot: family === 'review-code'
-        ? {
-          ...reviewImplementationSnapshot(options),
-          deliveryRemote: typeof frontmatter.delivery_remote === 'string' ? frontmatter.delivery_remote : '',
-          deliveryBaseRef: typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref : ''
-        }
+        ? reviewImplementationSnapshot(options, frontmatter)
         : null
     });
     const changeEvidenceDigest = selectionEvidenceDigest(taskContent, family, options, context);

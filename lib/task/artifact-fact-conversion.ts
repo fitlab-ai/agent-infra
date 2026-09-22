@@ -102,9 +102,15 @@ function convertArtifactFact(
       throw new Error(`upstream artifact '${relation.artifact}' changed on disk`);
     }
   }
-  if (reviewedFamily || identity.family === 'plan') {
+  if (identity.family === 'plan') {
+    const analysisInputs = upstream.filter((relation) => relation.family === 'analysis' && relation.relation === 'required-input');
+    if (analysisInputs.length !== 1) {
+      throw new Error(`completion fact '${fact.output}' requires exactly one verified analysis input`);
+    }
+  }
+  if (reviewedFamily) {
     const receipt = receiptForOutput(taskContent, fact.output);
-    const expected = upstream.find((relation) => relation.relation === (reviewedFamily ? 'reviewed-input' : 'required-input'));
+    const expected = upstream.find((relation) => relation.relation === 'reviewed-input');
     if (!receipt || !expected || receipt.input !== expected.artifact || receipt.inputSha256 !== expected.sha256) {
       throw new Error(`completion fact '${fact.output}' has no matching historical receipt`);
     }

@@ -73,6 +73,8 @@ type ArtifactInputDigestRequest = Readonly<{
     worktreeTree: string;
     deliveryRemote: string;
     deliveryBaseRef: string;
+    targetHead: string;
+    diffBase: string;
   }> | null;
 }>;
 
