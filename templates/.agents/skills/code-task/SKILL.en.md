@@ -82,7 +82,7 @@ status=$?
 echo "$result"
 ```
 
-When `selection.disposition` is `reuse-completed`, reuse `selection.artifact`, do not run started/init, modify code, or write a new artifact, and continue directly to completion verification and next-step guidance. Otherwise continue with the table below.
+When `selection.disposition` is `reuse`, reuse `selection.artifact`, do not run started/init, modify code, or write a new artifact, and continue directly to completion verification and next-step guidance. Otherwise continue with the table below.
 
 Dispatch by `$status` and `result.mode`:
 

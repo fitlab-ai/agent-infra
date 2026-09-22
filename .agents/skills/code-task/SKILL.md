@@ -108,7 +108,7 @@ status=$?
 echo "$result"
 ```
 
-若 `selection.disposition` 为 `reuse-completed`，复用 `selection.artifact`，不得执行 started、init、代码修改或写入新产物，并直接进入完成校验与下一步提示。其他状态继续按下表处理。
+若 `selection.disposition` 为 `reuse`，复用 `selection.artifact`，不得执行 started、init、代码修改或写入新产物，并直接进入完成校验与下一步提示。其他状态继续按下表处理。
 
 按 `$status` 与 `result.mode` 分流；二者不一致时按 `$status` 为准并报告异常：
 
