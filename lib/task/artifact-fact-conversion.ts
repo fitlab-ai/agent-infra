@@ -42,6 +42,7 @@ function parseLegacyFacts(value: unknown): readonly LegacyCompletionFact[] | nul
   try { parsed = JSON.parse(value); } catch { return null; }
   if (!Array.isArray(parsed)) return null;
   const facts: LegacyCompletionFact[] = [];
+  const identities = new Set<string>();
   for (const item of parsed) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
     const row = item as Record<string, unknown>;
@@ -52,6 +53,11 @@ function parseLegacyFacts(value: unknown): readonly LegacyCompletionFact[] | nul
       || !/^[a-f0-9]{64}$/u.test(String(row.semanticDigest ?? ''))
       || typeof row.requestId !== 'string'
       || typeof row.result !== 'string') return null;
+    const identity = JSON.stringify([row.event, row.output]);
+    if (identities.has(identity)) {
+      throw new Error(`completion facts contain the same event and output '${row.event}'/'${row.output}' more than once`);
+    }
+    identities.add(identity);
     facts.push({
       event: row.event, output: row.output,
       outputSha256: String(row.outputSha256), semanticDigest: String(row.semanticDigest),
@@ -146,9 +152,9 @@ function convertCompletionFactsUnlocked(taskRef: string, options: Readonly<{ rep
   if (already.ok) {
     return { status: 'no-op', changed: false, converted: 0, error: null };
   }
-  const legacy = parseLegacyFacts(frontmatter.completion_facts);
-  if (!legacy) return failure('ARTIFACT_FACT_CONVERSION_INVALID', 'completion_facts is neither valid version 1 nor version 2 data');
   try {
+    const legacy = parseLegacyFacts(frontmatter.completion_facts);
+    if (!legacy) return failure('ARTIFACT_FACT_CONVERSION_INVALID', 'completion_facts is neither valid version 1 nor version 2 data');
     const analysis = inspectArtifactDirectory(resolved.taskDir, 'analysis');
     if (analysis.status !== 'ready' || !analysis.latest) throw new Error('latest analysis artifact is required to recover lifecycle path');
     const pathState = parseLifecyclePathDecision(fs.readFileSync(analysis.latest.path, 'utf8'));

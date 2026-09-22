@@ -150,7 +150,7 @@ function planConversionFixture(upstreamCount: 0 | 1) {
     semanticDigest: canonicalSemanticDigest(plan), requestId: 'plan-1', result: '{}'
   }];
   fs.writeFileSync(taskPath, updateTaskFrontmatter(task, { completion_facts: JSON.stringify(legacy) }));
-  return { root, taskPath };
+  return { root, taskPath, legacy };
 }
 
 test('fact conversion accepts a plan with one verified qualification upstream', () => {
@@ -171,6 +171,27 @@ test('fact conversion rejects a plan without unique qualification provenance', (
     const result = convertCompletionFacts('TASK-20260101-000001', { repoRoot: f.root });
     assert.equal(result.status, 'failed');
     assert.match(result.error?.message ?? '', /exactly one verified analysis input/u);
+    assert.deepEqual(fs.readFileSync(f.taskPath), before);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('fact conversion rejects conflicting facts for the same event and output atomically', () => {
+  const f = planConversionFixture(1);
+  const conflicting = [
+    ...f.legacy,
+    { ...f.legacy[0], requestId: 'conflicting-request', result: '{"verdict":"rejected"}' }
+  ];
+  fs.writeFileSync(f.taskPath, updateTaskFrontmatter(
+    fs.readFileSync(f.taskPath, 'utf8'),
+    { completion_facts: JSON.stringify(conflicting) }
+  ));
+  const before = fs.readFileSync(f.taskPath);
+  try {
+    const result = convertCompletionFacts('TASK-20260101-000001', { repoRoot: f.root });
+    assert.equal(result.status, 'failed');
+    assert.match(result.error?.message ?? '', /same event and output/u);
     assert.deepEqual(fs.readFileSync(f.taskPath), before);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
