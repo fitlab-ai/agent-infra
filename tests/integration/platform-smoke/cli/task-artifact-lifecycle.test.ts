@@ -49,8 +49,7 @@ function seedCompletionFact(f: ReturnType<typeof fixture>, family: 'code' | 'rev
     version: 2, event: `${family}.completed`, output: context.latest!.name,
     outputSha256: sha256File(context.latest!.path), semanticDigest: 'b'.repeat(64),
     requestId: `${family}-1`, result: '{}', inputDigest: context.selection!.inputDigest,
-    resultDigest: context.selection!.observedResultDigest!, changeEvidenceDigest: context.selection!.changeEvidenceDigest,
-    selectionReason: context.selection!.reasonCode
+    resultDigest: context.selection!.observedResultDigest!
   };
   const taskPath = path.join(f.taskDir, 'task.md');
   fs.writeFileSync(taskPath, updateTaskFrontmatter(fs.readFileSync(taskPath, 'utf8'), {
@@ -365,13 +364,13 @@ test('code selection reuses completed work before review and creates a round onl
 
   const unchanged = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
   assert.equal(unchanged.status, 'ready');
-  assert.equal(unchanged.selection?.disposition, 'reuse-completed');
+  assert.equal(unchanged.selection?.disposition, 'reuse');
 
   fs.writeFileSync(path.join(f.repoRoot, 'app.txt'), 'changed implementation\n');
   const changed = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
   assert.equal(changed.status, 'ready');
   assert.equal(changed.codeMode?.mode, 'init');
-  assert.equal(changed.selection?.disposition, 'create-next');
+  assert.equal(changed.selection?.disposition, 'create');
   assert.equal(changed.selection?.reasonCode, 'result-changed');
 });
 
@@ -392,7 +391,7 @@ test('approved code selection reuses an unchanged completed implementation', () 
 
   const result = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
   assert.equal(result.status, 'ready');
-  assert.equal(result.selection?.disposition, 'reuse-completed');
+  assert.equal(result.selection?.disposition, 'reuse');
 });
 
 test('review-code selection binds the current implementation snapshot', () => {
@@ -407,11 +406,11 @@ test('review-code selection binds the current implementation snapshot', () => {
     inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt: '2026-01-01 00:01:00+00:00'
   });
   seedCompletionFact(f, 'review-code');
-  assert.equal(resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot }).selection?.disposition, 'reuse-completed');
+  assert.equal(resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot }).selection?.disposition, 'reuse');
 
   fs.writeFileSync(path.join(f.repoRoot, 'app.txt'), 'version two\n');
   const changed = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
-  assert.equal(changed.selection?.disposition, 'create-next');
+  assert.equal(changed.selection?.disposition, 'create');
   assert.equal(changed.selection?.reasonCode, 'input-changed');
 });
 
@@ -444,11 +443,11 @@ test('review-code selection binds the delivery target and diff base', () => {
     inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt: '2026-01-01 00:01:00+00:00'
   });
   seedCompletionFact(f, 'review-code');
-  assert.equal(resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot }).selection?.disposition, 'reuse-completed');
+  assert.equal(resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot }).selection?.disposition, 'reuse');
 
   spawnSync('git', ['branch', '-f', 'target', targetB], { cwd: f.repoRoot });
   const changed = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
-  assert.equal(changed.selection?.disposition, 'create-next');
+  assert.equal(changed.selection?.disposition, 'create');
   assert.equal(changed.selection?.reasonCode, 'input-changed');
 });
 

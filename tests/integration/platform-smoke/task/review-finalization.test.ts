@@ -597,8 +597,7 @@ test('review finalization preserves a completed review artifact byte-for-byte', 
   const fact = {
     version: 2, event: 'review-analysis.completed', output: 'review-analysis.md',
     outputSha256: 'a'.repeat(64), semanticDigest: 'b'.repeat(64), requestId: 'review-1', result: '{}',
-    inputDigest: 'c'.repeat(64), resultDigest: 'd'.repeat(64), changeEvidenceDigest: null,
-    selectionReason: 'substantive-identity-matched'
+    inputDigest: 'c'.repeat(64), resultDigest: 'd'.repeat(64)
   };
   fs.writeFileSync(taskPath, updateTaskFrontmatter(task, { completion_facts: JSON.stringify([fact]) }));
   const before = fs.readFileSync(f.artifactPath);

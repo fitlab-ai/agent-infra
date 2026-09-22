@@ -575,8 +575,7 @@ test('non-selection validation completion ignores unrelated version 2 facts', ()
   const fact = {
     version: 2, event: 'review-code.completed', output: 'review-code.md',
     outputSha256: 'a'.repeat(64), semanticDigest: 'b'.repeat(64), requestId: 'review-1', result: '{}',
-    inputDigest: 'c'.repeat(64), resultDigest: 'd'.repeat(64), changeEvidenceDigest: null,
-    selectionReason: 'substantive-identity-matched'
+    inputDigest: 'c'.repeat(64), resultDigest: 'd'.repeat(64)
   };
   fs.writeFileSync(f.file, updateTaskFrontmatter(content, { completion_facts: JSON.stringify([fact]) }));
   const started = run(f.root, [f.id, 'validation-run.started', '--agent', 'codex']);

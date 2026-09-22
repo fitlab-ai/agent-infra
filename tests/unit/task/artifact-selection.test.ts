@@ -9,7 +9,7 @@ import {
 
 const SHA = 'a'.repeat(64);
 
-test('artifact input digest excludes one-time change evidence', () => {
+test('artifact input digest is stable for the same normalized input', () => {
   const base = {
     family: 'review-plan' as const,
     taskInput: 'stable task input',
@@ -17,8 +17,8 @@ test('artifact input digest excludes one-time change evidence', () => {
     upstream: [{ family: 'plan' as const, artifact: 'plan.md', round: 1, sha256: SHA, relation: 'reviewed-input' }]
   };
   assert.equal(
-    buildArtifactInputDigest({ ...base, changeEvidenceDigest: null }),
-    buildArtifactInputDigest({ ...base, changeEvidenceDigest: 'b'.repeat(64) })
+    buildArtifactInputDigest(base),
+    buildArtifactInputDigest({ ...base, taskInput: '  stable   task input  ' })
   );
 });
 
@@ -32,7 +32,7 @@ test('artifact selection reuses a completed result after one-time evidence disap
     open: false,
     inputDigest,
     resultDigest,
-    changeEvidenceDigest: null,
+    hasChangeEvidence: false,
     completionFact: {
       version: 2,
       event: 'review-plan.completed',
@@ -42,12 +42,10 @@ test('artifact selection reuses a completed result after one-time evidence disap
       requestId: 'request-1',
       result: '{}',
       inputDigest,
-      resultDigest,
-      changeEvidenceDigest: 'd'.repeat(64),
-      selectionReason: 'change-evidence'
+      resultDigest
     }
   });
-  assert.equal(selected.disposition, 'reuse-completed');
+  assert.equal(selected.disposition, 'reuse');
   assert.equal(selected.writeRequired, false);
   assert.equal(selected.artifact.name, 'review-plan.md');
 });
@@ -62,15 +60,14 @@ test('artifact selection creates exactly one next round for new evidence', () =>
     open: false,
     inputDigest,
     resultDigest,
-    changeEvidenceDigest: 'e'.repeat(64),
+    hasChangeEvidence: true,
     completionFact: {
       version: 2,
       event: 'review-plan.completed', output: 'review-plan.md', outputSha256: SHA,
-      semanticDigest: SHA, requestId: 'request-1', result: '{}', inputDigest,
-      resultDigest, changeEvidenceDigest: null, selectionReason: 'initial'
+      semanticDigest: SHA, requestId: 'request-1', result: '{}', inputDigest, resultDigest
     }
   });
-  assert.equal(selected.disposition, 'create-next');
+  assert.equal(selected.disposition, 'create');
   assert.equal(selected.artifact.name, 'review-plan-r2.md');
   assert.equal(selected.reasonCode, 'change-evidence');
 });

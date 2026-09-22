@@ -6,24 +6,22 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { finalizeLocalArtifact, preflightLocalArtifact } from './local-artifact-finalization.ts';
 import { initializeArtifactSkeleton } from './artifact-operations.ts';
-import { convertCompletionFacts } from './artifact-fact-conversion.ts';
 
 export type ArtifactCommand = Readonly<{
   taskRef: string;
-  operation: 'inspect' | 'init' | 'preflight' | 'finalize-local' | 'convert-facts';
+  operation: 'inspect' | 'init' | 'preflight' | 'finalize-local';
   family: string;
   artifact: string;
   locale?: 'zh-CN' | 'en';
   sourceFinding?: string;
   sourceArtifact?: string;
   sourceSha256?: string;
-  dryRun?: boolean;
 }>;
 
 /** One option contract for the CLI and trusted projection executor. */
 export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   const [taskRef, operation] = args;
-  if (!taskRef || !['inspect', 'init', 'preflight', 'finalize-local', 'convert-facts'].includes(operation ?? '')) {
+  if (!taskRef || !['inspect', 'init', 'preflight', 'finalize-local'].includes(operation ?? '')) {
     throw new Error('task ref and a supported artifact operation are required');
   }
   const fields: Record<string, string> = {};
@@ -31,30 +29,25 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
     inspect: ['--family', '--source-finding', '--source-artifact', '--source-sha256'],
     init: ['--family', '--artifact', '--locale'],
     'preflight': ['--family', '--artifact'],
-    'finalize-local': ['--family', '--artifact'],
-    'convert-facts': ['--dry-run']
+    'finalize-local': ['--family', '--artifact']
   }[operation as ArtifactCommand['operation']];
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
     if (!allowed.includes(flag)) throw new Error(`unknown option '${flag}'`);
     if (Object.hasOwn(fields, flag)) throw new Error(`duplicate option '${flag}'`);
-    if (flag === '--dry-run') {
-      fields[flag] = 'true';
-      continue;
-    }
     const value = args[++index];
     if (!value || value.startsWith('--')) throw new Error(`option '${flag}' requires a value`);
     fields[flag] = value;
   }
-  if (operation !== 'convert-facts' && !fields['--family']) throw new Error("option '--family' is required");
-  if (!['inspect', 'convert-facts'].includes(operation!) && !fields['--artifact']) throw new Error("option '--artifact' is required");
+  if (!fields['--family']) throw new Error("option '--family' is required");
+  if (operation !== 'inspect' && !fields['--artifact']) throw new Error("option '--artifact' is required");
   const locale = fields['--locale'];
   if (locale !== undefined && locale !== 'zh-CN' && locale !== 'en') throw new Error("option '--locale' must be 'zh-CN' or 'en'");
   return {
     taskRef, operation: operation as ArtifactCommand['operation'], family: fields['--family'] ?? '',
     artifact: fields['--artifact'] ?? '', locale,
     sourceFinding: fields['--source-finding'], sourceArtifact: fields['--source-artifact'],
-    sourceSha256: fields['--source-sha256'], dryRun: fields['--dry-run'] === 'true'
+    sourceSha256: fields['--source-sha256']
   };
 }
 /** Resolve authoritative task metadata separately from a trusted candidate directory. */
@@ -64,7 +57,6 @@ export function executeArtifactCommand(
 ): Record<string, unknown> {
   const { taskRef, operation, family, artifact, locale } = command;
   const fail = (code: string, message: string) => ({ status: 'failed', changed: false, error: { code, message } });
-  if (operation === 'convert-facts') return { ...convertCompletionFacts(taskRef, { repoRoot: options.repoRoot, dryRun: command.dryRun }) };
   if (operation === 'inspect') {
     const result = resolveArtifactContext(taskRef, family, {
       repoRoot: options.repoRoot,

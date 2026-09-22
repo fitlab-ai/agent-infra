@@ -13,7 +13,7 @@ type SelectionArtifact = Readonly<{
   name: string;
 }>;
 
-type ArtifactDisposition = 'create-base' | 'resume-open' | 'reuse-completed' | 'create-next';
+type ArtifactDisposition = 'create' | 'resume' | 'reuse';
 
 type CompletionFactV2 = Readonly<{
   version: 2;
@@ -25,8 +25,6 @@ type CompletionFactV2 = Readonly<{
   result: string;
   inputDigest: string;
   resultDigest: string;
-  changeEvidenceDigest: string | null;
-  selectionReason: string;
 }>;
 
 type OpenArtifactSelection = Readonly<{
@@ -35,8 +33,6 @@ type OpenArtifactSelection = Readonly<{
   artifact: string;
   round: number;
   inputDigest: string;
-  changeEvidenceDigest: string | null;
-  selectionReason: string;
   requestId: string;
 }>;
 
@@ -50,7 +46,6 @@ type ArtifactSelection = Readonly<{
   artifact: SelectionArtifact;
   writeRequired: boolean;
   inputDigest: string;
-  changeEvidenceDigest: string | null;
   observedResultDigest: string | null;
   priorCompleted: SelectionArtifact | null;
 }>;
@@ -66,7 +61,6 @@ type ArtifactInputDigestRequest = Readonly<{
     sha256: string;
     relation: string;
   }>[];
-  changeEvidenceDigest?: string | null;
   implementationSnapshot?: Readonly<{
     head: string;
     headTree: string;
@@ -85,7 +79,7 @@ type ArtifactSelectionRequest = Readonly<{
   open: boolean;
   inputDigest: string;
   resultDigest: string | null;
-  changeEvidenceDigest: string | null;
+  hasChangeEvidence: boolean;
   completionFact: CompletionFactV2 | null;
 }>;
 
@@ -133,10 +127,9 @@ function parseCompletionFacts(encoded: unknown): CompletionFactParseResult {
       return {
         ok: false,
         code: 'ARTIFACT_SELECTION_FACT_VERSION_UNSUPPORTED',
-        message: 'completion fact requires explicit conversion to version 2; run task-artifact convert-facts'
+        message: 'completion fact uses an unsupported schema; rebuild the task state with the current version'
       };
     }
-    const nullableDigest = row.changeEvidenceDigest === null || SHA256_RE.test(String(row.changeEvidenceDigest ?? ''));
     if (
       typeof row.event !== 'string' || !row.event
       || typeof row.output !== 'string' || !row.output
@@ -146,8 +139,6 @@ function parseCompletionFacts(encoded: unknown): CompletionFactParseResult {
       || typeof row.result !== 'string'
       || !SHA256_RE.test(String(row.inputDigest ?? ''))
       || !SHA256_RE.test(String(row.resultDigest ?? ''))
-      || !nullableDigest
-      || typeof row.selectionReason !== 'string' || !row.selectionReason
     ) {
       return { ok: false, code: 'ARTIFACT_SELECTION_FACT_INVALID', message: `completion fact for '${String(row.output ?? '')}' is invalid` };
     }
@@ -160,9 +151,7 @@ function parseCompletionFacts(encoded: unknown): CompletionFactParseResult {
       requestId: row.requestId,
       result: row.result,
       inputDigest: String(row.inputDigest),
-      resultDigest: String(row.resultDigest),
-      changeEvidenceDigest: row.changeEvidenceDigest === null ? null : String(row.changeEvidenceDigest),
-      selectionReason: row.selectionReason
+      resultDigest: String(row.resultDigest)
     });
   }
   return { ok: true, facts };
@@ -179,8 +168,6 @@ function parseOpenArtifactSelection(encoded: unknown): OpenArtifactSelection | n
     || typeof row.artifact !== 'string' || !row.artifact
     || !Number.isInteger(row.round) || Number(row.round) < 1
     || !SHA256_RE.test(String(row.inputDigest ?? ''))
-    || !(row.changeEvidenceDigest === null || SHA256_RE.test(String(row.changeEvidenceDigest ?? '')))
-    || typeof row.selectionReason !== 'string' || !row.selectionReason
     || typeof row.requestId !== 'string') return null;
   return {
     version: 1,
@@ -188,8 +175,6 @@ function parseOpenArtifactSelection(encoded: unknown): OpenArtifactSelection | n
     artifact: row.artifact,
     round: Number(row.round),
     inputDigest: String(row.inputDigest),
-    changeEvidenceDigest: row.changeEvidenceDigest === null ? null : String(row.changeEvidenceDigest),
-    selectionReason: row.selectionReason,
     requestId: row.requestId
   };
 }
@@ -197,31 +182,28 @@ function parseOpenArtifactSelection(encoded: unknown): OpenArtifactSelection | n
 function selectArtifactDisposition(request: ArtifactSelectionRequest): ArtifactSelection {
   if (request.open) {
     return {
-      disposition: 'resume-open', reasonCode: 'open-round', artifact: request.next,
+      disposition: 'resume', reasonCode: 'open-round', artifact: request.next,
       writeRequired: true, inputDigest: request.inputDigest,
-      changeEvidenceDigest: request.changeEvidenceDigest,
       observedResultDigest: request.resultDigest, priorCompleted: request.latest
     };
   }
   if (!request.latest) {
     return {
-      disposition: request.next.round === 1 ? 'create-base' : 'create-next',
+      disposition: 'create',
       reasonCode: request.next.round === 1 ? 'no-history' : 'invalidated-history',
       artifact: request.next, writeRequired: true, inputDigest: request.inputDigest,
-      changeEvidenceDigest: request.changeEvidenceDigest,
       observedResultDigest: request.resultDigest, priorCompleted: null
     };
   }
   const fact = request.completionFact;
   if (!fact || fact.output !== request.latest.name) {
     return {
-      disposition: 'create-next', reasonCode: 'completion-fact-missing', artifact: request.next,
+      disposition: 'create', reasonCode: 'completion-fact-missing', artifact: request.next,
       writeRequired: true, inputDigest: request.inputDigest,
-      changeEvidenceDigest: request.changeEvidenceDigest,
       observedResultDigest: request.resultDigest, priorCompleted: request.latest
     };
   }
-  const reasonCode = request.changeEvidenceDigest && request.changeEvidenceDigest !== fact.changeEvidenceDigest
+  const reasonCode = request.hasChangeEvidence
     ? 'change-evidence'
     : request.inputDigest !== fact.inputDigest
       ? 'input-changed'
@@ -230,12 +212,11 @@ function selectArtifactDisposition(request: ArtifactSelectionRequest): ArtifactS
         : 'substantive-identity-matched';
   const reuse = reasonCode === 'substantive-identity-matched';
   return {
-    disposition: reuse ? 'reuse-completed' : 'create-next',
+    disposition: reuse ? 'reuse' : 'create',
     reasonCode,
     artifact: reuse ? request.latest : request.next,
     writeRequired: !reuse,
     inputDigest: request.inputDigest,
-    changeEvidenceDigest: request.changeEvidenceDigest,
     observedResultDigest: request.resultDigest,
     priorCompleted: request.latest
   };

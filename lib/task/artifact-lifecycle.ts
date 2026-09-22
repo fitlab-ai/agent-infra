@@ -327,50 +327,26 @@ const OPTIONAL_CONTEXT: Partial<Record<ArtifactFamily, { family: ArtifactFamily;
 };
 const QUALIFICATION_RECOVERY_OPTIONAL_CONTEXT_CONSUMERS = new Set<ArtifactFamily>(['analysis', 'plan']);
 
-function selectionEvidenceDigest(
+function hasSelectionEvidence(
   content: string,
   family: ArtifactFamily,
   options: InspectOptions,
   context: ArtifactContextResult
-): string | null {
-  const evidence: unknown[] = [];
-  if (options.sourceFinding && options.sourceArtifact && options.sourceSha256) {
-    evidence.push({
-      kind: 'explicit-source',
-      finding: options.sourceFinding,
-      artifact: options.sourceArtifact,
-      sha256: options.sourceSha256
-    });
-  }
+): boolean {
+  if (options.sourceFinding && options.sourceArtifact && options.sourceSha256) return true;
   const target = family === 'analysis' ? 'analysis' : family === 'plan' ? 'plan' : family === 'code' ? 'code' : null;
   if (target) {
     const parsed = parseReworkIntentDocument(content);
     if (!parsed.ok) throw new Error(`${parsed.code}: ${parsed.message}`);
-    for (const intent of parsed.intents) {
-      if (intent.status === 'pending' && intent.target === target) {
-        evidence.push({
-          kind: 'rework', id: intent.intentId, finding: intent.findingId,
-          sourceArtifact: intent.sourceArtifact, sourceSha256: intent.sourceSha256,
-          evidenceDigest: intent.evidenceDigest, taskFactDigest: intent.taskFactDigest
-        });
-      }
-    }
+    if (parsed.intents.some((intent) => intent.status === 'pending' && intent.target === target)) return true;
   }
   if (family === 'code') {
-    for (const input of parseImplementationInputs(content).rows) {
-      if (input.needsImplementation && input.status === 'pending') {
-        evidence.push({ kind: 'implementation-input', id: input.id, decisionEvidence: input.decisionEvidence });
-      }
-    }
+    if (parseImplementationInputs(content).rows.some((input) => input.needsImplementation && input.status === 'pending')) return true;
   }
-  for (const input of context.inputs.filter((candidate) => candidate.family.startsWith('review-'))) {
+  return context.inputs.filter((candidate) => candidate.family.startsWith('review-')).some((input) => {
     const verdict = parseVerdict(input.path);
-    if (verdict.ok && verdict.verdict === 'Changes Requested') {
-      evidence.push({ kind: 'review-finding', artifact: input.name, sha256: sha256File(input.path) });
-    }
-  }
-  if (evidence.length === 0) return null;
-  return createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+    return verdict.ok && verdict.verdict === 'Changes Requested';
+  });
 }
 
 function permanentSelectionInput(family: ArtifactFamily, input: ArtifactIdentity): boolean {
@@ -462,7 +438,7 @@ function attachArtifactSelection(
         ? reviewImplementationSnapshot(options, frontmatter)
         : null
     });
-    const changeEvidenceDigest = selectionEvidenceDigest(taskContent, family, options, context);
+    const hasChangeEvidence = hasSelectionEvidence(taskContent, family, options, context);
     const resultDigest = context.latest
       ? createHash('sha256').update(JSON.stringify({
         artifact: artifactSubstantiveDigest(fs.readFileSync(context.latest.path, 'utf8')),
@@ -487,7 +463,7 @@ function attachArtifactSelection(
       open,
       inputDigest,
       resultDigest,
-      changeEvidenceDigest,
+      hasChangeEvidence,
       completionFact
     });
     return {
@@ -517,7 +493,7 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
     const code = resolveCodeContext(inventory, options);
     const selected = attachArtifactSelection(code, pathState, options);
     if (selected.status !== 'ready' || !selected.selection) return selected;
-    if (selected.selection.disposition === 'reuse-completed') return selected;
+    if (selected.selection.disposition === 'reuse') return selected;
     if (selected.codeMode?.mode === 'error') {
       if (selected.selection.reasonCode === 'result-changed') {
         return {

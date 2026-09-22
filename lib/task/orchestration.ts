@@ -798,7 +798,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
       resolved.taskId
     );
   }
-  if (artifactContext.selection.disposition === 'reuse-completed') {
+  if (artifactContext.selection.disposition === 'reuse') {
     return failed(
       'ORCHESTRATION_REUSE_STALLED',
       `lifecycle still routes to ${action} after reusing ${artifactContext.selection.artifact.name}`,

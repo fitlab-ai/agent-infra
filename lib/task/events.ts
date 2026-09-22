@@ -748,9 +748,7 @@ function currentCompletionFact(
       implementationInput: request.implementationInput
     }),
     inputDigest: selection.inputDigest,
-    resultDigest,
-    changeEvidenceDigest: selection.changeEvidenceDigest,
-    selectionReason: selection.selectionReason
+    resultDigest
   };
 }
 
@@ -762,9 +760,7 @@ function sameCompletionFact(left: CompletionFactV2, right: CompletionFactV2): bo
     && left.requestId === right.requestId
     && left.result === right.result
     && left.inputDigest === right.inputDigest
-    && left.resultDigest === right.resultDigest
-    && left.changeEvidenceDigest === right.changeEvidenceDigest
-    && left.selectionReason === right.selectionReason;
+    && left.resultDigest === right.resultDigest;
 }
 
 function replaceCompletionFact(facts: readonly CompletionFactV2[], next: CompletionFactV2): CompletionFactV2[] {
@@ -1021,8 +1017,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       artifact: completedArtifact.name,
       round: completedArtifact.round,
       inputDigest: replayFact.inputDigest,
-      changeEvidenceDigest: replayFact.changeEvidenceDigest,
-      selectionReason: replayFact.selectionReason,
       requestId: replayFact.requestId
     } : null);
     if (selectionManaged && (!openSelection
@@ -1098,8 +1092,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
         artifact: artifactContext.selection.artifact.name,
         round: artifactContext.selection.artifact.round,
         inputDigest: artifactContext.selection.inputDigest,
-        changeEvidenceDigest: artifactContext.selection.changeEvidenceDigest,
-        selectionReason: artifactContext.selection.reasonCode,
         requestId: normalized.requestId ?? ''
       } satisfies OpenArtifactSelection);
     } catch (error) {
