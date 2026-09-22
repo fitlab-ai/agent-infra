@@ -281,6 +281,62 @@ test('review references remain optional context after input content changes', ()
   assert.equal(changed.status, 'ready');
 });
 
+test('change-request reviews create only while they target the latest artifact', () => {
+  const scenarios: Array<{
+    family: 'analysis' | 'plan';
+    reviewFamily: 'review-analysis' | 'review-plan';
+    files: Record<string, string>;
+    reviewed: string;
+  }> = [
+    {
+      family: 'analysis' as const,
+      reviewFamily: 'review-analysis' as const,
+      files: {
+        'analysis.md': '# analysis\n',
+        'analysis-r2.md': '# revised analysis\n',
+        'review-analysis.md': '## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n'
+      },
+      reviewed: 'analysis.md'
+    },
+    {
+      family: 'plan' as const,
+      reviewFamily: 'review-plan' as const,
+      files: {
+        'analysis.md': STANDARD_ANALYSIS,
+        'plan.md': '# plan\n',
+        'plan-r2.md': '# revised plan\n',
+        'review-plan.md': '## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n'
+      },
+      reviewed: 'plan.md'
+    }
+  ];
+  for (const scenario of scenarios) {
+    const f = fixture(scenario.files);
+    const review = `${scenario.reviewFamily}.md`;
+    addReceipt(f, {
+      event: `${scenario.reviewFamily}.completed`, output: review, input: scenario.reviewed,
+      inputSha256: sha256File(path.join(f.taskDir, scenario.reviewed)), completedAt: '2026-01-01 00:00:00+00:00'
+    });
+
+    const result = resolveArtifactContext(TASK_ID, scenario.family, { repoRoot: f.repoRoot });
+    assert.equal(result.status, 'ready', JSON.stringify(result.error));
+    assert.equal(result.selection?.disposition, 'reuse', scenario.family);
+  }
+
+  const current = fixture({
+    'analysis.md': '# analysis\n',
+    'review-analysis.md': '## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n'
+  });
+  addReceipt(current, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(current.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  assert.equal(
+    resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: current.repoRoot }).selection?.disposition,
+    'create'
+  );
+});
+
 test('standard-path code replan routing compares plan content with the code input receipt', () => {
   const f = fixture({
     'analysis.md': STANDARD_ANALYSIS,

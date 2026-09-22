@@ -351,7 +351,11 @@ function hasSelectionEvidence(
   }
   return context.inputs.filter((candidate) => candidate.family.startsWith('review-')).some((input) => {
     const verdict = parseVerdict(input.path);
-    return verdict.ok && verdict.verdict === 'Changes Requested';
+    if (!verdict.ok || verdict.verdict !== 'Changes Requested' || !context.latest) return false;
+    const receipt = receiptForOutput(content, input.name);
+    return receipt?.event === reviewEventName(input.family)
+      && receipt.input === context.latest.name
+      && receipt.inputSha256 === sha256File(context.latest.path);
   });
 }
 

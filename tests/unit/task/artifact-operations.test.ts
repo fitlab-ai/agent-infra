@@ -11,10 +11,14 @@ import {
   inspectArtifactContract,
   inspectArtifactStructure
 } from '../../../lib/task/artifact-operations.ts';
-import { validateQualificationAudit } from '../../../lib/task/qualification-audit.ts';
-
-const qualificationTask = `---
-id: TASK-20260101-000001
+test('artifact initialization creates each requested workflow skeleton', () => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-init-qualification-')));
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---
+id: ${taskId}
+qualification_input_relations: not-json
 ---
 
 ## 约束
@@ -27,22 +31,15 @@ id: TASK-20260101-000001
 
 | candidate_id | statement | status | constraint_ids | impact | evidence |
 | --- | --- | --- | --- | --- | --- |
-| A | Use the current implementation. | pending | C-1 | requires qualification | unit test |
-`;
-
-test('artifact initialization renders a valid qualification audit for every workflow family', () => {
-  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-init-qualification-')));
-  const taskId = 'TASK-20260101-000001';
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), qualificationTask);
+| A | Use the current implementation. | pending | C-1 | local | unit test |
+`);
 
   for (const family of ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const) {
     const artifact = `${family}.md`;
     const initialized = initializeArtifactSkeleton({ repoRoot: root, taskId, taskDir, family, artifact });
     assert.equal(initialized.status, 'applied', `${family}: ${JSON.stringify(initialized.error)}`);
     const content = fs.readFileSync(path.join(taskDir, artifact), 'utf8');
-    assert.equal(validateQualificationAudit(qualificationTask, content, { family, artifact, require: true }).ok, true);
+    assert.equal(inspectArtifactStructure(content, getArtifactSchema(family)!).diagnostics.every((item) => item.code === 'ARTIFACT_EMPTY_SECTION'), true);
   }
 });
 

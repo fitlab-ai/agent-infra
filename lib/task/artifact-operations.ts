@@ -10,12 +10,6 @@ import {
   renderArtifactSkeleton
 } from './artifact-schema.ts';
 import { withTaskExecutionLock } from './task-execution-lock.ts';
-import {
-  buildQualificationAudit,
-  expectedQualificationRelations,
-  parseTaskQualification,
-  renderQualificationAudit
-} from './qualification-audit.ts';
 import type {
   ArtifactSchema,
   ArtifactSchemaFamily,
@@ -294,23 +288,6 @@ function artifactRound(family: ArtifactSchemaFamily, artifact: string): number |
   return identity?.family === family ? identity.round : null;
 }
 
-function qualificationAuditForInit(request: ArtifactInitRequest): { ok: true; content: string } | { ok: false; code: string; message: string } {
-  let taskContent: string;
-  try {
-    taskContent = readStableFileSync(path.join(request.taskDir, 'task.md'), { maxBytes: 1024 * 1024 }).bytes.toString('utf8');
-  } catch (error) {
-    return { ok: false, code: 'ARTIFACT_INIT_TASK_READ_FAILED', message: error instanceof Error ? error.message : String(error) };
-  }
-  const qualification = parseTaskQualification(taskContent);
-  if (!qualification.ok) return qualification;
-  if (!qualification.qualification.present) return { ok: true, content: '' };
-  const relations = expectedQualificationRelations(taskContent, request.family);
-  if (!relations.ok) return relations;
-  const audit = buildQualificationAudit(taskContent, { upstreamRelations: relations.relations ?? [] });
-  if (!audit.ok) return audit;
-  return { ok: true, content: `\n## 资格审计\n\n${renderQualificationAudit(audit.audit)}\n` };
-}
-
 function initializeArtifactSkeleton(request: ArtifactInitRequest): ArtifactFileResult {
   const schema = getArtifactSchema(request.family);
   if (!schema) return resultFailure('ARTIFACT_FAMILY_UNKNOWN', `unknown artifact family '${request.family}'`);
@@ -333,9 +310,7 @@ function initializeArtifactSkeleton(request: ArtifactInitRequest): ArtifactFileR
         artifact: request.artifact,
         ...(request.locale ? { locale: request.locale } : {})
       });
-      const audit = qualificationAuditForInit(request);
-      if (!audit.ok) return resultFailure(audit.code, audit.message);
-      const content = `${skeleton.trimEnd()}${audit.content}`;
+      const content = skeleton.trimEnd();
       const tempPath = path.join(request.taskDir, `.${request.artifact}.init-${process.pid}-${Date.now()}.tmp`);
       try {
         fs.writeFileSync(tempPath, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
