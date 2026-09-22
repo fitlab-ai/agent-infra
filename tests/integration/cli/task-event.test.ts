@@ -23,7 +23,7 @@ import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
-import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
+import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 
 const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n';
 
@@ -525,6 +525,68 @@ test('task-event applies the same execution lock to both manual validation famil
     assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
     assert.match(result.error.message, /EXECUTION_BUSY/);
   }
+});
+
+test('started replay rejects a different request identity and permanent input drift', () => {
+  const f = fixture();
+  const first = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-1', '--reason-code', 'user-request'
+  ]);
+  assert.equal(first.status, 0, first.stderr);
+
+  const requestConflict = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-2', '--reason-code', 'user-request'
+  ]);
+  assert.equal(requestConflict.status, 1);
+  assert.equal(JSON.parse(requestConflict.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+
+  fs.appendFileSync(f.file, '\n## Task Input\n\nChanged after start.\n');
+  const drifted = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-1', '--reason-code', 'user-request'
+  ]);
+  assert.equal(drifted.status, 1);
+  assert.match(JSON.parse(drifted.stdout).error.message, /permanent artifact input changed/u);
+});
+
+test('completion rejects permanent input drift after started', () => {
+  const f = fixture();
+  const started = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-1', '--reason-code', 'user-request'
+  ]);
+  assert.equal(started.status, 0, started.stderr);
+  fs.appendFileSync(f.file, '\n## Task Input\n\nChanged after start.\n');
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+  const digestArgs = completionDigestArgs(f.dir, 'plan.md', 'plan');
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-1', '--reason-code', 'user-request', '--artifact', 'plan.md', ...digestArgs
+  ]);
+  assert.equal(completed.status, 1);
+  assert.match(JSON.parse(completed.stdout).error.message, /permanent artifact input changed/u);
+});
+
+test('non-selection validation completion ignores unrelated version 2 facts', () => {
+  const f = fixture('code-review');
+  const content = fs.readFileSync(f.file, 'utf8');
+  const fact = {
+    version: 2, event: 'review-code.completed', output: 'review-code.md',
+    outputSha256: 'a'.repeat(64), semanticDigest: 'b'.repeat(64), requestId: 'review-1', result: '{}',
+    inputDigest: 'c'.repeat(64), resultDigest: 'd'.repeat(64), changeEvidenceDigest: null,
+    selectionReason: 'substantive-identity-matched'
+  };
+  fs.writeFileSync(f.file, updateTaskFrontmatter(content, { completion_facts: JSON.stringify([fact]) }));
+  const started = run(f.root, [f.id, 'validation-run.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  fs.writeFileSync(path.join(f.dir, 'validation-run.md'), '# Validation run\n');
+  const completed = run(f.root, [
+    f.id, 'validation-run.completed', '--agent', 'codex', '--artifact', 'validation-run.md'
+  ]);
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
 });
 
 test('task-event blocks other lifecycle starts while either manual validation family is open', () => {
@@ -1560,18 +1622,19 @@ test('review completion replays the same current result without another activity
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
 });
 
-test('review completion records a new result when the finalized review artifact changes', () => {
+test('review completion refuses to rewrite a completed review artifact', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);
   assert.equal(finalizeReview(f, scenario).status, 0);
   assert.equal(completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 }).status, 0);
-  const before = fs.readFileSync(f.file, 'utf8');
+  const beforeTask = fs.readFileSync(f.file, 'utf8');
   fs.appendFileSync(path.join(f.dir, scenario.artifact), '\nUpdated evidence.\n');
-  assert.equal(finalizeReview(f, scenario).status, 0);
-  const repeated = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
-  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
-  assert.equal(JSON.parse(repeated.stdout).status, 'applied');
-  assert.notDeepEqual(fs.readFileSync(f.file, 'utf8'), before);
+  const changedArtifact = fs.readFileSync(path.join(f.dir, scenario.artifact));
+  const finalized = finalizeReview(f, scenario);
+  assert.equal(finalized.status, 1);
+  assert.match(JSON.parse(finalized.stdout).error.message, /completed artifact/u);
+  assert.deepEqual(fs.readFileSync(path.join(f.dir, scenario.artifact)), changedArtifact);
+  assert.equal(fs.readFileSync(f.file, 'utf8'), beforeTask);
 });
 
 test('review completion rejects a changed reviewed input after an earlier completion', () => {
@@ -1725,7 +1788,7 @@ test('review-code completion anchors the task branch worktree when the task work
   assert.match(fs.readFileSync(f.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
 });
 
-test('review-code completion clears an existing anchor for an approved dirty review', () => {
+test('review-code completion rejects implementation drift after review started', () => {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
   const added = spawnSync('git', ['add', '.gitignore'], { cwd: f.root, encoding: 'utf8' });
@@ -1756,8 +1819,9 @@ test('review-code completion clears an existing anchor for an approved dirty rev
     f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code-r2.md',
     '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
   ]);
-  assert.equal(completed.status, 0, completed.stderr);
-  assert.match(fs.readFileSync(f.file, 'utf8'), /^last_reviewed_commit:\s*$/m);
+  assert.equal(completed.status, 1);
+  assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_ARTIFACT_CONFLICT');
+  assert.match(fs.readFileSync(f.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
 });
 
 test('review-code event allows a supplemental round after commit preparation', () => {

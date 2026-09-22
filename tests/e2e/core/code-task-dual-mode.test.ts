@@ -67,6 +67,7 @@ function seedLifecycleReceipts(taskDir: string) {
 function runDetect(files: Record<string, string>) {
   const fixture = makeFixture(files);
   const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-artifact", TASK_ID, "inspect", "--family", "code"], { cwd: fixture.root, encoding: "utf8" });
+  if (!result.stdout.trim()) throw new Error(result.stderr || 'task-artifact inspect produced no output');
   return {
     status: result.status,
     output: JSON.parse(result.stdout)
@@ -389,6 +390,7 @@ function runDetectWithTransportTimes(
   }
 
   const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-artifact", TASK_ID, "inspect", "--family", "code"], { cwd: fixture.root, encoding: "utf8" });
+  if (!result.stdout.trim()) throw new Error(result.stderr || 'task-artifact inspect produced no output');
   return {
     status: result.status,
     output: JSON.parse(result.stdout)

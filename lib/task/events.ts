@@ -815,6 +815,16 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       if (request.round !== undefined && request.round !== openIdentity.round) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `round ${request.round} conflicts with open round ${openIdentity.round}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       if (request.fixFor !== undefined && request.fixFor !== openIdentity.fixFor) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       if (request.implementationInput !== openIdentity.implementationInput) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+      const persistedSelection = parseOpenArtifactSelection(frontmatter.open_artifact_selection);
+      if (persistedSelection && persistedSelection.requestId !== (request.requestId ?? '')) {
+        return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'open started event has a different requestId' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+      }
+      if (persistedSelection) {
+        const resumed = resolveArtifactContext(request.taskRef, persistedSelection.family, { repoRoot: resolved.repoRoot, selectionOnly: true });
+        if (resumed.status !== 'ready' || !resumed.selection || resumed.selection.inputDigest !== persistedSelection.inputDigest) {
+          return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'permanent artifact input changed after the started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+        }
+      }
       normalized = { ...request, round: openIdentity.round, artifact: artifactName(FAMILY[initialParts.family].artifact, openIdentity.round), fixFor: openIdentity.fixFor, implementationInput: openIdentity.implementationInput };
       return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '', identity(normalized), openIdentity.row.started, frontmatter, null);
     }
@@ -1025,22 +1035,36 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
         message: 'completion requires the matching persisted artifact selection'
       }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
+    if (selectionManaged) {
+      const observed = resolveArtifactContext(normalized.taskRef, completedFamily, { repoRoot: resolved.repoRoot, selectionOnly: true });
+      if (observed.status !== 'ready' || !observed.selection
+        || observed.selection.artifact.name !== completedArtifact.name
+        || observed.selection.inputDigest !== openSelection!.inputDigest) {
+        return failed(normalized, {
+          code: 'EVENT_ARTIFACT_CONFLICT',
+          message: `permanent artifact input changed after the started event (expected ${openSelection!.inputDigest}, observed ${observed.selection?.inputDigest ?? 'unavailable'})`
+        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+      }
+    }
     try {
       if (selectionManaged) currentFact = currentCompletionFact(normalized, completedArtifact, openSelection!, resolved.repoRoot);
     } catch (error) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot inspect current completion result: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     }
-    if (existingFacts.some((fact) => sameCompletionFact(fact, currentFact!))) {
-      return successNoOp(
-        normalized,
-        resolved.taskId,
-        resolved.taskMdPath,
-        currentStep,
-        eventIdentity,
-        completionReceipt?.completedAt ?? metadata.timestamp,
-        frontmatter,
-        artifactContext
-      );
+    if (currentFact) {
+      const comparableFact = currentFact;
+      if (existingFacts.some((fact) => sameCompletionFact(fact, comparableFact))) {
+        return successNoOp(
+          normalized,
+          resolved.taskId,
+          resolved.taskMdPath,
+          currentStep,
+          eventIdentity,
+          completionReceipt?.completedAt ?? metadata.timestamp,
+          frontmatter,
+          artifactContext
+        );
+      }
     }
     try {
       const invalidation = invalidationMutationForCompletion(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp);

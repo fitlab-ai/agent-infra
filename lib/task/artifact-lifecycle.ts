@@ -18,7 +18,8 @@ import { parseLifecyclePathDecision, pathIncludes } from './lifecycle-path.ts';
 import type { LifecyclePathState } from './lifecycle-path.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { artifactSubstantiveDigest } from './artifact-operations.ts';
-import { captureWorktreeTree } from './workspace-snapshot.ts';
+import { captureRepositorySnapshot, captureWorktreeTree } from './workspace-snapshot.ts';
+import type { RepositorySnapshot } from './workspace-snapshot.ts';
 import { parseReworkIntentDocument } from './rework-intent.ts';
 import { buildArtifactInputDigest, parseCompletionFacts, selectArtifactDisposition } from './artifact-selection.ts';
 import type { ArtifactSelection } from './artifact-selection.ts';
@@ -111,6 +112,8 @@ type InspectOptions = {
   sourceArtifact?: string;
   sourceSha256?: string;
   selectionOnly?: boolean;
+  captureWorktreeTree?: (repoRoot: string, forcedPath: string | null) => string;
+  captureRepositorySnapshot?: (repoRoot: string) => RepositorySnapshot;
 };
 
 const BLOCKING_DIAGNOSTICS = new Set<ArtifactDiagnosticCode>([
@@ -383,6 +386,16 @@ function selectionRelation(family: ArtifactFamily): string {
   return family.startsWith('review-') ? 'reviewed-input' : 'required-input';
 }
 
+function reviewImplementationSnapshot(options: InspectOptions): RepositorySnapshot {
+  const repoRoot = options.repoRoot ?? process.cwd();
+  try {
+    return (options.captureRepositorySnapshot ?? captureRepositorySnapshot)(repoRoot);
+  } catch {
+    const worktreeTree = (options.captureWorktreeTree ?? captureWorktreeTree)(repoRoot, null);
+    return { head: 'unborn', headTree: 'unborn', worktreeTree };
+  }
+}
+
 function attachArtifactSelection(
   context: ArtifactContextResult,
   pathState: LifecyclePathState,
@@ -419,13 +432,22 @@ function attachArtifactSelection(
       family,
       taskInput: `${extractSection(taskContent, ['任务输入', 'Task Input'])}\n${extractSection(taskContent, ['需求', 'Requirements'])}`,
       lifecyclePath: family === 'analysis' ? 'analysis-input' : pathState.status === 'valid' ? pathState.decision.path : 'analysis-input',
-      upstream
+      upstream,
+      implementationSnapshot: family === 'review-code'
+        ? {
+          ...reviewImplementationSnapshot(options),
+          deliveryRemote: typeof frontmatter.delivery_remote === 'string' ? frontmatter.delivery_remote : '',
+          deliveryBaseRef: typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref : ''
+        }
+        : null
     });
     const changeEvidenceDigest = selectionEvidenceDigest(taskContent, family, options, context);
     const resultDigest = context.latest
       ? createHash('sha256').update(JSON.stringify({
         artifact: artifactSubstantiveDigest(fs.readFileSync(context.latest.path, 'utf8')),
-        ...(family === 'code' ? { worktreeTree: captureWorktreeTree(options.repoRoot ?? process.cwd(), null) } : {})
+        ...(family === 'code' ? {
+          worktreeTree: (options.captureWorktreeTree ?? captureWorktreeTree)(options.repoRoot ?? process.cwd(), null)
+        } : {})
       })).digest('hex')
       : null;
     let completionFact = null;
@@ -470,7 +492,51 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
     && !pathIncludes(pathState, inventory.family as never)) {
     return contextFailure(inventory, 'ARTIFACT_STAGE_NOT_SELECTED', `${inventory.family} is not in ${pathState.decision.path}`);
   }
-  if (inventory.family === 'code') return attachArtifactSelection(resolveCodeContext(inventory, options), pathState, options);
+  if (inventory.family === 'code') {
+    const code = resolveCodeContext(inventory, options);
+    const selected = attachArtifactSelection(code, pathState, options);
+    if (selected.status !== 'ready' || !selected.selection) return selected;
+    if (selected.selection.disposition === 'reuse-completed') return selected;
+    if (selected.codeMode?.mode === 'error') {
+      if (selected.selection.reasonCode === 'result-changed') {
+        return {
+          ...selected,
+          status: 'ready',
+          codeMode: {
+            ...selected.codeMode,
+            mode: 'init',
+            message: 'The implementation result changed after completion. Entering a new code round.'
+          },
+          error: null
+        };
+      }
+      return {
+        ...selected,
+        status: 'failed',
+        error: { code: 'ARTIFACT_INPUT_MISSING', message: selected.codeMode.message }
+      };
+    }
+    if (selected.codeMode?.mode === 'refused' && selected.codeMode.verdict === 'Approved') {
+      if (selected.selection.reasonCode !== 'result-changed') {
+        return {
+          ...selected,
+          status: 'refused',
+          error: { code: 'ARTIFACT_MODE_REFUSED', message: selected.codeMode.message }
+        };
+      }
+      return {
+        ...selected,
+        status: 'ready',
+        codeMode: {
+          ...selected.codeMode,
+          mode: 'init',
+          message: 'The implementation result changed after approval. Entering a new code round.'
+        },
+        error: null
+      };
+    }
+    return selected;
+  }
   const required = REQUIRED_INPUT[inventory.family as ArtifactFamily];
   const inputs: ArtifactIdentity[] = [];
   if (required) {
@@ -545,6 +611,33 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
     const qualificationError = qualificationErrorForArtifact(reviewCode.latest);
     if (qualificationError && !options.selectionOnly) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, reviewCode.latest.name);
   }
+  if (latestCode) {
+    try {
+      const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');
+      if (hasOpenArtifactRound(taskContent, 'code', latestCode.round)) {
+        const review = reviewCode.latest;
+        const openInputs = review ? [...inputs, review] : inputs;
+        const openVerdict = review ? parseVerdict(review.path) : null;
+        const openRow = locateActivityLog(taskContent)
+          ? startedBackedRows(pairEntries(locateActivityLog(taskContent)!.entries))
+            .find((row) => row.step.startsWith(`Code Task (Round ${latestCode.round}`) && !row.done)
+          : null;
+        const decisionInput = /, decision (II-[1-9]\d*)\)$/u.exec(openRow?.step ?? '')?.[1] ?? null;
+        const fixInput = /, fix for (review-code(?:-r\d+)?\.md)\)$/u.exec(openRow?.step ?? '')?.[1] ?? null;
+        const mode = decisionInput ? 'decision'
+          : fixInput || (openVerdict?.ok && openVerdict.verdict === 'Changes Requested') ? 'fix'
+            : 'init';
+        return withCodeMode(
+          inventory, openInputs, 'ready', mode, codeMax, reviewMax,
+          openVerdict?.ok ? openVerdict.verdict : null, fixInput ?? review?.name ?? null,
+          `Resuming open code round ${latestCode.round}.`,
+          decisionInput
+        );
+      }
+    } catch (error) {
+      return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error));
+    }
+  }
   if (!latestCode) {
     if (pathState.decision.path === 'full') {
       if (!reviewPlan.latest || reviewPlan.reviewedInput?.name !== source.latest.name) {
@@ -573,6 +666,14 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
     const qualificationError = qualificationErrorForArtifact(reviewPlan.latest);
     if (qualificationError && !options.selectionOnly) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', qualificationError, reviewPlan.latest.name);
   }
+  if (pathState.decision.path === 'full'
+    && (codePlanInput.input.name !== source.latest.name || codePlanInput.inputSha256 !== currentInputSha256)
+    && (!reviewPlan.latest || reviewPlan.reviewedInput?.name !== source.latest.name)) {
+    return withCodeMode(
+      inventory, inputs, 'refused', 'refused', codeMax, reviewMax, null, reviewPlan.latest?.name ?? null,
+      `Latest plan '${source.latest.name}' requires a matching approved review-plan before another code round.`
+    );
+  }
   if (pathState.decision.path === 'full' && reviewPlan.latest && reviewPlan.reviewedInput?.name === source.latest.name) {
     const verdict = parseVerdict(reviewPlan.latest.path);
     if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_VERDICT_INVALID', `${verdict.code}: ${verdict.message}`, reviewPlan.latest.name);
@@ -586,7 +687,8 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   }
   if (!reviewCode.latest || reviewCode.reviewedInput?.name !== latestCode.name) {
     const expected = reviewCode.next?.name ?? artifactName('review-code', reviewMax + 1);
-    return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `${expected} is required before another code round`, expected);
+    return withCodeMode(inventory, inputs, 'ready', 'error', codeMax, reviewMax, null, expected,
+      `${expected} is required before another code round`);
   }
   const review = reviewCode.latest;
   if (!review) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', 'latest review-code artifact is required');
@@ -615,11 +717,13 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   } catch (error) {
     return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', error instanceof Error ? error.message : String(error), review.name);
   }
-  if (verdict.verdict === 'Approved' || verdict.verdict === 'Rejected') {
+  if (verdict.verdict === 'Approved') {
+    return withCodeMode(inventory, [...inputs, review], 'ready', 'refused', codeMax, reviewMax, verdict.verdict, review.name,
+      `Latest ${review.name} verdict is Approved with no findings. Nothing to fix. Run /commit to proceed.`);
+  }
+  if (verdict.verdict === 'Rejected') {
     return withCodeMode(inventory, [...inputs, review], 'refused', 'refused', codeMax, reviewMax, verdict.verdict, review.name,
-      verdict.verdict === 'Approved'
-        ? `Latest ${review.name} verdict is Approved with no findings. Nothing to fix. Run /commit to proceed.`
-        : `Latest ${review.name} verdict is Rejected. Re-plan before re-running code-task.`);
+      `Latest ${review.name} verdict is Rejected. Re-plan before re-running code-task.`);
   }
   return withCodeMode(inventory, [...inputs, review], 'ready', 'fix', codeMax, reviewMax, verdict.verdict, review.name,
     `Latest ${review.name} requires or permits fixes. Entering fix mode.`);
@@ -688,7 +792,20 @@ export function validateArtifactPublication(taskDir: string, family: ArtifactFam
   const inventory = inspectArtifactDirectory(taskDir, family);
   const error = assertWritableInventory(inventory);
   if (error) return error;
-  if (inventory.next?.name === name || inventory.artifacts.some((artifact) => artifact.name === name)) return null;
+  if (inventory.next?.name === name) return null;
+  if (inventory.artifacts.some((artifact) => artifact.name === name)) {
+    try {
+      const task = parseTypedTaskFrontmatter(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'));
+      const facts = parseCompletionFacts(task.completion_facts);
+      if (!facts.ok) return { code: facts.code, message: facts.message };
+      if (facts.facts.some((fact) => fact.output === name)) {
+        return { code: 'ARTIFACT_IDENTITY_INVALID', message: `completed artifact '${name}' is immutable` };
+      }
+    } catch (error) {
+      return { code: 'ARTIFACT_SELECTION_INDETERMINATE', message: error instanceof Error ? error.message : String(error) };
+    }
+    return null;
+  }
   return { code: 'ARTIFACT_IDENTITY_INVALID', message: `artifact '${name}' is not a current or next ${family} slot` };
 }
 

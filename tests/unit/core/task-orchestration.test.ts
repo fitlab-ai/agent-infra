@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
-import { execFileSync } from 'node:child_process';
 
 import {
   activateMatchingOrchestrationDelegation,
@@ -540,7 +539,10 @@ test('route requires the latest review to bind the latest artifact structurally'
   fs.writeFileSync(path.join(f.taskDir, 'code-r2.md'), '# Code round 2\n');
   fs.utimesSync(path.join(f.taskDir, 'review-code.md'), new Date(), new Date());
 
-  assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).next, {
+  assert.deepEqual(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: f.root,
+    captureRepository: () => ({ head: 'head', headTree: 'head-tree', worktreeTree: 'worktree-tree' })
+  }).next, {
     action: 'review-code', role: 'reviewer', stage: 'review-code', round: 2, artifact: 'review-code-r2.md',
     requestedModel: null, requestedReasoningEffort: null
   });
@@ -548,7 +550,6 @@ test('route requires the latest review to bind the latest artifact structurally'
 
 test('route uses the same recommendation facts as lifecycle capability checks', () => {
   const f = approvedCodeFixture();
-  execFileSync('git', ['init'], { cwd: f.root, stdio: 'ignore' });
   const taskPath = path.join(f.taskDir, 'task.md');
   const content = fs.readFileSync(taskPath, 'utf8');
   const intent = {
@@ -558,7 +559,10 @@ test('route uses the same recommendation facts as lifecycle capability checks', 
   };
   fs.writeFileSync(taskPath, upsertSection(content, reworkIntentMutation(content, [intent])).content);
 
-  const routed = routeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const routed = routeOrchestration('TASK-20260101-000001', {
+    repoRoot: f.root,
+    captureWorktreeTree: () => 'before-tree'
+  });
   assert.equal(routed.error, null);
   assert.deepEqual(routed.next, {
     action: 'code-task', role: 'executor', stage: 'code', round: 2, artifact: 'code-r2.md',

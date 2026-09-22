@@ -67,6 +67,13 @@ type ArtifactInputDigestRequest = Readonly<{
     relation: string;
   }>[];
   changeEvidenceDigest?: string | null;
+  implementationSnapshot?: Readonly<{
+    head: string;
+    headTree: string;
+    worktreeTree: string;
+    deliveryRemote: string;
+    deliveryBaseRef: string;
+  }> | null;
 }>;
 
 type ArtifactSelectionRequest = Readonly<{
@@ -102,7 +109,8 @@ function buildArtifactInputDigest(request: ArtifactInputDigestRequest): string {
       .sort((left, right) => left.family.localeCompare(right.family)
         || left.round - right.round
         || left.artifact.localeCompare(right.artifact)
-        || left.relation.localeCompare(right.relation))
+        || left.relation.localeCompare(right.relation)),
+    ...(request.implementationSnapshot ? { implementationSnapshot: request.implementationSnapshot } : {})
   });
 }
 

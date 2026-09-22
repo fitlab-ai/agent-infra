@@ -9,6 +9,7 @@ import { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCand
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
 import { inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
 import { readArtifactRecoveryIntent } from '../../../../lib/task/artifact-repair-intent.ts';
+import { updateTaskFrontmatter } from '../../../../lib/task/frontmatter.ts';
 import {
   finalizeReviewSummaryContent,
   parseReviewSummary,
@@ -586,6 +587,29 @@ test('review finalization preserves summary-marked substantive duplicates byte-f
 
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'REVIEW_DECISION_DETAIL_INVALID');
+  assert.deepEqual(fs.readFileSync(f.artifactPath), before);
+});
+
+test('review finalization preserves a completed review artifact byte-for-byte', () => {
+  const f = domainFixture();
+  const taskPath = path.join(f.dir, 'task.md');
+  const task = fs.readFileSync(taskPath, 'utf8');
+  const fact = {
+    version: 2, event: 'review-analysis.completed', output: 'review-analysis.md',
+    outputSha256: 'a'.repeat(64), semanticDigest: 'b'.repeat(64), requestId: 'review-1', result: '{}',
+    inputDigest: 'c'.repeat(64), resultDigest: 'd'.repeat(64), changeEvidenceDigest: null,
+    selectionReason: 'substantive-identity-matched'
+  };
+  fs.writeFileSync(taskPath, updateTaskFrontmatter(task, { completion_facts: JSON.stringify([fact]) }));
+  const before = fs.readFileSync(f.artifactPath);
+
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.match(result.error?.message ?? '', /completed artifact/u);
   assert.deepEqual(fs.readFileSync(f.artifactPath), before);
 });
 

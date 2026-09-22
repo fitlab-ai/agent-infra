@@ -17,6 +17,7 @@ import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../../lib/
 import { createInvalidationOperation, invalidationMutation, targetIdFor, type InvalidationTarget } from '../../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../../lib/task/sections.ts';
+import { updateTaskFrontmatter } from '../../../../lib/task/frontmatter.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：变更需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现权限、持久化或外部契约变更。\n';
@@ -24,6 +25,7 @@ const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径*
 function fixture(files: Record<string, string> = {}) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-lifecycle-'));
   spawnSync('git', ['init', '-q'], { cwd: repoRoot });
+  fs.writeFileSync(path.join(repoRoot, '.gitignore'), '.agents/workspace/\n');
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
@@ -36,6 +38,24 @@ function addReceipt(f: ReturnType<typeof fixture>, receipt: Parameters<typeof up
   const content = fs.readFileSync(taskPath, 'utf8');
   const mutation = upsertArtifactReceipt(content, receipt);
   fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+}
+
+function seedCompletionFact(f: ReturnType<typeof fixture>, family: 'code' | 'review-code') {
+  const context = resolveArtifactContext(TASK_ID, family, { repoRoot: f.repoRoot });
+  assert.ok(context.selection, JSON.stringify(context.error));
+  assert.ok(context.latest);
+  assert.ok(context.selection?.observedResultDigest);
+  const fact = {
+    version: 2, event: `${family}.completed`, output: context.latest!.name,
+    outputSha256: sha256File(context.latest!.path), semanticDigest: 'b'.repeat(64),
+    requestId: `${family}-1`, result: '{}', inputDigest: context.selection!.inputDigest,
+    resultDigest: context.selection!.observedResultDigest!, changeEvidenceDigest: context.selection!.changeEvidenceDigest,
+    selectionReason: context.selection!.reasonCode
+  };
+  const taskPath = path.join(f.taskDir, 'task.md');
+  fs.writeFileSync(taskPath, updateTaskFrontmatter(fs.readFileSync(taskPath, 'utf8'), {
+    completion_facts: JSON.stringify([fact])
+  }));
 }
 
 function enableQualification(f: ReturnType<typeof fixture>) {
@@ -333,6 +353,66 @@ test('code fix routing trusts the review receipt when code and review family rou
   assert.equal(result.status, 'ready');
   assert.equal(result.codeMode?.mode, 'fix');
   assert.equal(result.codeMode?.reviewArtifact, 'review-code.md');
+});
+
+test('code selection reuses completed work before review and creates a round only after the result changes', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# plan\n', 'code.md': '# code\n' });
+  addReceipt(f, {
+    event: 'code.completed', output: 'code.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  seedCompletionFact(f, 'code');
+
+  const unchanged = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
+  assert.equal(unchanged.status, 'ready');
+  assert.equal(unchanged.selection?.disposition, 'reuse-completed');
+
+  fs.writeFileSync(path.join(f.repoRoot, 'app.txt'), 'changed implementation\n');
+  const changed = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
+  assert.equal(changed.status, 'ready');
+  assert.equal(changed.codeMode?.mode, 'init');
+  assert.equal(changed.selection?.disposition, 'create-next');
+  assert.equal(changed.selection?.reasonCode, 'result-changed');
+});
+
+test('approved code selection reuses an unchanged completed implementation', () => {
+  const f = fixture({
+    'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# plan\n', 'code.md': '# code\n',
+    'review-code.md': '# Review Code\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n'
+  });
+  addReceipt(f, {
+    event: 'code.completed', output: 'code.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt: '2026-01-01 00:01:00+00:00'
+  });
+  seedCompletionFact(f, 'code');
+
+  const result = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.selection?.disposition, 'reuse-completed');
+});
+
+test('review-code selection binds the current implementation snapshot', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# plan\n', 'code.md': '# code\n' });
+  fs.writeFileSync(path.join(f.repoRoot, '.gitignore'), '.agents/workspace/\n');
+  fs.writeFileSync(path.join(f.repoRoot, 'app.txt'), 'version one\n');
+  spawnSync('git', ['add', '.'], { cwd: f.repoRoot });
+  spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'initial'], { cwd: f.repoRoot });
+  fs.writeFileSync(path.join(f.taskDir, 'review-code.md'), '# Review Code\n');
+  addReceipt(f, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt: '2026-01-01 00:01:00+00:00'
+  });
+  seedCompletionFact(f, 'review-code');
+  assert.equal(resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot }).selection?.disposition, 'reuse-completed');
+
+  fs.writeFileSync(path.join(f.repoRoot, 'app.txt'), 'version two\n');
+  const changed = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(changed.selection?.disposition, 'create-next');
+  assert.equal(changed.selection?.reasonCode, 'input-changed');
 });
 
 test('revision context fails closed when a review points to a future input', () => {

@@ -4,16 +4,16 @@ import { createHash } from 'node:crypto';
 
 import { artifactSubstantiveDigest, canonicalSemanticDigest } from './artifact-operations.ts';
 import { buildArtifactInputDigest, parseCompletionFacts } from './artifact-selection.ts';
-import type { CompletionFactV2, OpenArtifactSelection } from './artifact-selection.ts';
+import type { CompletionFactV2 } from './artifact-selection.ts';
 import { parseArtifactName } from './artifact-name.ts';
-import { sha256File } from './artifact-receipts.ts';
+import { receiptForOutput, sha256File } from './artifact-receipts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { extractSection } from './sections.ts';
-import { parseQualificationAudit } from './qualification-audit.ts';
+import { parseQualificationAudit, validateQualificationAudit } from './qualification-audit.ts';
 import { parseLifecyclePathDecision } from './lifecycle-path.ts';
-import { inspectArtifactDirectory, hasOpenArtifactRound, resolveArtifactContext } from './artifact-lifecycle.ts';
-import { captureWorktreeTree } from './workspace-snapshot.ts';
+import { inspectArtifactDirectory, hasOpenArtifactRound } from './artifact-lifecycle.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { writeTask } from './write.ts';
 
 type LegacyCompletionFact = Readonly<{
@@ -45,8 +45,7 @@ function parseLegacyFacts(value: unknown): readonly LegacyCompletionFact[] | nul
   for (const item of parsed) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
     const row = item as Record<string, unknown>;
-    const convertibleV2 = row.version === 2 && row.selectionReason === 'converted-v1';
-    if ((row.version !== undefined && !convertibleV2)
+    if (row.version !== undefined
       || typeof row.event !== 'string' || !row.event
       || typeof row.output !== 'string' || !row.output
       || !/^[a-f0-9]{64}$/u.test(String(row.outputSha256 ?? ''))
@@ -67,7 +66,7 @@ function convertArtifactFact(
   taskDir: string,
   taskInput: string,
   lifecyclePath: string,
-  repoRoot: string
+  taskContent: string
 ): CompletionFactV2 {
   const identity = parseArtifactName(fact.output);
   if (!identity) throw new Error(`completion fact output '${fact.output}' is not canonical`);
@@ -77,20 +76,39 @@ function convertArtifactFact(
   if (canonicalSemanticDigest(content) !== fact.semanticDigest) throw new Error(`completion fact semantic digest for '${fact.output}' changed`);
   const audit = parseQualificationAudit(content);
   if (!audit.ok) throw new Error(`${audit.code}: ${audit.message}`);
+  if (!audit.audit.present || !audit.audit.snapshot) {
+    throw new Error(`completion fact '${fact.output}' has no historical qualification snapshot`);
+  }
+  const validatedAudit = validateQualificationAudit(taskContent, content);
+  if (!validatedAudit.ok) throw new Error(`${validatedAudit.code}: ${validatedAudit.message}`);
+  if (identity.family === 'code' || identity.family === 'review-code') {
+    throw new Error(`completion fact '${fact.output}' has no recoverable historical implementation snapshot`);
+  }
   const reviewedFamily = identity.family === 'review-analysis' ? 'analysis'
-    : identity.family === 'review-plan' ? 'plan'
-      : identity.family === 'review-code' ? 'code' : null;
+    : identity.family === 'review-plan' ? 'plan' : null;
   const upstream = audit.audit.upstreamRelations.filter((relation) => reviewedFamily
     ? relation.upstreamFamily === reviewedFamily
     : identity.family === 'plan' ? relation.upstreamFamily === 'analysis'
-      : identity.family === 'code' ? ['analysis', 'plan'].includes(relation.upstreamFamily)
-        : false).map((relation) => ({
+      : false).map((relation) => ({
     family: relation.upstreamFamily,
     artifact: relation.upstreamArtifact,
     round: relation.upstreamRound,
     sha256: relation.upstreamSha256,
     relation: relation.relation
   }));
+  for (const relation of upstream) {
+    const upstreamPath = path.join(taskDir, relation.artifact);
+    if (sha256File(upstreamPath) !== relation.sha256) {
+      throw new Error(`upstream artifact '${relation.artifact}' changed on disk`);
+    }
+  }
+  if (reviewedFamily || identity.family === 'plan') {
+    const receipt = receiptForOutput(taskContent, fact.output);
+    const expected = upstream.find((relation) => relation.relation === (reviewedFamily ? 'reviewed-input' : 'required-input'));
+    if (!receipt || !expected || receipt.input !== expected.artifact || receipt.inputSha256 !== expected.sha256) {
+      throw new Error(`completion fact '${fact.output}' has no matching historical receipt`);
+    }
+  }
   const inputDigest = buildArtifactInputDigest({
     family: identity.family,
     taskInput,
@@ -98,8 +116,7 @@ function convertArtifactFact(
     upstream
   });
   const resultDigest = createHash('sha256').update(JSON.stringify({
-    artifact: artifactSubstantiveDigest(content),
-    ...(identity.family === 'code' ? { worktreeTree: captureWorktreeTree(repoRoot, null) } : {})
+    artifact: artifactSubstantiveDigest(content)
   })).digest('hex');
   return {
     version: 2, ...fact, inputDigest, resultDigest,
@@ -108,31 +125,7 @@ function convertArtifactFact(
   };
 }
 
-function currentOpenSelection(taskRef: string, taskContent: string, repoRoot: string): OpenArtifactSelection | null {
-  const resolved = resolveTaskRef(taskRef, { repoRoot });
-  if (!resolved.ok) throw new Error(resolved.message);
-  const families = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
-  for (const family of families) {
-    const inventory = inspectArtifactDirectory(resolved.taskDir, family);
-    const rounds = [inventory.latest?.round, inventory.next?.round].filter((round): round is number => round !== undefined);
-    if (!rounds.some((round) => hasOpenArtifactRound(taskContent, family, round))) continue;
-    const context = resolveArtifactContext(taskRef, family, { repoRoot });
-    if (context.status !== 'ready' || !context.selection) throw new Error(context.error?.message ?? `cannot reconstruct open ${family} selection`);
-    return {
-      version: 1,
-      family: context.selection.artifact.family,
-      artifact: context.selection.artifact.name,
-      round: context.selection.artifact.round,
-      inputDigest: context.selection.inputDigest,
-      changeEvidenceDigest: context.selection.changeEvidenceDigest,
-      selectionReason: context.selection.reasonCode,
-      requestId: ''
-    };
-  }
-  return null;
-}
-
-function convertCompletionFacts(taskRef: string, options: Readonly<{ repoRoot?: string; dryRun?: boolean }> = {}): ConversionResult {
+function convertCompletionFactsUnlocked(taskRef: string, options: Readonly<{ repoRoot?: string; dryRun?: boolean }> = {}): ConversionResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failure(resolved.code, resolved.message);
   let content: string;
@@ -144,7 +137,7 @@ function convertCompletionFacts(taskRef: string, options: Readonly<{ repoRoot?: 
     return failure('ARTIFACT_FACT_CONVERSION_INVALID', error instanceof Error ? error.message : String(error));
   }
   const already = parseCompletionFacts(frontmatter.completion_facts);
-  if (already.ok && !already.facts.some((fact) => fact.selectionReason === 'converted-v1')) {
+  if (already.ok) {
     return { status: 'no-op', changed: false, converted: 0, error: null };
   }
   const legacy = parseLegacyFacts(frontmatter.completion_facts);
@@ -156,14 +149,14 @@ function convertCompletionFacts(taskRef: string, options: Readonly<{ repoRoot?: 
     if (pathState.status !== 'valid') throw new Error(pathState.message);
     const taskInput = `${extractSection(content, ['任务输入', 'Task Input'])}\n${extractSection(content, ['需求', 'Requirements'])}`;
     const converted = legacy.map((fact) => convertArtifactFact(
-      fact, resolved.taskDir, taskInput, pathState.decision.path, resolved.repoRoot
+      fact, resolved.taskDir, taskInput, pathState.decision.path, content
     ));
-    const open = currentOpenSelection(taskRef, content, resolved.repoRoot);
-    if (open && open.family !== 'code') throw new Error('open legacy selection can only be converted when its request identity is recoverable');
-    const openSelection = open ? {
-      ...open,
-      requestId: `code-task:${resolved.taskId}:${open.artifact}`
-    } : null;
+    for (const family of ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const) {
+      const inventory = inspectArtifactDirectory(resolved.taskDir, family);
+      if (inventory.artifacts.some((artifact) => hasOpenArtifactRound(content, family, artifact.round))) {
+        throw new Error('open artifact selection cannot be reconstructed from legacy completion facts');
+      }
+    }
     const result = writeTask({
       taskRef,
       expectedState: resolved.state,
@@ -171,14 +164,29 @@ function convertCompletionFacts(taskRef: string, options: Readonly<{ repoRoot?: 
       mutations: [{
         kind: 'frontmatter',
         set: {
-          completion_facts: JSON.stringify(converted),
-          ...(openSelection ? { open_artifact_selection: JSON.stringify(openSelection) } : {})
+          completion_facts: JSON.stringify(converted)
         }
       }]
     }, { repoRoot: resolved.repoRoot });
     if (result.status === 'failed') return failure(result.error.code, result.error.message);
     return { status: result.status, changed: result.changed, converted: converted.length, error: null };
   } catch (error) {
+    return failure('ARTIFACT_FACT_CONVERSION_INVALID', error instanceof Error ? error.message : String(error));
+  }
+}
+
+function convertCompletionFacts(taskRef: string, options: Readonly<{ repoRoot?: string; dryRun?: boolean }> = {}): ConversionResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failure(resolved.code, resolved.message);
+  try {
+    return withTaskExecutionLock(
+      resolved.repoRoot,
+      resolved.taskId,
+      'task-artifact.convert-facts',
+      () => convertCompletionFactsUnlocked(taskRef, { ...options, repoRoot: resolved.repoRoot })
+    );
+  } catch (error) {
+    if (error instanceof TaskExecutionLockError) return failure(error.code, error.message);
     return failure('ARTIFACT_FACT_CONVERSION_INVALID', error instanceof Error ? error.message : String(error));
   }
 }
