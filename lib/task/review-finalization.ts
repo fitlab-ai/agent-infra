@@ -16,7 +16,6 @@ import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
-import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -30,7 +29,6 @@ type ReviewFinalizationErrorCode =
   | 'REVIEW_SUMMARY_PLACEHOLDER_INVALID'
   | 'REVIEW_SUMMARY_COUNT_MISMATCH'
   | 'REVIEW_ARTIFACT_STRUCTURE_INVALID'
-  | 'REVIEW_ARTIFACT_QUALIFICATION_INVALID'
   | 'REVIEW_DECISION_DETAIL_INVALID'
   | 'REVIEW_ARTIFACT_CONFLICT'
   | 'REVIEW_PROVENANCE_INVALID'
@@ -143,10 +141,8 @@ function preflightReviewSummaryUnlocked(
   const publicationError = validateArtifactPublication(resolved.taskDir, spec.family, request.artifact);
   if (publicationError) return preflightFailed(request, 'REVIEW_ARTIFACT_IDENTITY_INVALID', publicationError.message, resolved.taskId);
 
-  let taskContent: string;
   let content: string;
   try {
-    taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
     const validated = validateCompletedArtifact(resolved.taskDir, spec.family, request.artifact);
     if (!validated.ok) return preflightFailed(request, validated.error.code === 'ARTIFACT_NOT_REGULAR' ? 'REVIEW_ARTIFACT_NOT_REGULAR' : 'REVIEW_ARTIFACT_IDENTITY_INVALID', validated.error.message, resolved.taskId);
     content = fs.readFileSync(validated.artifact.path, 'utf8');
@@ -163,21 +159,12 @@ function preflightReviewSummaryUnlocked(
   const semanticDigest = canonicalSemanticDigest(content);
   const detail = inspectDecisionDetailDuplicates(content);
   const structure = inspectArtifactContract(content, getArtifactSchema(spec.family)!);
-  const expected = expectedQualificationRelations(taskContent, spec.family);
-  if (!expected.ok) return preflightFailed(request, 'REVIEW_ARTIFACT_QUALIFICATION_INVALID', `${expected.code}: ${expected.message}`, resolved.taskId, { artifactSha256, semanticDigest });
-  const qualification = validateQualificationAudit(taskContent, content, {
-    family: spec.family,
-    artifact: request.artifact,
-    expectedUpstreamRelations: expected.relations
-  });
-  const qualificationError = qualification.ok ? null : qualification;
-  if (!detail.ok || !structure.ok || qualificationError) {
+  if (!detail.ok || !structure.ok) {
     const diagnostics = [
       ...(!detail.ok ? [`${detail.code}: ${detail.message}`] : []),
-      ...structure.diagnostics.map((item) => `${item.code}: ${item.message}`),
-      ...(qualificationError ? [`${qualificationError.code}: ${qualificationError.message}`] : [])
+      ...structure.diagnostics.map((item) => `${item.code}: ${item.message}`)
     ].join('; ');
-    return preflightFailed(request, !detail.ok ? 'REVIEW_DECISION_DETAIL_INVALID' : !structure.ok ? 'REVIEW_ARTIFACT_STRUCTURE_INVALID' : 'REVIEW_ARTIFACT_QUALIFICATION_INVALID', diagnostics, resolved.taskId, {
+    return preflightFailed(request, !detail.ok ? 'REVIEW_DECISION_DETAIL_INVALID' : 'REVIEW_ARTIFACT_STRUCTURE_INVALID', diagnostics, resolved.taskId, {
       artifactSha256, semanticDigest,
     });
   }

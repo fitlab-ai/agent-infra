@@ -40,7 +40,6 @@ import type { OrchestrationRun } from "./orchestration.ts";
 import { resolveDeliveryTarget } from "./delivery-target.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
-import { validateQualificationAudit } from "./qualification-audit.ts";
 import { getArtifactSchema } from "./artifact-schema.ts";
 import { inspectArtifactContract } from "./artifact-operations.ts";
 import type { VerificationShared } from "./verification-types.ts";
@@ -510,19 +509,6 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
   }
 
   const content = fs.readFileSync(artifactPath, "utf8");
-  let taskContent = "";
-  const taskPath = path.join(taskDir, "task.md");
-  if (fs.existsSync(taskPath)) {
-    try {
-      taskContent = fs.readFileSync(taskPath, "utf8");
-    } catch (error) {
-      return failResult("artifact", `Cannot read task qualification contract: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  if (taskContent && /^review-(?:analysis|plan|code)$/.test(skillName)) {
-    const qualification = validateQualificationAudit(taskContent, content, { artifact: path.basename(artifactPath) });
-    if (!qualification.ok) return failResult("artifact", `${path.basename(artifactPath)} has qualification audit errors: ${qualification.code}: ${qualification.message}`);
-  }
   const schemaFamily = skillName === "analyze-task"
     ? "analysis"
     : skillName === "review-analysis"
@@ -546,9 +532,7 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
   }
   if (localFamily) {
     const local = validateLocalArtifact(content, {
-      family: localFamily,
-      ...(taskContent ? { taskContent } : {}),
-      artifact: path.basename(artifactPath)
+      family: localFamily
     });
     if (!local.ok) {
       return failResult(

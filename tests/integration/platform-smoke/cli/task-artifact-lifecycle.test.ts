@@ -24,6 +24,7 @@ const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径*
 function fixture(files: Record<string, string> = {}) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-lifecycle-'));
   spawnSync('git', ['init', '-q'], { cwd: repoRoot });
+  fs.writeFileSync(path.join(repoRoot, '.gitignore'), '.agents/workspace/\n');
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
@@ -181,8 +182,7 @@ test('context resolves required latest inputs from review receipts', () => {
   const review = resolveArtifactContext(TASK_ID, 'review-plan', { repoRoot: f.repoRoot });
   assert.equal(plan.status, 'ready', JSON.stringify(plan.error));
   assert.deepEqual(plan.inputs.map((item) => item.name), ['analysis-r2.md', 'review-plan.md']);
-  assert.equal(review.status, 'failed');
-  assert.equal(review.error?.code, 'ARTIFACT_STAGE_NOT_SELECTED');
+  assert.equal(review.status, 'ready');
   assert.equal(inspectTaskArtifacts(TASK_ID, 'review-plan', { repoRoot: f.repoRoot }).reviewedInput?.name, 'plan-r2.md');
 });
 
@@ -204,7 +204,7 @@ test('code context selects analysis or plan from the canonical lifecycle path', 
   assert.equal(rejected.error?.code, 'LIFECYCLE_PATH_INVALID');
 });
 
-test('qualification recovery accepts legacy optional context for analysis and plan but rejects a legacy required input', () => {
+test('artifact context accepts available inputs without qualification authorization', () => {
   const f = fixture({
     'analysis.md': '# analysis\n',
     'review-analysis.md': '**\u5ba1\u67e5\u8f93\u5165**\uff1a`analysis.md`\n',
@@ -235,13 +235,12 @@ test('qualification recovery accepts legacy optional context for analysis and pl
   assert.deepEqual(planRecovery.inputs.map((item) => item.name), ['analysis.md', 'review-plan.md']);
 });
 
-test('qualification recovery rejects legacy optional context outside analysis and plan', () => {
+test('artifact context treats qualification data as context outside analysis and plan', () => {
   const codeFixture = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# plan\n', 'code.md': '# legacy code\n' });
   enableQualification(codeFixture);
   writeQualifiedArtifact(codeFixture, 'plan.md');
   const code = resolveArtifactContext(TASK_ID, 'code', { repoRoot: codeFixture.repoRoot });
-  assert.equal(code.status, 'failed');
-  assert.equal(code.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+  assert.equal(code.status, 'ready');
 
   const reviewCodeFixture = fixture({
     'analysis.md': STANDARD_ANALYSIS,
@@ -252,19 +251,17 @@ test('qualification recovery rejects legacy optional context outside analysis an
   enableQualification(reviewCodeFixture);
   writeQualifiedArtifact(reviewCodeFixture, 'code.md');
   const reviewCode = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: reviewCodeFixture.repoRoot });
-  assert.equal(reviewCode.status, 'failed');
-  assert.equal(reviewCode.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+  assert.equal(reviewCode.status, 'ready');
 
   for (const family of ['manual-validation', 'validation-run'] as const) {
     const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'review-code.md': '# legacy review code\n' });
     enableQualification(f);
     const result = resolveArtifactContext(TASK_ID, family, { repoRoot: f.repoRoot });
-    assert.equal(result.status, 'failed');
-    assert.equal(result.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+    assert.equal(result.status, 'ready');
   }
 });
 
-test('review references ignore mtime order and fail closed on content changes', () => {
+test('review references remain optional context after input content changes', () => {
   const f = fixture({
     'analysis.md': '# analysis\n',
     'review-analysis.md': '**审查输入**：`analysis.md`\n'
@@ -281,8 +278,63 @@ test('review references ignore mtime order and fail closed on content changes', 
   assert.equal(resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot }).status, 'ready');
   fs.appendFileSync(path.join(f.taskDir, 'analysis.md'), 'changed\n');
   const changed = resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
-  assert.equal(changed.status, 'failed');
-  assert.equal(changed.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+  assert.equal(changed.status, 'ready');
+});
+
+test('change-request reviews create only while they target the latest artifact', () => {
+  const scenarios: Array<{
+    family: 'analysis' | 'plan';
+    reviewFamily: 'review-analysis' | 'review-plan';
+    files: Record<string, string>;
+    reviewed: string;
+  }> = [
+    {
+      family: 'analysis' as const,
+      reviewFamily: 'review-analysis' as const,
+      files: {
+        'analysis.md': '# analysis\n',
+        'analysis-r2.md': '# revised analysis\n',
+        'review-analysis.md': '## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n'
+      },
+      reviewed: 'analysis.md'
+    },
+    {
+      family: 'plan' as const,
+      reviewFamily: 'review-plan' as const,
+      files: {
+        'analysis.md': STANDARD_ANALYSIS,
+        'plan.md': '# plan\n',
+        'plan-r2.md': '# revised plan\n',
+        'review-plan.md': '## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n'
+      },
+      reviewed: 'plan.md'
+    }
+  ];
+  for (const scenario of scenarios) {
+    const f = fixture(scenario.files);
+    const review = `${scenario.reviewFamily}.md`;
+    addReceipt(f, {
+      event: `${scenario.reviewFamily}.completed`, output: review, input: scenario.reviewed,
+      inputSha256: sha256File(path.join(f.taskDir, scenario.reviewed)), completedAt: '2026-01-01 00:00:00+00:00'
+    });
+
+    const result = resolveArtifactContext(TASK_ID, scenario.family, { repoRoot: f.repoRoot });
+    assert.equal(result.status, 'ready', JSON.stringify(result.error));
+    assert.equal(result.selection?.disposition, 'reuse', scenario.family);
+  }
+
+  const current = fixture({
+    'analysis.md': '# analysis\n',
+    'review-analysis.md': '## 审查摘要\n\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，1 主要，0 次要 / **人工校验**：0\n'
+  });
+  addReceipt(current, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(current.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  assert.equal(
+    resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: current.repoRoot }).selection?.disposition,
+    'create'
+  );
 });
 
 test('standard-path code replan routing compares plan content with the code input receipt', () => {
@@ -335,7 +387,35 @@ test('code fix routing trusts the review receipt when code and review family rou
   assert.equal(result.codeMode?.reviewArtifact, 'review-code.md');
 });
 
-test('revision context fails closed when a review points to a future input', () => {
+test('code selection reuses completed work without explicit change evidence', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# plan\n', 'code.md': '# code\n' });
+  addReceipt(f, {
+    event: 'code.completed', output: 'code.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  const unchanged = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
+  assert.equal(unchanged.status, 'ready');
+  assert.equal(unchanged.selection?.disposition, 'reuse');
+});
+
+test('code selection creates a new round for explicit change evidence', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS, 'plan.md': '# plan\n', 'code.md': '# code\n' });
+  addReceipt(f, {
+    event: 'code.completed', output: 'code.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  const result = resolveArtifactContext(TASK_ID, 'code', {
+    repoRoot: f.repoRoot,
+    sourceFinding: 'CD-1',
+    sourceArtifact: 'review-code.md',
+    sourceSha256: 'a'.repeat(64)
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.selection?.disposition, 'create');
+  assert.equal(result.selection?.artifact.name, 'code-r2.md');
+});
+
+test('revision context does not use file timestamps as authorization', () => {
   const f = fixture({ 'analysis.md': '# analysis', 'review-analysis.md': '**Review Input**: `analysis.md`\n' });
   const reviewPath = path.join(f.taskDir, 'review-analysis.md');
   const analysisPath = path.join(f.taskDir, 'analysis.md');
@@ -344,6 +424,5 @@ test('revision context fails closed when a review points to a future input', () 
   const future = new Date(Date.now());
   fs.utimesSync(analysisPath, future, future);
   const result = resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+  assert.equal(result.status, 'ready');
 });

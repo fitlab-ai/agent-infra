@@ -63,7 +63,8 @@ function routeKeysFromHandlerBranches(): Set<string> {
     ...['preflight', 'finalize-summary'].map((selector) => ['task-review', selector] as const)
   ]) {
     if (command === 'task-artifact') {
-      const args = ['TASK-20260101-000001', selector, '--family', 'plan'];
+      const args = ['TASK-20260101-000001', selector];
+      args.push('--family', 'plan');
       if (selector !== 'inspect') args.push('--artifact', 'plan.md');
       keys.add(routeKey(command, parseArtifactCommand(args).operation));
     } else if (command === 'task-review') {

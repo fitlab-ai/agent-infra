@@ -100,6 +100,7 @@ function fixture(step = 'requirement-analysis-review') {
   const explicitStep = arguments.length > 0;
   const root = makeTempDir('task-event-');
   spawnSync('git', ['init', '-q'], { cwd: root });
+  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
@@ -525,6 +526,48 @@ test('task-event applies the same execution lock to both manual validation famil
   }
 });
 
+test('started replay is idempotent despite request identity and input drift', () => {
+  const f = fixture();
+  const first = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-1', '--reason-code', 'user-request'
+  ]);
+  assert.equal(first.status, 0, first.stderr);
+
+  const requestConflict = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-2', '--reason-code', 'user-request'
+  ]);
+  assert.equal(requestConflict.status, 0, requestConflict.stderr);
+  assert.equal(JSON.parse(requestConflict.stdout).status, 'no-op');
+
+  fs.appendFileSync(f.file, '\n## Task Input\n\nChanged after start.\n');
+  const drifted = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-1', '--reason-code', 'user-request'
+  ]);
+  assert.equal(drifted.status, 0, drifted.stderr);
+  assert.equal(JSON.parse(drifted.stdout).status, 'no-op');
+});
+
+test('completion accepts the skill result when task input changes after started', () => {
+  const f = fixture();
+  const started = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-1', '--reason-code', 'user-request'
+  ]);
+  assert.equal(started.status, 0, started.stderr);
+  fs.appendFileSync(f.file, '\n## Task Input\n\nChanged after start.\n');
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+  const digestArgs = completionDigestArgs(f.dir, 'plan.md', 'plan');
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', 'plan-request-1', '--reason-code', 'user-request', '--artifact', 'plan.md', ...digestArgs
+  ]);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
+});
+
 test('task-event blocks other lifecycle starts while either manual validation family is open', () => {
   for (const event of ['manual-validation.started', 'validation-run.started']) {
     const f = fixture('code-review');
@@ -555,15 +598,13 @@ test('manual-validation started persists its transaction identity for idempotent
   assert.equal(JSON.parse(conflict.stdout).error.code, 'EVENT_LOG_CONFLICT');
 });
 
-test('task-event requires an approved code review before either manual validation family starts', () => {
+test('standalone manual validation does not require an approved code review', () => {
   for (const event of ['manual-validation.started', 'validation-run.started']) {
     const f = fixture('code-review');
     fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewArtifact('Code Review', 'code.md', '拒绝'));
-    const blocked = run(f.root, [f.id, event, '--agent', 'codex']);
-    assert.equal(blocked.status, 1, blocked.stderr);
-    const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
-    assert.equal(result.error.code, 'EVENT_TRANSITION_INVALID');
-    assert.match(result.error.message, /CODE_REVIEW_NOT_APPROVED/);
+    const started = run(f.root, [f.id, event, '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stderr);
+    assert.equal(JSON.parse(started.stdout).status, 'applied');
   }
 });
 
@@ -736,7 +777,10 @@ test('plan event reopens technical design after commit preparation', () => {
   const f = fixture('commit');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan round 1\n');
 
-  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--reason-code', 'new-requirement',
+    '--request-id', `${f.id}:plan-rework`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stdout || started.stderr);
   const startedResult = JSON.parse(started.stdout);
   assert.equal(startedResult.status, 'applied');
@@ -747,7 +791,8 @@ test('plan event reopens technical design after commit preparation', () => {
 
   fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
   const completed = run(f.root, [
-    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan'),
+    '--reason-code', 'new-requirement', '--request-id', `${f.id}:plan-rework`, '--initiator', 'human'
   ]);
   assert.equal(completed.status, 0, completed.stdout || completed.stderr);
   assert.equal(JSON.parse(completed.stdout).toStep, 'technical-design');
@@ -788,7 +833,7 @@ test('plan event reopens technical design after code review', () => {
   assert.match(content, /`plan\.md`/);
 });
 
-test('plan event rejects an approved review whose input hash is stale', () => {
+test('standalone plan start does not require a fresh analysis review', () => {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
   addReceipt(f.file, {
@@ -797,13 +842,9 @@ test('plan event rejects an approved review whose input hash is stale', () => {
   });
   fs.appendFileSync(path.join(f.dir, 'analysis.md'), '# Changed after review\n');
 
-  const before = fs.readFileSync(f.file);
-  const blocked = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
-  assert.equal(blocked.status, 1);
-  const result = JSON.parse(blocked.stdout) as { error: { code: string; message: string } };
-  assert.equal(result.error.code, 'ARTIFACT_INPUT_MISSING');
-  assert.match(result.error.message, /requires a matching approved review-analysis/);
-  assert.deepEqual(fs.readFileSync(f.file), before);
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(JSON.parse(started.stdout).status, 'applied');
 });
 
 test('completed event validates orchestration provenance before writing task state', () => {
@@ -910,7 +951,10 @@ test('orchestrated completion advances one matching activated delegation', () =>
 
 test('orchestrated completion reports a distinct partial-write error when the run commit fails', () => {
   const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  assert.equal(run(f.root, [
+    f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+    '--request-id', `test:${f.id}:plan`, '--reason-code', 'user-request'
+  ]).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
@@ -942,7 +986,7 @@ test('orchestrated completion reports a distinct partial-write error when the ru
   });
 
   assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'EVENT_ORCHESTRATION_COMMIT_FAILED');
+  assert.equal(result.error?.code, 'EVENT_ORCHESTRATION_COMMIT_FAILED', JSON.stringify(result));
   assert.notDeepEqual(fs.readFileSync(f.file), taskBefore);
   assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.status, 'activated');
 });
@@ -1048,7 +1092,10 @@ test('historical done-only activity does not suppress a new current start', () =
 test('analysis can restart from code when task requirements expand', () => {
   const f = fixture('code');
 
-  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'analyze.started', '--agent', 'codex', '--reason-code', 'new-requirement',
+    '--request-id', `${f.id}:requirements-expanded`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stderr);
   const startedResult = JSON.parse(started.stdout);
   assert.equal(startedResult.status, 'applied');
@@ -1059,13 +1106,15 @@ test('analysis can restart from code when task requirements expand', () => {
 
   fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
   const completed = run(f.root, [
-    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis'),
+    '--reason-code', 'new-requirement', '--request-id', `${f.id}:requirements-expanded`, '--initiator', 'human'
   ]);
   assert.equal(completed.status, 0, completed.stderr);
   assert.equal(JSON.parse(completed.stdout).toStep, 'requirement-analysis');
   const beforeReplay = fs.readFileSync(f.file, 'utf8');
   const replayed = run(f.root, [
-    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis'),
+    '--reason-code', 'new-requirement', '--request-id', `${f.id}:requirements-expanded`, '--initiator', 'human'
   ]);
   assert.equal(replayed.status, 0, replayed.stderr);
   assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
@@ -1091,7 +1140,8 @@ test('streamlined design rework is consumed after the analysis upgrade step', ()
     fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis').replace('完整路径', '标准路径'));
     const completed = run(f.root, [
       f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md',
-      ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+      ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis'), '--initiator', 'model',
+      '--request-id', `${f.id}:design-rework`, '--reason-code', 'review-finding'
     ]);
     assert.equal(completed.status, 0, completed.stdout || completed.stderr);
     const parsed = parseReworkIntentDocument(fs.readFileSync(f.file, 'utf8'));
@@ -1125,7 +1175,10 @@ test('source completion records resumable invalidation and lifecycle starts reco
     event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
     inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00'
   });
-  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'analyze.started', '--agent', 'codex', '--reason-code', 'new-requirement',
+    '--request-id', `${f.id}:source-change`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stdout || started.stderr);
   fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
   const completed = run(f.root, [
@@ -1173,7 +1226,10 @@ test('late qualification graph fallback records upstream-replaced reason', () =>
     event, output, input, inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-01 00:00:00+00:00'
   });
 
-  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'analyze.started', '--agent', 'codex', '--reason-code', 'new-requirement',
+    '--request-id', `${f.id}:qualification-change`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stdout || started.stderr);
   fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('| A | Rebuild the earliest stale stage | qualified |', '| A | Rebuild the earliest stale stage | rejected |'));
   const currentTask = fs.readFileSync(f.file, 'utf8');
@@ -1196,7 +1252,7 @@ test('late qualification graph fallback records upstream-replaced reason', () =>
   assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'upstream-replaced'), true);
 });
 
-test('qualification recovery started events only authorize the earliest stale stage', () => {
+test('standalone started events may skip qualification recovery ordering', () => {
   const f = fixture('code-review');
   for (const [name, content] of [
     ['review-analysis.md', reviewArtifact('Analysis Review', 'analysis.md')],
@@ -1211,22 +1267,29 @@ test('qualification recovery started events only authorize the earliest stale st
   writeQualifiedArtifact(f.file, path.join(f.dir, 'plan.md'));
 
   const skipped = run(f.root, [f.id, 'review-plan.started', '--agent', 'codex', '--dry-run']);
-  assert.equal(skipped.status, 1);
-  assert.equal(JSON.parse(skipped.stdout).error.code, 'EVENT_TRANSITION_INVALID');
-  assert.match(JSON.parse(skipped.stdout).error.message, /QUALIFICATION_STALE/);
+  assert.equal(skipped.status, 0, skipped.stderr);
 
-  const planned = run(f.root, [f.id, 'analyze.started', '--agent', 'codex', '--dry-run']);
+  const planned = run(f.root, [
+    f.id, 'analyze.started', '--agent', 'codex', '--dry-run', '--reason-code', 'new-requirement',
+    '--request-id', `${f.id}:recovery`, '--initiator', 'human'
+  ]);
   assert.equal(planned.status, 0, planned.stdout || planned.stderr);
   assert.equal(JSON.parse(planned.stdout).artifact, 'analysis-r2.md');
 
-  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'analyze.started', '--agent', 'codex', '--reason-code', 'new-requirement',
+    '--request-id', `${f.id}:recovery`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stdout || started.stderr);
   assert.equal(JSON.parse(started.stdout).artifact, 'analysis-r2.md');
 });
 
 test('analysis restart is authorized by explicit intent without current-step adjacency', () => {
   const f = fixture('technical-design');
-  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'analyze.started', '--agent', 'codex', '--reason-code', 'new-requirement',
+    '--request-id', `${f.id}:restart`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stdout || started.stderr);
   assert.equal(JSON.parse(started.stdout).artifact, 'analysis-r2.md');
 });
@@ -1338,7 +1401,6 @@ for (const scenario of reviewScenarios) {
     const startedContent = fs.readFileSync(f.file, 'utf8');
     assert.match(startedContent, /^review_input_artifact: /m);
     assert.match(startedContent, /^review_input_sha256: [a-f0-9]{64}$/m);
-    assert.match(startedContent, /^qualification_input_relations: /m);
     const finalized = finalizeReview(f, scenario);
     assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
     const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
@@ -1552,21 +1614,22 @@ test('review completion replays the same current result without another activity
   assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
 });
 
-test('review completion records a new result when the finalized review artifact changes', () => {
+test('review completion refuses to rewrite a completed review artifact', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);
   assert.equal(finalizeReview(f, scenario).status, 0);
   assert.equal(completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 }).status, 0);
-  const before = fs.readFileSync(f.file, 'utf8');
+  const beforeTask = fs.readFileSync(f.file, 'utf8');
   fs.appendFileSync(path.join(f.dir, scenario.artifact), '\nUpdated evidence.\n');
-  assert.equal(finalizeReview(f, scenario).status, 0);
-  const repeated = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
-  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
-  assert.equal(JSON.parse(repeated.stdout).status, 'applied');
-  assert.notDeepEqual(fs.readFileSync(f.file, 'utf8'), before);
+  const changedArtifact = fs.readFileSync(path.join(f.dir, scenario.artifact));
+  const finalized = finalizeReview(f, scenario);
+  assert.equal(finalized.status, 1);
+  assert.match(JSON.parse(finalized.stdout).error.message, /completed artifact/u);
+  assert.deepEqual(fs.readFileSync(path.join(f.dir, scenario.artifact)), changedArtifact);
+  assert.equal(fs.readFileSync(f.file, 'utf8'), beforeTask);
 });
 
-test('review completion rejects a changed reviewed input after an earlier completion', () => {
+test('review completion rejects replay when its reviewed input later changes', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, []);
   assert.equal(finalizeReview(f, scenario).status, 0);
@@ -1619,14 +1682,20 @@ test('review-code event completes a supplemental round against the latest code a
     '- 2026-01-01 00:01:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md\n'
   );
 
-  const artifact = inspect(f.root, [f.id, 'inspect', '--family', 'review-code']);
+  const artifact = inspect(f.root, [
+    f.id, 'inspect', '--family', 'review-code', '--source-finding', 'CD-1',
+    '--source-artifact', 'review-code.md', '--source-sha256', 'a'.repeat(64)
+  ]);
   assert.equal(artifact.status, 0, artifact.stderr);
   const artifactResult = JSON.parse(artifact.stdout);
   assert.equal(artifactResult.status, 'ready');
   assert.deepEqual(artifactResult.next, { round: 2, name: 'review-code-r2.md' });
   assert.equal(artifactResult.inputs[0].name, 'code.md');
 
-  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'review-code.started', '--agent', 'codex', '--reason-code', 'upstream-fact-doubt',
+    '--request-id', `${f.id}:supplemental-review`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stderr);
   const startedResult = JSON.parse(started.stdout);
   assert.equal(startedResult.status, 'applied');
@@ -1661,7 +1730,10 @@ test('review-code completion anchors an approved clean reviewed commit', () => {
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
   const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
 
-  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'review-code.started', '--agent', 'codex', '--reason-code', 'upstream-fact-doubt',
+    '--request-id', `${f.id}:supplemental-review`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stderr);
   const artifact = reviewCodeArtifact()
     .replace('- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`', `- **审查基线提交**：${head}`)
@@ -1699,7 +1771,10 @@ test('review-code completion anchors the task branch worktree when the task work
   const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktree, encoding: 'utf8' }).stdout.trim();
   fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('assigned_to: claude', `assigned_to: claude\nbranch: ${branch}`));
 
-  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'review-code.started', '--agent', 'codex', '--reason-code', 'upstream-fact-doubt',
+    '--request-id', `${f.id}:supplemental-review`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stderr);
   const artifact = reviewCodeArtifact()
     .replace('- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`', `- **审查基线提交**：${head}`)
@@ -1717,7 +1792,7 @@ test('review-code completion anchors the task branch worktree when the task work
   assert.match(fs.readFileSync(f.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
 });
 
-test('review-code completion clears an existing anchor for an approved dirty review', () => {
+test('review-code completion records the result without authorizing a changed implementation', () => {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
   const added = spawnSync('git', ['add', '.gitignore'], { cwd: f.root, encoding: 'utf8' });
@@ -1733,7 +1808,10 @@ test('review-code completion clears an existing anchor for an approved dirty rev
     `agent_infra_version: v0.9.11-alpha.0\nlast_reviewed_commit: ${head}`
   ));
 
-  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'review-code.started', '--agent', 'codex', '--reason-code', 'upstream-fact-doubt',
+    '--request-id', `${f.id}:supplemental-review`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stderr);
   const artifact = reviewCodeArtifact()
     .replace('- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`', `- **审查基线提交**：${head}`)
@@ -1749,7 +1827,8 @@ test('review-code completion clears an existing anchor for an approved dirty rev
     '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
   ]);
   assert.equal(completed.status, 0, completed.stderr);
-  assert.match(fs.readFileSync(f.file, 'utf8'), /^last_reviewed_commit:\s*$/m);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
+  assert.match(fs.readFileSync(f.file, 'utf8'), /^last_reviewed_commit:$/m);
 });
 
 test('review-code event allows a supplemental round after commit preparation', () => {
@@ -1761,7 +1840,10 @@ test('review-code event allows a supplemental round after commit preparation', (
     '- 2026-01-01 00:01:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md\n'
   );
 
-  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  const started = run(f.root, [
+    f.id, 'review-code.started', '--agent', 'codex', '--reason-code', 'upstream-fact-doubt',
+    '--request-id', `${f.id}:supplemental-review`, '--initiator', 'human'
+  ]);
   assert.equal(started.status, 0, started.stdout || started.stderr);
   const startedResult = JSON.parse(started.stdout);
   assert.equal(startedResult.status, 'applied');

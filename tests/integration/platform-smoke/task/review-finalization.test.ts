@@ -589,6 +589,22 @@ test('review finalization preserves summary-marked substantive duplicates byte-f
   assert.deepEqual(fs.readFileSync(f.artifactPath), before);
 });
 
+test('review finalization preserves a completed review artifact byte-for-byte', () => {
+  const f = domainFixture();
+  const taskPath = path.join(f.dir, 'task.md');
+  fs.appendFileSync(taskPath, '- 2026-01-01 00:01:00+00:00 — **Review Analysis (Round 1)** by codex — Analysis review completed → review-analysis.md; verdict=approved; 0 blockers, 0 major, 0 minor\n');
+  const before = fs.readFileSync(f.artifactPath);
+
+  const result = finalizeReviewSummary(
+    { taskRef: TASK_ID, stage: 'analysis', artifact: 'review-analysis.md' },
+    { repoRoot: f.root }
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.match(result.error?.message ?? '', /completed artifact/u);
+  assert.deepEqual(fs.readFileSync(f.artifactPath), before);
+});
+
 test('review finalization ignores fenced examples but preserves visible duplicates', () => {
   const f = domainFixture();
   fs.appendFileSync(

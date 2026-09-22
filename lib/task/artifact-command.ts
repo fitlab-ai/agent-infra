@@ -13,6 +13,9 @@ export type ArtifactCommand = Readonly<{
   family: string;
   artifact: string;
   locale?: 'zh-CN' | 'en';
+  sourceFinding?: string;
+  sourceArtifact?: string;
+  sourceSha256?: string;
 }>;
 
 /** One option contract for the CLI and trusted projection executor. */
@@ -23,7 +26,7 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   }
   const fields: Record<string, string> = {};
   const allowed = {
-    inspect: ['--family'],
+    inspect: ['--family', '--source-finding', '--source-artifact', '--source-sha256'],
     init: ['--family', '--artifact', '--locale'],
     'preflight': ['--family', '--artifact'],
     'finalize-local': ['--family', '--artifact']
@@ -41,8 +44,10 @@ export function parseArtifactCommand(args: readonly string[]): ArtifactCommand {
   const locale = fields['--locale'];
   if (locale !== undefined && locale !== 'zh-CN' && locale !== 'en') throw new Error("option '--locale' must be 'zh-CN' or 'en'");
   return {
-    taskRef, operation: operation as ArtifactCommand['operation'], family: fields['--family'],
-    artifact: fields['--artifact'] ?? '', locale
+    taskRef, operation: operation as ArtifactCommand['operation'], family: fields['--family'] ?? '',
+    artifact: fields['--artifact'] ?? '', locale,
+    sourceFinding: fields['--source-finding'], sourceArtifact: fields['--source-artifact'],
+    sourceSha256: fields['--source-sha256']
   };
 }
 /** Resolve authoritative task metadata separately from a trusted candidate directory. */
@@ -53,7 +58,12 @@ export function executeArtifactCommand(
   const { taskRef, operation, family, artifact, locale } = command;
   const fail = (code: string, message: string) => ({ status: 'failed', changed: false, error: { code, message } });
   if (operation === 'inspect') {
-    const result = resolveArtifactContext(taskRef, family, { repoRoot: options.repoRoot });
+    const result = resolveArtifactContext(taskRef, family, {
+      repoRoot: options.repoRoot,
+      sourceFinding: command.sourceFinding,
+      sourceArtifact: command.sourceArtifact,
+      sourceSha256: command.sourceSha256
+    });
     return family === 'code' && result.codeMode ? {
       ...result, mode: result.codeMode.mode, code_max: result.codeMode.codeMax, rev_max: result.codeMode.reviewMax,
       verdict: result.codeMode.verdict, next_round: result.next?.round ?? null, next_artifact: result.next?.name ?? null,

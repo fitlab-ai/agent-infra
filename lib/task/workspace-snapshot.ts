@@ -42,7 +42,8 @@ function captureWorktreeTree(repoRoot: string, forcedPath: string | null): strin
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-orchestration-index-'));
   const indexFile = path.join(tempDir, 'index');
   try {
-    git(repoRoot, indexFile, ['read-tree', 'HEAD']);
+    try { git(repoRoot, indexFile, ['read-tree', 'HEAD']); }
+    catch { git(repoRoot, indexFile, ['read-tree', '--empty']); }
     git(repoRoot, indexFile, ['add', '-A', '--', ':/']);
     if (forcedPath && fs.existsSync(path.join(repoRoot, forcedPath))) {
       git(repoRoot, indexFile, ['add', '-f', '--', forcedPath]);
@@ -138,5 +139,5 @@ function diffWorkspaceSnapshots(repoRoot: string, before: string, after: string)
   return [...changed].sort();
 }
 
-export { captureRepositorySnapshot, captureWorkspaceSnapshot, diffWorkspaceSnapshots };
+export { captureRepositorySnapshot, captureWorkspaceSnapshot, captureWorktreeTree, diffWorkspaceSnapshots };
 export type { OrchestrationWorkspaceFingerprint, RepositorySnapshot, WorkspaceSnapshotContext };

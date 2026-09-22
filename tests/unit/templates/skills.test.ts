@@ -15,6 +15,7 @@ import {
   skillDocPaths
 } from "../../helpers.ts";
 import { getArtifactSchema } from "../../../lib/task/artifact-schema.ts";
+import type { ArtifactDisposition } from "../../../lib/task/artifact-selection.ts";
 
 const skillDocFiles = [
   ...listFilesRecursive(".agents/skills"),
@@ -1506,6 +1507,19 @@ test("artifact lifecycle skills use core context and events in every language va
       const content = read(relativePath);
       assert.match(content, /agent-infra-internal task-artifact \{task-id\} inspect --family /, `${relativePath} should resolve artifact context through the core`);
       assert.match(content, /agent-infra-internal task-event \{task-id\}/, `${relativePath} should apply lifecycle events through the core`);
+    }
+  }
+});
+
+test("artifact lifecycle skill reuse branches use a supported disposition", () => {
+  const reuseDispositions = ["reuse"] as const satisfies readonly ArtifactDisposition[];
+
+  for (const skill of ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code"]) {
+    for (const relativePath of skillDocPaths(skill)) {
+      const dispositions = [...read(relativePath).matchAll(/`selection\.disposition`[^\n]*?`([^`]+)`/g)]
+        .map((match) => match[1]);
+
+      assert.deepEqual(dispositions, reuseDispositions, `${relativePath} should use the supported reuse disposition`);
     }
   }
 });

@@ -265,6 +265,21 @@ test('rework intent semantic evidence survives review renames and blocks unchang
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
 
+test('rework intent resolves evidence anchors followed by heading punctuation', () => {
+  for (const separator of ['：', ':', '.', '、']) {
+    const f = fixture(['| PL-1 | plan | 2 | major | open | review-plan-r2.md#PL-1-check |']);
+    try {
+      const reviewPath = path.join(path.dirname(f.taskMd), 'review-plan-r2.md');
+      fs.writeFileSync(reviewPath, `# Review\n\n### PL-1-check${separator} Finding title\n\nThe plan still needs revision.\n`);
+      const result = applyLedgerIntent({
+        kind: 'rework-intent-upsert', taskRef: f.taskId, intentId: 'RI-1', findingId: 'PL-1',
+        sourceArtifact: 'review-plan-r2.md', sourceSha256: createHash('sha256').update(fs.readFileSync(reviewPath)).digest('hex'), classification: 'design'
+      }, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
+      assert.equal(result.status, 'applied', separator);
+    } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+  }
+});
+
 test('rework intent permits a new classification once and blocks its unchanged retry', () => {
   const f = fixture(['| PL-1 | plan | 1 | major | open | review-plan.md#1 |']);
   try {

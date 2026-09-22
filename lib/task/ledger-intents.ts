@@ -95,8 +95,8 @@ function findingEvidence(reviewContent: string, evidence: string): string | null
     return heading ? semanticFindingEvidence(reviewContent, heading, end) : reviewContent.slice(explicit.end, end);
   }
   const heading = markdown.headings.find((candidate) => {
-    if (candidate.text === anchor || candidate.text.startsWith(`${anchor} `)) return true;
-    return /^\d+$/.test(anchor) && new RegExp(`^${anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[.、：:]`).test(candidate.text);
+    const escapedAnchor = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return candidate.text === anchor || new RegExp(`^${escapedAnchor}(?:\\s|[.、：:])`).test(candidate.text);
   });
   if (!heading) return null;
   const next = markdown.headings.find((candidate) => candidate.start > heading.start && candidate.level <= heading.level);

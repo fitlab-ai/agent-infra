@@ -471,7 +471,7 @@ test('task-orchestration CLI keeps completed code chains read-only without or af
   assert.deepEqual(fs.readFileSync(completedRunPath), completedRunBefore);
 });
 
-test('task-orchestration CLI recovers stale qualification and bindings, allows read-only routing during invalidation, then rejects pending runs without writing', () => {
+test('task-orchestration CLI ignores qualification diagnostics, preserves fixed routing, and rejects pending runs without writing', () => {
   const qualification = approvedRouteFixture('disabled');
   writeQualificationFixture(qualification.dir);
   const planPath = path.join(qualification.dir, 'plan.md');
@@ -484,9 +484,9 @@ test('task-orchestration CLI recovers stale qualification and bindings, allows r
     run(qualification.root, [qualification.id, 'route'], qualification.env),
     run(qualification.root, [qualification.id, 'route'], qualification.env)
   ]) {
-    assert.equal(qualificationRoute.status, 0, qualificationRoute.stderr);
+    assert.equal(qualificationRoute.status, 0, qualificationRoute.stderr || qualificationRoute.stdout);
     assert.deepEqual(JSON.parse(qualificationRoute.stdout).next, {
-      action: 'plan-task', role: 'executor', stage: 'plan', round: 2, artifact: 'plan-r2.md',
+      action: 'review-plan', role: 'reviewer', stage: 'review-plan', round: 2, artifact: 'review-plan-r2.md',
       requestedModel: null, requestedReasoningEffort: null
     });
   }
@@ -533,8 +533,9 @@ test('task-orchestration CLI recovers stale qualification and bindings, allows r
   const pending = approvedRouteFixture('disabled');
   const prepared = approvedRouteFixture('disabled', 'code');
   assert.equal(run(prepared.root, [prepared.id, 'begin-or-resume', ...explicitPolicyArgs], prepared.env).status, 0);
-  assert.equal(run(prepared.root, [prepared.id, 'prepare', '--client', 'claude-code',
-    '--requested-model', 'reviewer-model', '--requested-reasoning-effort', 'high'], prepared.env).status, 0);
+  const preparedDelegation = run(prepared.root, [prepared.id, 'prepare', '--client', 'claude-code',
+    '--requested-model', 'reviewer-model', '--requested-reasoning-effort', 'high'], prepared.env);
+  assert.equal(preparedDelegation.status, 0, preparedDelegation.stderr || preparedDelegation.stdout);
   const pendingRun = path.join(pending.dir, 'orchestration.json');
   fs.copyFileSync(path.join(prepared.dir, 'orchestration.json'), pendingRun);
   const pendingBefore = fs.readFileSync(pendingRun);

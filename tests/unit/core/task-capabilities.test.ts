@@ -303,7 +303,7 @@ test('recommendation is derived from lifecycle facts rather than current_step', 
   assert.equal(recommendNext(withAnalysis).action, 'review-analysis');
 });
 
-test('qualification recovery routes to the earliest stale stage and only authorizes that stage', () => {
+test('qualification diagnostics do not change lifecycle routing', () => {
   const stale = {
     ...facts('code'),
     artifacts: {
@@ -316,17 +316,16 @@ test('qualification recovery routes to the earliest stale stage and only authori
   } satisfies LifecycleFacts;
 
   const recommendation = recommendNext(stale);
-  assert.equal(recommendation.action, 'analysis');
-  assert.equal(recommendation.reasonCode, 'QUALIFICATION_RECOVERY_REQUIRED');
+  assert.deepEqual(recommendation, recommendNext({
+    ...stale, qualificationStale: false, qualificationStaleArtifacts: []
+  }));
 
   const recoveryFacts = { ...stale, recommendedAction: recommendation.action };
-  assert.equal(canStart('analysis', recoveryFacts, trigger).allowed, true);
-  const busy = canStart('analysis', { ...recoveryFacts, executionBusy: true }, trigger);
+  const action = recommendation.action!;
+  assert.equal(canStart(action, recoveryFacts, { ...trigger, requestedAction: action }).allowed, true);
+  const busy = canStart(action, { ...recoveryFacts, executionBusy: true }, { ...trigger, requestedAction: action });
   assert.equal(busy.allowed, false);
   assert.equal(busy.reasonCode, 'EXECUTION_BUSY');
-  const skipped = canStart('review-code', recoveryFacts, { ...trigger, requestedAction: 'review-code' });
-  assert.equal(skipped.allowed, false);
-  assert.equal(skipped.reasonCode, 'QUALIFICATION_STALE');
 });
 
 test('qualification recovery only evaluates the latest active artifact in each family', () => {

@@ -42,8 +42,8 @@ import type { InvalidationTargetKind } from './invalidation.ts';
 import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
 import type { ReworkTarget } from './rework-intent.ts';
-import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
-import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
+import { ARTIFACT_FAMILIES, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest } from './qualification-audit.ts';
+import type { QualificationAudit } from './qualification-audit.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract } from './artifact-operations.ts';
 import {
@@ -353,7 +353,13 @@ function failed(request: TaskEventRequest, error: TaskEventError, extra: Partial
 
 function normalizeStarted(request: TaskEventRequest, repoRoot: string): { request: TaskEventRequest; context: ArtifactContextResult } | { error: TaskEventError; context: ArtifactContextResult } {
   const family = eventParts(request.event).family;
-  const context = resolveArtifactContext(request.taskRef, FAMILY[family].artifact, { repoRoot });
+  const context = resolveArtifactContext(request.taskRef, FAMILY[family].artifact, {
+    repoRoot,
+    reasonCode: request.reasonCode,
+    sourceFinding: request.sourceFinding,
+    sourceArtifact: request.sourceArtifact,
+    sourceSha256: request.sourceSha256
+  });
   if (context.status !== 'ready' || !context.next) {
     return { error: { code: context.error?.code ?? 'EVENT_ARTIFACT_CONFLICT', message: context.error?.message ?? context.codeMode?.message ?? 'artifact context is not writable' }, context };
   }
@@ -408,25 +414,6 @@ function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: Event
 
 function reviewInputFamily(family: EventFamily): ArtifactFamily {
   return family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
-}
-
-function relationForStartedInput(family: EventFamily, input: ArtifactIdentity): UpstreamRelation['relation'] {
-  if (family.startsWith('review-')) {
-    return input.family === reviewInputFamily(family) ? 'reviewed-input' : 'approval-context';
-  }
-  const consumer = family === 'analyze' ? 'analysis' : family;
-  if ((consumer === 'plan' && input.family === 'analysis') || (consumer === 'code' && input.family === 'plan')) return 'required-input';
-  return 'review-context';
-}
-
-function qualificationRelationsForStarted(family: EventFamily, inputs: readonly ArtifactIdentity[]): UpstreamRelation[] {
-  return inputs.map((input) => ({
-    upstreamFamily: input.family as UpstreamRelation['upstreamFamily'],
-    upstreamArtifact: input.name,
-    upstreamRound: input.round,
-    upstreamSha256: sha256File(input.path),
-    relation: relationForStartedInput(family, input)
-  }));
 }
 
 function lifecycleAction(family: EventFamily): LifecycleAction {
@@ -813,6 +800,12 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       normalized = { ...request, round: openIdentity.round, artifact: artifactName(FAMILY[initialParts.family].artifact, openIdentity.round), fixFor: openIdentity.fixFor, implementationInput: openIdentity.implementationInput };
       return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '', identity(normalized), openIdentity.row.started, frontmatter, null);
     }
+    if (rows.some((item) => item.started && !item.done)) {
+      return failed(request, {
+        code: 'EVENT_TRANSITION_INVALID',
+        message: 'EXECUTION_BUSY: another lifecycle execution is open'
+      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+    }
     const result = normalizeStarted(request, resolved.repoRoot);
     artifactContext = result.context;
     if ('error' in result) return failed(request, result.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, artifactContext });
@@ -875,24 +868,12 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     if (eventIdentity.family.startsWith('review-')) {
       try { reviewContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
       catch (error) {
-        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read qualification audit from ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
       const schema = getArtifactSchema(eventIdentity.family);
       const structure = schema ? inspectArtifactContract(reviewContent, schema) : null;
       if (structure && !structure.ok) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `shared artifact structure invalid: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-      const expected = expectedQualificationRelations(content, eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code');
-      if (!expected.ok) {
-        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${expected.code}: ${expected.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-      const qualification = validateQualificationAudit(content, reviewContent, {
-        family: eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code',
-        artifact: completedArtifact.name,
-        expectedUpstreamRelations: expected.relations
-      });
-      if (!qualification.ok) {
-        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${qualification.code}: ${qualification.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
     }
     if (eventIdentity.family === 'analyze' || eventIdentity.family === 'plan' || eventIdentity.family === 'code') {
@@ -905,9 +886,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read ${completedArtifact.name}: ${String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
       const local = validateLocalArtifact(artifactContent, {
-        family: localFamily,
-        taskContent: content,
-        artifact: completedArtifact.name
+        family: localFamily
       });
       if (!local.ok) {
         return failed(normalized, {
@@ -942,7 +921,9 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const capabilityOverride = capability.reasonCode === 'TASK_NOT_ACTIVE'
       ? stateOverride
       : allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_TRANSITION_INVALID');
-    if (!capability.allowed && !capabilityOverride) {
+    const safetyFailure = capability.reasonCode === 'TASK_NOT_ACTIVE'
+      || capability.reasonCode === 'LIFECYCLE_EXECUTION_OPEN';
+    if (!capability.allowed && (normalized.initiator === 'orchestrator' || safetyFailure) && !capabilityOverride) {
       const code = capability.reasonCode === 'INVALIDATION_INCOMPLETE' ? 'TASK_INVALIDATION_BLOCKED' : 'EVENT_TRANSITION_INVALID';
       return failed(normalized, { code, message: `${capability.reasonCode}: ${capability.evidence.join(', ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
@@ -955,10 +936,11 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   let orchestrationCompletion: OrchestrationStageCompletion | null = null;
-  if (eventIdentity.phase === 'completed' && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
+  if (eventIdentity.phase === 'completed' && normalized.orchestrated
+    && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
     const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
     const execution = validateLifecycleExecution(normalized.taskRef, {
-      mode: normalized.orchestrated ? 'orchestrated' : 'standalone',
+      mode: 'orchestrated',
       identity: {
         stage: orchestrationStage,
         round: normalized.round!,
@@ -1023,13 +1005,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
   if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(completionFacts(frontmatter), currentFact));
   let frontmatterRemove: string[] | undefined;
-  if (eventIdentity.phase === 'started' && artifactContext) {
-    try {
-      frontmatterSet.qualification_input_relations = JSON.stringify(qualificationRelationsForStarted(eventIdentity.family, artifactContext.inputs));
-    } catch (error) {
-      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot capture qualification input relations: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
-    }
-  }
   if (eventIdentity.phase === 'started' && eventIdentity.family === 'code') {
     const planInput = artifactContext?.inputs.find((input) => input.family === 'plan' || input.family === 'analysis');
     if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started lifecycle input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
@@ -1064,7 +1039,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     if (reviewedCommit) frontmatterSet.last_reviewed_commit = reviewedCommit;
     else if (normalized.verdict === 'approved') frontmatterSet.last_reviewed_commit = '';
   }
-  if (eventIdentity.phase === 'completed') frontmatterRemove = [...(frontmatterRemove ?? []), 'qualification_input_relations'];
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
     { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove }

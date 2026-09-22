@@ -58,7 +58,7 @@ Require `task.md` and at least one analysis artifact: `analysis.md` or `analysis
 
 ### 2. Resolve Review Context
 
-Run `agent-infra-internal task-artifact {task-id} inspect --family review-analysis`. Continue only for `ready`; take `{analysis-artifact}` from `inputs` and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill.
+Run `agent-infra-internal task-artifact {task-id} inspect --family review-analysis`. Continue only for `ready`. When `selection.disposition` is `reuse`, reuse `selection.artifact`, do not run started/init or write a new artifact, and continue directly to completion verification and next-step guidance. Otherwise take `{analysis-artifact}` from `inputs` and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill.
 
 ### 3. Read Analysis Context
 

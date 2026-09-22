@@ -59,6 +59,7 @@ import { hasOpenLifecycleExecution } from './activity-log.ts';
 import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import type { LifecycleAction, LifecycleFacts } from './capabilities.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
+import { resolveArtifactContext } from './artifact-lifecycle.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type ModelPolicySource = Readonly<{
@@ -642,18 +643,14 @@ function validateSavedCurrentDiffBase(
   return null;
 }
 
-function routeFromFacts(facts: LifecycleFacts): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | { completion: true } | null {
+function routeFromFacts(facts: LifecycleFacts): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort' | 'round' | 'artifact'> | { completion: true } | null {
   const recommendation = recommendNext(facts);
   if (!recommendation.action) return recommendation.reasonCode === 'LIFECYCLE_REVIEWED' ? { completion: true } : null;
   const action = recommendation.action;
   if (action === 'manual-validation' || action === 'validation-run') return null;
-  const family = action === 'analysis' ? 'analysis' : action;
-  const round = maxArtifactRound([
-    ...(facts.artifacts[family] ?? []), ...(facts.staleArtifacts?.[family] ?? [])
-  ], family) + 1;
   const command = action === 'analysis' ? 'analyze-task' : action === 'plan' ? 'plan-task' : action === 'code' ? 'code-task' : action;
   const role = action.startsWith('review-') ? 'reviewer' : 'executor';
-  return { action: command, role, stage: action, round, artifact: artifactName(family, round) };
+  return { action: command, role, stage: action };
 }
 
 function routeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -786,14 +783,35 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     return { status: 'completed', changed: true, taskId: resolved.taskId, run: completed, next: null, error: null };
   }
   const action = routed.stage as LifecycleAction;
+  const family = action === 'analysis' ? 'analysis' : action;
+  const artifactContext = resolveArtifactContext(taskRef, family, {
+    repoRoot: resolved.repoRoot
+  });
+  if (artifactContext.status !== 'ready' || !artifactContext.selection) {
+    return failed(
+      artifactContext.error?.code ?? 'ORCHESTRATION_ARTIFACT_SELECTION_FAILED',
+      artifactContext.error?.message ?? 'cannot determine artifact selection',
+      resolved.taskId
+    );
+  }
+  if (artifactContext.selection.disposition === 'reuse') {
+    return failed(
+      'ORCHESTRATION_REUSE_STALLED',
+      `lifecycle still routes to ${action} after reusing ${artifactContext.selection.artifact.name}`,
+      resolved.taskId
+    );
+  }
+  const selected = artifactContext.selection.artifact;
   const capability = canStart(action, facts.facts, {
-    initiator: 'orchestrator', requestId: `orchestration:${resolved.taskId}:${routed.stage}:${routed.round}`,
+    initiator: 'orchestrator', requestId: `orchestration:${resolved.taskId}:${routed.stage}:${selected.round}`,
     requestedAction: action, reasonCode: 'user-request', explicitRequest: true
   });
   if (!capability.allowed) return failed('ORCHESTRATION_CAPABILITY_DENIED', `${capability.reasonCode}: ${capability.evidence.join(', ')}`, resolved.taskId);
   const policy = run ? rolePolicy(run, routed.role) : null;
   const next: OrchestrationNext = {
     ...routed,
+    round: selected.round,
+    artifact: selected.name,
     requestedModel: policy?.model ?? null,
     requestedReasoningEffort: policy?.reasoningEffort ?? null
   };
