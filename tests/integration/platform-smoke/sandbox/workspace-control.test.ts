@@ -53,6 +53,8 @@ import {
   executeRequest,
   nodeEntryArgs
 } from '../../../../lib/sandbox/control/executor.ts';
+import { prepareTaskFinalization } from '../../../../lib/task/finalization.ts';
+import { platformResult } from '../../../../lib/platform/types.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
 import {
@@ -684,6 +686,17 @@ test('sandbox executor finalizes only the manifest task and returns no control a
       '| id | stage | round | severity | status | evidence |',
       '|----|-------|-------|----------|--------|----------|', '', '## Activity Log', ''
     ].join('\n'));
+    const prepared = await prepareTaskFinalization({ taskRef: taskId, intent: 'complete', agent: 'codex' }, {
+      repoRoot: root,
+      backfill: async () => ({ ...platformResult('no-op'), artifacts: [], warnings: [] }),
+      commentSync: async () => platformResult('no-op'),
+      verify: async () => ({
+        status: 'pass' as const, changed: false, event: 'complete-task.prepared', requestRef: taskId,
+        taskId, taskDir, taskState: 'active' as const, skill: 'complete-task', mode: 'gate' as const,
+        artifact: null, invocations: [], error: null
+      })
+    });
+    assert.equal(prepared.status, 'prepared', prepared.error?.message);
     const result = await executeRequest({
       ...manifest,
       repoRoot: root,

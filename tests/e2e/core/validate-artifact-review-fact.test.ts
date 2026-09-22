@@ -49,12 +49,13 @@ function setupRepo(tempRoot: string) {
   };
 }
 
-function taskContent(lastReviewedCommit?: string, withDeliveryTarget = true) {
+function taskContent(lastReviewedCommit?: string, withDeliveryTarget = true, branch?: string) {
   return [
     buildTaskFrontmatter({
       id: TASK_ID,
       current_step: "code-review",
       ...(withDeliveryTarget ? { delivery_remote: "origin", delivery_base_ref: "main" } : {}),
+      ...(branch ? { branch } : {}),
       ...(lastReviewedCommit ? { last_reviewed_commit: lastReviewedCommit } : {})
     }),
     "",
@@ -279,6 +280,23 @@ test("review-fact accepts an approved uncommitted snapshot without a commit anch
     write(path.join(tempRoot, ".agents/skills/x.md"), "base\nreviewed\nuncommitted\n");
     write(path.join(taskDir, "task.md"), taskContent());
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
+
+    const { result, payload } = await runCheck(taskDir);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(payload.status, "pass");
+  });
+});
+
+test("review-fact validates the task branch worktree instead of the task workspace directory", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-review-fact-task-worktree-", async (tempRoot) => {
+    const { taskDir, baseline } = setupRepo(tempRoot);
+    const branch = "feature/review-fact";
+    const worktree = path.join(tempRoot, "task-worktree");
+    git(tempRoot, ["worktree", "add", "-q", "-b", branch, worktree, baseline]);
+    write(path.join(worktree, ".agents/skills/x.md"), "base\nreviewed\ntask worktree change\n");
+
+    write(path.join(taskDir, "task.md"), taskContent(undefined, true, branch));
+    write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(worktree, baseline)));
 
     const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 0, result.stderr || result.stdout);
