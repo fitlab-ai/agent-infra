@@ -109,17 +109,39 @@ type TaskEventResult = {
   operations: readonly TaskOperationSummary[]; error: TaskEventError | null;
 };
 
-function approvedCleanReviewedCommit(reviewContent: string, verdict: Verdict | undefined, repoRoot: string): string | null {
+function branchWorktree(repoRoot: string, branch: string): string | null {
+  if (!branch) return repoRoot;
+  try {
+    const records = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    }).trim().split(/\r?\n\r?\n/);
+    const expectedRef = `refs/heads/${branch}`;
+    for (const record of records) {
+      const worktree = /^worktree (.+)$/m.exec(record)?.[1];
+      const branchRef = /^branch (.+)$/m.exec(record)?.[1];
+      if (worktree && branchRef === expectedRef) return worktree;
+    }
+  } catch {
+    // A missing worktree must not anchor a review to an unrelated repository.
+  }
+  return null;
+}
+
+function approvedCleanReviewedCommit(reviewContent: string, verdict: Verdict | undefined, repoRoot: string, branch: string): string | null {
   if (verdict !== 'approved') return null;
   const reviewedHead = extractReviewedHead(reviewContent) || extractReviewBaseline(reviewContent);
   const reviewedTree = extractReviewedSnapshotTree(reviewContent);
   if (!/^[a-f0-9]{40}$/.test(reviewedHead) || !/^[a-f0-9]{40}$/.test(reviewedTree)) return null;
+  const worktree = branchWorktree(repoRoot, branch);
+  if (!worktree) return null;
   try {
-    const currentHead = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const currentHead = execFileSync('git', ['-C', worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     if (currentHead !== reviewedHead) return null;
-    const currentTree = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+    const currentTree = execFileSync('git', ['-C', worktree, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
     if (currentTree !== reviewedTree) return null;
-    execFileSync('git', ['-C', repoRoot, 'diff-index', '--quiet', 'HEAD', '--']);
+    execFileSync('git', ['-C', worktree, 'diff-index', '--quiet', 'HEAD', '--']);
     return reviewedHead;
   } catch {
     return null;
@@ -1033,7 +1055,12 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     frontmatterRemove = ['review_input_artifact', 'review_input_sha256'];
   }
   if (eventIdentity.phase === 'completed' && eventIdentity.family === 'review-code' && reviewContent !== null) {
-    const reviewedCommit = approvedCleanReviewedCommit(reviewContent, normalized.verdict, resolved.repoRoot);
+    const reviewedCommit = approvedCleanReviewedCommit(
+      reviewContent,
+      normalized.verdict,
+      resolved.repoRoot,
+      typeof frontmatter.branch === 'string' ? frontmatter.branch : ''
+    );
     if (reviewedCommit) frontmatterSet.last_reviewed_commit = reviewedCommit;
     else if (normalized.verdict === 'approved') frontmatterSet.last_reviewed_commit = '';
   }

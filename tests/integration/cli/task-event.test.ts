@@ -1679,6 +1679,44 @@ test('review-code completion anchors an approved clean reviewed commit', () => {
   assert.match(fs.readFileSync(f.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
 });
 
+test('review-code completion anchors the task branch worktree when the task workspace is on the host', () => {
+  const f = fixture('code-review');
+  const branch = 'agent-infra-bugfix-worktree-anchor';
+  const worktree = path.join(f.root, 'task-worktree');
+  fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
+  let result = spawnSync('git', ['add', '.gitignore'], { cwd: f.root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  result = spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'fixture'], { cwd: f.root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  result = spawnSync('git', ['worktree', 'add', '-b', branch, worktree], { cwd: f.root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  fs.writeFileSync(path.join(worktree, 'reviewed.txt'), 'reviewed\n');
+  result = spawnSync('git', ['add', 'reviewed.txt'], { cwd: worktree, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  result = spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'reviewed'], { cwd: worktree, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8' }).stdout.trim();
+  const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktree, encoding: 'utf8' }).stdout.trim();
+  fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('assigned_to: claude', `assigned_to: claude\nbranch: ${branch}`));
+
+  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  const artifact = reviewCodeArtifact()
+    .replace('- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`', `- **审查基线提交**：${head}`)
+    .replace('- **审查快照树**：dddddddddddddddddddddddddddddddddddddddd', `- **审查快照树**：${tree}`)
+    .replace('- **审查差异基线**：bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', `- **审查已检视提交**：${head}\n- **审查差异基线**：${head}`);
+  fs.writeFileSync(path.join(f.dir, 'review-code-r2.md'), artifact);
+  const finalized = finalizeReview(f, { stage: 'code', artifact: 'review-code-r2.md' });
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+
+  const completed = run(f.root, [
+    f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code-r2.md',
+    '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
+  ]);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.match(fs.readFileSync(f.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
+});
+
 test('review-code completion clears an existing anchor for an approved dirty review', () => {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
