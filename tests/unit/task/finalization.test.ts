@@ -475,9 +475,11 @@ test('host finalization records a replayed verification exception and recovers o
     taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
   })}\n`);
   let verifyCalls = 0;
+  const verificationEvents: string[] = [];
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
-  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received) => {
     verifyCalls += 1;
+    verificationEvents.push(received.event);
     if (verifyCalls === 2) throw new Error('verification input unavailable');
     return verifyCalls === 3 ? verificationChecks('pass') : verification('pass');
   };
@@ -500,6 +502,7 @@ test('host finalization records a replayed verification exception and recovers o
     assert.equal(recoveredReceipt?.verification, 'done');
     assert.equal(recoveredReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), false);
     assert.equal(verifyCalls, 3);
+    assert.deepEqual(verificationEvents, ['complete-task.prepared', 'complete-task.completed', 'complete-task.completed']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

@@ -920,8 +920,12 @@ async function prepareUnderLock(
   } else {
     try {
     receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    const verificationState = resolveTaskRef(taskId, { repoRoot });
+    const verificationEvent = verificationState.ok && verificationState.state === 'completed'
+      ? 'complete-task.completed'
+      : 'complete-task.prepared';
     const result = await verify(
-      { taskRef: taskId, event: 'complete-task.prepared' },
+      { taskRef: taskId, event: verificationEvent },
       { repoRoot }
     );
     verification = verificationStep(result);
