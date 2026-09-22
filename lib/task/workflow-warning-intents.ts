@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 
 import { resolveTaskRef } from './resolve-ref.ts';
+import { parseTaskFrontmatter } from './frontmatter.ts';
 import {
   WORKFLOW_WARNING_COLUMNS,
   WORKFLOW_WARNING_HEADINGS,
@@ -141,7 +142,14 @@ function projectFinalizationWarning(
 ): FinalizationWarningProjectionResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return { status: 'failed', changed: false, error: { code: resolved.code, message: resolved.message } };
-  if (resolved.state !== 'completed') return { status: 'failed', changed: false, error: { code: 'TASK_STATE_MISMATCH', message: `task ${resolved.taskId} is ${resolved.state}, expected completed` } };
+  let prepared = resolved.state === 'completed';
+  if (!prepared && resolved.state === 'active') {
+    try { prepared = parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8')).status === 'completed'; }
+    catch { prepared = false; }
+  }
+  if (!prepared) {
+    return { status: 'failed', changed: false, error: { code: 'TASK_STATE_MISMATCH', message: `task ${resolved.taskId} is ${resolved.state}, expected a prepared or completed task` } };
+  }
   let content: string;
   let rows: WorkflowWarning[];
   try {
@@ -175,11 +183,11 @@ function projectFinalizationWarning(
   if (existing && JSON.stringify(existing) === JSON.stringify(after)) return { status: 'no-op', changed: false, error: null };
   const written = writeTask({
     taskRef: resolved.taskId,
-    expectedState: 'completed',
+    expectedState: resolved.state,
     mutations: [...sectionMutation(content), rowMutation(after)]
   }, {
     ...options,
-    taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: 'completed' },
+    taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state },
     metadataProvider: () => metadata
   });
   if (written.status === 'failed') return { status: 'failed', changed: false, error: { code: written.error.code, message: written.error.message } };

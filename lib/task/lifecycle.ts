@@ -108,6 +108,9 @@ type TaskLifecycleOptions = {
   taskFileSystem?: Partial<TaskFileSystem>;
   directoryRenameSync?: (source: string, target: string) => void;
   manualOverride?: Readonly<{ failureId: string; operator: string; reason: string }>;
+  /** Write the terminal task document and durable journal, but leave the move
+   * and short-id mutation for a separately authorized commit. */
+  prepareOnly?: boolean;
 };
 
 function allowsManualOverride(options: TaskLifecycleOptions, code: string): boolean {
@@ -573,6 +576,16 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     completed.add('task-written'); journal.completedSteps = [...completed];
     try { writeJournal(journalPath, journal, io); }
     catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+  }
+  if (options.prepareOnly && !completed.has('directory-moved')) {
+    return {
+      ...failed(request, { code: '', message: '' }), status: 'applied', changed: true, error: null,
+      taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
+      task: { operations: taskOperations }, directory: { effect: 'unchanged', changed: false },
+      shortId: { effect: 'unchanged', shortId: null, changed: false },
+      timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion,
+      journalPath, completedSteps: [...completed], pendingSteps: STEPS.filter((step) => !completed.has(step))
+    };
   }
   if (fs.existsSync(targetPath) && !fs.existsSync(sourcePath)) completed.add('directory-moved');
   if (!completed.has('directory-moved')) {

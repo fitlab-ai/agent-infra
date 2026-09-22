@@ -3,8 +3,11 @@ import {
   dispatchTaskControlOperation,
   parseTaskControlOperation
 } from '../task/control-authority.ts';
-import { applyTaskFinalization } from '../task/finalization.ts';
+import { applyTaskFinalization, prepareTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
+import { verifyTaskEvent } from '../task/verification.ts';
+import { resolveSandboxControlTransport } from './task-operation-registry.ts';
+import { requestSandboxTaskFinalization, SandboxControlClientError } from '../sandbox/control/client.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-finalization <N | TASK-id> complete --agent <agent>\n';
@@ -73,10 +76,46 @@ async function taskFinalization(args: string[] = []): Promise<void> {
     ...operation,
     request: { ...operation.request, taskRef: resolved.taskId }
   };
+  const transport = resolveSandboxControlTransport(process.env, { localWorkflow: true });
+  if (transport.kind === 'sandbox-local') {
+    const prepared = await prepareTaskFinalization(boundOperation.request, {
+      repoRoot,
+      preflight: (request, options) => verifyTaskEvent({ ...request, event: 'complete-task.hard-preflight' }, options)
+    });
+    if (prepared.status !== 'prepared') {
+      process.stdout.write(envelope(prepared.status, prepared.changed, true, prepared, prepared.error));
+      process.exitCode = exitCode(prepared.status);
+      return;
+    }
+    try {
+      const response = requestSandboxTaskFinalization({ agent: boundOperation.request.agent });
+      process.stdout.write(response.stdout);
+      process.stderr.write(response.stderr);
+      process.exitCode = response.exitCode ?? 1;
+      return;
+    } catch (error) {
+      const detail = error instanceof SandboxControlClientError
+        ? error.detail
+        : { code: 'SANDBOX_CONTROL_CLIENT_FAILED', message: error instanceof Error ? error.message : String(error), retryable: false };
+      process.stdout.write(envelope(detail.retryable ? 'blocked' : 'failed', false, false, null, detail));
+      process.exitCode = detail.retryable ? 2 : 1;
+      return;
+    }
+  }
   const result = await dispatchTaskControlOperation(
     createDirectHostExecutionContext({ repoRoot }),
     boundOperation
   );
+  if (result.status === 'prepared') {
+    const detail = {
+      code: 'TASK_FINALIZATION_DIRECT_COMMIT_REQUIRED',
+      message: 'direct finalization prepared external work without committing the lifecycle transition',
+      retryable: false
+    };
+    process.stdout.write(envelope('failed', result.changed, true, result, detail));
+    process.exitCode = 1;
+    return;
+  }
   process.stdout.write(envelope(result.status, result.changed, true, result, result.error));
   process.exitCode = exitCode(result.status);
 }

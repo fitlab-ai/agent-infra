@@ -1183,7 +1183,8 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
   let targetHead;
   let diffBase;
   try {
-    gitRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    const taskRepositoryRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    gitRoot = reviewWorktreeForTask(taskRepositoryRoot, String(task.metadata.branch || "").trim()) ?? taskRepositoryRoot;
     head = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
     const target = resolveDeliveryTarget(gitRoot, { remote: deliveryRemote, baseRef: deliveryBaseRef });
     if (!target.ok) throw new Error(target.message);
@@ -1262,6 +1263,21 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
     "review-fact",
     `Review fact valid for ${path.basename(resolvedArtifact.path)} at ${baseline.slice(0, 8)}`
   );
+}
+
+function reviewWorktreeForTask(repositoryRoot: string, branch: string): string | null {
+  if (!branch) return null;
+  const expectedRef = `refs/heads/${branch}`;
+  const records = execFileSync("git", ["-C", repositoryRoot, "worktree", "list", "--porcelain"], {
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"]
+  }).trim().split(/\r?\n\r?\n/);
+  for (const record of records) {
+    const worktree = /^worktree (.+)$/m.exec(record)?.[1];
+    const branchRef = /^branch (.+)$/m.exec(record)?.[1];
+    if (worktree && branchRef === expectedRef) return worktree;
+  }
+  throw new Error(`Task branch '${branch}' is not checked out in a registered worktree`);
 }
 
 function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact }: any): any {

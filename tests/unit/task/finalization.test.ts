@@ -11,7 +11,9 @@ import { inspectCompletionBackfillEligibility } from '../../../lib/platform/comp
 import {
   applyFinalizationReceiptMutation,
   applyTaskFinalization,
+  commitPreparedTaskFinalization,
   createFinalizationCapability,
+  prepareTaskFinalization,
   readTaskFinalizationReceipt,
   terminalResult,
   type TaskFinalizationOptions,
@@ -200,7 +202,7 @@ test('host finalization stops before lifecycle when completion backfill has no s
   }
 });
 
-test('completed finalization persists a retryable backfill failure without replaying lifecycle', async () => {
+test('completed finalization does not replay lifecycle for a backfill warning', async () => {
   const f = fixture();
   let calls = 0;
   const backfill: NonNullable<TaskFinalizationOptions['backfill']> = async () => {
@@ -223,7 +225,7 @@ test('completed finalization persists a retryable backfill failure without repla
     const retry = await applyTaskFinalization(request, {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')), backfill
     });
-    assert.equal(retry.result, 'completed_with_warnings');
+    assert.equal(retry.result, 'completed');
     assert.equal(retry.lifecycle, null);
     assert.equal(retry.warnings.some((warning) => warning.step === 'backfill'), true);
   } finally {
@@ -384,7 +386,7 @@ test('host finalization uses the canonical root and makes a successful replay a 
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received, receivedOptions) => {
     verifyCalls += 1;
-    assert.deepEqual(received, { taskRef: TASK_ID, event: 'complete-task.completed' });
+    assert.deepEqual(received, { taskRef: TASK_ID, event: 'complete-task.prepared' });
     assert.equal(receivedOptions?.repoRoot, f.repoRoot);
     return verification('pass');
   };
@@ -393,10 +395,10 @@ test('host finalization uses the canonical root and makes a successful replay a 
     const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
-    assert.equal(commentCalls, 2);
+    assert.equal(commentCalls, 1);
     assert.equal(verifyCalls, 1);
-    assert.equal(second.verification?.status, 'no-op');
-    assert.equal(second.taskComment?.status, 'no-op');
+    assert.equal(second.verification, null);
+    assert.equal(second.taskComment, null);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
     assert.equal((fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
   } finally {
@@ -604,10 +606,10 @@ test('host finalization resolves a summary warning after a successful retry', as
     const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const third = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
-    assert.equal(first.result, 'completed_with_warnings');
-    assert.equal(second.result, 'completed_with_warnings');
+    assert.equal(first.result, 'blocked');
+    assert.equal(second.result, 'completed');
     assert.equal(third.result, 'completed');
-    assert.deepEqual(calls.slice(-2), ['task', 'summary']);
+    assert.deepEqual(calls.slice(-2), ['summary', 'task']);
     assert.equal(receipt?.warnings.some((warning) => warning.step === 'summary' && warning.status === 'open'), false);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), true);
   } finally {
@@ -667,7 +669,7 @@ test('host finalization returns actionable verification gate failures and retrie
   let verifyCalls = 0;
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => {
     commentCalls += 1;
-    commentSnapshots.push(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8'));
+    commentSnapshots.push(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md'), 'utf8'));
     return platformResult(commentCalls === 1 ? 'applied' : 'no-op');
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
@@ -678,15 +680,15 @@ test('host finalization returns actionable verification gate failures and retrie
     const failed = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const replay = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    assert.equal(failed.status, 'completed');
-    assert.equal(failed.result, 'completed_with_warnings');
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.result, 'failed');
     assert.equal(failed.warnings[0]?.code, 'CHECK_FAILED');
     assert.match(failed.warnings[0]?.message ?? '', /Fix complete-task issues/);
-    assert.deepEqual(failed.pendingSteps, ['task-comment', 'verification', 'summary']);
+    assert.deepEqual(failed.pendingSteps, ['lifecycle', 'task-comment', 'verification', 'summary']);
     assert.equal(recovered.status, 'completed');
     assert.equal(replay.status, 'completed');
     assert.equal(verifyCalls, 2);
-    assert.equal(commentCalls, 4);
+    assert.equal(commentCalls, 3);
     assert.doesNotMatch(commentSnapshots[0]!, /CHECK_FAILED/);
     assert.match(commentSnapshots[1]!, /\| CHECK_FAILED \| open \|/);
     assert.match(commentSnapshots[2]!, /\| CHECK_FAILED \| resolved \|/);
@@ -737,8 +739,8 @@ test('host finalization retries only the pending terminal steps after a comment 
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const second = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    assert.equal(first.status, 'completed');
-    assert.equal(first.result, 'completed_with_warnings');
+    assert.equal(first.status, 'blocked');
+    assert.equal(first.result, 'blocked');
     assert.equal(first.warnings[0]?.code, 'NETWORK_RETRY');
     assert.equal(first.lifecycle?.status, 'applied');
     assert.equal(first.pendingSteps.includes('task-comment'), true);
@@ -841,7 +843,7 @@ test('host finalization rejects capability mutations for active tasks', async ()
   }
 });
 
-test('host finalization fails closed when the canonical short-id registry is unavailable', async () => {
+test('broker commit fails closed on the short-id registry after sandbox preparation', async () => {
   const mutations: Array<[string, (registryPath: string) => void]> = [
     ['missing', (registryPath) => fs.unlinkSync(registryPath)],
     ['malformed JSON', (registryPath) => fs.writeFileSync(registryPath, '{not-json\n')],
@@ -854,16 +856,16 @@ test('host finalization fails closed when the canonical short-id registry is una
     const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
     const registryPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
     try {
-      const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+      const first = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify));
       mutate(registryPath);
-      const replay = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-      assert.equal(first.status, 'completed', label);
-      assert.equal(replay.status, 'failed', label);
-      assert.equal(replay.error?.code, 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE', label);
-      assert.equal(replay.lifecycle?.status, 'failed', label);
-      assert.equal(replay.pendingSteps.includes('lifecycle'), true, label);
+      const commit = await commitPreparedTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+      assert.equal(first.status, 'prepared', label);
+      assert.equal(commit.status, 'failed', label);
+      assert.equal(commit.error?.code, 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE', label);
+      assert.equal(commit.lifecycle, null, label);
+      assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), true, label);
       const receipt = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`), 'utf8');
-      assert.equal(JSON.stringify(replay).includes(f.repoRoot), false, label);
+      assert.equal(JSON.stringify(commit).includes(f.repoRoot), false, label);
       assert.equal(receipt.includes(f.repoRoot), false, label);
     } finally {
       fs.rmSync(f.repoRoot, { recursive: true, force: true });

@@ -101,7 +101,7 @@ type TaskCommentSyncOutcome = Readonly<{
 }>;
 
 type TaskFinalizationResult = Readonly<{
-  status: 'completed' | 'failed' | 'blocked';
+  status: 'prepared' | 'completed' | 'failed' | 'blocked';
   changed: boolean;
   taskId: string | null;
   backfill: TaskFinalizationStep | null;
@@ -111,7 +111,7 @@ type TaskFinalizationResult = Readonly<{
   summary: TaskFinalizationStep | null;
   completedSteps: readonly FinalizationStep[];
   pendingSteps: readonly FinalizationStep[];
-  result: 'completed' | 'completed_with_warnings' | 'failed' | 'blocked';
+  result: 'prepared' | 'completed' | 'completed_with_warnings' | 'failed' | 'blocked';
   warnings: readonly OperationWarning[];
   error: FinalizationError | null;
 }>;
@@ -444,6 +444,15 @@ function capabilityError(code: 'FINALIZATION_CAPABILITY_STALE' | 'FINALIZATION_S
   return error;
 }
 
+function hasPreparedTaskDocument(repoRoot: string, taskId: string): boolean {
+  const resolved = resolveTaskRef(taskId, { repoRoot });
+  if (!resolved.ok) return false;
+  if (resolved.state === 'completed') return true;
+  if (resolved.state !== 'active') return false;
+  try { return parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8')).status === 'completed'; }
+  catch { return false; }
+}
+
 function mutationKeys(value: FinalizationMutation): string[] {
   return Object.keys(value).sort();
 }
@@ -521,9 +530,8 @@ function applyFinalizationReceiptMutationUnderLock(
   mutation: FinalizationMutation,
   consumed: Set<string>
 ): TaskFinalizationReceipt {
-  const resolved = resolveTaskRef(receipt.taskId, { repoRoot });
-  if (!resolved.ok || resolved.state !== 'completed') {
-    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires a completed task');
+  if (!hasPreparedTaskDocument(repoRoot, receipt.taskId)) {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active prepared task or a completed task');
   }
   const current = readReceipt(repoRoot, receipt.taskId);
   if (!current || current.receiptId !== receipt.receiptId || current.revision !== receipt.revision) {
@@ -541,11 +549,10 @@ function applyFinalizationReceiptMutation(
   capability: FinalizationCapability,
   mutation: FinalizationMutation
 ): TaskFinalizationReceipt {
-  const resolved = resolveTaskRef(receipt.taskId, { repoRoot });
-  if (!resolved.ok || resolved.state !== 'completed') {
-    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires a completed task');
+  if (!hasPreparedTaskDocument(repoRoot, receipt.taskId)) {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active prepared task or a completed task');
   }
-  return withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.receipt-mutation', () =>
+  return withTaskExecutionLock(repoRoot, receipt.taskId, 'task-finalization.receipt-mutation', () =>
     applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, mutation, new Set<string>())
   );
 }
@@ -668,7 +675,11 @@ async function syncPendingSummary(input: {
   let { receipt } = input;
   try {
     const resolved = resolveTaskRef(input.taskId, { repoRoot: input.repoRoot });
-    if (!resolved.ok || resolved.state !== 'completed') throw Object.assign(new Error('completed task is unavailable for summary sync'), { code: 'SUMMARY_STAGING_INVALID' });
+    if (!resolved.ok || !hasPreparedTaskDocument(input.repoRoot, input.taskId)) throw Object.assign(new Error('prepared task is unavailable for summary sync'), { code: 'SUMMARY_STAGING_INVALID' });
+    if (!fs.existsSync(path.join(resolved.taskDir, '.delivery-summary.json'))) {
+      receipt = updateReceipt(input.repoRoot, receipt, { summary: 'skipped', lastError: null });
+      return { receipt, step: { status: 'skipped', changed: false, error: null }, changed: false, error: null };
+    }
     if (!taskIssueIdentity(parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8')))) {
       receipt = updateReceipt(input.repoRoot, receipt, {
         summary: 'skipped', lastError: null
@@ -749,7 +760,25 @@ function terminalResult(
   };
 }
 
-async function applyUnderLock(
+function preparedResult(
+  taskId: string,
+  receipt: TaskFinalizationReceipt,
+  steps: Partial<Pick<TaskFinalizationResult, 'backfill' | 'lifecycle' | 'taskComment' | 'verification' | 'summary'>>,
+  changed: boolean
+): TaskFinalizationResult {
+  return {
+    status: 'prepared', changed, taskId,
+    backfill: steps.backfill ?? null,
+    lifecycle: steps.lifecycle ?? null,
+    taskComment: steps.taskComment ?? null,
+    verification: steps.verification ?? null,
+    summary: steps.summary ?? null,
+    completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt),
+    result: 'prepared', warnings: openWarnings(receipt), error: null
+  };
+}
+
+async function prepareUnderLock(
   request: TaskFinalizationRequest,
   taskId: string,
   options: TaskFinalizationOptions
@@ -861,44 +890,13 @@ async function applyUnderLock(
   let lifecycleResult: TaskFinalizationStep | null = null;
   try {
     const resolved = resolveTaskRef(taskId, { repoRoot });
-    const registry = resolved.ok && resolved.state === 'completed' ? inspectShortIdRegistry(repoRoot) : null;
-    if (registry && registry.status !== 'valid') {
-      const detail: FinalizationError = {
-        code: 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE',
-        message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
-        retryable: false
-      };
-      receipt = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: detail });
-      return terminalResult(taskId, receipt, {
-        backfill: backfillResult,
-        lifecycle: { status: 'failed', changed: false, error: detail },
-        taskComment: null,
-        verification: null
-      }, changed, detail);
-    }
-    const shortIds = registry?.status === 'valid' ? registry.shortIds : null;
-    if (shortIds?.has(taskId)) {
-      const detail: FinalizationError = {
-        code: 'TASK_FINALIZATION_CANONICAL_STATE_INVALID',
-        message: 'completed task still has an active short-id registry entry',
-        retryable: false
-      };
-      receipt = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: detail });
-      return terminalResult(taskId, receipt, {
-        backfill: backfillResult,
-        lifecycle: { status: 'failed', changed: false, error: detail },
-        taskComment: null,
-        verification: null
-      }, changed, detail);
-    }
-    const lifecycleDone = receipt.lifecycle === 'done' && resolved.ok && resolved.state === 'completed' && shortIds !== null;
-    if (lifecycleDone) {
+    if (receipt.lifecycle === 'done' && resolved.ok && resolved.state === 'completed') {
       lifecycleResult = { status: 'no-op', changed: false, error: null };
       receipt = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
     } else {
       const result = lifecycle(
         { taskRef: taskId, intent: 'complete', agent: request.agent },
-        { repoRoot, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) }
+        { repoRoot, prepareOnly: true, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) }
       );
       lifecycleResult = lifecycleStep(result);
       if (result.status !== 'applied' && result.status !== 'no-op') {
@@ -906,7 +904,6 @@ async function applyUnderLock(
         return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment: null, verification: null }, result.changed, lifecycleResult.error);
       }
       changed = changed || result.changed;
-      receipt = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
     }
   } catch (error) {
     const detail = errorOf(error, 'TASK_FINALIZATION_LIFECYCLE_FAILED');
@@ -933,7 +930,7 @@ async function applyUnderLock(
     try {
     receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
     const result = await verify(
-      { taskRef: taskId, event: 'complete-task.completed' },
+      { taskRef: taskId, event: 'complete-task.prepared' },
       { repoRoot }
     );
     verification = verificationStep(result);
@@ -1002,10 +999,21 @@ async function applyUnderLock(
     return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification, summary: summary.step }, changed, summary.error);
   }
   receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-  return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification, summary: summary.step }, changed);
+  if (receipt.taskComment === 'pending') {
+    const finalComment = await syncPendingTaskComment({
+      repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
+    });
+    receipt = finalComment.receipt;
+    taskComment = finalComment.step;
+    changed = changed || finalComment.changed;
+    if (finalComment.error) {
+      return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification, summary: summary.step }, changed, finalComment.error);
+    }
+  }
+  return preparedResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification, summary: summary.step }, changed);
 }
 
-async function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
+async function prepareTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
   if (request.intent !== 'complete' || !request.taskRef || !request.agent) {
     return failed(null, { code: 'TASK_FINALIZATION_PAYLOAD_INVALID', message: 'complete finalization requires taskRef and agent', retryable: false });
   }
@@ -1013,7 +1021,7 @@ async function applyTaskFinalization(request: TaskFinalizationRequest, options: 
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
-    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.complete', () => applyUnderLock(request, resolved.taskId, options));
+    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.prepare', () => prepareUnderLock(request, resolved.taskId, options));
   } catch (error) {
     const detail = error instanceof TaskExecutionLockError
       ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }
@@ -1022,9 +1030,65 @@ async function applyTaskFinalization(request: TaskFinalizationRequest, options: 
   }
 }
 
+async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
+  if (request.intent !== 'complete' || !request.taskRef || !request.agent) {
+    return failed(null, { code: 'TASK_FINALIZATION_PAYLOAD_INVALID', message: 'complete finalization requires taskRef and agent', retryable: false });
+  }
+  const repoRoot = path.resolve(options.repoRoot);
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot });
+  if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
+  try {
+    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', () => {
+      const receipt = readReceipt(repoRoot, resolved.taskId);
+      if (!receipt) return failed(resolved.taskId, {
+        code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation receipt is unavailable', retryable: true
+      });
+      if (receipt.lifecycle === 'done' && resolved.state === 'completed') {
+        return terminalResult(resolved.taskId, receipt, { lifecycle: { status: 'no-op', changed: false, error: null } }, false);
+      }
+      if (receipt.taskComment === 'pending' || receipt.verification === 'pending' || receipt.summary === 'pending' || receipt.warningProjection === 'pending') {
+        return failed(resolved.taskId, {
+          code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation has pending external steps', retryable: true
+        }, { completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt) });
+      }
+      const registry = inspectShortIdRegistry(repoRoot);
+      if (registry.status !== 'valid') return failed(resolved.taskId, {
+        code: 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE',
+        message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
+        retryable: false
+      });
+      const lifecycle = options.lifecycle ?? applyTaskLifecycle;
+      const result = lifecycle(
+        { taskRef: resolved.taskId, intent: 'complete', agent: request.agent },
+        { repoRoot, ...(options.metadataProvider ? { metadataProvider: options.metadataProvider } : {}) }
+      );
+      const step = lifecycleStep(result);
+      if (result.status !== 'applied' && result.status !== 'no-op') {
+        const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });
+        return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed, step.error);
+      }
+      const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
+      return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed);
+    });
+  } catch (error) {
+    const detail = error instanceof TaskExecutionLockError
+      ? { code: error.code, message: error.message, retryable: error.code === 'ORCHESTRATION_LOCK_BUSY' }
+      : errorOf(error, 'TASK_FINALIZATION_FAILED');
+    return failed(resolved.taskId, detail);
+  }
+}
+
+async function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFinalizationOptions): Promise<TaskFinalizationResult> {
+  const prepared = await prepareTaskFinalization(request, options);
+  if (prepared.status !== 'prepared') return prepared;
+  return commitPreparedTaskFinalization(request, options);
+}
+
 export {
   applyFinalizationReceiptMutation,
+  commitPreparedTaskFinalization,
   applyTaskFinalization,
+  prepareTaskFinalization,
   issueCapability as createFinalizationCapability,
   readTaskFinalizationReceipt,
   terminalResult

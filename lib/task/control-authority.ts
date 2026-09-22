@@ -26,6 +26,7 @@ import {
 import type { OrchestrationOptions, OrchestrationResult } from './orchestration.ts';
 import {
   applyTaskFinalization,
+  commitPreparedTaskFinalization,
   type TaskFinalizationRequest,
   type TaskFinalizationResult
 } from './finalization.ts';
@@ -860,7 +861,8 @@ export function dispatchTaskControlOperation(
   }
   if (operation.family === 'task-finalization') {
     operationTaskId(context, operation.request.taskRef);
-    return applyTaskFinalization(operation.request, {
+    const finalize = context.source === 'sandbox-executor' ? commitPreparedTaskFinalization : applyTaskFinalization;
+    return finalize(operation.request, {
       repoRoot: context.repoRoot,
       ...(context.source === 'sandbox-executor' ? {
         controlBinding: { generation: context.generation, requestId: context.requestId }

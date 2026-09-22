@@ -8,7 +8,6 @@ import { enumerateAllTaskDirs } from '../task/resolve-ref.ts';
 import { resolveSandboxCleanupTarget } from './workspace-identity.ts';
 import { readSandboxControlManifest } from './control/lifecycle.ts';
 import { readJsonFile, readSandboxControlStatus } from './control/state.ts';
-import { finalizationTerminalResponse } from './control/finalization-response.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 
@@ -83,13 +82,10 @@ function canonicalPath(input: string): string {
 
 function taskFinalizationReceiptComplete(
   receipt: TaskFinalizationReceipt,
-  taskId: string,
-  binding: SandboxControlBinding
+  taskId: string
 ): boolean {
   return receipt.taskId === taskId
-    && taskFinalizationReceiptState(receipt) === 'complete'
-    && receipt.controlBinding?.generation === binding.generation
-    && receipt.controlBinding.requestId === binding.requestId;
+    && taskFinalizationReceiptState(receipt) === 'complete';
 }
 
 function terminalControlBindingEvidence(
@@ -114,24 +110,20 @@ function terminalControlBindingEvidence(
       if (errorCode(error) !== 'ENOENT') return false;
     }
     const receipt = readTaskFinalizationReceipt(repoRoot, taskId);
-    if (!receipt || !taskFinalizationReceiptComplete(receipt, taskId, binding)) {
+    if (!receipt || !taskFinalizationReceiptComplete(receipt, taskId)) {
       return false;
     }
-    const status = readSandboxControlStatus(manifest.publicStatusDir);
-    const viewReceipt = status.taskView.receipt;
-    const terminalTaskView = (status.taskView.state === 'current' && status.taskView.observedSource === 'completed')
-      || (status.taskView.state === 'finalized-stale' && status.taskView.observedSource === 'active');
-    if (status.generation !== binding.generation || status.state !== 'healthy'
-      || status.activeRequestId !== null || !terminalTaskView || status.taskView.taskId !== taskId
-      || !viewReceipt || viewReceipt.generation !== binding.generation
-      || viewReceipt.requestId !== binding.requestId
-      || viewReceipt.receiptId !== receipt.receiptId
-      || viewReceipt.revision !== receipt.revision) return false;
     const responsePath = path.join(manifest.channelDir, 'responses', `${binding.requestId}.json`);
     if (!inspectOwnedPath(path.join(controlRoot, 'channel'), responsePath, 'file')) return false;
     const actual = readJsonFile(responsePath);
-    const expected = finalizationTerminalResponse(taskId, binding.requestId, receipt);
-    return JSON.stringify(actual) === JSON.stringify(expected);
+    const response = actual as Record<string, unknown>;
+    if (response.version !== 2 || response.id !== binding.requestId || response.phase !== 'completed'
+      || response.exitCode !== 0 || typeof response.stdout !== 'string') return false;
+    const envelope = JSON.parse(response.stdout) as Record<string, unknown>;
+    const result = envelope.result as Record<string, unknown> | null;
+    return envelope.status === 'completed' && envelope.accepted === true
+      && result !== null && typeof result === 'object'
+      && result.status === 'completed' && result.taskId === taskId;
   } catch {
     return false;
   }
@@ -157,7 +149,7 @@ function removedControlBindingEvidence(
   if (frontmatter.id !== taskId || frontmatter.branch !== journal.target.branch) return false;
   try {
     const receipt = readTaskFinalizationReceipt(repoRoot, taskId);
-    return receipt !== null && taskFinalizationReceiptComplete(receipt, taskId, binding);
+    return receipt !== null && taskFinalizationReceiptComplete(receipt, taskId);
   } catch {
     return false;
   }
