@@ -165,7 +165,7 @@ test('task delivery refuses an unknown remote branch drift', () => {
   assert.notEqual(remoteHead(f.remote), nextHead);
 });
 
-test('task delivery rejects a completed invalidation target for the authoritative review', () => {
+test('task delivery does not use review state as an authorization gate', () => {
   const f = fixture();
   const now = '2026-08-31T00:01:00.000Z';
   const source = {
@@ -198,7 +198,7 @@ test('task delivery rejects a completed invalidation target for the authoritativ
   fs.appendFileSync(f.taskPath, `\n## 产物失效记录\n\n${renderInvalidation({ operations: [completed], targets: [target] })}\n`);
 
   const result = deliverTaskBranch(TASK_ID, { repoRoot: f.root, agent: 'codex', dryRun: true });
-  assert.equal(result.status, 'failed');
-  assert.equal(result.error?.code, 'DELIVERY_REVIEW_REQUIRED');
+  assert.equal(result.status, 'planned');
+  assert.equal(result.error, null);
   assert.equal(fs.existsSync(path.join(f.taskDir, 'review-code.md')), true);
 });

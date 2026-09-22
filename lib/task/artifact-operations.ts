@@ -147,36 +147,6 @@ function canonicalSemanticDigest(content: string): string {
   return sha256Content(canonicalContent(content));
 }
 
-const NON_SUBSTANTIVE_SECTIONS = new Set([
-  '状态核对', 'State Check',
-  '证据原文', 'Evidence',
-  '资格审计', 'Qualification Audit',
-  '审查分歧账本回写', 'Review Ledger Writeback'
-]);
-
-function artifactSubstantiveDigest(content: string): string {
-  const normalizedContent = content.replace(/\r\n/g, '\n');
-  const scanned = scanVisibleMarkdown(normalizedContent);
-  const excluded = scanned.headings
-    .filter((heading) => heading.level === 2 && NON_SUBSTANTIVE_SECTIONS.has(heading.text))
-    .map((heading) => ({
-      start: heading.start,
-      end: scanned.headings.find((candidate) => candidate.start > heading.start && candidate.level <= 2)?.start ?? normalizedContent.length
-    }));
-  let visible = '';
-  let cursor = 0;
-  for (const range of excluded) {
-    visible += normalizedContent.slice(cursor, range.start);
-    cursor = range.end;
-  }
-  visible += normalizedContent.slice(cursor);
-  const normalized = canonicalContent(visible)
-    .replace(/[ \t]+$/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return sha256Content(normalized);
-}
-
 function inspectArtifactStructure(
   content: string,
   schema: ArtifactSchema
@@ -390,7 +360,6 @@ function initializeArtifactSkeleton(request: ArtifactInitRequest): ArtifactFileR
 }
 
 export {
-  artifactSubstantiveDigest,
   canonicalSemanticDigest,
   initializeArtifactSkeleton,
   inspectArtifactContract,

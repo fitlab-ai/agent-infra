@@ -6,7 +6,6 @@ import {
   type LocalArtifactFamily
 } from '../../../lib/task/local-artifact-finalization.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
-import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 
 const PLAN_SECTIONS = [
   ['问题理解', '范围说明'],
@@ -100,82 +99,4 @@ test('code reports diagnose the same one-line heading issue without normalizing 
   const repaired = validateLocalArtifact(malformed.replace('## 测试结果：', '## 测试结果'), { family: 'code' });
   assert.equal(repaired.ok, true);
   assert.notEqual(repaired.semanticDigest, failed.semanticDigest);
-});
-
-test('code report validation binds qualification relations to the started input', () => {
-  const task = `---
-id: TASK-20260101-000001
-code_input_artifact: plan.md
-code_input_sha256: ${'a'.repeat(64)}
----
-
-# Task
-
-## 约束
-
-| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| C-1 | Use the approved plan | derived | task-input | task.md | task.md#约束 |  |  |
-
-## 候选与否决方案
-
-| candidate_id | statement | status | constraint_ids | impact | evidence |
-| --- | --- | --- | --- | --- | --- |
-| A | Use the approved plan | pending | C-1 | bounded | task.md#候选与否决方案 |
-
-## 活动日志
-
-- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started
-`;
-  const audit = buildQualificationAudit(task);
-  assert.equal(audit.ok, true);
-  if (!audit.ok) return;
-  const content = `${artifact('code')}\n## 资格审计\n\n${renderQualificationAudit(audit.audit)}\n`;
-  const result = validateLocalArtifact(content, { family: 'code', taskContent: task, artifact: 'code.md' });
-  const mismatch = diagnostic(result, 'LOCAL_QUALIFICATION_AUDIT_INVALID');
-  assert.match(mismatch.message, /QUALIFICATION_UPSTREAM_RELATION_MISMATCH/);
-});
-
-test('completed code report remains valid after a later review starts', () => {
-  const completedRelations = [
-    { upstreamFamily: 'plan' as const, upstreamArtifact: 'plan.md', upstreamRound: 1, upstreamSha256: 'a'.repeat(64), relation: 'required-input' as const },
-    { upstreamFamily: 'review-code' as const, upstreamArtifact: 'review-code.md', upstreamRound: 1, upstreamSha256: 'b'.repeat(64), relation: 'review-context' as const }
-  ];
-  const reviewRelations = [
-    { upstreamFamily: 'code' as const, upstreamArtifact: 'code.md', upstreamRound: 1, upstreamSha256: 'c'.repeat(64), relation: 'reviewed-input' as const },
-    { upstreamFamily: 'review-plan' as const, upstreamArtifact: 'review-plan.md', upstreamRound: 1, upstreamSha256: 'd'.repeat(64), relation: 'approval-context' as const }
-  ];
-  const task = `---
-id: TASK-20260101-000001
-qualification_input_relations: '${JSON.stringify(reviewRelations)}'
----
-
-# Task
-
-## 约束
-
-| constraint_id | statement | status | authority | source | evidence | derived_from | approval_evidence |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| C-1 | Keep qualification inputs stable | derived | task-input | task.md | task.md#约束 |  |  |
-
-## 候选与否决方案
-
-| candidate_id | statement | status | constraint_ids | impact | evidence |
-| --- | --- | --- | --- | --- | --- |
-| A | Preserve artifact-local evidence | pending | C-1 | bounded | task.md#候选与否决方案 |
-
-## 活动日志
-
-- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1) [started]** by codex — started
-- 2026-01-01 00:00:00+00:00 — **Code Task (Round 1)** by codex — Code implemented, 1 files modified, 1 tests passed → code.md
-- 2026-01-01 00:01:00+00:00 — **Review Code (Round 2) [started]** by codex — started
-`;
-  const audit = buildQualificationAudit(task, { upstreamRelations: completedRelations });
-  assert.equal(audit.ok, true);
-  if (!audit.ok) return;
-
-  const content = `${artifact('code')}\n## 资格审计\n\n${renderQualificationAudit(audit.audit)}\n`;
-  const result = validateLocalArtifact(content, { family: 'code', taskContent: task, artifact: 'code.md' });
-
-  assert.deepEqual(result.diagnostics, []);
 });

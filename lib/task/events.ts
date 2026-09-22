@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 
 import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import {
@@ -43,13 +42,10 @@ import type { InvalidationTargetKind } from './invalidation.ts';
 import { reconcileTaskInvalidation } from './invalidation-command.ts';
 import { consumeReworkIntents, parseReworkIntentDocument, reworkIntentMutation, supersedeReworkIntents } from './rework-intent.ts';
 import type { ReworkTarget } from './rework-intent.ts';
-import { ARTIFACT_FAMILIES, expectedQualificationRelations, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest, validateQualificationAudit } from './qualification-audit.ts';
-import type { QualificationAudit, UpstreamRelation } from './qualification-audit.ts';
+import { ARTIFACT_FAMILIES, parseQualificationAudit, parseTaskQualification, upstreamArtifactDigest } from './qualification-audit.ts';
+import type { QualificationAudit } from './qualification-audit.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
-import { artifactSubstantiveDigest, canonicalSemanticDigest, inspectArtifactContract } from './artifact-operations.ts';
-import { parseCompletionFacts, parseOpenArtifactSelection } from './artifact-selection.ts';
-import type { CompletionFactV2, OpenArtifactSelection } from './artifact-selection.ts';
-import { captureWorktreeTree } from './workspace-snapshot.ts';
+import { canonicalSemanticDigest, inspectArtifactContract } from './artifact-operations.ts';
 import {
   consumeLifecycleRecoveryAttestation,
   lifecycleRecoveryAttestationDigest,
@@ -359,6 +355,7 @@ function normalizeStarted(request: TaskEventRequest, repoRoot: string): { reques
   const family = eventParts(request.event).family;
   const context = resolveArtifactContext(request.taskRef, FAMILY[family].artifact, {
     repoRoot,
+    reasonCode: request.reasonCode,
     sourceFinding: request.sourceFinding,
     sourceArtifact: request.sourceArtifact,
     sourceSha256: request.sourceSha256
@@ -417,25 +414,6 @@ function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: Event
 
 function reviewInputFamily(family: EventFamily): ArtifactFamily {
   return family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
-}
-
-function relationForStartedInput(family: EventFamily, input: ArtifactIdentity): UpstreamRelation['relation'] {
-  if (family.startsWith('review-')) {
-    return input.family === reviewInputFamily(family) ? 'reviewed-input' : 'approval-context';
-  }
-  const consumer = family === 'analyze' ? 'analysis' : family;
-  if ((consumer === 'plan' && input.family === 'analysis') || (consumer === 'code' && input.family === 'plan')) return 'required-input';
-  return 'review-context';
-}
-
-function qualificationRelationsForStarted(family: EventFamily, inputs: readonly ArtifactIdentity[]): UpstreamRelation[] {
-  return inputs.map((input) => ({
-    upstreamFamily: input.family as UpstreamRelation['upstreamFamily'],
-    upstreamArtifact: input.name,
-    upstreamRound: input.round,
-    upstreamSha256: sha256File(input.path),
-    relation: relationForStartedInput(family, input)
-  }));
 }
 
 function lifecycleAction(family: EventFamily): LifecycleAction {
@@ -712,25 +690,37 @@ function buildCompletionReceipt(
   }
 }
 
-function completionFacts(frontmatter: Record<string, unknown>): CompletionFactV2[] {
-  const parsed = parseCompletionFacts(frontmatter.completion_facts);
-  if (!parsed.ok) throw new Error(`${parsed.code}: ${parsed.message}`);
-  return [...parsed.facts];
+type CompletionFact = Readonly<{
+  event: string;
+  output: string;
+  outputSha256: string;
+  semanticDigest: string;
+  requestId: string;
+  result: string;
+}>;
+
+function completionFacts(frontmatter: Record<string, unknown>): CompletionFact[] {
+  if (typeof frontmatter.completion_facts !== 'string') return [];
+  try {
+    const facts: unknown = JSON.parse(frontmatter.completion_facts);
+    if (!Array.isArray(facts)) return [];
+    return facts.filter((fact): fact is CompletionFact => Boolean(
+      fact && typeof fact === 'object' && !Array.isArray(fact)
+      && typeof (fact as CompletionFact).event === 'string'
+      && typeof (fact as CompletionFact).output === 'string'
+      && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).outputSha256)
+      && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).semanticDigest)
+      && typeof (fact as CompletionFact).requestId === 'string'
+      && typeof (fact as CompletionFact).result === 'string'
+    ));
+  } catch {
+    return [];
+  }
 }
 
-function currentCompletionFact(
-  request: TaskEventRequest,
-  artifact: ArtifactIdentity,
-  selection: OpenArtifactSelection,
-  repoRoot: string
-): CompletionFactV2 {
+function currentCompletionFact(request: TaskEventRequest, artifact: ArtifactIdentity): CompletionFact {
   const content = fs.readFileSync(artifact.path, 'utf8');
-  const resultDigest = createHash('sha256').update(JSON.stringify({
-    artifact: artifactSubstantiveDigest(content),
-    ...(artifact.family === 'code' ? { worktreeTree: captureWorktreeTree(repoRoot, null) } : {})
-  })).digest('hex');
   return {
-    version: 2,
     event: request.event,
     output: artifact.name,
     outputSha256: sha256File(artifact.path),
@@ -746,24 +736,20 @@ function currentCompletionFact(
       verdict: request.verdict,
       fixFor: request.fixFor,
       implementationInput: request.implementationInput
-    }),
-    inputDigest: selection.inputDigest,
-    resultDigest
+    })
   };
 }
 
-function sameCompletionFact(left: CompletionFactV2, right: CompletionFactV2): boolean {
+function sameCompletionFact(left: CompletionFact, right: CompletionFact): boolean {
   return left.event === right.event
     && left.output === right.output
     && left.outputSha256 === right.outputSha256
     && left.semanticDigest === right.semanticDigest
     && left.requestId === right.requestId
-    && left.result === right.result
-    && left.inputDigest === right.inputDigest
-    && left.resultDigest === right.resultDigest;
+    && left.result === right.result;
 }
 
-function replaceCompletionFact(facts: readonly CompletionFactV2[], next: CompletionFactV2): CompletionFactV2[] {
+function replaceCompletionFact(facts: readonly CompletionFact[], next: CompletionFact): CompletionFact[] {
   return [...facts.filter((fact) => !(fact.event === next.event && fact.output === next.output)), next];
 }
 
@@ -811,18 +797,14 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       if (request.round !== undefined && request.round !== openIdentity.round) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `round ${request.round} conflicts with open round ${openIdentity.round}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       if (request.fixFor !== undefined && request.fixFor !== openIdentity.fixFor) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       if (request.implementationInput !== openIdentity.implementationInput) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-      const persistedSelection = parseOpenArtifactSelection(frontmatter.open_artifact_selection);
-      if (persistedSelection && persistedSelection.requestId !== (request.requestId ?? '')) {
-        return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'open started event has a different requestId' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-      }
-      if (persistedSelection) {
-        const resumed = resolveArtifactContext(request.taskRef, persistedSelection.family, { repoRoot: resolved.repoRoot, selectionOnly: true });
-        if (resumed.status !== 'ready' || !resumed.selection || resumed.selection.inputDigest !== persistedSelection.inputDigest) {
-          return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'permanent artifact input changed after the started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-        }
-      }
       normalized = { ...request, round: openIdentity.round, artifact: artifactName(FAMILY[initialParts.family].artifact, openIdentity.round), fixFor: openIdentity.fixFor, implementationInput: openIdentity.implementationInput };
       return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '', identity(normalized), openIdentity.row.started, frontmatter, null);
+    }
+    if (rows.some((item) => item.started && !item.done)) {
+      return failed(request, {
+        code: 'EVENT_TRANSITION_INVALID',
+        message: 'EXECUTION_BUSY: another lifecycle execution is open'
+      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     }
     const result = normalizeStarted(request, resolved.repoRoot);
     artifactContext = result.context;
@@ -886,24 +868,12 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     if (eventIdentity.family.startsWith('review-')) {
       try { reviewContent = fs.readFileSync(completedArtifact.path, 'utf8'); }
       catch (error) {
-        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read qualification audit from ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read ${completedArtifact.name}: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
       const schema = getArtifactSchema(eventIdentity.family);
       const structure = schema ? inspectArtifactContract(reviewContent, schema) : null;
       if (structure && !structure.ok) {
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `shared artifact structure invalid: ${structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-      const expected = expectedQualificationRelations(content, eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code');
-      if (!expected.ok) {
-        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${expected.code}: ${expected.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-      const qualification = validateQualificationAudit(content, reviewContent, {
-        family: eventIdentity.family as 'review-analysis' | 'review-plan' | 'review-code',
-        artifact: completedArtifact.name,
-        expectedUpstreamRelations: expected.relations
-      });
-      if (!qualification.ok) {
-        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `${qualification.code}: ${qualification.message}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
     }
     if (eventIdentity.family === 'analyze' || eventIdentity.family === 'plan' || eventIdentity.family === 'code') {
@@ -916,9 +886,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
         return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot read ${completedArtifact.name}: ${String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
       }
       const local = validateLocalArtifact(artifactContent, {
-        family: localFamily,
-        taskContent: content,
-        artifact: completedArtifact.name
+        family: localFamily
       });
       if (!local.ok) {
         return failed(normalized, {
@@ -953,7 +921,9 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     const capabilityOverride = capability.reasonCode === 'TASK_NOT_ACTIVE'
       ? stateOverride
       : allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_TRANSITION_INVALID');
-    if (!capability.allowed && !capabilityOverride) {
+    const safetyFailure = capability.reasonCode === 'TASK_NOT_ACTIVE'
+      || capability.reasonCode === 'LIFECYCLE_EXECUTION_OPEN';
+    if (!capability.allowed && (normalized.initiator === 'orchestrator' || safetyFailure) && !capabilityOverride) {
       const code = capability.reasonCode === 'INVALIDATION_INCOMPLETE' ? 'TASK_INVALIDATION_BLOCKED' : 'EVENT_TRANSITION_INVALID';
       return failed(normalized, { code, message: `${capability.reasonCode}: ${capability.evidence.join(', ')}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
@@ -966,10 +936,11 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   let orchestrationCompletion: OrchestrationStageCompletion | null = null;
-  if (eventIdentity.phase === 'completed' && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
+  if (eventIdentity.phase === 'completed' && normalized.orchestrated
+    && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
     const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
     const execution = validateLifecycleExecution(normalized.taskRef, {
-      mode: normalized.orchestrated ? 'orchestrated' : 'standalone',
+      mode: 'orchestrated',
       identity: {
         stage: orchestrationStage,
         round: normalized.round!,
@@ -991,7 +962,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
   catch (error) { return failed(normalized, { code: 'METADATA_CAPTURE_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
   let completionReceipt: ArtifactReceipt | null = null;
-  let currentFact: CompletionFactV2 | null = null;
+  let currentFact: CompletionFact | null = null;
   let completionInvalidation: ReturnType<typeof invalidationMutation> | null = null;
   let completionRework: ReturnType<typeof reworkIntentMutation> | null = null;
   if (eventIdentity.phase === 'completed' && completedArtifact) {
@@ -1000,65 +971,22 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: receipt.message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
     completionReceipt = receipt?.receipt ?? null;
-    const selectionManaged = !['manual-validation', 'validation-run'].includes(eventIdentity.family);
-    let existingFacts: CompletionFactV2[];
-    try { existingFacts = completionFacts(frontmatter); }
-    catch (error) {
-      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-    }
-    const persistedOpenSelection = parseOpenArtifactSelection(frontmatter.open_artifact_selection);
-    const completedFamily = FAMILY[eventIdentity.family].artifact;
-    const replayFact = existingFacts.find((fact) => fact.event === normalized.event
-      && fact.output === completedArtifact.name
-      && fact.requestId === (normalized.requestId ?? ''));
-    const openSelection: OpenArtifactSelection | null = persistedOpenSelection ?? (replayFact ? {
-      version: 1,
-      family: completedFamily,
-      artifact: completedArtifact.name,
-      round: completedArtifact.round,
-      inputDigest: replayFact.inputDigest,
-      requestId: replayFact.requestId
-    } : null);
-    if (selectionManaged && (!openSelection
-      || openSelection.family !== completedFamily
-      || openSelection.artifact !== completedArtifact.name
-      || openSelection.round !== completedArtifact.round
-      || openSelection.requestId !== (normalized.requestId ?? ''))) {
-      return failed(normalized, {
-        code: 'EVENT_ARTIFACT_CONFLICT',
-        message: 'completion requires the matching persisted artifact selection'
-      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-    }
-    if (selectionManaged) {
-      const observed = resolveArtifactContext(normalized.taskRef, completedFamily, { repoRoot: resolved.repoRoot, selectionOnly: true });
-      if (observed.status !== 'ready' || !observed.selection
-        || observed.selection.artifact.name !== completedArtifact.name
-        || observed.selection.inputDigest !== openSelection!.inputDigest) {
-        return failed(normalized, {
-          code: 'EVENT_ARTIFACT_CONFLICT',
-          message: `permanent artifact input changed after the started event (expected ${openSelection!.inputDigest}, observed ${observed.selection?.inputDigest ?? 'unavailable'})`
-        }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-      }
-    }
     try {
-      if (selectionManaged) currentFact = currentCompletionFact(normalized, completedArtifact, openSelection!, resolved.repoRoot);
+      currentFact = currentCompletionFact(normalized, completedArtifact);
     } catch (error) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot inspect current completion result: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     }
-    if (currentFact) {
-      const comparableFact = currentFact;
-      if (existingFacts.some((fact) => sameCompletionFact(fact, comparableFact))) {
-        return successNoOp(
-          normalized,
-          resolved.taskId,
-          resolved.taskMdPath,
-          currentStep,
-          eventIdentity,
-          completionReceipt?.completedAt ?? metadata.timestamp,
-          frontmatter,
-          artifactContext
-        );
-      }
+    if (completionFacts(frontmatter).some((fact) => sameCompletionFact(fact, currentFact!))) {
+      return successNoOp(
+        normalized,
+        resolved.taskId,
+        resolved.taskMdPath,
+        currentStep,
+        eventIdentity,
+        completionReceipt?.completedAt ?? metadata.timestamp,
+        frontmatter,
+        artifactContext
+      );
     }
     try {
       const invalidation = invalidationMutationForCompletion(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp);
@@ -1075,29 +1003,8 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const logStep = eventIdentity.phase === 'started' ? `${eventIdentity.action} [started]` : eventIdentity.action;
   const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
-  if (currentFact) {
-    try { frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(completionFacts(frontmatter), currentFact)); }
-    catch (error) {
-      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-    }
-  }
+  if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(completionFacts(frontmatter), currentFact));
   let frontmatterRemove: string[] | undefined;
-  if (eventIdentity.phase === 'started' && artifactContext) {
-    try {
-      frontmatterSet.qualification_input_relations = JSON.stringify(qualificationRelationsForStarted(eventIdentity.family, artifactContext.inputs));
-      if (!artifactContext.selection) throw new Error('artifact selection is unavailable');
-      frontmatterSet.open_artifact_selection = JSON.stringify({
-        version: 1,
-        family: artifactContext.selection.artifact.family,
-        artifact: artifactContext.selection.artifact.name,
-        round: artifactContext.selection.artifact.round,
-        inputDigest: artifactContext.selection.inputDigest,
-        requestId: normalized.requestId ?? ''
-      } satisfies OpenArtifactSelection);
-    } catch (error) {
-      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot capture qualification input relations: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
-    }
-  }
   if (eventIdentity.phase === 'started' && eventIdentity.family === 'code') {
     const planInput = artifactContext?.inputs.find((input) => input.family === 'plan' || input.family === 'analysis');
     if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started lifecycle input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
@@ -1132,7 +1039,6 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     if (reviewedCommit) frontmatterSet.last_reviewed_commit = reviewedCommit;
     else if (normalized.verdict === 'approved') frontmatterSet.last_reviewed_commit = '';
   }
-  if (eventIdentity.phase === 'completed') frontmatterRemove = [...(frontmatterRemove ?? []), 'qualification_input_relations', 'open_artifact_selection'];
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
     { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove }

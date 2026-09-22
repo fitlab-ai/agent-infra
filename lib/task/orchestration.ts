@@ -165,7 +165,6 @@ type OrchestrationOptions = {
   modelPolicy?: OrchestrationModelPolicy;
   captureWorkspace?: (context: WorkspaceSnapshotContext) => string;
   captureRepository?: (repoRoot: string) => RepositorySnapshot;
-  captureWorktreeTree?: (repoRoot: string, forcedPath: string | null) => string;
   inspectPullRequest?: (taskId: string, options: { cwd: string }) => Readonly<{
     status: string;
     task?: Readonly<{ prNumber?: number | null }>;
@@ -786,10 +785,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   const action = routed.stage as LifecycleAction;
   const family = action === 'analysis' ? 'analysis' : action;
   const artifactContext = resolveArtifactContext(taskRef, family, {
-    repoRoot: resolved.repoRoot,
-    selectionOnly: true,
-    captureWorktreeTree: options.captureWorktreeTree,
-    captureRepositorySnapshot: options.captureRepository
+    repoRoot: resolved.repoRoot
   });
   if (artifactContext.status !== 'ready' || !artifactContext.selection) {
     return failed(

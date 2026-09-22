@@ -4,11 +4,7 @@ import path from 'node:path';
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
 import { parseArtifactName } from './artifact-name.ts';
-import {
-  hasOpenArtifactRound,
-} from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
-import { expectedQualificationRelations, validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 
@@ -28,8 +24,7 @@ type LocalArtifactDiagnosticCode =
   | 'LOCAL_DECISION_DETAIL_DUPLICATE'
   | 'LOCAL_REQUIRED_PATTERN_MISSING'
   | 'LOCAL_STRUCTURAL_INVALID'
-  | 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION'
-  | 'LOCAL_QUALIFICATION_AUDIT_INVALID';
+  | 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION';
 
 type LocalArtifactDiagnostic = {
   code: LocalArtifactDiagnosticCode;
@@ -40,8 +35,6 @@ type LocalArtifactDiagnostic = {
 type LocalArtifactValidationOptions = {
   family: LocalArtifactFamily;
   requiredSections?: readonly string[];
-  taskContent?: string;
-  artifact?: string;
 };
 
 type LocalArtifactValidationResult = {
@@ -128,20 +121,6 @@ function validateLocalArtifact(
   const decisionDetails = inspectDecisionDetailDuplicates(content);
   if (!decisionDetails.ok) diagnostics.push({ code: 'LOCAL_DECISION_DETAIL_DUPLICATE', message: decisionDetails.message, line: null });
 
-  if (options.taskContent !== undefined) {
-    const identity = options.artifact ? parseArtifactName(options.artifact) : null;
-    const expected = identity?.family === options.family && hasOpenArtifactRound(options.taskContent, options.family, identity.round)
-      ? expectedQualificationRelations(options.taskContent, options.family)
-      : undefined;
-    if (expected && !expected.ok) diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${expected.code}: ${expected.message}`, line: null });
-    const qualification = validateQualificationAudit(options.taskContent, content, {
-      family: options.family,
-      artifact: options.artifact,
-      expectedUpstreamRelations: expected?.ok ? expected.relations : undefined
-    });
-    if (!qualification.ok) diagnostics.push({ code: 'LOCAL_QUALIFICATION_AUDIT_INVALID', message: `${qualification.code}: ${qualification.message}`, line: null });
-  }
-
   return {
     ok: diagnostics.length === 0,
     family: options.family,
@@ -182,10 +161,8 @@ function prepareLocalArtifact(
   if (!resolved.ok) return failed(resolved.code, resolved.message);
   const parsed = parseArtifactName(request.artifact);
   if (!parsed || parsed.family !== request.family) return failed('ARTIFACT_IDENTITY_INVALID', `artifact '${request.artifact}' does not match ${request.family}`);
-  let taskContent: string;
   let content: string;
   try {
-    taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
     const artifactPath = path.join(resolved.taskDir, request.artifact);
     if (!fs.statSync(artifactPath).isFile()) return failed('ARTIFACT_NOT_REGULAR', `artifact '${request.artifact}' is not a regular file`);
     content = candidate ?? fs.readFileSync(artifactPath, 'utf8');
@@ -195,7 +172,7 @@ function prepareLocalArtifact(
     return failed('ARTIFACT_IDENTITY_INVALID', 'artifact finalization requires an active task');
   }
   const validation = validateLocalArtifact(content, {
-    family: request.family, requiredSections: request.requiredSections, taskContent, artifact: request.artifact
+    family: request.family, requiredSections: request.requiredSections
   });
   const artifactSha256 = sha256Content(content);
   const result = failedFinalization(request, {

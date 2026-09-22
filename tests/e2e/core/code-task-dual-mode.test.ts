@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { INTERNAL_CLI_PATH } from "../../helpers.ts";
+import { INTERNAL_CLI_PATH, sandboxControlSafeEnv } from "../../helpers.ts";
 import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
 import { upsertSection } from "../../../lib/task/sections.ts";
 
@@ -66,7 +66,9 @@ function seedLifecycleReceipts(taskDir: string) {
 
 function runDetect(files: Record<string, string>) {
   const fixture = makeFixture(files);
-  const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-artifact", TASK_ID, "inspect", "--family", "code"], { cwd: fixture.root, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-artifact", TASK_ID, "inspect", "--family", "code"], {
+    cwd: fixture.root, encoding: "utf8", env: sandboxControlSafeEnv()
+  });
   if (!result.stdout.trim()) throw new Error(result.stderr || 'task-artifact inspect produced no output');
   return {
     status: result.status,
@@ -136,11 +138,11 @@ function zhReviewPlan(reviewedPlanFile: string, verdict: string, findings = "0 �
 ${zhReview(verdict, findings)}`;
 }
 
-test("code-task dual-mode: branch 1 - no code requires an approved review-plan", () => {
+test("code-task dual-mode: branch 1 - no code starts without review-plan authorization", () => {
   const result = runDetect({});
 
-  assert.equal(result.status, 2);
-  assert.equal(result.output.mode, "error");
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "init");
 });
 
 test("code-task dual-mode: branch 1 - approved plan starts init mode", () => {
@@ -148,15 +150,15 @@ test("code-task dual-mode: branch 1 - approved plan starts init mode", () => {
     "review-plan.md": zhReviewPlan("plan.md", "通过")
   });
 
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 0, JSON.stringify(result.output));
   assert.equal(result.output.mode, "init");
   assert.equal(result.output.next_artifact, "code.md");
 });
 
-test("code-task dual-mode: branch 2 - unreviewed code returns error", () => {
+test("code-task dual-mode: branch 2 - completed unreviewed code is reused", () => {
   const result = runDetect({ "code.md": "# code" });
 
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 0);
   assert.equal(result.output.mode, "error");
   assert.equal(result.output.review_artifact, "review-code.md");
 });
@@ -172,7 +174,7 @@ test("code-task dual-mode: human-supplemented review (Approved 0/0/0) refuses re
     "review-code-r2.md": zhReview("通过")
   });
 
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 0);
   assert.equal(result.output.mode, "refused");
   assert.equal(result.output.verdict, "Approved");
 });
@@ -184,7 +186,7 @@ test("code-task dual-mode: human-supplemented review (Changes Requested) enters 
     "review-code-r2.md": zhReview("需要修改", "2 阻塞项，1 主要，0 次要 / **人工校验**：0")
   });
 
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 0, JSON.stringify(result.output));
   assert.equal(result.output.mode, "fix");
   assert.equal(result.output.verdict, "Changes Requested");
   assert.equal(result.output.next_artifact, "code-r2.md");
@@ -211,7 +213,7 @@ test("code-task dual-mode: human-supplemented review (Rejected) refuses local fi
     "review-code-r2.md": zhReview("拒绝")
   });
 
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 0);
   assert.equal(result.output.mode, "refused");
   assert.equal(result.output.verdict, "Rejected");
 });
@@ -234,7 +236,7 @@ test("code-task dual-mode: branch 4 - Approved with no findings refuses rerun", 
     "review-code.md": zhReview("通过")
   });
 
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 0);
   assert.equal(result.output.mode, "refused");
   assert.equal(result.output.verdict, "Approved");
 });
@@ -278,7 +280,7 @@ test("code-task decision mode ignores not-required and consumed inputs", () => {
     "code.md": "# code",
     "review-code.md": zhReview("通过")
   });
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 0);
   assert.equal(result.output.mode, "refused");
 });
 
@@ -360,7 +362,7 @@ test("code-task dual-mode: branch 7 - Rejected refuses local fix mode", () => {
     "review-code.md": zhReview("拒绝")
   });
 
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 0);
   assert.equal(result.output.mode, "refused");
   assert.equal(result.output.verdict, "Rejected");
 });
@@ -389,7 +391,9 @@ function runDetectWithTransportTimes(
     fs.utimesSync(path.join(fixture.taskDir, name), mtimeSeconds, mtimeSeconds);
   }
 
-  const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-artifact", TASK_ID, "inspect", "--family", "code"], { cwd: fixture.root, encoding: "utf8" });
+  const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-artifact", TASK_ID, "inspect", "--family", "code"], {
+    cwd: fixture.root, encoding: "utf8", env: sandboxControlSafeEnv()
+  });
   if (!result.stdout.trim()) throw new Error(result.stderr || 'task-artifact inspect produced no output');
   return {
     status: result.status,
@@ -422,7 +426,7 @@ test("code-task dual-mode: branch 2 (replan) - new plan-r2 after code triggers i
   assert.equal(result.output.mode, "init");
   assert.equal(result.output.next_round, 2);
   assert.equal(result.output.next_artifact, "code-r2.md");
-  assert.equal(result.output.review_artifact, "review-plan-r2.md");
+  assert.equal(result.output.review_artifact, null);
 });
 
 test("code-task dual-mode: transport time reordering does not change receipt-backed routing", () => {
@@ -452,7 +456,7 @@ test("code-task dual-mode: transport time reordering does not change receipt-bac
   assert.deepEqual(routing(reordered), routing(first));
 });
 
-test("code-task dual-mode: branch 2 (replan) - unreviewed latest plan does not fire", () => {
+test("code-task dual-mode: branch 2 (replan) - latest plan does not require review authorization", () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // plan iterated to r2 but the only review-plan (review-plan.md) still references plan.md;
   // checkPlanAheadOfCode sees the latest plan (plan-r2.md) is unreviewed and skips replan,
@@ -474,8 +478,8 @@ test("code-task dual-mode: branch 2 (replan) - unreviewed latest plan does not f
     }
   );
 
-  assert.equal(result.status, 1);
-  assert.equal(result.output.mode, "refused");
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "init");
 });
 
 test("code-task dual-mode: branch 2 (replan) - precedes unreviewed-code error", () => {
@@ -507,10 +511,10 @@ test("code-task dual-mode: branch 2 (replan) - precedes unreviewed-code error", 
   assert.equal(result.output.mode, "init");
   assert.equal(result.output.next_round, 3);
   assert.equal(result.output.next_artifact, "code-r3.md");
-  assert.equal(result.output.review_artifact, "review-plan-r2.md");
+  assert.equal(result.output.review_artifact, null);
 });
 
-test("code-task dual-mode: branch 2 (replan) - review-plan Approved with findings fails closed", () => {
+test("code-task dual-mode: branch 2 (replan) - review-plan findings do not authorize code", () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // review-plan-r2 has Approved + 1 major → normalizes to Approved-with-issues.
   const result = runDetectWithTransportTimes(
@@ -532,10 +536,8 @@ test("code-task dual-mode: branch 2 (replan) - review-plan Approved with finding
     }
   );
 
-  assert.equal(result.status, 2);
-  assert.equal(result.output.mode, "error");
-  assert.equal(result.output.verdict, null);
-  assert.match(result.output.message, /REVIEW_VERDICT_FINDING_MISMATCH/);
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "init");
 });
 
 test("code-task dual-mode: branch 2 (replan) - off-number plan/review-plan linked via 审查输入", () => {
@@ -569,10 +571,10 @@ test("code-task dual-mode: branch 2 (replan) - off-number plan/review-plan linke
   assert.equal(result.output.mode, "init");
   assert.equal(result.output.next_round, 2);
   assert.equal(result.output.next_artifact, "code-r2.md");
-  assert.equal(result.output.review_artifact, "review-plan-r4.md");
+  assert.equal(result.output.review_artifact, null);
 });
 
-test("code-task dual-mode: branch 2 (replan) - latest plan unreviewed (review-plan points to older plan)", () => {
+test("code-task dual-mode: branch 2 (replan) - latest plan does not wait for review-plan", () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // review-plan-r2 explicitly references plan-r2.md, but plan-r3.md exists (unreviewed).
   // checkPlanAheadOfCode must NOT replan because the maintainer hasn't approved plan-r3 yet.
@@ -594,6 +596,6 @@ test("code-task dual-mode: branch 2 (replan) - latest plan unreviewed (review-pl
     }
   );
 
-  assert.equal(result.status, 1);
-  assert.equal(result.output.mode, "refused");
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "init");
 });

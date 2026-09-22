@@ -4,8 +4,7 @@ import path from 'node:path';
 
 import { parseTaskFrontmatter } from './frontmatter.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
-import { resolveDeliveryTarget, resolveDiffBase, resolveTargetHead, validateBaseRef, validateRemote } from './delivery-target.ts';
-import { extractReviewBaseline, extractReviewDiffBase, extractReviewTargetHead, extractReviewedHead, findAuthoritativeReviewCodeArtifact } from './review-fingerprint.ts';
+import { resolveDeliveryTarget, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import { withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
 
@@ -47,40 +46,6 @@ function validateBranch(cwd: string, branch: string): boolean {
   return git(cwd, ['check-ref-format', `refs/heads/${branch}`]).status === 0;
 }
 
-function validateReviewTargetCompatibility(
-  repoRoot: string,
-  taskDir: string,
-  target: { remote: string; baseRef: string },
-  reviewedHead: string
-): { ok: true } | { ok: false; code: string; message: string } {
-  const artifact = findAuthoritativeReviewCodeArtifact(taskDir);
-  if (!artifact.ok || !artifact.path) return { ok: false, code: 'DELIVERY_REVIEW_REQUIRED', message: 'A current review-code artifact is required before delivery' };
-  let content: string;
-  try { content = fs.readFileSync(artifact.path, 'utf8'); }
-  catch (error) { return { ok: false, code: 'DELIVERY_REVIEW_REQUIRED', message: error instanceof Error ? error.message : String(error) }; }
-  const savedReviewedHead = extractReviewedHead(content) || extractReviewBaseline(content);
-  const savedTargetHead = extractReviewTargetHead(content);
-  const savedDiffBase = extractReviewDiffBase(content);
-  if (!savedReviewedHead || !savedTargetHead || !savedDiffBase) {
-    return { ok: false, code: 'DELIVERY_REVIEW_TARGET_INVALID', message: 'review-code must save reviewed head, target head, and diff base before delivery' };
-  }
-  if (savedReviewedHead !== reviewedHead) {
-    return { ok: false, code: 'DELIVERY_REVIEW_REQUIRED', message: 'review-code reviewed head does not match last_reviewed_commit' };
-  }
-  const saved = resolveDiffBase(repoRoot, reviewedHead, savedTargetHead);
-  if (!saved.ok || saved.diffBase !== savedDiffBase) {
-    return { ok: false, code: 'DELIVERY_REVIEW_TARGET_INVALID', message: saved.ok ? 'saved review diff base does not match saved target head' : saved.message };
-  }
-  const currentTarget = resolveTargetHead(repoRoot, target);
-  if (!currentTarget.ok) return { ok: false, code: currentTarget.code, message: currentTarget.message };
-  const current = resolveDiffBase(repoRoot, reviewedHead, currentTarget.head!);
-  if (!current.ok) return { ok: false, code: current.code, message: current.message };
-  if (current.diffBase !== savedDiffBase) {
-    return { ok: false, code: 'DELIVERY_REVIEW_TARGET_CHANGED', message: 'current delivery target changed the reviewed diff base; re-run review-code' };
-  }
-  return { ok: true };
-}
-
 function failure(taskId: string | null, code: string, message: string, retryable = false, status: 'failed' | 'blocked' = retryable ? 'blocked' : 'failed'): TaskBranchDeliveryResult {
   return { status, changed: false, taskId, remoteHead: null, localHead: null, state: null, error: { code, message, retryable } };
 }
@@ -115,10 +80,6 @@ function deliverUnlocked(
   const status = git(repoRoot, ['status', '--porcelain=v1']);
   if (status.status !== 0) return failure(taskId, 'DELIVERY_GIT_INSPECT_FAILED', status.stderr.trim() || 'Unable to inspect Git state');
   if (status.stdout.trim()) return failure(taskId, 'DELIVERY_WORKTREE_DIRTY', 'Working tree must be clean before branch delivery');
-  const reviewed = frontmatter.last_reviewed_commit ?? '';
-  if (reviewed !== localHead) return failure(taskId, 'DELIVERY_REVIEW_REQUIRED', 'Local HEAD must equal last_reviewed_commit before delivery');
-  const reviewTarget = validateReviewTargetCompatibility(repoRoot, taskDir, target.value, reviewed);
-  if (!reviewTarget.ok) return failure(taskId, reviewTarget.code, reviewTarget.message, reviewTarget.code.includes('UNAVAILABLE'), reviewTarget.code.includes('UNAVAILABLE') ? 'blocked' : 'failed');
   const ref = `refs/heads/${branch}`;
   const remoteOutput = git(repoRoot, ['ls-remote', '--refs', target.value.remote, ref]);
   if (remoteOutput.status !== 0) return failure(taskId, 'DELIVERY_REMOTE_UNAVAILABLE', remoteOutput.stderr.trim() || 'Unable to inspect the delivery remote', true);

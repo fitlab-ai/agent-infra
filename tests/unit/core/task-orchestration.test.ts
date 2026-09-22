@@ -539,10 +539,7 @@ test('route requires the latest review to bind the latest artifact structurally'
   fs.writeFileSync(path.join(f.taskDir, 'code-r2.md'), '# Code round 2\n');
   fs.utimesSync(path.join(f.taskDir, 'review-code.md'), new Date(), new Date());
 
-  assert.deepEqual(routeOrchestration('TASK-20260101-000001', {
-    repoRoot: f.root,
-    captureRepository: () => ({ head: 'head', headTree: 'head-tree', worktreeTree: 'worktree-tree' })
-  }).next, {
+  assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).next, {
     action: 'review-code', role: 'reviewer', stage: 'review-code', round: 2, artifact: 'review-code-r2.md',
     requestedModel: null, requestedReasoningEffort: null
   });
@@ -559,10 +556,7 @@ test('route uses the same recommendation facts as lifecycle capability checks', 
   };
   fs.writeFileSync(taskPath, upsertSection(content, reworkIntentMutation(content, [intent])).content);
 
-  const routed = routeOrchestration('TASK-20260101-000001', {
-    repoRoot: f.root,
-    captureWorktreeTree: () => 'before-tree'
-  });
+  const routed = routeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   assert.equal(routed.error, null);
   assert.deepEqual(routed.next, {
     action: 'code-task', role: 'executor', stage: 'code', round: 2, artifact: 'code-r2.md',

@@ -104,9 +104,6 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
   }
   if (facts.taskState !== 'active') return deny('TASK_NOT_ACTIVE', `state=${facts.taskState}`);
   if (invalidationBlocks(facts.invalidation)) return deny('INVALIDATION_INCOMPLETE');
-  if (facts.qualificationStale && facts.recommendedAction !== action) {
-    return deny('QUALIFICATION_STALE', ...(facts.qualificationStaleArtifacts ?? ['qualification audit is stale']));
-  }
   if (facts.executionBusy) return deny('EXECUTION_BUSY');
 
   const pendingIntent = (facts.reworkIntents ?? []).find((intent) => intent.status === 'pending');
@@ -213,29 +210,7 @@ function qualificationCandidateSnapshotMatches(
   });
 }
 
-const QUALIFICATION_RECOVERY_ORDER: ReadonlyArray<{ action: LifecycleAction; pattern: RegExp }> = [
-  { action: 'analysis', pattern: /^analysis(?:-r\d+)?\.md$/ },
-  { action: 'review-analysis', pattern: /^review-analysis(?:-r\d+)?\.md$/ },
-  { action: 'plan', pattern: /^plan(?:-r\d+)?\.md$/ },
-  { action: 'review-plan', pattern: /^review-plan(?:-r\d+)?\.md$/ },
-  { action: 'code', pattern: /^code(?:-r\d+)?\.md$/ },
-  { action: 'review-code', pattern: /^review-code(?:-r\d+)?\.md$/ }
-];
-
-function qualificationRecoveryAction(facts: LifecycleFacts): LifecycleAction | null {
-  const stale = facts.qualificationStaleArtifacts ?? [];
-  return QUALIFICATION_RECOVERY_ORDER.find(({ pattern }) => stale.some((name) => pattern.test(name)))?.action ?? null;
-}
-
 function recommendNext(facts: LifecycleFacts): LifecycleRecommendation {
-  if (facts.qualificationStale) {
-    const action = qualificationRecoveryAction(facts);
-    return {
-      action,
-      reasonCode: 'QUALIFICATION_RECOVERY_REQUIRED',
-      evidence: facts.qualificationStaleArtifacts ?? ['qualification audit is stale']
-    };
-  }
   if ((facts.reworkClassificationRequired?.length ?? 0) > 0
     && !(facts.reworkIntents ?? []).some((intent) => intent.status === 'pending')) {
     return { action: null, reasonCode: 'REWORK_CLASSIFICATION_REQUIRED', evidence: facts.reworkClassificationRequired ?? [] };
