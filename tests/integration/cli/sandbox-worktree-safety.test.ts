@@ -16,10 +16,6 @@ import {
   removeSandboxControlRoot
 } from "../../../lib/sandbox/control/lifecycle.ts";
 import {
-  semanticDigest,
-  sha256Content
-} from "../../../lib/task/local-artifact-finalization.ts";
-import {
   cliArgs,
   envWithPrependedPath,
   gitSafeEnv,
@@ -187,26 +183,6 @@ function spawnSandboxCli(
   });
 }
 
-function writeAuxiliaryCleanupCrashPreload(tmpDir: string): string {
-  const preload = path.join(tmpDir, "crash-before-auxiliary-cleanup.cjs");
-  fs.writeFileSync(preload, `
-const fs = require("node:fs");
-const controlRoot = process.env.AGENT_INFRA_TEST_CONTROL_ROOT;
-const auxiliaryRoot = ".local-artifact-finalization-intents";
-const originalUnlinkSync = fs.unlinkSync;
-let injected = false;
-fs.unlinkSync = function unlinkSync(target, options) {
-  if (!injected && controlRoot && !fs.existsSync(controlRoot)
-    && String(target).includes(auxiliaryRoot)) {
-    injected = true;
-    process.exit(91);
-  }
-  return originalUnlinkSync.call(this, target, options);
-};
-`, "utf8");
-  return preload;
-}
-
 function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpDir: string): SandboxConfig {
   return {
     repoRoot: fixture.repoDir,
@@ -286,35 +262,10 @@ function writeTaskBoundCleanupEvidence(
     "utf8"
   );
 
-  const artifact = "plan.md";
-  const content = "# Plan\n";
-  const recoveryId = "c".repeat(16);
-  fs.writeFileSync(path.join(taskDir, artifact), content, "utf8");
-  const intentDir = path.join(config.repoRoot, ".agents", "workspace", ".local-artifact-finalization-intents");
+  const intentDir = path.join(config.repoRoot, ".agents", "workspace", ".task-commit-intents");
   fs.mkdirSync(intentDir, { recursive: true });
-  const intentPath = path.join(intentDir, `${taskId}-plan-${artifact}.json`);
-  fs.writeFileSync(intentPath, `${JSON.stringify({
-    version: 3,
-    taskId,
-    family: "plan",
-    artifact,
-    round: 1,
-    state: "consumed",
-    baselineSha256: sha256Content(content),
-    baselineSemanticDigest: semanticDigest(content),
-    stagingId: recoveryId,
-    candidateSha256: sha256Content(content),
-    finalArtifactSha256: sha256Content(content),
-    finalSemanticDigest: semanticDigest(content),
-    recoveryOperationId: recoveryId,
-    phase: null,
-    authorityDigest: null,
-    requestId: "sandbox-fixture",
-    errorCode: null,
-    errorMessage: null,
-    createdAt: 1,
-    updatedAt: 1
-  })}\n`, "utf8");
+  const intentPath = path.join(intentDir, `${taskId}.json`);
+  fs.writeFileSync(intentPath, "{\"version\":1}\n", "utf8");
 
   const container = `${config.containerPrefix}-${branch.replaceAll("/", "..")}`;
   const controlRoot = sandboxControlPaths({

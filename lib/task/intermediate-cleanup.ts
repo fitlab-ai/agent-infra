@@ -14,26 +14,14 @@ import {
   readTaskFinalizationReceipt,
   type TaskFinalizationReceipt
 } from './finalization.ts';
-import {
-  semanticDigest,
-  sha256Content
-} from './local-artifact-finalization.ts';
-import { artifactRecoveryRoot, readArtifactRecoveryIntent } from './artifact-repair-intent.ts';
-import type { ArtifactRecoveryIntent } from './artifact-repair-intent.ts';
-import { parseArtifactName } from './artifact-name.ts';
-import type { ArtifactSchemaFamily } from './artifact-schema.ts';
 import { enumerateAllTaskDirs, type TaskWorkspaceState } from './resolve-ref.ts';
 import type { TaskControlBindingEvidence } from './finalization-state.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
-const LOCAL_INTENT_RE = /^(TASK-\d{8}-\d{6})-(analysis|review-analysis|plan|review-plan|code|review-code)-(.+\.md)\.json$/;
 const COMMIT_INTENT_RE = /^(TASK-\d{8}-\d{6})\.json$/;
-const AUXILIARY_ROOTS = [
-  '.local-artifact-finalization-intents',
-  '.task-commit-intents'
-] as const;
+const AUXILIARY_ROOTS = ['.task-commit-intents'] as const;
 
-type CleanupKind = 'LFAI-CONSUMED' | 'COMMIT-SYNCED' | 'EMPTY-AUX-PARENT';
+type CleanupKind = 'COMMIT-SYNCED' | 'EMPTY-AUX-PARENT';
 type CleanupDisposition = 'planned' | 'protected' | 'skipped' | 'deleted' | 'failed';
 type FileIdentity = Readonly<{ dev: string; ino: string; size: number; mtimeMs: number }>;
 
@@ -153,47 +141,6 @@ function receiptGate(
   return null;
 }
 
-function canonicalLocalIntentPath(taskId: string, family: string, artifact: string): string {
-  return `${taskId}-${family}-${artifact}.json`;
-}
-
-function localIntentCandidate(
-  repoRoot: string,
-  task: TaskRecord | undefined,
-  filePath: string,
-  taskId: string,
-  family: ArtifactSchemaFamily,
-  artifact: string,
-  identity: FileIdentity,
-  options: ScanOptions
-): IntermediateCleanupItem {
-  const protectedReason = taskGate(task);
-  if (protectedReason) return item('LFAI-CONSUMED', taskId, filePath, 'protected', protectedReason, identity);
-  if (path.basename(filePath) !== canonicalLocalIntentPath(taskId, family, artifact)
-    || !parseArtifactName(artifact)?.family || parseArtifactName(artifact)!.family !== family) {
-    return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity);
-  }
-  let intent: ArtifactRecoveryIntent | null;
-  try { intent = readArtifactRecoveryIntent(repoRoot, taskId, family, artifact); }
-  catch { return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'LFAI_SCHEMA_INVALID', identity); }
-  if (!intent || intent.state !== 'consumed') {
-    return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'LFAI_STATE_PROTECTED', identity);
-  }
-  const artifactPath = path.join(task!.taskDir, artifact);
-  if (safeLstat(task!.taskDir, artifactPath, 'file') === null) {
-    return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_IDENTITY_MISMATCH', identity);
-  }
-  let content: string;
-  try { content = fs.readFileSync(artifactPath, 'utf8'); }
-  catch { return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_UNREADABLE', identity); }
-  if (intent.finalArtifactSha256 !== sha256Content(content) || intent.finalSemanticDigest !== semanticDigest(content)) {
-    return item('LFAI-CONSUMED', taskId, filePath, 'protected', 'ARTIFACT_DIGEST_MISMATCH', identity);
-  }
-  const receiptReason = receiptGate(repoRoot, task!, options);
-  if (receiptReason) return item('LFAI-CONSUMED', taskId, filePath, 'protected', receiptReason, identity);
-  return item('LFAI-CONSUMED', taskId, filePath, 'planned', 'LFAI_CONSUMED_AND_VERIFIED', identity);
-}
-
 function commitIntentCandidate(
   repoRoot: string,
   task: TaskRecord | undefined,
@@ -258,23 +205,12 @@ function readAuxiliaryCandidates(
         candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH'));
         continue;
       }
-      if (rootName === '.local-artifact-finalization-intents') {
-        const match = LOCAL_INTENT_RE.exec(entry.name);
-        if (!match || (selected && !selected.has(match[1]!))) {
-          if (!selected || !match) candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity));
-          continue;
-        }
-        candidates.push(localIntentCandidate(
-          repoRoot, tasks.get(match[1]!), filePath, match[1]!, match[2] as 'analysis' | 'plan' | 'code', match[3]!, identity, options
-        ));
-      } else {
-        const match = COMMIT_INTENT_RE.exec(entry.name);
-        if (!match || (selected && !selected.has(match[1]!))) {
-          if (!selected || !match) candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity));
-          continue;
-        }
-        candidates.push(commitIntentCandidate(repoRoot, tasks.get(match[1]!), filePath, match[1]!, identity, options));
+      const match = COMMIT_INTENT_RE.exec(entry.name);
+      if (!match || (selected && !selected.has(match[1]!))) {
+        if (!selected || !match) candidates.push(item('AUXILIARY-UNKNOWN', null, filePath, 'protected', 'PATH_IDENTITY_MISMATCH', identity));
+        continue;
       }
+      candidates.push(commitIntentCandidate(repoRoot, tasks.get(match[1]!), filePath, match[1]!, identity, options));
     }
     if (entries.length === 0) {
       candidates.push(item('EMPTY-AUX-PARENT', null, root, 'planned', 'EMPTY_CANONICAL_AUXILIARY_ROOT', rootIdentity));
@@ -307,56 +243,7 @@ function scanIntermediateCleanup(repoRoot: string, options: ScanOptions = {}): I
   return buildIntermediateCleanupReport(candidates, true);
 }
 
-function cleanupConsumedRecoveryFiles(repoRoot: string, task: TaskRecord | undefined, candidate: IntermediateCleanupItem): boolean {
-  if (candidate.kind !== 'LFAI-CONSUMED' || !candidate.taskId) return true;
-  if (!task) return false;
-  const match = LOCAL_INTENT_RE.exec(path.basename(candidate.path));
-  if (!match) return false;
-  let intent: ReturnType<typeof readArtifactRecoveryIntent>;
-  try { intent = readArtifactRecoveryIntent(repoRoot, candidate.taskId, match[2] as ArtifactSchemaFamily, match[3]!); }
-  catch { return false; }
-  if (!intent || intent.state !== 'consumed') return false;
-
-  const recovery = artifactRecoveryRoot(task.taskDir, intent.recoveryOperationId);
-  let stat: fs.Stats | null = null;
-  try { stat = fs.lstatSync(recovery); } catch (error) {
-    if (errorCode(error) === 'ENOENT') return true;
-    return false;
-  }
-  if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
-  let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(recovery, { withFileTypes: true }); } catch { return false; }
-  for (const entry of entries) {
-    if (entry.isSymbolicLink()) return false;
-    if (entry.isFile()) {
-      if (!['baseline.md', 'candidate.md', 'final.md', 'publish.md'].includes(entry.name)) return false;
-      continue;
-    }
-    if (!entry.isDirectory() || entry.name !== 'generations') return false;
-    let generations: fs.Dirent[];
-    try { generations = fs.readdirSync(path.join(recovery, entry.name), { withFileTypes: true }); } catch { return false; }
-    if (generations.some((generation) => generation.isSymbolicLink()
-      || !generation.isFile() || !/^[a-f0-9]{64}\.md$/u.test(generation.name))) return false;
-  }
-  try {
-    for (const entry of entries) {
-      const target = path.join(recovery, entry.name);
-      if (entry.isFile()) fs.unlinkSync(target);
-      else {
-        for (const generation of fs.readdirSync(target, { withFileTypes: true })) fs.unlinkSync(path.join(target, generation.name));
-        fs.rmdirSync(target);
-      }
-    }
-    fs.rmdirSync(recovery);
-    const recoveryRoot = path.dirname(recovery);
-    if (fs.readdirSync(recoveryRoot).length === 0) fs.rmdirSync(recoveryRoot);
-    return true;
-  } catch (error) {
-    return errorCode(error) === 'ENOENT';
-  }
-}
-
-function removeCandidate(repoRoot: string, candidate: IntermediateCleanupItem, task?: TaskRecord): IntermediateCleanupItem {
+function removeCandidate(repoRoot: string, candidate: IntermediateCleanupItem): IntermediateCleanupItem {
   if (candidate.disposition !== 'planned') return candidate;
   const root = candidate.kind === 'EMPTY-AUX-PARENT'
     ? path.dirname(path.dirname(candidate.path))
@@ -373,9 +260,6 @@ function removeCandidate(repoRoot: string, candidate: IntermediateCleanupItem, t
   const actual = safeLstat(root, candidate.path, candidate.kind === 'EMPTY-AUX-PARENT' ? 'directory' : 'file');
   if (!actual) return { ...candidate, disposition: 'protected', reason: 'PATH_IDENTITY_CHANGED' };
   if (!sameFileIdentity(expected, actual)) return { ...candidate, disposition: 'protected', reason: 'PATH_IDENTITY_CHANGED' };
-  if (!cleanupConsumedRecoveryFiles(repoRoot, task, candidate)) {
-    return { ...candidate, disposition: 'protected', reason: 'RECOVERY_STAGING_NOT_SAFE_TO_REMOVE' };
-  }
   try {
     if (candidate.kind === 'EMPTY-AUX-PARENT') {
       if (fs.readdirSync(candidate.path).length !== 0) return { ...candidate, disposition: 'protected', reason: 'AUXILIARY_ROOT_NOT_EMPTY' };
@@ -434,7 +318,7 @@ function cleanupIntermediateUnderRemovalCoordinator(
         if (initialCandidate.disposition !== 'planned') continue;
         const current = refreshedByKey.get(intermediateCleanupKey(initialCandidate));
         items[index] = current
-          ? removeCandidate(repoRoot, current, tasks.get(taskId))
+          ? removeCandidate(repoRoot, current)
           : { ...initialCandidate, disposition: 'protected', reason: 'CANDIDATE_NO_LONGER_ELIGIBLE' };
       }
     };
