@@ -61,7 +61,6 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-review': ['preflight', 'finalize-summary'],
   'task-event': ['event'],
   'task-invalidation': ['reconcile'],
-  'task-override': ['diagnose', 'issue', 'consume'],
   'task-lifecycle': ['intent'],
   'task-finalization': ['complete'],
   'task-short-id': ['list', 'list-verify', 'alloc', 'release', 'resolve'],
@@ -98,7 +97,6 @@ export function internalRouteSelector(command: string, args: readonly string[]):
   if (command === 'task-orchestration') return args[1] === 'status' ? 'status' : args[1] ? 'progress' : '';
   if (command === 'task-review') return args[1] ?? '';
   if (command === 'task-invalidation') return args[1] ?? '';
-  if (command === 'task-override') return args[1] ?? '';
   if (command === 'task-artifact') return args[1] ?? '';
   if (command === 'platform-pr-review' && first(args) === 'publish') {
     const scope = optionValue(args, '--scope') ?? '';

@@ -28,14 +28,6 @@ function run(root: string, args: string[], env: NodeJS.ProcessEnv = sandboxContr
   });
 }
 
-function runOverride(root: string, args: string[]) {
-  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-override', ...args], {
-    cwd: root,
-    encoding: 'utf8',
-    env: sandboxControlSafeEnv()
-  });
-}
-
 test('task-lifecycle CLI stays inside its fixture with sandbox control authority removed', () => {
   const f = fixture();
   const env = sandboxControlSafeEnv({ ...process.env });
@@ -57,20 +49,6 @@ test('task-lifecycle CLI prints one JSON result and uses domain exit codes', () 
   const conflict = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'different']);
   assert.equal(conflict.status, 1);
   assert.equal(JSON.parse(conflict.stdout).error.code, 'LIFECYCLE_INTENT_CONFLICT');
-});
-
-test('task-lifecycle rejects dry-run with an override before acquiring a task lock', () => {
-  const f = fixture();
-  try {
-    const before = fs.readFileSync(path.join(f.dir, 'task.md'));
-    const result = run(f.root, [
-      TASK_ID, 'complete', '--agent', 'codex', '--dry-run', '--override-ticket', 'ticket',
-      '--override-target', 'continue-local', '--override-scope', 'task-lifecycle'
-    ]);
-    assert.equal(result.status, 1);
-    assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_PAYLOAD_INVALID');
-    assert.deepEqual(fs.readFileSync(path.join(f.dir, 'task.md')), before);
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
 test('task-lifecycle CLI rejects unknown and duplicate options as one JSON failure', () => {
@@ -150,47 +128,24 @@ test('task-lifecycle CLI restore fails closed with REPO_ROOT_NOT_FOUND outside a
   assert.equal(JSON.parse(result.stdout).error.code, 'REPO_ROOT_NOT_FOUND');
 });
 
-test('task-lifecycle consumes a ticket to repair a missing log before moving the task', () => {
+test('task-lifecycle preserves a missing activity-log failure before moving the task', () => {
   const f = fixture();
   const taskFile = path.join(f.dir, 'task.md');
   fs.writeFileSync(taskFile, `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\ntarget_date:\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
-  const issue = runOverride(f.root, [
-    TASK_ID, 'issue', '--failure-id', 'lifecycle.apply:LIFECYCLE_LOG_MISSING',
-    '--target', 'repair-task', '--intent', 'cancel', '--operator', 'external-contributor',
-    '--reason', 'repair the missing local activity log', '--scope', 'task-lifecycle',
-    '--expires-at', '2099-01-01 00:00:00+00:00'
-  ]);
-  assert.equal(issue.status, 0, issue.stderr || issue.stdout);
-  const ticket = JSON.parse(issue.stdout).ticketId as string;
-  const result = run(f.root, [
-    TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'normal cancel blocked by missing log',
-    '--override-ticket', ticket, '--override-target', 'repair-task', '--override-scope', 'task-lifecycle'
-  ]);
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.equal(JSON.parse(result.stdout).humanOverride.outcome.result, 'recovery-required');
-  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
+  const result = run(f.root, [TASK_ID, 'cancel', '--agent', 'codex', '--reason', 'normal cancel blocked by missing log']);
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_LOG_MISSING');
+  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), false);
 });
 
-test('a source override does not bypass an independent missing-log guard', () => {
+test('task-lifecycle rejects an invalid source state before moving the task', () => {
   const f = fixture();
   const taskFile = path.join(f.dir, 'task.md');
   fs.writeFileSync(taskFile, `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: old\ntarget_date:\n---\n\n# Task\n`);
   fs.mkdirSync(path.join(f.root, '.agents', 'workspace', 'blocked'), { recursive: true });
   fs.renameSync(f.dir, path.join(f.root, '.agents', 'workspace', 'blocked', TASK_ID));
-  const issue = runOverride(f.root, [
-    TASK_ID, 'issue', '--failure-id', 'lifecycle.apply:LIFECYCLE_SOURCE_INVALID',
-    '--target', 'continue-local', '--intent', 'complete', '--operator', 'external-contributor',
-    '--reason', 'source state was independently confirmed', '--scope', 'task-lifecycle',
-    '--expires-at', '2099-01-01 00:00:00+00:00'
-  ]);
-  assert.equal(issue.status, 0, issue.stderr || issue.stdout);
-  const ticket = JSON.parse(issue.stdout).ticketId as string;
-  const result = run(f.root, [
-    TASK_ID, 'complete', '--agent', 'codex', '--override-ticket', ticket,
-    '--override-target', 'continue-local', '--override-scope', 'task-lifecycle'
-  ]);
+  const result = run(f.root, [TASK_ID, 'complete', '--agent', 'codex']);
   assert.equal(result.status, 1, result.stderr || result.stdout);
-  const parsed = JSON.parse(result.stdout) as { humanOverride: { error: { message: string } } };
-  assert.match(parsed.humanOverride.error.message, /LIFECYCLE_LOG_MISSING/);
+  assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_SOURCE_INVALID');
   assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID)), false);
 });

@@ -14,7 +14,6 @@ import type { LedgerRow, ReviewStage } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
-import { allowsManualOverride } from './guard-override.ts';
 import { parseLegacyReworkIntentDocument, parseReworkIntentDocument, reworkIntentMutation, upsertReworkIntent } from './rework-intent.ts';
 import type { ReworkClassification, ReworkIntent, ReworkTarget } from './rework-intent.ts';
 import { extractSection, extractSubSection } from './sections.ts';
@@ -149,8 +148,7 @@ function mapWrite(intent: LedgerIntent, entityId: string, before: LedgerRow | nu
 function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {}): LedgerIntentResult {
   const resolved = resolveTaskRef(intent.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(intent, resolved.code, resolved.message, resolved.taskId);
-  const stateOverride = allowsManualOverride(options.manualOverride, 'ledger-intent', 'TASK_STATE_MISMATCH');
-  if (resolved.state !== 'active' && !stateOverride) return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
+  if (resolved.state !== 'active') return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   let content: string;
   let rows: LedgerRow[];
   try {
@@ -353,8 +351,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
             ? new Set(['confirmed', 'open', 'needs-human-decision'])
             : before.status === 'cannot-judge' ? new Set(['open', 'needs-human-decision']) : new Set<string>();
         const sameRoundMinorClose = before.status === 'open' && before.severity === 'minor' && intent.status === 'closed';
-        if ((!sameRoundMinorClose && !allowed.has(intent.status))
-          && !allowsManualOverride(options.manualOverride, 'ledger-intent', 'LEDGER_TRANSITION_INVALID')) {
+        if (!sameRoundMinorClose && !allowed.has(intent.status)) {
           return failed(intent, 'LEDGER_TRANSITION_INVALID', `finding '${intent.id}' cannot transition from ${before.status} to ${intent.status}`, resolved.taskId, intent.id);
         }
         after = { ...before, status: intent.status, evidence };
@@ -388,7 +385,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
   }
 
   const result = writeTask({
-    taskRef: intent.taskRef, expectedState: stateOverride ? resolved.state : 'active',
+    taskRef: intent.taskRef, expectedState: 'active',
     mutations: [rowMutation(after), ...(implementationMutation ? [implementationMutation] : [])],
     dryRun: 'dryRun' in intent ? intent.dryRun : false
   }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });

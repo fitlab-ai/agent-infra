@@ -12,8 +12,6 @@ import type {
   ResolveTaskRefErrorCode,
   TaskWorkspaceState
 } from './resolve-ref.ts';
-import { allowsManualOverride } from './guard-override.ts';
-import type { ManualOverrideCapability } from './guard-override.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
 import { invalidationBlocks, parseInvalidationDocument } from './invalidation.ts';
@@ -163,7 +161,6 @@ type TaskWriteOptions = {
   metadataProvider?: () => TaskWriteMetadata;
   randomSuffix?: () => string;
   fileSystem?: Partial<TaskFileSystem>;
-  manualOverride?: ManualOverrideCapability;
   invalidationContext?: 'standard' | 'source-completion' | 'reconcile';
 };
 
@@ -250,7 +247,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
     taskMdPath: resolved.taskMdPath,
     actualState: resolved.state
   };
-  if (resolved.state !== request.expectedState && !allowsManualOverride(options.manualOverride, 'task.write', 'TASK_STATE_MISMATCH')) {
+  if (resolved.state !== request.expectedState) {
     return failure(
       request,
       identity,

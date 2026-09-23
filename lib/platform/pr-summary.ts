@@ -3,7 +3,6 @@ import path from 'node:path';
 
 import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
-import { renderHumanOverrideAudit } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { readPrDeliveryFact } from '../task/pr-delivery-fact.ts';
@@ -11,7 +10,7 @@ import type { PrDeliveryFact } from '../task/pr-delivery-fact.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { LoadedContext, PlatformClient } from './context.ts';
 import { normalizeCommentContent } from './issue-comments.ts';
-import { CONTROL_MARKER_PATTERN, escapeHtmlText, sanitizeMarkdownDocument, splitDocumentPlaceholder } from './comment-safety.ts';
+import { CONTROL_MARKER_PATTERN, sanitizeMarkdownDocument, splitDocumentPlaceholder } from './comment-safety.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
@@ -74,25 +73,6 @@ function summaryMarker(taskId: string): string {
   return `<!-- sync-pr:${taskId}:summary -->`;
 }
 
-function escapeSummaryAuditText(value: string): string {
-  return escapeHtmlText(value).replace(/\r\n?/g, '\n');
-}
-
-function renderSummaryAuditLine(value: string): string {
-  const safe = escapeSummaryAuditText(value);
-  const longestRun = Math.max(0, ...(safe.match(/`+/g) || []).map((run) => run.length));
-  const delimiter = '`'.repeat(longestRun + 1);
-  return `${delimiter} ${safe} ${delimiter}`;
-}
-
-function renderSafeHumanOverrideAudit(value: string): string {
-  const normalized = value.trim().replace(/\r\n?/g, '\n');
-  if (!normalized) return '';
-  const [heading, ...rows] = normalized.split('\n');
-  const safeHeading = heading === '## Human Override Audit' ? heading : renderSummaryAuditLine(heading || '');
-  return [safeHeading, ...rows.map((row) => row ? renderSummaryAuditLine(row) : '')].join('\n');
-}
-
 function isSafeSummaryEnvelope(value: string, taskId: string): boolean {
   return value.includes(summaryMarker(taskId))
     && (value.match(/<!--\s*sync-pr:/gi) || []).length === 1
@@ -136,9 +116,8 @@ function platformError(error: { code: string; message: string; retryable?: boole
   return { code: error.code, message: error.message, retryable: error.retryable ?? false };
 }
 
-function buildPullRequestSummary(taskId: string, body: string, headSha: string, humanOverrideAudit = ''): string {
-  const sections = [body.replace(/\s+$/, ''), renderSafeHumanOverrideAudit(humanOverrideAudit)].filter(Boolean).join('\n\n');
-  return normalizeCommentContent(`${summaryMarker(taskId)}\n<!-- last-commit: ${headSha} -->\n\n${sections}\n`);
+function buildPullRequestSummary(taskId: string, body: string, headSha: string): string {
+  return normalizeCommentContent(`${summaryMarker(taskId)}\n<!-- last-commit: ${headSha} -->\n\n${body.replace(/\s+$/, '')}\n`);
 }
 
 function reconcileSummaryComment(comments: SummaryComment[], taskId: string, desired: string):
@@ -643,7 +622,7 @@ async function syncPullRequestSummary(
           `<!-- manual-validation-receipt: transaction=${manual.transactionId}; receipt=${manual.receiptDigest}; evidence=${manualEvidenceDigest}; head=${manual.prHeadSha} -->`
         )
         : replaced.value;
-      const desired = buildPullRequestSummary(resolved.taskId, renderedBody, initial.value.head.sha, renderHumanOverrideAudit(taskContent));
+      const desired = buildPullRequestSummary(resolved.taskId, renderedBody, initial.value.head.sha);
       if (!isSafeSummaryEnvelope(desired, resolved.taskId)) return fail('failed', context, {
         code: 'PR_SUMMARY_RENDER_INVALID',
         message: 'Summary contains an invalid or duplicated reserved control marker',

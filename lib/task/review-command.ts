@@ -1,13 +1,10 @@
 import type { ReviewFinalizationRequest } from './review-finalization.ts';
 
-export function parseReviewCommand(args: readonly string[]): ReviewFinalizationRequest & {
-  overrideTicket?: string; overrideTarget?: string; overrideScope?: string;
-} {
+export function parseReviewCommand(args: readonly string[]): ReviewFinalizationRequest {
   if (!args[0] || !['preflight', 'finalize-summary'].includes(args[1] ?? '')) throw new Error('task ref and a supported review operation are required');
   const values: Record<string, string | boolean> = {};
   const flags = {
-    '--stage': 'stage', '--artifact': 'artifact', '--orchestrated': 'orchestrated', '--dry-run': 'dryRun',
-    '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
+    '--stage': 'stage', '--artifact': 'artifact', '--orchestrated': 'orchestrated', '--dry-run': 'dryRun'
   } as const;
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;

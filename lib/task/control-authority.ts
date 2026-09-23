@@ -5,7 +5,6 @@ import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 import { getAgentClientAdapter } from '../agent-clients/registry.ts';
-import { consumeHumanOverride, failureId, overrideDryRunConflict } from './human-override.ts';
 import {
   activateMatchingOrchestrationDelegation,
   activateOrchestrationDelegation,
@@ -427,11 +426,7 @@ export function taskControlOperationKey(operation: TaskControlOperation): string
     : operation.intent;
 }
 
-export type TaskLifecycleControlRequest = TaskLifecycleRequest & Readonly<{
-  overrideTicket?: string;
-  overrideTarget?: string;
-  overrideScope?: string;
-}>;
+export type TaskLifecycleControlRequest = TaskLifecycleRequest;
 
 function invalidContext(message: string): never {
   throw new Error(`TASK_CONTROL_CONTEXT_INVALID: ${message}`);
@@ -558,12 +553,8 @@ function lifecycleTaskId(request: TaskLifecycleControlRequest, repoRoot: string)
 async function applyLifecycleWithAuthority(
   context: TaskControlExecutionContext,
   request: TaskLifecycleControlRequest
-): Promise<(TaskLifecycleResult | LifecycleRecoveryResult) & { humanOverride?: unknown }> {
-  const conflict = overrideDryRunConflict(request as unknown as Record<string, unknown>);
-  if (conflict) {
-    return taskLifecycleFailure(request, { code: 'LIFECYCLE_PAYLOAD_INVALID', message: conflict.message });
-  }
-  const execute = async (): Promise<(TaskLifecycleResult | LifecycleRecoveryResult) & { humanOverride?: unknown }> => {
+): Promise<TaskLifecycleResult | LifecycleRecoveryResult> {
+  const execute = async (): Promise<TaskLifecycleResult | LifecycleRecoveryResult> => {
     if (request.intent === 'recover-started') {
       const adapter = isAgentClientId(request.agent)
         ? getAgentClientAdapter(request.agent).orchestrationAdapter
@@ -577,27 +568,7 @@ async function applyLifecycleWithAuthority(
       }
       return adapter.recoverStarted(request as LifecycleRecoveryRequest, { repoRoot: context.repoRoot });
     }
-    const lifecycleResult = applyTaskLifecycle(request, { repoRoot: context.repoRoot });
-    if (lifecycleResult.status !== 'failed' || !request.overrideTicket) return lifecycleResult;
-    if (!request.overrideTarget || !request.overrideScope) {
-      return {
-        ...lifecycleResult,
-        error: { code: 'OVERRIDE_PAYLOAD_INVALID', message: 'override ticket requires --override-target and --override-scope' }
-      };
-    }
-    const override = await consumeHumanOverride({
-      taskRef: request.taskRef,
-      ticketId: request.overrideTicket,
-      failureId: failureId('lifecycle.apply', lifecycleResult.error?.code ?? 'LIFECYCLE_FAILED'),
-      target: request.overrideTarget,
-      scope: request.overrideScope,
-      intent: request.intent,
-      ...('alertNumber' in request && request.alertNumber ? { alertNumber: request.alertNumber } : {}),
-      ...('issueNumber' in request && request.issueNumber ? { issueNumber: request.issueNumber } : {}),
-      ...('stagingDir' in request && request.stagingDir ? { stagingDir: request.stagingDir } : {})
-    }, { repoRoot: context.repoRoot });
-    if (override.status === 'failed') return { ...lifecycleResult, humanOverride: override };
-    return { ...lifecycleResult, ...override, humanOverride: override, error: null };
+    return applyTaskLifecycle(request, { repoRoot: context.repoRoot });
   };
   const taskId = lifecycleTaskId(request, context.repoRoot);
   if (!taskId) return await execute();
@@ -692,7 +663,7 @@ function orchestrationFailure(error: unknown): OrchestrationResult {
 export function dispatchTaskControlOperation(
   context: TaskControlExecutionContext,
   operation: Extract<TaskControlOperation, { family: 'task-lifecycle' }>
-): Promise<(TaskLifecycleResult | LifecycleRecoveryResult) & { humanOverride?: unknown }>;
+): Promise<TaskLifecycleResult | LifecycleRecoveryResult>;
 export function dispatchTaskControlOperation(
   context: TaskControlExecutionContext,
   operation: Extract<TaskControlOperation, { family: 'task-finalization' }>
@@ -756,7 +727,7 @@ function operationInvalid(message: string): never {
 
 const LIFECYCLE_FLAGS = new Set([
   '--agent', '--reason', '--unblock-condition', '--note', '--alert-number', '--staging-dir', '--issue-number',
-  '--auto', '--override-ticket', '--override-target', '--override-scope', '--dry-run'
+  '--auto', '--dry-run'
 ]);
 
 const FINALIZATION_FLAGS = new Set(['--agent']);
@@ -831,9 +802,6 @@ export function parseTaskControlOperation(
       ...(value(values, '--unblock-condition') ? { unblockCondition: value(values, '--unblock-condition') } : {}),
       ...(value(values, '--note') ? { note: value(values, '--note') } : {}),
       ...(value(values, '--staging-dir') ? { stagingDir: value(values, '--staging-dir') } : {}),
-      ...(value(values, '--override-ticket') ? { overrideTicket: value(values, '--override-ticket') } : {}),
-      ...(value(values, '--override-target') ? { overrideTarget: value(values, '--override-target') } : {}),
-      ...(value(values, '--override-scope') ? { overrideScope: value(values, '--override-scope') } : {}),
       ...(value(values, '--alert-number') ? { alertNumber: Number(value(values, '--alert-number')) } : {}),
       ...(value(values, '--issue-number') ? { issueNumber: Number(value(values, '--issue-number')) } : {}),
       ...(values['--auto'] === true ? { auto: true } : {}),
