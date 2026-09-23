@@ -940,6 +940,47 @@ test("sandbox rm clean path uses injectable default-yes confirmations and remove
   }
 });
 
+test("sandbox rm preserves another registered worktree", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-preserve-worktree-"));
+  const targetBranch = "feature/remove-selected";
+  const retainedBranch = "feature/retain-registered";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const target = addFixtureWorktree(fixture, tmpDir, targetBranch);
+    const retained = addFixtureWorktree(fixture, tmpDir, retainedBranch);
+    const inspection = safety.inspectWorktree(target);
+    assert.equal(inspection.status, "clean");
+
+    await rm.rmOne(config, [], targetBranch, {
+      assumeYes: true,
+      target: {
+        branch: targetBranch,
+        effectiveBranch: targetBranch,
+        engine: "docker-desktop",
+        matchedContainers: [],
+        existingWorktrees: [target],
+        toolCandidates: [],
+        workspace: { mode: "branch-only" },
+        controlRoots: [],
+        workspaceViewRoots: []
+      },
+      permits: new Map([[path.resolve(target), safety.createCleanPermit(inspection.snapshot)]])
+    });
+
+    assert.equal(fs.existsSync(target), false);
+    assert.equal(
+      git(fixture.repoDir, "worktree", "list", "--porcelain").includes(`worktree ${fs.realpathSync.native(retained)}`),
+      true
+    );
+    assert.equal(git(retained, "rev-parse", "--abbrev-ref", "HEAD"), retainedBranch);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm releases a stale short id after task-bound cleanup", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/removal.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-stale-short-id-"));

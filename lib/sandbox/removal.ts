@@ -47,6 +47,7 @@ import { toolConfigDirCandidates, toolProjectDirCandidates } from './tools.ts';
 import type { SandboxTool } from './tools.ts';
 import { getProcessStartTime } from '../server/process-state.ts';
 import { releaseStaleShortIdRegistry } from '../task/short-id.ts';
+import { withRepositoryMutationLock } from '../task/task-execution-lock.ts';
 import { fetchSandboxRows, type SandboxRow } from './commands/list-running.ts';
 import {
   formatIntermediateCleanupReport,
@@ -959,7 +960,10 @@ async function rmOne(
   branch: string,
   options: RmOneOptions = {}
 ): Promise<void> {
-  await runRmOneUnderRepositoryLock(config, tools, branch, options);
+  await withRepositoryMutationLock(
+    config.repoRoot,
+    () => runRmOneUnderRepositoryLock(config, tools, branch, options)
+  );
 }
 
 async function removeUncheckedSandbox(
@@ -998,7 +1002,16 @@ async function removeUncheckedSandbox(
     return null;
   }
 
+  const worktreePermits = options.permits ?? await authorizeWorktrees(
+    existingWorktrees,
+    { allowDirtyDiscard: true, assumeYes: Boolean(options.assumeYes) },
+    { ...options.prompt, interactive: options.interactive }
+  );
+
   for (const container of matchedContainers) runSafeEngine(engine, 'docker', ['rm', '-f', container]);
+  if (!sandboxContainersRemoved(engine, matchedContainers)) {
+    throw new Error(`SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT: ${matchedContainers.join(', ')}`);
+  }
   for (const root of controlRoots) {
     fs.rmSync(root, { recursive: true, force: true });
     removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
@@ -1011,12 +1024,15 @@ async function removeUncheckedSandbox(
   for (const shell of shellConfigDirCandidates(config, effectiveBranch)) fs.rmSync(shell, { recursive: true, force: true });
   if (shouldRemoveShare) fs.rmSync(sharePath, { recursive: true, force: true });
   if (shouldRemoveWorktree) {
-    for (const worktree of existingWorktrees) fs.rmSync(worktree, { recursive: true, force: true });
-    runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
+    for (const worktree of existingWorktrees) {
+      const permit = worktreePermits.get(path.resolve(worktree));
+      if (!permit) throw new Error(`SANDBOX_WORKTREE_REMOVAL_PERMIT_MISSING: ${worktree}`);
+      removeWorktreeDir(config.repoRoot, config.worktreeBase, worktree, permit);
+    }
   }
-  if (shouldDeleteBranch) runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch]);
-  if (!sandboxContainersRemoved(engine, matchedContainers)) {
-    throw new Error(`SANDBOX_REMOVAL_CONTAINER_STILL_PRESENT: ${matchedContainers.join(', ')}`);
+  if (shouldDeleteBranch) {
+    assertBranchRemovalIdentity(config, effectiveBranch, worktreePermits);
+    runSafe('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch]);
   }
   if (target.workspace.mode === 'task-bound') {
     releaseStaleShortIdRegistry(config.repoRoot, target.workspace.taskId);
@@ -1045,7 +1061,7 @@ async function rmPurge(
   tools: SandboxTool[],
   prompt: PromptDependencies = {}
 ): Promise<void> {
-  return rmPurgeCore(config, tools, prompt);
+  return withRepositoryMutationLock(config.repoRoot, () => rmPurgeCore(config, tools, prompt));
 }
 
 async function rmPurgeCore(
