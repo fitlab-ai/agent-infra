@@ -129,6 +129,44 @@ test("platform-sync computes in: labels from the repository when the task worksp
   });
 });
 
+test("platform-sync computes in: labels from a moved task worktree", async () => {
+  await withTempRoot("agent-infra-platform-sync-moved-worktree-", async (tempRoot) => {
+    const repositoryRoot = path.join(tempRoot, "repository");
+    const registeredWorktree = path.join(tempRoot, "registered-worktree");
+    const sandboxWorktree = path.join(tempRoot, "sandbox-worktree");
+    const branch = "agent-infra-bugfix-sandbox-path";
+    const ctx = setupPlatformSyncEnv(repositoryRoot);
+    addWorktree(repositoryRoot, registeredWorktree, branch);
+    write(path.join(registeredWorktree, "lib", "change.ts"), "export const changed = true;\n");
+    const added = spawnSync("git", ["add", "lib/change.ts"], { cwd: registeredWorktree, encoding: "utf8", env: gitSafeEnv() });
+    const committed = spawnSync("git", ["commit", "-qm", "test: add changed file"], { cwd: registeredWorktree, encoding: "utf8", env: gitSafeEnv() });
+    assert.equal(added.status, 0, added.stderr);
+    assert.equal(committed.status, 0, committed.stderr);
+    fs.renameSync(registeredWorktree, sandboxWorktree);
+
+    const taskDir = path.join(sandboxWorktree, ".agents", "workspace", "active", taskId);
+    write(path.join(sandboxWorktree, ".agents", ".airc.json"), JSON.stringify({
+      platform: { type: "github" },
+      labels: { in: { cli: ["lib/"] } }
+    }));
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      branch,
+      platform_issue_identity: '\'{"kind":"number","value":65}\''
+    }));
+    writeJson(ctx.issuePath, buildIssuePayload({ labels: [{ name: "in: cli" }] }));
+
+    const result = await runPlatformSyncAdapter(taskDir, {
+      when: "platform_issue_identity_exists"
+    }, ctx.env({ GH_FAKE_ISSUE_PATH: ctx.issuePath }), sandboxWorktree);
+
+    assert.equal(result.status, "pass", result.message);
+    const inLabels = result.subchecks.find((check: { checkId: string }) => check.checkId === "platform.in-labels-computed");
+    assert.ok(inLabels);
+    assert.equal(inLabels.status, "pass");
+    assert.match(inLabels.message, /in: labels match committed changes/);
+  });
+});
+
 test("platform-sync performs no GitHub operation when the repository selects none", async () => {
   await withTempRoot("agent-infra-platform-sync-none-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
@@ -1223,10 +1261,13 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
   })
 ));
 
-test("validate-artifact platform-sync falls back to taskDir HEAD when task branch worktree is unmatched", () => (
+test("validate-artifact platform-sync fails closed while computing in: labels for an unmatched task branch", () => (
   withTempRoot("agent-infra-platform-sync-commit-unmatched-branch-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const mainSha = createHeadCommit(tempRoot);
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
+      labels: { in: { source: [".platform-sync-base"] } }
+    }));
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
       branch: "agent-infra-feature-missing",
       platform_issue_identity: '\'{"kind":"number","value":65}\'',
@@ -1242,7 +1283,11 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
       GH_FAKE_PR_NUMBER: "77"
     });
     assert.equal(result.status, 0, result.stderr);
-    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    const payload = assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    const inLabels = payload.checks.find((check) => check.checkId === "platform.in-labels-computed");
+    assert.ok(inLabels);
+    assert.equal(inLabels.status, "fail");
+    assert.match(String(inLabels.message), /not checked out in a usable worktree/);
   })
 ));
 

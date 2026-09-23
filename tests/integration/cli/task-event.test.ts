@@ -1717,24 +1717,28 @@ test('review-code completion anchors an approved clean reviewed commit', () => {
 test('review-code completion anchors the task branch worktree when the task workspace is on the host', () => {
   const f = fixture('code-review');
   const branch = 'agent-infra-bugfix-worktree-anchor';
-  const worktree = path.join(f.root, 'task-worktree');
+  const registeredWorktree = path.join(f.root, 'task-worktree');
+  const sandboxWorktree = path.join(f.root, 'sandbox-worktree');
   fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
   let result = spawnSync('git', ['add', '.gitignore'], { cwd: f.root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   result = spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'fixture'], { cwd: f.root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  result = spawnSync('git', ['worktree', 'add', '-b', branch, worktree], { cwd: f.root, encoding: 'utf8' });
+  result = spawnSync('git', ['worktree', 'add', '-b', branch, registeredWorktree], { cwd: f.root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  fs.writeFileSync(path.join(worktree, 'reviewed.txt'), 'reviewed\n');
-  result = spawnSync('git', ['add', 'reviewed.txt'], { cwd: worktree, encoding: 'utf8' });
+  fs.writeFileSync(path.join(registeredWorktree, 'reviewed.txt'), 'reviewed\n');
+  result = spawnSync('git', ['add', 'reviewed.txt'], { cwd: registeredWorktree, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  result = spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'reviewed'], { cwd: worktree, encoding: 'utf8' });
+  result = spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'reviewed'], { cwd: registeredWorktree, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8' }).stdout.trim();
-  const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktree, encoding: 'utf8' }).stdout.trim();
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: registeredWorktree, encoding: 'utf8' }).stdout.trim();
+  const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: registeredWorktree, encoding: 'utf8' }).stdout.trim();
   fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('assigned_to: claude', `assigned_to: claude\nbranch: ${branch}`));
+  fs.renameSync(registeredWorktree, sandboxWorktree);
+  const sandboxTaskDir = path.join(sandboxWorktree, '.agents', 'workspace', 'active', f.id);
+  fs.cpSync(f.dir, sandboxTaskDir, { recursive: true });
 
-  const started = run(f.root, [
+  const started = run(sandboxWorktree, [
     f.id, 'review-code.started', '--agent', 'codex', '--reason-code', 'upstream-fact-doubt',
     '--request-id', `${f.id}:supplemental-review`, '--initiator', 'human'
   ]);
@@ -1743,16 +1747,17 @@ test('review-code completion anchors the task branch worktree when the task work
     .replace('- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`', `- **审查基线提交**：${head}`)
     .replace('- **审查快照树**：dddddddddddddddddddddddddddddddddddddddd', `- **审查快照树**：${tree}`)
     .replace('- **审查差异基线**：bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', `- **审查已检视提交**：${head}\n- **审查差异基线**：${head}`);
-  fs.writeFileSync(path.join(f.dir, 'review-code-r2.md'), artifact);
-  const finalized = finalizeReview(f, { stage: 'code', artifact: 'review-code-r2.md' });
+  fs.writeFileSync(path.join(sandboxTaskDir, 'review-code-r2.md'), artifact);
+  const sandboxFixture = { ...f, root: sandboxWorktree, dir: sandboxTaskDir, file: path.join(sandboxTaskDir, 'task.md') };
+  const finalized = finalizeReview(sandboxFixture, { stage: 'code', artifact: 'review-code-r2.md' });
   assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
 
-  const completed = run(f.root, [
+  const completed = run(sandboxWorktree, [
     f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code-r2.md',
     '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
   ]);
   assert.equal(completed.status, 0, completed.stderr);
-  assert.match(fs.readFileSync(f.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
+  assert.match(fs.readFileSync(sandboxFixture.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
 });
 
 test('review-code completion records the result without authorizing a changed implementation', () => {

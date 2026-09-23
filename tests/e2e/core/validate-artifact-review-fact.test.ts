@@ -34,7 +34,7 @@ function setupRepo(tempRoot: string) {
   write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({ delivery: { remote: "origin", baseRef: "main" } }) + "\n");
   git(tempRoot, ["config", "user.email", "codex@example.com"]);
   git(tempRoot, ["config", "user.name", "Codex"]);
-  write(path.join(tempRoot, ".gitignore"), "task/\n");
+  write(path.join(tempRoot, ".gitignore"), "task/\n.agents/workspace/\n");
   write(path.join(tempRoot, ".agents/skills/x.md"), "base\n");
   git(tempRoot, ["add", "-A"]);
   git(tempRoot, ["commit", "-qm", "base"]);
@@ -289,14 +289,17 @@ test("review-fact accepts an approved uncommitted snapshot without a commit anch
 
 test("review-fact validates the task branch worktree instead of the task workspace directory", onPlatforms("linux", "darwin", "win32"), async () => {
   await withTempRoot("agent-infra-review-fact-task-worktree-", async (tempRoot) => {
-    const { taskDir, baseline } = setupRepo(tempRoot);
+    const { baseline } = setupRepo(tempRoot);
     const branch = "feature/review-fact";
-    const worktree = path.join(tempRoot, "task-worktree");
-    git(tempRoot, ["worktree", "add", "-q", "-b", branch, worktree, baseline]);
-    write(path.join(worktree, ".agents/skills/x.md"), "base\nreviewed\ntask worktree change\n");
+    const registeredWorktree = path.join(tempRoot, "task-worktree");
+    const sandboxWorktree = path.join(tempRoot, "sandbox-worktree");
+    git(tempRoot, ["worktree", "add", "-q", "-b", branch, registeredWorktree, baseline]);
+    write(path.join(registeredWorktree, ".agents/skills/x.md"), "base\nreviewed\ntask worktree change\n");
+    fs.renameSync(registeredWorktree, sandboxWorktree);
+    const taskDir = path.join(sandboxWorktree, ".agents", "workspace", TASK_ID);
 
     write(path.join(taskDir, "task.md"), taskContent(undefined, true, branch));
-    write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(worktree, baseline)));
+    write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(sandboxWorktree, baseline)));
 
     const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 0, result.stderr || result.stdout);

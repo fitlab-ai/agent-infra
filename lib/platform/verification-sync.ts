@@ -5,6 +5,8 @@ import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
 
+import { resolveBranchWorktree } from "../git/branch-worktree.ts";
+
 import { resolvePlatformProviderContext } from "./context.ts";
 import { hasCheckedRequirement, resolveRequirementSection } from "./issue-metadata.ts";
 import { requirementSectionAnchors } from "./issues.ts";
@@ -1054,7 +1056,10 @@ function computeExpectedInLabels(taskDir: any, repositoryLabels: string[], mappi
     return { ok: false, type: "check_failed", message: "Task has no delivery_base_ref for in-label evidence" };
   }
   const branch = typeof task.metadata?.branch === "string" ? task.metadata.branch.trim() : "";
-  const gitCwd = branch ? worktreeForBranch(shared.repoRoot, branch) ?? taskDir : taskDir;
+  const gitCwd = branch ? resolveBranchWorktree(shared.repoRoot, branch) : taskDir;
+  if (!gitCwd) {
+    return { ok: false, type: "check_failed", message: `Task branch '${branch}' is not checked out in a usable worktree` };
+  }
   const changedFilesResult = gitText(["diff", `${baseRef}...HEAD`, "--name-only"], gitCwd);
   if (!changedFilesResult.ok) {
     return { ...changedFilesResult, type: "network_error" };
@@ -1080,25 +1085,6 @@ function computeExpectedInLabels(taskDir: any, repositoryLabels: string[], mappi
     return { ok: false, type: "check_failed", message: planned.error.message };
   }
   return { ok: true, labels: planned.target, mode: "mapped" };
-}
-
-function worktreeForBranch(repositoryRoot: string, branch: string): string | null {
-  try {
-    const records = execFileSync("git", ["worktree", "list", "--porcelain"], {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"]
-    }).trim().split(/\r?\n\r?\n/);
-    const expectedRef = `refs/heads/${branch}`;
-    for (const record of records) {
-      const worktree = /^worktree (.+)$/m.exec(record)?.[1];
-      const branchRef = /^branch (.+)$/m.exec(record)?.[1];
-      if (worktree && branchRef === expectedRef) return worktree;
-    }
-  } catch {
-    // Fall back to taskDir so ordinary in-repository task workspaces retain their behavior.
-  }
-  return null;
 }
 
 function loadInLabelMapping(shared: VerificationShared): any {
@@ -1141,42 +1127,16 @@ function resolvePrHeadSha(context: any): any {
     return fallback();
   }
 
-  const worktreeList = gitText(["worktree", "list", "--porcelain"], context.taskDir);
-  if (!worktreeList.ok) {
-    return fallback();
-  }
-
-  const matchedWorktree = findWorktreeForBranch(worktreeList.value, branch);
+  const matchedWorktree = resolveBranchWorktree(context.taskDir, branch);
   if (!matchedWorktree) {
-    return fallback();
+    return {
+      ok: false,
+      type: "check_failed",
+      message: `Task branch '${branch}' is not checked out in a usable worktree`
+    };
   }
 
-  const headInWorktree = gitText(["rev-parse", "HEAD"], matchedWorktree);
-  if (!headInWorktree.ok) {
-    return fallback();
-  }
-
-  return headInWorktree;
-}
-
-function findWorktreeForBranch(porcelainOutput: any, branch: any): any {
-  let currentWorktree = "";
-  for (const rawLine of String(porcelainOutput || "").split("\n")) {
-    const line = rawLine.trimEnd();
-    if (line.startsWith("worktree ")) {
-      currentWorktree = line.slice("worktree ".length).trim();
-      continue;
-    }
-
-    if (line.startsWith("branch refs/heads/")) {
-      const usedBranch = line.slice("branch refs/heads/".length).trim();
-      if (usedBranch === branch && currentWorktree) {
-        return currentWorktree;
-      }
-    }
-  }
-
-  return null;
+  return gitText(["rev-parse", "HEAD"], matchedWorktree);
 }
 
 function interpolate(template: any, taskDir: any, artifactFile: any): any {

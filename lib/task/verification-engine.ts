@@ -23,6 +23,7 @@ import { inspectPlatformPullRequest } from "../platform/pull-requests.ts";
 import { resolveMaterializedReviewedHeadRelation } from "../platform/change-request-git-evidence.ts";
 import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
 import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
+import { resolveBranchWorktree } from "../git/branch-worktree.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
 import { LEDGER_TERMINAL, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
 import type { LedgerRow } from "./ledger.ts";
@@ -1268,16 +1269,8 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
 
 function reviewWorktreeForTask(repositoryRoot: string, branch: string): string | null {
   if (!branch) return null;
-  const expectedRef = `refs/heads/${branch}`;
-  const records = execFileSync("git", ["-C", repositoryRoot, "worktree", "list", "--porcelain"], {
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"]
-  }).trim().split(/\r?\n\r?\n/);
-  for (const record of records) {
-    const worktree = /^worktree (.+)$/m.exec(record)?.[1];
-    const branchRef = /^branch (.+)$/m.exec(record)?.[1];
-    if (worktree && branchRef === expectedRef) return worktree;
-  }
+  const worktree = resolveBranchWorktree(repositoryRoot, branch);
+  if (worktree) return worktree;
   throw new Error(`Task branch '${branch}' is not checked out in a registered worktree`);
 }
 
