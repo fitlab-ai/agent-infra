@@ -160,6 +160,10 @@ test("platform-sync computes in: labels from a moved task worktree", async () =>
     }, ctx.env({ GH_FAKE_ISSUE_PATH: ctx.issuePath }), sandboxWorktree);
 
     assert.equal(result.status, "pass", result.message);
+    const inLabels = result.subchecks.find((check: { checkId: string }) => check.checkId === "platform.in-labels-computed");
+    assert.ok(inLabels);
+    assert.equal(inLabels.status, "pass");
+    assert.match(inLabels.message, /in: labels match committed changes/);
   });
 });
 
