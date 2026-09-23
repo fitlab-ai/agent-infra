@@ -653,6 +653,7 @@ test('task finalization uses a typed task-bound request with manifest authority'
     family: 'task-finalization',
     operation: 'complete',
     agent: 'codex',
+    handoffSha256: '0'.repeat(64),
     args: [],
     controllerProcess: null,
     controllerProof: null
@@ -713,6 +714,7 @@ test('sandbox executor finalizes only the manifest task and returns no control a
       family: 'task-finalization',
       operation: 'complete',
       agent: 'codex',
+      handoffSha256: '0'.repeat(64),
       args: [],
       controllerProcess: null,
       controllerProof: null

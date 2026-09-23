@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { getProcessStartTime } from '../../server/process-state.ts';
 import {
   createTask,
@@ -41,6 +42,11 @@ import {
   openCodexControllerRegistration,
   resolveCodexControllerBinding
 } from './controller-registration.ts';
+import { shareBranchDir } from '../constants.ts';
+
+function handoffDirectory(manifest: SandboxControlManifest): string {
+  return shareBranchDir({ shareBase: path.join(homedir(), '.agent-infra', 'share', manifest.project) }, manifest.branch);
+}
 
 export type SandboxControlExecutionResult = {
   exitCode: number;
@@ -373,10 +379,11 @@ async function executeRequestInner(
     }
   }
   if (request.family === 'task-finalization') {
-    const operation = parseTaskControlOperation(
+    const parsed = parseTaskControlOperation(
       'task-finalization', [manifest.taskId!, 'complete', '--agent', request.agent]
     );
-    if (operation.family !== 'task-finalization') throw new Error('SANDBOX_CONTROL_FINALIZATION_OPERATION_INVALID');
+    if (parsed.family !== 'task-finalization') throw new Error('SANDBOX_CONTROL_FINALIZATION_OPERATION_INVALID');
+    const operation = { ...parsed, request: { ...parsed.request, handoffSha256: request.handoffSha256 } };
     const result = dispatchTaskControlOperation(
       createSandboxExecutorExecutionContext({
         repoRoot: manifest.repoRoot,
@@ -385,7 +392,8 @@ async function executeRequestInner(
         taskId: manifest.taskId!,
         generation: manifest.generation,
         manifestPath,
-        requestId: request.id
+        requestId: request.id,
+        handoffDirectory: handoffDirectory(manifest)
       }),
       operation
     );
@@ -407,7 +415,8 @@ async function executeRequestInner(
     taskId: manifest.taskId!,
     generation: manifest.generation,
     manifestPath,
-    requestId: request.id
+    requestId: request.id,
+    handoffDirectory: handoffDirectory(manifest)
   });
   const format = (value: unknown): SandboxControlExecutionResult => {
     const result = value as { status?: string };

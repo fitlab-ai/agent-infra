@@ -393,6 +393,7 @@ export function requestSandboxControl(params: Readonly<{
 
 export function requestSandboxTaskFinalization(params: Readonly<{
   agent: string;
+  prepareHandoff?: (binding: Readonly<{ generation: string; requestId: string }>) => string;
   channelDir?: string;
   statusDir?: string;
   token?: string;
@@ -403,15 +404,18 @@ export function requestSandboxTaskFinalization(params: Readonly<{
   if (!agent) clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'task-finalization agent is invalid', false);
   const auth = authority(params);
   const issuedAt = Date.now();
+  const id = randomUUID();
+  const handoffSha256 = (params.prepareHandoff ?? (() => '0'.repeat(64)))({ generation: auth.generation, requestId: id });
   const request: SandboxTaskFinalizationRequest = {
     version: 3,
-    id: randomUUID(),
+    id,
     ...auth,
     issuedAt,
     expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
     family: 'task-finalization',
     operation: 'complete',
     agent,
+    handoffSha256,
     args: [],
     controllerProcess: null,
     controllerProof: null

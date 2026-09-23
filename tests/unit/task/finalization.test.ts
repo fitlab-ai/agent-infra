@@ -11,6 +11,7 @@ import { inspectCompletionBackfillEligibility } from '../../../lib/platform/comp
 import {
   applyFinalizationReceiptMutation,
   applyTaskFinalization,
+  bindTaskFinalizationReceipt,
   commitPreparedTaskFinalization,
   createFinalizationCapability,
   prepareTaskFinalization,
@@ -20,6 +21,7 @@ import {
   type TaskFinalizationRequest,
   type TaskFinalizationReceipt
 } from '../../../lib/task/finalization.ts';
+import { publishTaskFinalizationHandoff } from '../../../lib/task/finalization-handoff.ts';
 import type { TaskVerificationResult } from '../../../lib/task/verification.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -359,7 +361,58 @@ test('host finalization receipt records the sandbox generation and request bindi
   }
 });
 
-test('host finalization replaces an obsolete local sandbox binding with the current request', async () => {
+test('host imports a sandbox-prepared receipt only when its handoff is bound to the current request', async () => {
+  const sandbox = fixture();
+  const host = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const binding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    const prepared = await prepareTaskFinalization(request, options(sandbox.repoRoot, commentSync, verify));
+    assert.equal(prepared.status, 'prepared');
+    const receipt = bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, binding);
+    const handoffSha256 = publishTaskFinalizationHandoff(handoff, receipt, binding);
+    const result = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256 },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: binding, handoffDirectory: handoff }
+    );
+    assert.equal(result.status, 'completed');
+    assert.deepEqual(readTaskFinalizationReceipt(host.repoRoot, TASK_ID)?.controlBinding, binding);
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
+    fs.rmSync(host.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('host rejects a handoff with a different binding before finalization side effects', async () => {
+  const sandbox = fixture();
+  const host = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const published = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const requested = { generation: 'sandbox-generation', requestId: 'fedcba9876543210fedcba9876543210' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    await prepareTaskFinalization(request, options(sandbox.repoRoot, commentSync, verify));
+    const receipt = bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, published);
+    const handoffSha256 = publishTaskFinalizationHandoff(handoff, receipt, published);
+    const result = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256 },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: requested, handoffDirectory: handoff }
+    );
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'TASK_FINALIZATION_HANDOFF_INVALID');
+    assert.equal(fs.existsSync(path.join(host.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), false);
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
+    fs.rmSync(host.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('terminal host finalization ignores a conflicting sandbox binding', async () => {
   const f = fixture();
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
@@ -369,7 +422,7 @@ test('host finalization replaces an obsolete local sandbox binding with the curr
     assert.equal((await applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, verify), controlBinding: firstBinding })).status, 'completed');
     const replay = await applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, verify), controlBinding: conflictingBinding });
     assert.equal(replay.status, 'completed');
-    assert.deepEqual(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.controlBinding, conflictingBinding);
+    assert.deepEqual(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.controlBinding, firstBinding);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
