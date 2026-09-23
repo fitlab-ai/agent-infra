@@ -30,3 +30,26 @@ test('resolves the current branch worktree after its registered path becomes una
 
   assert.equal(resolveBranchWorktree(sandboxWorktree, branch), sandboxWorktree);
 });
+
+test('rejects a registered path reused by an unrelated repository on the same branch', onPlatforms('linux', 'darwin'), () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-worktree-unrelated-'));
+  const repositoryRoot = path.join(root, 'repository');
+  const registeredWorktree = path.join(root, 'registered-worktree');
+  const sandboxWorktree = path.join(root, 'sandbox-worktree');
+  const branch = 'agent-infra-bugfix-sandbox-path';
+  fs.mkdirSync(repositoryRoot);
+  initIsolatedGitRepo(repositoryRoot);
+  git(repositoryRoot, ['config', 'user.name', 'Test']);
+  git(repositoryRoot, ['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(repositoryRoot, 'base.txt'), 'base\n');
+  git(repositoryRoot, ['add', 'base.txt']);
+  git(repositoryRoot, ['commit', '-qm', 'base']);
+  git(repositoryRoot, ['worktree', 'add', '-qb', branch, registeredWorktree]);
+  fs.renameSync(registeredWorktree, sandboxWorktree);
+
+  fs.mkdirSync(registeredWorktree);
+  initIsolatedGitRepo(registeredWorktree);
+  git(registeredWorktree, ['checkout', '-qb', branch]);
+
+  assert.equal(resolveBranchWorktree(repositoryRoot, branch), null);
+});

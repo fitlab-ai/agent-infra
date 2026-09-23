@@ -11,7 +11,9 @@ function gitText(repositoryRoot: string, args: string[]): string | null {
   }
 }
 
-function verifiedWorktreeRoot(candidate: string, expectedBranch: string): string | null {
+function verifiedWorktreeRoot(candidate: string, expectedBranch: string, expectedCommonDirectory: string): string | null {
+  const commonDirectory = gitText(candidate, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (commonDirectory !== expectedCommonDirectory) return null;
   const root = gitText(candidate, ['rev-parse', '--show-toplevel']);
   if (!root) return null;
   const branch = gitText(root, ['symbolic-ref', '--short', 'HEAD']);
@@ -19,7 +21,9 @@ function verifiedWorktreeRoot(candidate: string, expectedBranch: string): string
 }
 
 export function resolveBranchWorktree(repositoryRoot: string, expectedBranch: string): string | null {
-  const currentRoot = verifiedWorktreeRoot(repositoryRoot, expectedBranch);
+  const commonDirectory = gitText(repositoryRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (!commonDirectory) return null;
+  const currentRoot = verifiedWorktreeRoot(repositoryRoot, expectedBranch, commonDirectory);
   if (currentRoot) return currentRoot;
 
   const records = gitText(repositoryRoot, ['worktree', 'list', '--porcelain']);
@@ -29,7 +33,7 @@ export function resolveBranchWorktree(repositoryRoot: string, expectedBranch: st
     const candidate = /^worktree (.+)$/m.exec(record)?.[1];
     const branch = /^branch (.+)$/m.exec(record)?.[1];
     if (candidate && branch === expectedRef) {
-      const verifiedRoot = verifiedWorktreeRoot(candidate, expectedBranch);
+      const verifiedRoot = verifiedWorktreeRoot(candidate, expectedBranch, commonDirectory);
       if (verifiedRoot) return verifiedRoot;
     }
   }
