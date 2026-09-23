@@ -1223,10 +1223,13 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
   })
 ));
 
-test("validate-artifact platform-sync falls back to taskDir HEAD when task branch worktree is unmatched", () => (
+test("validate-artifact platform-sync fails closed while computing in: labels for an unmatched task branch", () => (
   withTempRoot("agent-infra-platform-sync-commit-unmatched-branch-", async (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const mainSha = createHeadCommit(tempRoot);
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
+      labels: { in: { source: [".platform-sync-base"] } }
+    }));
     write(path.join(ctx.taskDir, "task.md"), buildTaskContent({
       branch: "agent-infra-feature-missing",
       platform_issue_identity: '\'{"kind":"number","value":65}\'',
@@ -1242,7 +1245,11 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
       GH_FAKE_PR_NUMBER: "77"
     });
     assert.equal(result.status, 0, result.stderr);
-    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    const payload = assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    const inLabels = payload.checks.find((check) => check.checkId === "platform.in-labels-computed");
+    assert.ok(inLabels);
+    assert.equal(inLabels.status, "fail");
+    assert.match(String(inLabels.message), /not checked out in a usable worktree/);
   })
 ));
 

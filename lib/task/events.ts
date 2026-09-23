@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+import { resolveBranchWorktree } from '../git/branch-worktree.ts';
+
 import { appendActivityEntry, locateActivityLog, pairEntries, startedBackedRows } from './activity-log.ts';
 import {
   buildArtifactLinkSection,
@@ -111,22 +113,7 @@ type TaskEventResult = {
 
 function branchWorktree(repoRoot: string, branch: string): string | null {
   if (!branch) return repoRoot;
-  try {
-    const records = execFileSync('git', ['worktree', 'list', '--porcelain'], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe']
-    }).trim().split(/\r?\n\r?\n/);
-    const expectedRef = `refs/heads/${branch}`;
-    for (const record of records) {
-      const worktree = /^worktree (.+)$/m.exec(record)?.[1];
-      const branchRef = /^branch (.+)$/m.exec(record)?.[1];
-      if (worktree && branchRef === expectedRef) return worktree;
-    }
-  } catch {
-    // A missing worktree must not anchor a review to an unrelated repository.
-  }
-  return null;
+  return resolveBranchWorktree(repoRoot, branch);
 }
 
 function approvedCleanReviewedCommit(reviewContent: string, verdict: Verdict | undefined, repoRoot: string, branch: string): string | null {
