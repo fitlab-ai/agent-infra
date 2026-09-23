@@ -9,6 +9,7 @@ import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：夹具需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现高风险边界。\n';
+const ANALYSIS_DECISION = '- **本任务路径**：标准路径。\n- **判定依据**：夹具需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现高风险边界。';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-artifact-cli-'));
@@ -29,6 +30,7 @@ function localArtifact(family: 'analysis' | 'plan' | 'code', suffix = ''): strin
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` })
     .replaceAll('<!-- artifact-slot:empty -->', '内容');
   content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n\`\`\``);
+  if (family === 'analysis') content = content.replace('## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n内容', `## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n${ANALYSIS_DECISION}`);
   if (family === 'code') content = content.replace('## 证据原文\n<!-- artifact-section:code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:code:evidence -->\n验证输出');
   return `${content}${suffix}`;
 }
@@ -211,6 +213,33 @@ test('task-artifact finalize-local reports one-line heading diagnostics and reva
   const success = JSON.parse(passed.stdout);
   assert.equal(success.status, 'passed');
   assert.notEqual(success.semanticDigest, failure.semanticDigest);
+});
+
+test('task-artifact finalize-local rejects invalid analysis flow decisions and accepts a direct repair', () => {
+  const f = fixture();
+  const artifact = path.join(f.dir, 'analysis.md');
+  fs.appendFileSync(path.join(f.dir, 'task.md'), '- 2026-01-01 00:01:00+00:00 — **Analyze Task (Round 1) [started]** by codex — started\n');
+  const valid = localArtifact('analysis');
+  const taskBefore = fs.readFileSync(path.join(f.dir, 'task.md'), 'utf8');
+
+  for (const invalid of [
+    valid.replace(ANALYSIS_DECISION, ''),
+    valid.replace(ANALYSIS_DECISION, `${ANALYSIS_DECISION}\n- **本任务路径**：完整路径。`),
+    valid.replace('**本任务路径**：标准路径。', '**本任务路径**：未知路径。')
+  ]) {
+    fs.writeFileSync(artifact, invalid);
+    const failed = run(f.root, [f.id, 'finalize-local', '--family', 'analysis', '--artifact', 'analysis.md']);
+    assert.equal(failed.status, 1, `${failed.stderr}\n${failed.stdout}`);
+    const result = JSON.parse(failed.stdout);
+    assert.equal(result.status, 'failed');
+    assert.ok(result.diagnostics.some((item: { code: string }) => item.code === 'LOCAL_FLOW_DECISION_INVALID'));
+    assert.equal(fs.readFileSync(path.join(f.dir, 'task.md'), 'utf8'), taskBefore);
+  }
+
+  fs.writeFileSync(artifact, valid);
+  const repaired = run(f.root, [f.id, 'finalize-local', '--family', 'analysis', '--artifact', 'analysis.md']);
+  assert.equal(repaired.status, 0, `${repaired.stderr}\n${repaired.stdout}`);
+  assert.equal(JSON.parse(repaired.stdout).status, 'passed');
 });
 
 test('task-artifact finalize-local supports direct code report repair', () => {
