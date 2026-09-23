@@ -15,7 +15,7 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 ### Flow decision
 
-The analysis artifact must record the selected path, factual basis, unmet higher-path conditions, and factual upgrade triggers in `## Flow Decision`. The path is streamlined, standard, or full; file count, module count, and speculative risk cannot upgrade it by themselves.
+The analysis artifact must record `Path`, `Basis`, `Unmet Higher-path Conditions`, and `Upgrade Triggers` exactly once each, with non-empty values, in `## Flow Decision`. The path is streamlined, standard, or full; file count, module count, and speculative risk cannot upgrade it by themselves. The analysis `finalize-local` reuses the lifecycle-path parser to validate this decision; directly repair the formal artifact and rerun it for missing, duplicate, or invalid values.
 
 ### Persisted Report Evidence
 
@@ -186,6 +186,15 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ## Dependencies
 - {Required dependencies and coordination with other modules}
+
+<!-- lifecycle-path-decision-template:start -->
+## Flow Decision
+
+- **Path**: {lifecycle-path}
+- **Basis**: {Factual basis for selecting the current path}
+- **Unmet Higher-path Conditions**: {Factual conditions for the higher path that are not met; for full, state that no higher path exists}
+- **Upgrade Triggers**: {Factual triggers that require reassessing the path}
+<!-- lifecycle-path-decision-template:end -->
 
 ## Assumptions
 
