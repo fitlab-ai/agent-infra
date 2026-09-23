@@ -28,7 +28,7 @@ test('resolves the current branch worktree after its registered path becomes una
   git(repositoryRoot, ['worktree', 'add', '-qb', branch, registeredWorktree]);
   fs.renameSync(registeredWorktree, sandboxWorktree);
 
-  assert.equal(resolveBranchWorktree(sandboxWorktree, branch), sandboxWorktree);
+  assert.equal(resolveBranchWorktree(sandboxWorktree, branch), fs.realpathSync(sandboxWorktree));
 });
 
 test('rejects a registered path reused by an unrelated repository on the same branch', onPlatforms('linux', 'darwin'), () => {
