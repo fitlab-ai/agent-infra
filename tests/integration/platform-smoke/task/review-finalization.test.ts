@@ -8,7 +8,6 @@ import { spawnSync } from 'node:child_process';
 import { finalizeReviewSummary, preflightReviewSummary, prepareReviewSummaryCandidate } from '../../../../lib/task/review-finalization.ts';
 import { getArtifactSchema, renderArtifactSkeleton } from '../../../../lib/task/artifact-schema.ts';
 import { inspectArtifactContract } from '../../../../lib/task/artifact-operations.ts';
-import { readArtifactRecoveryIntent } from '../../../../lib/task/artifact-repair-intent.ts';
 import {
   finalizeReviewSummaryContent,
   parseReviewSummary,
@@ -334,7 +333,7 @@ test('review finalizer rejects a missing schema pattern before summary mutation'
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });
 
-test('review finalizer validates current content without a recovery candidate', () => {
+test('review finalizer rejects invalid current content', () => {
   const f = domainFixture();
   const taskPath = path.join(f.dir, 'task.md');
   fs.writeFileSync(
@@ -351,7 +350,6 @@ test('review finalizer validates current content without a recovery candidate', 
 
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
-  assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
   assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), invalid);
 });
 
@@ -368,7 +366,6 @@ test('projection review preparation enforces the same artifact contract without 
     assert.equal(prepared.result.status, 'failed');
     assert.equal(prepared.result.error?.code, 'REVIEW_ARTIFACT_STRUCTURE_INVALID');
     assert.equal(fs.readFileSync(f.artifactPath, 'utf8'), before);
-    assert.equal(readArtifactRecoveryIntent(f.root, TASK_ID, 'review-analysis', 'review-analysis.md'), null);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

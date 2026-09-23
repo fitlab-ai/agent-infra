@@ -5,7 +5,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { semanticDigest, sha256Content } from "../../../lib/task/local-artifact-finalization.ts";
 import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycle.ts";
 import { sandboxManagedPathKey } from "../../../lib/sandbox/removal.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
@@ -363,58 +362,6 @@ function writeTaskBoundControlEvidence(
     }
   })}\n`, "utf8");
   return controlRoot;
-}
-
-function writeCompletedTaskWithConsumedPlan(repoDir: string, taskId: string, branch: string): void {
-  const taskDir = path.join(repoDir, ".agents", "workspace", "completed", taskId);
-  const plan = "# Plan\n";
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nstatus: completed\nbranch: ${branch}\n---\n# body\n`, "utf8");
-  fs.writeFileSync(path.join(taskDir, "plan.md"), plan, "utf8");
-
-  const intentRoot = path.join(repoDir, ".agents", "workspace", ".local-artifact-finalization-intents");
-  fs.mkdirSync(intentRoot, { recursive: true });
-  const recoveryId = "c".repeat(16);
-  fs.writeFileSync(path.join(intentRoot, `${taskId}-plan-plan.md.json`), `${JSON.stringify({
-    version: 3,
-    taskId,
-    family: "plan",
-    artifact: "plan.md",
-    round: 1,
-    state: "consumed",
-    baselineSha256: sha256Content(plan),
-    baselineSemanticDigest: semanticDigest(plan),
-    stagingId: recoveryId,
-    candidateSha256: sha256Content(plan),
-    finalArtifactSha256: sha256Content(plan),
-    finalSemanticDigest: semanticDigest(plan),
-    recoveryOperationId: recoveryId,
-    phase: null,
-    authorityDigest: null,
-    requestId: "sandbox-fixture",
-    errorCode: null,
-    errorMessage: null,
-    createdAt: 1,
-    updatedAt: 1
-  })}\n`, "utf8");
-
-  const receiptRoot = path.join(repoDir, ".agents", "workspace", ".task-finalization");
-  fs.mkdirSync(receiptRoot, { recursive: true });
-  fs.writeFileSync(path.join(receiptRoot, `${taskId}.json`), `${JSON.stringify({
-    version: 4,
-    taskId,
-    intent: "complete",
-    receiptId: `${taskId}-receipt`,
-    revision: 1,
-    lifecycle: "done",
-    taskComment: "done",
-    verification: "done",
-    summary: "done",
-    warningProjection: "done",
-    warnings: [],
-    updatedAt: new Date().toISOString(),
-    lastError: null
-  })}\n`, "utf8");
 }
 
 function addSandboxWorktree(
