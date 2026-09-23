@@ -12,7 +12,6 @@ import {
   createSandboxExecutorExecutionContext,
   dispatchTaskControlOperation
 } from '../../../lib/task/control-authority.ts';
-import { issueHumanOverride } from '../../../lib/task/human-override.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
 import { resolveSandboxControlTransport, SANDBOX_CONTROL_STATUS_MOUNT } from '../../../lib/internal/task-operation-registry.ts';
@@ -533,7 +532,7 @@ test('direct-host and sandbox executor share lifecycle results', async () => {
   }
 });
 
-test('sandbox lifecycle uses the shared task lock and human override authority', async () => {
+test('sandbox lifecycle uses the shared task lock', async () => {
   const lockFixture = taskFixture();
   try {
     const sandbox = contexts(lockFixture.root).sandbox;
@@ -546,45 +545,6 @@ test('sandbox lifecycle uses the shared task lock and human override authority',
     fs.rmSync(lockFixture.root, { recursive: true, force: true });
   }
 
-  const directFixture = taskFixture(false);
-  const sandboxFixture = taskFixture(false);
-  try {
-    const issue = async (root: string, ticketId: string) => issueHumanOverride({
-      taskRef: TASK_ID,
-      failureId: 'lifecycle.apply:LIFECYCLE_LOG_MISSING',
-      target: 'repair-task',
-      operator: 'external-contributor',
-      reason: 'repair the missing activity log',
-      scope: 'task-lifecycle',
-      intent: 'cancel',
-      expiresAt: '2099-01-01 00:00:00+00:00'
-    }, { repoRoot: root, randomId: () => ticketId, now: () => '2026-08-09 01:02:03+00:00' });
-    assert.equal((await issue(directFixture.root, 'direct-ticket')).status, 'applied');
-    assert.equal((await issue(sandboxFixture.root, 'sandbox-ticket')).status, 'applied');
-    const request = {
-      intent: 'cancel' as const,
-      reason: 'normal cancel blocked by missing log',
-      overrideTarget: 'repair-task',
-      overrideScope: 'task-lifecycle'
-    };
-    const directResult = await dispatchTaskControlOperation(
-      contexts(directFixture.root).direct,
-      lifecycleOperation({ ...request, overrideTicket: 'direct-ticket' })
-    );
-    const sandboxResult = await dispatchTaskControlOperation(
-      contexts(sandboxFixture.root).sandbox,
-      lifecycleOperation({ ...request, overrideTicket: 'sandbox-ticket' })
-    );
-    assert.equal((directResult as { status: string }).status, 'applied');
-    assert.equal((sandboxResult as { status: string }).status, 'applied');
-    assert.equal((directResult as unknown as { humanOverride: { status: string } }).humanOverride.status, 'applied');
-    assert.equal((sandboxResult as unknown as { humanOverride: { status: string } }).humanOverride.status, 'applied');
-    assert.equal(fs.existsSync(path.join(directFixture.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
-    assert.equal(fs.existsSync(path.join(sandboxFixture.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
-  } finally {
-    fs.rmSync(directFixture.root, { recursive: true, force: true });
-    fs.rmSync(sandboxFixture.root, { recursive: true, force: true });
-  }
 });
 
 test('direct-host and sandbox client transport preserve lifecycle results', async () => {

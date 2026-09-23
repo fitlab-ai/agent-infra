@@ -12,8 +12,6 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
-import { allowsManualOverride } from './guard-override.ts';
-import type { ManualOverrideCapability } from './guard-override.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 
@@ -70,7 +68,6 @@ type ReviewFileSystem = {
 type ReviewFinalizationOptions = {
   repoRoot?: string;
   fileSystem?: Partial<ReviewFileSystem>;
-  manualOverride?: ManualOverrideCapability;
   lockAlreadyHeld?: boolean;
 };
 
@@ -224,7 +221,7 @@ function prepareReviewSummaryCandidate(
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   taskId = resolved.taskId ?? null;
   if (!resolved.ok) return reject(resolved.code, resolved.message);
-  if (resolved.state !== 'active' && !allowsManualOverride(options.manualOverride, 'review-finalization', 'TASK_STATE_MISMATCH')) {
+  if (resolved.state !== 'active') {
     return reject('TASK_STATE_MISMATCH', `task ${taskId} is ${resolved.state}, expected active`);
   }
   const parsed = parseArtifactName(request.artifact);

@@ -16,7 +16,6 @@ import { resolveTaskContext } from './resolve-ref.ts';
 import { extractSection, extractSubSection, findSectionHeading } from './sections.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
-import { allowsManualOverride } from './guard-override.ts';
 import { consumeHumanDecisionReworkIntents, parseReworkIntentDocument, reworkIntentMutation } from './rework-intent.ts';
 
 type HumanDecisionRequest = {
@@ -87,8 +86,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   if (!request.selector || !request.decision.trim()) return failed('DECISION_PAYLOAD_INVALID', 'selector and decision are required');
   const resolved = resolveTaskContext(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const stateOverride = allowsManualOverride(options.manualOverride, 'decision-intent', 'TASK_STATE_MISMATCH');
-  if (resolved.state !== 'active' && !stateOverride) return failed('TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
+  if (resolved.state !== 'active') return failed('TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   let content: string;
   let rows: LedgerRow[];
   try {
@@ -186,7 +184,7 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   } catch (error) {
     return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, row.id);
   }
-  const writeResult = writeTask({ taskRef: resolved.taskId, expectedState: stateOverride ? resolved.state : 'active', mutations, dryRun: request.dryRun }, {
+  const writeResult = writeTask({ taskRef: resolved.taskId, expectedState: 'active', mutations, dryRun: request.dryRun }, {
     ...options,
     taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state },
     metadataProvider: () => metadata

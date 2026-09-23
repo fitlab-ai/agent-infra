@@ -2,7 +2,6 @@ import fs from 'node:fs';
 
 import { applyLedgerIntent } from '../task/ledger-intents.ts';
 import type { LedgerIntent } from '../task/ledger-intents.ts';
-import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, isReviewStage, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from '../task/ledger.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
@@ -14,8 +13,7 @@ const FLAGS: Record<string, string> = {
   '--severity': 'severity', '--evidence': 'evidence', '--id': 'id', '--round': 'round',
   '--status': 'status', '--artifact': 'artifact', '--needs-implementation': 'needsImplementation',
   '--intent-id': 'intentId', '--finding-id': 'findingId', '--source-artifact': 'sourceArtifact',
-  '--source-sha256': 'sourceSha256', '--classification': 'classification',
-  '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
+  '--source-sha256': 'sourceSha256', '--classification': 'classification'
 };
 const NUMERIC = new Set(['ordinal', 'round']);
 const BOOLEAN = new Set(['needsImplementation']);
@@ -78,16 +76,11 @@ async function taskLedger(args: string[] = []): Promise<void> {
     'decision-upsert': ['needsImplementation'],
     'rework-intent-rebuild': ['findingId', 'sourceArtifact', 'sourceSha256', 'classification']
   };
-  const overrideFields = kind === 'stage-status' || kind === 'decision-next-id' || kind === 'rework-intent-upsert' || kind === 'rework-intent-rebuild'
-    ? []
-    : ['overrideTicket', 'overrideTarget', 'overrideScope'];
-  const allowed = new Set(['kind', 'taskRef', 'dryRun', ...required[kind]!, ...(optional[kind] ?? []), ...overrideFields]);
+  const allowed = new Set(['kind', 'taskRef', 'dryRun', ...required[kind]!, ...(optional[kind] ?? [])]);
   const unexpected = Object.keys(values).find((key) => !allowed.has(key));
   const missing = required[kind]!.find((key) => values[key] === undefined);
   if (unexpected) { usageFailure(`${kind} does not accept '${unexpected}'`); return; }
   if (missing) { usageFailure(`${kind} requires '${missing}'`); return; }
-  const dryRunConflict = overrideDryRunConflict(values);
-  if (dryRunConflict) { usageFailure(dryRunConflict.message); return; }
   if (values.classification !== undefined && !REWORK_CLASSIFICATIONS.has(String(values.classification))) {
     usageFailure(`invalid rework classification '${values.classification}'`); return;
   }
@@ -124,42 +117,16 @@ async function taskLedger(args: string[] = []): Promise<void> {
   const lockResolved = resolveTaskRef(taskRef);
   if (!lockResolved.ok) { usageFailure(lockResolved.message); return; }
   let result;
-  let humanOverride: unknown = null;
   try {
-    result = await withTaskExecutionLock(lockResolved.repoRoot, lockResolved.taskId, `task-ledger.${kind}`, async () => {
-      let current = applyLedgerIntent(values as LedgerIntent);
-      if (current.status !== 'failed' || !values.overrideTicket) return current;
-      if (!values.overrideTarget || !values.overrideScope) { usageFailure('override ticket requires target and scope'); return current; }
-      const consumed = await consumeHumanOverride({
-        taskRef,
-        ticketId: String(values.overrideTicket),
-        failureId: failureId('ledger-intent', current.error?.code ?? 'TASK_STATE_MISMATCH'),
-        target: String(values.overrideTarget),
-        scope: String(values.overrideScope)
-      }, {
-        effectExecutor: (capability) => {
-          const retried = applyLedgerIntent(values as LedgerIntent, { manualOverride: capability });
-          current = retried;
-          return retried.status === 'failed'
-            ? { code: 'OVERRIDE_EFFECT_FAILED', message: `${retried.error?.code ?? 'LEDGER_FAILED'}: ${retried.error?.message ?? 'manual ledger effect failed'}` }
-            : null;
-        }
-      });
-      humanOverride = consumed;
-      return current;
-    });
+    result = await withTaskExecutionLock(lockResolved.repoRoot, lockResolved.taskId, `task-ledger.${kind}`, async () => applyLedgerIntent(values as LedgerIntent));
   } catch (error) {
     if (!(error instanceof TaskExecutionLockError)) throw error;
     process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
     process.exitCode = 1;
     return;
   }
-  process.stdout.write(`${JSON.stringify(humanOverride ? { ...result, humanOverride } : result)}\n`);
-  const overrideFailed = Boolean(
-    humanOverride && typeof humanOverride === 'object' &&
-    (humanOverride as { status?: unknown }).status === 'failed'
-  );
-  if (result.status === 'failed' || overrideFailed) process.exitCode = 1;
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (result.status === 'failed') process.exitCode = 1;
 }
 
 export { taskLedger };

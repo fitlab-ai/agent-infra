@@ -172,17 +172,6 @@ test('PR summary envelope owns marker and current HEAD', () => {
   ].join('\n'));
 });
 
-test('PR summary escapes control markers in the human override audit', () => {
-  const summary = buildPullRequestSummary(
-    'TASK-1',
-    'Summary',
-    'abc123',
-    '## Human Override Audit\n\n- reason=<!-- sync-pr:TASK-1:summary -->'
-  );
-  assert.equal((summary.match(/<!--\s*sync-pr:/gi) || []).length, 1);
-  assert.match(summary, /&lt;!-- sync-pr:TASK-1:summary --&gt;/);
-});
-
 test('PR summary warning result preserves the primary lifecycle outcome', () => {
   assert.equal(warningResultForPrimary('pr_created'), 'pr_created_with_warnings');
   assert.equal(warningResultForPrimary('pr_reused'), 'pr_reused_with_warnings');
