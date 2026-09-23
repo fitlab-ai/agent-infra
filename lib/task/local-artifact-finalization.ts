@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
 import { parseArtifactName } from './artifact-name.ts';
+import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
@@ -23,7 +24,8 @@ type LocalArtifactDiagnosticCode =
   | 'LOCAL_DECISION_DETAIL_DUPLICATE'
   | 'LOCAL_REQUIRED_PATTERN_MISSING'
   | 'LOCAL_STRUCTURAL_INVALID'
-  | 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION';
+  | 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION'
+  | 'LOCAL_FLOW_DECISION_INVALID';
 
 type LocalArtifactDiagnostic = {
   code: LocalArtifactDiagnosticCode;
@@ -92,6 +94,13 @@ function validateLocalArtifact(
 
   const decisionDetails = inspectDecisionDetailDuplicates(content);
   if (!decisionDetails.ok) diagnostics.push({ code: 'LOCAL_DECISION_DETAIL_DUPLICATE', message: decisionDetails.message, line: null });
+
+  if (options.family === 'analysis') {
+    const flowDecision = parseLifecyclePathDecision(content);
+    if (flowDecision.status !== 'valid') {
+      diagnostics.push({ code: 'LOCAL_FLOW_DECISION_INVALID', message: flowDecision.message, line: null });
+    }
+  }
 
   return {
     ok: diagnostics.length === 0,

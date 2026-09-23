@@ -1,10 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { parseLifecyclePathDecision } from '../../../lib/task/lifecycle-path.ts';
 
-function decision(path: string, heading = '流程裁定') {
-  return `# Analysis\n\n## ${heading}\n\n- **本任务路径**：${path}。\n- **判定依据**：需求与验收明确。\n- **未满足的更高路径条件**：没有独立审计事实。\n- **升级触发条件**：出现不可逆 schema 决策。\n`;
+const SKILL_PATH = fileURLToPath(new URL('../../../.agents/skills/analyze-task/SKILL.md', import.meta.url));
+
+function decision(path: string) {
+  const skill = fs.readFileSync(SKILL_PATH, 'utf8');
+  const template = /<!-- lifecycle-path-decision-template:start -->\n([\s\S]*?)\n<!-- lifecycle-path-decision-template:end -->/.exec(skill);
+  assert.ok(template, 'analyze-task must provide a marked canonical flow-decision template');
+  return `# Analysis\n\n${template[1]!.replace('{lifecycle-path}', path)}`;
 }
 
 test('flow decision maps each canonical path to its fixed stage sequence', () => {
