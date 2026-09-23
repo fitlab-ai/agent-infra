@@ -51,20 +51,6 @@ test('task-lifecycle CLI prints one JSON result and uses domain exit codes', () 
   assert.equal(JSON.parse(conflict.stdout).error.code, 'LIFECYCLE_INTENT_CONFLICT');
 });
 
-test('task-lifecycle rejects dry-run with an override before acquiring a task lock', () => {
-  const f = fixture();
-  try {
-    const before = fs.readFileSync(path.join(f.dir, 'task.md'));
-    const result = run(f.root, [
-      TASK_ID, 'complete', '--agent', 'codex', '--dry-run', '--override-ticket', 'ticket',
-      '--override-target', 'continue-local', '--override-scope', 'task-lifecycle'
-    ]);
-    assert.equal(result.status, 1);
-    assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_PAYLOAD_INVALID');
-    assert.deepEqual(fs.readFileSync(path.join(f.dir, 'task.md')), before);
-  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
-});
-
 test('task-lifecycle CLI rejects unknown and duplicate options as one JSON failure', () => {
   const f = fixture();
   for (const args of [

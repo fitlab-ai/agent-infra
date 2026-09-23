@@ -413,7 +413,7 @@ test('internal task-event accepts the human manual-executor token', () => {
   assert.match(fs.readFileSync(f.file, 'utf8'), /by human — started/);
 });
 
-test('internal task-event keeps a state mismatch closed when an override is supplied', () => {
+test('internal task-event keeps a blocked task state mismatch closed', () => {
   const root = makeTempDir('task-event-override-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   const id = 'TASK-20260101-000002';
@@ -423,13 +423,12 @@ test('internal task-event keeps a state mismatch closed when an override is supp
   try {
     const before = fs.readFileSync(path.join(dir, 'task.md'));
     const applied = spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', id, 'analyze.started',
-      '--agent', 'codex', '--initiator', 'model', '--request-id', `override:${id}:analyze`, '--reason-code', 'user-request',
-      '--override-ticket', 'local-ticket', '--override-target', 'continue-local', '--override-scope', 'task-event'
+      '--agent', 'codex', '--initiator', 'model', '--request-id', `blocked:${id}:analyze`, '--reason-code', 'user-request'
     ], { cwd: root, encoding: 'utf8', env: sandboxControlSafeEnv() });
     assert.equal(applied.status, 1, applied.stderr || applied.stdout);
     const result = JSON.parse(applied.stdout) as { status: string; error: { code: string } };
     assert.equal(result.status, 'failed');
-    assert.equal(result.error.code, 'EVENT_PAYLOAD_INVALID');
+    assert.equal(result.error.code, 'TASK_STATE_MISMATCH');
     assert.deepEqual(fs.readFileSync(path.join(dir, 'task.md')), before);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

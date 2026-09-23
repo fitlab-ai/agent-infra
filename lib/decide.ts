@@ -23,6 +23,8 @@ function parseDecisionParts(parts: string[]): { decision: string; needsImplement
         throw new Error("--needs-implementation must be 'true' or 'false'");
       }
       needsImplementation = value === 'true';
+    } else if (part?.startsWith('--')) {
+      throw new Error(`unknown option '${part}'`);
     } else {
       decision.push(parts[index]!);
     }

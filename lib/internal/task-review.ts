@@ -4,7 +4,7 @@ import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 import { ensureInternalHandlerRoute } from './cli-route-inventory.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-review <task-ref> <preflight|finalize-summary> --stage <analysis|plan|code> --artifact <review-*.md> [--orchestrated] [--dry-run] [--override-ticket <ticket> --override-target <target> --override-scope <scope>]\n';
+const USAGE = 'Usage: agent-infra-internal task-review <task-ref> <preflight|finalize-summary> --stage <analysis|plan|code> --artifact <review-*.md> [--orchestrated] [--dry-run]\n';
 
 function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({

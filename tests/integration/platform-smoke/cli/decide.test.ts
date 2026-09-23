@@ -107,6 +107,20 @@ test('implementation intent validation fails before writing task.md', async () =
   }
 });
 
+test('decide rejects option-shaped decision input without writing a pending decision', async () => {
+  const { repoRoot, taskId, taskMd } = makeTask();
+  try {
+    const before = fs.readFileSync(taskMd);
+    assert.equal(await decide([
+      '--task', taskId, '--item', 'HD-1', '--override-ticket', 'ticket',
+      '--override-target', 'continue-local', '--override-scope', 'task-decision', 'choose A'
+    ], { repoRoot }), 1);
+    assert.deepEqual(fs.readFileSync(taskMd), before);
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('decide rejects duplicate ids for both stable and ordinal selectors without writes', async () => {
   const { repoRoot, taskId, taskMd } = makeTask([
     '| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |',
