@@ -12,9 +12,7 @@ Read this file before creating `manual-validation.md` / `manual-validation-r{N}.
 ## State Check
 
 ```text
-$ git status -s
-$ ls -la .agents/workspace/active/{task-id}/
-$ tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 > Follow `.agents/rules/evidence-reporting.md`: record task scope, key result, and uncovered parts; do not paste the complete directory listing or task tail for normal success.
 

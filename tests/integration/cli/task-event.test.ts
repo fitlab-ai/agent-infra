@@ -72,7 +72,7 @@ function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
       '## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。'
     );
   }
-  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
+  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n\`\`\``);
   content = appendReviewContract(content, family);
   fs.writeFileSync(artifactPath, `${content}\n## 资格审计\n\n${renderQualificationAudit(built.audit)}\n`);
 }
@@ -210,7 +210,7 @@ function inspect(root: string, args: string[]) {
 function reviewCodeArtifact(input = 'code.md') {
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family: 'review-code', artifact: 'review-code.md' }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   content = content.replace('## 审查摘要\n<!-- artifact-section:review-code:summary -->\n内容', `## 审查摘要\n<!-- artifact-section:review-code:summary -->\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n- **审查输入**：\`${input}\``);
-  return appendReviewContract(content.replace('## 证据原文\n<!-- artifact-section:review-code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-code:evidence -->\n```text\n$ git status -s\n```'), 'review-code');
+  return appendReviewContract(content.replace('## 证据原文\n<!-- artifact-section:review-code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-code:evidence -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```'), 'review-code');
 }
 
 function reviewArtifact(
@@ -222,7 +222,7 @@ function reviewArtifact(
   const family = title.includes('Plan') ? 'review-plan' : title.includes('Code') ? 'review-code' : 'review-analysis';
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
   content = content.replace(`## 审查摘要\n<!-- artifact-section:${family}:summary -->\n内容`, `## 审查摘要\n<!-- artifact-section:${family}:summary -->\n- **总体结论**：${verdict}\n- **发现（AI 可处理）**：${counts.blockers} 阻塞项，${counts.major} 主要，${counts.minor} 次要 / **人工校验**：0\n- **审查输入**：\`${input}\``);
-  return appendReviewContract(content.replace(`## 证据原文\n<!-- artifact-section:${family}:evidence -->\n内容`, `## 证据原文\n<!-- artifact-section:${family}:evidence -->\n\`\`\`text\n$ git status -s\n\`\`\``), family);
+  return appendReviewContract(content.replace(`## 证据原文\n<!-- artifact-section:${family}:evidence -->\n内容`, `## 证据原文\n<!-- artifact-section:${family}:evidence -->\n\`\`\`text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n\`\`\``), family);
 }
 
 function sha256File(filePath: string) {
@@ -242,7 +242,7 @@ function localArtifact(family: LocalArtifactFamily, suffix = '') {
       '## 流程裁定\n<!-- artifact-section:analysis:flow-decision -->\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。'
     );
   }
-  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
+  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n\`\`\``);
   if (family === 'code') content = content.replace('## 证据原文\n<!-- artifact-section:code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:code:evidence -->\n验证输出');
   return `${content}${suffix}`;
 }
@@ -727,7 +727,7 @@ test('local completion uses the repository verification config for its language'
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   const artifact = path.join(f.dir, 'plan.md');
   let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: 'plan.md', locale: 'en' }).replaceAll('<!-- artifact-slot:empty -->', 'content');
-  content = content.replace('## State Check\n<!-- artifact-section:plan:state-check -->\ncontent', '## State Check\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');
+  content = content.replace('## State Check\n<!-- artifact-section:plan:state-check -->\ncontent', '## State Check\n<!-- artifact-section:plan:state-check -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```');
   fs.writeFileSync(artifact, content);
   const artifactContent = fs.readFileSync(artifact, 'utf8');
   const local = validateLocalArtifact(artifactContent, { family: 'plan' });

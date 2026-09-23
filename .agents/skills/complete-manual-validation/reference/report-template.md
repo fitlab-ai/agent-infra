@@ -12,9 +12,7 @@
 ## 状态核对
 
 ```text
-$ git status -s
-$ ls -la .agents/workspace/active/{task-id}/
-$ tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 > 按 `.agents/rules/evidence-reporting.md` 记录任务范围、关键结果和未覆盖部分；正常成功不粘贴完整目录清单或 task tail。
 

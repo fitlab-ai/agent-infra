@@ -25,7 +25,7 @@ test('snapshot renders deterministic git, directory and ten-line tail evidence',
   assert.equal(result.status, 'ready');
   assert.equal(result.taskState, 'active');
   assert.ok(result.evidence);
-  assert.match(result.evidence, /^\$ git status -s\n\?\? /m);
+  assert.match(result.evidence, /^git status --short --untracked-files=all\n\?\? /m);
   assert.ok(result.evidence.indexOf('d\t-\ta-dir') < result.evidence.indexOf('\ttask.md'));
   assert.doesNotMatch(result.evidence, /line 1\n|line 2\n/);
   assert.match(result.evidence, /line 3\n[\s\S]*line 12$/);
@@ -38,8 +38,8 @@ test('snapshot makes clean and empty observations explicit', () => {
   spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'fixture'], { cwd: f.root });
   const result = collectTaskSnapshot(f.taskId, { repoRoot: f.root });
   assert.equal(result.status, 'ready');
-  assert.match(result.evidence!, /^\$ git status -s\n\(empty\)$/m);
-  assert.match(result.evidence!, new RegExp(`\\$ tail .*task\\.md\\n\\(empty\\)$`));
+  assert.match(result.evidence!, /^git status --short --untracked-files=all\n\(empty\)$/m);
+  assert.match(result.evidence!, new RegExp(`fs\\.readFileSync .*task\\.md \\(last 10 lines\\)\\n\\(empty\\)$`));
 });
 
 test('snapshot returns a stable failure and never exposes partial evidence', () => {

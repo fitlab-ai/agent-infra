@@ -102,25 +102,25 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 
 ## State Check
 
-> Record the state-check command, task/artifact scope, key result, and uncovered parts; each command starts with `$ `.
+> Record the state-check command, task/artifact scope, key result, and uncovered parts.
 > Follow `.agents/rules/evidence-reporting.md`: record task/artifact scope, key result, and uncovered parts; do not paste complete successful stdout.
 
-Record at least one actually executed `$ ` command and its result summary; prose-only status is insufficient. An implementation-stage report normally includes:
+Record at least one actually executed command and its result summary; prose-only status is insufficient. An implementation-stage report normally includes:
 
 ```text
-$ agent-infra-internal task-snapshot {task-id} --format text
+agent-infra-internal task-snapshot {task-id} --format text
 {task state, implementation-artifact scope, and uncovered-area summary}
-$ agent-infra-internal task-artifact {task-id} inspect --family code
+agent-infra-internal task-artifact {task-id} inspect --family code
 {code artifact, upstream input, and next-step summary}
 ```
 
 ## Raw Evidence
 
-> Follow `.agents/rules/evidence-reporting.md`: pair each claim with a `$ ` command and proportionate result summary; include a decisive raw excerpt only for failures, blocking conditions, or disputes.
+> Follow `.agents/rules/evidence-reporting.md`: pair each claim with an executable command and proportionate result summary; include a decisive raw excerpt only for failures, blocking conditions, or disputes.
 
 - Claim: {verified claim}
 ```text
-$ {command}
+{command}
 {result summary or decisive excerpt}
 ```
 

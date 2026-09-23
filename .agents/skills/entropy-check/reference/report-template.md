@@ -7,13 +7,13 @@
 ## 状态核对
 
 ```text
-$ git status -s
+git status -s
 {output}
 
-$ git branch --show-current
+git branch --show-current
 {output}
 
-$ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 {output}
 ```
 
@@ -38,7 +38,7 @@ $ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - **问题**：{what is wrong}
 - **证据**：
   ```text
-  $ {command}
+  {command}
   {output}
   ```
 - **影响**：{impact}

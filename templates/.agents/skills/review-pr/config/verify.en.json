@@ -12,8 +12,10 @@
         "State Check",
         "Evidence"
       ],
+      "state_check_patterns": [
+        "agent-infra-internal[ \\t]+task-snapshot\\b"
+      ],
       "required_patterns": [
-        "^\\$ ",
         "^- \\*\\*Reviewed Head SHA\\*\\*[:：]\\s*[0-9a-f]{40}\\s*$",
         "^- \\*\\*Review Mode\\*\\*[:：]\\s*(?:verify|audit|reconstruct)\\s*$",
         "^- \\*\\*Evidence Scenario\\*\\*[:：]\\s*S[123]\\s*$",

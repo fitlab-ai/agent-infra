@@ -28,7 +28,7 @@ function run(root: string, args: string[]) {
 function localArtifact(family: 'analysis' | 'plan' | 'code', suffix = ''): string {
   let content = renderArtifactSkeleton({ taskId: 'TASK-20260101-000001', family, artifact: `${family}.md` })
     .replaceAll('<!-- artifact-slot:empty -->', '内容');
-  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\n$ git status -s\n\`\`\``);
+  content = content.replace(`## 状态核对\n<!-- artifact-section:${family}:state-check -->\n内容`, `## 状态核对\n<!-- artifact-section:${family}:state-check -->\n\`\`\`text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n\`\`\``);
   if (family === 'code') content = content.replace('## 证据原文\n<!-- artifact-section:code:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:code:evidence -->\n验证输出');
   return `${content}${suffix}`;
 }
@@ -84,7 +84,7 @@ test('task-artifact revalidates a directly repaired formal artifact', () => {
   const f = fixture();
   const artifact = path.join(f.dir, 'plan.md');
   let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: path.basename(artifact) }).replaceAll('<!-- artifact-slot:empty -->', 'content');
-  content = content.replace('## 状态核对\n<!-- artifact-section:plan:state-check -->\ncontent', '## 状态核对\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');
+  content = content.replace('## 状态核对\n<!-- artifact-section:plan:state-check -->\ncontent', '## 状态核对\n<!-- artifact-section:plan:state-check -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```');
   fs.writeFileSync(artifact, content.replace('## 问题理解\n', '## 问题理解：\n'));
   const finalizer = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
   assert.equal(finalizer.status, 1, finalizer.stdout);
@@ -147,7 +147,7 @@ test('task-artifact finalize-local uses repository config from a nested working 
     checks: { artifact: { schema: 'plan' } }
   }));
   let content = renderArtifactSkeleton({ taskId: f.id, family: 'plan', artifact: 'plan.md', locale: 'en' }).replaceAll('<!-- artifact-slot:empty -->', 'content');
-  content = content.replace('## State Check\n<!-- artifact-section:plan:state-check -->\ncontent', '## State Check\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```');
+  content = content.replace('## State Check\n<!-- artifact-section:plan:state-check -->\ncontent', '## State Check\n<!-- artifact-section:plan:state-check -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), content);
   const nested = path.join(f.root, 'nested');
   fs.mkdirSync(nested);
@@ -184,7 +184,7 @@ test('task-artifact revalidates required evidence after a successful finalizatio
 
   const first = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
   assert.equal(first.status, 0, first.stderr);
-  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('```text\n$ git status -s\n```', 'status unavailable'));
+  fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```', 'status unavailable'));
 
   const second = run(f.root, [f.id, 'finalize-local', '--family', 'plan', '--artifact', 'plan.md']);
 
@@ -253,7 +253,7 @@ test('task-artifact finalize-local ignores fenced headings and commands', () => 
     '内容',
     '## 状态核对',
     '```text',
-    '$ git status -s',
+    'agent-infra-internal task-snapshot TASK-20260101-000001 --format text',
     '```'
   ].join('\n'));
 

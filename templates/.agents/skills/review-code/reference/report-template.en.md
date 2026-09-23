@@ -153,16 +153,16 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## State Check
 
-> Record the state-check command, review scope, key result, and uncovered parts; each command starts with `$ `.
+> Record the state-check command, review scope, key result, and uncovered parts.
 > Follow `.agents/rules/evidence-reporting.md`: record review scope, key result, and uncovered parts; do not paste complete successful stdout.
 
 ## Raw Evidence
 
-> Follow `.agents/rules/evidence-reporting.md`: pair each claim with a `$ ` command and proportionate result summary; Blockers, failures, blocking conditions, or disputes require reproducible evidence, exact location, and a decisive excerpt; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
+> Follow `.agents/rules/evidence-reporting.md`: pair each claim with an executable command and proportionate result summary; Blockers, failures, blocking conditions, or disputes require reproducible evidence, exact location, and a decisive excerpt; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
 
 - Claim: {verified claim}
 ```text
-$ {command}
+{command}
 {result summary or decisive excerpt}
 ```
 

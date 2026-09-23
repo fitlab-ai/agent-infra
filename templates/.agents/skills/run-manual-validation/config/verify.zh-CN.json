@@ -29,8 +29,8 @@
         "尚未覆盖",
         "证据原文"
       ],
-      "required_patterns": [
-        "^\\$ "
+      "state_check_patterns": [
+        "agent-infra-internal[ \\t]+task-snapshot\\b"
       ]
     },
     "activity-log": {

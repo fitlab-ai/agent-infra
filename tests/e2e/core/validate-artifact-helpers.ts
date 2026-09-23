@@ -216,7 +216,7 @@ function buildCompletedTaskContent(checklistLines: string[], overrides: Frontmat
     "## 状态核对",
     "",
     "```text",
-    "$ git status -s",
+    "agent-infra-internal task-snapshot TASK-20260101-000001 --format text",
     "```",
     "",
     "## 活动日志",

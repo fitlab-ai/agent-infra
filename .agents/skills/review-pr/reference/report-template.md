@@ -11,7 +11,7 @@
 
 ## 状态核对
 
-> 记录状态核对命令、PR/head、审查范围、关键结果和未覆盖部分；每条命令以 `$ ` 开头。
+> 记录状态核对命令、PR/head、审查范围、关键结果和未覆盖部分。
 > 按 `.agents/rules/evidence-reporting.md` 同时记录 PR、head、审查范围、关键结果和未覆盖部分；正常成功不粘贴完整 stdout。
 
 ## 身份信息
@@ -77,10 +77,10 @@
 
 ## 证据原文
 
-> 遵循 `.agents/rules/evidence-reporting.md`：每条断言配对 `$ ` 命令和相称结果摘要；正式 Review、失败、阻塞或争议保留准确身份和决定性摘录。
+> 遵循 `.agents/rules/evidence-reporting.md`：每条断言配对可执行命令和相称结果摘要；正式 Review、失败、阻塞或争议保留准确身份和决定性摘录。
 
 - 断言：{verified claim}
 ```text
-$ {command}
+{command}
 {result summary or decisive excerpt}
 ```

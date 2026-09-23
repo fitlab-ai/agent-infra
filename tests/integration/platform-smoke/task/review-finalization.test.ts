@@ -86,6 +86,13 @@ function filledOfficialReviewSample(
     assert.ok(report.includes(headingLine), `${relativePath} should include ${heading}`);
     report = report.replace(headingLine, `${headingLine}${marker}\n`);
   }
+  const stateCheck = schema.sections.find((section) => section.id === 'state-check')!;
+  const stateCheckHeading = locale === 'zh' ? stateCheck.headings.zh : stateCheck.headings.en;
+  const stateCheckMarker = `<!-- ${stateCheck.marker} -->`;
+  report = report.replace(
+    `## ${stateCheckHeading}\n${stateCheckMarker}\n`,
+    `## ${stateCheckHeading}\n${stateCheckMarker}\nagent-infra-internal task-snapshot ${TASK_ID} --format text\n`
+  );
   return report;
 }
 
@@ -147,7 +154,7 @@ id: ${TASK_ID}
   let review = renderArtifactSkeleton({ taskId: TASK_ID, family: 'review-analysis', artifact: 'review-analysis.md' })
     .replaceAll('<!-- artifact-slot:empty -->', '内容')
     .replace(/## 审查摘要\n<!-- artifact-section:review-analysis:summary -->\n内容/, summary.trimEnd())
-    .replace('## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n```text\n$ git status -s\n```');
+    .replace('## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n内容', '## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```');
   review += '\n### 审查决定\n通过\n';
   fs.writeFileSync(artifactPath, review);
   return { root, dir, artifactPath };

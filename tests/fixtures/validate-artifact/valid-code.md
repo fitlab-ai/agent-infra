@@ -28,7 +28,7 @@ fixture
 ## 状态核对
 <!-- artifact-section:code:state-check -->
 ```text
-$ git status -s
+agent-infra-internal task-snapshot TASK-20260101-000001 --format text
 ```
 
 ## 证据原文

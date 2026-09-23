@@ -69,7 +69,7 @@ function buildReviewArtifact(verdictLine: string, baseline: string, reviewedFing
     "（无）",
     "（无）",
     "### 审查决定\n\n- [x] 通过",
-    "```text\n$ git status -s\n```",
+    "```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```",
     "```text\n$ true\n```",
     "（无）",
     "（本轮无新发现）"

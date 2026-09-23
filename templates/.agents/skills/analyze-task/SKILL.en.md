@@ -160,7 +160,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ## State Check
 
-> Record the Step 0 state-check command, task/artifact scope, key result, and uncovered parts; each command starts with `$ `. Do not paste complete directory listings or task tails on normal success; retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes.
+> Record the Step 0 state-check command, task/artifact scope, key result, and uncovered parts. Do not paste complete directory listings or task tails on normal success; retain decisive raw lines only for failures, blocking conditions, identity mismatches, or disputes.
 
 ## Requirement Source
 

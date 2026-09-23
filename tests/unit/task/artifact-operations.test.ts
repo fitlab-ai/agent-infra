@@ -122,9 +122,17 @@ test('shared artifact contract enforces localized review patterns from the schem
       artifact: 'review-code.md',
       locale
     }).replaceAll('<!-- artifact-slot:empty -->', 'content')
+      .replace(
+        locale === 'en'
+          ? '## State Check\n<!-- artifact-section:review-code:state-check -->\ncontent'
+          : '## 状态核对\n<!-- artifact-section:review-code:state-check -->\ncontent',
+        locale === 'en'
+          ? '## State Check\n<!-- artifact-section:review-code:state-check -->\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text'
+          : '## 状态核对\n<!-- artifact-section:review-code:state-check -->\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text'
+      )
       + (locale === 'en'
-        ? '\n### Approval Decision\nChanges Requested\n- **Overall Verdict**: Changes Requested\n- **Review Baseline Commit**: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n- **Reviewed Diff Base**: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n- **Reviewed Diff Fingerprint**: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n- **Reviewed Snapshot Tree**: dddddddddddddddddddddddddddddddddddddddd\n$ git status -s\n'
-        : '\n### 审查决定\n需要修改\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n- **审查差异基线**：bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n- **审查差异指纹**：sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n- **审查快照树**：dddddddddddddddddddddddddddddddddddddddd\n$ git status -s\n');
+        ? '\n### Approval Decision\nChanges Requested\n- **Overall Verdict**: Changes Requested\n- **Review Baseline Commit**: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n- **Reviewed Diff Base**: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n- **Reviewed Diff Fingerprint**: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n- **Reviewed Snapshot Tree**: dddddddddddddddddddddddddddddddddddddddd\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n'
+        : '\n### 审查决定\n需要修改\n- **总体结论**：需要修改\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n- **审查基线提交**：`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n- **审查差异基线**：bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n- **审查差异指纹**：sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n- **审查快照树**：dddddddddddddddddddddddddddddddddddddddd\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n');
     assert.equal(inspectArtifactContract(content, getArtifactSchema('review-code')!).ok, true, locale);
 
     const invalid = content.replace(/^### (?:审查决定|Approval Decision)$/m, '### Decision');

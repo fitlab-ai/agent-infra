@@ -10,7 +10,7 @@
 ## 状态核对
 
 ```text
-$ agent-infra-internal task-snapshot {task-id} --format text
+agent-infra-internal task-snapshot {task-id} --format text
 {command-summary-and-key-result}
 ```
 > 按 `.agents/rules/evidence-reporting.md` 记录命令名称、目标范围、退出状态、sanitized result 和覆盖缺口；不得粘贴完整 argv 或敏感 transcript。
@@ -67,7 +67,7 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ## 证据原文
 
 ```text
-$ agent-infra-internal task-validate {task-ref} --scope {scope} --format json -- {redacted-command}
+agent-infra-internal task-validate {task-ref} --scope {scope} --format json -- {redacted-command}
 {sanitized-result}
 ```
 > 仅保留允许公开的命令与脱敏结构化结果；完整成功 stdout 不属于默认报告内容。

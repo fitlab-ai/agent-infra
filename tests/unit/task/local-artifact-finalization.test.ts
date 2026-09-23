@@ -15,7 +15,7 @@ const PLAN_SECTIONS = [
   ['实施步骤', '步骤一'],
   ['文件清单', '文件列表'],
   ['验证策略', '验证方法'],
-  ['状态核对', '```text\n$ git status -s\n```']
+  ['状态核对', '```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```']
 ] as const;
 
 const CODE_SECTIONS = [
@@ -25,16 +25,16 @@ const CODE_SECTIONS = [
   ['测试结果', '测试通过'],
   ['与方案的差异', '无'],
   ['供审查关注的内容', '完成门禁'],
-  ['状态核对', '```text\n$ git status -s\n```'],
+  ['状态核对', '```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```'],
   ['证据原文', '验证输出']
 ] as const;
 
 function artifact(family: LocalArtifactFamily = 'plan'): string {
   const taskId = 'TASK-20260101-000001';
   const content = renderArtifactSkeleton({ taskId, family, artifact: `${family}.md` }).replaceAll('<!-- artifact-slot:empty -->', '内容');
-  return content.replace('## 状态核对\n<!-- artifact-section:plan:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:plan:state-check -->\n```text\n$ git status -s\n```')
-    .replace('## 状态核对\n<!-- artifact-section:code:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:code:state-check -->\n```text\n$ git status -s\n```')
-    .replace('## 状态核对\n<!-- artifact-section:analysis:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:analysis:state-check -->\n```text\n$ git status -s\n```');
+  return content.replace('## 状态核对\n<!-- artifact-section:plan:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:plan:state-check -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```')
+    .replace('## 状态核对\n<!-- artifact-section:code:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:code:state-check -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```')
+    .replace('## 状态核对\n<!-- artifact-section:analysis:state-check -->\n内容', '## 状态核对\n<!-- artifact-section:analysis:state-check -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```');
 }
 
 function diagnostic(result: ReturnType<typeof validateLocalArtifact>, code: string) {
@@ -76,7 +76,7 @@ test('non-whitelisted content changes and ambiguous candidates fail closed', () 
   assert.equal(changed.ok, true);
   assert.notEqual(changed.semanticDigest, valid.semanticDigest);
 
-  const changedWhitespace = validateLocalArtifact(artifact().replace('$ git status -s', '$ git status  -s'), { family: 'plan' });
+  const changedWhitespace = validateLocalArtifact(artifact().replace('agent-infra-internal task-snapshot TASK-20260101-000001 --format text', 'agent-infra-internal  task-snapshot TASK-20260101-000001 --format text'), { family: 'plan' });
   assert.equal(changedWhitespace.ok, true);
   assert.notEqual(changedWhitespace.semanticDigest, valid.semanticDigest);
 

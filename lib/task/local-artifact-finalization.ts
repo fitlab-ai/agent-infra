@@ -2,10 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { inspectDecisionDetailDuplicates } from './decision-details.ts';
-import { scanVisibleMarkdown } from './markdown.ts';
 import { parseArtifactName } from './artifact-name.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
-import { canonicalSemanticDigest, inspectArtifactPatterns, inspectArtifactStructure, sha256Content } from './artifact-operations.ts';
+import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
@@ -71,7 +70,9 @@ function localDiagnosticCode(code: string): LocalArtifactDiagnosticCode {
     ARTIFACT_EMPTY: 'LOCAL_ARTIFACT_EMPTY',
     ARTIFACT_MISSING_SECTION: 'LOCAL_ARTIFACT_MISSING_SECTION',
     ARTIFACT_DUPLICATE_SECTION: 'LOCAL_ARTIFACT_DUPLICATE_SECTION',
-    ARTIFACT_HEADING_TRAILING_PUNCTUATION: 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION'
+    ARTIFACT_HEADING_TRAILING_PUNCTUATION: 'LOCAL_SECTION_HEADING_TRAILING_PUNCTUATION',
+    ARTIFACT_STATE_CHECK_PATTERN_MISSING: 'LOCAL_STATUS_COMMAND_MISSING',
+    ARTIFACT_REQUIRED_PATTERN_MISSING: 'LOCAL_REQUIRED_PATTERN_MISSING'
   };
   return map[code] ?? 'LOCAL_STRUCTURAL_INVALID';
 }
@@ -80,43 +81,14 @@ function localDiagnostic(item: { code: string; message: string; line: number | n
   return { code: localDiagnosticCode(item.code), message: item.message, line: item.line };
 }
 
-function isStatusPattern(pattern: string): boolean {
-  return pattern === '^\\$ ';
-}
-
 function validateLocalArtifact(
   content: string,
   options: LocalArtifactValidationOptions
 ): LocalArtifactValidationResult {
   const schema = getArtifactSchema(options.family)!;
   const diagnostics: LocalArtifactDiagnostic[] = [];
-  const scanned = scanVisibleMarkdown(content);
-  const structure = inspectArtifactStructure(content, schema);
-  for (const item of structure.diagnostics) diagnostics.push(localDiagnostic(item));
-
-  const statusSection = schema.sections.find((section) => section.id === 'state-check');
-  if (statusSection) {
-    const statusHeading = scanned.headings.find((heading) => (
-      heading.level === 2 && [statusSection.headings.zh, statusSection.headings.en].some((name) => (
-        heading.text === name || heading.text === `${name}:` || heading.text === `${name}：`
-      ))
-    ));
-    if (statusHeading) {
-      const next = scanned.headings.find((candidate) => candidate.start > statusHeading.start && candidate.level <= 2);
-      const body = content.slice(statusHeading.end, next?.start ?? content.length);
-      for (const pattern of schema.requiredPatterns.filter(isStatusPattern)) {
-        if (!new RegExp(pattern, 'm').test(body)) {
-          diagnostics.push({ code: 'LOCAL_STATUS_COMMAND_MISSING', message: `status section '${statusHeading.text}' is missing required command output`, line: content.slice(0, statusHeading.start).split('\n').length });
-        }
-      }
-    }
-  }
-
-  const patternInspection = inspectArtifactPatterns(content, {
-    ...schema,
-    requiredPatterns: schema.requiredPatterns.filter((item) => !isStatusPattern(item))
-  });
-  for (const item of patternInspection.diagnostics) diagnostics.push({ code: 'LOCAL_REQUIRED_PATTERN_MISSING', message: item.message, line: null });
+  const inspection = inspectArtifactContract(content, schema, { scopeStateCheckSection: true });
+  for (const item of inspection.diagnostics) diagnostics.push(localDiagnostic(item));
 
   const decisionDetails = inspectDecisionDetailDuplicates(content);
   if (!decisionDetails.ok) diagnostics.push({ code: 'LOCAL_DECISION_DETAIL_DUPLICATE', message: decisionDetails.message, line: null });

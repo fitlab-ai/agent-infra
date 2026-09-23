@@ -97,22 +97,22 @@ function collectTaskSnapshot(taskRef: string, options: SnapshotOptions = {}): Ta
   const observations: SnapshotObservation[] = [];
   try {
     const output = stripOneTrailingNewline((options.gitStatus ?? defaultGitStatus)(resolved.repoRoot));
-    observations.push({ name: 'git', status: 'ready', command: '$ git status -s', output, error: null });
+    observations.push({ name: 'git', status: 'ready', command: 'git status --short --untracked-files=all', output, error: null });
   } catch (error) {
-    return failedSnapshot(resolved, taskRef, observations, 'git', '$ git status -s', 'SNAPSHOT_GIT_FAILED', error);
+    return failedSnapshot(resolved, taskRef, observations, 'git', 'git status --short --untracked-files=all', 'SNAPSHOT_GIT_FAILED', error);
   }
   try {
     const entries = (options.readDirectory ?? ((dir) => fs.readdirSync(dir, { withFileTypes: true })))(resolved.taskDir);
     const output = renderDirectory(entries, resolved.taskDir, options.lstat ?? fs.lstatSync);
-    observations.push({ name: 'task-directory', status: 'ready', command: `$ ls -la ${taskDirPath}/`, output, error: null });
+    observations.push({ name: 'task-directory', status: 'ready', command: `fs.readdirSync ${taskDirPath}/`, output, error: null });
   } catch (error) {
-    return failedSnapshot(resolved, taskRef, observations, 'task-directory', `$ ls -la ${taskDirPath}/`, 'SNAPSHOT_DIRECTORY_READ_FAILED', error);
+    return failedSnapshot(resolved, taskRef, observations, 'task-directory', `fs.readdirSync ${taskDirPath}/`, 'SNAPSHOT_DIRECTORY_READ_FAILED', error);
   }
   try {
     const content = (options.readTask ?? ((file) => fs.readFileSync(file, 'utf8')))(resolved.taskMdPath);
-    observations.push({ name: 'task-tail', status: 'ready', command: `$ tail ${taskPath}`, output: renderTail(content), error: null });
+    observations.push({ name: 'task-tail', status: 'ready', command: `fs.readFileSync ${taskPath} (last 10 lines)`, output: renderTail(content), error: null });
   } catch (error) {
-    return failedSnapshot(resolved, taskRef, observations, 'task-tail', `$ tail ${taskPath}`, 'SNAPSHOT_TASK_READ_FAILED', error);
+    return failedSnapshot(resolved, taskRef, observations, 'task-tail', `fs.readFileSync ${taskPath} (last 10 lines)`, 'SNAPSHOT_TASK_READ_FAILED', error);
   }
   return {
     status: 'ready', changed: false, requestRef: taskRef, taskId: resolved.taskId,

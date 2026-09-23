@@ -570,6 +570,23 @@ function checkArtifact({ taskDir, config, artifactFile, skillName }: any): any {
     }
   }
 
+  const stateCheckPatterns = config.state_check_patterns || [];
+  if (stateCheckPatterns.length > 0) {
+    const scanned = scanVisibleMarkdown(content);
+    const stateCheckHeading = scanned.headings.find((heading) => (
+      heading.level === 2 && (heading.text === "状态核对" || heading.text === "State Check")
+    ));
+    const nextHeading = stateCheckHeading && scanned.headings.find((heading) => (
+      heading.start > stateCheckHeading.start && heading.level <= 2
+    ));
+    const stateCheckBody = stateCheckHeading ? content.slice(stateCheckHeading.end, nextHeading?.start ?? content.length) : "";
+    for (const pattern of stateCheckPatterns) {
+      if (!new RegExp(pattern, "m").test(stateCheckBody)) {
+        return failResult("artifact", `${path.basename(artifactPath)} state-check section is missing required command: ${pattern}`);
+      }
+    }
+  }
+
   return passResult(
     "artifact",
     `${path.basename(artifactPath)} passed (${requiredSections.length} sections)`

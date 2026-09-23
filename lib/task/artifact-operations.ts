@@ -27,6 +27,7 @@ type ArtifactStructuralDiagnosticCode =
   | 'ARTIFACT_EMPTY_SECTION'
   | 'ARTIFACT_SECTION_ORDER_INVALID'
   | 'ARTIFACT_HEADING_TRAILING_PUNCTUATION'
+  | 'ARTIFACT_STATE_CHECK_PATTERN_MISSING'
   | 'ARTIFACT_REQUIRED_PATTERN_MISSING';
 
 type ArtifactStructuralDiagnostic = Readonly<{
@@ -254,13 +255,68 @@ function inspectArtifactPatterns(
   };
 }
 
+function inspectArtifactStateCheck(
+  content: string,
+  schema: ArtifactSchema,
+  scopeToStateCheckSection: boolean
+): ArtifactStructureResult {
+  const stateCheck = schema.sections.find((section) => section.id === 'state-check');
+  if (!stateCheck || schema.stateCheckPatterns.length === 0) {
+    return { ok: true, family: schema.family, semanticDigest: canonicalSemanticDigest(content), diagnostics: [] };
+  }
+
+  if (!scopeToStateCheckSection) {
+    const diagnostics = schema.stateCheckPatterns
+      .filter((pattern) => !new RegExp(pattern, 'm').test(content))
+      .map((pattern) => diagnostic(
+        'ARTIFACT_STATE_CHECK_PATTERN_MISSING',
+        `artifact is missing required state-check command '${pattern}'`,
+        stateCheck.id,
+        null
+      ));
+    return {
+      ok: diagnostics.length === 0,
+      family: schema.family,
+      semanticDigest: canonicalSemanticDigest(content),
+      diagnostics
+    };
+  }
+
+  const scanned = scanVisibleMarkdown(content);
+  const headings = scanned.headings.filter((heading) => (
+    heading.level === 2 && sectionHeadings(schema, stateCheck).includes(heading.text)
+  ));
+  if (headings.length !== 1) {
+    return { ok: true, family: schema.family, semanticDigest: canonicalSemanticDigest(content), diagnostics: [] };
+  }
+
+  const bodyBounds = sectionBodyBounds(content, headings[0]!, scanned);
+  const body = content.slice(bodyBounds.start, bodyBounds.end);
+  const diagnostics = schema.stateCheckPatterns
+    .filter((pattern) => !new RegExp(pattern, 'm').test(body))
+    .map((pattern) => diagnostic(
+      'ARTIFACT_STATE_CHECK_PATTERN_MISSING',
+      `state-check section is missing required command '${pattern}'`,
+      stateCheck.id,
+      lineNumber(content, headings[0]!.start)
+    ));
+  return {
+    ok: diagnostics.length === 0,
+    family: schema.family,
+    semanticDigest: canonicalSemanticDigest(content),
+    diagnostics
+  };
+}
+
 function inspectArtifactContract(
   content: string,
-  schema: ArtifactSchema
+  schema: ArtifactSchema,
+  options: { scopeStateCheckSection?: boolean } = {}
 ): ArtifactStructureResult {
   const structure = inspectArtifactStructure(content, schema);
+  const stateCheck = inspectArtifactStateCheck(content, schema, options.scopeStateCheckSection === true);
   const patterns = inspectArtifactPatterns(content, schema);
-  const diagnostics = [...structure.diagnostics, ...patterns.diagnostics];
+  const diagnostics = [...structure.diagnostics, ...stateCheck.diagnostics, ...patterns.diagnostics];
   return {
     ok: diagnostics.length === 0,
     family: schema.family,

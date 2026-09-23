@@ -29,8 +29,8 @@
         "Remaining Coverage",
         "Raw Evidence"
       ],
-      "required_patterns": [
-        "^\\$ "
+      "state_check_patterns": [
+        "agent-infra-internal[ \\t]+task-snapshot\\b"
       ]
     },
     "activity-log": {

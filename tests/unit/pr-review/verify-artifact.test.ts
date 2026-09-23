@@ -22,7 +22,7 @@ function validArtifact(): string {
     '',
     '## 状态核对',
     '',
-    '$ agent-infra-internal task-snapshot TASK-1 --format text',
+    'PS> agent-infra-internal task-snapshot TASK-1 --format text',
     '',
     '## 身份信息',
     '',
@@ -86,6 +86,20 @@ test('verify-artifact fails when the reviewed head SHA is missing', async () => 
     const result = await runVerify(root, 'pr-review.md', content);
     assert.equal(result.status, 'fail');
     assert.match(result.message, /required pattern/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('verify-artifact requires the state-check command inside the State Check section', async () => {
+  const root = fixtureRoot();
+  try {
+    const content = validArtifact()
+      .replace('PS> agent-infra-internal task-snapshot TASK-1 --format text\n', '')
+      .replace('$ echo verified', 'C:\\work> agent-infra-internal task-snapshot TASK-1 --format text\n$ echo verified');
+    const result = await runVerify(root, 'pr-review.md', content);
+    assert.equal(result.status, 'fail');
+    assert.match(result.message, /state-check section/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

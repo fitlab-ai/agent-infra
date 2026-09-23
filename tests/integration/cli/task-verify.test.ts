@@ -27,7 +27,7 @@ function codeArtifact(taskId: string, artifact: string): string {
     .replaceAll('<!-- artifact-slot:empty -->', '内容');
   return content.replace(
     '## 状态核对\n<!-- artifact-section:code:state-check -->\n内容',
-    '## 状态核对\n<!-- artifact-section:code:state-check -->\n```text\n$ git status -s\n```'
+    '## 状态核对\n<!-- artifact-section:code:state-check -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```'
   );
 }
 
@@ -103,7 +103,7 @@ test('review artifact verification uses the schema pattern contract', () => {
     const content = renderArtifactSkeleton({ taskId: id, family: 'review-analysis', artifact: 'review-analysis.md' })
       .replaceAll('<!-- artifact-slot:empty -->', 'content')
       .replace('## 审查摘要\n<!-- artifact-section:review-analysis:summary -->\ncontent', '## 审查摘要\n<!-- artifact-section:review-analysis:summary -->\n- **总体结论**：通过')
-      .replace('## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\ncontent', '## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n```text\n$ git status -s\n```');
+      .replace('## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\ncontent', '## 证据原文\n<!-- artifact-section:review-analysis:evidence -->\n```text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n```');
     fs.writeFileSync(path.join(dir, 'review-analysis.md'), content);
     writeJson(path.join(root, '.agents/skills/review-analysis/config/verify.json'), {
       skill: 'review-analysis', checks: { artifact: { schema: 'review-analysis' } }

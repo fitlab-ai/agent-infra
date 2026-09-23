@@ -23,8 +23,8 @@
         "验证详情",
         "PR 摘要同步"
       ],
-      "required_patterns": [
-        "^\\$ "
+      "state_check_patterns": [
+        "agent-infra-internal[ \\t]+task-snapshot\\b"
       ]
     },
     "activity-log": {

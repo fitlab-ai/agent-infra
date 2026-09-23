@@ -790,11 +790,30 @@ test("workflow artifact gates require state check evidence", () => {
       }
       if (!schemaFamilies[skill]) {
         assert.ok(
-          artifact.required_patterns.includes("^\\$ "),
-          `${relativePath} should require a shell prompt evidence line`
+          artifact.state_check_patterns.includes("agent-infra-internal[ \\t]+task-snapshot\\b"),
+          `${relativePath} should require the typed state-check command`
         );
       }
     });
+  });
+});
+
+test("complete-task state-check evidence accepts portable transcript markers", () => {
+  [
+    ".agents/skills/complete-task/config/verify.json",
+    "templates/.agents/skills/complete-task/config/verify.en.json",
+    "templates/.agents/skills/complete-task/config/verify.zh-CN.json"
+  ].forEach((relativePath) => {
+    const config = JSON.parse(read(relativePath));
+    const pattern = new RegExp(config.checks.artifact.state_check_patterns[0], "m");
+
+    [
+      "agent-infra-internal task-snapshot TASK-1 --format text",
+      "$ agent-infra-internal task-snapshot TASK-1 --format text",
+      "PS> agent-infra-internal task-snapshot TASK-1 --format text",
+      "C:\\work> agent-infra-internal task-snapshot TASK-1 --format text"
+    ].forEach((line) => assert.equal(pattern.test(line), true, relativePath));
+    assert.equal(pattern.test("git status -s"), false, relativePath);
   });
 });
 

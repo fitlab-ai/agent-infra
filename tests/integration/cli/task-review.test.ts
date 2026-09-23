@@ -48,7 +48,7 @@ current_step: ${scenario.step}
   );
   content = content.replace(
     `## Raw Evidence\n<!-- artifact-section:${scenario.family}:evidence -->\ncontent`,
-    `## Raw Evidence\n<!-- artifact-section:${scenario.family}:evidence -->\n\`\`\`text\n$ git status -s\n\`\`\``
+    `## Raw Evidence\n<!-- artifact-section:${scenario.family}:evidence -->\n\`\`\`text\nagent-infra-internal task-snapshot TASK-20260101-000001 --format text\n\`\`\``
   );
   content += `\n### Approval Decision\nChanges Requested\n`;
   if (scenario.family === 'review-code') {

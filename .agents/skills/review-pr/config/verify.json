@@ -12,8 +12,10 @@
         "状态核对",
         "证据原文"
       ],
+      "state_check_patterns": [
+        "agent-infra-internal[ \\t]+task-snapshot\\b"
+      ],
       "required_patterns": [
-        "^\\$ ",
         "^- \\*\\*被审 head SHA\\*\\*[:：]\\s*[0-9a-f]{40}\\s*$",
         "^- \\*\\*审查模式\\*\\*[:：]\\s*(?:verify|audit|reconstruct)\\s*$",
         "^- \\*\\*证据场景\\*\\*[:：]\\s*S[123]\\s*$",
