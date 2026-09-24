@@ -1102,14 +1102,14 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
       let receipt = readReceipt(repoRoot, resolved.taskId);
       if (!receipt && options.controlBinding && options.handoffDirectory && request.handoffSha256) {
         try {
-          if (inspectTaskLifecycleProgress(repoRoot, resolved.taskId, request.agent) !== 'not-started') {
-            throw new Error('TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
-          }
           const handoff = readTaskFinalizationHandoff(
             options.handoffDirectory, resolved.taskId, options.controlBinding, request.handoffSha256
           );
           receipt = validateReceipt(handoff.receipt, resolved.taskId);
           if (receipt.lifecycle !== 'pending') throw new Error('handoff lifecycle must be pending');
+          if (inspectTaskLifecycleProgress(repoRoot, resolved.taskId, request.agent) === 'unknown') {
+            throw new Error('TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
+          }
           writeReceipt(repoRoot, receipt);
           try { handoff.cleanup(); } catch { /* keep the persisted canonical receipt usable */ }
         } catch (error) {
