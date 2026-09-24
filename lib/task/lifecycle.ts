@@ -378,6 +378,11 @@ export function inspectTaskLifecycleProgress(
     if (journal.taskId !== taskId || journal.intent !== 'complete'
       || journal.intentDigest !== intentIdentity(request, taskId)
       || journal.sourceState !== 'active' || journal.targetState !== 'completed') return 'unknown';
+    if (journal.completedSteps.some((step, index) => STEPS[index] !== step)) return 'unknown';
+    const directoryMoved = journal.completedSteps.includes('directory-moved');
+    if ((directoryMoved && state !== 'completed') || (!directoryMoved && state !== 'active')) return 'unknown';
+    const shortIdReleased = journal.completedSteps.includes('registry-committed');
+    if (shortIdReleased === loadShortIdByTaskId(repoRoot).has(taskId)) return 'unknown';
     if (frontmatter.status !== state
       && !(state === 'active' && frontmatter.status === 'completed' && matchingCompletion(content, request))) {
       return 'unknown';

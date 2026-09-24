@@ -366,6 +366,41 @@ test('host finalization receipt records the sandbox generation and request bindi
   }
 });
 
+test('host finalization rejects an inconsistent copied-back lifecycle journal without side effects', async () => {
+  const f = fixture();
+  const binding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
+    bindTaskFinalizationReceipt(f.repoRoot, TASK_ID, binding);
+    const interrupted = applyTaskLifecycle(request, {
+      repoRoot: f.repoRoot, metadataProvider: () => METADATA,
+      directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
+    });
+    assert.equal(interrupted.status, 'failed');
+    const journalPath = path.join(f.taskDir, '.task-lifecycle.json');
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { completedSteps: string[] };
+    journal.completedSteps.push('directory-moved');
+    fs.writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
+
+    const result = await commitPreparedTaskFinalization(
+      request,
+      { ...options(f.repoRoot, commentSync, verify), controlBinding: binding }
+    );
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
+    assert.equal(fs.existsSync(f.taskDir), true);
+    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), false);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids,
+      { '01': TASK_ID }
+    );
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host imports a sandbox-prepared receipt only when its handoff is bound to the current request', async () => {
   const sandbox = fixture();
   const host = fixture();
