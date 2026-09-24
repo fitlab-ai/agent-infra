@@ -13,6 +13,8 @@ type TaskFinalizationHandoff = Readonly<{
   receipt: TaskFinalizationReceipt;
   receiptSha256: string;
 }>;
+type ReadHandoff = Readonly<{ receipt: TaskFinalizationReceipt; cleanup: () => void }>;
+const MAX_HANDOFF_BYTES = 1024 * 1024;
 
 function digest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -50,13 +52,36 @@ export function readTaskFinalizationHandoff(
   taskId: string,
   binding: Readonly<{ generation: string; requestId: string }>,
   handoffSha256: string
-): TaskFinalizationReceipt {
+): ReadHandoff {
   const file = finalizationHandoffPath(directory, taskId);
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('TASK_FINALIZATION_HANDOFF_INVALID');
-  const envelope = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<TaskFinalizationHandoff>;
-  if (envelope.version !== HANDOFF_VERSION || envelope.taskId !== taskId
-    || !envelope.binding || envelope.binding.generation !== binding.generation
+  const initial = fs.lstatSync(file);
+  if (!initial.isFile() || initial.isSymbolicLink() || initial.size > MAX_HANDOFF_BYTES) {
+    throw new Error('TASK_FINALIZATION_HANDOFF_INVALID');
+  }
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  let content: string;
+  try {
+    const opened = fs.fstatSync(descriptor);
+    if (!opened.isFile() || opened.dev !== initial.dev || opened.ino !== initial.ino
+      || opened.size > MAX_HANDOFF_BYTES) throw new Error('TASK_FINALIZATION_HANDOFF_INVALID');
+    const bytes = Buffer.alloc(MAX_HANDOFF_BYTES + 1);
+    const length = fs.readSync(descriptor, bytes, 0, bytes.length, 0);
+    if (length !== opened.size || length > MAX_HANDOFF_BYTES) throw new Error('TASK_FINALIZATION_HANDOFF_INVALID');
+    content = bytes.toString('utf8', 0, length);
+    const after = fs.fstatSync(descriptor);
+    if (after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size) {
+      throw new Error('TASK_FINALIZATION_HANDOFF_INVALID');
+    }
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  const envelope = JSON.parse(content) as Partial<TaskFinalizationHandoff>;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)
+    || Object.keys(envelope).sort().join('\0') !== ['binding', 'receipt', 'receiptSha256', 'taskId', 'version'].join('\0')
+    || envelope.version !== HANDOFF_VERSION || envelope.taskId !== taskId
+    || !envelope.binding || typeof envelope.binding !== 'object' || Array.isArray(envelope.binding)
+    || Object.keys(envelope.binding).sort().join('\0') !== ['generation', 'requestId'].join('\0')
+    || envelope.binding.generation !== binding.generation
     || envelope.binding.requestId !== binding.requestId || !envelope.receipt
     || envelope.receipt.controlBinding?.generation !== binding.generation
     || envelope.receipt.controlBinding.requestId !== binding.requestId
@@ -64,5 +89,16 @@ export function readTaskFinalizationHandoff(
     || digest(envelope) !== handoffSha256) {
     throw new Error('TASK_FINALIZATION_HANDOFF_INVALID');
   }
-  return envelope.receipt;
+  return {
+    receipt: envelope.receipt,
+    cleanup: () => {
+      try {
+        const current = fs.lstatSync(file);
+        if (current.isFile() && !current.isSymbolicLink()
+          && current.dev === initial.dev && current.ino === initial.ino) fs.unlinkSync(file);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+  };
 }

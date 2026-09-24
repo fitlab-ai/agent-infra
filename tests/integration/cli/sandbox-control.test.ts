@@ -275,12 +275,20 @@ function runTaskFinalizationClient(params: {
   token: string;
   generation: string;
   timeoutMs: number;
+  repoRoot?: string;
+  taskId?: string;
 }): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
   const script = [
     "import { requestSandboxTaskFinalization } from './lib/sandbox/control/client.ts';",
+    "import { bindTaskFinalizationReceipt } from './lib/task/finalization.ts';",
+    "import { publishTaskFinalizationHandoff } from './lib/task/finalization-handoff.ts';",
     'try {',
     '  const response = requestSandboxTaskFinalization({',
     "    agent: 'codex',",
+    '    prepareHandoff: process.env.TEST_REPO_ROOT ? (binding) => {',
+    '      const receipt = bindTaskFinalizationReceipt(process.env.TEST_REPO_ROOT, process.env.TEST_TASK_ID, binding);',
+    '      return publishTaskFinalizationHandoff(process.env.TEST_REPO_ROOT, receipt, binding);',
+    '    } : undefined,',
     '    channelDir: process.env.TEST_CHANNEL_DIR,',
     '    statusDir: process.env.TEST_STATUS_DIR,',
     '    token: process.env.TEST_TOKEN,',
@@ -310,7 +318,9 @@ function runTaskFinalizationClient(params: {
         TEST_STATUS_DIR: params.statusDir,
         TEST_TOKEN: params.token,
         TEST_GENERATION: params.generation,
-        TEST_TIMEOUT_MS: String(params.timeoutMs)
+        TEST_TIMEOUT_MS: String(params.timeoutMs),
+        TEST_REPO_ROOT: params.repoRoot,
+        TEST_TASK_ID: params.taskId
       },
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -1522,17 +1532,17 @@ test('task-bound finalization accepts a new request after accepted response loss
     };
 
     const firstBroker = serveOne(true);
-    const firstClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 500 });
+    const firstClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 500, repoRoot: root, taskId });
     const firstExecution = await firstBroker;
     assert.equal(firstClient.exitCode, 1);
     assert.equal((firstClient.payload.error as { code?: string }).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
     assert.equal(firstClient.payload.accepted, true);
     assert.ok(firstExecution.stdout, firstExecution.stderr);
-    assert.equal(JSON.parse(firstExecution.stdout).status, 'completed');
+    assert.equal(JSON.parse(firstExecution.stdout).status, 'completed', firstExecution.stdout);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
 
     const secondBroker = serveOne(false);
-    const secondClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS });
+    const secondClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS, repoRoot: root, taskId });
     const secondExecution = await secondBroker;
     assert.equal(secondClient.exitCode, 0, secondClient.stderr);
     assert.equal(secondClient.payload.exitCode, 0);
@@ -1658,7 +1668,9 @@ test('task-finalization normal publication fails closed on a conflicting termina
       statusDir: manifest.publicStatusDir,
       token: manifest.token,
       generation,
-      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
+      repoRoot: root,
+      taskId
     });
     const evidence = await waitForResultEvidenceAsync(manifest.processingDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
     fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${evidence.requestId}.json`), `${JSON.stringify({
@@ -1704,7 +1716,9 @@ test('task-finalization publishes its executor result when the receipt disappear
       statusDir: manifest.publicStatusDir,
       token: manifest.token,
       generation,
-      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
+      repoRoot: root,
+      taskId
     });
     const evidence = await resultEvidence;
     fs.rmSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`));
@@ -1750,7 +1764,9 @@ test('task-finalization settles and commits the canonical terminal before gracef
       statusDir: manifest.publicStatusDir,
       token: manifest.token,
       generation,
-      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
+      repoRoot: root,
+      taskId
     });
     const evidence = await resultEvidence;
     controller.abort();
@@ -1809,7 +1825,9 @@ test('task-finalization reports unknown when shutdown precedes broker result pub
       statusDir: manifest.publicStatusDir,
       token: manifest.token,
       generation,
-      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
+      repoRoot: root,
+      taskId
     });
     const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
     await waitForReceiptTerminalAsync(receiptPath, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
@@ -1818,7 +1836,7 @@ test('task-finalization reports unknown when shutdown precedes broker result pub
     assert.equal(fs.existsSync(path.join(manifest.processingDir, processingEntries[0]!, 'result.json')), false);
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as Record<string, unknown>;
     assert.equal(receipt.lifecycle, 'done', JSON.stringify(receipt));
-    assert.equal(receipt.controlBinding, undefined);
+    assert.deepEqual(receipt.controlBinding, { generation, requestId: processingEntries[0] });
     controller.abort();
     await server;
     const client = await clientResult;
@@ -1879,7 +1897,9 @@ test('task-finalization preserves unknown result evidence when executor terminat
       statusDir: manifest.publicStatusDir,
       token: manifest.token,
       generation,
-      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS
+      timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS,
+      repoRoot: root,
+      taskId
     });
     const receiptPath = path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`);
     await waitForReceiptLifecycleDoneAsync(receiptPath, SANDBOX_CONTROL_TEST_TIMEOUT_MS);

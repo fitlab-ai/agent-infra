@@ -21,7 +21,12 @@ import {
   type TaskFinalizationRequest,
   type TaskFinalizationReceipt
 } from '../../../lib/task/finalization.ts';
-import { publishTaskFinalizationHandoff } from '../../../lib/task/finalization-handoff.ts';
+import {
+  finalizationHandoffPath,
+  publishTaskFinalizationHandoff,
+  readTaskFinalizationHandoff
+} from '../../../lib/task/finalization-handoff.ts';
+import { applyTaskLifecycle } from '../../../lib/task/lifecycle.ts';
 import type { TaskVerificationResult } from '../../../lib/task/verification.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -379,6 +384,7 @@ test('host imports a sandbox-prepared receipt only when its handoff is bound to 
     );
     assert.equal(result.status, 'completed');
     assert.deepEqual(readTaskFinalizationReceipt(host.repoRoot, TASK_ID)?.controlBinding, binding);
+    assert.equal(fs.existsSync(finalizationHandoffPath(handoff, TASK_ID)), false);
   } finally {
     fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
     fs.rmSync(host.repoRoot, { recursive: true, force: true });
@@ -408,6 +414,225 @@ test('host rejects a handoff with a different binding before finalization side e
   } finally {
     fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
     fs.rmSync(host.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('host rebinds an imported pending receipt after a failed pre-lifecycle commit', async () => {
+  const sandbox = fixture();
+  const host = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const oldBinding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const newBinding = { generation: oldBinding.generation, requestId: 'fedcba9876543210fedcba9876543210' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    await prepareTaskFinalization(request, options(sandbox.repoRoot, commentSync, verify));
+    const oldReceipt = bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, oldBinding);
+    const oldDigest = publishTaskFinalizationHandoff(handoff, oldReceipt, oldBinding);
+    const registryPath = path.join(host.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+    fs.writeFileSync(registryPath, 'invalid json');
+    const first = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: oldDigest },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: oldBinding, handoffDirectory: handoff }
+    );
+    assert.equal(first.status, 'failed');
+    assert.deepEqual(readTaskFinalizationReceipt(host.repoRoot, TASK_ID)?.controlBinding, oldBinding);
+    fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
+    const newReceipt = bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, newBinding);
+    const newDigest = publishTaskFinalizationHandoff(handoff, newReceipt, newBinding);
+    const retry = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: newDigest },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: newBinding, handoffDirectory: handoff }
+    );
+    assert.equal(retry.status, 'completed', JSON.stringify(retry));
+    assert.deepEqual(readTaskFinalizationReceipt(host.repoRoot, TASK_ID)?.controlBinding, newBinding);
+    assert.equal(fs.existsSync(finalizationHandoffPath(handoff, TASK_ID)), false);
+    assert.equal(fs.existsSync(path.join(host.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
+    fs.rmSync(host.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('host resumes a matching lifecycle journal without replacing its old binding', async () => {
+  const sandbox = fixture();
+  const host = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const oldBinding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const newBinding = { generation: oldBinding.generation, requestId: 'fedcba9876543210fedcba9876543210' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    await prepareTaskFinalization(request, options(sandbox.repoRoot, commentSync, verify));
+    const receipt = bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, oldBinding);
+    const digest = publishTaskFinalizationHandoff(handoff, receipt, oldBinding);
+    const first = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: digest },
+      {
+        ...options(host.repoRoot, commentSync, verify), controlBinding: oldBinding, handoffDirectory: handoff,
+        lifecycle: (input, lifecycleOptions) => applyTaskLifecycle(input, {
+          ...lifecycleOptions, directoryRenameSync: () => { throw new Error('injected move interruption'); }
+        })
+      }
+    );
+    assert.equal(first.status, 'failed');
+    const journalPath = path.join(host.taskDir, '.task-lifecycle.json');
+    assert.equal(fs.existsSync(journalPath), true);
+    const retry = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: '0'.repeat(64) },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: newBinding, handoffDirectory: handoff }
+    );
+    assert.equal(retry.status, 'completed', JSON.stringify(retry));
+    assert.deepEqual(readTaskFinalizationReceipt(host.repoRoot, TASK_ID)?.controlBinding, oldBinding);
+    assert.equal(fs.existsSync(path.join(host.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
+    fs.rmSync(host.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('host refuses an otherwise valid handoff with an extra receipt field', async () => {
+  const sandbox = fixture();
+  const host = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const binding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    await prepareTaskFinalization(request, options(sandbox.repoRoot, commentSync, verify));
+    const receipt = bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, binding);
+    const altered = { ...receipt, unexpected: 'field' };
+    const digest = publishTaskFinalizationHandoff(handoff, altered, binding);
+    const result = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: digest },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: binding, handoffDirectory: handoff }
+    );
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'TASK_FINALIZATION_HANDOFF_INVALID');
+    assert.equal(readTaskFinalizationReceipt(host.repoRoot, TASK_ID), null);
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
+    fs.rmSync(host.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('host rejects a cross-generation rebind without changing its canonical receipt', async () => {
+  const sandbox = fixture();
+  const host = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const oldBinding = { generation: 'old-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const newBinding = { generation: 'new-generation', requestId: 'fedcba9876543210fedcba9876543210' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    await prepareTaskFinalization(request, options(sandbox.repoRoot, commentSync, verify));
+    const oldDigest = publishTaskFinalizationHandoff(handoff, bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, oldBinding), oldBinding);
+    const registryPath = path.join(host.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+    fs.writeFileSync(registryPath, 'invalid json');
+    await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: oldDigest },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: oldBinding, handoffDirectory: handoff }
+    );
+    fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
+    const newDigest = publishTaskFinalizationHandoff(handoff, bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, newBinding), newBinding);
+    const retry = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: newDigest },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: newBinding, handoffDirectory: handoff }
+    );
+    assert.equal(retry.error?.code, 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
+    assert.deepEqual(readTaskFinalizationReceipt(host.repoRoot, TASK_ID)?.controlBinding, oldBinding);
+    assert.equal(fs.existsSync(path.join(host.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), false);
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
+    fs.rmSync(host.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('host refuses rebind when its lifecycle journal is malformed', async () => {
+  const sandbox = fixture();
+  const host = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const oldBinding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const newBinding = { generation: oldBinding.generation, requestId: 'fedcba9876543210fedcba9876543210' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    await prepareTaskFinalization(request, options(sandbox.repoRoot, commentSync, verify));
+    const oldDigest = publishTaskFinalizationHandoff(handoff, bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, oldBinding), oldBinding);
+    const registryPath = path.join(host.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json');
+    fs.writeFileSync(registryPath, 'invalid json');
+    await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: oldDigest },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: oldBinding, handoffDirectory: handoff }
+    );
+    fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
+    fs.writeFileSync(path.join(host.taskDir, '.task-lifecycle.json'), '{"version":1,"taskId":"wrong"}\n');
+    const newDigest = publishTaskFinalizationHandoff(handoff, bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, newBinding), newBinding);
+    const retry = await commitPreparedTaskFinalization(
+      { ...request, handoffSha256: newDigest },
+      { ...options(host.repoRoot, commentSync, verify), controlBinding: newBinding, handoffDirectory: handoff }
+    );
+    assert.equal(retry.error?.code, 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
+    assert.deepEqual(readTaskFinalizationReceipt(host.repoRoot, TASK_ID)?.controlBinding, oldBinding);
+    assert.equal(fs.existsSync(path.join(host.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), false);
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
+    fs.rmSync(host.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('host rejects malformed nested receipt fields even with a matching handoff digest', async () => {
+  const sandbox = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const binding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    await prepareTaskFinalization(request, options(sandbox.repoRoot, commentSync, verify));
+    const receipt = bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, binding);
+    for (const altered of [
+      { ...receipt, controlBinding: { ...binding, unexpected: true } },
+      { ...receipt, lastError: { code: 'TEST', message: 'test', retryable: false, unexpected: true } }
+    ]) {
+      const host = fixture();
+      try {
+        const digest = publishTaskFinalizationHandoff(handoff, altered, binding);
+        const result = await commitPreparedTaskFinalization(
+          { ...request, handoffSha256: digest },
+          { ...options(host.repoRoot, commentSync, verify), controlBinding: binding, handoffDirectory: handoff }
+        );
+        assert.equal(result.error?.code, 'TASK_FINALIZATION_HANDOFF_INVALID');
+        assert.equal(readTaskFinalizationReceipt(host.repoRoot, TASK_ID), null);
+      } finally {
+        fs.rmSync(host.repoRoot, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
+    fs.rmSync(handoff, { recursive: true, force: true });
+  }
+});
+
+test('handoff cleanup preserves a replacement file', async () => {
+  const sandbox = fixture();
+  const handoff = fs.mkdtempSync(path.join(os.tmpdir(), 'task-finalization-handoff-'));
+  const binding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  try {
+    await prepareTaskFinalization(request, options(sandbox.repoRoot, async () => platformResult('no-op'), async () => verification('pass')));
+    const receipt = bindTaskFinalizationReceipt(sandbox.repoRoot, TASK_ID, binding);
+    const digest = publishTaskFinalizationHandoff(handoff, receipt, binding);
+    const read = readTaskFinalizationHandoff(handoff, TASK_ID, binding, digest);
+    publishTaskFinalizationHandoff(handoff, receipt, binding);
+    read.cleanup();
+    assert.equal(fs.existsSync(finalizationHandoffPath(handoff, TASK_ID)), true);
+  } finally {
+    fs.rmSync(sandbox.repoRoot, { recursive: true, force: true });
     fs.rmSync(handoff, { recursive: true, force: true });
   }
 });

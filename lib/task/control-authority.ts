@@ -693,7 +693,8 @@ export function dispatchTaskControlOperation(
       repoRoot: context.repoRoot,
       ...(context.source === 'sandbox-executor' ? {
         controlBinding: { generation: context.generation, requestId: context.requestId },
-        handoffDirectory: context.handoffDirectory
+        handoffDirectory: context.handoffDirectory,
+        manifestPath: context.manifestPath
       } : {}),
       preflight: (request, options) => verifyTaskEvent(
         { ...request, event: 'complete-task.hard-preflight' }, options
