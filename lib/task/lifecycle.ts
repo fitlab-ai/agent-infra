@@ -357,6 +357,44 @@ export function readLifecycleJournalEvidence(repoRoot: string, taskId: string): 
   } catch { return { exists: true, completedSteps: [], failure: 'SANDBOX_CONTROL_LIFECYCLE_JOURNAL_INVALID' }; }
 }
 
+export function inspectTaskLifecycleProgress(
+  repoRoot: string, taskId: string, agent: string
+): 'not-started' | 'started-recoverable' | 'unknown' {
+  try {
+    const hot = locateHotTaskDirs(repoRoot, taskId);
+    if (hot.length !== 1 || (hot[0]!.state !== 'active' && hot[0]!.state !== 'completed')) return 'unknown';
+    const { state, taskDir } = hot[0]!;
+    const content = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    const frontmatter = parseTypedTaskFrontmatter(content);
+    if (frontmatter.id !== taskId) return 'unknown';
+    const journalPath = path.join(taskDir, '.task-lifecycle.json');
+    if (!fs.existsSync(journalPath)) {
+      if (state === 'active') return frontmatter.status === 'active' ? 'not-started' : 'unknown';
+      return matchingCompletion(content, { taskRef: taskId, intent: 'complete', agent })
+        ? 'started-recoverable' : 'unknown';
+    }
+    const journal = parseJournal(fs.readFileSync(journalPath, 'utf8'));
+    const request: TaskLifecycleRequest = { taskRef: taskId, intent: 'complete', agent };
+    if (journal.taskId !== taskId || journal.intent !== 'complete'
+      || journal.intentDigest !== intentIdentity(request, taskId)
+      || journal.sourceState !== 'active' || journal.targetState !== 'completed') return 'unknown';
+    if (journal.completedSteps.some((step, index) => STEPS[index] !== step)) return 'unknown';
+    const directoryMoved = journal.completedSteps.includes('directory-moved');
+    const registryCommitted = journal.completedSteps.includes('registry-committed');
+    const hasShortId = loadShortIdByTaskId(repoRoot).has(taskId);
+    if (state === 'active' && (directoryMoved || !hasShortId)) return 'unknown';
+    if (state === 'completed' && (!journal.completedSteps.includes('task-written')
+      || !matchingCompletion(content, request) || (registryCommitted && hasShortId))) return 'unknown';
+    if (frontmatter.status !== state
+      && !(state === 'active' && frontmatter.status === 'completed' && matchingCompletion(content, request))) {
+      return 'unknown';
+    }
+    return 'started-recoverable';
+  } catch {
+    return 'unknown';
+  }
+}
+
 type DirectoryEntry = Readonly<{ relativePath: string; kind: 'file' | 'directory'; size: number; digest: string }>;
 
 function directoryManifest(root: string): DirectoryEntry[] {

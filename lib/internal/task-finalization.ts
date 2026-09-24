@@ -3,7 +3,8 @@ import {
   dispatchTaskControlOperation,
   parseTaskControlOperation
 } from '../task/control-authority.ts';
-import { applyTaskFinalization, prepareTaskFinalization } from '../task/finalization.ts';
+import { applyTaskFinalization, bindTaskFinalizationReceipt, prepareTaskFinalization } from '../task/finalization.ts';
+import { publishTaskFinalizationHandoff } from '../task/finalization-handoff.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import { verifyTaskEvent } from '../task/verification.ts';
 import { resolveSandboxControlTransport } from './task-operation-registry.ts';
@@ -88,7 +89,13 @@ async function taskFinalization(args: string[] = []): Promise<void> {
       return;
     }
     try {
-      const response = requestSandboxTaskFinalization({ agent: boundOperation.request.agent });
+      const response = requestSandboxTaskFinalization({
+        agent: boundOperation.request.agent,
+        prepareHandoff: (binding) => {
+          const receipt = bindTaskFinalizationReceipt(repoRoot, boundOperation.request.taskRef, binding);
+          return publishTaskFinalizationHandoff('/share/branch', receipt, binding);
+        }
+      });
       process.stdout.write(response.stdout);
       process.stderr.write(response.stderr);
       process.exitCode = response.exitCode ?? 1;

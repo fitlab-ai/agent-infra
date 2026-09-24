@@ -53,7 +53,7 @@ import {
   executeRequest,
   nodeEntryArgs
 } from '../../../../lib/sandbox/control/executor.ts';
-import { prepareTaskFinalization } from '../../../../lib/task/finalization.ts';
+import { bindTaskFinalizationReceipt, prepareTaskFinalization } from '../../../../lib/task/finalization.ts';
 import { platformResult } from '../../../../lib/platform/types.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../../lib/sandbox/control/client.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../../lib/sandbox/control/identity-sentinel.ts';
@@ -653,6 +653,7 @@ test('task finalization uses a typed task-bound request with manifest authority'
     family: 'task-finalization',
     operation: 'complete',
     agent: 'codex',
+    handoffSha256: '0'.repeat(64),
     args: [],
     controllerProcess: null,
     controllerProof: null
@@ -697,15 +698,27 @@ test('sandbox executor finalizes only the manifest task and returns no control a
       })
     });
     assert.equal(prepared.status, 'prepared', prepared.error?.message);
-    const result = await executeRequest({
+    const requestId = '12345678-1234-1234-1234-123456789abc';
+    const boundManifest = {
       ...manifest,
       repoRoot: root,
       worktreeRoot: root,
       taskId,
+      channelDir: path.join(root, 'channel'),
+      publicStatusDir: path.join(root, 'public'),
+      processingDir: path.join(root, 'processing'),
       runtimeDir: path.join(root, 'runtime')
-    }, path.join(root, 'manifest.json'), {
+    };
+    const manifestPath = path.join(root, 'manifest.json');
+    fs.mkdirSync(boundManifest.publicStatusDir);
+    fs.writeFileSync(manifestPath, `${JSON.stringify(boundManifest)}\n`);
+    writeSandboxControlIdentitySentinel(boundManifest.publicStatusDir, {
+      version: 1, mode: 'task-bound', taskId, generation: manifest.generation, controlRootId: manifest.controlRootId
+    });
+    bindTaskFinalizationReceipt(root, taskId, { generation: manifest.generation, requestId });
+    const result = await executeRequest(boundManifest, manifestPath, {
       version: 3,
-      id: '12345678-1234-1234-1234-123456789abc',
+      id: requestId,
       token: manifest.token,
       generation: manifest.generation,
       issuedAt: 1_000,
@@ -713,6 +726,7 @@ test('sandbox executor finalizes only the manifest task and returns no control a
       family: 'task-finalization',
       operation: 'complete',
       agent: 'codex',
+      handoffSha256: '0'.repeat(64),
       args: [],
       controllerProcess: null,
       controllerProof: null

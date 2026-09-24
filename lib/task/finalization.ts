@@ -10,6 +10,7 @@ import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
 import {
   applyTaskLifecycle,
+  inspectTaskLifecycleProgress,
   type TaskLifecycleOptions,
   type TaskLifecycleRequest,
   type TaskLifecycleResult
@@ -25,6 +26,9 @@ import {
   type OperationWarning,
   type OperationWarningSeverity
 } from './operation-outcome.ts';
+import { readTaskFinalizationHandoff } from './finalization-handoff.ts';
+import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
+import { validateSandboxControlIdentity } from '../sandbox/control/identity-sentinel.ts';
 
 const RECEIPT_VERSION = 4 as const;
 const FINALIZATION_STEPS = ['lifecycle', 'task-comment', 'verification', 'summary'] as const;
@@ -55,11 +59,14 @@ type TaskFinalizationRequest = Readonly<{
   taskRef: string;
   intent: 'complete';
   agent: string;
+  handoffSha256?: string;
 }>;
 
 type TaskFinalizationOptions = Readonly<{
   repoRoot: string;
   controlBinding?: Readonly<{ generation: string; requestId: string }>;
+  handoffDirectory?: string;
+  manifestPath?: string;
   metadataProvider?: TaskLifecycleOptions['metadataProvider'];
   lifecycle?: typeof applyTaskLifecycle;
   backfill?: typeof backfillCompletionComments;
@@ -198,20 +205,32 @@ function validateReceipt(value: unknown, taskId: string): TaskFinalizationReceip
   const receipt = value as Record<string, unknown>;
   const controlBinding = receipt.controlBinding as Record<string, unknown> | null | undefined;
   const states = ['pending', 'done', 'skipped'];
+  const requiredKeys = [
+    'version', 'taskId', 'intent', 'receiptId', 'revision', 'lifecycle', 'taskComment',
+    'verification', 'summary', 'warningProjection', 'warnings', 'updatedAt', 'lastError'
+  ];
+  if (receipt.controlBinding !== undefined) requiredKeys.push('controlBinding');
   if (
+    Object.keys(receipt).sort().join('\0') !== requiredKeys.sort().join('\0')
+    ||
     receipt.version !== RECEIPT_VERSION || receipt.taskId !== taskId || receipt.intent !== 'complete'
     || typeof receipt.receiptId !== 'string' || receipt.receiptId.length === 0
     || !Number.isSafeInteger(receipt.revision) || Number(receipt.revision) < 0
-    || !states.includes(String(receipt.lifecycle))
-    || !states.includes(String(receipt.taskComment))
-    || !states.includes(String(receipt.verification))
-    || !states.includes(String(receipt.summary))
-    || !['pending', 'done'].includes(String(receipt.warningProjection))
+    || !states.includes(receipt.lifecycle as string)
+    || !states.includes(receipt.taskComment as string)
+    || !states.includes(receipt.verification as string)
+    || !states.includes(receipt.summary as string)
+    || !['pending', 'done'].includes(receipt.warningProjection as string)
     || !Array.isArray(receipt.warnings) || receipt.warnings.some((warning) => !validWarning(warning))
-    || typeof receipt.updatedAt !== 'string'
-    || (receipt.lastError !== null && (typeof receipt.lastError !== 'object' || Array.isArray(receipt.lastError)))
+    || typeof receipt.updatedAt !== 'string' || receipt.updatedAt.length === 0
+    || (receipt.lastError !== null && (typeof receipt.lastError !== 'object' || Array.isArray(receipt.lastError)
+      || Object.keys(receipt.lastError).sort().join('\0') !== ['code', 'message', 'retryable'].join('\0')
+      || typeof (receipt.lastError as Record<string, unknown>).code !== 'string'
+      || typeof (receipt.lastError as Record<string, unknown>).message !== 'string'
+      || typeof (receipt.lastError as Record<string, unknown>).retryable !== 'boolean'))
     || (receipt.controlBinding !== undefined && (!controlBinding || typeof controlBinding !== 'object'
       || Array.isArray(controlBinding)
+      || Object.keys(controlBinding).sort().join('\0') !== ['generation', 'requestId'].join('\0')
       || typeof controlBinding.generation !== 'string' || controlBinding.generation.length === 0
       || typeof controlBinding.requestId !== 'string' || !/^[a-f0-9-]{16,64}$/u.test(controlBinding.requestId)))
   ) throw new Error('receipt schema is invalid');
@@ -241,6 +260,14 @@ function writeReceipt(repoRoot: string, receipt: TaskFinalizationReceipt): void 
     try { fs.unlinkSync(temporary); } catch { /* preserve the primary error */ }
     throw error;
   }
+}
+
+export function bindTaskFinalizationReceipt(
+  repoRoot: string, taskId: string, controlBinding: Readonly<{ generation: string; requestId: string }>
+): TaskFinalizationReceipt {
+  const receipt = readReceipt(path.resolve(repoRoot), taskId);
+  if (!receipt) throw new Error('TASK_FINALIZATION_PREPARATION_REQUIRED');
+  return updateReceipt(path.resolve(repoRoot), receipt, { controlBinding, lastError: null });
 }
 
 function updateReceipt(
@@ -798,10 +825,16 @@ async function prepareUnderLock(
   } catch (error) {
     return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
   }
-  if (options.controlBinding && (
-    receipt.controlBinding?.generation !== options.controlBinding.generation
-    || receipt.controlBinding.requestId !== options.controlBinding.requestId
-  )) receipt = updateReceipt(repoRoot, receipt, { controlBinding: options.controlBinding });
+  if (options.controlBinding && (receipt.controlBinding?.generation !== options.controlBinding.generation
+    || receipt.controlBinding.requestId !== options.controlBinding.requestId)) {
+    const state = resolveTaskRef(taskId, { repoRoot });
+    if (!(receipt.lifecycle === 'done' && state.ok && state.state === 'completed')) {
+      return failed(taskId, {
+        code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
+        message: 'canonical receipt is not bound to the current sandbox request', retryable: false
+      });
+    }
+  }
 
   const preflightState = resolveTaskRef(taskId, { repoRoot });
   if (options.preflight && preflightState.ok && preflightState.state === 'active') {
@@ -1043,12 +1076,87 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
     return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', () => {
-      const receipt = readReceipt(repoRoot, resolved.taskId);
+      if (options.controlBinding && options.manifestPath) {
+        try {
+          const manifest = readSandboxControlManifest(options.manifestPath);
+          const identity = validateSandboxControlIdentity({
+            publicStatusDir: manifest.publicStatusDir,
+            root: path.dirname(path.resolve(options.manifestPath)),
+            mode: manifest.mode,
+            taskId: manifest.taskId,
+            generation: manifest.generation,
+            controlRootId: manifest.controlRootId
+          });
+          if (identity.state !== 'valid' || manifest.taskId !== resolved.taskId
+            || manifest.generation !== options.controlBinding.generation
+            || fs.realpathSync.native(manifest.repoRoot) !== fs.realpathSync.native(repoRoot)) {
+            throw new Error('current sandbox manifest does not match finalization request');
+          }
+        } catch (error) {
+          return failed(resolved.taskId, {
+            code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
+            message: error instanceof Error ? error.message : String(error), retryable: false
+          });
+        }
+      }
+      let receipt = readReceipt(repoRoot, resolved.taskId);
+      if (!receipt && options.controlBinding && options.handoffDirectory && request.handoffSha256) {
+        try {
+          const handoff = readTaskFinalizationHandoff(
+            options.handoffDirectory, resolved.taskId, options.controlBinding, request.handoffSha256
+          );
+          receipt = validateReceipt(handoff.receipt, resolved.taskId);
+          if (receipt.lifecycle !== 'pending') throw new Error('handoff lifecycle must be pending');
+          if (inspectTaskLifecycleProgress(repoRoot, resolved.taskId, request.agent) === 'unknown') {
+            throw new Error('TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
+          }
+          writeReceipt(repoRoot, receipt);
+          try { handoff.cleanup(); } catch { /* keep the persisted canonical receipt usable */ }
+        } catch (error) {
+          return failed(resolved.taskId, {
+            code: 'TASK_FINALIZATION_HANDOFF_INVALID',
+            message: error instanceof Error ? error.message : String(error), retryable: false
+          });
+        }
+      }
       if (!receipt) return failed(resolved.taskId, {
         code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation receipt is unavailable', retryable: true
       });
       if (receipt.lifecycle === 'done' && resolved.state === 'completed') {
         return terminalResult(resolved.taskId, receipt, { lifecycle: { status: 'no-op', changed: false, error: null } }, false);
+      }
+      if (options.controlBinding) {
+        const proof = inspectTaskLifecycleProgress(repoRoot, resolved.taskId, request.agent);
+        const oldBinding = receipt.controlBinding;
+        if (!oldBinding || oldBinding.generation !== options.controlBinding.generation || proof === 'unknown') {
+          return failed(resolved.taskId, {
+            code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
+            message: 'canonical receipt has no valid host recovery proof', retryable: false
+          });
+        }
+        if (oldBinding.requestId !== options.controlBinding.requestId && proof === 'not-started') {
+          if (receipt.lifecycle !== 'pending' || !options.handoffDirectory || !request.handoffSha256) {
+            return failed(resolved.taskId, {
+              code: 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE',
+              message: 'pending receipt cannot be rebound without a current handoff', retryable: false
+            });
+          }
+          try {
+            const handoff = readTaskFinalizationHandoff(
+              options.handoffDirectory, resolved.taskId, options.controlBinding, request.handoffSha256
+            );
+            const nextReceipt = validateReceipt(handoff.receipt, resolved.taskId);
+            if (nextReceipt.receiptId !== receipt.receiptId || nextReceipt.intent !== receipt.intent
+              || nextReceipt.lifecycle !== 'pending') throw new Error('handoff is not continuous with canonical receipt');
+            receipt = updateReceipt(repoRoot, receipt, { controlBinding: options.controlBinding });
+            try { handoff.cleanup(); } catch { /* keep the persisted canonical receipt usable */ }
+          } catch (error) {
+            return failed(resolved.taskId, {
+              code: 'TASK_FINALIZATION_HANDOFF_INVALID',
+              message: error instanceof Error ? error.message : String(error), retryable: false
+            });
+          }
+        }
       }
       if (receipt.taskComment === 'pending' || receipt.verification === 'pending' || receipt.summary === 'pending' || receipt.warningProjection === 'pending') {
         return failed(resolved.taskId, {

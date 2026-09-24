@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { applyTaskLifecycle, lifecycleIntentCatalog } from '../../../lib/task/lifecycle.ts';
+import { applyTaskLifecycle, inspectTaskLifecycleProgress, lifecycleIntentCatalog } from '../../../lib/task/lifecycle.ts';
 import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
@@ -329,6 +329,54 @@ test('directory rename failure keeps the journal at source and retries without d
   assert.equal(recovered.status, 'applied');
   const content = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
   assert.equal((content.match(/Complete Task/g) ?? []).length, 2);
+});
+
+test('recovery proof accepts completed lifecycle states before their journal catches up', () => {
+  const f = fixture();
+  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
+  const failed = applyTaskLifecycle(request, {
+    repoRoot: f.repoRoot, metadataProvider: () => METADATA,
+    directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
+  });
+  assert.equal(failed.status, 'failed');
+  const targetDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+  fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+  fs.renameSync(f.taskDir, targetDir);
+
+  assert.equal(inspectTaskLifecycleProgress(f.repoRoot, TASK_ID, 'codex'), 'started-recoverable');
+  const journalPath = path.join(targetDir, '.task-lifecycle.json');
+  const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { completedSteps: string[] };
+  journal.completedSteps.push('directory-moved');
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
+  fs.writeFileSync(
+    path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'),
+    `${JSON.stringify({ version: 1, ids: {} })}\n`
+  );
+
+  assert.equal(inspectTaskLifecycleProgress(f.repoRoot, TASK_ID, 'codex'), 'started-recoverable');
+  assert.equal(applyTaskLifecycle(request, { repoRoot: f.repoRoot }).status, 'applied');
+  assert.equal(fs.existsSync(path.join(targetDir, '.task-lifecycle.json')), false);
+});
+
+test('recovery proof rejects a directory-moved journal that remains in active', () => {
+  const f = fixture();
+  const request = { taskRef: TASK_ID, intent: 'complete' as const, agent: 'codex' };
+  const failed = applyTaskLifecycle(request, {
+    repoRoot: f.repoRoot, metadataProvider: () => METADATA,
+    directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
+  });
+  assert.equal(failed.status, 'failed');
+  const journalPath = path.join(f.taskDir, '.task-lifecycle.json');
+  const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { completedSteps: string[] };
+  journal.completedSteps.push('directory-moved');
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
+
+  assert.equal(inspectTaskLifecycleProgress(f.repoRoot, TASK_ID, 'codex'), 'unknown');
+  assert.equal(fs.existsSync(f.taskDir), true);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids,
+    { '01': TASK_ID }
+  );
 });
 
 test('cross-device lifecycle move copies and verifies before removing the source', () => {
