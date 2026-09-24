@@ -21,8 +21,7 @@ Record a reproducible command or entry point, the exact file/line/object/version
 - Preserve artifact SHA-256, semantic digest, review head, receipt, request-id, snapshot tree, and platform marker exactly.
 - The Issue continues to mirror the complete report; the report must not depend on logs accessible only on the local machine.
 - Manual validation keeps its stricter basename-only and sanitized-result rules; this shared rule does not expand public fields.
-- A `$ ` command line satisfies the structural gate but does not require complete successful output.
 
 ## Evidence Pairing
 
-Pair every verification claim with a `$ ` command and a proportionate result summary. Include a decisive raw excerpt only for failure, blocking, or dispute conclusions. When a command contains sensitive arguments, use its allowed public name or a redacted command.
+Pair every verification claim with an executable command and a proportionate result summary. Include a decisive raw excerpt only for failure, blocking, or dispute conclusions. When a command contains sensitive arguments, use its allowed public name or a redacted command.
