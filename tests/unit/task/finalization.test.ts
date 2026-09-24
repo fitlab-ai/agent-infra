@@ -401,6 +401,43 @@ test('host finalization rejects an inconsistent copied-back lifecycle journal wi
   }
 });
 
+test('host finalization rejects a journal that claims a retained short id was released', async () => {
+  const f = fixture();
+  const binding = { generation: 'sandbox-generation', requestId: '0123456789abcdef0123456789abcdef' };
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    assert.equal((await prepareTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'prepared');
+    bindTaskFinalizationReceipt(f.repoRoot, TASK_ID, binding);
+    const interrupted = applyTaskLifecycle(request, {
+      repoRoot: f.repoRoot, metadataProvider: () => METADATA,
+      directoryRenameSync: () => { throw new Error('injected directory rename failure'); }
+    });
+    assert.equal(interrupted.status, 'failed');
+    const targetDir = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID);
+    fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+    fs.renameSync(f.taskDir, targetDir);
+    const journalPath = path.join(targetDir, '.task-lifecycle.json');
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { completedSteps: string[] };
+    journal.completedSteps.push('directory-moved', 'registry-committed');
+    fs.writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
+
+    const result = await commitPreparedTaskFinalization(
+      request,
+      { ...options(f.repoRoot, commentSync, verify), controlBinding: binding }
+    );
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'TASK_FINALIZATION_RECOVERY_PROOF_UNAVAILABLE');
+    assert.deepEqual(readTaskFinalizationReceipt(f.repoRoot, TASK_ID)?.lastError, null);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids,
+      { '01': TASK_ID }
+    );
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host imports a sandbox-prepared receipt only when its handoff is bound to the current request', async () => {
   const sandbox = fixture();
   const host = fixture();
