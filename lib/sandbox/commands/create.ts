@@ -1082,6 +1082,7 @@ export async function create(
     identity: target.workspace
   });
   const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
+  let worktreeCreated = false;
   const shareCommon = shareCommonDir(effectiveConfig);
   const shareBranch = shareBranchDir(effectiveConfig, branch);
   const preparedDockerfile = prepareDockerfile(effectiveConfig, capabilityPlan.image);
@@ -1206,6 +1207,7 @@ export async function create(
               toEnginePath(engine, worktree),
               branch
             ]);
+            worktreeCreated = true;
           } else {
             message(`Creating branch '${branch}' from '${baseBranch}'...`);
             runEngineTaskCommand(engine, 'git', [
@@ -1218,6 +1220,7 @@ export async function create(
               toEnginePath(engine, worktree),
               baseBranch
             ]);
+            worktreeCreated = true;
           }
 
           return `Worktree ready at ${worktree}`;
@@ -1731,7 +1734,7 @@ export async function create(
             );
           }
 
-          if (runProjectInitCommand && effectiveConfig.initCommand !== null) {
+          if (runProjectInitCommand && worktreeCreated && effectiveConfig.initCommand !== null) {
             try {
               runVerboseEngine(engine, 'docker', [
                 'exec', '--workdir', '/workspace', container, 'bash', '-lc', effectiveConfig.initCommand

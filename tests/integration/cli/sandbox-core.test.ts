@@ -687,6 +687,38 @@ test("sandbox create runs the configured project init command in the mounted wor
   }
 });
 
+test("sandbox create does not rerun project init for an existing worktree", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-project-init-existing-worktree-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { initCommand: "npm ci" },
+      dockerStdoutForPs: "demo-dev-feature..project-init-existing\tExited (137) 5 minutes ago\tdemo.sandbox.branch=feature/project-init-existing"
+    });
+    fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
+    execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json", ".gitignore"], { env: gitSafeEnv() });
+    execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
+    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..project-init-existing");
+    fs.mkdirSync(path.dirname(worktree), { recursive: true });
+    execFileSync("git", ["-C", fixture.repoDir, "worktree", "add", "-b", "feature/project-init-existing", worktree, "main"], { env: gitSafeEnv() });
+
+    const result = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature/project-init-existing", "--no-refresh"],
+      { AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json") }
+    );
+
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Sandbox ready/);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "exec" && call.at(-1) === "npm ci"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox create reports project init failure and preserves the failed sandbox for diagnosis", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-project-init-fail-"));
 
