@@ -460,7 +460,7 @@ function validateReleaseNotes(value: unknown, declaration?: ProviderIdentityDecl
     }), (entry) => entry.sha, 'release notes.commits'),
     mergedPullRequests: stableUnique(arrayValue(item.mergedPullRequests, 'release notes.mergedPullRequests').map((raw) => {
       const entry = record(raw, 'release notes.mergedPullRequests[]');
-      exactKeys(entry, ['id', 'identity', 'number', 'title', 'body', 'mergedAt', 'displayUrl', 'labels', 'author', 'commitShas', 'closingIssues'], 'release notes.mergedPullRequests[]');
+      exactKeys(entry, ['id', 'identity', 'number', 'title', 'body', 'mergedAt', 'displayUrl', 'labels', 'author', 'closingIssues'], 'release notes.mergedPullRequests[]');
       return {
         id: stringValue(entry.id, 'pullRequest.id'),
         identity: identity(entry.identity, 'pullRequest.identity', declaredIdentityKind(declaration, 'pull-request')),
@@ -471,7 +471,6 @@ function validateReleaseNotes(value: unknown, declaration?: ProviderIdentityDecl
         displayUrl: stringValue(entry.displayUrl, 'pullRequest.displayUrl', true),
         labels: stringArray(entry.labels, 'pullRequest.labels'),
         author: releaseAuthor(entry.author, 'pullRequest.author'),
-        commitShas: stringArray(entry.commitShas, 'pullRequest.commitShas'),
         closingIssues: stableUnique(arrayValue(entry.closingIssues, 'pullRequest.closingIssues').map((entry) => issue(entry, 'pullRequest.closingIssues[]')), (entry) => serializeResourceIdentity(entry.identity), 'pullRequest.closingIssues')
       };
     }), (entry) => serializeResourceIdentity(entry.identity), 'release notes.mergedPullRequests')

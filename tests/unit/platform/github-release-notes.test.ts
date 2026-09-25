@@ -49,18 +49,10 @@ test('collector keeps release bodies and preserves authors on each commit, pull 
               pageInfo: { hasNextPage: false }
             },
             associatedPullRequests: {
-              nodes: [{ number: 17, baseRefName: 'main', mergedAt: '2026-09-01T12:00:00Z', repository: { nameWithOwner: 'example/project' } }],
+              nodes: [{ number: 17 }],
               pageInfo: { hasNextPage: false }
             }
           } } } }
-        } as never;
-      }
-      if (query.includes('commits(first:100,after:$cursor)')) {
-        return {
-          ok: true,
-          value: { data: { repository: { pullRequest: { commits: {
-            nodes: [{ commit: { oid: 'sha-one' } }], pageInfo: { hasNextPage: false, endCursor: null }
-          } } } } }
         } as never;
       }
       return {
@@ -108,21 +100,13 @@ test('collector uses the merged commit association when a PR commit SHA was rewr
                 object: {
                   authors: { nodes: [], pageInfo: { hasNextPage: false } },
                   associatedPullRequests: {
-                    nodes: [{ number: 17, baseRefName: 'main', mergedAt: '2026-09-01T12:00:00Z', repository: { nameWithOwner: 'example/project' } }],
+                    nodes: [{ number: 17 }],
                     pageInfo: { hasNextPage: false }
                   }
                 }
               }
             }
           }
-        } as never;
-      }
-      if (query.includes('commits(first:100,after:$cursor)')) {
-        return {
-          ok: true,
-          value: { data: { repository: { pullRequest: { commits: {
-            nodes: [{ commit: { oid: 'original-pr-sha' } }], pageInfo: { hasNextPage: false, endCursor: null }
-          } } } } }
         } as never;
       }
       return {

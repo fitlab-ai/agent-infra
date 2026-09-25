@@ -122,7 +122,7 @@ function fetchGitHubReleaseNoteData(
   const eligiblePullRequestNumbers = new Set(pullRequests.map((item) => Number(item.number)));
   const pullRequestNumbersByCommit = new Map<string, number[]>();
   for (const oid of input.commitOids) {
-    const query = `query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{authors(first:100){nodes{name email user{login}} pageInfo{hasNextPage}} associatedPullRequests(first:100){nodes{number baseRefName mergedAt} pageInfo{hasNextPage}}}}}}`;
+    const query = `query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{authors(first:100){nodes{name email user{login}} pageInfo{hasNextPage}} associatedPullRequests(first:100){nodes{number} pageInfo{hasNextPage}}}}}}`;
     const [owner, name] = input.repository.split('/');
     const result = client.json<{
       data?: { repository?: { object?: {
@@ -161,35 +161,7 @@ function fetchGitHubReleaseNoteData(
   const resolvedPullRequests = [];
   const [owner, name] = input.repository.split('/');
   const closingIssuesQuery = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number title url author{login}} pageInfo{hasNextPage endCursor}}}}}';
-  const pullRequestCommitsQuery = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){commits(first:100,after:$cursor){nodes{commit{oid}} pageInfo{hasNextPage endCursor}}}}}';
   for (const item of pullRequests) {
-    const commitShas: string[] = [];
-    let commitCursor: string | null = null;
-    for (;;) {
-      const args = ['api', 'graphql', '-f', `query=${pullRequestCommitsQuery}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${String(item.number)}`];
-      if (commitCursor) args.push('-F', `cursor=${commitCursor}`);
-      const response = client.json<{
-        data?: { repository?: { pullRequest?: { commits?: {
-          nodes?: Array<{ commit?: { oid?: string } }>;
-          pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-        } } } };
-      }>(args, { cwd: options.cwd });
-      if (!response.ok) return failure(response.error);
-      const connection = response.value.data?.repository?.pullRequest?.commits;
-      if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo || typeof connection.pageInfo.hasNextPage !== 'boolean') {
-        return failure({ code: 'INVALID_PLATFORM_RESPONSE', message: `Pull request commit data is incomplete for ${String(item.number)}`, retryable: false });
-      }
-      for (const node of connection.nodes) {
-        const oid = node.commit?.oid;
-        if (!oid) return failure({ code: 'INVALID_PLATFORM_RESPONSE', message: `Pull request commit identity is incomplete for ${String(item.number)}`, retryable: false });
-        commitShas.push(oid);
-      }
-      if (!connection.pageInfo.hasNextPage) break;
-      if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === commitCursor) {
-        return failure({ code: 'PAGINATION_INVALID', message: `Pull request commit pagination is incomplete for ${String(item.number)}`, retryable: false });
-      }
-      commitCursor = connection.pageInfo.endCursor;
-    }
     const closingIssues = [];
     let cursor: string | null = null;
     for (;;) {
@@ -218,7 +190,6 @@ function fetchGitHubReleaseNoteData(
     }
     resolvedPullRequests.push({
       ...item,
-      commitShas,
       author: normalizePlatformAuthor((item.author as { login?: string | null } | null) || null),
       closingIssues
     });

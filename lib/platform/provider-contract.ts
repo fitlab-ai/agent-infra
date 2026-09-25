@@ -247,7 +247,6 @@ type ReleaseNotePullRequest = {
   displayUrl: string;
   labels: string[];
   author: ReleaseNoteAuthor | null;
-  commitShas: string[];
   closingIssues: ReleaseNoteIssue[];
 };
 

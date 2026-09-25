@@ -175,7 +175,6 @@ test('release-note facts validate v2 authors and nested PR issue relations', asy
             title: 'fix: facts', body: '', mergedAt: '2026-09-01T12:00:00Z',
             displayUrl: 'https://example/pull/7', labels: [],
             author: { name: 'PR author', login: 'pr-author', bot: false, resolution: 'platform-user' },
-            commitShas: ['abc'],
             closingIssues: [{
               id: '7', identity: { kind: 'number', value: 7 }, number: 7,
               title: 'Issue', displayUrl: 'https://example/issues/7',

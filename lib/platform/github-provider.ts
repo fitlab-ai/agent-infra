@@ -929,7 +929,6 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
         mergedAt: new Date(String(item.mergedAt)).toISOString(), displayUrl: String(item.url || ''),
         labels: Array.isArray(item.labels) ? item.labels.map((label: any) => String(label.name || label)) : [],
         author: item.author,
-        commitShas: item.commitShas,
         closingIssues: item.closingIssues.map((issue: any) => ({
           id: String(issue.number), identity: { kind: 'number', value: Number(issue.number) }, number: Number(issue.number),
           title: String(issue.title || ''), displayUrl: String(issue.url || ''), author: issue.author
