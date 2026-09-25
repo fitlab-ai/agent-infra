@@ -367,7 +367,7 @@ function writeSandboxEngineFixture(
       "if (args[0] === 'container' && args[1] === 'ls') {",
       "  const filter = args.find((arg) => arg.startsWith('id=')) || '';",
       "  const id = filter.slice(3);",
-      "  if (process.env.DOCKER_INSPECT_NOT_FOUND === '1' || removedContainers().has(id)) process.exit(0);",
+      "  if (process.env.DOCKER_CONTAINER_LS_NOT_FOUND === '1' || process.env.DOCKER_INSPECT_NOT_FOUND === '1' || removedContainers().has(id)) process.exit(0);",
       "  if (/^[a-f0-9]{64}$/.test(id)) process.stdout.write(`${id}\\n`);",
       "  process.exit(0);",
       "}",

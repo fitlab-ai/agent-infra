@@ -79,6 +79,7 @@ import {
   recoverSandboxControlReplacement,
   readSandboxControlManifest
 } from '../control/lifecycle.ts';
+import { atomicWriteJson } from '../control/state.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
@@ -1008,6 +1009,23 @@ function readImageLabels(config: Pick<SandboxCreateConfig, 'imageName'> & Pick<S
   ]));
 }
 
+function readProjectInitCommandDigest(controlRoot: string): string | null {
+  const markerPath = path.join(controlRoot, 'project-init.json');
+  if (!fs.existsSync(markerPath)) return null;
+  try {
+    const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8')) as { version?: unknown; commandSha256?: unknown };
+    return marker.version === 1 && typeof marker.commandSha256 === 'string' && /^[a-f0-9]{64}$/.test(marker.commandSha256)
+      ? marker.commandSha256
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeProjectInitCommandDigest(controlRoot: string, commandSha256: string): void {
+  atomicWriteJson(path.join(controlRoot, 'project-init.json'), { version: 1, commandSha256 });
+}
+
 export async function create(
   args: string[],
   { runProjectInitCommand = true }: { runProjectInitCommand?: boolean } = {}
@@ -1278,6 +1296,7 @@ export async function create(
           let replacementCutover: ReturnType<typeof beginSandboxControlReplacement> | null = null;
           try {
             const recoveryResult = await recoverSandboxControlReplacement(controlPaths.root, replacementLease);
+            const previousProjectInitCommandDigest = readProjectInitCommandDigest(controlPaths.root);
             const hadExistingControlRoot = hadControlRootBeforeAcquire || recoveryResult === 'restored';
             const previousManifest = fs.existsSync(controlPaths.manifestPath)
               ? readSandboxControlManifest(controlPaths.manifestPath)
@@ -1734,16 +1753,30 @@ export async function create(
             );
           }
 
-          if (runProjectInitCommand && worktreeCreated && effectiveConfig.initCommand !== null) {
+          const initCommand = effectiveConfig.initCommand;
+          const initCommandDigest = initCommand === null ? null : createHash('sha256').update(initCommand).digest('hex');
+          const shouldRunProjectInitCommand = runProjectInitCommand
+            && initCommand !== null
+            && initCommandDigest !== null
+            && (worktreeCreated || previousProjectInitCommandDigest !== initCommandDigest);
+          let projectInitCompleted = !worktreeCreated
+            && initCommandDigest !== null
+            && previousProjectInitCommandDigest === initCommandDigest;
+
+          if (shouldRunProjectInitCommand && initCommand !== null) {
             try {
               runVerboseEngine(engine, 'docker', [
-                'exec', '--workdir', '/workspace', container, 'bash', '-lc', effectiveConfig.initCommand
+                'exec', '--workdir', '/workspace', container, 'bash', '-lc', initCommand
               ]);
+              projectInitCompleted = true;
             } catch (error) {
               throw new Error(
                 `Project initialization failed for '${branch}': ${error instanceof Error ? error.message : String(error)}`
               );
             }
+          }
+          if (projectInitCompleted && initCommandDigest !== null) {
+            writeProjectInitCommandDigest(controlPaths.root, initCommandDigest);
           }
 
           replacementLease.release();

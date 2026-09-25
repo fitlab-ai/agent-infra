@@ -691,29 +691,35 @@ test("sandbox create does not rerun project init for an existing worktree", onPl
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-project-init-existing-worktree-"));
 
   try {
-    const fixture = writeSandboxEngineFixture(tmpDir, {
-      project: "demo",
-      sandbox: { initCommand: "npm ci" },
-      dockerStdoutForPs: "demo-dev-feature..project-init-existing\tExited (137) 5 minutes ago\tdemo.sandbox.branch=feature/project-init-existing"
-    });
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", sandbox: { initCommand: "npm ci" } });
     fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
     execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json", ".gitignore"], { env: gitSafeEnv() });
     execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
-    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..project-init-existing");
-    fs.mkdirSync(path.dirname(worktree), { recursive: true });
-    execFileSync("git", ["-C", fixture.repoDir, "worktree", "add", "-b", "feature/project-init-existing", worktree, "main"], { env: gitSafeEnv() });
 
-    const result = spawnSandboxCli(
+    const firstCreate = spawnSandboxCli(
       fixture,
       tmpDir,
       ["create", "feature/project-init-existing", "--no-refresh"],
       { AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json") }
     );
+    assert.equal(firstCreate.signal, null);
+    assert.equal(firstCreate.status, 0, firstCreate.stderr);
+    assert.match(firstCreate.stdout, /Sandbox ready/);
 
-    assert.equal(result.signal, null);
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Sandbox ready/);
-    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "exec" && call.at(-1) === "npm ci"), false);
+    const repeatedCreate = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature/project-init-existing", "--no-refresh"],
+      {
+        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json"),
+        DOCKER_CONTAINER_LS_NOT_FOUND: "1"
+      }
+    );
+
+    assert.equal(repeatedCreate.signal, null);
+    assert.equal(repeatedCreate.status, 0, repeatedCreate.stderr);
+    assert.match(repeatedCreate.stdout, /Sandbox ready/);
+    assert.equal(fixture.readDockerCalls().filter((call) => call[0] === "exec" && call.at(-1) === "npm ci").length, 1);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -751,6 +757,48 @@ test("sandbox create reports project init failure and preserves the failed sandb
       fs.existsSync(path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..project-init-fail")),
       true
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox create retries project init after a failed create on the same worktree", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-project-init-retry-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { initCommand: "npm ci" }
+    });
+    execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
+    execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
+
+    const failed = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature/project-init-retry", "--no-refresh"],
+      {
+        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json"),
+        DOCKER_EXIT_FOR_INIT_COMMAND: "23"
+      }
+    );
+    assert.equal(failed.signal, null);
+    assert.notEqual(failed.status, 0);
+    assert.doesNotMatch(failed.stdout, /Sandbox ready/);
+
+    const retried = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature/project-init-retry", "--no-refresh"],
+      {
+        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json"),
+        DOCKER_CONTAINER_LS_NOT_FOUND: "1"
+      }
+    );
+    assert.equal(retried.signal, null);
+    assert.equal(retried.status, 0, retried.stderr);
+    assert.match(retried.stdout, /Sandbox ready/);
+    assert.equal(fixture.readDockerCalls().filter((call) => call[0] === "exec" && call.at(-1) === "npm ci").length, 2);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
