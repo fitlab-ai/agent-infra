@@ -147,6 +147,47 @@ test("archive-tasks keeps the completed task when checksum validation fails", on
   }
 });
 
+test("archive-tasks rolls back the published archive when completed source removal fails", onPlatforms("linux", "darwin"), () => {
+  const repoDir = setupRepo();
+
+  try {
+    const taskId = "TASK-20260301-000006";
+    writeCompletedTask(repoDir, taskId, {
+      completedAt: "2026-03-01 09:00:00",
+      title: "source removal failure"
+    });
+    const completedTaskDir = path.join(repoDir, ".agents/workspace/completed", taskId);
+    const archiveTaskDir = path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId);
+    const taskMdBefore = fs.readFileSync(path.join(completedTaskDir, "task.md"));
+    const fakeBin = path.join(repoDir, "fake-bin");
+    fs.mkdirSync(fakeBin);
+    const failingRm = path.join(fakeBin, "rm");
+    fs.writeFileSync(
+      failingRm,
+      `#!/bin/sh\nfor arg do\n  case "$arg" in */completed/${taskId}) exit 1 ;; esac\ndone\nexec /bin/rm "$@"\n`,
+      "utf8"
+    );
+    fs.chmodSync(failingRm, 0o755);
+
+    const result = spawnSync(
+      "sh",
+      [path.join(repoDir, ".agents/skills/archive-tasks/scripts/archive-tasks.sh"), taskId],
+      {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` }
+      }
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /rolled back archive copy/i);
+    assert.deepEqual(fs.readFileSync(path.join(completedTaskDir, "task.md")), taskMdBefore);
+    assert.equal(fs.existsSync(archiveTaskDir), false);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
 test("archive-tasks preserves a stale lock for explicit recovery", onPlatforms("linux", "darwin"), () => {
   const repoDir = setupRepo();
 

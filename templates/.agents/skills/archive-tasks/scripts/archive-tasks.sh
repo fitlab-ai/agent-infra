@@ -230,7 +230,14 @@ archive_task_dir() {
   cp -R "$task_dir"/. "$staged_dir/local/"
   write_contents_hash "$staged_dir/local"
   mv "$staged_dir" "$destination_dir"
-  rm -rf "$task_dir"
+  if ! rm -rf "$task_dir"; then
+    if ! rm -rf "$destination_dir"; then
+      echo "Failed to remove completed task and roll back archive copy: $task_id" >&2
+    else
+      echo "Failed to remove completed task; rolled back archive copy: $task_id" >&2
+    fi
+    return 1
+  fi
   archived_count=$((archived_count + 1))
   printf 'Archived %s -> %s\n' "$task_id" "$relative_path"
 }
