@@ -35,6 +35,8 @@ npm run typecheck
 npm run test:core
 ```
 
+`npm run test:core` 会先构建项目。
+
 ### 5. 运行完整测试（高风险升级）
 
 主版本升级、构建工具升级或影响多个运行路径时执行：

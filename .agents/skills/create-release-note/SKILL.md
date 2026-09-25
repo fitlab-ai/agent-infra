@@ -53,7 +53,7 @@ agent-infra-internal platform-release-notes context \
 
 **用途**：
 - Part A：分析最近 3 条历史发布说明的章节结构、标题风格、emoji 使用、条目格式
-- `history` 中的每项包含 tag、正文和 Release URL；仅把正文作为格式样例，不把它当作当前版本的变更事实
+- 每项 `history` 含 tag、正文和 Release URL；正文只作为格式样例，不作为当前版本的变更事实
 - Part B：提供静态完整分类清单，确保后续生成时不遗漏已有分类
 - 该静态清单用于确保变更分类时不遗漏已有类别名称；若当前版本无该类变更，仍按步骤 7 的格式规则省略空分类
 - 后续步骤 7 生成发布说明时，**必须**同时参考步骤 3 的历史格式风格和完整分类清单，保持版本间的一致性
@@ -80,7 +80,7 @@ agent-infra-internal platform-release-notes context \
 
 ### 7. 生成发布说明
 
-**优先使用步骤 3 中获取的历史格式风格，并确保覆盖步骤 3 列出的所有分类。** 每次动态参考最近 3 条已发布说明，共同出现的章节、双语布局和安装段作为稳定格式；条目内容按当前版本变化。不要把样例中的作者或链接复制到当前版本。
+**优先使用步骤 3 中获取的历史格式风格，并确保覆盖步骤 3 列出的所有分类。** 每次动态参考最近 3 条已发布说明；把这些正文共同使用的章节、双语布局和安装段作为稳定格式，条目内容按当前版本变化。不要把样例中的作者或链接复制到当前版本。
 
 如果没有历史发布说明，使用以下默认格式化为 Markdown：
 
@@ -99,7 +99,7 @@ agent-infra-internal platform-release-notes context \
 
 @contributor1, @contributor2, @contributor3, @reporter1 (reported #N)
 
-## 安装 / Installation
+## Installation / 安装
 
 {本版本的中英文安装说明，沿用历史正文中的稳定安装步骤}
 ```
@@ -107,8 +107,8 @@ agent-infra-internal platform-release-notes context \
 **格式规则**：
 1. PR 条目格式：`- [scope] Description by @author in [#N](url)`
 2. Issue + PR：`in [#Issue](url) and [#PR](url)`；Issue reporter 来自该 PR 的 `closingIssues`
-3. `pullRequestNumbers` 为空的 commit 单独作为条目，使用 commit subject 和可解析作者；可用 commit URL 时链接 commit 本身，不添加 Issue/PR 链接
-4. 描述：使用 PR 标题或 commit subject，移除 PR 标题中的 `type(scope):` 前缀，首字母大写
+3. `pullRequestNumbers` 为空的 commit 单独作为条目，使用 commit subject 和可解析作者；有 commit URL 时链接 commit 本身，不添加 Issue/PR 链接
+4. 描述：使用 PR 标题或 commit subject；移除 PR 标题中的 `type(scope):` 前缀，首字母大写
 5. **贡献者搜集**：
    - **数据源**：
      - PR author：来自 `.agents/rules/release-commands.md` 中已合并 PR 查询规则

@@ -9,18 +9,19 @@ description: >
 
 执行项目的集成测试流程，进行端到端验证。
 
-## 1. 构建并运行集成测试
+## 1. 验证构建产物
 
-项目使用 TypeScript，并将集成测试和端到端测试作为同一套跨模块验证入口：
+项目使用 TypeScript。`npm run test:integration` 会先运行 `npm run build`，再执行集成与端到端测试，因此无需单独重复构建。
+
+## 2. 运行集成测试
 
 ```bash
 npm run test:integration
 ```
 
-该脚本先执行 `npm run build`，再运行 `tests/integration/**/*.test.ts` 和
-`tests/e2e/**/*.test.ts`，并启用 Node.js TypeScript strip-types 支持。
+该脚本先构建项目，再运行 `tests/integration/**/*.test.ts` 和 `tests/e2e/**/*.test.ts`，并启用 Node.js TypeScript strip-types 支持。
 
-## 2. 输出结果
+## 3. 输出结果
 
 报告结果：
 - 运行/通过/失败的测试数

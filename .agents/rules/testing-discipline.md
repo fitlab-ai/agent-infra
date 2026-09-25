@@ -41,38 +41,25 @@ assert.match(content, /^name: code-task$/m);         // 正向断言已足够
 
 ## 项目级测试策略
 
-仓库特定的命令、目录约定、覆盖率阈值、CI 集成和报告服务应记录在项目自己的测试文档中。新增测试前先读取该策略，并按测试的可观察范围与运行成本选择对应层级。
+仓库特定的命令、目录约定、覆盖率规则、CI 集成和报告服务应记录在本文档中。新增测试前先读取该策略，并按测试的可观察范围与运行成本选择层级。
 
-如果项目没有定义分层测试套件，RED 与 GREEN 验证都使用项目的完整测试命令。不要在无关改动中自行引入测试层级或覆盖率门禁。
+如果项目没有分层测试套件，RED 与 GREEN 验证都使用完整测试命令。不要在无关改动中自行引入测试层级或覆盖率门禁。
 
-### agent-infra 项目策略
+本仓库按测试的可观察范围与运行成本选择测试层级。完整测试命令为 `npm test`；RED 与 GREEN 验证使用完整测试命令，快速内循环可使用对应 tier 命令。
 
-#### 覆盖率定位（信息层）
+如果使用跨平台 smoke 边界，真实 CLI、git、shell、环境透传和进程生命周期测试应放在 unit 层之外；测试层级结构检查与代码行覆盖率相互独立。
 
-> CI 中通过 `node --test --experimental-test-coverage` 输出覆盖率，仅作为"哪些文件被测试薄弱"的提示，**不作为 merge gate**。
-
-##### 本地运行
+### 1. 测试命令
 
 ```bash
-npm run test:coverage
+npm test
+npm run test:smoke:fast
+npm run test:smoke
+npm run test:core
+npm run test:integration
 ```
 
-stdout 末尾会打印按文件粒度的行 / 分支 / 函数覆盖率以及未覆盖行号。
-
-##### CI 展示
-
-`.github/workflows/unit-tests.yml` 的独立 coverage job 仅在 push main 时把覆盖率块写入 GitHub Actions 的 step summary。PR 不运行 coverage。
-
-README 顶部的 Codecov 徽章由该 main-only coverage job 上传 `coverage.lcov` 后由 Codecov 生成。
-
-##### 边界
-
-- **不设置百分比阈值**：`--test-coverage-lines/branches/functions` 等阈值参数禁止加入；Goodhart's law 提醒我们一旦把覆盖率作为指标，开发者会写"覆盖率友好但行为弱"的测试。
-- **第三方服务仅用于徽章**：已接入 Codecov 托管 README 覆盖率徽章，但通过根 `codecov.yml` 显式关闭其 project/patch status check 与 PR 评论——Codecov 在本项目只展示数字，不参与 merge 决策。不接入 coveralls 等其他服务。
-- **不区分 tier**：当前只对 full `test` tier 输出覆盖率；smoke / core tier 的覆盖率没有独立价值。
-- **不阻塞 PR**：CI 步骤 `continue-on-error: true`，即便覆盖率采集失败也不影响 merge。
-
-#### 新测试该放哪一层
+### 2. 测试目录或层级
 
 测试文件放入哪一层决定它会被哪些 npm script 自动执行：
 
@@ -83,17 +70,20 @@ README 顶部的 Codecov 徽章由该 main-only coverage job 上传 `coverage.lc
 
 模块继续作为第二级目录（如 `cli`、`core`、`scripts`、`templates`）。共享 helper 和 fixtures 保持在 `tests/helpers/`、`tests/helpers.ts`、`tests/fixtures/`，不要放入任一 tier。
 
-#### CI 与参考预算
+### 3. 覆盖率
 
-unit job 在 Ubuntu/Windows/macOS 矩阵运行；Windows/macOS 运行 unit 与 `platform-smoke`，integration/e2e 在 Ubuntu 独立运行。显式 build 后使用 build-free runner；baseline 与 main-only coverage 由默认 runner 各自只 build 一次。
+CI 通过 `node --test --experimental-test-coverage` 输出覆盖率，仅用于识别测试薄弱文件，不设百分比阈值，也不作为 merge gate；Goodhart's law 提醒我们，覆盖率一旦成为指标，就可能诱使开发者编写只追求覆盖率、行为保护较弱的测试。本地可运行 `npm run test:coverage`，输出按文件统计的行、分支、函数覆盖率和未覆盖行号。
 
-fast smoke、smoke、core、full 的秒数只作为反馈预算，不是 merge gate。coverage 只在 main push 的独立 job 采集、上传，且不阻塞合并。
+覆盖率只在 full `test` tier 采集；smoke / core tier 不单独采集覆盖率。
 
-#### 与"测试 tier 覆盖"的关系
+### 4. 持续集成
 
-注意区分两个概念：
+unit job 在 Ubuntu、Windows、macOS 矩阵运行；Windows/macOS 运行 unit 与 `platform-smoke`，integration/e2e 在 Ubuntu 独立运行。显式 build 后使用 build-free runner；baseline 与 main-only coverage 由默认 runner 各自只 build 一次。
 
-- **测试 tier 覆盖**（`tests/unit/core/test-tier-coverage.test.ts` 校验测试文件目录归属与 npm script tier 映射）：管的是"哪些测试文件被纳入哪一 tier"，与代码行覆盖率正交。
-- **代码行覆盖率**（本节）：管的是"业务源码哪些行被测试触达"。
+fast smoke、smoke、core、full 的秒数只作为反馈预算，不是 merge gate。coverage 仅在 main push 的独立 job 采集、上传，且不阻塞合并。
 
-两者目的不同，不要相互替代。
+### 5. 报告服务
+
+README 顶部的 Codecov 徽章由 main-only coverage job 上传 `coverage.lcov` 后生成。Codecov 仅展示数字；project/patch status check 与 PR 评论已关闭，不参与 merge 决策，也不接入其他覆盖率服务。
+
+测试层级结构检查（`tests/unit/core/test-tier-coverage.test.ts` 校验测试文件目录归属与 npm script tier 映射）与代码行覆盖率相互独立，不能相互替代。
