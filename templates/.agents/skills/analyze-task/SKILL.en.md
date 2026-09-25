@@ -263,7 +263,7 @@ Handle the result as follows:
 - exit code 1 (validation failed) -> fix the reported issues and run the gate again
 - exit code 2 (network blocked) -> stop and tell the user that human intervention is required
 
-Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
+Record a concise evidence summary of this gate in your reply, including the command, exit status, and actual result; do not reproduce full successful stdout line by line. Include decisive raw excerpts for failures, blocking conditions, or disputes. Do not claim completion without the current gate result.
 
 ### 9. Inform User
 

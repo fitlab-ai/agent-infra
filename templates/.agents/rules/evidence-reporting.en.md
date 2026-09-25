@@ -12,6 +12,8 @@ This rule governs lifecycle reports persisted in the task workspace or synchroni
 
 Every successful check records the command or an allowed public command name, target and scope, exit status or structured result, actual result, and uncovered parts. Do not write only “passed” or “tests passed”, and do not paste complete successful stdout by default.
 
+Apply the same rule to the final user response: for success, show only a summary sufficient to verify the result; do not reproduce the full stdout line by line. A skill instruction to “keep the gate output” means preserve the current command, exit status, and result summary, not every detail. For verbose commands, prefer a structured summary or filter successful detail at the tool boundary so unnecessary output does not enter the reply or model context. Filtering must preserve the real exit status and information needed for the decision. For failures, blocking conditions, or disputes, retain the smallest decisive raw excerpt.
+
 ## Failures, Blocking Conditions, and Disputes
 
 Record a reproducible command or entry point, the exact file/line/object/version location, exit status, and the smallest decisive excerpt supporting the conclusion. If reproduction is unavailable, state the limitation explicitly rather than presenting incomplete evidence as success.
