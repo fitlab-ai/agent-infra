@@ -815,17 +815,10 @@ for (const removalFails of [false, true]) {
   });
 }
 
-test('sandbox control lifecycle terminates a live execution before accepting a stale broker', onPlatforms('linux', 'darwin'), async () => {
+test('sandbox control lifecycle terminates a live execution before accepting a stale broker', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-stale-execution-'));
-  const execution = spawn(process.execPath, ['--eval', 'setInterval(() => {}, 1000);'], {
-    detached: true,
-    stdio: 'ignore'
-  });
   try {
-    const branch = initializeRepository(root);
-    const manifestPath = writeControlManifest(root, branch, 'stale-execution-generation');
-    const executionStartTime = getProcessStartTime(execution.pid!);
-    assert.ok(executionStartTime);
+    const manifestPath = writeControlManifest(root, 'main', 'stale-execution-generation');
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
       version: 3, pid: 999_999_999, startTime: 0, brokerId: 'stale-broker',
       token: 'lifecycle-secret', generation: 'stale-execution-generation'
@@ -835,21 +828,36 @@ test('sandbox control lifecycle terminates a live execution before accepting a s
     fs.writeFileSync(path.join(executionDir, 'execution.json'), `${JSON.stringify({
       version: 2, generation: 'stale-execution-generation', requestId: 'stale-execution-request',
       nonce: 'stale-execution-nonce',
-      child: { pid: execution.pid, startTime: executionStartTime, processGroupId: execution.pid },
+      child: { pid: 42, startTime: 1, processGroupId: 42 },
       phase: 'running', updatedAt: Date.now()
     })}\n`);
 
-    assert.equal(await quiesceSandboxControlRoot(root, { timeoutMs: 100 }), 'stale');
-    const exitDeadline = Date.now() + 2_000;
-    while (isProcessAlive(execution.pid!) && Date.now() < exitDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    assert.equal(isProcessAlive(execution.pid!), false);
+    let executionAlive = true;
+    const events: string[] = [];
+    const result = await quiesceSandboxControlRoot(root, {
+      identityProbe: () => 'dead',
+      executionProcessControl: {
+        isAlive: () => {
+          events.push('probe');
+          assert.equal(executionAlive, false, 'the execution must be terminated before liveness is rechecked');
+          return executionAlive;
+        },
+        terminate: (_execution, phase) => {
+          if (executionAlive) {
+            events.push(`terminate:${phase}`);
+            executionAlive = false;
+          }
+          return !executionAlive;
+        }
+      }
+    });
+
+    assert.equal(result, 'stale');
+    assert.equal(executionAlive, false);
+    assert.equal(events[0], 'terminate:graceful');
+    assert.equal(events.includes('probe'), true);
     assert.equal(fs.existsSync(manifestPath), true);
   } finally {
-    if (execution.pid && isProcessAlive(execution.pid)) {
-      try { process.kill(-execution.pid, 'SIGKILL'); } catch { /* already exited */ }
-    }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

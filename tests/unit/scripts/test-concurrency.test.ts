@@ -9,10 +9,10 @@ import {
   testConcurrencyFromEnv
 } from "../../../scripts/test-concurrency.js";
 
-test("default test concurrency follows available parallelism", () => {
+test("default test concurrency is limited to four workers", () => {
   assert.equal(
     defaultTestConcurrency(),
-    Math.max(1, os.availableParallelism() * 2)
+    Math.max(1, Math.min(4, os.availableParallelism()))
   );
 });
 

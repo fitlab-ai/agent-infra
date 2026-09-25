@@ -1298,6 +1298,10 @@ export async function quiesceSandboxControlRoot(
     timeoutMs?: number;
     timing?: SandboxControlTimingPolicy;
     identityProbe?: ProcessIdentityProbe;
+    executionProcessControl?: Readonly<{
+      isAlive: (execution: SandboxControlExecution) => boolean;
+      terminate: (execution: SandboxControlExecution, phase: 'graceful' | 'force') => boolean;
+    }>;
   } = {}
 ): Promise<'missing' | 'stale' | 'stopped'> {
   const resolvedRoot = path.resolve(root);
@@ -1338,58 +1342,63 @@ export async function quiesceSandboxControlRoot(
   if (!manifest && brokerLive) throw new Error('SANDBOX_CONTROL_OWNER_MISMATCH');
 
   const platform = options.platform ?? process.platform;
+  const processControl = options.executionProcessControl ?? {
+    isAlive: (execution: SandboxControlExecution) => executionAlive(execution, platform, identityProbe),
+    terminate: (execution: SandboxControlExecution, phase: 'graceful' | 'force') => phase === 'graceful'
+      ? terminateSandboxControlExecution(execution, { platform, timeoutMs: 0, allowForce: false, identityProbe })
+      : terminateSandboxControlExecution(execution, {
+        platform, timeoutMs: Math.max(0, deadlineAt - Date.now()), deadlineAt, forceAt: Date.now(), identityProbe
+      })
+  };
   let executions = manifest ? readExecutions(manifest) : [];
   const owner: OwnerIdentity | null = brokerLive ? broker : statusLive ? statusOwner : null;
   if (!owner) {
     if (manifest && !broker && !status) throw new Error('SANDBOX_CONTROL_OWNER_EVIDENCE_MISSING');
     for (const execution of executions) {
-      terminateSandboxControlExecution(execution, { platform, timeoutMs: 0, allowForce: false, identityProbe });
+      processControl.terminate(execution, 'graceful');
     }
     const softDeadlineAt = Math.min(forceAt, Date.now() + Math.floor(Math.max(0, forceAt - Date.now()) / 2));
     while (Date.now() < softDeadlineAt) {
-      if (!executions.some((execution) => executionAlive(execution, platform, identityProbe))) break;
+      if (!executions.some((execution) => processControl.isAlive(execution))) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     if (manifest) executions = mergeExecutions(executions, readExecutions(manifest));
     if (Date.now() >= deadlineAt) throw new Error('SANDBOX_CONTROL_QUIESCE_DEADLINE_EXCEEDED');
     for (const execution of executions) {
-      if (!terminateSandboxControlExecution(execution, {
-        platform, timeoutMs: Math.max(0, deadlineAt - Date.now()), deadlineAt, forceAt: Date.now(), identityProbe
-      })) {
+      if (!processControl.terminate(execution, 'force')) {
         throw new Error(`SANDBOX_CONTROL_EXECUTION_STILL_RUNNING: ${execution.requestId}`);
       }
     }
-    if (executions.some((execution) => executionAlive(execution, platform, identityProbe))) {
+    if (executions.some((execution) => processControl.isAlive(execution))) {
       throw new Error('SANDBOX_CONTROL_EXECUTION_STILL_RUNNING');
     }
     return broker || status ? 'stale' : 'missing';
   }
 
-  const remaining = (): number => Math.max(0, deadlineAt - Date.now());
   signalOwner(owner, platform, false);
   for (const execution of executions) {
-    terminateSandboxControlExecution(execution, { platform, timeoutMs: 0, allowForce: false, identityProbe });
+    processControl.terminate(execution, 'graceful');
   }
   const softDeadlineAt = Math.min(forceAt, Date.now() + Math.floor(Math.max(0, forceAt - Date.now()) / 2));
   while (Date.now() < softDeadlineAt) {
-    if (!ownerLive(owner, identityProbe) && !executions.some((execution) => executionAlive(execution, platform, identityProbe))) break;
+    if (!ownerLive(owner, identityProbe) && !executions.some((execution) => processControl.isAlive(execution))) break;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  if (!ownerLive(owner, identityProbe) && !executions.some((execution) => executionAlive(execution, platform, identityProbe))) {
+  if (!ownerLive(owner, identityProbe) && !executions.some((execution) => processControl.isAlive(execution))) {
     return 'stopped';
   }
   if (manifest) executions = mergeExecutions(executions, readExecutions(manifest));
   if (Date.now() >= deadlineAt) throw new Error('SANDBOX_CONTROL_QUIESCE_DEADLINE_EXCEEDED');
   for (const execution of executions) {
-    terminateSandboxControlExecution(execution, { platform, timeoutMs: 0, deadlineAt, forceAt: Date.now(), identityProbe });
+    processControl.terminate(execution, 'force');
   }
   signalOwner(owner, platform, true);
   while (Date.now() < deadlineAt) {
-    if (!ownerLive(owner, identityProbe) && !executions.some((execution) => executionAlive(execution, platform, identityProbe))) return 'stopped';
+    if (!ownerLive(owner, identityProbe) && !executions.some((execution) => processControl.isAlive(execution))) return 'stopped';
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   if (ownerLive(owner, identityProbe)) throw new Error('SANDBOX_CONTROL_BROKER_STILL_RUNNING');
-  if (executions.some((execution) => executionAlive(execution, platform, identityProbe))) throw new Error('SANDBOX_CONTROL_EXECUTION_STILL_RUNNING');
+  if (executions.some((execution) => processControl.isAlive(execution))) throw new Error('SANDBOX_CONTROL_EXECUTION_STILL_RUNNING');
   return 'stopped';
 }
 

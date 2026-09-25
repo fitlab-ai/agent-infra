@@ -3,7 +3,7 @@ import os from 'node:os';
 export const TEST_CONCURRENCY_ENV = 'AGENT_INFRA_TEST_CONCURRENCY';
 
 export function defaultTestConcurrency() {
-  return Math.max(1, os.availableParallelism() * 2);
+  return Math.max(1, Math.min(4, os.availableParallelism()));
 }
 
 export function parseTestConcurrency(value) {
