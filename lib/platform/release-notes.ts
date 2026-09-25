@@ -7,6 +7,7 @@ import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { providerError, providerOperationContext, providerStatus, unsupportedProviderOperation } from './provider-bridge.ts';
 import { resourceIdentityNumber } from './resource-identity.ts';
+import type { ReleaseNoteAuthor } from './provider-contract.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 
 type ReleaseNoteOptions = {
@@ -15,10 +16,9 @@ type ReleaseNoteOptions = {
   client?: PlatformClient;
 };
 
-type ReleaseNoteActor = { id?: string; name?: string };
-type ReleaseNoteCommit = { oid: string; title: string; authors: ReleaseNoteActor[] };
-type ReleaseNoteIssue = { number: number; identity?: ResourceIdentity; title: string; url: string; labels: string[]; author: { login: string; bot: boolean } | null };
-type ReleaseNotePullRequest = { number: number; identity?: ResourceIdentity; title: string; body: string; url: string; mergedAt: string; labels: string[]; author: { login: string; bot: boolean } | null; closingIssues: ReleaseNoteIssue[] };
+type ReleaseNoteCommit = { oid: string; title: string; url: string | null; pullRequestNumbers: number[]; authors: ReleaseNoteAuthor[] };
+type ReleaseNoteIssue = { number: number; identity?: ResourceIdentity; title: string; url: string; author: ReleaseNoteAuthor | null };
+type ReleaseNotePullRequest = { number: number; identity?: ResourceIdentity; title: string; body: string; url: string; mergedAt: string; labels: string[]; author: ReleaseNoteAuthor | null; closingIssues: ReleaseNoteIssue[] };
 
 const unsupportedError = {
   code: 'PLATFORM_RELEASE_NOTES_UNSUPPORTED',
@@ -180,15 +180,15 @@ async function releaseNoteContext(
   if (!platform.ok) return { ...baseResult(platform.error.retryable ? 'blocked' : 'failed'), error: providerError(platform.error, 'PLATFORM_PROVIDER_OPERATION_FAILED') };
   const commits = commitFacts.map((commit) => {
     const seen = new Set<string>();
-    const authors = platform.value.history.filter((item) => item.sha === commit.oid).flatMap((item) => item.author ? [item.author] : [])
-      .concat(platform.value.actors)
+    const facts = platform.value.commits.find((item) => item.sha === commit.oid);
+    const authors = (facts?.authors || [])
       .filter((actor) => {
-      const key = actor.id || actor.name || '';
+      const key = actor.login || actor.name;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
       });
-    return { ...commit, authors };
+    return { ...commit, url: facts?.url || null, pullRequestNumbers: facts?.pullRequestNumbers || [], authors };
   });
   const pullRequests: ReleaseNotePullRequest[] = platform.value.mergedPullRequests
     .map((item) => ({
@@ -199,14 +199,13 @@ async function releaseNoteContext(
       url: item.displayUrl || '',
       mergedAt: item.mergedAt || '',
       labels: item.labels || [],
-      author: item.author ? { login: item.author.name || item.author.id || '', bot: false } : null,
-      closingIssues: platform.value.closingIssues.filter((issue) => issue.id === item.id).map((issue) => ({
+      author: item.author,
+      closingIssues: item.closingIssues.map((issue) => ({
         number: issue.number || resourceIdentityNumber(issue.identity) || 0,
         ...(issue.identity ? { identity: issue.identity } : {}),
         title: issue.title,
         url: issue.displayUrl || '',
-        labels: issue.labels || [],
-        author: issue.author ? { login: issue.author.name || issue.author.id || '', bot: false } : null
+        author: issue.author
       }))
     }))
     .sort((left, right) => left.number - right.number);

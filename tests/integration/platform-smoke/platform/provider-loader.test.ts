@@ -148,7 +148,7 @@ test('loads built-in none without external source', async () => {
   configure(root, 'none');
   const result = await loadPlatformProvider({ cwd: root });
   assert.equal(result.ok, true);
-  if (result.ok) assert.equal(result.value.sourceIdentity, 'builtin:none@1');
+  if (result.ok) assert.equal(result.value.sourceIdentity, 'builtin:none@2');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -224,7 +224,7 @@ test('loads an external release-note provider through the normalized facts contr
       historyLimit: 3
     });
     assert.equal(notes.ok, true);
-    if (notes.ok) assert.equal(notes.value.history[0]?.authoredAt, '2026-09-02T00:00:00.000Z');
+    if (notes.ok) assert.deepEqual(notes.value.commits, [{ sha: '1111111', url: null, pullRequestNumbers: [], authors: [] }]);
   }
   fs.rmSync(root, { recursive: true, force: true });
 });
