@@ -9,6 +9,7 @@ COMPLETED_DIR="$WORKSPACE_ROOT/completed"
 ARCHIVE_DIR="$WORKSPACE_ROOT/archive"
 MANIFEST_PATH="$ARCHIVE_DIR/manifest.md"
 ARCHIVE_LOCK="$WORKSPACE_ROOT/.archive-operation-lock"
+archive_lock_owned=0
 
 if [ -d "$ARCHIVE_LOCK" ] && [ -f "$ARCHIVE_LOCK/pid" ]; then
   lock_pid=$(cat "$ARCHIVE_LOCK/pid")
@@ -25,7 +26,15 @@ if ! mkdir "$ARCHIVE_LOCK" 2>/dev/null; then
   exit 1
 fi
 printf '%s\n' "$$" > "$ARCHIVE_LOCK/pid"
-release_archive_lock() { rm -rf "$ARCHIVE_LOCK"; }
+archive_lock_owned=1
+release_archive_lock() {
+  if [ "$archive_lock_owned" -eq 1 ]; then
+    archive_lock_owned=0
+    if [ -f "$ARCHIVE_LOCK/pid" ] && [ "$(cat "$ARCHIVE_LOCK/pid")" = "$$" ]; then
+      rm -rf "$ARCHIVE_LOCK"
+    fi
+  fi
+}
 
 tmpdir=""
 cleanup() {
