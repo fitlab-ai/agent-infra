@@ -211,6 +211,7 @@ function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpD
     },
     refreshIntervalDays: 7,
     dockerfile: null,
+    initCommand: null,
     vm: { cpu: null, memory: null, disk: null }
   };
 }

@@ -35,6 +35,7 @@
       }
     ],
     "dockerfile": null,
+    "initCommand": "npm ci",
     "vm": {
       "cpu": null,
       "memory": null,

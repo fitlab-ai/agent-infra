@@ -132,6 +132,8 @@ The switch does not configure the Docker daemon or builder. Image pulls and `FRO
 
 `ai sandbox exec` also forwards a small terminal-detection whitelist (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `LC_TERMINAL`, `LC_TERMINAL_VERSION`) into the container. This keeps interactive TUIs aligned with the host terminal for behaviors such as Claude Code's Shift+Enter newline support, without passing through the full host environment.
 
+`sandbox.initCommand` in `.agents/.airc.json` optionally runs one project initialization command during `ai sandbox create`, after container setup hooks, from `/workspace`. The repository config uses `npm ci` to install project dependencies in a newly created worktree. If the command fails, create reports the branch and exit error and leaves the worktree and container available for diagnosis; it does not report the sandbox as ready. `ai sandbox start`, `exec`, and recovery do not replay this command.
+
 `ai sandbox start`, `ai sandbox exec`, and sandbox-backed `ai run` now share one readiness check before they run user work. After a stopped container starts, agent-infra restores tmpfs ownership, rehydrates every seed that is still mounted in the container, recreates the built-in Codex prompts link, and verifies mount topology, shell aliases, Codex availability, state-directory writability, and the entries copied during that recovery. A running container receives a non-destructive structural check: existing writable seed targets are preserved even when their content, timestamp, or inode differs from the host staging copy. Recovery does not replay custom `postSetupCmds`, and custom `versionCmd` results remain advisory.
 
 ## Task-scoped workspace identity

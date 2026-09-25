@@ -18,6 +18,7 @@ const DEFAULTS = Object.freeze({
   tools: ['agent-infra'],
   refreshIntervalDays: 7,
   dockerfile: null,
+  initCommand: null,
   vm: {
     cpu: null,
     memory: null,
@@ -35,6 +36,7 @@ type SandboxConfigInput = {
   customTools?: unknown;
   refreshIntervalDays?: unknown;
   dockerfile?: string | null;
+  initCommand?: unknown;
   vm?: Record<string, unknown>;
 };
 
@@ -66,6 +68,7 @@ export type SandboxConfig = {
   delivery?: { remote: string; baseRef: string };
   refreshIntervalDays: number;
   dockerfile: string | null;
+  initCommand: string | null;
   vm: SandboxVmConfig;
 };
 
@@ -103,6 +106,7 @@ function cloneDefaults(): SandboxConfigInput & { vm: SandboxVmConfig; runtimes: 
     tools: [...DEFAULTS.tools],
     refreshIntervalDays: DEFAULTS.refreshIntervalDays,
     dockerfile: DEFAULTS.dockerfile,
+    initCommand: DEFAULTS.initCommand,
     vm: { ...DEFAULTS.vm }
   };
 }
@@ -149,6 +153,13 @@ export function loadConfig({
     ? [...sandbox.runtimes]
     : defaults.runtimes;
   const dockerfile = typeof sandbox.dockerfile === 'string' ? sandbox.dockerfile : defaults.dockerfile ?? null;
+  if (sandbox.initCommand !== undefined &&
+      (typeof sandbox.initCommand !== 'string' || sandbox.initCommand.trim().length === 0)) {
+    throw new Error('sandbox.initCommand must be a non-empty string when configured');
+  }
+  const initCommand = typeof sandbox.initCommand === 'string'
+    ? sandbox.initCommand
+    : null;
 
   if (!dockerfile) {
     let enginesNode: string | undefined;
@@ -200,6 +211,7 @@ export function loadConfig({
       defaults.refreshIntervalDays
     ),
     dockerfile,
+    initCommand,
     vm: {
       cpu: asPositiveNumberOrNull(sandbox.vm?.cpu) ?? defaults.vm.cpu,
       memory: asPositiveNumberOrNull(sandbox.vm?.memory) ?? defaults.vm.memory,

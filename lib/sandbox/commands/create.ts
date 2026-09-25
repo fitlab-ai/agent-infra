@@ -1728,6 +1728,18 @@ export async function create(args: string[]): Promise<void> {
             );
           }
 
+          if (effectiveConfig.initCommand !== null) {
+            try {
+              runVerboseEngine(engine, 'docker', [
+                'exec', '--workdir', '/workspace', container, 'bash', '-lc', effectiveConfig.initCommand
+              ]);
+            } catch (error) {
+              throw new Error(
+                `Project initialization failed for '${branch}': ${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          }
+
           replacementLease.release();
           replacementLeaseHeld = false;
           return 'Container started';
