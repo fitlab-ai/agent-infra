@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -184,106 +184,6 @@ test("archive-tasks rolls back the published archive when completed source remov
     assert.deepEqual(fs.readFileSync(path.join(completedTaskDir, "task.md")), taskMdBefore);
     assert.equal(fs.existsSync(archiveTaskDir), false);
   } finally {
-    fs.rmSync(repoDir, { recursive: true, force: true });
-  }
-});
-
-test("archive-tasks preserves a stale lock for explicit recovery", onPlatforms("linux", "darwin"), () => {
-  const repoDir = setupRepo();
-
-  try {
-    const taskId = "TASK-20260301-000004";
-    writeCompletedTask(repoDir, taskId, {
-      completedAt: "2026-03-01 09:00:00",
-      title: "stale archive lock"
-    });
-    const lockDir = path.join(repoDir, ".agents/workspace/.archive-operation-lock");
-    fs.mkdirSync(lockDir);
-    fs.writeFileSync(path.join(lockDir, "pid"), "999999999\n");
-
-    const result = spawnSync(
-      "sh",
-      [path.join(repoDir, ".agents/skills/archive-tasks/scripts/archive-tasks.sh")],
-      { cwd: repoDir, encoding: "utf8" }
-    );
-
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /stale archive operation lock/i);
-    assert.equal(fs.readFileSync(path.join(lockDir, "pid"), "utf8"), "999999999\n");
-    assert.equal(fs.existsSync(path.join(repoDir, ".agents/workspace/completed", taskId, "task.md")), true);
-  } finally {
-    fs.rmSync(repoDir, { recursive: true, force: true });
-  }
-});
-
-test("archive-tasks signal cleanup preserves a replacement lock", onPlatforms("linux", "darwin"), async () => {
-  const repoDir = setupRepo();
-  const fakeBin = path.join(repoDir, "fake-bin");
-  const lockDir = path.join(repoDir, ".agents/workspace/.archive-operation-lock");
-  const tmpReady = path.join(repoDir, "mktemp-ready");
-  const tmpAck = path.join(repoDir, "mktemp-ack");
-  const lockReleased = path.join(repoDir, "lock-released");
-  const lockAck = path.join(repoDir, "lock-ack");
-  const releaseCount = path.join(repoDir, "release-count");
-  let archiveProcess: ReturnType<typeof spawn> | undefined;
-
-  try {
-    writeCompletedTask(repoDir, "TASK-20260301-000005", {
-      completedAt: "2026-03-01 09:00:00",
-      title: "signal cleanup"
-    });
-    fs.mkdirSync(fakeBin);
-    const fakeMktemp = path.join(fakeBin, "mktemp");
-    fs.writeFileSync(fakeMktemp, "#!/bin/sh\ntmpdir=$(/bin/mktemp -d \"$1\")\n: > \"$TEST_MKTEMP_READY\"\nwhile [ ! -f \"$TEST_MKTEMP_ACK\" ]; do sleep 0.01; done\nprintf '%s\\n' \"$tmpdir\"\n", "utf8");
-    fs.chmodSync(fakeMktemp, 0o755);
-    const fakeRm = path.join(fakeBin, "rm");
-    fs.writeFileSync(fakeRm, "#!/bin/sh\ncase \"$*\" in\n  *\"$TEST_ARCHIVE_LOCK\"*)\n    count=0\n    [ ! -f \"$TEST_RELEASE_COUNT\" ] || count=$(cat \"$TEST_RELEASE_COUNT\")\n    count=$((count + 1))\n    printf '%s\\n' \"$count\" > \"$TEST_RELEASE_COUNT\"\n    /bin/rm \"$@\"\n    if [ \"$count\" -eq 1 ]; then\n      : > \"$TEST_LOCK_RELEASED\"\n      while [ ! -f \"$TEST_LOCK_ACK\" ]; do sleep 0.01; done\n    fi\n    ;;\n  *) /bin/rm \"$@\" ;;\nesac\n", "utf8");
-    fs.chmodSync(fakeRm, 0o755);
-
-    archiveProcess = spawn("sh", [path.join(repoDir, ".agents/skills/archive-tasks/scripts/archive-tasks.sh")], {
-      cwd: repoDir,
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
-        TEST_MKTEMP_READY: tmpReady,
-        TEST_MKTEMP_ACK: tmpAck,
-        TEST_ARCHIVE_LOCK: lockDir,
-        TEST_RELEASE_COUNT: releaseCount,
-        TEST_LOCK_RELEASED: lockReleased,
-        TEST_LOCK_ACK: lockAck
-      },
-      stdio: "ignore"
-    });
-    const waitFor = async (target: string) => {
-      const deadline = Date.now() + 5000;
-      while (!fs.existsSync(target) && Date.now() < deadline) {
-        if (archiveProcess?.exitCode !== null) throw new Error(`archive process exited before ${path.basename(target)}`);
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      assert.equal(fs.existsSync(target), true, `timed out waiting for ${path.basename(target)}`);
-    };
-
-    await waitFor(tmpReady);
-    archiveProcess.kill("SIGTERM");
-    fs.writeFileSync(tmpAck, "continue\n");
-    await waitFor(lockReleased);
-    fs.mkdirSync(lockDir);
-    fs.writeFileSync(path.join(lockDir, "pid"), `${process.pid}\n`);
-    fs.writeFileSync(lockAck, "continue\n");
-    const [exitCode] = await new Promise<[number | null]>((resolve, reject) => {
-      archiveProcess!.once("error", reject);
-      archiveProcess!.once("exit", (code) => resolve([code]));
-    });
-
-    assert.equal(exitCode, 1);
-    assert.equal(fs.readFileSync(path.join(lockDir, "pid"), "utf8"), `${process.pid}\n`);
-  } finally {
-    fs.writeFileSync(tmpAck, "continue\n");
-    fs.writeFileSync(lockAck, "continue\n");
-    if (archiveProcess && archiveProcess.exitCode === null) {
-      archiveProcess.kill("SIGKILL");
-      await new Promise((resolve) => archiveProcess!.once("exit", resolve));
-    }
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
 });

@@ -2,7 +2,6 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isRemovedHashShortIdInput } from '../task/short-id.ts';
-import { assertArchiveOperationAvailable } from '../task/archive-operation-lock.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const SHORT_ID_RE = /^\d+$/;
@@ -37,7 +36,6 @@ function stripQuotes(value: string): string {
 
 function readTaskContent(repoRoot: string, taskId: string): { content: string; state: TaskWorkspaceState; taskMd: string } {
   for (const state of TASK_WORKSPACE_STATES) {
-    if (state === 'archive') assertArchiveOperationAvailable(path.join(repoRoot, '.agents', 'workspace'));
     const taskPath = state === 'archive'
       ? path.join(repoRoot, '.agents', 'workspace', state, ...findArchiveTaskParts(repoRoot, taskId), 'local', 'task.md')
       : path.join(repoRoot, '.agents', 'workspace', state, taskId, 'task.md');
@@ -60,12 +58,6 @@ function taskWorkspaceCandidates(repoRoot: string, taskId: string): TaskWorkspac
       taskMd
     }];
   });
-  try {
-    assertArchiveOperationAvailable(path.join(repoRoot, '.agents', 'workspace'));
-  } catch (error) {
-    if (hot.length > 0) return hot;
-    throw error;
-  }
   const parts = findArchiveTaskParts(repoRoot, taskId);
   if (parts.length === 0) return hot;
   const taskMd = path.join(repoRoot, '.agents', 'workspace', 'archive', ...parts, 'local', 'task.md');
@@ -139,7 +131,6 @@ export function resolveTaskWorkspace(taskId: string, repoRoot: string): TaskWork
 export function listTaskWorkspaces(repoRoot: string, state: TaskWorkspaceState): TaskWorkspace[] {
   const stateRoot = path.join(repoRoot, '.agents', 'workspace', state);
   if (state === 'archive') {
-    assertArchiveOperationAvailable(path.join(repoRoot, '.agents', 'workspace'));
     if (!fs.existsSync(stateRoot)) return [];
     const rows: TaskWorkspace[] = [];
     for (const year of fs.readdirSync(stateRoot).sort()) {

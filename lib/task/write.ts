@@ -15,7 +15,6 @@ import type {
 } from './resolve-ref.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
-import { acquireArchiveOperationLock } from './archive-operation-lock.ts';
 import { invalidationBlocks, parseInvalidationDocument } from './invalidation.ts';
 import type {
   TableRowDeleteMutation,
@@ -104,8 +103,7 @@ type TaskWriteErrorCode =
   | 'METADATA_CAPTURE_FAILED'
   | 'TEMP_WRITE_FAILED'
   | 'RENAME_FAILED'
-  | 'TEMP_CLEANUP_FAILED'
-  | 'ARCHIVE_OPERATION_UNAVAILABLE';
+  | 'TEMP_CLEANUP_FAILED';
 
 type TaskWriteError = { code: TaskWriteErrorCode; message: string };
 
@@ -567,10 +565,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
   }
 
   const identity = { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, actualState: resolved.state };
-  let release: (() => void) | undefined;
   try {
-    const workspaceRoot = path.join(resolved.repoRoot, '.agents', 'workspace');
-    release = acquireArchiveOperationLock(workspaceRoot);
     const originalTask = fs.readFileSync(resolved.taskMdPath);
     const originalMode = fs.statSync(resolved.taskMdPath).mode;
     archiveContentsHash(resolved.taskDir);
@@ -594,9 +589,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
     }
     return result;
   } catch (error) {
-    return failure(request, identity, 'ARCHIVE_OPERATION_UNAVAILABLE', error instanceof Error ? error.message : String(error));
-  } finally {
-    release?.();
+    return failure(request, identity, 'TASK_READ_FAILED', error instanceof Error ? error.message : String(error));
   }
 }
 

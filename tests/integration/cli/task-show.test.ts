@@ -105,29 +105,6 @@ test('ai task show <TASK-id> resolves an archived task under archive/YYYY/MM/DD/
   assert.match(out.stdout, /body for archived/);
 });
 
-test('ai task show fails closed when an archive operation lock has no pid file', () => {
-  const { repoRoot } = mkFixture();
-  const taskId = 'TASK-20260613-120000';
-  const datedDir = path.join(
-    repoRoot,
-    '.agents',
-    'workspace',
-    'archive',
-    '2026',
-    '06',
-    '13',
-    taskId,
-    'local'
-  );
-  fs.mkdirSync(datedDir, { recursive: true });
-  fs.writeFileSync(path.join(datedDir, 'task.md'), `---\nid: ${taskId}\n---\n# Archived\n`);
-  fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace', '.archive-operation-lock'));
-
-  const out = runCli(['task', 'show', '--task', taskId], repoRoot);
-  assert.notEqual(out.status, 0);
-  assert.match(out.stderr, /Archive unavailable/);
-});
-
 test('ai task show <TASK-id> resolves an archived task whose archive date differs from task id (cross-day)', () => {
   const { repoRoot } = mkFixture();
   // archive-tasks uses completed_at/updated_at, which can fall on a different

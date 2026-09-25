@@ -159,22 +159,6 @@ test('writeTask enforces the complete workspace state match and mismatch matrix'
   }
 });
 
-test('writeTask fails closed while another archive operation holds the lock', () => {
-  const { repoRoot, taskMdPath } = fixture('archive');
-  const before = fs.readFileSync(taskMdPath);
-  const lockDir = path.join(repoRoot, '.agents', 'workspace', '.archive-operation-lock');
-  fs.mkdirSync(lockDir);
-  fs.writeFileSync(path.join(lockDir, 'pid'), `${process.pid}\n`);
-  const result = writeTask({
-    taskRef: TASK_ID,
-    expectedState: 'archive',
-    mutations: [{ kind: 'frontmatter', set: { status: 'must-not-write' } }]
-  }, { repoRoot, metadataProvider: () => METADATA });
-  assert.equal(result.status, 'failed');
-  if (result.status === 'failed') assert.equal(result.error.code, 'ARCHIVE_OPERATION_UNAVAILABLE');
-  assert.deepEqual(fs.readFileSync(taskMdPath), before);
-});
-
 test('writeTask leaves archived task and checksum unchanged when archive source validation fails', onPlatforms('linux', 'darwin'), () => {
   const { repoRoot, taskDir, taskMdPath } = fixture('archive');
   const hashPath = path.join(taskDir, 'contents.sha256');

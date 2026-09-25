@@ -3,7 +3,6 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { removeDirRecursive } from './remove-dir.ts';
 import { validateCurrentTaskContract } from './task/current-contract.ts';
-import { acquireArchiveOperationLock, assertArchiveOperationAvailable } from './task/archive-operation-lock.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -1087,14 +1086,6 @@ async function cmdMerge(args: string[]): Promise<void> {
   }
 
   const workspaceDir = path.join(process.cwd(), '.agents', 'workspace');
-  assertArchiveOperationAvailable(workspaceDir);
-  assertArchiveOperationAvailable(resolvedSource);
-  const releaseLock = acquireArchiveOperationLock(workspaceDir);
-  let releaseSourceLock = () => {};
-  try {
-  if (path.resolve(resolvedSource) !== path.resolve(workspaceDir)) {
-    releaseSourceLock = acquireArchiveOperationLock(resolvedSource);
-  }
   const archiveDir = path.join(workspaceDir, 'archive');
   const backupStamp = formatBackupTimestamp(new Date());
   const backupRootRelative = `.agents/workspace/.merge-backup/${backupStamp}/`;
@@ -1124,10 +1115,6 @@ async function cmdMerge(args: string[]): Promise<void> {
   rebuildManifests(archiveDir);
 
   printReport(report);
-  } finally {
-    releaseSourceLock();
-    releaseLock();
-  }
 }
 
 export {

@@ -8,38 +8,9 @@ WORKSPACE_ROOT="$REPO_ROOT/.agents/workspace"
 COMPLETED_DIR="$WORKSPACE_ROOT/completed"
 ARCHIVE_DIR="$WORKSPACE_ROOT/archive"
 MANIFEST_PATH="$ARCHIVE_DIR/manifest.md"
-ARCHIVE_LOCK="$WORKSPACE_ROOT/.archive-operation-lock"
-archive_lock_owned=0
-
-if [ -d "$ARCHIVE_LOCK" ] && [ -f "$ARCHIVE_LOCK/pid" ]; then
-  lock_pid=$(cat "$ARCHIVE_LOCK/pid")
-  case "$lock_pid" in
-    ''|*[!0-9]*) echo "Cannot verify archive operation lock: $ARCHIVE_LOCK" >&2; exit 1 ;;
-  esac
-  if ! kill -0 "$lock_pid" 2>/dev/null; then
-    echo "Stale archive operation lock: $ARCHIVE_LOCK; remove it only after verifying that no archive operation is active" >&2
-    exit 1
-  fi
-fi
-if ! mkdir "$ARCHIVE_LOCK" 2>/dev/null; then
-  echo "Another archive operation is active or a stale lock exists: $ARCHIVE_LOCK" >&2
-  exit 1
-fi
-printf '%s\n' "$$" > "$ARCHIVE_LOCK/pid"
-archive_lock_owned=1
-release_archive_lock() {
-  if [ "$archive_lock_owned" -eq 1 ]; then
-    archive_lock_owned=0
-    if [ -f "$ARCHIVE_LOCK/pid" ] && [ "$(cat "$ARCHIVE_LOCK/pid")" = "$$" ]; then
-      rm -rf "$ARCHIVE_LOCK"
-    fi
-  fi
-}
-
 tmpdir=""
 cleanup() {
   [ -z "$tmpdir" ] || rm -rf "$tmpdir"
-  release_archive_lock
 }
 trap 'cleanup' 0
 trap 'cleanup; exit 1' HUP INT TERM
