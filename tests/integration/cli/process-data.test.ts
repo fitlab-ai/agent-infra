@@ -7,7 +7,6 @@ import { spawnSync } from 'node:child_process';
 
 import { CLI_PATH } from '../../helpers.ts';
 import { createObjectStore, publishSnapshot } from '../../../lib/process-data/store.ts';
-import { collectLocalObjects } from '../../../lib/process-data/sources.ts';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-cli-'));

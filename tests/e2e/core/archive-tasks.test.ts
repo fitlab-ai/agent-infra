@@ -47,6 +47,7 @@ function setupRepo() {
     read(".agents/skills/archive-tasks/scripts/archive-tasks.sh"),
     "utf8"
   );
+
   return repoDir;
 }
 

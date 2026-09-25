@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { resolveTaskRef } from '../../../lib/task/resolve-ref.ts';
 import { writeTask } from '../../../lib/task/write.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = { timestamp: '2026-07-15 12:34:56+00:00', agentInfraVersion: 'v9.9.9' };
@@ -172,6 +173,42 @@ test('writeTask fails closed while another archive operation holds the lock', ()
   assert.equal(result.status, 'failed');
   if (result.status === 'failed') assert.equal(result.error.code, 'ARCHIVE_OPERATION_UNAVAILABLE');
   assert.deepEqual(fs.readFileSync(taskMdPath), before);
+});
+
+test('writeTask leaves archived task and checksum unchanged when archive source validation fails', onPlatforms('linux', 'darwin'), () => {
+  const { repoRoot, taskDir, taskMdPath } = fixture('archive');
+  const hashPath = path.join(taskDir, 'contents.sha256');
+  const beforeTask = fs.readFileSync(taskMdPath);
+  const beforeHash = fs.readFileSync(hashPath);
+  fs.symlinkSync('task.md', path.join(taskDir, 'linked-file'));
+
+  const result = writeTask({
+    taskRef: TASK_ID,
+    expectedState: 'archive',
+    mutations: [{ kind: 'frontmatter', set: { status: 'must-not-write' } }]
+  }, { repoRoot, metadataProvider: () => METADATA });
+
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(fs.readFileSync(taskMdPath), beforeTask);
+  assert.deepEqual(fs.readFileSync(hashPath), beforeHash);
+});
+
+test('writeTask restores archived task when checksum publication fails', () => {
+  const { repoRoot, taskDir, taskMdPath } = fixture('archive');
+  const hashPath = path.join(taskDir, 'contents.sha256');
+  const beforeTask = fs.readFileSync(taskMdPath);
+  fs.rmSync(hashPath);
+  fs.mkdirSync(hashPath);
+
+  const result = writeTask({
+    taskRef: TASK_ID,
+    expectedState: 'archive',
+    mutations: [{ kind: 'frontmatter', set: { status: 'must-not-write' } }]
+  }, { repoRoot, metadataProvider: () => METADATA });
+
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(fs.readFileSync(taskMdPath), beforeTask);
+  assert.equal(fs.statSync(hashPath).isDirectory(), true);
 });
 
 test('writeTask returns a dry-run plan without changing bytes, mtime or directory', () => {
