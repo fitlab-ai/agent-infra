@@ -100,10 +100,10 @@ function validateFinal(tasks) {
   for (const taskDir of tasks) {
     const local = path.join(taskDir, 'local');
     if (!fs.existsSync(path.join(local, 'task.md'))) fail(`missing local/task.md: ${taskDir}`);
-    const expected = fs.readFileSync(path.join(local, 'contents.sha256'), 'utf8').trimEnd().split('\n').filter(Boolean);
-    const actual = walkFiles(local).filter((f) => path.basename(f) !== 'contents.sha256')
+    const expected = walkFiles(local).filter((f) => path.basename(f) !== 'contents.sha256')
       .map((f) => `${shaFile(f)}  ${path.relative(local, f).split(path.sep).join('/')}`);
-    if (JSON.stringify(expected.slice().sort()) !== JSON.stringify(actual)) fail(`contents.sha256 mismatch: ${local}`);
+    const actual = fs.readFileSync(path.join(local, 'contents.sha256'), 'utf8').trimEnd().split('\n').filter(Boolean);
+    if (JSON.stringify(expected) !== JSON.stringify(actual)) fail(`contents.sha256 mismatch: ${local}`);
     for (const entry of fs.readdirSync(taskDir, { withFileTypes: true })) {
       if (entry.name !== 'local') fail(`unexpected task root entry: ${path.join(taskDir, entry.name)}`);
     }
