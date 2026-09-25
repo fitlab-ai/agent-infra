@@ -113,32 +113,55 @@ function fetchGitHubReleaseNoteData(
   );
   if (!prs.ok) return failure(prs.error);
   const authors = new Map<string, ReleaseNoteActor[]>();
-  for (const oid of input.commitOids) {
-    const query = `query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{authors(first:100){nodes{name email user{login}} pageInfo{hasNextPage}}}}}}`;
-    const [owner, name] = input.repository.split('/');
-    const result = client.json<{
-      data?: { repository?: { object?: { authors?: { nodes?: GitHubActorInput[]; pageInfo?: { hasNextPage?: boolean } } } } };
-    }>([
-      'api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `oid=${oid}`
-    ], { cwd: options.cwd });
-    if (!result.ok) return failure(result.error);
-    const connection = result.value.data?.repository?.object?.authors;
-    if (connection?.pageInfo?.hasNextPage) {
-      return failure({ code: 'RELEASE_NOTES_AUTHORS_TRUNCATED', message: `Commit authors exceeded the supported page size for ${oid}`, retryable: false });
-    }
-    authors.set(oid, (connection?.nodes || []).map(normalizeGitHubActor));
-  }
   const fromTime = Date.parse(input.fromTime);
   const toTime = Date.parse(input.toTime);
   const pullRequests = prs.value.filter((item) => {
     const mergedAt = Date.parse(String(item.mergedAt || ''));
     return Number.isFinite(mergedAt) && mergedAt > fromTime && mergedAt <= toTime;
   });
+  const eligiblePullRequestNumbers = new Set(pullRequests.map((item) => Number(item.number)));
+  const pullRequestNumbersByCommit = new Map<string, number[]>();
+  for (const oid of input.commitOids) {
+    const query = `query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{authors(first:100){nodes{name email user{login}} pageInfo{hasNextPage}} associatedPullRequests(first:100){nodes{number baseRefName mergedAt} pageInfo{hasNextPage}}}}}}`;
+    const [owner, name] = input.repository.split('/');
+    const result = client.json<{
+      data?: { repository?: { object?: {
+        authors?: { nodes?: GitHubActorInput[]; pageInfo?: { hasNextPage?: boolean } };
+        associatedPullRequests?: {
+          nodes?: Array<{ number?: number | null }>;
+          pageInfo?: { hasNextPage?: boolean };
+        };
+      } } };
+    }>([
+      'api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `oid=${oid}`
+    ], { cwd: options.cwd });
+    if (!result.ok) return failure(result.error);
+    const object = result.value.data?.repository?.object;
+    const connection = object?.authors;
+    if (connection?.pageInfo?.hasNextPage) {
+      return failure({ code: 'RELEASE_NOTES_AUTHORS_TRUNCATED', message: `Commit authors exceeded the supported page size for ${oid}`, retryable: false });
+    }
+    authors.set(oid, (connection?.nodes || []).map(normalizeGitHubActor));
+    const associatedPullRequests = object?.associatedPullRequests;
+    if (!associatedPullRequests || !Array.isArray(associatedPullRequests.nodes) || !associatedPullRequests.pageInfo || typeof associatedPullRequests.pageInfo.hasNextPage !== 'boolean') {
+      return failure({ code: 'INVALID_PLATFORM_RESPONSE', message: `Associated pull request data is incomplete for commit ${oid}`, retryable: false });
+    }
+    if (associatedPullRequests.pageInfo.hasNextPage) {
+      return failure({ code: 'RELEASE_NOTES_ASSOCIATED_PULL_REQUESTS_TRUNCATED', message: `Associated pull requests exceeded the supported page size for ${oid}`, retryable: false });
+    }
+    const numbers: number[] = [];
+    for (const association of associatedPullRequests.nodes) {
+      if (typeof association?.number !== 'number' || !Number.isSafeInteger(association.number)) {
+        return failure({ code: 'INVALID_PLATFORM_RESPONSE', message: `Associated pull request identity is incomplete for commit ${oid}`, retryable: false });
+      }
+      if (eligiblePullRequestNumbers.has(association.number)) numbers.push(association.number);
+    }
+    pullRequestNumbersByCommit.set(oid, [...new Set(numbers)]);
+  }
   const resolvedPullRequests = [];
   const [owner, name] = input.repository.split('/');
   const closingIssuesQuery = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$cursor){nodes{number title url author{login}} pageInfo{hasNextPage endCursor}}}}}';
   const pullRequestCommitsQuery = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){commits(first:100,after:$cursor){nodes{commit{oid}} pageInfo{hasNextPage endCursor}}}}}';
-  const pullRequestNumbersByCommit = new Map<string, number[]>();
   for (const item of pullRequests) {
     const commitShas: string[] = [];
     let commitCursor: string | null = null;
@@ -166,11 +189,6 @@ function fetchGitHubReleaseNoteData(
         return failure({ code: 'PAGINATION_INVALID', message: `Pull request commit pagination is incomplete for ${String(item.number)}`, retryable: false });
       }
       commitCursor = connection.pageInfo.endCursor;
-    }
-    for (const sha of commitShas) {
-      const numbers = pullRequestNumbersByCommit.get(sha) || [];
-      numbers.push(Number(item.number));
-      pullRequestNumbersByCommit.set(sha, numbers);
     }
     const closingIssues = [];
     let cursor: string | null = null;

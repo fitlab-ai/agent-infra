@@ -82,9 +82,14 @@ test('release-note provider emits typed history and keeps commit and closing-iss
         const login = oid === 'sha-one' ? 'alice' : 'bob';
         return {
           ok: true,
-          value: { data: { repository: { object: { authors: {
-            nodes: [{ name: login, email: `${login}@example.com`, user: { login } }], pageInfo: { hasNextPage: false }
-          } } } } }
+          value: { data: { repository: { object: {
+            authors: {
+              nodes: [{ name: login, email: `${login}@example.com`, user: { login } }], pageInfo: { hasNextPage: false }
+            },
+            associatedPullRequests: {
+              nodes: oid === 'sha-one' ? [{ number: 7 }] : [], pageInfo: { hasNextPage: false }
+            }
+          } } } }
         } as never;
       }
       if (query.includes('commits(first:100,after:$cursor)')) {

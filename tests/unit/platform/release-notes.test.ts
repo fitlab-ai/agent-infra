@@ -225,12 +225,18 @@ test('context keeps authors per commit and exposes platform PR associations', as
         if (query.includes('authors(first:100)')) {
           const sha = args.find((arg) => arg.startsWith('oid='))?.slice(4);
           const login = sha === firstSha ? 'first-author' : 'direct-author';
-          return success({ data: { repository: { object: { authors: {
-            nodes: [{ name: login, email: `${login}@example.com`, user: { login } }], pageInfo: { hasNextPage: false }
-          } } } } });
+          return success({ data: { repository: { object: {
+            authors: {
+              nodes: [{ name: login, email: `${login}@example.com`, user: { login } }], pageInfo: { hasNextPage: false }
+            },
+            associatedPullRequests: {
+              nodes: sha === firstSha ? [{ number: 7, baseRefName: 'main', mergedAt: '2026-09-01T12:00:00Z', repository: { nameWithOwner: 'example/project' } }] : [],
+              pageInfo: { hasNextPage: false }
+            }
+          } } } });
         }
         if (query.includes('commits(first:100,after:$cursor)')) return success({ data: { repository: { pullRequest: { commits: {
-          nodes: [{ commit: { oid: firstSha } }], pageInfo: { hasNextPage: false, endCursor: null }
+          nodes: [{ commit: { oid: 'rewritten-original-sha' } }], pageInfo: { hasNextPage: false, endCursor: null }
         } } } } });
         return success({ data: { repository: { pullRequest: { closingIssuesReferences: {
           nodes: [{ number: 7, title: 'Issue', url: 'https://example/issues/7', author: { login: 'reporter' } }],

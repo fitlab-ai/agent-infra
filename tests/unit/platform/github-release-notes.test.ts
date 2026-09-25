@@ -43,10 +43,16 @@ test('collector keeps release bodies and preserves authors on each commit, pull 
       if (query.includes('authors(first:100)')) {
         return {
           ok: true,
-          value: { data: { repository: { object: { authors: {
-            nodes: [{ name: 'Commit One', email: 'one@example.com', user: { login: 'CommitAuthor' } }],
-            pageInfo: { hasNextPage: false }
-          } } } } }
+          value: { data: { repository: { object: {
+            authors: {
+              nodes: [{ name: 'Commit One', email: 'one@example.com', user: { login: 'CommitAuthor' } }],
+              pageInfo: { hasNextPage: false }
+            },
+            associatedPullRequests: {
+              nodes: [{ number: 17, baseRefName: 'main', mergedAt: '2026-09-01T12:00:00Z', repository: { nameWithOwner: 'example/project' } }],
+              pageInfo: { hasNextPage: false }
+            }
+          } } } }
         } as never;
       }
       if (query.includes('commits(first:100,after:$cursor)')) {
@@ -81,6 +87,60 @@ test('collector keeps release bodies and preserves authors on each commit, pull 
     sha: 'sha-one', url: 'https://github.com/example/project/commit/sha-one',
     pullRequestNumbers: [17], authors: [{ name: 'Commit One', login: 'commitauthor', bot: false, resolution: 'platform-user' }]
   }]);
+});
+
+test('collector uses the merged commit association when a PR commit SHA was rewritten', () => {
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args) {
+      if (args[0] === 'release' && args[1] === 'list') return { ok: true, value: [] } as never;
+      if (args[0] === 'pr') return { ok: true, value: [{
+        number: 17, title: 'fix: preserve association', body: '', url: 'https://example/pull/17',
+        mergedAt: '2026-09-01T12:00:00Z', labels: [], author: { login: 'author' }
+      }] } as never;
+      const query = args.find((arg) => arg.startsWith('query=')) || '';
+      if (query.includes('authors(first:100)')) {
+        return {
+          ok: true,
+          value: {
+            data: {
+              repository: {
+                object: {
+                  authors: { nodes: [], pageInfo: { hasNextPage: false } },
+                  associatedPullRequests: {
+                    nodes: [{ number: 17, baseRefName: 'main', mergedAt: '2026-09-01T12:00:00Z', repository: { nameWithOwner: 'example/project' } }],
+                    pageInfo: { hasNextPage: false }
+                  }
+                }
+              }
+            }
+          }
+        } as never;
+      }
+      if (query.includes('commits(first:100,after:$cursor)')) {
+        return {
+          ok: true,
+          value: { data: { repository: { pullRequest: { commits: {
+            nodes: [{ commit: { oid: 'original-pr-sha' } }], pageInfo: { hasNextPage: false, endCursor: null }
+          } } } } }
+        } as never;
+      }
+      return {
+        ok: true,
+        value: { data: { repository: { pullRequest: { closingIssuesReferences: {
+          nodes: [], pageInfo: { hasNextPage: false, endCursor: null }
+        } } } } }
+      } as never;
+    },
+    text: () => ({ ok: true, value: '' })
+  };
+  const result = fetchGitHubReleaseNoteData({
+    repository: 'example/project', commitOids: ['squash-merge-sha'], branch: 'main', historyLimit: 3,
+    fromTime: '2026-09-01T00:00:00Z', toTime: '2026-09-02T00:00:00Z'
+  }, { client });
+  assert.equal(result.status, 'no-op', JSON.stringify(result));
+  if (result.status !== 'no-op') return;
+  assert.deepEqual(result.commits[0]?.pullRequestNumbers, [17]);
 });
 
 test('publishing edits an existing published release and creates a missing release', () => {
