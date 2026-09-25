@@ -58,6 +58,7 @@ test(".agents/.airc.json declares default sandbox configuration", () => {
       }
     ],
     dockerfile: null,
+    initCommand: "npm ci",
     vm: { cpu: null, memory: null, disk: null }
   });
 });

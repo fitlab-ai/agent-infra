@@ -219,7 +219,7 @@ export async function runInSandbox(
       allowRecreate: request.recreate,
       recreate: async () => {
         const { create } = await import('./commands/create.ts');
-        await create([request.taskRef, '--no-refresh']);
+        await create([request.taskRef, '--no-refresh'], { runProjectInitCommand: false });
       }
     })).container;
   } else if (!found.running) {

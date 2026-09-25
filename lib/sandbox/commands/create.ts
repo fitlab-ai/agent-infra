@@ -79,6 +79,7 @@ import {
   recoverSandboxControlReplacement,
   readSandboxControlManifest
 } from '../control/lifecycle.ts';
+import { atomicWriteJson } from '../control/state.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
@@ -1008,7 +1009,27 @@ function readImageLabels(config: Pick<SandboxCreateConfig, 'imageName'> & Pick<S
   ]));
 }
 
-export async function create(args: string[]): Promise<void> {
+function readProjectInitCommandDigest(controlRoot: string): string | null {
+  const markerPath = path.join(controlRoot, 'project-init.json');
+  if (!fs.existsSync(markerPath)) return null;
+  try {
+    const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8')) as { version?: unknown; commandSha256?: unknown };
+    return marker.version === 1 && typeof marker.commandSha256 === 'string' && /^[a-f0-9]{64}$/.test(marker.commandSha256)
+      ? marker.commandSha256
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeProjectInitCommandDigest(controlRoot: string, commandSha256: string): void {
+  atomicWriteJson(path.join(controlRoot, 'project-init.json'), { version: 1, commandSha256 });
+}
+
+export async function create(
+  args: string[],
+  { runProjectInitCommand = true }: { runProjectInitCommand?: boolean } = {}
+): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -1079,6 +1100,7 @@ export async function create(args: string[]): Promise<void> {
     identity: target.workspace
   });
   const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
+  let worktreeCreated = false;
   const shareCommon = shareCommonDir(effectiveConfig);
   const shareBranch = shareBranchDir(effectiveConfig, branch);
   const preparedDockerfile = prepareDockerfile(effectiveConfig, capabilityPlan.image);
@@ -1203,6 +1225,7 @@ export async function create(args: string[]): Promise<void> {
               toEnginePath(engine, worktree),
               branch
             ]);
+            worktreeCreated = true;
           } else {
             message(`Creating branch '${branch}' from '${baseBranch}'...`);
             runEngineTaskCommand(engine, 'git', [
@@ -1215,6 +1238,7 @@ export async function create(args: string[]): Promise<void> {
               toEnginePath(engine, worktree),
               baseBranch
             ]);
+            worktreeCreated = true;
           }
 
           return `Worktree ready at ${worktree}`;
@@ -1272,6 +1296,7 @@ export async function create(args: string[]): Promise<void> {
           let replacementCutover: ReturnType<typeof beginSandboxControlReplacement> | null = null;
           try {
             const recoveryResult = await recoverSandboxControlReplacement(controlPaths.root, replacementLease);
+            const previousProjectInitCommandDigest = readProjectInitCommandDigest(controlPaths.root);
             const hadExistingControlRoot = hadControlRootBeforeAcquire || recoveryResult === 'restored';
             const previousManifest = fs.existsSync(controlPaths.manifestPath)
               ? readSandboxControlManifest(controlPaths.manifestPath)
@@ -1726,6 +1751,32 @@ export async function create(args: string[]): Promise<void> {
               afterStartFailure.message
               ?? `Sandbox hook '${afterStartFailure.hookId}' failed.`
             );
+          }
+
+          const initCommand = effectiveConfig.initCommand;
+          const initCommandDigest = initCommand === null ? null : createHash('sha256').update(initCommand).digest('hex');
+          const shouldRunProjectInitCommand = runProjectInitCommand
+            && initCommand !== null
+            && initCommandDigest !== null
+            && (worktreeCreated || previousProjectInitCommandDigest !== initCommandDigest);
+          let projectInitCompleted = !worktreeCreated
+            && initCommandDigest !== null
+            && previousProjectInitCommandDigest === initCommandDigest;
+
+          if (shouldRunProjectInitCommand && initCommand !== null) {
+            try {
+              runVerboseEngine(engine, 'docker', [
+                'exec', '--workdir', '/workspace', container, 'bash', '-lc', initCommand
+              ]);
+              projectInitCompleted = true;
+            } catch (error) {
+              throw new Error(
+                `Project initialization failed for '${branch}': ${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          }
+          if (projectInitCompleted && initCommandDigest !== null) {
+            writeProjectInitCommandDigest(controlPaths.root, initCommandDigest);
           }
 
           replacementLease.release();

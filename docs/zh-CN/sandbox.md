@@ -124,6 +124,8 @@ ai sandbox create feature/proxy --inherit-proxy
 
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。
 
+`.agents/.airc.json` 中的 `sandbox.initCommand` 可选配置一条项目初始化命令。`ai sandbox create` 会在容器 setup hooks 完成后，从 `/workspace` 执行该命令。仓库配置使用 `npm ci` 为新建 worktree 安装项目依赖。命令失败时，create 会报告分支和退出错误，并保留 worktree 与容器供诊断；命令不会报告 sandbox ready。`ai sandbox start`、`exec` 和恢复流程不会重放该命令。
+
 `ai sandbox start`、`ai sandbox exec` 与使用沙箱的 `ai run` 现在会在执行用户工作前共享同一套 ready 检查。已停止的容器启动后，agent-infra 会修复 tmpfs owner/mode，重水合容器内仍有 staging mount 的全部 seed，重建内置 Codex prompts 链接，并验证 mount topology、shell aliases、Codex 可用性、状态目录可写性以及本次实际复制的条目。已在运行的容器只接受无损结构检查：只要现有 seed target 可写，即使内容、时间戳或 inode 与宿主 staging 副本不同也会原样保留。恢复不会重放 custom `postSetupCmds`，custom `versionCmd` 结果仍只是 advisory。
 
 ## 按任务隔离的工作区身份

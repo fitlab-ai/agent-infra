@@ -49,12 +49,50 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
       ["agent-infra", "claude-code", "codex", "antigravity-cli", "opencode", "traecli"]
     );
     assert.equal(config.engine, null);
+    assert.equal(config.initCommand, null);
     assert.equal(config.refreshIntervalDays, 7);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
     assert.equal(config.worktreeBase, path.join(os.homedir(), ".agent-infra", "worktrees", "demo"));
     assert.equal(config.shareBase, path.join(os.homedir(), ".agent-infra", "share", "demo"));
     assert.equal(config.shellConfigBase, path.join(os.homedir(), ".agent-infra", "config", "demo"));
     assert.equal(config.dotfilesDir, path.join(os.homedir(), ".agent-infra", "dotfiles"));
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig parses the optional project sandbox init command", async () => {
+  const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-init-command-"));
+  const previousCwd = process.cwd();
+  const configPath = path.join(tmpDir, ".agents", ".airc.json");
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const writeConfig = (initCommand: unknown) => fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        project: "demo",
+        org: "fitlab-ai",
+        agentClients: CANONICAL_AGENT_CLIENTS,
+        sandbox: { initCommand }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    process.chdir(tmpDir);
+    writeConfig("npm ci");
+    assert.equal(withGitSafeProcessEnv(() => sandboxConfig.loadConfig()).initCommand, "npm ci");
+
+    for (const invalid of ["  ", 42]) {
+      writeConfig(invalid);
+      assert.throws(
+        () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
+        /sandbox\.initCommand/
+      );
+    }
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
