@@ -20,7 +20,7 @@ test('GitHub provider owns security alert transport and preserves read-before-di
     }
   } as GitHubClient;
   const provider = createGitHubProvider({
-    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+    providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {}
   }, client);
   const context = { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' };
 
@@ -52,7 +52,7 @@ test('GitHub provider reconciles labels safely and creates missing milestones by
     }
   } as GitHubClient;
   const provider = createGitHubProvider({
-    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+    providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {}
   }, client);
   const context = { repositoryRoot: '/repo', workingDirectory: '/repo', scopeId: 'acme/project' };
 
@@ -92,7 +92,7 @@ test('GitHub provider preserves confirmed label mutations when a later mutation 
     text() { return { ok: true, value: '' }; }
   } as GitHubClient;
   const provider = createGitHubProvider({
-    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+    providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {}
   }, client);
 
   const result = await provider.repositoryMetadata!.reconcileLabels({
@@ -145,7 +145,7 @@ test('GitHub provider preserves confirmed cleanup deletions when a later deletio
     }
   } as GitHubClient;
   const provider = createGitHubProvider({
-    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+    providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {}
   }, client);
 
   const result = await provider.repositoryMetadata!.reconcileLabels({
@@ -185,7 +185,7 @@ test('GitHub provider preserves confirmed milestone creations when a later creat
     text() { return { ok: true, value: '' }; }
   } as GitHubClient;
   const provider = createGitHubProvider({
-    providerType: 'github', contractVersion: 1, repositoryRoot: '/repo', config: {}
+    providerType: 'github', contractVersion: 2, repositoryRoot: '/repo', config: {}
   }, client);
 
   const result = await provider.repositoryMetadata!.reconcileMilestones({

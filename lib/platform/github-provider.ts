@@ -923,30 +923,24 @@ function createGitHubOperations(client: GitHubClient): Pick<PlatformProvider, 'i
       if (collected.status === 'failed' || collected.status === 'blocked' || !('pullRequests' in collected)) {
         return { ok: false, error: collected.error || { code: 'RELEASE_NOTES_COLLECTION_FAILED', message: 'Release notes could not be collected', retryable: false } };
       }
-      const mergedPullRequests = collected.pullRequests.map((item: any): ChangeRequestSnapshot => ({
-        id: String(item.number), identity: { kind: 'number', value: Number(item.number) }, number: Number(item.number),
-        state: 'closed', title: String(item.title || ''), body: String(item.body || ''),
+      const mergedPullRequests = collected.pullRequests.map((item: any) => ({
+        id: String(item.number), identity: { kind: 'number' as const, value: Number(item.number) }, number: Number(item.number),
+        title: String(item.title || ''), body: String(item.body || ''),
         mergedAt: new Date(String(item.mergedAt)).toISOString(), displayUrl: String(item.url || ''),
         labels: Array.isArray(item.labels) ? item.labels.map((label: any) => String(label.name || label)) : [],
-        assignees: [], mergeCommitSha: null
-      }));
-      const closingIssues: IssueSnapshot[] = collected.pullRequests.flatMap((item: any) =>
-        Array.isArray(item.closingIssuesReferences) ? item.closingIssuesReferences.map((issue: any) => ({
+        author: item.author,
+        commitShas: item.commitShas,
+        closingIssues: item.closingIssues.map((issue: any) => ({
           id: String(issue.number), identity: { kind: 'number', value: Number(issue.number) }, number: Number(issue.number),
-          state: 'closed' as const, title: String(issue.title || ''), body: '', labels: Array.isArray(issue.labels) ? issue.labels.map((label: any) => String(label.name || label)) : [],
-          assignees: [], milestone: null, fields: {}, displayUrl: String(issue.url || '')
-        })) : []
-      );
-      const actors = [...collected.authors.values()].flatMap((items) => items.map((item: any) => ({
-        ...(item.login ? { id: String(item.login) } : {}), ...(item.name ? { name: String(item.name) } : {})
-      })));
+          title: String(issue.title || ''), displayUrl: String(issue.url || ''), author: issue.author
+        }))
+      }));
       return {
         ok: true,
         value: {
-          history: commitOids.map((sha) => ({ sha, message: '', authoredAt: toTime, author: actors.find((actor) => actor.id) || null })),
+          history: collected.history,
+          commits: collected.commits,
           mergedPullRequests,
-          closingIssues,
-          actors
         }
       };
     }
@@ -1116,7 +1110,7 @@ function createGitHubProvider(
 ): PlatformProvider {
   return {
     type: input.providerType,
-    contractVersion: 1,
+    contractVersion: 2,
     identity: { issue: 'number', 'pull-request': 'number', comment: 'number', release: 'key' },
     ...createGitHubOperations(client),
     context: {

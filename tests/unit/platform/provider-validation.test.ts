@@ -35,7 +35,7 @@ test('provider metadata is sorted by identity and rejects duplicate identities',
     milestones: [], issueTypes: [], fields: []
   };
   const provider = wrapProviderOperations({
-    type: 'trae', contractVersion: 1, identity: { issue: 'id' },
+    type: 'trae', contractVersion: 2, identity: { issue: 'id' },
     context: { async resolve() { return { ok: true, value: { type: 'trae', scope: { id: 'scope' }, currentUser: null, capabilities: { authenticated: true, comment: false, triage: false, push: false, admin: false }, authenticated: true } }; } },
     issues: {
       async describeRepository() { return { ok: true, value: metadata }; },
@@ -58,7 +58,7 @@ test('provider groups require a primary identity declaration for their resources
   const noop = async () => ({ ok: true, value: {} });
   const result = validatePlatformProvider({
     type: 'trae',
-    contractVersion: 1,
+    contractVersion: 2,
     context: { resolve: noop },
     issues: { inspect: noop, create: noop, update: noop, describeRepository: noop }
   }, 'trae');
@@ -75,7 +75,7 @@ test('provider identity serialization is canonical and declarations cover operat
   const noop = async () => ({ ok: true, value: {} });
   const result = validatePlatformProvider({
     type: 'trae',
-    contractVersion: 1,
+    contractVersion: 2,
     identity: { comment: 'id' },
     context: { resolve: noop },
     comments: { list: noop, write: noop, delete: noop }
@@ -88,7 +88,7 @@ test('verification providers only declare identities consumed by verification', 
   const noop = async () => ({ ok: true, value: {} });
   const result = validatePlatformProvider({
     type: 'trae',
-    contractVersion: 1,
+    contractVersion: 2,
     identity: { issue: 'id', 'pull-request': 'id' },
     context: { resolve: noop },
     verification: { fetchRemoteFacts: noop }
@@ -113,7 +113,7 @@ test('provider result validation rejects duplicate nested options, mismatched id
     labels: [], assignees: [], milestone: null, fields: {}
   };
   const provider = wrapProviderOperations({
-    type: 'trae', contractVersion: 1,
+    type: 'trae', contractVersion: 2,
     identity: { issue: 'number', 'pull-request': 'id', release: 'key' },
     context: { async resolve() { return { ok: true, value: {} }; } },
     issues: {
@@ -133,9 +133,8 @@ test('provider result validation rejects duplicate nested options, mismatched id
           ok: true,
           value: {
             history: [],
-            mergedPullRequests: [{ id: 'pr-1', state: 'merged', title: '', body: '' }],
-            closingIssues: [],
-            actors: []
+            commits: [],
+            mergedPullRequests: [{ id: 'pr-1', state: 'merged', title: '', body: '' }]
           }
         };
       }
@@ -155,10 +154,55 @@ test('provider result validation rejects duplicate nested options, mismatched id
   if (!missingReleaseIdentity.ok) assert.equal(missingReleaseIdentity.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
 });
 
+test('release-note facts validate v2 authors and nested PR issue relations', async () => {
+  let resolution = 'platform-user';
+  const provider = wrapProviderOperations({
+    type: 'trae', contractVersion: 2,
+    identity: { release: 'key', 'pull-request': 'number', issue: 'number' },
+    context: { async resolve() { return { ok: true, value: {} }; } },
+    releases: {
+      async collectNotes() {
+        return { ok: true, value: {
+          history: [
+            { tag: 'v0.9.0', body: 'Recent body', url: null },
+            { tag: 'v0.10.0', body: 'Older body', url: null }
+          ],
+          commits: [{ sha: 'abc', url: null, pullRequestNumbers: [], authors: [
+            { name: 'Author', login: 'author', bot: false, resolution }
+          ] }],
+          mergedPullRequests: [{
+            id: '7', identity: { kind: 'number', value: 7 }, number: 7,
+            title: 'fix: facts', body: '', mergedAt: '2026-09-01T12:00:00Z',
+            displayUrl: 'https://example/pull/7', labels: [],
+            author: { name: 'PR author', login: 'pr-author', bot: false, resolution: 'platform-user' },
+            commitShas: ['abc'],
+            closingIssues: [{
+              id: '7', identity: { kind: 'number', value: 7 }, number: 7,
+              title: 'Issue', displayUrl: 'https://example/issues/7',
+              author: { name: 'Reporter', login: 'reporter', bot: false, resolution: 'platform-user' }
+            }]
+          }]
+        } };
+      }
+    }
+  } as never);
+  const valid = await provider.releases!.collectNotes({} as never);
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.value.mergedPullRequests[0]?.closingIssues[0]?.author?.login, 'reporter');
+    assert.deepEqual(valid.value.history.map((entry) => entry.tag), ['v0.9.0', 'v0.10.0']);
+  }
+
+  resolution = 'unknown';
+  const invalid = await provider.releases!.collectNotes({} as never);
+  assert.equal(invalid.ok, false);
+  if (!invalid.ok) assert.equal(invalid.error.code, 'PLATFORM_PROVIDER_RESULT_INVALID');
+});
+
 test('provider operation validation rejects coercion, context mismatch, and raw error details', async () => {
   const provider = wrapProviderOperations({
     type: 'trae',
-    contractVersion: 1,
+    contractVersion: 2,
     context: {
       async resolve() {
         return {
@@ -181,7 +225,7 @@ test('provider operation validation rejects coercion, context mismatch, and raw 
       async update() { return { ok: true, value: { remoteId: 'r1', changed: false } }; },
       async reconcileMilestones() { return { ok: true, value: { changed: 'false', created: [], closed: [] } }; },
       async publishNotes() { return { ok: true, value: { remoteId: 'r1', changed: false } }; },
-      async collectNotes() { return { ok: true, value: { history: [], mergedPullRequests: [], closingIssues: [], actors: [] } }; }
+      async collectNotes() { return { ok: true, value: { history: [], commits: [], mergedPullRequests: [] } }; }
     }
   } as never);
 
@@ -194,7 +238,7 @@ test('provider operation validation rejects coercion, context mismatch, and raw 
 
   const failureProvider = wrapProviderOperations({
     type: 'trae',
-    contractVersion: 1,
+    contractVersion: 2,
     context: { async resolve() { return { ok: true, value: {} }; } },
     releases: {
       async inspect() {
@@ -204,7 +248,7 @@ test('provider operation validation rejects coercion, context mismatch, and raw 
       async update() { return { ok: true, value: { remoteId: 'r1', changed: false } }; },
       async reconcileMilestones() { return { ok: true, value: { changed: false, created: [], closed: [] } }; },
       async publishNotes() { return { ok: true, value: { remoteId: 'r1', changed: false } }; },
-      async collectNotes() { return { ok: true, value: { history: [], mergedPullRequests: [], closingIssues: [], actors: [] } }; }
+      async collectNotes() { return { ok: true, value: { history: [], commits: [], mergedPullRequests: [] } }; }
     }
   } as never);
   const failure = await failureProvider.releases!.inspect({} as never);
@@ -219,7 +263,7 @@ test('provider operation validation rejects coercion, context mismatch, and raw 
 test('optional security and repository metadata groups are validated without becoming required', async () => {
   const provider = wrapProviderOperations({
     type: 'trae',
-    contractVersion: 1,
+    contractVersion: 2,
     context: { async resolve() { return { ok: true, value: { type: 'trae', scope: { id: 'scope' }, currentUser: null, capabilities: { authenticated: false, comment: false, triage: false, push: false, admin: false }, authenticated: false } }; } },
     securityAlerts: {
       async inspect() { return { ok: true, value: { kind: 'dependabot', number: 7, state: 'open', data: { number: 7 } } }; },
@@ -235,7 +279,7 @@ test('optional security and repository metadata groups are validated without bec
   const labels = await provider.repositoryMetadata!.reconcileLabels({} as never);
   assert.equal(labels.ok, true);
   const invalid = wrapProviderOperations({
-    type: 'trae', contractVersion: 1,
+    type: 'trae', contractVersion: 2,
     context: { async resolve() { return { ok: true, value: { type: 'trae', scope: { id: 'scope' }, currentUser: null, capabilities: { authenticated: false, comment: false, triage: false, push: false, admin: false }, authenticated: false } }; } },
     securityAlerts: {
       async inspect() { return { ok: true, value: { kind: 'dependabot', number: 0, state: 'open', data: null } }; },

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  fetchGitHubReleaseNoteData,
   normalizeGitHubActor,
   publishGitHubReleaseNotes
 } from '../../../lib/platform/github-release-notes.ts';
@@ -10,7 +11,7 @@ import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 test('GitHub actors prefer platform users, then no-reply identities, without guessing ordinary email', () => {
   assert.deepEqual(
     normalizeGitHubActor({ name: 'Alice Example', email: 'alice@example.com', user: { login: 'Alice' } }),
-    { name: 'Alice Example', email: 'alice@example.com', login: 'alice', bot: false, resolution: 'platform-user' }
+    { name: 'Alice Example', login: 'alice', bot: false, resolution: 'platform-user' }
   );
   assert.equal(
     normalizeGitHubActor({ name: 'Robot', email: '123+Dependabot[bot]@users.noreply.github.com', user: null }).login,
@@ -18,8 +19,68 @@ test('GitHub actors prefer platform users, then no-reply identities, without gue
   );
   assert.deepEqual(
     normalizeGitHubActor({ name: 'Unknown Person', email: 'unknown@example.com', user: null }),
-    { name: 'Unknown Person', email: 'unknown@example.com', login: null, bot: false, resolution: 'unresolved' }
+    { name: 'Unknown Person', login: null, bot: false, resolution: 'unresolved' }
   );
+});
+
+test('collector keeps release bodies and preserves authors on each commit, pull request, and closing issue', () => {
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.72.0' }),
+    json(args) {
+      if (args[0] === 'release' && args[1] === 'list') {
+        return { ok: true, value: [{ tagName: 'v1.2.0', isDraft: false, isPrerelease: false }] } as never;
+      }
+      if (args[0] === 'release' && args[1] === 'view') {
+        return { ok: true, value: { body: '## 安装\nInstall', url: 'https://example/releases/v1.2.0' } } as never;
+      }
+      if (args[0] === 'pr') {
+        return { ok: true, value: [{
+          number: 17, title: 'fix: preserve facts', body: 'body', url: 'https://example/pull/17',
+          mergedAt: '2026-09-01T12:00:00Z', labels: [{ name: 'bug' }], author: { login: 'PullAuthor' }
+        }] } as never;
+      }
+      const query = args.find((arg) => arg.startsWith('query=')) || '';
+      if (query.includes('authors(first:100)')) {
+        return {
+          ok: true,
+          value: { data: { repository: { object: { authors: {
+            nodes: [{ name: 'Commit One', email: 'one@example.com', user: { login: 'CommitAuthor' } }],
+            pageInfo: { hasNextPage: false }
+          } } } } }
+        } as never;
+      }
+      if (query.includes('commits(first:100,after:$cursor)')) {
+        return {
+          ok: true,
+          value: { data: { repository: { pullRequest: { commits: {
+            nodes: [{ commit: { oid: 'sha-one' } }], pageInfo: { hasNextPage: false, endCursor: null }
+          } } } } }
+        } as never;
+      }
+      return {
+        ok: true,
+        value: { data: { repository: { pullRequest: { closingIssuesReferences: {
+          nodes: [{ number: 8, title: 'Issue title', url: 'https://example/issues/8', author: { login: 'IssueAuthor' } }],
+          pageInfo: { hasNextPage: false, endCursor: null }
+        } } } } }
+      } as never;
+    },
+    text: () => ({ ok: true, value: '' })
+  };
+  const result = fetchGitHubReleaseNoteData({
+    repository: 'example/project', commitOids: ['sha-one'], branch: 'main', historyLimit: 3,
+    fromTime: '2026-09-01T00:00:00Z', toTime: '2026-09-02T00:00:00Z'
+  }, { client });
+  assert.equal(result.status, 'no-op', JSON.stringify(result));
+  if (result.status !== 'no-op') return;
+  assert.deepEqual(result.history, [{ tag: 'v1.2.0', body: '## 安装\nInstall', url: 'https://example/releases/v1.2.0' }]);
+  assert.equal(result.commits[0]?.authors[0]?.login, 'commitauthor');
+  assert.equal(result.pullRequests[0]?.author?.login, 'pullauthor');
+  assert.equal(result.pullRequests[0]?.closingIssues[0]?.author?.login, 'issueauthor');
+  assert.deepEqual(result.commits, [{
+    sha: 'sha-one', url: 'https://github.com/example/project/commit/sha-one',
+    pullRequestNumbers: [17], authors: [{ name: 'Commit One', login: 'commitauthor', bot: false, resolution: 'platform-user' }]
+  }]);
 });
 
 test('publishing edits an existing published release and creates a missing release', () => {

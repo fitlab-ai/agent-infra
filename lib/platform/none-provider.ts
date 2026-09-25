@@ -8,7 +8,7 @@ import type {
 function createNoneProvider(input: PlatformProviderFactoryInput): PlatformProvider {
   return {
     type: input.providerType,
-    contractVersion: 1,
+    contractVersion: 2,
     context: {
       async resolve(): Promise<ProviderResult<PlatformContextSnapshot>> {
         return {

@@ -16,6 +16,8 @@ import type {
   PlatformError,
   PlatformProvider,
   ProviderResult,
+  ReleaseNoteAuthor,
+  ReleaseNoteIssue,
   ReleaseNotesFacts,
   ReleaseSnapshot,
   RemoteCommentSnapshot,
@@ -109,6 +111,15 @@ function arrayValue(value: unknown, label: string): unknown[] {
   return value;
 }
 
+function positiveNumberValue(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) <= 0) throw new Error(`${label} must be a positive integer`);
+  return Number(value);
+}
+
+function stringArray(value: unknown, label: string): string[] {
+  return arrayValue(value, label).map((entry, index) => stringValue(entry, `${label}[${index}]`));
+}
+
 function stableUnique<T>(values: T[], key: (value: T) => string, label: string): T[] {
   const seen = new Set<string>();
   for (const value of values) {
@@ -117,6 +128,16 @@ function stableUnique<T>(values: T[], key: (value: T) => string, label: string):
     seen.add(identityKey);
   }
   return [...values].sort((left, right) => key(left).localeCompare(key(right)));
+}
+
+function uniqueInOrder<T>(values: T[], key: (value: T) => string, label: string): T[] {
+  const seen = new Set<string>();
+  for (const value of values) {
+    const identityKey = key(value);
+    if (seen.has(identityKey)) throw new Error(`${label} contains duplicate identities`);
+    seen.add(identityKey);
+  }
+  return values;
 }
 
 function declaredIdentityKind(
@@ -389,20 +410,71 @@ function validateMetadata(value: unknown): RepositoryMetadataSnapshot {
 
 function validateReleaseNotes(value: unknown, declaration?: ProviderIdentityDeclaration): ReleaseNotesFacts {
   const item = record(value, 'release notes');
-  exactKeys(item, ['history', 'mergedPullRequests', 'closingIssues', 'actors'], 'release notes');
+  exactKeys(item, ['history', 'commits', 'mergedPullRequests'], 'release notes');
+  const releaseAuthor = (raw: unknown, label: string): ReleaseNoteAuthor | null => {
+    if (raw === null) return null;
+    const entry = record(raw, label);
+    exactKeys(entry, ['name', 'login', 'bot', 'resolution'], label);
+    if (typeof entry.bot !== 'boolean') throw new Error(`${label}.bot must be boolean`);
+    if (!['platform-user', 'platform-noreply', 'unresolved'].includes(String(entry.resolution))) {
+      throw new Error(`${label}.resolution is invalid`);
+    }
+    return {
+      name: stringValue(entry.name, `${label}.name`, true),
+      login: nullableString(entry.login, `${label}.login`),
+      bot: entry.bot,
+      resolution: entry.resolution as ReleaseNoteAuthor['resolution']
+    };
+  };
+  const issue = (raw: unknown, label: string): ReleaseNoteIssue => {
+    const entry = record(raw, label);
+    exactKeys(entry, ['id', 'identity', 'number', 'title', 'displayUrl', 'author'], label);
+    return {
+      id: stringValue(entry.id, `${label}.id`),
+      identity: identity(entry.identity, `${label}.identity`, declaredIdentityKind(declaration, 'issue')),
+      number: positiveNumberValue(entry.number, `${label}.number`),
+      title: stringValue(entry.title, `${label}.title`, true),
+      displayUrl: stringValue(entry.displayUrl, `${label}.displayUrl`, true),
+      author: releaseAuthor(entry.author, `${label}.author`)
+    };
+  };
   return {
-    history: stableUnique(arrayValue(item.history, 'release notes.history').map((raw) => {
+    history: uniqueInOrder(arrayValue(item.history, 'release notes.history').map((raw) => {
       const entry = record(raw, 'release notes.history[]');
-      exactKeys(entry, ['sha', 'message', 'authoredAt', 'author'], 'release notes.history[]');
-      return { sha: stringValue(entry.sha, 'history.sha'), message: stringValue(entry.message, 'history.message', true), authoredAt: utcTimestamp(entry.authoredAt, 'history.authoredAt'), author: author(entry.author, 'history.author') };
-    }), (entry) => entry.sha, 'release notes.history'),
-    mergedPullRequests: stableUnique(arrayValue(item.mergedPullRequests, 'release notes.mergedPullRequests').map((entry) => validateChangeRequest(entry, declaredIdentityKind(declaration, 'pull-request'), true)), (entry) => serializeResourceIdentity(entry.identity!), 'release notes.mergedPullRequests'),
-    closingIssues: stableUnique(arrayValue(item.closingIssues, 'release notes.closingIssues').map((entry) => validateIssue(entry, declaredIdentityKind(declaration, 'issue'), true)), (entry) => serializeResourceIdentity(entry.identity!), 'release notes.closingIssues'),
-    actors: stableUnique(arrayValue(item.actors, 'release notes.actors').map((entry) => {
-      const actor = author(entry, 'release notes.actor');
-      if (!actor) throw new Error('release notes.actor must identify an actor');
-      return actor;
-    }), (entry) => entry.id || entry.name || '', 'release notes.actors')
+      exactKeys(entry, ['tag', 'body', 'url'], 'release notes.history[]');
+      return { tag: stringValue(entry.tag, 'history.tag'), body: stringValue(entry.body, 'history.body', true), url: nullableString(entry.url, 'history.url') };
+    }), (entry) => entry.tag, 'release notes.history'),
+    commits: stableUnique(arrayValue(item.commits, 'release notes.commits').map((raw) => {
+      const entry = record(raw, 'release notes.commits[]');
+      exactKeys(entry, ['sha', 'url', 'pullRequestNumbers', 'authors'], 'release notes.commits[]');
+      return {
+        sha: stringValue(entry.sha, 'commits.sha'),
+        url: nullableString(entry.url, 'commits.url'),
+        pullRequestNumbers: stableUnique(arrayValue(entry.pullRequestNumbers, 'commits.pullRequestNumbers').map((number) => positiveNumberValue(number, 'commits.pullRequestNumbers[]')), (number) => String(number), 'commits.pullRequestNumbers'),
+        authors: arrayValue(entry.authors, 'commits.authors').map((rawAuthor) => {
+          const normalized = releaseAuthor(rawAuthor, 'commits.author');
+          if (!normalized) throw new Error('commits.author must identify an author');
+          return normalized;
+        })
+      };
+    }), (entry) => entry.sha, 'release notes.commits'),
+    mergedPullRequests: stableUnique(arrayValue(item.mergedPullRequests, 'release notes.mergedPullRequests').map((raw) => {
+      const entry = record(raw, 'release notes.mergedPullRequests[]');
+      exactKeys(entry, ['id', 'identity', 'number', 'title', 'body', 'mergedAt', 'displayUrl', 'labels', 'author', 'commitShas', 'closingIssues'], 'release notes.mergedPullRequests[]');
+      return {
+        id: stringValue(entry.id, 'pullRequest.id'),
+        identity: identity(entry.identity, 'pullRequest.identity', declaredIdentityKind(declaration, 'pull-request')),
+        number: positiveNumberValue(entry.number, 'pullRequest.number'),
+        title: stringValue(entry.title, 'pullRequest.title', true),
+        body: stringValue(entry.body, 'pullRequest.body', true),
+        mergedAt: utcTimestamp(entry.mergedAt, 'pullRequest.mergedAt'),
+        displayUrl: stringValue(entry.displayUrl, 'pullRequest.displayUrl', true),
+        labels: stringArray(entry.labels, 'pullRequest.labels'),
+        author: releaseAuthor(entry.author, 'pullRequest.author'),
+        commitShas: stringArray(entry.commitShas, 'pullRequest.commitShas'),
+        closingIssues: stableUnique(arrayValue(entry.closingIssues, 'pullRequest.closingIssues').map((entry) => issue(entry, 'pullRequest.closingIssues[]')), (entry) => serializeResourceIdentity(entry.identity), 'pullRequest.closingIssues')
+      };
+    }), (entry) => serializeResourceIdentity(entry.identity), 'release notes.mergedPullRequests')
   };
 }
 
