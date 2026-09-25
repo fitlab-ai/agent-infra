@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { removeDirRecursive } from './remove-dir.ts';
 import { validateCurrentTaskContract } from './task/current-contract.ts';
-import { acquireArchiveOperationLock, assertArchiveAvailable } from './task/archive-migration-state.ts';
+import { acquireArchiveOperationLock, assertArchiveOperationAvailable } from './task/archive-operation-lock.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -1087,8 +1087,8 @@ async function cmdMerge(args: string[]): Promise<void> {
   }
 
   const workspaceDir = path.join(process.cwd(), '.agents', 'workspace');
-  assertArchiveAvailable(workspaceDir);
-  assertArchiveAvailable(resolvedSource);
+  assertArchiveOperationAvailable(workspaceDir);
+  assertArchiveOperationAvailable(resolvedSource);
   const releaseLock = acquireArchiveOperationLock(workspaceDir);
   let releaseSourceLock = () => {};
   try {

@@ -953,26 +953,6 @@ test("resolveTaskBranch returns plain branch names unchanged", async () => {
   );
 });
 
-test("sandbox task resolver rejects archived tasks while migration marker exists", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sandbox-archive-migration-"));
-  try {
-    const taskId = "TASK-20260401-180099";
-    const local = path.join(tmpDir, ".agents/workspace/archive/2026/04/01", taskId, "local");
-    fs.mkdirSync(local, { recursive: true });
-    fs.writeFileSync(path.join(local, "task.md"), `---\nid: ${taskId}\nbranch: archive-branch\n---\n# task\n`);
-    const hotId = "TASK-20260401-180098";
-    const active = path.join(tmpDir, ".agents/workspace/active", hotId);
-    fs.mkdirSync(active, { recursive: true });
-    fs.writeFileSync(path.join(active, "task.md"), `---\nid: ${hotId}\nbranch: active-branch\n---\n# task\n`);
-    fs.writeFileSync(path.join(tmpDir, ".agents/workspace/.archive-migration-state.json"), "{}");
-    const resolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
-    assert.throws(() => resolver.resolveTaskWorkspace(taskId, tmpDir), /Archive unavailable/);
-    assert.equal(resolver.resolveTaskWorkspace(hotId, tmpDir).branch, "active-branch");
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
 test("resolveTaskBranch reads branch from task frontmatter", async () => {
   const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-frontmatter-"));

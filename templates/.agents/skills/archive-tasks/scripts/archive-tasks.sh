@@ -8,13 +8,8 @@ WORKSPACE_ROOT="$REPO_ROOT/.agents/workspace"
 COMPLETED_DIR="$WORKSPACE_ROOT/completed"
 ARCHIVE_DIR="$WORKSPACE_ROOT/archive"
 MANIFEST_PATH="$ARCHIVE_DIR/manifest.md"
-MIGRATION_STATE="$WORKSPACE_ROOT/.archive-migration-state.json"
 ARCHIVE_LOCK="$WORKSPACE_ROOT/.archive-operation-lock"
 
-if [ -e "$MIGRATION_STATE" ]; then
-  echo "Archive migration state exists; restore or complete migration before archiving: $MIGRATION_STATE" >&2
-  exit 1
-fi
 if [ -d "$ARCHIVE_LOCK" ] && [ -f "$ARCHIVE_LOCK/pid" ]; then
   lock_pid=$(cat "$ARCHIVE_LOCK/pid")
   case "$lock_pid" in ''|*[!0-9]*) lock_pid="" ;; esac

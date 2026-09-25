@@ -279,24 +279,6 @@ test('merge skips existing task IDs without overwriting local archive', () => {
   }
 });
 
-test('merge refuses a migration marker before changing target archive', () => {
-  const repoDir = makeTempRepo();
-  const sourceDir = makeTempWorkspace(repoDir);
-  const marker = path.join(repoDir, '.agents/workspace/.archive-migration-state.json');
-  const manifest = path.join(repoDir, '.agents/workspace/archive/manifest.md');
-  fs.writeFileSync(manifest, 'sentinel\n');
-  fs.writeFileSync(marker, '{broken');
-  try {
-    assert.throws(
-      () => execFileSync(process.execPath, cliArgs('merge', sourceDir), { cwd: repoDir, encoding: 'utf8' }),
-      /Archive unavailable/
-    );
-    assert.equal(read(manifest), 'sentinel\n');
-  } finally {
-    fs.rmSync(repoDir, { recursive: true, force: true });
-  }
-});
-
 test('merge rejects a changed archive source file whose contents hash no longer matches', () => {
   const repoDir = makeTempRepo();
   const sourceDir = makeTempWorkspace(repoDir);

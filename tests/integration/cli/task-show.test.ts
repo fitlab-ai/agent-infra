@@ -133,23 +133,6 @@ test('ai task show <TASK-id> resolves an archived task whose archive date differ
   assert.match(out.stdout, /archived-cross-day/);
 });
 
-test('archive lookup fails closed on a malformed migration marker while hot tasks remain readable', () => {
-  const { repoRoot, activeDir } = mkFixture();
-  const hotId = 'TASK-20260612-120001';
-  const coldId = 'TASK-20260612-120002';
-  writeTask(activeDir, hotId, 'feature-hot');
-  const local = path.join(repoRoot, '.agents/workspace/archive/2026/06/13', coldId, 'local');
-  fs.mkdirSync(local, { recursive: true });
-  fs.writeFileSync(path.join(local, 'task.md'), `---\nid: ${coldId}\nbranch: archived\n---\n# archived\n`);
-  fs.writeFileSync(path.join(repoRoot, '.agents/workspace/.archive-migration-state.json'), '{broken');
-
-  const hot = runCli(['task', 'show', '--task', hotId], repoRoot);
-  assert.equal(hot.status, 0, hot.stderr);
-  const cold = runCli(['task', 'show', '--task', coldId], repoRoot);
-  assert.equal(cold.status, 1);
-  assert.match(cold.stderr, /Archive unavailable/);
-});
-
 test('ai task show <reserved> rejects 0', () => {
   const { repoRoot } = mkFixture();
   const out = runCli(['task', 'show', '--task', '0'], repoRoot);

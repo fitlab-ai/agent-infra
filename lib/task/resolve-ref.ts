@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { normalizeShortIdInput, resolveShortIdReadOnly } from './short-id.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
-import { assertArchiveAvailable } from './archive-migration-state.ts';
+import { assertArchiveOperationAvailable } from './archive-operation-lock.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 // Flat-structured workspace dirs that hold tasks under `{dir}/{taskId}/task.md`.
@@ -88,7 +88,7 @@ function findInArchive(repoRoot: string, taskId: string): string | null {
   // the task id's creation date. So we cannot derive the path from taskId alone;
   // walk the bounded YYYY/MM/DD tree instead. Newest-first to favor recent archives.
   const archiveDir = path.join(repoRoot, '.agents', 'workspace', 'archive');
-  assertArchiveAvailable(path.join(repoRoot, '.agents', 'workspace'));
+  assertArchiveOperationAvailable(path.join(repoRoot, '.agents', 'workspace'));
   for (const year of listSortedNumeric(archiveDir, 4)) {
     const yearDir = path.join(archiveDir, year);
     for (const month of listSortedNumeric(yearDir, 2)) {
@@ -159,7 +159,7 @@ function enumerateAllTaskDirs(repoRoot: string): { taskId: string; taskDir: stri
   }
 
   const archive = path.join(repoRoot, '.agents', 'workspace', 'archive');
-  assertArchiveAvailable(path.join(repoRoot, '.agents', 'workspace'));
+  assertArchiveOperationAvailable(path.join(repoRoot, '.agents', 'workspace'));
   for (const year of listSortedNumeric(archive, 4).reverse()) {
     const yearDir = path.join(archive, year);
     for (const month of listSortedNumeric(yearDir, 2).reverse()) {

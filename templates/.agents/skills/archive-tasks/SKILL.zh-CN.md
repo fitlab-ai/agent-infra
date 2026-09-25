@@ -14,16 +14,7 @@ description: >
 
 ## 执行流程
 
-### 1. 迁移既有归档（仅在旧布局存在时）
-
-先在维护窗口运行一次性迁移脚本。脚本会在修改前把完整 archive 备份到 `.agents/workspace/archive-backups/`，验证备份后再迁移；中断后 archive 操作会失败关闭，需使用 marker 指向的备份执行恢复。
-
-```bash
-node .agents/skills/archive-tasks/scripts/migrate-archive.mjs
-node .agents/skills/archive-tasks/scripts/migrate-archive.mjs --restore .agents/workspace/archive-backups/archive-before-l0-<UTC>.tar
-```
-
-### 2. 验证环境
+### 1. 验证环境
 
 确认 `.agents/workspace/completed/` 存在，并根据用户输入选择以下四种调用方式之一：
 - 无参数：归档全部已完成任务
@@ -31,7 +22,7 @@ node .agents/skills/archive-tasks/scripts/migrate-archive.mjs --restore .agents/
 - `--before YYYY-MM-DD`：仅归档指定日期之前的任务
 - `TASK-ID...`：仅归档指定任务
 
-### 3. 运行归档脚本
+### 2. 运行归档脚本
 
 执行以下命令：
 
@@ -46,7 +37,7 @@ bash .agents/skills/archive-tasks/scripts/archive-tasks.sh [--days N | --before 
 - 全量重建根 / 年 / 月三级 manifest
 - 输出归档与跳过摘要
 
-### 4. 告知用户
+### 3. 告知用户
 
 向用户汇报：
 - 本次归档的任务数量

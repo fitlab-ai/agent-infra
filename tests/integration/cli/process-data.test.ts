@@ -72,17 +72,6 @@ test('local, all and excerpt capture options fail before creating the data root'
   }
 });
 
-test('local source enumeration fails closed while archive migration state exists', () => {
-  const root = fixture();
-  const workspace = path.join(root, '.agents', 'workspace');
-  fs.mkdirSync(path.join(workspace, 'archive', '2026', '01', '01', 'TASK-20260101-000002', 'local'), { recursive: true });
-  fs.writeFileSync(path.join(workspace, 'archive', '2026', '01', '01', 'TASK-20260101-000002', 'local', 'task.md'), 'archive');
-  fs.writeFileSync(path.join(workspace, '.archive-migration-state.json'), '{broken');
-  const result = collectLocalObjects(root);
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.error.message, /Archive unavailable/);
-});
-
 test('unknown data subcommand fails without creating the default root', () => {
   const root = fixture();
   const result = run(root, ['unknown']);

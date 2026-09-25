@@ -158,10 +158,12 @@ test('writeTask enforces the complete workspace state match and mismatch matrix'
   }
 });
 
-test('writeTask fails closed on an archive migration marker without changing archived bytes', () => {
+test('writeTask fails closed while another archive operation holds the lock', () => {
   const { repoRoot, taskMdPath } = fixture('archive');
   const before = fs.readFileSync(taskMdPath);
-  fs.writeFileSync(path.join(repoRoot, '.agents', 'workspace', '.archive-migration-state.json'), '{broken');
+  const lockDir = path.join(repoRoot, '.agents', 'workspace', '.archive-operation-lock');
+  fs.mkdirSync(lockDir);
+  fs.writeFileSync(path.join(lockDir, 'pid'), `${process.pid}\n`);
   const result = writeTask({
     taskRef: TASK_ID,
     expectedState: 'archive',

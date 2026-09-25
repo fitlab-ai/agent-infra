@@ -15,7 +15,7 @@ import type {
 } from './resolve-ref.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
-import { acquireArchiveOperationLock, assertArchiveAvailable } from './archive-migration-state.ts';
+import { acquireArchiveOperationLock } from './archive-operation-lock.ts';
 import { invalidationBlocks, parseInvalidationDocument } from './invalidation.ts';
 import type {
   TableRowDeleteMutation,
@@ -537,7 +537,6 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
   let release: (() => void) | undefined;
   try {
     const workspaceRoot = path.join(resolved.repoRoot, '.agents', 'workspace');
-    assertArchiveAvailable(workspaceRoot);
     release = acquireArchiveOperationLock(workspaceRoot);
     const result = writeTaskCore(request, { ...options, taskLocation: {
       repoRoot: resolved.repoRoot,

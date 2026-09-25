@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -47,130 +47,8 @@ function setupRepo() {
     read(".agents/skills/archive-tasks/scripts/archive-tasks.sh"),
     "utf8"
   );
-  fs.writeFileSync(
-    path.join(repoDir, ".agents/skills/archive-tasks/scripts/migrate-archive.mjs"),
-    read(".agents/skills/archive-tasks/scripts/migrate-archive.mjs"),
-    "utf8"
-  );
-
   return repoDir;
 }
-
-test("archive migration verifies an external backup, writes local checksums, and restores the old tree", () => {
-  const repoDir = setupRepo();
-  const taskId = "TASK-20260301-000101";
-  const taskDir = path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\n---\n# Task\n`);
-  fs.writeFileSync(path.join(taskDir, "note.txt"), "original note\n");
-  fs.writeFileSync(path.join(repoDir, ".agents/workspace/archive/manifest.md"), "navigation\n");
-  const migration = path.join(repoDir, ".agents/skills/archive-tasks/scripts/migrate-archive.mjs");
-  const migrated = spawnSync(process.execPath, [migration], { cwd: repoDir, encoding: "utf8" });
-  assert.equal(migrated.status, 0, migrated.stderr);
-  assert.equal(fs.existsSync(path.join(taskDir, "local/task.md")), true);
-  assert.equal(fs.existsSync(path.join(taskDir, "local/contents.sha256")), true);
-  assert.equal(fs.existsSync(path.join(repoDir, ".agents/workspace/.archive-migration-state.json")), false);
-
-  const backup = fs.readdirSync(path.join(repoDir, ".agents/workspace/archive-backups"))
-    .filter((name) => name.endsWith(".tar"))
-    .map((name) => path.join(repoDir, ".agents/workspace/archive-backups", name))[0]!;
-  const digest = crypto.createHash("sha256").update(fs.readFileSync(backup)).digest("hex");
-  const markerPath = path.join(repoDir, ".agents/workspace/.archive-migration-state.json");
-  fs.writeFileSync(markerPath, JSON.stringify({
-    schema_version: 1,
-    state: "migrating",
-    backup: path.relative(path.join(repoDir, ".agents/workspace"), backup).split(path.sep).join("/"),
-    backup_sha256: digest
-  }));
-  const restored = spawnSync(process.execPath, [migration, "--restore", backup], { cwd: repoDir, encoding: "utf8" });
-  assert.equal(restored.status, 0, restored.stderr);
-  assert.equal(fs.readFileSync(path.join(taskDir, "task.md"), "utf8").includes(taskId), true);
-  assert.equal(fs.readFileSync(path.join(taskDir, "note.txt"), "utf8"), "original note\n");
-  assert.equal(fs.existsSync(markerPath), false);
-});
-
-test("archive migration validates multi-file checksums in path order", () => {
-  const repoDir = setupRepo();
-  const taskId = "TASK-20260301-000104";
-  const taskDir = path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, "task.md"), "a");
-  fs.writeFileSync(path.join(taskDir, "z.txt"), "b");
-  const migration = path.join(repoDir, ".agents/skills/archive-tasks/scripts/migrate-archive.mjs");
-
-  const result = spawnSync(process.execPath, [migration], { cwd: repoDir, encoding: "utf8" });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(path.join(taskDir, "local/task.md"), "utf8"), "a");
-  assert.equal(fs.readFileSync(path.join(taskDir, "local/z.txt"), "utf8"), "b");
-  assert.equal(fs.existsSync(path.join(repoDir, ".agents/workspace/.archive-migration-state.json")), false);
-});
-
-test("archive migration template validates multi-file checksums in path order", () => {
-  const repoDir = setupRepo();
-  const migration = path.join(repoDir, ".agents/skills/archive-tasks/scripts/migrate-archive.mjs");
-  fs.writeFileSync(
-    migration,
-    read("templates/.agents/skills/archive-tasks/scripts/migrate-archive.mjs"),
-    "utf8"
-  );
-  const taskId = "TASK-20260301-000105";
-  const taskDir = path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, "task.md"), "a");
-  fs.writeFileSync(path.join(taskDir, "z.txt"), "b");
-
-  const result = spawnSync(process.execPath, [migration], { cwd: repoDir, encoding: "utf8" });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(path.join(taskDir, "local/task.md"), "utf8"), "a");
-  assert.equal(fs.readFileSync(path.join(taskDir, "local/z.txt"), "utf8"), "b");
-  assert.equal(fs.existsSync(path.join(repoDir, ".agents/workspace/.archive-migration-state.json")), false);
-  fs.rmSync(repoDir, { recursive: true, force: true });
-});
-
-test("a killed migration leaves a marker that blocks a fresh archive writer until restore", async () => {
-  const repoDir = setupRepo();
-  const taskId = "TASK-20260301-000102";
-  const taskDir = path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId);
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\n---\n# Task\n`);
-  const completed = path.join(repoDir, ".agents/workspace/completed/TASK-20260301-000103");
-  fs.mkdirSync(completed, { recursive: true });
-  fs.writeFileSync(path.join(completed, "task.md"), "---\ncompleted_at: 2026-03-01\n---\n# Task\n");
-  const migration = path.join(repoDir, ".agents/skills/archive-tasks/scripts/migrate-archive.mjs");
-  const child = spawn(process.execPath, [migration], {
-    cwd: repoDir,
-    env: { ...process.env, NODE_ENV: "test", ARCHIVE_MIGRATION_TEST_PAUSE: "1" },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  let stdout = "";
-  await new Promise<void>((resolve, reject) => {
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-      stdout += chunk;
-      if (stdout.includes("marker-ready")) resolve();
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`migration exited before marker: ${code}; ${stdout}`)));
-  });
-  child.kill("SIGKILL");
-  await new Promise<void>((resolve) => child.once("exit", () => resolve()));
-
-  const markerPath = path.join(repoDir, ".agents/workspace/.archive-migration-state.json");
-  assert.equal(fs.existsSync(markerPath), true);
-  const writer = spawnSync("sh", [path.join(repoDir, ".agents/skills/archive-tasks/scripts/archive-tasks.sh")], { cwd: repoDir, encoding: "utf8" });
-  assert.notEqual(writer.status, 0);
-  assert.match(writer.stderr, /migration state exists/);
-  assert.equal(fs.existsSync(completed), true);
-
-  const marker = JSON.parse(fs.readFileSync(markerPath, "utf8")) as { backup: string };
-  const backup = path.join(repoDir, ".agents/workspace", marker.backup);
-  const restored = spawnSync(process.execPath, [migration, "--restore", backup], { cwd: repoDir, encoding: "utf8" });
-  assert.equal(restored.status, 0, restored.stderr);
-  assert.equal(fs.existsSync(path.join(taskDir, "task.md")), true);
-  assert.equal(fs.existsSync(markerPath), false);
-  fs.rmSync(repoDir, { recursive: true, force: true });
-});
 
 function writeCompletedTask(
   repoDir: string,
