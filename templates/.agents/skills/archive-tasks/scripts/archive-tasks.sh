@@ -8,9 +8,14 @@ WORKSPACE_ROOT="$REPO_ROOT/.agents/workspace"
 COMPLETED_DIR="$WORKSPACE_ROOT/completed"
 ARCHIVE_DIR="$WORKSPACE_ROOT/archive"
 MANIFEST_PATH="$ARCHIVE_DIR/manifest.md"
+tmpdir=""
+cleanup() {
+  [ -z "$tmpdir" ] || rm -rf "$tmpdir"
+}
+trap 'cleanup' 0
+trap 'cleanup; exit 1' HUP INT TERM
 
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
+tmpdir="$(mktemp -d "$WORKSPACE_ROOT/.archive-tmp.XXXXXX")"
 
 IDS_FILE="$tmpdir/task-ids.txt"
 : > "$IDS_FILE"
@@ -160,6 +165,17 @@ archive_task_dir() {
     return 0
   fi
 
+  find "$task_dir" -name manifest.md -print > "$tmpdir/task-manifests.txt"
+  if [ -s "$tmpdir/task-manifests.txt" ]; then
+    echo "TASK content cannot contain manifest.md: $task_id" >&2
+    return 1
+  fi
+  find "$task_dir" ! -type f ! -type d -print > "$tmpdir/task-special-files.txt"
+  if [ -s "$tmpdir/task-special-files.txt" ]; then
+    echo "TASK content cannot contain symbolic links or special files: $task_id" >&2
+    return 1
+  fi
+
   completed_at=$(extract_completed_at "$task_file")
   task_date=$(printf '%s' "$completed_at" | cut -c1-10)
 
@@ -179,10 +195,87 @@ archive_task_dir() {
     return 0
   fi
 
-  mkdir -p "$ARCHIVE_DIR/$year/$month/$day"
-  mv "$task_dir" "$destination_dir"
+  mkdir -p "$(dirname "$destination_dir")"
+  staged_dir="$tmpdir/$task_id"
+  mkdir -p "$staged_dir/local"
+  cp -R "$task_dir"/. "$staged_dir/local/"
+  write_contents_hash "$staged_dir/local"
+  mv "$staged_dir" "$destination_dir"
+  if ! rm -rf "$task_dir"; then
+    if ! rm -rf "$destination_dir"; then
+      echo "Failed to remove completed task and roll back archive copy: $task_id" >&2
+    else
+      echo "Failed to remove completed task; rolled back archive copy: $task_id" >&2
+    fi
+    return 1
+  fi
   archived_count=$((archived_count + 1))
   printf 'Archived %s -> %s\n' "$task_id" "$relative_path"
+}
+
+write_contents_hash() {
+  local_dir="$1"
+  hash_path=${2:-$local_dir/contents.sha256}
+  hash_tmp="$tmpdir/contents.sha256"
+  newline='
+'
+  : > "$hash_tmp"
+  find "$local_dir" -type f ! -name contents.sha256 | LC_ALL=C sort | while IFS= read -r source_file; do
+    relative_file=${source_file#"$local_dir"/}
+    case "$relative_file" in *"$newline"*|*"$(printf '\r')"*) echo "Newline path is not supported" >&2; return 1 ;; esac
+    if command -v sha256sum >/dev/null 2>&1; then
+      digest=$(sha256sum "$source_file" | awk '{print $1}')
+    else
+      digest=$(shasum -a 256 "$source_file" | awk '{print $1}')
+    fi
+    printf '%s  %s\n' "$digest" "$relative_file" >> "$hash_tmp"
+  done
+  mv "$hash_tmp" "$hash_path"
+  if [ "$hash_path" = "$local_dir/contents.sha256" ] && command -v sha256sum >/dev/null 2>&1; then
+    (cd "$local_dir" && sha256sum -c contents.sha256 >/dev/null)
+  elif [ "$hash_path" = "$local_dir/contents.sha256" ]; then
+    (cd "$local_dir" && shasum -a 256 -c contents.sha256 >/dev/null)
+  fi
+}
+
+validate_source_hash() {
+  source_dir="$1"
+  [ -f "$source_dir/task.md" ] || { echo "Archive source lacks task.md: $source_dir" >&2; return 1; }
+  [ -f "$source_dir/contents.sha256" ] || { echo "Archive source lacks contents.sha256: $source_dir" >&2; return 1; }
+  write_contents_hash "$source_dir" "$tmpdir/contents.expected"
+  if ! cmp -s "$tmpdir/contents.expected" "$source_dir/contents.sha256"; then
+    echo "Archive source checksum mismatch: $source_dir" >&2
+    return 1
+  fi
+}
+
+validate_existing_archive() {
+  [ -d "$ARCHIVE_DIR" ] || return 0
+  for year_dir in "$ARCHIVE_DIR"/[0-9][0-9][0-9][0-9]; do
+    [ -d "$year_dir" ] || continue
+    for month_dir in "$year_dir"/[0-9][0-9]; do
+      [ -d "$month_dir" ] || continue
+      for day_dir in "$month_dir"/[0-9][0-9]; do
+        [ -d "$day_dir" ] || continue
+        for task_dir in "$day_dir"/TASK-*; do
+          [ -d "$task_dir" ] || continue
+          [ -d "$task_dir/local" ] || { echo "Unsupported legacy archive task layout: $task_dir" >&2; return 1; }
+          for task_entry in "$task_dir"/*; do
+            [ -e "$task_entry" ] || continue
+            case "$(basename "$task_entry")" in
+              local|github|derived) [ -d "$task_entry" ] || { echo "Invalid archive source directory: $task_entry" >&2; return 1; } ;;
+              *) echo "Unexpected TASK root entry: $task_entry" >&2; return 1 ;;
+            esac
+          done
+          find "$task_dir/local" -name manifest.md -print > "$tmpdir/task-manifests.txt"
+          [ ! -s "$tmpdir/task-manifests.txt" ] || { echo "TASK content cannot contain manifest.md: $task_dir" >&2; return 1; }
+          find "$task_dir/local" ! -type f ! -type d -print > "$tmpdir/task-special-files.txt"
+          [ ! -s "$tmpdir/task-special-files.txt" ] || { echo "TASK content cannot contain symbolic links or special files: $task_dir" >&2; return 1; }
+          validate_source_hash "$task_dir/local"
+        done
+      done
+    done
+  done
 }
 
 should_archive_filtered_task() {
@@ -231,7 +324,7 @@ rebuild_manifest() {
           [ -d "$task_dir" ] || continue
 
           task_id=$(basename "$task_dir")
-          task_file="$task_dir/task.md"
+          task_file="$task_dir/local/task.md"
           relative_path="$year/$month/$day/$task_id/"
           title="$task_id"
           task_type="unknown"
@@ -261,7 +354,15 @@ rebuild_manifest() {
     done
   done
 
-  find "$ARCHIVE_DIR" -type f -name 'manifest.md' -exec rm -f {} \;
+  rm -f "$ARCHIVE_DIR/manifest.md"
+  for year_dir in "$ARCHIVE_DIR"/[0-9][0-9][0-9][0-9]; do
+    [ -d "$year_dir" ] || continue
+    rm -f "$year_dir/manifest.md"
+    for month_dir in "$year_dir"/[0-9][0-9]; do
+      [ -d "$month_dir" ] || continue
+      rm -f "$month_dir/manifest.md"
+    done
+  done
 
   awk -F'\t' '{print $1 "\t" $2}' "$entries_file" | LC_ALL=C sort -u > "$month_keys_file"
   awk -F'\t' '{print $1}' "$entries_file" | LC_ALL=C sort -u > "$year_keys_file"
@@ -435,6 +536,8 @@ if [ -s "$IDS_FILE" ]; then
 
   MODE="ids"
 fi
+
+validate_existing_archive
 
 archived_count=0
 skipped_count=0

@@ -281,7 +281,7 @@ function writeTaskBranch(
   branch: string
 ): void {
   const taskDir = state === "archive"
-    ? path.join(repoDir, ".agents", "workspace", "archive", "2026", "01", "01", taskId)
+    ? path.join(repoDir, ".agents", "workspace", "archive", "2026", "01", "01", taskId, "local")
     : path.join(repoDir, ".agents", "workspace", state, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nstatus: ${state === "archive" ? "completed" : state}\nbranch: ${branch}\n---\n# body\n`);
@@ -1219,7 +1219,9 @@ for (const workspaceDir of ["completed", "blocked", "archive"]) {
   test(`resolveTaskBranch resolves tasks in ${workspaceDir} directory`, async () => {
     const taskResolver = await loadFreshEsm<typeof import("../../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-sandbox-task-${workspaceDir}-`));
-    const taskDir = path.join(tmpDir, ".agents", "workspace", workspaceDir, "TASK-20260401-180003");
+    const taskDir = workspaceDir === "archive"
+      ? path.join(tmpDir, ".agents", "workspace", workspaceDir, "2026", "04", "01", "TASK-20260401-180003", "local")
+      : path.join(tmpDir, ".agents", "workspace", workspaceDir, "TASK-20260401-180003");
 
     try {
       fs.mkdirSync(taskDir, { recursive: true });

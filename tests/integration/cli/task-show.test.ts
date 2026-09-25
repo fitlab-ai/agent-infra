@@ -79,7 +79,7 @@ test('ai task show <TASK-id> resolves a completed task (flat layout)', () => {
 test('ai task show <TASK-id> resolves an archived task under archive/YYYY/MM/DD/', () => {
   const { repoRoot } = mkFixture();
   // archive-tasks SKILL moves completed tasks into
-  //   .agents/workspace/archive/YYYY/MM/DD/TASK-YYYYMMDD-HHMMSS/task.md
+  //   .agents/workspace/archive/YYYY/MM/DD/TASK-YYYYMMDD-HHMMSS/local/task.md
   // where YYYY/MM/DD comes from completed_at (NOT from the task id timestamp).
   const taskId = 'TASK-20260613-120000';
   const datedDir = path.join(
@@ -90,7 +90,8 @@ test('ai task show <TASK-id> resolves an archived task under archive/YYYY/MM/DD/
     '2026',
     '06',
     '13',
-    taskId
+    taskId,
+    'local'
   );
   fs.mkdirSync(datedDir, { recursive: true });
   fs.writeFileSync(
@@ -118,7 +119,8 @@ test('ai task show <TASK-id> resolves an archived task whose archive date differ
     '2026',
     '06',
     '13', // archive date != task id date (Jun 13 vs Jun 12)
-    taskId
+    taskId,
+    'local'
   );
   fs.mkdirSync(datedDir, { recursive: true });
   fs.writeFileSync(

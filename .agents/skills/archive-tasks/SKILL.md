@@ -7,7 +7,7 @@ description: >
 
 # 归档已完成任务
 
-将 `.agents/workspace/completed/` 中的已完成任务移动到 `.agents/workspace/archive/YYYY/MM/DD/TASK-xxx/`，并重建三级归档索引：
+将 `.agents/workspace/completed/` 中的已完成任务归档到 `.agents/workspace/archive/YYYY/MM/DD/TASK-xxx/local/`，并重建三级归档索引。TASK 本地材料位于 `local/`，含按路径排序的 `contents.sha256`；TASK 根目录不存放普通文件。
 - 根 manifest：`.agents/workspace/archive/manifest.md`
 - 年 manifest：`.agents/workspace/archive/YYYY/manifest.md`
 - 月 manifest：`.agents/workspace/archive/YYYY/MM/manifest.md`
@@ -32,7 +32,7 @@ bash .agents/skills/archive-tasks/scripts/archive-tasks.sh [--days N | --before 
 
 脚本负责：
 - 解析 `task.md` frontmatter 中的 `completed_at`（缺失时回退到 `updated_at`）
-- 按 `YYYY/MM/DD/TASK-xxx/` 目录直接移动任务，不压缩
+- 按 `YYYY/MM/DD/TASK-xxx/local/` 保存任务本地材料，不压缩
 - 跳过已归档、缺少元数据或不存在的任务
 - 全量重建根 / 年 / 月三级 manifest
 - 输出归档与跳过摘要

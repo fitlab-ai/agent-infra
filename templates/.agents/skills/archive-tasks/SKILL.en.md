@@ -7,7 +7,7 @@ description: >
 
 # Archive Completed Tasks
 
-Move completed tasks from `.agents/workspace/completed/` into `.agents/workspace/archive/YYYY/MM/DD/TASK-xxx/` and rebuild a three-level archive index:
+Archive completed tasks from `.agents/workspace/completed/` into `.agents/workspace/archive/YYYY/MM/DD/TASK-xxx/local/` and rebuild a three-level archive index. Local task materials live in `local/` with a path-sorted `contents.sha256`; the TASK root contains no ordinary files.
 - root manifest: `.agents/workspace/archive/manifest.md`
 - yearly manifest: `.agents/workspace/archive/YYYY/manifest.md`
 - monthly manifest: `.agents/workspace/archive/YYYY/MM/manifest.md`
@@ -32,7 +32,7 @@ bash .agents/skills/archive-tasks/scripts/archive-tasks.sh [--days N | --before 
 
 The script is responsible for:
 - reading `completed_at` from `task.md` frontmatter and falling back to `updated_at`
-- moving task directories directly into `YYYY/MM/DD/TASK-xxx/` without compression
+- storing local task materials under `YYYY/MM/DD/TASK-xxx/local/` without compression
 - skipping already archived, missing, or malformed tasks
 - rebuilding root, yearly, and monthly manifests from all archived tasks
 - printing an archive and skip summary

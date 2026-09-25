@@ -81,7 +81,7 @@ function listSortedNumeric(dir: string, width: number): string[] {
 }
 
 function findInArchive(repoRoot: string, taskId: string): string | null {
-  // archive-tasks SKILL writes to .agents/workspace/archive/YYYY/MM/DD/{taskId}/task.md
+  // archive-tasks stores local material at .agents/workspace/archive/YYYY/MM/DD/{taskId}/local/task.md
   // where YYYY/MM/DD comes from completed_at (or updated_at fallback) — NOT from
   // the task id's creation date. So we cannot derive the path from taskId alone;
   // walk the bounded YYYY/MM/DD tree instead. Newest-first to favor recent archives.
@@ -91,7 +91,7 @@ function findInArchive(repoRoot: string, taskId: string): string | null {
     for (const month of listSortedNumeric(yearDir, 2)) {
       const monthDir = path.join(yearDir, month);
       for (const day of listSortedNumeric(monthDir, 2)) {
-        const candidate = path.join(monthDir, day, taskId, 'task.md');
+        const candidate = path.join(monthDir, day, taskId, 'local', 'task.md');
         if (fs.existsSync(candidate)) return candidate;
       }
     }
@@ -162,7 +162,7 @@ function enumerateAllTaskDirs(repoRoot: string): { taskId: string; taskDir: stri
       const monthDir = path.join(yearDir, month);
       for (const day of listSortedNumeric(monthDir, 2).reverse()) {
         const dayDir = path.join(monthDir, day);
-        for (const taskId of fs.readdirSync(dayDir).sort()) add(taskId, path.join(dayDir, taskId), 'archive');
+        for (const taskId of fs.readdirSync(dayDir).sort()) add(taskId, path.join(dayDir, taskId, 'local'), 'archive');
       }
     }
   }

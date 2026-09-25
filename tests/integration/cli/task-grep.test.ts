@@ -44,7 +44,7 @@ function writeTask(
 
 // Write a task dir under the archive YYYY/MM/DD layout.
 function writeArchiveTask(repoRoot: string, taskId: string, files: Record<string, string>): void {
-  const dir = path.join(repoRoot, '.agents', 'workspace', 'archive', '2026', '06', '18', taskId);
+  const dir = path.join(repoRoot, '.agents', 'workspace', 'archive', '2026', '06', '18', taskId, 'local');
   fs.mkdirSync(dir, { recursive: true });
   if (!files['task.md']) {
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\nbranch: feat\n---\n# ${taskId}\n`);

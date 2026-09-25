@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import {
@@ -223,7 +224,7 @@ function errorDetails(error: unknown, fallback: TaskWriteErrorCode): TaskWriteEr
   };
 }
 
-function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
+function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
   const resolved = options.taskLocation
     ? {
         ok: true as const,
@@ -477,6 +478,119 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
     );
   }
   return { ...successBase, status: 'applied', changed: true };
+}
+
+function archiveContentsHash(localDir: string): string {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.includes('\n') || entry.name.includes('\r') || entry.name === 'manifest.md') {
+        throw new Error(`Archive source path is not valid: ${path.join(dir, entry.name)}`);
+      }
+      const target = path.join(dir, entry.name);
+      const stat = fs.lstatSync(target);
+      if (stat.isSymbolicLink()) throw new Error(`Archive source cannot contain symbolic links: ${target}`);
+      if (stat.isDirectory()) walk(target);
+      else if (stat.isFile()) {
+        if (entry.name !== 'contents.sha256') files.push(target);
+      }
+      else throw new Error(`Archive source cannot contain special files: ${target}`);
+    }
+  };
+  walk(localDir);
+  const rows = files
+    .map((file) => ({ file, relative: path.relative(localDir, file).split(path.sep).join('/') }))
+    .sort((left, right) => Buffer.compare(Buffer.from(left.relative), Buffer.from(right.relative)))
+    .map(({ file, relative }) => `${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ${relative}`);
+  return `${rows.join('\n')}${rows.length ? '\n' : ''}`;
+}
+
+function writeArchiveContentsHash(localDir: string): void {
+  const contents = archiveContentsHash(localDir);
+  const hashPath = path.join(localDir, 'contents.sha256');
+  const tempPath = path.join(localDir, `.contents.sha256.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+  try {
+    fs.writeFileSync(tempPath, contents, { flag: 'wx' });
+    fs.renameSync(tempPath, hashPath);
+  } catch (error) {
+    try {
+      fs.unlinkSync(tempPath);
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; failed to remove ${tempPath}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      }
+    }
+    throw error;
+  }
+}
+
+function restoreArchivedTask(taskMdPath: string, contents: Buffer, mode: number): void {
+  const tempPath = `${taskMdPath}.${process.pid}.${Math.random().toString(36).slice(2)}.rollback`;
+  fs.writeFileSync(tempPath, contents, { flag: 'wx', mode });
+  try {
+    fs.renameSync(tempPath, taskMdPath);
+  } catch (error) {
+    try {
+      fs.unlinkSync(tempPath);
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; failed to remove ${tempPath}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      }
+    }
+    throw error;
+  }
+}
+
+function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
+  const resolved = options.taskLocation
+    ? {
+        ok: true as const,
+        repoRoot: options.taskLocation.repoRoot,
+        taskId: options.taskLocation.taskId,
+        taskDir: path.dirname(options.taskLocation.taskMdPath),
+        taskMdPath: options.taskLocation.taskMdPath,
+        state: options.taskLocation.state
+      }
+    : resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) {
+    return failure(request, { taskId: resolved.taskId, taskMdPath: null, actualState: null }, resolved.code, resolved.message);
+  }
+  if (resolved.state !== 'archive' || request.expectedState !== 'archive' || request.dryRun) {
+    return writeTaskCore(request, { ...options, taskLocation: {
+      repoRoot: resolved.repoRoot,
+      taskId: resolved.taskId,
+      taskMdPath: resolved.taskMdPath,
+      state: resolved.state
+    } });
+  }
+
+  const identity = { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, actualState: resolved.state };
+  try {
+    const originalTask = fs.readFileSync(resolved.taskMdPath);
+    const originalMode = fs.statSync(resolved.taskMdPath).mode;
+    archiveContentsHash(resolved.taskDir);
+    const result = writeTaskCore(request, { ...options, taskLocation: {
+      repoRoot: resolved.repoRoot,
+      taskId: resolved.taskId,
+      taskMdPath: resolved.taskMdPath,
+      state: resolved.state
+    } });
+    if (result.status === 'applied') {
+      try {
+        writeArchiveContentsHash(resolved.taskDir);
+      } catch (error) {
+        try {
+          restoreArchivedTask(resolved.taskMdPath, originalTask, originalMode);
+        } catch (rollbackError) {
+          throw new Error(`Archive checksum update failed: ${error instanceof Error ? error.message : String(error)}; task rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        }
+        throw error;
+      }
+    }
+    return result;
+  } catch (error) {
+    return failure(request, identity, 'TASK_READ_FAILED', error instanceof Error ? error.message : String(error));
+  }
 }
 
 export { writeTask, captureTaskWriteMetadata, canonicalTimestamp };
