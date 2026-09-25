@@ -952,9 +952,10 @@ function mergeArchiveSection(sourceArchive: string, localArchive: string, report
       continue;
     }
 
-    const destinationDir = path.join(localArchive, task.relativePath, 'local');
+    const sourceTaskDir = path.dirname(task.taskDir);
+    const destinationDir = path.join(localArchive, task.relativePath);
     fs.mkdirSync(path.dirname(destinationDir), { recursive: true });
-    fs.cpSync(task.taskDir, destinationDir, { recursive: true });
+    fs.cpSync(sourceTaskDir, destinationDir, { recursive: true });
     recordArchive(report, 'copied', {
       action: 'copied',
       symbol: '✓',

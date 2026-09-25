@@ -169,6 +169,25 @@ function snapshotTree(rootDir: string): string[] {
   return entries.sort();
 }
 
+function rewriteContentsHash(sourceDir: string) {
+  const files: string[] = [];
+  const walk = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) walk(file);
+      else if (entry.name !== 'contents.sha256') files.push(file);
+    }
+  };
+  walk(sourceDir);
+  const lines = files
+    .sort((left, right) => Buffer.compare(
+      Buffer.from(path.relative(sourceDir, left).split(path.sep).join('/')),
+      Buffer.from(path.relative(sourceDir, right).split(path.sep).join('/'))
+    ))
+    .map((file) => `${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ${path.relative(sourceDir, file).split(path.sep).join('/')}`);
+  fs.writeFileSync(path.join(sourceDir, 'contents.sha256'), `${lines.join('\n')}\n`, 'utf8');
+}
+
 test('merge copies new archived tasks and rebuilds manifests', () => {
   const repoDir = makeTempRepo();
   const sourceDir = makeTempWorkspace(repoDir);
@@ -192,6 +211,41 @@ test('merge copies new archived tasks and rebuilds manifests', () => {
     assert.match(output, /Totals: 1 copied, 0 updated, 0 moved, 0 skipped/);
     assert.match(read(path.join(archiveRoot, 'manifest.md')), /\| 2026 \| 1 \| \[2026\/manifest\.md\]\(2026\/manifest\.md\) \|/);
     assert.match(read(path.join(archiveRoot, '2026/03/manifest.md')), /\| TASK-20260320-111111 \| 同步归档 \| feature \| 2026-03-20 11:11:11 \| 2026\/03\/20\/TASK-20260320-111111\/ \|/);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge preserves all validated archive source directories', () => {
+  const repoDir = makeTempRepo();
+  const sourceDir = makeTempWorkspace(repoDir);
+  const taskId = 'TASK-20260320-111112';
+
+  try {
+    const localSource = writeTask(path.join(sourceDir, 'archive'), '2026/03/20', taskId, {
+      title: 'multi-source archive task',
+      completedAt: '2026-03-20 11:11:12'
+    });
+    const taskRoot = path.dirname(localSource);
+    const captureDir = path.join(taskRoot, 'github/capture-20260320');
+    const derivedDir = path.join(taskRoot, 'derived/summary');
+    fs.mkdirSync(captureDir, { recursive: true });
+    fs.writeFileSync(path.join(captureDir, 'capture.md'), '# Capture\n');
+    fs.writeFileSync(path.join(captureDir, 'details.md'), 'captured detail\n');
+    rewriteContentsHash(captureDir);
+    fs.mkdirSync(derivedDir, { recursive: true });
+    fs.writeFileSync(path.join(derivedDir, 'inputs.md'), 'github/capture-20260320/capture.md\n');
+    fs.writeFileSync(path.join(derivedDir, 'summary.md'), 'derived summary\n');
+    rewriteContentsHash(localSource);
+
+    execFileSync(process.execPath, cliArgs('merge', sourceDir), { cwd: repoDir, encoding: 'utf8' });
+
+    const destination = path.join(repoDir, '.agents/workspace/archive/2026/03/20', taskId);
+    assert.equal(fs.readFileSync(path.join(destination, 'local/task.md'), 'utf8').includes(taskId), true);
+    assert.equal(fs.readFileSync(path.join(destination, 'github/capture-20260320/capture.md'), 'utf8'), '# Capture\n');
+    assert.equal(fs.readFileSync(path.join(destination, 'github/capture-20260320/contents.sha256'), 'utf8'), fs.readFileSync(path.join(captureDir, 'contents.sha256'), 'utf8'));
+    assert.equal(fs.readFileSync(path.join(destination, 'derived/summary/inputs.md'), 'utf8'), 'github/capture-20260320/capture.md\n');
+    assert.equal(fs.readFileSync(path.join(destination, 'derived/summary/summary.md'), 'utf8'), 'derived summary\n');
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }

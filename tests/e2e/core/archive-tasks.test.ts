@@ -89,6 +89,23 @@ test("archive migration verifies an external backup, writes local checksums, and
   assert.equal(fs.existsSync(markerPath), false);
 });
 
+test("archive migration validates multi-file checksums in path order", () => {
+  const repoDir = setupRepo();
+  const taskId = "TASK-20260301-000104";
+  const taskDir = path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "task.md"), "a");
+  fs.writeFileSync(path.join(taskDir, "z.txt"), "b");
+  const migration = path.join(repoDir, ".agents/skills/archive-tasks/scripts/migrate-archive.mjs");
+
+  const result = spawnSync(process.execPath, [migration], { cwd: repoDir, encoding: "utf8" });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(taskDir, "local/task.md"), "utf8"), "a");
+  assert.equal(fs.readFileSync(path.join(taskDir, "local/z.txt"), "utf8"), "b");
+  assert.equal(fs.existsSync(path.join(repoDir, ".agents/workspace/.archive-migration-state.json")), false);
+});
+
 test("a killed migration leaves a marker that blocks a fresh archive writer until restore", async () => {
   const repoDir = setupRepo();
   const taskId = "TASK-20260301-000102";
