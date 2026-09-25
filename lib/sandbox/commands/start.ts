@@ -86,7 +86,7 @@ export async function start(args: string[]): Promise<void> {
     forceRecreate: parsed.recreate,
     recreate: async () => {
       const { create } = await import('./create.ts');
-      await create([target.requestedRef, '--no-refresh']);
+      await create([target.requestedRef, '--no-refresh'], { runProjectInitCommand: false });
     }
   });
   const message = ready.path === 'healthy'

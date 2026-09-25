@@ -1008,7 +1008,10 @@ function readImageLabels(config: Pick<SandboxCreateConfig, 'imageName'> & Pick<S
   ]));
 }
 
-export async function create(args: string[]): Promise<void> {
+export async function create(
+  args: string[],
+  { runProjectInitCommand = true }: { runProjectInitCommand?: boolean } = {}
+): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -1728,7 +1731,7 @@ export async function create(args: string[]): Promise<void> {
             );
           }
 
-          if (effectiveConfig.initCommand !== null) {
+          if (runProjectInitCommand && effectiveConfig.initCommand !== null) {
             try {
               runVerboseEngine(engine, 'docker', [
                 'exec', '--workdir', '/workspace', container, 'bash', '-lc', effectiveConfig.initCommand

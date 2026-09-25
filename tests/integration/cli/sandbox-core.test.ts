@@ -1677,6 +1677,72 @@ test("sandbox start is a no-op when the container is already running", onPlatfor
   }
 });
 
+test("sandbox start --recreate does not rerun project init for an existing sandbox", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-recreate-init-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { initCommand: "npm ci" },
+      dockerStdoutForPs: "demo-dev-feature..restart\tUp 3 minutes\tdemo.sandbox.branch=feature/restart"
+    });
+    fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
+    execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json"], { env: gitSafeEnv() });
+    execFileSync("git", ["-C", fixture.repoDir, "add", ".gitignore"], { env: gitSafeEnv() });
+    execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
+    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..restart");
+    fs.mkdirSync(path.dirname(worktree), { recursive: true });
+    execFileSync("git", ["-C", fixture.repoDir, "worktree", "add", "-b", "feature/restart", worktree, "main"], { env: gitSafeEnv() });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["start", "--recreate", "feature/restart"]);
+
+    assert.equal(result.signal, null);
+    assert.match(`${result.stdout}\n${result.stderr}`, /Sandbox ready/);
+    assert.match(result.stderr, /Replacement sandbox container was not found in a running state/);
+    const calls = fixture.readDockerCalls();
+    assert.ok(calls.some((call) => call[0] === "rm" && call.at(-1) === "demo-dev-feature..restart"));
+    assert.ok(calls.some((call) => call[0] === "run"));
+    assert.equal(calls.some((call) => call[0] === "exec" && call.at(-1) === "npm ci"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox exec --recreate does not rerun project init for an existing sandbox", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-exec-recreate-init-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { initCommand: "npm ci" },
+      dockerStdoutForPs: "demo-dev-feature..restart\tUp 3 minutes\tdemo.sandbox.branch=feature/restart"
+    });
+    fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
+    execFileSync("git", ["-C", fixture.repoDir, "add", ".agents/.airc.json", ".gitignore"], { env: gitSafeEnv() });
+    execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox-test@example.com", "commit", "-m", "initial"], { env: gitSafeEnv() });
+    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..restart");
+    fs.mkdirSync(path.dirname(worktree), { recursive: true });
+    execFileSync("git", ["-C", fixture.repoDir, "worktree", "add", "-b", "feature/restart", worktree, "main"], { env: gitSafeEnv() });
+
+    const result = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["exec", "--recreate", "feature/restart"],
+      { DOCKER_INSPECT_NO_MOUNTS: "1" }
+    );
+
+    assert.equal(result.signal, null);
+    assert.match(`${result.stdout}\n${result.stderr}`, /Container started/);
+    assert.match(result.stderr, /Fresh sandbox readiness check failed/);
+    const calls = fixture.readDockerCalls();
+    assert.ok(calls.some((call) => call[0] === "rm" && call.at(-1) === "demo-dev-feature..restart"));
+    assert.ok(calls.some((call) => call[0] === "run"));
+    assert.equal(calls.some((call) => call[0] === "exec" && call.at(-1) === "npm ci"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox start surfaces a distinct error when docker start fails", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-fail-"));
 

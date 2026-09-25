@@ -169,7 +169,7 @@ export async function enter(args: string[]): Promise<number> {
     allowRecreate: parsed.recreate,
     recreate: async () => {
       const { create } = await import('./create.ts');
-      await create([target.requestedRef, '--no-refresh']);
+      await create([target.requestedRef, '--no-refresh'], { runProjectInitCommand: false });
     }
   });
   const container = ready.container;
