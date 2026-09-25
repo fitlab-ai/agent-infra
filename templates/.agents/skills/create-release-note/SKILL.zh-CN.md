@@ -53,6 +53,7 @@ agent-infra-internal platform-release-notes context \
 
 **用途**：
 - Part A：分析最近 3 条历史发布说明的章节结构、标题风格、emoji 使用、条目格式
+- 每项 `history` 含 tag、正文和 Release URL；正文只作为格式样例，不作为当前版本的变更事实
 - Part B：提供静态完整分类清单，确保后续生成时不遗漏已有分类
 - 该静态清单用于确保变更分类时不遗漏已有类别名称；若当前版本无该类变更，仍按步骤 7 的格式规则省略空分类
 - 后续步骤 7 生成发布说明时，**必须**同时参考步骤 3 的历史格式风格和完整分类清单，保持版本间的一致性
@@ -60,7 +61,7 @@ agent-infra-internal platform-release-notes context \
 
 ### 4. 收集已合并的 PR 与贡献者
 
-使用步骤 3 返回的 `pullRequests` 与 `commits`。每个 commit 的 `authors` 已按平台事实规范化并包含 git author 与 co-author；技能不读取平台原始字段或邮箱规则。
+使用步骤 3 返回的 `pullRequests` 与 `commits`。每个 commit 的 `authors` 只包含该 commit 的平台作者；`pullRequestNumbers` 表示平台记录的 PR 关联。技能不读取平台原始字段或邮箱规则。PR 的 `closingIssues` 是该 PR 实际关闭的 Issue，不按 PR/Issue 编号推断关联。
 
 ### 5. 收集关联 Issue
 
@@ -79,31 +80,36 @@ agent-infra-internal platform-release-notes context \
 
 ### 7. 生成发布说明
 
-**优先使用步骤 3 中获取的历史格式风格，并确保覆盖步骤 3 列出的所有分类。** 如果存在历史发布说明，严格沿用其章节结构、标题风格（含 emoji）、条目格式和双语布局。
+**优先使用步骤 3 中获取的历史格式风格，并确保覆盖步骤 3 列出的所有分类。** 每次动态参考最近 3 条已发布说明；把这些正文共同使用的章节、双语布局和安装段作为稳定格式，条目内容按当前版本变化。不要把样例中的作者或链接复制到当前版本。
 
 如果没有历史发布说明，使用以下默认格式化为 Markdown：
 
 ```markdown
-## {模块/平台名称}
+## {Module / 模块}
 
-### Enhancement
-
-- [{scope}] Description by @author in [#N](url)
-
-### Bugfix
+### Enhancement / 增强
 
 - [{scope}] Description by @author in [#N](url)
 
-## Contributors
+### Bugfix / 修复
+
+- [{scope}] Description by @author in [#N](url)
+
+## Contributors / 贡献者
 
 @contributor1, @contributor2, @contributor3, @reporter1 (reported #N)
+
+## Installation / 安装
+
+{本版本的中英文安装说明，沿用历史正文中的稳定安装步骤}
 ```
 
 **格式规则**：
-1. 条目格式：`- [scope] Description by @author in [#N](url)`
-2. Issue + PR：`in [#Issue](url) and [#PR](url)`
-3. 描述：使用 PR 标题，移除 `type(scope):` 前缀，首字母大写
-4. **贡献者搜集**：
+1. PR 条目格式：`- [scope] Description by @author in [#N](url)`
+2. Issue + PR：`in [#Issue](url) and [#PR](url)`；Issue reporter 来自该 PR 的 `closingIssues`
+3. `pullRequestNumbers` 为空的 commit 单独作为条目，使用 commit subject 和可解析作者；有 commit URL 时链接 commit 本身，不添加 Issue/PR 链接
+4. 描述：使用 PR 标题或 commit subject；移除 PR 标题中的 `type(scope):` 前缀，首字母大写
+5. **贡献者搜集**：
    - **数据源**：
      - PR author：来自 `.agents/rules/release-commands.md` 中已合并 PR 查询规则
      - Commit co-authors：来自步骤 3 typed context 的 commit `authors`
@@ -123,7 +129,7 @@ agent-infra-internal platform-release-notes context \
      - 仅报告贡献的用户以 `@login (reported #N)` 格式展示；同一 reporter 报告多个 Issue 时使用 `@login (reported #N1, #N2)`
      - Reporter 在 Contributors 段落中排在代码贡献者之后，以逗号分隔追加
      - Reporter 之间按报告的 Issue 数量降序排列，数量相同时按 login 字典序
-5. 空部分：省略没有条目的部分
+6. 空部分：省略没有条目的分类；保留历史格式中的双语章节与安装段
 
 ### 8. Stage、展示并确认
 

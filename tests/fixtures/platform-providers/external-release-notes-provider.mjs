@@ -31,10 +31,9 @@ export default async function createPlatformProvider(input) {
         return {
           ok: true,
           value: {
-            history: request.commitOids.map((sha) => ({ sha, message: '', authoredAt: request.toTime, author: null })),
+            history: [],
+            commits: request.commitOids.map((sha) => ({ sha, url: null, pullRequestNumbers: [], authors: [] })),
             mergedPullRequests: [],
-            closingIssues: [],
-            actors: []
           }
         };
       }

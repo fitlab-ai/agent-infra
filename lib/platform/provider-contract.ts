@@ -221,16 +221,39 @@ type RepositoryMetadataSnapshot = {
   }>;
 };
 
+type ReleaseNoteAuthor = {
+  name: string;
+  login: string | null;
+  bot: boolean;
+  resolution: 'platform-user' | 'platform-noreply' | 'unresolved';
+};
+
+type ReleaseNoteIssue = {
+  id: string;
+  identity: ResourceIdentity;
+  number: number;
+  title: string;
+  displayUrl: string;
+  author: ReleaseNoteAuthor | null;
+};
+
+type ReleaseNotePullRequest = {
+  id: string;
+  identity: ResourceIdentity;
+  number: number;
+  title: string;
+  body: string;
+  mergedAt: string;
+  displayUrl: string;
+  labels: string[];
+  author: ReleaseNoteAuthor | null;
+  closingIssues: ReleaseNoteIssue[];
+};
+
 type ReleaseNotesFacts = {
-  history: Array<{
-    sha: string;
-    message: string;
-    authoredAt: string;
-    author: { id?: string; name?: string } | null;
-  }>;
-  mergedPullRequests: Array<ChangeRequestSnapshot>;
-  closingIssues: Array<IssueSnapshot>;
-  actors: Array<{ id?: string; name?: string }>;
+  history: Array<{ tag: string; body: string; url: string | null }>;
+  commits: Array<{ sha: string; url: string | null; pullRequestNumbers: number[]; authors: ReleaseNoteAuthor[] }>;
+  mergedPullRequests: ReleaseNotePullRequest[];
 };
 
 type MilestoneReconciliation = {
@@ -249,14 +272,14 @@ type VerificationRemoteFacts = {
 
 type PlatformProviderFactoryInput = {
   providerType: string;
-  contractVersion: 1;
+  contractVersion: 2;
   repositoryRoot: string;
   config: Readonly<Record<string, JsonValue>>;
 };
 
 type PlatformProvider = {
   type: string;
-  contractVersion: 1;
+  contractVersion: 2;
   identity?: ProviderIdentityDeclaration;
   context: {
     resolve(input: {
@@ -466,7 +489,7 @@ type PlatformProviderFactory = (
   input: PlatformProviderFactoryInput
 ) => Promise<PlatformProvider>;
 
-const PLATFORM_PROVIDER_CONTRACT_VERSION = 1 as const;
+const PLATFORM_PROVIDER_CONTRACT_VERSION = 2 as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -605,6 +628,9 @@ export type {
   RequiredCheckSnapshot,
   RepositoryMetadataSnapshot,
   ReleaseNotesFacts,
+  ReleaseNoteAuthor,
+  ReleaseNoteIssue,
+  ReleaseNotePullRequest,
   ResourceIdentity,
   SecurityAlertKind,
   SecurityAlertSnapshot,

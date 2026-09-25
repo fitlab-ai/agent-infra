@@ -53,6 +53,7 @@ agent-infra-internal platform-release-notes context \
 
 **Purpose**:
 - Part A: Analyze the section structure, heading style, emoji usage, and item format from the latest 3 historical release notes
+- Each `history` item contains a tag, body, and Release URL; use the body as a format sample, not as current change facts
 - Part B: Provide a static complete category list so no existing category is omitted
 - This static list ensures existing category names are not missed during classification; if the current release has no entries for a category, Step 7 still omits the empty section
 - When generating release notes in Step 7, **must** follow both the historical format style and the full category list gathered in Step 3
@@ -60,7 +61,7 @@ agent-infra-internal platform-release-notes context \
 
 ### 4. Collect Merged PRs and Contributors
 
-Use `pullRequests` and `commits` from Step 3. Each commit's `authors` are normalized platform facts containing the git author and co-authors; the skill does not interpret raw platform fields or email rules.
+Use `pullRequests` and `commits` from Step 3. Each commit's `authors` contains only that commit's platform authors; `pullRequestNumbers` records the platform's PR associations. The skill does not interpret raw platform fields or email rules. A PR's `closingIssues` contains its actual closing Issues; never infer a relationship from matching PR and Issue numbers.
 
 ### 5. Collect Related Issues
 
@@ -79,31 +80,36 @@ Use each PR's `closingIssues` from Step 3. Do not parse platform-specific refere
 
 ### 7. Generate Release Notes
 
-**Prioritize the historical format style obtained in Step 3 and ensure all categories listed in Step 3 are covered.** If historical release notes exist, strictly follow their section structure, heading style (including emojis), item format, and bilingual layout.
+**Prioritize the historical format style obtained in Step 3 and ensure all categories listed in Step 3 are covered.** Dynamically use the latest 3 published notes each time. Treat sections, bilingual layout, and installation instructions shared by those notes as stable format; allow item content to vary by release. Never copy an example's authors or links into the current release.
 
 If no historical release notes exist, use the following default Markdown format:
 
 ```markdown
-## {Module/Platform Name}
+## {Module / 模块}
 
-### Enhancement
-
-- [{scope}] Description by @author in [#N](url)
-
-### Bugfix
+### Enhancement / 增强
 
 - [{scope}] Description by @author in [#N](url)
 
-## Contributors
+### Bugfix / 修复
+
+- [{scope}] Description by @author in [#N](url)
+
+## Contributors / 贡献者
 
 @contributor1, @contributor2, @contributor3, @reporter1 (reported #N)
+
+## Installation / 安装
+
+{English and Chinese installation instructions for this release, following stable steps in historical notes}
 ```
 
 **Format rules**:
-1. Item format: `- [scope] Description by @author in [#N](url)`
-2. Issue + PR: `in [#Issue](url) and [#PR](url)`
-3. Description: Use PR title, remove `type(scope):` prefix, capitalize first letter
-4. **Contributor collection**:
+1. PR item format: `- [scope] Description by @author in [#N](url)`
+2. Issue + PR: `in [#Issue](url) and [#PR](url)`; Issue reporters come from that PR's `closingIssues`
+3. Render each commit with an empty `pullRequestNumbers` as a standalone item using its subject and resolvable author; link to the commit itself when its URL is available, without adding an Issue or PR link
+4. Description: Use the PR title or commit subject; remove `type(scope):` from PR titles and capitalize the first letter
+5. **Contributor collection**:
    - **Data sources**:
      - PR authors from the typed context
      - Commit co-authors from the typed context's commit `authors`
@@ -123,7 +129,7 @@ If no historical release notes exist, use the following default Markdown format:
      - Reporter-only contributors use the format `@login (reported #N)`; if the same reporter reported multiple Issues, use `@login (reported #N1, #N2)`
      - Reporters are appended after code contributors in the Contributors section, separated by commas
      - Sort reporters by reported Issue count descending, then lexicographically by login for ties
-5. Empty sections: Omit sections with no entries
+6. Empty sections: Omit categories with no entries; retain bilingual headings and the installation section from the historical format
 
 ### 8. Stage, Present, and Confirm
 
