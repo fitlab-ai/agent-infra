@@ -79,7 +79,7 @@ test('ai task show <TASK-id> resolves a completed task (flat layout)', () => {
 test('ai task show <TASK-id> resolves an archived task under archive/YYYY/MM/DD/', () => {
   const { repoRoot } = mkFixture();
   // archive-tasks SKILL moves completed tasks into
-  //   .agents/workspace/archive/YYYY/MM/DD/TASK-YYYYMMDD-HHMMSS/task.md
+  //   .agents/workspace/archive/YYYY/MM/DD/TASK-YYYYMMDD-HHMMSS/local/task.md
   // where YYYY/MM/DD comes from completed_at (NOT from the task id timestamp).
   const taskId = 'TASK-20260613-120000';
   const datedDir = path.join(
@@ -90,7 +90,8 @@ test('ai task show <TASK-id> resolves an archived task under archive/YYYY/MM/DD/
     '2026',
     '06',
     '13',
-    taskId
+    taskId,
+    'local'
   );
   fs.mkdirSync(datedDir, { recursive: true });
   fs.writeFileSync(
@@ -118,7 +119,8 @@ test('ai task show <TASK-id> resolves an archived task whose archive date differ
     '2026',
     '06',
     '13', // archive date != task id date (Jun 13 vs Jun 12)
-    taskId
+    taskId,
+    'local'
   );
   fs.mkdirSync(datedDir, { recursive: true });
   fs.writeFileSync(
@@ -129,6 +131,23 @@ test('ai task show <TASK-id> resolves an archived task whose archive date differ
   const out = runCli(['task', 'show', '--task', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /archived-cross-day/);
+});
+
+test('archive lookup fails closed on a malformed migration marker while hot tasks remain readable', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const hotId = 'TASK-20260612-120001';
+  const coldId = 'TASK-20260612-120002';
+  writeTask(activeDir, hotId, 'feature-hot');
+  const local = path.join(repoRoot, '.agents/workspace/archive/2026/06/13', coldId, 'local');
+  fs.mkdirSync(local, { recursive: true });
+  fs.writeFileSync(path.join(local, 'task.md'), `---\nid: ${coldId}\nbranch: archived\n---\n# archived\n`);
+  fs.writeFileSync(path.join(repoRoot, '.agents/workspace/.archive-migration-state.json'), '{broken');
+
+  const hot = runCli(['task', 'show', '--task', hotId], repoRoot);
+  assert.equal(hot.status, 0, hot.stderr);
+  const cold = runCli(['task', 'show', '--task', coldId], repoRoot);
+  assert.equal(cold.status, 1);
+  assert.match(cold.stderr, /Archive unavailable/);
 });
 
 test('ai task show <reserved> rejects 0', () => {

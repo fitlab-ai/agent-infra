@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { normalizeShortIdInput, resolveShortIdReadOnly } from './short-id.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
+import { assertArchiveAvailable } from './archive-migration-state.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 // Flat-structured workspace dirs that hold tasks under `{dir}/{taskId}/task.md`.
@@ -44,7 +45,8 @@ type ResolveTaskRefErrorCode =
   | 'TASK_CONTEXT_DETACHED_HEAD'
   | 'TASK_CONTEXT_NOT_FOUND'
   | 'TASK_CONTEXT_AMBIGUOUS'
-  | 'TASK_CONTEXT_UNREADABLE';
+  | 'TASK_CONTEXT_UNREADABLE'
+  | 'ARCHIVE_OPERATION_UNAVAILABLE';
 
 type ResolveTaskRefOptions = { repoRoot?: string };
 
@@ -81,17 +83,18 @@ function listSortedNumeric(dir: string, width: number): string[] {
 }
 
 function findInArchive(repoRoot: string, taskId: string): string | null {
-  // archive-tasks SKILL writes to .agents/workspace/archive/YYYY/MM/DD/{taskId}/task.md
+  // archive-tasks stores local material at .agents/workspace/archive/YYYY/MM/DD/{taskId}/local/task.md
   // where YYYY/MM/DD comes from completed_at (or updated_at fallback) — NOT from
   // the task id's creation date. So we cannot derive the path from taskId alone;
   // walk the bounded YYYY/MM/DD tree instead. Newest-first to favor recent archives.
   const archiveDir = path.join(repoRoot, '.agents', 'workspace', 'archive');
+  assertArchiveAvailable(path.join(repoRoot, '.agents', 'workspace'));
   for (const year of listSortedNumeric(archiveDir, 4)) {
     const yearDir = path.join(archiveDir, year);
     for (const month of listSortedNumeric(yearDir, 2)) {
       const monthDir = path.join(yearDir, month);
       for (const day of listSortedNumeric(monthDir, 2)) {
-        const candidate = path.join(monthDir, day, taskId, 'task.md');
+        const candidate = path.join(monthDir, day, taskId, 'local', 'task.md');
         if (fs.existsSync(candidate)) return candidate;
       }
     }
@@ -156,13 +159,14 @@ function enumerateAllTaskDirs(repoRoot: string): { taskId: string; taskDir: stri
   }
 
   const archive = path.join(repoRoot, '.agents', 'workspace', 'archive');
+  assertArchiveAvailable(path.join(repoRoot, '.agents', 'workspace'));
   for (const year of listSortedNumeric(archive, 4).reverse()) {
     const yearDir = path.join(archive, year);
     for (const month of listSortedNumeric(yearDir, 2).reverse()) {
       const monthDir = path.join(yearDir, month);
       for (const day of listSortedNumeric(monthDir, 2).reverse()) {
         const dayDir = path.join(monthDir, day);
-        for (const taskId of fs.readdirSync(dayDir).sort()) add(taskId, path.join(dayDir, taskId), 'archive');
+        for (const taskId of fs.readdirSync(dayDir).sort()) add(taskId, path.join(dayDir, taskId, 'local'), 'archive');
       }
     }
   }
@@ -239,7 +243,18 @@ function resolveTaskRef(arg: string, options: ResolveTaskRefOptions = {}): Resol
     }
     taskId = shortResult.taskId;
   }
-  const located = findTaskMd(repoRoot, taskId);
+  let located: { taskMdPath: string; state: TaskWorkspaceState } | null;
+  try {
+    located = findTaskMd(repoRoot, taskId);
+  } catch (error) {
+    return {
+      ok: false,
+      code: 'ARCHIVE_OPERATION_UNAVAILABLE',
+      message: error instanceof Error ? error.message : String(error),
+      repoRoot,
+      taskId
+    };
+  }
   if (!located) {
     return {
       ok: false,

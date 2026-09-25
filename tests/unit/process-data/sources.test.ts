@@ -105,7 +105,7 @@ test('all-state enumeration includes the dated archive while local capture exclu
     path.join(root, '.agents', 'workspace', 'active', ids[0]!),
     path.join(root, '.agents', 'workspace', 'blocked', ids[1]!),
     path.join(root, '.agents', 'workspace', 'completed', ids[2]!),
-    path.join(root, '.agents', 'workspace', 'archive', '2026', '01', '01', ids[3]!)
+    path.join(root, '.agents', 'workspace', 'archive', '2026', '01', '01', ids[3]!, 'local')
   ];
   for (const [index, directory] of dirs.entries()) {
     fs.mkdirSync(directory, { recursive: true });

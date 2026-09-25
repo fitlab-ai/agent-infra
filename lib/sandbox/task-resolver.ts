@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isRemovedHashShortIdInput } from '../task/short-id.ts';
+import { assertArchiveAvailable } from '../task/archive-migration-state.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const SHORT_ID_RE = /^\d+$/;
@@ -36,7 +37,10 @@ function stripQuotes(value: string): string {
 
 function readTaskContent(repoRoot: string, taskId: string): { content: string; state: TaskWorkspaceState; taskMd: string } {
   for (const state of TASK_WORKSPACE_STATES) {
-    const taskPath = path.join(repoRoot, '.agents', 'workspace', state, taskId, 'task.md');
+    if (state === 'archive') assertArchiveAvailable(path.join(repoRoot, '.agents', 'workspace'));
+    const taskPath = state === 'archive'
+      ? path.join(repoRoot, '.agents', 'workspace', state, ...findArchiveTaskParts(repoRoot, taskId), 'local', 'task.md')
+      : path.join(repoRoot, '.agents', 'workspace', state, taskId, 'task.md');
     if (fs.existsSync(taskPath)) {
       return { content: fs.readFileSync(taskPath, 'utf8'), state, taskMd: taskPath };
     }
@@ -45,7 +49,7 @@ function readTaskContent(repoRoot: string, taskId: string): { content: string; s
 }
 
 function taskWorkspaceCandidates(repoRoot: string, taskId: string): TaskWorkspace[] {
-  return TASK_WORKSPACE_STATES.flatMap((state) => {
+  const hot = TASK_WORKSPACE_STATES.filter((state) => state !== 'archive').flatMap((state) => {
     const taskMd = path.join(repoRoot, '.agents', 'workspace', state, taskId, 'task.md');
     if (!fs.existsSync(taskMd)) return [];
     const content = fs.readFileSync(taskMd, 'utf8');
@@ -56,6 +60,38 @@ function taskWorkspaceCandidates(repoRoot: string, taskId: string): TaskWorkspac
       taskMd
     }];
   });
+  try {
+    assertArchiveAvailable(path.join(repoRoot, '.agents', 'workspace'));
+  } catch (error) {
+    if (hot.length > 0) return hot;
+    throw error;
+  }
+  const parts = findArchiveTaskParts(repoRoot, taskId);
+  if (parts.length === 0) return hot;
+  const taskMd = path.join(repoRoot, '.agents', 'workspace', 'archive', ...parts, 'local', 'task.md');
+  if (!fs.existsSync(taskMd)) return hot;
+  const content = fs.readFileSync(taskMd, 'utf8');
+  return [...hot, {
+    taskId,
+    branch: resolveBranchFromTaskContent(content, taskId),
+    state: 'archive',
+    taskMd
+  }];
+}
+
+function findArchiveTaskParts(repoRoot: string, taskId: string): string[] {
+  const archiveRoot = path.join(repoRoot, '.agents', 'workspace', 'archive');
+  if (!fs.existsSync(archiveRoot)) return [];
+  for (const year of fs.readdirSync(archiveRoot).sort().reverse()) {
+    if (!/^\d{4}$/.test(year)) continue;
+    for (const month of fs.readdirSync(path.join(archiveRoot, year)).sort().reverse()) {
+      if (!/^\d{2}$/.test(month)) continue;
+      for (const day of fs.readdirSync(path.join(archiveRoot, year, month)).sort().reverse()) {
+        if (/^\d{2}$/.test(day) && fs.existsSync(path.join(archiveRoot, year, month, day, taskId, 'local', 'task.md'))) return [year, month, day, taskId];
+      }
+    }
+  }
+  return [];
 }
 
 function resolveBranchFromTaskContent(content: string, taskId: string): string {
@@ -102,6 +138,28 @@ export function resolveTaskWorkspace(taskId: string, repoRoot: string): TaskWork
 
 export function listTaskWorkspaces(repoRoot: string, state: TaskWorkspaceState): TaskWorkspace[] {
   const stateRoot = path.join(repoRoot, '.agents', 'workspace', state);
+  if (state === 'archive') {
+    assertArchiveAvailable(path.join(repoRoot, '.agents', 'workspace'));
+    if (!fs.existsSync(stateRoot)) return [];
+    const rows: TaskWorkspace[] = [];
+    for (const year of fs.readdirSync(stateRoot).sort()) {
+      if (!/^\d{4}$/.test(year)) continue;
+      for (const month of fs.readdirSync(path.join(stateRoot, year)).sort()) {
+        if (!/^\d{2}$/.test(month)) continue;
+        for (const day of fs.readdirSync(path.join(stateRoot, year, month)).sort()) {
+          if (!/^\d{2}$/.test(day)) continue;
+          for (const taskId of fs.readdirSync(path.join(stateRoot, year, month, day)).sort()) {
+            if (!TASK_ID_RE.test(taskId)) continue;
+            const taskMd = path.join(stateRoot, year, month, day, taskId, 'local', 'task.md');
+            if (!fs.existsSync(taskMd)) continue;
+            const content = fs.readFileSync(taskMd, 'utf8');
+            rows.push({ taskId, branch: resolveBranchFromTaskContent(content, taskId), state, taskMd });
+          }
+        }
+      }
+    }
+    return rows;
+  }
   if (!fs.existsSync(stateRoot)) return [];
   return fs.readdirSync(stateRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && TASK_ID_RE.test(entry.name))

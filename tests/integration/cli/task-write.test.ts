@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -15,7 +16,7 @@ type FixtureState = 'active' | 'blocked' | 'completed' | 'archive';
 function fixture(state: FixtureState = 'active') {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-write-'));
   const taskDir = state === 'archive'
-    ? path.join(repoRoot, '.agents', 'workspace', 'archive', '2026', '07', '15', TASK_ID)
+    ? path.join(repoRoot, '.agents', 'workspace', 'archive', '2026', '07', '15', TASK_ID, 'local')
     : path.join(repoRoot, '.agents', 'workspace', state, TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.mkdirSync(path.join(repoRoot, '.agents'), { recursive: true });
@@ -25,6 +26,10 @@ function fixture(state: FixtureState = 'active') {
     taskMdPath,
     `---\nid: ${TASK_ID}\nstatus: ${state}\nupdated_at: old\nagent_infra_version: v0.0.1\n---\n# Task\n\n${state === 'active' ? '## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n' : ''}## Notes\n\nold\n`
   );
+  if (state === 'archive') {
+    const taskMd = fs.readFileSync(taskMdPath);
+    fs.writeFileSync(path.join(taskDir, 'contents.sha256'), `${crypto.createHash('sha256').update(taskMd).digest('hex')}  task.md\n`);
+  }
   if (state === 'active') {
     fs.writeFileSync(
       path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'),
@@ -117,10 +122,14 @@ test('writeTask enforces the complete workspace state match and mismatch matrix'
         randomSuffix: () => `matched-${actualState}`
       }
     );
-    assert.equal(applied.status, 'applied');
+    assert.equal(applied.status, 'applied', applied.status === 'failed' ? applied.error.message : undefined);
     assert.equal(applied.actualState, actualState);
     assert.match(fs.readFileSync(matched.taskMdPath, 'utf8'), new RegExp(`status: matched-${actualState}`));
-    assert.deepEqual(fs.readdirSync(matched.taskDir), ['task.md']);
+    assert.deepEqual(fs.readdirSync(matched.taskDir).sort(), actualState === 'archive' ? ['contents.sha256', 'task.md'] : ['task.md']);
+    if (actualState === 'archive') {
+      const expectedHash = crypto.createHash('sha256').update(fs.readFileSync(matched.taskMdPath)).digest('hex');
+      assert.equal(fs.readFileSync(path.join(matched.taskDir, 'contents.sha256'), 'utf8'), `${expectedHash}  task.md\n`);
+    }
 
     const mismatched = fixture(actualState);
     const before = fs.readFileSync(mismatched.taskMdPath);
@@ -147,6 +156,20 @@ test('writeTask enforces the complete workspace state match and mismatch matrix'
     assert.equal(fs.statSync(mismatched.taskMdPath).mtimeMs, beforeMtime);
     assert.deepEqual(fs.readdirSync(mismatched.taskDir), beforeFiles);
   }
+});
+
+test('writeTask fails closed on an archive migration marker without changing archived bytes', () => {
+  const { repoRoot, taskMdPath } = fixture('archive');
+  const before = fs.readFileSync(taskMdPath);
+  fs.writeFileSync(path.join(repoRoot, '.agents', 'workspace', '.archive-migration-state.json'), '{broken');
+  const result = writeTask({
+    taskRef: TASK_ID,
+    expectedState: 'archive',
+    mutations: [{ kind: 'frontmatter', set: { status: 'must-not-write' } }]
+  }, { repoRoot, metadataProvider: () => METADATA });
+  assert.equal(result.status, 'failed');
+  if (result.status === 'failed') assert.equal(result.error.code, 'ARCHIVE_OPERATION_UNAVAILABLE');
+  assert.deepEqual(fs.readFileSync(taskMdPath), before);
 });
 
 test('writeTask returns a dry-run plan without changing bytes, mtime or directory', () => {

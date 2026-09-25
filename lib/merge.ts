@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { removeDirRecursive } from './remove-dir.ts';
 import { validateCurrentTaskContract } from './task/current-contract.ts';
+import { acquireArchiveOperationLock, assertArchiveAvailable } from './task/archive-migration-state.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -107,7 +109,7 @@ function extractTitle(content: string): string | null {
 }
 
 function normalizeTaskRecord(taskDir: string, taskFile: string, dateParts: DateParts): TaskRecord {
-  const taskId = path.basename(taskDir);
+  const taskId = path.basename(taskDir) === 'local' ? path.basename(path.dirname(taskDir)) : path.basename(taskDir);
   const content = fs.readFileSync(taskFile, 'utf8');
   const completedAt = extractField(content, 'completed_at');
   const updatedAt = extractField(content, 'updated_at');
@@ -155,7 +157,7 @@ function scanSourceTasks(sourceDir: string): TaskRecord[] {
             continue;
           }
 
-          const taskDir = path.join(dayDir, taskEntry.name);
+          const taskDir = path.join(dayDir, taskEntry.name, 'local');
           const taskFile = path.join(taskDir, 'task.md');
           if (!fs.existsSync(taskFile)) {
             continue;
@@ -251,7 +253,7 @@ function collectArchiveEntries(archiveDir: string): ArchiveManifestEntry[] {
           }
 
           const taskDir = path.join(dayDir, taskEntry.name);
-          const taskFile = path.join(taskDir, 'task.md');
+          const taskFile = path.join(taskDir, 'local', 'task.md');
           const relativePath = `${yearEntry.name}/${monthEntry.name}/${dayEntry.name}/${taskEntry.name}/`;
           let title = taskEntry.name;
           let type = 'unknown';
@@ -624,10 +626,12 @@ function validateSourceRoot(sourceRoot: string): void {
 function validateTaskDirectory(
   sourceRoot: string,
   taskDir: string,
-  seenTaskIds: Map<string, string>
+  seenTaskIds: Map<string, string>,
+  archived = false
 ): void {
   const taskId = path.basename(taskDir);
-  const taskFile = path.join(taskDir, 'task.md');
+  const contentDir = archived ? path.join(taskDir, 'local') : taskDir;
+  const taskFile = path.join(contentDir, 'task.md');
   const taskDirStat = sourcePathStat(sourceRoot, taskDir);
   if (!taskDirStat || !taskDirStat.isDirectory()) {
     invalidSource(`${sourceRelativePath(sourceRoot, taskDir)} must be a directory`);
@@ -646,12 +650,59 @@ function validateTaskDirectory(
     invalidSource(`${sourceRelativePath(sourceRoot, taskFile)} id '${String(contract.metadata.id ?? 'missing')}' does not match directory '${taskId}'`);
   }
   validateTaskTree(sourceRoot, taskDir);
+  if (archived) {
+    for (const entry of fs.readdirSync(taskDir, { withFileTypes: true })) {
+      if (!['local', 'github', 'derived'].includes(entry.name) || !entry.isDirectory()) {
+        invalidSource(`${sourceRelativePath(sourceRoot, path.join(taskDir, entry.name))} is not an allowed archive source directory`);
+      }
+    }
+    validateArchiveSource(sourceRoot, contentDir);
+    const githubDir = path.join(taskDir, 'github');
+    if (fs.existsSync(githubDir)) {
+      for (const capture of fs.readdirSync(githubDir, { withFileTypes: true })) {
+        const captureDir = path.join(githubDir, capture.name);
+        if (!capture.isDirectory() || !/^capture-[A-Za-z0-9._-]+$/.test(capture.name) || !fs.existsSync(path.join(captureDir, 'capture.md'))) {
+          invalidSource(`${sourceRelativePath(sourceRoot, captureDir)} is not a valid GitHub capture`);
+        }
+        validateArchiveSource(sourceRoot, captureDir);
+      }
+    }
+    const derivedDir = path.join(taskDir, 'derived');
+    if (fs.existsSync(derivedDir)) {
+      for (const view of fs.readdirSync(derivedDir, { withFileTypes: true })) {
+        const viewDir = path.join(derivedDir, view.name);
+        if (!view.isDirectory() || !fs.existsSync(path.join(viewDir, 'inputs.md'))) {
+          invalidSource(`${sourceRelativePath(sourceRoot, viewDir)} requires inputs.md`);
+        }
+      }
+    }
+  }
 
   const previousPath = seenTaskIds.get(taskId);
   if (previousPath) {
     invalidSource(`duplicate task ID ${taskId} at ${previousPath} and ${sourceRelativePath(sourceRoot, taskDir)}`);
   }
   seenTaskIds.set(taskId, sourceRelativePath(sourceRoot, taskDir));
+}
+
+function validateArchiveSource(sourceRoot: string, sourceDir: string): void {
+  const hashFile = path.join(sourceDir, 'contents.sha256');
+  const hashStat = sourcePathStat(sourceRoot, hashFile);
+  if (!hashStat?.isFile()) invalidSource(`${sourceRelativePath(sourceRoot, sourceDir)} requires contents.sha256`);
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const target = path.join(dir, entry.name);
+      if (entry.name === 'manifest.md') invalidSource(`${sourceRelativePath(sourceRoot, target)} is forbidden inside a TASK`);
+      if (entry.isDirectory()) walk(target);
+      else if (entry.isFile() && target !== hashFile) files.push(target);
+    }
+  };
+  walk(sourceDir);
+  const expected = files.sort((a, b) => Buffer.compare(Buffer.from(path.relative(sourceDir, a).split(path.sep).join('/')), Buffer.from(path.relative(sourceDir, b).split(path.sep).join('/'))))
+    .map((file) => `${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ${path.relative(sourceDir, file).split(path.sep).join('/')}`);
+  const actual = fs.readFileSync(hashFile, 'utf8').trimEnd().split(/\r?\n/).filter(Boolean);
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) invalidSource(`${sourceRelativePath(sourceRoot, hashFile)} does not match local files`);
 }
 
 function validateMutableSection(
@@ -730,9 +781,6 @@ function validateArchiveSection(
       const monthDir = monthPath;
       for (const dayEntry of fs.readdirSync(monthDir, { withFileTypes: true })) {
         const dayPath = path.join(monthDir, dayEntry.name);
-        if (allowManifest(monthDir, dayEntry)) {
-          continue;
-        }
         const dayStat = sourcePathStat(sourceRoot, dayPath);
         if (!dayStat?.isDirectory() || !/^\d{2}$/.test(dayEntry.name)) {
           invalidSource(`${sourceRelativePath(sourceRoot, dayPath)} is not a DD directory or manifest.md`);
@@ -745,7 +793,7 @@ function validateArchiveSection(
           if (!taskStat?.isDirectory() || !TASK_ID_RE.test(taskEntry.name)) {
             invalidSource(`${sourceRelativePath(sourceRoot, taskPath)} is not a TASK-YYYYMMDD-HHMMSS directory`);
           }
-          validateTaskDirectory(sourceRoot, taskPath, seenTaskIds);
+          validateTaskDirectory(sourceRoot, taskPath, seenTaskIds, true);
         }
       }
     }
@@ -904,7 +952,7 @@ function mergeArchiveSection(sourceArchive: string, localArchive: string, report
       continue;
     }
 
-    const destinationDir = path.join(localArchive, task.relativePath);
+    const destinationDir = path.join(localArchive, task.relativePath, 'local');
     fs.mkdirSync(path.dirname(destinationDir), { recursive: true });
     fs.cpSync(task.taskDir, destinationDir, { recursive: true });
     recordArchive(report, 'copied', {
@@ -1038,6 +1086,14 @@ async function cmdMerge(args: string[]): Promise<void> {
   }
 
   const workspaceDir = path.join(process.cwd(), '.agents', 'workspace');
+  assertArchiveAvailable(workspaceDir);
+  assertArchiveAvailable(resolvedSource);
+  const releaseLock = acquireArchiveOperationLock(workspaceDir);
+  let releaseSourceLock = () => {};
+  try {
+  if (path.resolve(resolvedSource) !== path.resolve(workspaceDir)) {
+    releaseSourceLock = acquireArchiveOperationLock(resolvedSource);
+  }
   const archiveDir = path.join(workspaceDir, 'archive');
   const backupStamp = formatBackupTimestamp(new Date());
   const backupRootRelative = `.agents/workspace/.merge-backup/${backupStamp}/`;
@@ -1045,6 +1101,7 @@ async function cmdMerge(args: string[]): Promise<void> {
   const report = createReport(resolvedSource, backupRootRelative);
   detectSourceMode(resolvedSource);
   validateSourceWorkspace(resolvedSource);
+  validateArchiveSection(workspaceDir, new Map());
 
   for (const section of ALL_SECTIONS) {
     fs.mkdirSync(path.join(workspaceDir, section), { recursive: true });
@@ -1066,6 +1123,10 @@ async function cmdMerge(args: string[]): Promise<void> {
   rebuildManifests(archiveDir);
 
   printReport(report);
+  } finally {
+    releaseSourceLock();
+    releaseLock();
+  }
 }
 
 export {

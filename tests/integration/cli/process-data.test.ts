@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 
 import { CLI_PATH } from '../../helpers.ts';
 import { createObjectStore, publishSnapshot } from '../../../lib/process-data/store.ts';
+import { collectLocalObjects } from '../../../lib/process-data/sources.ts';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-cli-'));
@@ -69,6 +70,17 @@ test('local, all and excerpt capture options fail before creating the data root'
     assert.equal(result.status, 1);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'process-data')), false);
   }
+});
+
+test('local source enumeration fails closed while archive migration state exists', () => {
+  const root = fixture();
+  const workspace = path.join(root, '.agents', 'workspace');
+  fs.mkdirSync(path.join(workspace, 'archive', '2026', '01', '01', 'TASK-20260101-000002', 'local'), { recursive: true });
+  fs.writeFileSync(path.join(workspace, 'archive', '2026', '01', '01', 'TASK-20260101-000002', 'local', 'task.md'), 'archive');
+  fs.writeFileSync(path.join(workspace, '.archive-migration-state.json'), '{broken');
+  const result = collectLocalObjects(root);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error.message, /Archive unavailable/);
 });
 
 test('unknown data subcommand fails without creating the default root', () => {

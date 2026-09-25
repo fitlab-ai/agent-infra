@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import {
@@ -14,6 +15,7 @@ import type {
 } from './resolve-ref.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
 import { validateCurrentTaskContract } from './current-contract.ts';
+import { acquireArchiveOperationLock, assertArchiveAvailable } from './archive-migration-state.ts';
 import { invalidationBlocks, parseInvalidationDocument } from './invalidation.ts';
 import type {
   TableRowDeleteMutation,
@@ -102,7 +104,8 @@ type TaskWriteErrorCode =
   | 'METADATA_CAPTURE_FAILED'
   | 'TEMP_WRITE_FAILED'
   | 'RENAME_FAILED'
-  | 'TEMP_CLEANUP_FAILED';
+  | 'TEMP_CLEANUP_FAILED'
+  | 'ARCHIVE_OPERATION_UNAVAILABLE';
 
 type TaskWriteError = { code: TaskWriteErrorCode; message: string };
 
@@ -223,7 +226,7 @@ function errorDetails(error: unknown, fallback: TaskWriteErrorCode): TaskWriteEr
   };
 }
 
-function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
+function writeTaskCore(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
   const resolved = options.taskLocation
     ? {
         ok: true as const,
@@ -477,6 +480,78 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
     );
   }
   return { ...successBase, status: 'applied', changed: true };
+}
+
+function writeArchiveContentsHash(localDir: string): void {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.includes('\n') || entry.name.includes('\r') || entry.name === 'manifest.md') {
+        throw new Error(`Archive source path is not valid: ${path.join(dir, entry.name)}`);
+      }
+      const target = path.join(dir, entry.name);
+      const stat = fs.lstatSync(target);
+      if (stat.isSymbolicLink()) throw new Error(`Archive source cannot contain symbolic links: ${target}`);
+      if (stat.isDirectory()) walk(target);
+      else if (stat.isFile()) {
+        if (entry.name !== 'contents.sha256') files.push(target);
+      }
+      else throw new Error(`Archive source cannot contain special files: ${target}`);
+    }
+  };
+  walk(localDir);
+  const rows = files
+    .map((file) => ({ file, relative: path.relative(localDir, file).split(path.sep).join('/') }))
+    .sort((left, right) => Buffer.compare(Buffer.from(left.relative), Buffer.from(right.relative)))
+    .map(({ file, relative }) => `${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ${relative}`);
+  const hashPath = path.join(localDir, 'contents.sha256');
+  const tempPath = path.join(localDir, `.contents.sha256.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+  fs.writeFileSync(tempPath, `${rows.join('\n')}${rows.length ? '\n' : ''}`, { flag: 'wx' });
+  fs.renameSync(tempPath, hashPath);
+}
+
+function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
+  const resolved = options.taskLocation
+    ? {
+        ok: true as const,
+        repoRoot: options.taskLocation.repoRoot,
+        taskId: options.taskLocation.taskId,
+        taskDir: path.dirname(options.taskLocation.taskMdPath),
+        taskMdPath: options.taskLocation.taskMdPath,
+        state: options.taskLocation.state
+      }
+    : resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) {
+    return failure(request, { taskId: resolved.taskId, taskMdPath: null, actualState: null }, resolved.code, resolved.message);
+  }
+  if (resolved.state !== 'archive' || request.expectedState !== 'archive' || request.dryRun) {
+    return writeTaskCore(request, { ...options, taskLocation: {
+      repoRoot: resolved.repoRoot,
+      taskId: resolved.taskId,
+      taskMdPath: resolved.taskMdPath,
+      state: resolved.state
+    } });
+  }
+
+  const identity = { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, actualState: resolved.state };
+  let release: (() => void) | undefined;
+  try {
+    const workspaceRoot = path.join(resolved.repoRoot, '.agents', 'workspace');
+    assertArchiveAvailable(workspaceRoot);
+    release = acquireArchiveOperationLock(workspaceRoot);
+    const result = writeTaskCore(request, { ...options, taskLocation: {
+      repoRoot: resolved.repoRoot,
+      taskId: resolved.taskId,
+      taskMdPath: resolved.taskMdPath,
+      state: resolved.state
+    } });
+    if (result.status === 'applied') writeArchiveContentsHash(resolved.taskDir);
+    return result;
+  } catch (error) {
+    return failure(request, identity, 'ARCHIVE_OPERATION_UNAVAILABLE', error instanceof Error ? error.message : String(error));
+  } finally {
+    release?.();
+  }
 }
 
 export { writeTask, captureTaskWriteMetadata, canonicalTimestamp };

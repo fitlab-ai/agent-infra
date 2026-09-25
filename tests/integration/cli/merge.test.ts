@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 import { cliArgs, filePath, onPlatforms } from '../../helpers.ts';
 import {
@@ -50,7 +51,9 @@ function makeTempWorkspace(repoDir: string, name: string = 'incoming-workspace')
 }
 
 function writeTask(rootDir: string, relativeDir: string, taskId: string, { title, type = 'feature', completedAt, updatedAt }: TaskOptions) {
-  const taskDir = path.join(rootDir, relativeDir, taskId);
+  const archived = path.basename(rootDir).includes('archive');
+  const taskRoot = path.join(rootDir, relativeDir, taskId);
+  const taskDir = archived ? path.join(taskRoot, 'local') : taskRoot;
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
     path.join(taskDir, 'task.md'),
@@ -74,6 +77,10 @@ function writeTask(rootDir: string, relativeDir: string, taskId: string, { title
     'utf8'
   );
   fs.writeFileSync(path.join(taskDir, 'note.txt'), `${taskId}\n`, 'utf8');
+  if (archived) {
+    const files = ['note.txt', 'task.md'].sort().map((name) => `${crypto.createHash('sha256').update(fs.readFileSync(path.join(taskDir, name))).digest('hex')}  ${name}`);
+    fs.writeFileSync(path.join(taskDir, 'contents.sha256'), `${files.join('\n')}\n`, 'utf8');
+  }
   return taskDir;
 }
 
@@ -212,7 +219,47 @@ test('merge skips existing task IDs without overwriting local archive', () => {
 
     assert.match(output, /⊘ TASK-20260321-222222\s+archive\s+skipped \(already exists at 2026\/03\/21\/TASK-20260321-222222\/\)/);
     assert.match(output, /Totals: 0 copied, 0 updated, 0 moved, 1 skipped/);
-    assert.match(read(path.join(archiveRoot, '2026/03/21/TASK-20260321-222222/task.md')), /本地版本/);
+    assert.match(read(path.join(archiveRoot, '2026/03/21/TASK-20260321-222222/local/task.md')), /本地版本/);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge refuses a migration marker before changing target archive', () => {
+  const repoDir = makeTempRepo();
+  const sourceDir = makeTempWorkspace(repoDir);
+  const marker = path.join(repoDir, '.agents/workspace/.archive-migration-state.json');
+  const manifest = path.join(repoDir, '.agents/workspace/archive/manifest.md');
+  fs.writeFileSync(manifest, 'sentinel\n');
+  fs.writeFileSync(marker, '{broken');
+  try {
+    assert.throws(
+      () => execFileSync(process.execPath, cliArgs('merge', sourceDir), { cwd: repoDir, encoding: 'utf8' }),
+      /Archive unavailable/
+    );
+    assert.equal(read(manifest), 'sentinel\n');
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge rejects a changed archive source file whose contents hash no longer matches', () => {
+  const repoDir = makeTempRepo();
+  const sourceDir = makeTempWorkspace(repoDir);
+  const archiveTask = writeTask(path.join(sourceDir, 'archive'), '2026/03/23', 'TASK-20260323-222222', {
+    title: 'checksum source',
+    completedAt: '2026-03-23 10:00:00'
+  });
+  const target = path.join(repoDir, '.agents/workspace');
+  fs.writeFileSync(path.join(target, 'archive/manifest.md'), 'target sentinel\n');
+  fs.writeFileSync(path.join(archiveTask, 'note.txt'), 'changed after hash\n');
+  const targetBefore = snapshotTree(target);
+  try {
+    assert.throws(
+      () => execFileSync(process.execPath, cliArgs('merge', sourceDir), { cwd: repoDir, encoding: 'utf8' }),
+      /contents\.sha256 does not match local files/
+    );
+    assert.deepEqual(snapshotTree(target), targetBefore);
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
@@ -356,7 +403,7 @@ test('frontmatter helpers and source scanning parse current archive metadata', (
       updatedAt: '2026-03-10 09:00:00'
     });
 
-    const content = read(path.join(sourceDir, '2026/03/09/TASK-20260309-123456/task.md'));
+    const content = read(path.join(sourceDir, '2026/03/09/TASK-20260309-123456/local/task.md'));
     assert.equal(extractField(content, 'type'), 'bug');
     assert.equal(extractField(content, 'missing'), null);
     assert.equal(extractTitle(content), '管道 \\| 转义');
@@ -483,7 +530,7 @@ test('merge workspace copies new mutable tasks and preserves archive behavior', 
     });
 
     assert.ok(fs.existsSync(path.join(repoDir, '.agents/workspace/active/TASK-20260409-111111/task.md')));
-    assert.ok(fs.existsSync(path.join(repoDir, '.agents/workspace/archive/2026/04/09/TASK-20260409-121212/task.md')));
+    assert.ok(fs.existsSync(path.join(repoDir, '.agents/workspace/archive/2026/04/09/TASK-20260409-121212/local/task.md')));
     assert.match(output, /Active\s+\(.agents\/workspace\/active\/\):/);
     assert.match(output, /✓ Copied\s+: 1/);
     assert.match(output, /Archive\s+\(.agents\/workspace\/archive\/\):/);
