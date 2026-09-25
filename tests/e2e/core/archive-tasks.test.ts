@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { read } from "../../helpers.ts";
+import { onPlatforms, read } from "../../helpers.ts";
 
 type CompletedTaskOptions = {
   completedAt: string;
@@ -103,6 +103,44 @@ test("archive-tasks archives all completed tasks and rebuilds the manifest", () 
     assert.match(yearManifest, /\| 03 \| 2 \| \[03\/manifest\.md\]\(03\/manifest\.md\) \|/);
     assert.match(monthManifest, /\| TASK-20260302-000002 \| 修复 manifest \\| 表格 \| bug \| 2026-03-02 11:30:00 \| 2026\/03\/02\/TASK-20260302-000002\/ \|/);
     assert.match(monthManifest, /\| TASK-20260301-000001 \| 归档旧任务 \| feature \| 2026-03-01 09:00:00 \| 2026\/03\/01\/TASK-20260301-000001\/ \|/);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test("archive-tasks keeps the completed task when checksum validation fails", onPlatforms("linux", "darwin"), () => {
+  const repoDir = setupRepo();
+
+  try {
+    const taskId = "TASK-20260301-000003";
+    writeCompletedTask(repoDir, taskId, {
+      completedAt: "2026-03-01 09:00:00",
+      title: "checksum failure"
+    });
+    const completedTaskDir = path.join(repoDir, ".agents/workspace/completed", taskId);
+    const taskMdBefore = fs.readFileSync(path.join(completedTaskDir, "task.md"));
+    const fakeBin = path.join(repoDir, "fake-bin");
+    fs.mkdirSync(fakeBin);
+    const failingHasher = path.join(fakeBin, "sha256sum");
+    fs.writeFileSync(failingHasher, "#!/bin/sh\nexit 1\n", "utf8");
+    fs.chmodSync(failingHasher, 0o755);
+
+    const result = spawnSync(
+      "sh",
+      [path.join(repoDir, ".agents/skills/archive-tasks/scripts/archive-tasks.sh")],
+      {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` }
+      }
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.deepEqual(fs.readFileSync(path.join(completedTaskDir, "task.md")), taskMdBefore);
+    assert.equal(
+      fs.existsSync(path.join(repoDir, ".agents/workspace/archive/2026/03/01", taskId)),
+      false
+    );
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }

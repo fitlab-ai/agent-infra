@@ -32,7 +32,7 @@ cleanup() {
 trap 'cleanup' 0
 trap 'cleanup; exit 1' HUP INT TERM
 
-tmpdir="$(mktemp -d)"
+tmpdir="$(mktemp -d "$WORKSPACE_ROOT/.archive-tmp.XXXXXX")"
 
 IDS_FILE="$tmpdir/task-ids.txt"
 : > "$IDS_FILE"
@@ -212,13 +212,13 @@ archive_task_dir() {
     return 0
   fi
 
-  mkdir -p "$destination_dir/local"
-  for task_entry in "$task_dir"/* "$task_dir"/.[!.]* "$task_dir"/..?*; do
-    [ -e "$task_entry" ] || [ -L "$task_entry" ] || continue
-    mv "$task_entry" "$destination_dir/local/"
-  done
-  write_contents_hash "$destination_dir/local"
-  rmdir "$task_dir"
+  mkdir -p "$(dirname "$destination_dir")"
+  staged_dir="$tmpdir/$task_id"
+  mkdir -p "$staged_dir/local"
+  cp -R "$task_dir"/. "$staged_dir/local/"
+  write_contents_hash "$staged_dir/local"
+  mv "$staged_dir" "$destination_dir"
+  rm -rf "$task_dir"
   archived_count=$((archived_count + 1))
   printf 'Archived %s -> %s\n' "$task_id" "$relative_path"
 }
