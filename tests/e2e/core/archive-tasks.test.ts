@@ -146,6 +146,34 @@ test("archive-tasks keeps the completed task when checksum validation fails", on
   }
 });
 
+test("archive-tasks preserves a stale lock for explicit recovery", onPlatforms("linux", "darwin"), () => {
+  const repoDir = setupRepo();
+
+  try {
+    const taskId = "TASK-20260301-000004";
+    writeCompletedTask(repoDir, taskId, {
+      completedAt: "2026-03-01 09:00:00",
+      title: "stale archive lock"
+    });
+    const lockDir = path.join(repoDir, ".agents/workspace/.archive-operation-lock");
+    fs.mkdirSync(lockDir);
+    fs.writeFileSync(path.join(lockDir, "pid"), "999999999\n");
+
+    const result = spawnSync(
+      "sh",
+      [path.join(repoDir, ".agents/skills/archive-tasks/scripts/archive-tasks.sh")],
+      { cwd: repoDir, encoding: "utf8" }
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /stale archive operation lock/i);
+    assert.equal(fs.readFileSync(path.join(lockDir, "pid"), "utf8"), "999999999\n");
+    assert.equal(fs.existsSync(path.join(repoDir, ".agents/workspace/completed", taskId, "task.md")), true);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
 test("archive-tasks limits monthly manifests to 1000 entries with a truncation note", () => {
   const repoDir = setupRepo();
 

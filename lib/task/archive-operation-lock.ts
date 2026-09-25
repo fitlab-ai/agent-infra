@@ -24,11 +24,12 @@ export function assertArchiveOperationAvailable(workspaceRoot: string): void {
 
   try { process.kill(pid, 0); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+      throw new Error(`Archive unavailable: stale archive operation lock at ${lockPath}; remove it only after verifying that no archive operation is active`);
+    }
+    else {
       throw new Error(`Archive unavailable: cannot verify archive operation lock at ${lockPath}`);
     }
-    fs.rmSync(lockPath, { recursive: true, force: true });
-    return;
   }
   throw new Error(`Archive unavailable: archive operation is active at ${lockPath}`);
 }

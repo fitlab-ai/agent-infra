@@ -12,9 +12,12 @@ ARCHIVE_LOCK="$WORKSPACE_ROOT/.archive-operation-lock"
 
 if [ -d "$ARCHIVE_LOCK" ] && [ -f "$ARCHIVE_LOCK/pid" ]; then
   lock_pid=$(cat "$ARCHIVE_LOCK/pid")
-  case "$lock_pid" in ''|*[!0-9]*) lock_pid="" ;; esac
-  if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
-    rm -rf "$ARCHIVE_LOCK"
+  case "$lock_pid" in
+    ''|*[!0-9]*) echo "Cannot verify archive operation lock: $ARCHIVE_LOCK" >&2; exit 1 ;;
+  esac
+  if ! kill -0 "$lock_pid" 2>/dev/null; then
+    echo "Stale archive operation lock: $ARCHIVE_LOCK; remove it only after verifying that no archive operation is active" >&2
+    exit 1
   fi
 fi
 if ! mkdir "$ARCHIVE_LOCK" 2>/dev/null; then
