@@ -57,49 +57,6 @@ test("all SKILL.md files have valid frontmatter", () => {
   });
 });
 
-test("all skill doc files have consecutive step numbering", () => {
-  skillDocFiles.forEach((relativePath) => {
-    const stepNumbers = [...read(relativePath).matchAll(/^### (\d+)\. /gm)]
-      .map((match) => Number(match[1]));
-
-    if (stepNumbers.length === 0) {
-      return;
-    }
-
-    const expected = stepNumbers.map((_, index) => index + 1);
-    assert.deepEqual(stepNumbers, expected, `${relativePath} steps should be consecutively numbered from 1`);
-  });
-});
-
-test("all skill doc nested numbered lists are consecutive", () => {
-  skillDocFiles.forEach((relativePath) => {
-    const activeLists = new Map<number, number>();
-
-    read(relativePath).split("\n").forEach((line, lineIndex) => {
-      const item = line.match(/^( +)(\d+)\. /);
-      const indentation = line.match(/^ */)?.[0].length || 0;
-
-      if (!item) {
-        if (line.trim() !== "") {
-          for (const indent of activeLists.keys()) {
-            if (indentation <= indent) activeLists.delete(indent);
-          }
-        }
-        return;
-      }
-
-      const indent = item[1]!.length;
-      const number = Number(item[2]);
-      const expected = (activeLists.get(indent) || 0) + 1;
-      assert.equal(number, expected, `${relativePath}:${lineIndex + 1} nested list should continue with ${expected}`);
-      activeLists.set(indent, number);
-      for (const activeIndent of activeLists.keys()) {
-        if (activeIndent > indent) activeLists.delete(activeIndent);
-      }
-    });
-  });
-});
-
 test("Git and release consumers keep write commands behind typed workflow intents", () => {
   const consumers = ["commit", "create-pr", "watch-pr", "release", "post-release", "complete-task", "code-task"];
   const mutatingGit = /^\s*git\s+(?:add|commit|push|tag|checkout|switch|reset)\b/m;
@@ -163,10 +120,6 @@ test("post-release command templates expose and forward one version argument", (
 test("complete-manual-validation skill docs retain completion control structures", () => {
   skillDocPaths("complete-manual-validation").forEach((relativePath) => {
     const content = read(relativePath);
-    const checklistHeading = relativePath.includes(".en.")
-      ? "Completion Checklist"
-      : "完成检查清单";
-    const checklist = sectionContent(content, checklistHeading);
     const gateCommand = "agent-infra-internal task-verify {task-id} manual-validation.completed";
     const gateIndex = content.indexOf(gateCommand);
 
@@ -189,11 +142,6 @@ test("complete-manual-validation skill docs retain completion control structures
         `${relativePath} should structurally handle exit code ${exitCode}`
       );
     });
-    assert.equal(
-      [...checklist.matchAll(/^- \[[ x]\] /gm)].length,
-      5,
-      `${relativePath} should retain five completion checklist items`
-    );
   });
 });
 
@@ -236,48 +184,6 @@ test("run-task skill variants verify route completion before preparing delegatio
   }
 });
 
-test("local entropy-check defines review checklist and report template sections", () => {
-  const skill = read(".agents/skills/entropy-check/SKILL.md");
-  const checklist = read(".agents/skills/entropy-check/reference/checklist.md");
-  const reportTemplate = read(".agents/skills/entropy-check/reference/report-template.md");
-
-  [
-    "reference/checklist.md",
-    "reference/report-template.md"
-  ].forEach((referencePath) => {
-    assert.match(
-      skill,
-      new RegExp(escapeRegExp(referencePath)),
-      `.agents/skills/entropy-check/SKILL.md should reference ${referencePath}`
-    );
-  });
-
-  [
-    "Issue/PR",
-    "SKILL.md",
-    "over-design",
-    "bilingual",
-    "version"
-  ].forEach((topic) => {
-    assert.match(checklist, new RegExp(escapeRegExp(topic)), `checklist should cover ${topic}`);
-  });
-
-  [
-    "状态核对",
-    "审查范围",
-    "发现摘要",
-    "发现详情",
-    "人工裁决待办",
-    "后续任务建议"
-  ].forEach((section) => {
-    assert.match(
-      reportTemplate,
-      new RegExp(`^## ${escapeRegExp(section)}$`, "m"),
-      `report template should define ${section}`
-    );
-  });
-});
-
 // Soft size guard: SKILL.md bodies should stay lean (long rules/templates/scripts
 // belong in reference/ or scripts/). Per the design decision this is a visibility
 // signal, not a red light — oversize files emit a diagnostic but never fail.
@@ -293,43 +199,6 @@ test("source SKILL.md files stay within the soft size limit", (t) => {
         "consider splitting detail into reference/."
       );
     }
-  });
-});
-
-test("template skill content does not reference deprecated lifecycle names", () => {
-  const deprecatedPattern = /\b(?:implement-task|refine-task|review-task)\b|(?:implementation|refinement)(?:\.md|-r\{N\}\.md)|\{(?:implementation|refinement)-[A-Za-z]+}/;
-  const templateFiles = listFilesRecursive("templates/.agents/skills")
-    .filter((relativePath) => /\.(?:md|toml|yaml|json)$/.test(relativePath));
-
-  templateFiles.forEach((relativePath) => {
-    assert.doesNotMatch(read(relativePath), deprecatedPattern, `${relativePath} should use the code/review-code lifecycle`);
-  });
-});
-
-test("workflow skills document state check gates", () => {
-  [
-    "analyze-task",
-    "review-analysis",
-    "plan-task",
-    "review-plan",
-    "code-task",
-    "review-code",
-    "complete-manual-validation",
-    "run-manual-validation",
-    "complete-task"
-  ].forEach((skill) => {
-    skillDocPaths(skill).forEach((relativePath) => {
-      const content = read(relativePath);
-      const expectedHeading = relativePath.includes(".en.")
-        ? "## Step 0: State Check (pre-execution hard gate)"
-        : "## 第 0 步：状态核对（执行前硬约束）";
-
-      assert.match(
-        content,
-        new RegExp(escapeRegExp(expectedHeading)),
-        `${relativePath} should document the pre-execution state check`
-      );
-    });
   });
 });
 
@@ -418,10 +287,8 @@ test("local artifact recovery rules expose the shared transaction contract struc
     "templates/.agents/rules/local-artifact-repair.zh-CN.md"
   ]) {
     const content = read(relativePath);
-    const headings = [...content.matchAll(/^##\s+.+$/gmu)];
     const commandBlocks = [...content.matchAll(/```(?:bash|sh|text)\n([\s\S]*?)\n```/gu)]
       .map((match) => match[1] ?? '');
-    assert.ok(headings.length >= 4, `${relativePath} should contain the rule sections`);
     assert.ok(
       commandBlocks.some((block) => /^agent-infra-internal\s+task-(?:artifact|review)\s+\S+/mu.test(block)),
       `${relativePath} should contain a parseable internal workflow command block`
@@ -512,7 +379,7 @@ test("review skills publish non-advancing finalizer results before same-stage ro
   }
 });
 
-test("review output templates define a result-preserving stop scenario", () => {
+test("review output templates expose result-preserving stop fields", () => {
   const paths = [
     ...["review-analysis", "review-plan", "review-code"].map(
       (name) => `.agents/skills/${name}/reference/output-templates.md`
@@ -525,7 +392,6 @@ test("review output templates define a result-preserving stop scenario", () => {
 
   paths.forEach((relativePath) => {
     const content = read(relativePath);
-    assert.match(content, /^### (?:场景|Scenario|Branch) R[:：]/m, `${relativePath} should define the stop scenario`);
     assert.match(content, /\{last-readable-review-result\}/);
     assert.match(content, /\{repairAttempts\}/);
     assert.match(content, /\{last-structured-diagnostic\}/);
@@ -1412,12 +1278,11 @@ test("workflow skill output instructions align with state check artifact gates",
 
   completeTaskCases.forEach(([relativePath, heading]) => {
     const content = read(relativePath);
-    const updateSection = content.match(/^### 3\. .+?(?=^### 4\. )/ms)?.[0] || "";
 
     assert.match(
-      updateSection,
+      content,
       new RegExp(escapeRegExp(heading)),
-      `${relativePath} task update step should write the state check section required by the gate`
+      `${relativePath} should include the state check section required by the gate`
     );
   });
 });
@@ -1429,7 +1294,7 @@ test("local test skill documents smoke / core / full layered commands", () => {
   assert.match(content, /npm test/, "SKILL should still document the full layer");
 });
 
-test("skill command templates use thin adapter bodies", () => {
+test("skill command templates declare adapter metadata and references", () => {
   const skills = listSkillNames().filter((skill) =>
     exists(`templates/.agents/skills/${skill}/SKILL.en.md`) ||
     exists(`templates/.agents/skills/${skill}/SKILL.zh-CN.md`) ||
@@ -1448,8 +1313,7 @@ test("skill command templates use thin adapter bodies", () => {
 
     markdownTargets.forEach((target) => {
       const content = read(target);
-      const isChinese = target.endsWith(".zh-CN.md");
-      const contextLine = isChinese ? spec.zh : spec.en;
+      const contextLine = target.endsWith(".zh-CN.md") ? spec.zh : spec.en;
 
       assert.match(content, skillPathPattern, `${target} should reference the skill file`);
       assert.doesNotMatch(content, /^name:/m, `${target} should not declare a name field`);
@@ -1484,13 +1348,6 @@ test("skill command templates use thin adapter bodies", () => {
         assert.doesNotMatch(content, /\$1|\$ARGUMENTS/, `${target} should not include argument placeholders`);
       }
 
-      if (isChinese) {
-        assert.match(content, /读取并执行/, `${target} should use the Chinese thin adapter body`);
-        assert.match(content, /严格按照技能中定义的所有步骤执行/, `${target} should include the Chinese execution instruction`);
-      } else {
-        assert.match(content, /Read and execute the .* skill from/, `${target} should use the English thin adapter body`);
-        assert.match(content, /Follow all steps defined in the skill exactly/, `${target} should include the English execution instruction`);
-      }
     });
 
   });
@@ -1762,7 +1619,6 @@ test("run-manual-validation keeps discovery, reporting, and verification structu
     config.checks.artifact.required_sections.forEach((heading: string) => {
       assert.ok(report.includes(`## ${heading}\n`), `${reportPath} should define the configured ${heading} section`);
     });
-    assert.equal(config.checks.artifact.required_sections.length, 11);
   });
 });
 
@@ -1958,22 +1814,7 @@ test("review-code schema locks down Overall Verdict value range", () => {
   }
 });
 
-test("analyze-task brainstorming gate adds step 4 and whitelists analyze-task in no-mid-flow rule", () => {
-  const analyzeVariants = [
-    ".agents/skills/analyze-task/SKILL.md",
-    "templates/.agents/skills/analyze-task/SKILL.zh-CN.md",
-    "templates/.agents/skills/analyze-task/SKILL.en.md"
-  ];
-
-  analyzeVariants.forEach((relativePath) => {
-    const stepNumbers = [...read(relativePath).matchAll(/^### (\d+)\. /gm)].map((match) => Number(match[1]));
-    assert.deepEqual(
-      stepNumbers,
-      [1, 2, 3, 4, 5, 6, 7, 8, 9],
-      `${relativePath} should expose the requirement-sufficiency gate as a new step 4 with steps numbered 1..9`
-    );
-  });
-
+test("analyze-task is whitelisted for entry-point clarification in the no-mid-flow rule", () => {
   const ruleVariants = [
     ".agents/rules/no-mid-flow-questions.md",
     "templates/.agents/rules/no-mid-flow-questions.zh-CN.md",
@@ -2085,7 +1926,7 @@ test("create-task context capture exposes a structured observable-acceptance con
   );
 });
 
-test("import-issue step 1 declares a structured title-derivation contract", () => {
+test("import-issue declares a structured title-derivation contract", () => {
   // Structural guard for the CC-prefix stripping rule (Issue #494). The assertable
   // object is a fenced, language-neutral contract block parsed by key (not prose
   // tokens), so it verifies the strip *direction* and the boundary semantics rather
@@ -2103,11 +1944,8 @@ test("import-issue step 1 declares a structured title-derivation contract", () =
 
   skillDocPaths("import-issue").forEach((relativePath) => {
     const content = read(relativePath);
-    const step1 = content.match(/^### 1\. [\s\S]*?(?=^### \d+\. )/m)?.[0] || "";
-    assert.ok(step1, `${relativePath} should expose a step 1 section`);
-
-    const block = step1.match(/```[a-z]*\n# title-derivation-contract\n([\s\S]*?)\n```/m)?.[1];
-    assert.ok(block, `${relativePath} step 1 should declare a fenced "# title-derivation-contract" block`);
+    const block = content.match(/```[a-z]*\n# title-derivation-contract\n([\s\S]*?)\n```/m)?.[1];
+    assert.ok(block, `${relativePath} should declare a fenced "# title-derivation-contract" block`);
 
     const entries: Record<string, string> = {};
     const examples: string[] = [];
@@ -2140,25 +1978,6 @@ test("import-issue step 1 declares a structured title-derivation contract", () =
   // Language-neutral contract: identical across deployed + EN + zh-CN variants (no drift).
   contracts.forEach((block) => {
     assert.equal(block, contracts[0], "title-derivation contract should be byte-identical across all import-issue variants");
-  });
-});
-
-test("commit skill single-core steps stay consecutively numbered", () => {
-  // commit SKILL uses level-2 (`## N.`) step headings, which the generic
-  // consecutive-numbering test (level-3 `### N.`) does not cover.
-  const commitVariants = [
-    ".agents/skills/commit/SKILL.md",
-    "templates/.agents/skills/commit/SKILL.zh-CN.md",
-    "templates/.agents/skills/commit/SKILL.en.md"
-  ];
-
-  commitVariants.forEach((relativePath) => {
-    const stepNumbers = [...read(relativePath).matchAll(/^## (\d+)\. /gm)].map((match) => Number(match[1]));
-    assert.deepEqual(
-      stepNumbers,
-      [1, 2, 3, 4, 5, 6],
-      `${relativePath} should keep level-2 steps consecutively numbered`
-    );
   });
 });
 

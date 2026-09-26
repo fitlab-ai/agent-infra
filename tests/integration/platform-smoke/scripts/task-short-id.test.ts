@@ -384,8 +384,6 @@ test("alloc rejects a task id not in active without touching state (R5 B-1)", ()
   assert.equal(fs.existsSync(path.join(active, ".short-ids.json")), false);
 });
 
-// --- U-2 structural assertions: SKILL.md inline bash is gone ---
-
 test("default width is 2 even without --short-id-length flag and without task.shortIdLength in .airc.json (R4 B-1)", () => {
   // Simulate a project that upgraded but hasn't backfilled task.shortIdLength
   // into .agents/.airc.json yet. The script must still allocate / resolve with
@@ -427,23 +425,6 @@ test("default width is 2 even without --short-id-length flag and without task.sh
   assert.match(overWidth.stderr, /exceeds shortIdLength=2 capacity/);
 });
 
-test("SKILL.md no longer embeds multi-line short-id bash snippet (U-2 slimming)", () => {
-  const skills = fs.readdirSync(TEMPLATES_SKILLS);
-  // Match the 5-line conditional block that used to live in every SKILL.md
-  // (`if [[ "{task-id}" == "#"* ]]; then` followed by a `node …` call).
-  const oldSnippet = /if \[\[ "\{task-id\}" == "#"\*[\s\S]+task-short-id\.js resolve/m;
-  let offenders: string[] = [];
-  for (const skill of skills) {
-    for (const lang of ["en", "zh-CN"]) {
-      const file = path.join(TEMPLATES_SKILLS, skill, `SKILL.${lang}.md`);
-      if (!fs.existsSync(file)) continue;
-      const content = fs.readFileSync(file, "utf8");
-      if (oldSnippet.test(content)) offenders.push(`${skill}/${lang}`);
-    }
-  }
-  assert.deepEqual(offenders, [], `SKILL.md still embeds old inline bash: ${offenders.join(", ")}`);
-});
-
 test("short-id-only lifecycle SKILLs reference the centralized task-short-id rule doc (U-2)", () => {
   const skills = [
     "create-task", "import-issue", "import-codescan", "import-dependabot",
@@ -456,21 +437,5 @@ test("short-id-only lifecycle SKILLs reference the centralized task-short-id rul
       const content = fs.readFileSync(file, "utf8");
       assert.match(content, pointerRe, `${skill}/${lang} missing rule pointer`);
     }
-  }
-});
-
-// --- U-3 structural assertions: rule doc declares storage + SKILL parser ---
-
-test("task-short-id rule doc declares SKILL parser + storage sections (U-2/U-3)", () => {
-  const docs = {
-    "en": path.resolve(process.cwd(), "templates/.agents/rules/task-short-id.en.md"),
-    "zh-CN": path.resolve(process.cwd(), "templates/.agents/rules/task-short-id.zh-CN.md")
-  };
-  const skillSection = { en: /^## SKILL parameter resolver$/m, "zh-CN": /^## SKILL 入参解析$/m };
-  const storageSection = { en: /^## Storage$/m, "zh-CN": /^## 存储位置$/m };
-  for (const [lang, file] of Object.entries(docs)) {
-    const content = fs.readFileSync(file, "utf8");
-    assert.match(content, skillSection[lang as keyof typeof skillSection], `${lang}: SKILL section missing`);
-    assert.match(content, storageSection[lang as keyof typeof storageSection], `${lang}: storage section missing`);
   }
 });

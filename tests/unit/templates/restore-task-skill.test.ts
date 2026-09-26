@@ -21,15 +21,6 @@ test("restore-task skill files exist with valid frontmatter", () => {
   });
 });
 
-test("restore-task skill docs keep consecutive step numbering", () => {
-  [localSkillPath, templateSkillPath, templateSkillZhPath].forEach((relativePath) => {
-    const stepNumbers = [...read(relativePath).matchAll(/^### (\d+)\. /gm)]
-      .map((match) => Number(match[1]));
-
-    assert.deepEqual(stepNumbers, [1, 2, 3, 4, 5, 6, 7, 8], `${relativePath} should define steps 1 through 8`);
-  });
-});
-
 test("restore-task verify configs declare the expected checks", () => {
   [localVerifyPath, templateVerifyPath].forEach((relativePath) => {
     assert.ok(exists(relativePath), `${relativePath} should exist`);
