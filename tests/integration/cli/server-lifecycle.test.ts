@@ -256,6 +256,50 @@ test(
 );
 
 test(
+  'foreground and direct daemon entrypoints change cwd to the primary worktree',
+  onPlatforms('linux'),
+  async () => {
+    const primary = makeRepo();
+    const linked = path.join(os.tmpdir(), `${path.basename(primary)}-foreground-linked`);
+    const primaryLog = path.join(primary, '.agents', 'primary-server.log');
+    try {
+      fs.writeFileSync(path.join(primary, '.agents', 'server.json'), JSON.stringify({
+        heartbeatMs: 100,
+        log: { path: '.agents/primary-server.log' }
+      }));
+      execFileSync('git', ['-C', primary, 'add', '.agents'], { env: gitSafeEnv() });
+      execFileSync('git', ['-C', primary, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'server config'], { env: gitSafeEnv() });
+      execFileSync('git', ['-C', primary, 'worktree', 'add', '-b', 'linked-foreground-test', linked], { env: gitSafeEnv() });
+
+      for (const args of [['start', '--foreground'], ['__daemon']]) {
+        const child = spawn(process.execPath, [CLI_PATH, 'server', ...args], {
+          cwd: linked,
+          stdio: 'ignore',
+          env: gitSafeEnv({ HOME: primary, USERPROFILE: primary })
+        });
+        assert.ok(child.pid);
+        try {
+          assert.ok(await waitFor(() => fs.existsSync(primaryLog) && /\[INFO\] heartbeat/.test(fs.readFileSync(primaryLog, 'utf8'))));
+          assert.ok(await waitFor(() => {
+            try {
+              return fs.readlinkSync(`/proc/${child.pid}/cwd`) === primary;
+            } catch {
+              return false;
+            }
+          }));
+        } finally {
+          if (isProcessAlive(child.pid)) child.kill('SIGTERM');
+          assert.ok(await waitFor(() => !isProcessAlive(child.pid as number)));
+        }
+      }
+    } finally {
+      fs.rmSync(linked, { recursive: true, force: true });
+      fs.rmSync(primary, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
   'server start clears a stale pid file left by a crashed daemon',
   onPlatforms('linux', 'darwin'),
   async () => {

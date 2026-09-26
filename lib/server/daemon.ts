@@ -109,6 +109,8 @@ export async function runDaemon({ rootDir }: { rootDir?: string } = {}): Promise
     process.exit(1);
   }
 
+  process.chdir(config.repoRoot);
+
   const logger = createLogger(config.log);
   logger.info(`daemon starting agent-infra ${VERSION} pid=${process.pid}`);
   const ownStartTime = getProcessStartTime(process.pid);
