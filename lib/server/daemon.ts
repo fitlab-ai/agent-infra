@@ -83,7 +83,7 @@ export function createMessageDispatcher(options: MessageDispatcherOptions): (mes
           chunkChars: typeof options.config.stream?.chunkChars === 'number' ? options.config.stream.chunkChars : 4000,
           throttleMs: typeof options.config.stream?.throttleMs === 'number' ? options.config.stream.throttleMs : 1500
         },
-        (emit) => runAiImpl(plan.argv, { onChunk: emit }),
+        (emit) => runAiImpl(plan.argv, { onChunk: emit, cwd: options.config.repoRoot }),
         (outbound) => replyOutbound(message, outbound)
       );
     }
@@ -100,10 +100,10 @@ export function createMessageDispatcher(options: MessageDispatcherOptions): (mes
 //   - runDaemon() awaits a shutdown promise that only resolves once a
 //     SIGINT/SIGTERM handler has finished graceful cleanup. We never unref()
 //     the only keep-alive timer (that would let the process exit immediately).
-export async function runDaemon(): Promise<void> {
+export async function runDaemon({ rootDir }: { rootDir?: string } = {}): Promise<void> {
   let config;
   try {
-    config = loadServerConfig();
+    config = loadServerConfig({ rootDir });
   } catch (error) {
     process.stderr.write(`${errorMessage(error)}\n`);
     process.exit(1);

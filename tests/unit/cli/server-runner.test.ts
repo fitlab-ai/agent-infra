@@ -51,3 +51,22 @@ test('runAi waits for asynchronous chunk callbacks before resolving', async () =
     process.env = originalEnv;
   }
 });
+
+test('runAi runs commands from the configured working directory', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-runner-cwd-'));
+  const binDir = path.join(tmpDir, 'bin');
+  const aiJsPath = path.join(binDir, 'ai.js');
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(aiJsPath, "process.stdout.write(process.cwd());\n", 'utf8');
+  writeNodeCommandShim(path.join(binDir, 'ai'), aiJsPath);
+
+  const originalEnv: NodeJS.ProcessEnv = { ...process.env };
+  Object.assign(process.env, envWithPrependedPath(process.env, binDir));
+  try {
+    const result = await runAi(['task', 'ls'], { cwd: tmpDir });
+    assert.equal(result.stdout, tmpDir);
+  } finally {
+    process.env = originalEnv;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

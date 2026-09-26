@@ -8,10 +8,16 @@ import {
   loadServerConfig,
   validateServerConfig,
   DEFAULT_SERVER_CONFIG
-} from '../../../lib/server/config.ts';
+} from '../../../../lib/server/config.ts';
+import { initIsolatedGitRepo, onPlatforms } from '../../../helpers.ts';
+
+function platformTest(name: string, fn: () => void): void {
+  test(name, onPlatforms('linux', 'darwin', 'win32'), fn);
+}
 
 function makeRepo(serverJson?: unknown, localJson?: unknown): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-config-'));
+  initIsolatedGitRepo(dir);
   fs.mkdirSync(path.join(dir, '.agents'), { recursive: true });
   if (serverJson !== undefined) {
     fs.writeFileSync(path.join(dir, '.agents', 'server.json'), JSON.stringify(serverJson));
@@ -22,7 +28,7 @@ function makeRepo(serverJson?: unknown, localJson?: unknown): string {
   return dir;
 }
 
-test('loadServerConfig returns defaults when no server.json exists', () => {
+platformTest('loadServerConfig returns defaults when no server.json exists', () => {
   const dir = makeRepo();
   try {
     const config = loadServerConfig({ rootDir: dir });
@@ -30,37 +36,31 @@ test('loadServerConfig returns defaults when no server.json exists', () => {
     assert.equal(config.heartbeatMs, DEFAULT_SERVER_CONFIG.heartbeatMs);
     assert.equal(config.log.rotateAtBytes, DEFAULT_SERVER_CONFIG.log.rotateAtBytes);
     assert.deepEqual(config.adapters, {});
-    // default log + pid live OUTSIDE the repo, under
-    // ~/.agent-infra/{logs,run}/<project>/<repo-hash>/. No .airc.json here → the
-    // project key falls back to the repo directory name. The exact repo-hash
-    // segment is implementation detail, so assert structurally.
+    // Default runtime paths live outside the repo under the project key.
     const logBase = path.join(os.homedir(), '.agent-infra', 'logs', path.basename(dir));
     const runBase = path.join(os.homedir(), '.agent-infra', 'run', path.basename(dir));
-    assert.ok(config.log.path.startsWith(logBase + path.sep), config.log.path);
-    assert.ok(config.log.path.endsWith(`${path.sep}server.log`), config.log.path);
-    assert.ok(config.pidFile.startsWith(runBase + path.sep), config.pidFile);
-    assert.ok(config.pidFile.endsWith(`${path.sep}server.pid`), config.pidFile);
+    assert.equal(config.log.path, path.join(logBase, 'server.log'));
+    assert.equal(config.pidFile, path.join(runBase, 'server.pid'));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('server.json deep-merges rotateAtBytes while log.path keeps the home default', () => {
+platformTest('server.json deep-merges rotateAtBytes while log.path keeps the home default', () => {
   const dir = makeRepo({ log: { rotateAtBytes: 1024 }, adapters: { dev: { enabled: false } } });
   try {
     const config = loadServerConfig({ rootDir: dir });
     assert.equal(config.log.rotateAtBytes, 1024);
     // log.path not set in server.json → still defaults under the home dir (deep merge, not dropped)
     const logBase = path.join(os.homedir(), '.agent-infra', 'logs', path.basename(dir));
-    assert.ok(config.log.path.startsWith(logBase + path.sep), config.log.path);
-    assert.ok(config.log.path.endsWith(`${path.sep}server.log`), config.log.path);
+    assert.equal(config.log.path, path.join(logBase, 'server.log'));
     assert.deepEqual(config.adapters, { dev: { enabled: false } });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('the default runtime directory is keyed by the .airc.json project', () => {
+platformTest('the default runtime directory is keyed by the .airc.json project', () => {
   const dir = makeRepo();
   fs.writeFileSync(path.join(dir, '.agents', '.airc.json'), JSON.stringify({ project: 'myproj' }));
   try {
@@ -78,8 +78,7 @@ test('the default runtime directory is keyed by the .airc.json project', () => {
   }
 });
 
-test('two checkouts sharing a project get isolated runtime paths (repo-hash)', () => {
-  // CD-2: same .airc.json project, different repo roots → must NOT share PID/log.
+platformTest('runtime paths are keyed by project regardless of checkout path', () => {
   const a = makeRepo();
   const b = makeRepo();
   fs.writeFileSync(path.join(a, '.agents', '.airc.json'), JSON.stringify({ project: 'shared' }));
@@ -87,9 +86,9 @@ test('two checkouts sharing a project get isolated runtime paths (repo-hash)', (
   try {
     const ca = loadServerConfig({ rootDir: a });
     const cb = loadServerConfig({ rootDir: b });
-    assert.notEqual(ca.pidFile, cb.pidFile, 'pid files must differ between checkouts');
-    assert.notEqual(ca.log.path, cb.log.path, 'log paths must differ between checkouts');
-    // both still grouped under the shared project directory
+    assert.equal(ca.pidFile, cb.pidFile);
+    assert.equal(ca.log.path, cb.log.path);
+    // both are grouped under the shared project directory
     const sharedRun = path.join(os.homedir(), '.agent-infra', 'run', 'shared') + path.sep;
     assert.ok(ca.pidFile.startsWith(sharedRun) && cb.pidFile.startsWith(sharedRun));
   } finally {
@@ -98,7 +97,7 @@ test('two checkouts sharing a project get isolated runtime paths (repo-hash)', (
   }
 });
 
-test('an explicit relative log.path resolves against the repo root', () => {
+platformTest('an explicit relative log.path resolves against the primary worktree root', () => {
   const dir = makeRepo({ log: { path: '.agents/server.log' } });
   try {
     const config = loadServerConfig({ rootDir: dir });
@@ -108,7 +107,7 @@ test('an explicit relative log.path resolves against the repo root', () => {
   }
 });
 
-test('an explicit absolute log.path is used as-is', () => {
+platformTest('an explicit absolute log.path is used as-is', () => {
   const abs = path.join(os.tmpdir(), 'server-abs-log', 'daemon.log');
   const dir = makeRepo({ log: { path: abs } });
   try {
@@ -119,7 +118,7 @@ test('an explicit absolute log.path is used as-is', () => {
   }
 });
 
-test('server.local.json overrides server.json by deep merge', () => {
+platformTest('server.local.json overrides server.json by deep merge', () => {
   const dir = makeRepo(
     { adapters: { dev: { enabled: false, appId: 'cli_xxx' } } },
     { adapters: { dev: { enabled: true } } }
@@ -133,7 +132,7 @@ test('server.local.json overrides server.json by deep merge', () => {
   }
 });
 
-test('environment variables take highest precedence over both files', () => {
+platformTest('environment variables take highest precedence over both files', () => {
   const dir = makeRepo({ heartbeatMs: 5000 });
   const key = 'AGENT_INFRA_SERVER_heartbeatMs';
   const previous = process.env[key];
@@ -148,7 +147,7 @@ test('environment variables take highest precedence over both files', () => {
   }
 });
 
-test('nested env override builds the path and coerces booleans', () => {
+platformTest('nested env override builds the path and coerces booleans', () => {
   const dir = makeRepo({ adapters: { dev: { enabled: true } } });
   const key = 'AGENT_INFRA_SERVER_adapters__dev__enabled';
   const previous = process.env[key];
@@ -163,7 +162,7 @@ test('nested env override builds the path and coerces booleans', () => {
   }
 });
 
-test('committed secret in server.json is rejected at load time', () => {
+platformTest('committed secret in server.json is rejected at load time', () => {
   const dir = makeRepo({ adapters: { feishu: { enabled: true, appSecret: 'leaked-xxx' } } });
   try {
     assert.throws(
@@ -175,7 +174,7 @@ test('committed secret in server.json is rejected at load time', () => {
   }
 });
 
-test('validateServerConfig reports the offending secret field paths', () => {
+platformTest('validateServerConfig reports the offending secret field paths', () => {
   const result = validateServerConfig({
     adapters: { feishu: { enabled: true, appSecret: 'x' } },
     token: 'y'
@@ -186,7 +185,7 @@ test('validateServerConfig reports the offending secret field paths', () => {
   }
 });
 
-test('secrets in server.local.json are allowed (not scanned)', () => {
+platformTest('secrets in server.local.json are allowed (not scanned)', () => {
   const dir = makeRepo(
     { adapters: { feishu: { enabled: true } } },
     { adapters: { feishu: { appSecret: 'kept-secret' } } }
@@ -199,7 +198,7 @@ test('secrets in server.local.json are allowed (not scanned)', () => {
   }
 });
 
-test('empty secret-like fields in server.json do not trigger rejection', () => {
+platformTest('empty secret-like fields in server.json do not trigger rejection', () => {
   const result = validateServerConfig({ adapters: { feishu: { enabled: true, appSecret: '' } } });
   assert.equal(result.ok, true);
 });
