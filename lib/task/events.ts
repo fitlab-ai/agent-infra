@@ -47,6 +47,8 @@ import { ARTIFACT_FAMILIES, parseQualificationAudit, parseTaskQualification, ups
 import type { QualificationAudit } from './qualification-audit.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
 import { canonicalSemanticDigest, inspectArtifactContract } from './artifact-operations.ts';
+import { inspectReviewIdentity } from './review-identity.ts';
+import { parseCompletionFacts, type CompletionFact } from './completion-facts.ts';
 import {
   consumeLifecycleRecoveryAttestation,
   lifecycleRecoveryAttestationDigest,
@@ -618,6 +620,10 @@ function buildCompletionReceipt(
       return null;
     }
   })();
+  if (family === 'review-code') {
+    const identity = inspectReviewIdentity(taskDir, fs.readFileSync(artifact.path, 'utf8'));
+    if (identity.status !== 'matched') return { ok: false, message: `review-code identity is ${identity.status}: ${identity.message}` };
+  }
   if (family === 'code') {
     const startedInput = typeof frontmatter.code_input_artifact === 'string'
       ? frontmatter.code_input_artifact : existing?.input ?? '';
@@ -650,6 +656,9 @@ function buildCompletionReceipt(
     ? frontmatter.review_input_artifact : existing?.input ?? '';
   const startedSha256 = typeof frontmatter.review_input_sha256 === 'string'
     ? frontmatter.review_input_sha256 : existing?.inputSha256 ?? '';
+  if (family === 'review-code' && !startedInput && !startedSha256) {
+    return null;
+  }
   if (!startedInput || !startedSha256) return { ok: false, message: 'review started input context is missing' };
   const current = inspectArtifactDirectory(taskDir, expectedFamily);
   if (current.status !== 'ready' || !current.latest || current.latest.name !== startedInput) {
@@ -672,34 +681,6 @@ function buildCompletionReceipt(
     };
   } catch (error) {
     return { ok: false, message: `cannot hash review input ${startedInput}: ${error instanceof Error ? error.message : String(error)}` };
-  }
-}
-
-type CompletionFact = Readonly<{
-  event: string;
-  output: string;
-  outputSha256: string;
-  semanticDigest: string;
-  requestId: string;
-  result: string;
-}>;
-
-function completionFacts(frontmatter: Record<string, unknown>): CompletionFact[] {
-  if (typeof frontmatter.completion_facts !== 'string') return [];
-  try {
-    const facts: unknown = JSON.parse(frontmatter.completion_facts);
-    if (!Array.isArray(facts)) return [];
-    return facts.filter((fact): fact is CompletionFact => Boolean(
-      fact && typeof fact === 'object' && !Array.isArray(fact)
-      && typeof (fact as CompletionFact).event === 'string'
-      && typeof (fact as CompletionFact).output === 'string'
-      && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).outputSha256)
-      && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).semanticDigest)
-      && typeof (fact as CompletionFact).requestId === 'string'
-      && typeof (fact as CompletionFact).result === 'string'
-    ));
-  } catch {
-    return [];
   }
 }
 
@@ -957,7 +938,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     } catch (error) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot inspect current completion result: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     }
-    if (completionFacts(frontmatter).some((fact) => sameCompletionFact(fact, currentFact!))) {
+    if (parseCompletionFacts(frontmatter.completion_facts).some((fact) => sameCompletionFact(fact, currentFact!))) {
       return successNoOp(
         normalized,
         resolved.taskId,
@@ -984,7 +965,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const logStep = eventIdentity.phase === 'started' ? `${eventIdentity.action} [started]` : eventIdentity.action;
   const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
-  if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(completionFacts(frontmatter), currentFact));
+  if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(parseCompletionFacts(frontmatter.completion_facts), currentFact));
   let frontmatterRemove: string[] | undefined;
   if (eventIdentity.phase === 'started' && eventIdentity.family === 'code') {
     const planInput = artifactContext?.inputs.find((input) => input.family === 'plan' || input.family === 'analysis');
@@ -1000,12 +981,16 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   } else if (eventIdentity.phase === 'started' && eventIdentity.family.startsWith('review-')) {
     const expectedFamily = reviewInputFamily(eventIdentity.family);
     const input = artifactContext?.inputs.find((candidate) => candidate.family === expectedFamily);
-    if (!input) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `review.started ${expectedFamily} input context is unavailable` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
-    try {
-      frontmatterSet.review_input_artifact = input.name;
-      frontmatterSet.review_input_sha256 = sha256File(input.path);
-    } catch (error) {
-      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot hash review.started input: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    if (!input && eventIdentity.family !== 'review-code') {
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `review.started ${expectedFamily} input context is unavailable` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    }
+    if (input) {
+      try {
+        frontmatterSet.review_input_artifact = input.name;
+        frontmatterSet.review_input_sha256 = sha256File(input.path);
+      } catch (error) {
+        return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot hash review.started input: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+      }
     }
   } else if (eventIdentity.phase === 'completed' && eventIdentity.family.startsWith('review-')) {
     frontmatterRemove = ['review_input_artifact', 'review_input_sha256'];

@@ -67,30 +67,29 @@ After resolving the artifact context and before this round's first artifact acti
 
 Require:
 - `.agents/workspace/active/{task-id}/task.md`
-- at least one code artifact: `code.md` or `code-r{N}.md`
+- a resolvable task branch and Git review target. Implementation artifacts are optional context and must not gate review eligibility.
 
 ### 2. Resolve the Artifact Context
 
-Run `agent-infra-internal task-artifact {task-id} inspect --family review-code`. Continue only for `ready`. When `selection.disposition` is `reuse`, reuse `selection.artifact`, do not run started/init or write a new artifact, and continue directly to completion verification and next-step guidance. Otherwise take the latest `{code-artifact}` from `inputs` and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. Then run the started event and verify the returned identity.
+Run `agent-infra-internal task-artifact {task-id} inspect --family review-code`. Continue only for `ready`. When `selection.disposition` is `reuse`, reuse `selection.artifact`, do not run started/init or write a new artifact, and continue directly to completion verification and next-step guidance. Otherwise take any available latest `{code-artifact}` and `{plan-artifact}` from `inputs`, and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. If no code or plan artifact exists, review the Git diff and record the missing context in the report. Then run the started event and verify the returned identity.
 
 ### 3. Read Implementation and Refinement Context
 
-Read the highest-round code artifact and, if present, the highest-round fix artifact. After reading, record the actually reviewed highest-round code artifact (and the highest-round fix artifact, if present) by filename in the report's `Review Input` field; leave it blank when it cannot be reliably determined—do not fabricate.
+Read the available code and plan context returned in step 2. Record the artifact filenames actually read in the report's `Review Input` field; identify missing context without fabricating an artifact. When no implementation artifact exists, review the Git diff as the review subject.
 
 ### 4. Perform the Review
 
-Follow `.agents/workflows/feature-development.yaml` and inspect the full change context:
+Follow `.agents/workflows/feature-development.yaml` and inspect the full change context. HD-1 decided that changes within the reviewed scope must be committed first: before writing the started event, check the post-review paths and stop with an actionable commit instruction when tracked or untracked changes remain. Do not create a review report for a dirty reviewed scope. Bind the report identity to the exact HEAD of a clean worktree:
 - Resolve the task's bound delivery remote/base and read the target SHA once at review start, `M=$(git ls-remote --refs {remote} refs/heads/{baseRef})`; then capture the reviewed commit `R=$(git rev-parse HEAD)` once and compute `D=$(git merge-base "$R" "$M")`. Save M/D/R as historical evidence and never overwrite them with a later live target value
 - If the delivery target cannot be resolved or its target commit is unavailable, stop and record the target error; M/D/R must come from one fact-collection round and must not be replaced by PR-existence evidence
-- `git diff --binary "$D" -- <post-review-globs>` covers committed and uncommitted tracked changes from D to the current worktree
-- `git ls-files -o --exclude-standard -z -- <post-review-globs>` for untracked new files
-- Write `mode=worktree`, `baseline=R`, and `diffBase=D` to a temporary JSON file, then call `agent-infra-internal git-workflow snapshot --input {file}` to generate a reviewed diff fingerprint `F` for the complete committed range and a reviewed snapshot tree `T` for the current worktree; write M, R, D, F, and T into the report
+- `git diff --binary "$D" "$R" -- <post-review-globs>` covers committed tracked changes from D to R; commit any uncommitted or untracked reviewed paths before starting, as required by HD-1
+- Write `mode=worktree`, `baseline=R`, and `diffBase=D` to a temporary JSON file, then call `agent-infra-internal git-workflow snapshot --input {file}` to generate a reviewed diff fingerprint `F` for the committed range and a snapshot tree `T`; write M, R, D, F, and T into the report
 
 > After collecting those facts, read `.agents/rules/review-method.md`, use them as readiness evidence, and run Passes 2–5 for traceability, risk lenses, counterevidence, and classification; the report must record all five passes.
 > Detailed review criteria, severity rules, and reviewer expectations live in `reference/review-criteria.md`. Read `reference/review-criteria.md` before reviewing.
 
 Apply the shared five-pass protocol to code in this order:
-- Pass 1 reads the complete diff, untracked files, latest code artifact, approved plan/review-plan, task source, and raw test results.
+- Pass 1 reads the complete diff, any available code/plan artifacts, task source, and raw test results; when code or plan context is missing, record that gap and continue with the Git diff.
 - Pass 2 maps acceptance/plan → implementation → verification and records changed lines, necessary callers/callees, state/data flow, and uncovered areas per file.
 - Pass 3 reviews overall design before per-file semantics, evaluates every shared registry trigger, and reads every matched reference in full. Test changes load `.agents/rules/testing-discipline.md` through the registry's `testing-discipline` lens; do not maintain a second trigger list.
 - Pass 4 checks guards, call constraints, test coverage, and narrower impact boundaries as counterevidence.

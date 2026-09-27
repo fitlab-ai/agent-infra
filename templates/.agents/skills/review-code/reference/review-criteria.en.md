@@ -30,13 +30,13 @@ Follow the `code-review` step in `.agents/workflows/feature-development.yaml`.
 
 Read `.agents/rules/review-method.md` first and apply its five-pass protocol, risk lenses, and finding evidence contract. Finding, manual-validation, advisory, and `needs-human-decision` state semantics remain governed by `.agents/rules/review-handshake.md`. This file adds only code-stage criteria.
 
-Also inspect `git diff`, the latest code artifact, latest technical-plan review artifact, and `task.md` Activity Log so the report reflects the full change context.
+Also inspect `git diff`, available implementation and plan-review artifacts, and the `task.md` Activity Log so the report reflects the full change context. If implementation or plan artifacts are missing, record the context gap and continue reviewing the Git diff; their absence must not block review.
 
 ## Five Code-stage Passes
 
 | pass_id | code-stage action |
 |---------|-------------------|
-| pass-1 | Read the complete diff, untracked files, implementation/plan artifacts, task source, and raw test results |
+| pass-1 | Read the complete diff, available implementation/plan artifacts, task source, and raw test results; record missing artifact context and continue with the Git diff |
 | pass-2 | Map acceptance/plan → implementation → verification and record changed lines, call context, state/data flow, and uncovered areas |
 | pass-3 | Review overall design before per-file semantics; evaluate every shared registry trigger and read each matched reference in full |
 | pass-4 | Check guards, call constraints, test coverage, and narrower impact boundaries as counterevidence |

@@ -6,12 +6,9 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
-  extractReviewBaseline,
   extractReviewTargetHead,
   extractReviewedHead,
   extractReviewDiffBase,
-  extractReviewDiffFingerprint,
-  extractReviewedSnapshotTree,
   findAuthoritativeReviewCodeArtifact,
   loadPostReviewConfig,
   parseReviewVerdict,
@@ -23,7 +20,6 @@ import { inspectPlatformPullRequest } from "../platform/pull-requests.ts";
 import { resolveMaterializedReviewedHeadRelation } from "../platform/change-request-git-evidence.ts";
 import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
 import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
-import { resolveBranchWorktree } from "../git/branch-worktree.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
 import { LEDGER_TERMINAL, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
 import type { LedgerRow } from "./ledger.ts";
@@ -33,12 +29,10 @@ import { inspectDecisionDetailDuplicates } from "./decision-details.ts";
 import { parseImplementationInputs, type ImplementationInput } from "./implementation-inputs.ts";
 import { scanVisibleMarkdown } from "./markdown.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
-import { snapshotReview } from "../git/review-snapshot.ts";
 import { inspectActivityLog } from "./activity-log.ts";
 import { parseWorkflowWarnings } from "./workflow-warnings.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
 import type { OrchestrationRun } from "./orchestration.ts";
-import { resolveDeliveryTarget } from "./delivery-target.ts";
 import { readPrDeliveryFact } from "./pr-delivery-fact.ts";
 import { validateLocalArtifact } from "./local-artifact-finalization.ts";
 import { getArtifactSchema } from "./artifact-schema.ts";
@@ -50,6 +44,8 @@ import { readManualValidationCompletion } from "./manual-validation-completion.t
 import { sha256File } from "./artifact-receipts.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
 import { taskIssueIdentity } from "../platform/task-identities.ts";
+import { hasArtifactCompletionFact, hasArtifactCompletionLog } from './completion-facts.ts';
+import { inspectReviewIdentity } from './review-identity.ts';
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -1159,12 +1155,16 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
   }
 
   const content = fs.readFileSync(resolvedArtifact.path, "utf8");
+  if (!hasArtifactCompletionFact(task.content, resolvedArtifact.path, 'review-code.completed')) {
+    return failResult("review-fact", `Review Code completion fact does not match ${path.basename(resolvedArtifact.path)}`);
+  }
+  if (!hasArtifactCompletionLog(task.content, path.basename(resolvedArtifact.path), 'review-code.completed')) {
+    return failResult("review-fact", `Review Code completion entry does not reference ${path.basename(resolvedArtifact.path)}`);
+  }
   const verdict = parseReviewVerdict(content);
   const reviewTargetHead = extractReviewTargetHead(content);
   const reviewReviewedHead = extractReviewedHead(content);
   const reviewDiffBase = extractReviewDiffBase(content);
-  const reviewedFingerprint = extractReviewDiffFingerprint(content);
-  const reviewedTree = extractReviewedSnapshotTree(content);
 
   if (!["通过", "需要修改", "拒绝", "Approved", "Changes Requested", "Rejected"].includes(verdict)) {
     return failResult("review-fact", `Unsupported review verdict '${verdict}'`);
@@ -1179,84 +1179,18 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
     return failResult("review-fact", "Review fact must record target head, reviewed head, and diff base");
   }
 
-  let gitRoot;
-  let head;
-  let baseline;
-  let targetHead;
-  let diffBase;
-  try {
-    const taskRepositoryRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-    gitRoot = reviewWorktreeForTask(taskRepositoryRoot, String(task.metadata.branch || "").trim()) ?? taskRepositoryRoot;
-    head = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-    const target = resolveDeliveryTarget(gitRoot, { remote: deliveryRemote, baseRef: deliveryBaseRef });
-    if (!target.ok) throw new Error(target.message);
-    const reviewedRef = reviewReviewedHead;
-    baseline = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewedRef}^{commit}`], { encoding: "utf8" }).trim();
-    targetHead = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewTargetHead}^{commit}`], { encoding: "utf8" }).trim();
-    const computed = execFileSync("git", ["-C", gitRoot, "merge-base", baseline, targetHead], { encoding: "utf8" }).trim();
-    diffBase = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewDiffBase}^{commit}`], { encoding: "utf8" }).trim();
-    if (diffBase !== computed) throw new Error('saved review diff base does not match merge-base(reviewed head, target head)');
-  } catch {
-    return blockedResult(
-      "review-fact",
-      `Unable to resolve saved review commits in the task repository; re-run review-code`
-    );
+  const identity = inspectReviewIdentity(taskDir, content, repositoryRoot);
+  if (identity.status !== 'matched' || !identity.reviewedHead) {
+    return failResult('review-fact', `Review identity is ${identity.status}: ${identity.message}; re-run review-code`);
   }
-
-  if (baseline !== head) {
-    return failResult(
-      "review-fact",
-      `Reviewed head ${baseline.slice(0, 8)} does not match current HEAD ${head.slice(0, 8)}; re-run review-code`
-    );
-  }
-
-  let actualSnapshot;
-  try {
-    actualSnapshot = snapshotReview({
-      cwd: gitRoot,
-      mode: "worktree",
-      baseline,
-      diffBase,
-      globs: resolvePostReviewGlobs({}, loadPostReviewConfig(repositoryRoot))
-    });
-  } catch {
-    return blockedResult(
-      "review-fact",
-      `Unable to recompute reviewed diff fingerprint from baseline ${baseline.slice(0, 8)}; re-run review-code`
-    );
-  }
-
-  if (actualSnapshot.fingerprint !== reviewedFingerprint) {
-    return failResult(
-      "review-fact",
-      `Reviewed diff fingerprint does not match the current worktree for baseline ${baseline.slice(0, 8)}; re-run review-code`
-    );
-  }
-
-  if (!reviewedTree || actualSnapshot.tree !== reviewedTree) {
-    return failResult(
-      "review-fact",
-      `Reviewed snapshot tree does not match the current worktree for baseline ${baseline.slice(0, 8)}; re-run review-code`
-    );
-  }
+  const baseline = identity.reviewedHead;
 
   if (["通过", "Approved"].includes(verdict)) {
     const lastReviewedCommit = String(task.metadata.last_reviewed_commit || "").trim();
-    const cleanSnapshot = actualSnapshot.tree === execFileSync(
-      "git",
-      ["-C", gitRoot, "rev-parse", `${baseline}^{tree}`],
-      { encoding: "utf8" }
-    ).trim();
-    if (cleanSnapshot && lastReviewedCommit !== baseline) {
+    if (lastReviewedCommit !== baseline) {
       return failResult(
         "review-fact",
         `Approved clean review must set task last_reviewed_commit to reviewed head ${baseline.slice(0, 8)}`
-      );
-    }
-    if (!cleanSnapshot && lastReviewedCommit) {
-      return failResult(
-        "review-fact",
-        "Approved review with uncommitted changes must remain unanchored until commit"
       );
     }
   }
@@ -1265,13 +1199,6 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
     "review-fact",
     `Review fact valid for ${path.basename(resolvedArtifact.path)} at ${baseline.slice(0, 8)}`
   );
-}
-
-function reviewWorktreeForTask(repositoryRoot: string, branch: string): string | null {
-  if (!branch) return null;
-  const worktree = resolveBranchWorktree(repositoryRoot, branch);
-  if (worktree) return worktree;
-  throw new Error(`Task branch '${branch}' is not checked out in a registered worktree`);
 }
 
 function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact }: any): any {

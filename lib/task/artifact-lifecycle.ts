@@ -9,6 +9,8 @@ import { parseImplementationInputs, selectPendingImplementationInput } from './i
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
 import { receiptForOutput, sha256File } from './artifact-receipts.ts';
+import { hasArtifactCompletionFact, hasArtifactCompletionLog } from './completion-facts.ts';
+import { inspectReviewIdentity } from './review-identity.ts';
 import { isArtifactInvalidated, parseInvalidationDocument } from './invalidation.ts';
 import type { InvalidationDocument } from './invalidation.ts';
 import type { ArtifactFamily, ArtifactFamilySpec } from './artifact-name.ts';
@@ -228,7 +230,12 @@ function inspectArtifactDirectory(
     if (!knownRounds.has(round)) diagnostics.push(diagnostic('ROUND_GAP', family, null, `${artifactName(family, round)} is missing`));
   }
   const latest = artifacts.at(-1) ?? null;
-  const reviewedInput = family.startsWith('review-') && latest
+  let hasReviewCodeReceipt = false;
+  if (family === 'review-code' && latest) {
+    try { hasReviewCodeReceipt = Boolean(receiptForOutput(fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'), latest.name)); }
+    catch { hasReviewCodeReceipt = false; }
+  }
+  const reviewedInput = family.startsWith('review-') && latest && (family !== 'review-code' || hasReviewCodeReceipt)
     ? resolveReviewedInput(taskDir, latest, family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code', diagnostics)
     : null;
   return {
@@ -316,14 +323,14 @@ function assertWritableInventory(inventory: ArtifactInventoryResult): ArtifactEr
 }
 
 const REQUIRED_INPUT: Partial<Record<ArtifactFamily, ArtifactFamily>> = {
-  'review-analysis': 'analysis', plan: 'analysis', 'review-plan': 'plan', 'review-code': 'code'
+  'review-analysis': 'analysis', plan: 'analysis', 'review-plan': 'plan'
 };
-const OPTIONAL_CONTEXT: Partial<Record<ArtifactFamily, { family: ArtifactFamily }>> = {
-  analysis: { family: 'review-analysis' },
-  plan: { family: 'review-plan' },
-  'review-code': { family: 'review-plan' },
-  'manual-validation': { family: 'review-code' },
-  'validation-run': { family: 'review-code' }
+const OPTIONAL_CONTEXT: Partial<Record<ArtifactFamily, readonly ArtifactFamily[]>> = {
+  analysis: ['review-analysis'],
+  plan: ['review-plan'],
+  'review-code': ['code', 'plan', 'review-plan'],
+  'manual-validation': ['review-code'],
+  'validation-run': ['review-code']
 };
 function hasSelectionEvidence(
   content: string,
@@ -336,6 +343,18 @@ function hasSelectionEvidence(
   if (family.startsWith('review-')) {
     const reviewedFamily = family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
     const currentInput = context.inputs.find((input) => input.family === reviewedFamily);
+    if (family === 'review-code') {
+      if (!context.latest) return false;
+      try {
+        const reportContent = fs.readFileSync(context.latest.path, 'utf8');
+        const identity = inspectReviewIdentity(context.taskDir!, reportContent, options.repoRoot);
+        return identity.status !== 'matched'
+          || !hasArtifactCompletionFact(content, context.latest.path, 'review-code.completed')
+          || !hasArtifactCompletionLog(content, context.latest.name, 'review-code.completed');
+      } catch {
+        return true;
+      }
+    }
     if (currentInput && context.reviewedInput?.name !== currentInput.name) return true;
   }
   const target = family === 'analysis' ? 'analysis' : family === 'plan' ? 'plan' : family === 'code' ? 'code' : null;
@@ -450,9 +469,9 @@ function resolveArtifactContext(taskRef: string, family: string, options: Inspec
   }
   const optional = OPTIONAL_CONTEXT[inventory.family as ArtifactFamily];
   if (optional) {
-    const context = inspectTaskArtifacts(taskRef, optional.family, options);
-    if (context.status === 'ready' && context.latest) {
-      inputs.push(context.latest);
+    for (const family of optional) {
+      const context = inspectTaskArtifacts(taskRef, family, options);
+      if (context.status === 'ready' && context.latest) inputs.push(context.latest);
     }
   }
   if (inventory.family === 'manual-validation' || inventory.family === 'validation-run') {

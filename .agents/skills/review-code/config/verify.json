@@ -24,9 +24,7 @@
       "stage": "code"
     },
     "review-fact": {},
-    "activity-log": {
-      "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)"
-    },
+    "activity-log": {},
     "platform-sync": {
       "when": "platform_issue_identity_exists"
     }

@@ -30,13 +30,13 @@
 
 先读取 `.agents/rules/review-method.md`，按其五遍协议、风险镜头和 finding 证据契约执行；finding、manual-validation、advisory 与 `needs-human-decision` 的状态语义以 `.agents/rules/review-handshake.md` 为准。本文件只补充代码实现阶段的专项判断。
 
-同时检查 `git diff`、最新实现产物、最新技术方案审查产物和 `task.md` Activity Log，确保报告反映完整的变更上下文。
+同时检查 `git diff`、可用的实现与方案审查产物和 `task.md` Activity Log，确保报告反映完整的变更上下文。实现或方案产物缺失时记录上下文缺口并继续审查 Git 差异，不得拒绝审查。
 
 ## 代码阶段五遍动作
 
 | pass_id | code-stage action |
 |---------|-------------------|
-| pass-1 | 读取完整 diff、未跟踪文件、实现/方案产物、任务来源和测试原始结果 |
+| pass-1 | 读取完整 diff、可用实现/方案产物、任务来源和测试原始结果；记录缺失的产物上下文并继续审查 Git 差异 |
 | pass-2 | 建立验收/方案—实现—验证映射，并记录 changed lines、调用上下文、状态/数据流和未覆盖区域 |
 | pass-3 | 先检查整体设计，再检查逐文件语义；判断共享注册表的每个触发器并完整加载命中 reference |
 | pass-4 | 检查保护条件、调用约束、测试覆盖和更窄影响范围等反证 |

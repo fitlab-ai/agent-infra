@@ -46,6 +46,15 @@ test('selected lifecycle path controls authorization without removing code revie
   assert.equal(canStart('code', invalid, { ...trigger, requestedAction: 'code' }).reasonCode, 'LIFECYCLE_PATH_INVALID');
 });
 
+test('review-code authorization does not require a code lifecycle artifact', () => {
+  const state = {
+    ...facts('code-review'), pathState: pathState('标准路径'),
+    artifacts: { ...facts('code-review').artifacts, analysis: ['analysis.md'], plan: ['plan.md'] }
+  } satisfies LifecycleFacts;
+  const result = canStart('review-code', state, { ...trigger, requestedAction: 'review-code' });
+  assert.equal(result.allowed, true);
+});
+
 test('pending rework pauses authorization except for an explicit new requirement', () => {
   const paused = {
     ...facts('code'),
@@ -447,7 +456,9 @@ test('lifecycle facts use completed review receipts rather than review body form
     });
     assert.equal(canStart('plan', result.facts, { ...trigger, requestedAction: 'plan' }).allowed, true);
     assert.equal(canStart('code', result.facts, { ...trigger, requestedAction: 'code' }).allowed, true);
-    assert.equal(canStart('manual-validation', result.facts, { ...trigger, requestedAction: 'manual-validation' }).allowed, true);
+    const manualValidation = canStart('manual-validation', result.facts, { ...trigger, requestedAction: 'manual-validation' });
+    assert.equal(manualValidation.allowed, false);
+    assert.equal(manualValidation.reasonCode, 'CODE_REVIEW_IDENTITY_INVALID');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
