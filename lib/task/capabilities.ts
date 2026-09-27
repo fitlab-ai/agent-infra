@@ -17,6 +17,8 @@ import type { QualificationAudit, TaskQualification } from './qualification-audi
 import { parseLifecyclePathDecision, pathIncludes } from './lifecycle-path.ts';
 import type { LifecyclePathState } from './lifecycle-path.ts';
 import { parseImplementationInputs } from './implementation-inputs.ts';
+import { hasArtifactCompletionFact, hasArtifactCompletionLog } from './completion-facts.ts';
+import { inspectReviewIdentity } from './review-identity.ts';
 
 const ARTIFACT_AUDIT_FAMILIES = new Set(['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code']);
 
@@ -55,6 +57,7 @@ type LifecycleFacts = {
   pathState?: LifecyclePathState;
   reworkClassificationRequired?: readonly ('analysis' | 'plan' | 'code')[];
   resolvedHumanDecisions?: Partial<Record<'analysis' | 'plan' | 'code', 'review' | 'implementation'>>;
+  reviewCodeIdentityValid?: boolean;
 };
 type CapabilityResult = {
   allowed: boolean;
@@ -176,11 +179,12 @@ function canStart(action: LifecycleAction, facts: LifecycleFacts, trigger: Expli
     return allow('plan-review-approved');
   }
   if (action === 'review-code') {
-    return hasArtifact(facts, 'code') ? allow('code-artifact') : deny('CODE_ARTIFACT_REQUIRED');
+    return allow(hasArtifact(facts, 'code') ? 'optional-code-context' : 'review-current-git-diff');
   }
   if (action === 'manual-validation' || action === 'validation-run') {
     if (!hasArtifact(facts, 'review-code')) return deny('CODE_REVIEW_REQUIRED');
-    if (!reviewMatchesLatest(facts, 'code', 'review-code')) return deny('CODE_REVIEW_NOT_LATEST');
+    if (hasArtifact(facts, 'code') && !reviewMatchesLatest(facts, 'code', 'review-code')) return deny('CODE_REVIEW_NOT_LATEST');
+    if (!facts.reviewCodeIdentityValid) return deny('CODE_REVIEW_IDENTITY_INVALID');
     if (facts.reviews['review-code'] !== 'approved') return deny('CODE_REVIEW_NOT_APPROVED');
     if (facts.unresolvedLedger.code > 0) return deny('CODE_LEDGER_BLOCKED', `unresolved=${facts.unresolvedLedger.code}`);
     return allow('code-review-approved');
@@ -345,6 +349,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
     }
     const reviews: LifecycleFacts['reviews'] = {};
     const reviewedInputs: NonNullable<LifecycleFacts['reviewedInputs']> = {};
+    let reviewCodeIdentityValid = false;
     for (const family of ['review-analysis', 'review-plan', 'review-code'] as const) {
       const latest = latestArtifact(artifacts[family] ?? []);
       if (!latest) continue;
@@ -358,6 +363,12 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
         && (artifacts[expectedFamily] ?? []).includes(input)
         && artifactHashes[input] === receipt.inputSha256
       ) reviewedInputs[family] = input;
+      if (family === 'review-code') {
+        const identity = inspectReviewIdentity(taskDir, reviewContent);
+        reviewCodeIdentityValid = identity.status === 'matched'
+          && hasArtifactCompletionFact(content, path.join(taskDir, latest), 'review-code.completed')
+          && hasArtifactCompletionLog(content, latest, 'review-code.completed');
+      }
       const parsed = parseReviewSummary(reviewContent);
       if (!parsed.ok) continue;
       const verdict = resolveCanonicalVerdict(parsed.summary);
@@ -423,6 +434,7 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
       , pathState
       , reworkClassificationRequired
       , resolvedHumanDecisions
+      , reviewCodeIdentityValid
     };
     facts.recommendedAction = recommendNext(facts).action;
     return { ok: true, facts };

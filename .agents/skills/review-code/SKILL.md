@@ -66,24 +66,23 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 要求存在：
 - `.agents/workspace/active/{task-id}/task.md`
-- 至少一个实现产物：`code.md` 或 `code-r{N}.md`
+- 可解析的任务分支与 Git 审查目标。实现产物属于可选上下文，不得作为审查资格门槛。
 
 ### 2. 解析审查上下文
 
-运行 `agent-infra-internal task-artifact {task-id} inspect --family review-code`。仅当结果为 `ready` 时继续。若 `selection.disposition` 为 `reuse`，复用 `selection.artifact`，不得执行 started、init 或写入新产物，并直接进入完成校验与下一步提示。其他状态从 `inputs` 取得最新 `{code-artifact}`，从 `next.round` / `next.name` 取得 `{review-round}` / `{review-artifact}`；不得自行扫描轮次或拼装文件名。随后执行 started 事件并复核返回身份。
+运行 `agent-infra-internal task-artifact {task-id} inspect --family review-code`。仅当结果为 `ready` 时继续。若 `selection.disposition` 为 `reuse`，复用 `selection.artifact`，不得执行 started、init 或写入新产物，并直接进入完成校验与下一步提示。其他状态从 `inputs` 读取可用的最新 `{code-artifact}` 和 `{plan-artifact}`，从 `next.round` / `next.name` 取得 `{review-round}` / `{review-artifact}`；不得自行扫描轮次或拼装文件名。若没有 code 或 plan artifact，直接审查 Git 差异，并在报告中说明缺少的上下文。随后执行 started 事件并复核返回身份。
 
 ### 3. 阅读实现与修复上下文
 
-读取步骤 2 返回的最新 `{code-artifact}`。读取后，把本轮实际检视的 code artifact 按文件名回填到报告 `审查输入` 段；无法可靠取得时留空，不要伪造。
+读取步骤 2 返回的可用 code 与 plan 上下文。把实际读取的 artifact 文件名写入报告 `审查输入` 段；未提供的 artifact 说明为缺失，不要伪造。实现产物缺失时，仍以 Git 审查差异作为审查对象。
 
 ### 4. 执行审查
 
-遵循 `.agents/workflows/feature-development.yaml`，并同时检查完整变更上下文：
+遵循 `.agents/workflows/feature-development.yaml`，并同时检查完整变更上下文。HD-1 已裁定受审范围内的改动必须先提交：在声明 started 前检查 post-review 路径；存在已跟踪或未跟踪改动时停止并提示先提交，不创建审查报告。报告身份必须绑定干净工作树的确切 HEAD commit：
 - 在审查开始时解析任务绑定的 delivery remote/base，并一次性读取目标分支 SHA `M=$(git ls-remote --refs {remote} refs/heads/{baseRef})`；随后一次性记录审查提交 `R=$(git rev-parse HEAD)`，计算 `D=$(git merge-base "$R" "$M")`。报告保存 M/D/R，不能用后续实时目标值覆盖本轮历史证据
 - 若 delivery target 无法解析或目标 commit 不可用，停止并记录 target 错误；M/D/R 必须来自同一轮事实采集，不以 PR 是否存在替代 delivery target 证据
-- `git diff --binary "$D" -- <post-review-globs>` 覆盖 `D` 到当前工作区的已提交与未提交跟踪变更
-- `git ls-files -o --exclude-standard -z -- <post-review-globs>` 覆盖未跟踪新文件
-- 把 `mode=worktree`、`baseline=R`、`diffBase=D` 写入临时 JSON，调用 `agent-infra-internal git-workflow snapshot --input {file}` 一次生成覆盖完整提交范围的审查差异指纹 `F` 与当前工作区审查快照树 `T`；把 M、R、D、F、T 全部写入报告
+- `git diff --binary "$D" "$R" -- <post-review-globs>` 覆盖 `D` 到 `R` 的已提交跟踪变更；未提交或未跟踪的受审路径按 HD-1 先提交后再开始审查
+- 把 `mode=worktree`、`baseline=R`、`diffBase=D` 写入临时 JSON，调用 `agent-infra-internal git-workflow snapshot --input {file}` 一次生成已提交范围的审查差异指纹 `F` 与快照树 `T`；把 M、R、D、F、T 全部写入报告
 
 > 上述事实采集完成后，先读取 `.agents/rules/review-method.md`，以其作为 readiness 证据并按 Pass 2–5 完成追踪、风险镜头、反证和归类；报告必须记录全部五遍覆盖。
 > 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。

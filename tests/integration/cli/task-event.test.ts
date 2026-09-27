@@ -23,6 +23,8 @@ import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
+import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
+import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts';
 
 const FULL_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：完整路径。\n- **判定依据**：夹具覆盖完整生命周期。\n- **未满足的更高路径条件**：没有更高路径。\n- **升级触发条件**：生命周期事实发生变化。\n';
 
@@ -101,10 +103,16 @@ function fixture(step = 'requirement-analysis-review') {
   const root = makeTempDir('task-event-');
   spawnSync('git', ['init', '-q'], { cwd: root });
   fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents/.airc.json'), JSON.stringify({ delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
+  spawnSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
+  spawnSync('git', ['add', '.gitignore', '.agents/.airc.json'], { cwd: root });
+  spawnSync('git', ['commit', '-qm', 'fixture baseline'], { cwd: root });
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\ndelivery_remote: origin\ndelivery_base_ref: main\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), FULL_ANALYSIS);
   if ((!explicitStep && step === 'requirement-analysis-review') || step === 'commit') {
     fs.writeFileSync(path.join(dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
@@ -190,7 +198,32 @@ function run(root: string, args: string[], env: NodeJS.ProcessEnv = sandboxContr
   const trigger = lifecycle && !hasTrigger
     ? ['--initiator', 'model', '--request-id', `${args[0]}:${family}`, '--reason-code', 'user-request']
     : [];
+  if (event === 'review-code.completed') {
+    const artifactIndex = args.indexOf('--artifact');
+    const artifact = artifactIndex >= 0 ? args[artifactIndex + 1] : undefined;
+    if (artifact) bindReviewIdentity(root, args[0]!, artifact);
+  }
   return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args, ...trigger], { cwd: root, encoding: 'utf8', env });
+}
+
+function bindReviewIdentity(root: string, taskId: string, artifact: string): void {
+  const reportPath = path.join(root, '.agents', 'workspace', 'active', taskId, artifact);
+  if (!fs.existsSync(reportPath)) return;
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  const reviewed = snapshotReview({ cwd: root, mode: 'worktree', baseline: head, diffBase: head, globs: resolvePostReviewGlobs({}, {}) });
+  let report = fs.readFileSync(reportPath, 'utf8')
+    .replace(/^- \*\*审查目标提交\*\*：.*$/mu, `- **审查目标提交**：${head}`)
+    .replace(/^- \*\*审查基线提交\*\*：.*$/mu, `- **审查基线提交**：\`${head}\``)
+    .replace(/^- \*\*审查差异基线\*\*：.*$/mu, `- **审查差异基线**：${head}`)
+    .replace(/^- \*\*审查差异指纹\*\*：.*$/mu, `- **审查差异指纹**：${reviewed.fingerprint}`)
+    .replace(/^- \*\*审查快照树\*\*：.*$/mu, `- **审查快照树**：${reviewed.tree}`);
+  if (!/^- \*\*审查目标提交\*\*：/mu.test(report)) {
+    report = report.replace('## 审查摘要\n', `## 审查摘要\n\n- **审查目标提交**：${head}\n`);
+  }
+  if (!/^- \*\*审查已检视提交\*\*：/mu.test(report)) {
+    report = report.replace('## 审查摘要\n', `## 审查摘要\n\n- **审查已检视提交**：${head}\n`);
+  }
+  fs.writeFileSync(reportPath, report);
 }
 
 function finalizeReview(
@@ -1344,6 +1377,23 @@ test('review-code event completes the regular code review path', () => {
   assert.match(content, /`review-code\.md`/);
 });
 
+test('review-code completes against the Git diff without a code artifact receipt', () => {
+  const f = fixture('code');
+  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+
+  fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
+  const finalized = finalizeReview(f, reviewScenarios[2]);
+  assert.equal(finalized.status, 0, finalized.stderr || finalized.stdout);
+  const completed = run(f.root, [
+    f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code.md',
+    '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
+  ]);
+  assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+  const task = fs.readFileSync(f.file, 'utf8');
+  assert.match(task, /review-code\.completed.*review-code\.md/);
+});
+
 test('review completion rejects the same missing schema pattern used by finalization', () => {
   const f = fixture('requirement-analysis-review');
   fs.writeFileSync(path.join(f.dir, 'analysis.md'), FULL_ANALYSIS);
@@ -1683,13 +1733,6 @@ test('review-code event completes a supplemental round against the latest code a
 
 test('review-code completion anchors an approved clean reviewed commit', () => {
   const f = fixture('code-review');
-  fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
-  const added = spawnSync('git', ['add', '.gitignore'], { cwd: f.root, encoding: 'utf8' });
-  assert.equal(added.status, 0, added.stderr);
-  const committed = spawnSync('git', [
-    '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'fixture'
-  ], { cwd: f.root, encoding: 'utf8' });
-  assert.equal(committed.status, 0, committed.stderr);
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
   const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
 
@@ -1719,12 +1762,7 @@ test('review-code completion anchors the task branch worktree when the task work
   const branch = 'agent-infra-bugfix-worktree-anchor';
   const registeredWorktree = path.join(f.root, 'task-worktree');
   const sandboxWorktree = path.join(f.root, 'sandbox-worktree');
-  fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
-  let result = spawnSync('git', ['add', '.gitignore'], { cwd: f.root, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  result = spawnSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'fixture'], { cwd: f.root, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  result = spawnSync('git', ['worktree', 'add', '-b', branch, registeredWorktree], { cwd: f.root, encoding: 'utf8' });
+  let result = spawnSync('git', ['worktree', 'add', '-b', branch, registeredWorktree], { cwd: f.root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   fs.writeFileSync(path.join(registeredWorktree, 'reviewed.txt'), 'reviewed\n');
   result = spawnSync('git', ['add', 'reviewed.txt'], { cwd: registeredWorktree, encoding: 'utf8' });
@@ -1762,13 +1800,6 @@ test('review-code completion anchors the task branch worktree when the task work
 
 test('review-code completion records the result without authorizing a changed implementation', () => {
   const f = fixture('code-review');
-  fs.writeFileSync(path.join(f.root, '.gitignore'), '.agents/workspace/\n');
-  const added = spawnSync('git', ['add', '.gitignore'], { cwd: f.root, encoding: 'utf8' });
-  assert.equal(added.status, 0, added.stderr);
-  const committed = spawnSync('git', [
-    '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'fixture'
-  ], { cwd: f.root, encoding: 'utf8' });
-  assert.equal(committed.status, 0, committed.stderr);
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
   const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
   fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(
@@ -1794,9 +1825,9 @@ test('review-code completion records the result without authorizing a changed im
     f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code-r2.md',
     '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
   ]);
-  assert.equal(completed.status, 0, completed.stderr);
-  assert.equal(JSON.parse(completed.stdout).status, 'applied');
-  assert.match(fs.readFileSync(f.file, 'utf8'), /^last_reviewed_commit:$/m);
+  assert.equal(completed.status, 1, completed.stdout || completed.stderr);
+  assert.match(JSON.parse(completed.stdout).error.message, /uncommitted changes/i);
+  assert.match(fs.readFileSync(f.file, 'utf8'), new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
 });
 
 test('review-code event allows a supplemental round after commit preparation', () => {

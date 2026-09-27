@@ -17,6 +17,9 @@ import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../../lib/
 import { createInvalidationOperation, invalidationMutation, targetIdFor, type InvalidationTarget } from '../../../../lib/task/invalidation.ts';
 import { buildQualificationAudit, renderQualificationAudit } from '../../../../lib/task/qualification-audit.ts';
 import { upsertSection } from '../../../../lib/task/sections.ts';
+import { snapshotReview } from '../../../../lib/git/review-snapshot.ts';
+import { resolvePostReviewGlobs } from '../../../../lib/task/review-fingerprint.ts';
+import { canonicalSemanticDigest } from '../../../../lib/task/artifact-operations.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const STANDARD_ANALYSIS = '# Analysis\n\n## 流程裁定\n\n- **本任务路径**：标准路径。\n- **判定依据**：变更需要技术方案。\n- **未满足的更高路径条件**：不涉及高风险边界。\n- **升级触发条件**：发现权限、持久化或外部契约变更。\n';
@@ -54,6 +57,49 @@ function writeQualifiedArtifact(f: ReturnType<typeof fixture>, name: string) {
   fs.writeFileSync(path.join(f.taskDir, name), `${lifecycle}## \u8d44\u683c\u5ba1\u8ba1\n\n${renderQualificationAudit(built.audit)}\n`);
 }
 
+function git(root: string, args: string[]): string {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result.stdout.trim();
+}
+
+function completedReviewFixture(f: ReturnType<typeof fixture>) {
+  const aircPath = path.join(f.repoRoot, '.agents', '.airc.json');
+  fs.mkdirSync(path.dirname(aircPath), { recursive: true });
+  fs.writeFileSync(aircPath, JSON.stringify({ delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
+  fs.writeFileSync(path.join(f.repoRoot, '.gitignore'), '.agents/workspace/\n');
+  git(f.repoRoot, ['config', 'user.email', 'codex@example.com']);
+  git(f.repoRoot, ['config', 'user.name', 'Codex']);
+  git(f.repoRoot, ['add', '.agents/.airc.json', '.gitignore']);
+  git(f.repoRoot, ['commit', '-qm', 'fixture base']);
+  const head = git(f.repoRoot, ['rev-parse', 'HEAD']);
+  const reviewed = snapshotReview({ cwd: f.repoRoot, mode: 'worktree', baseline: head, diffBase: head, globs: resolvePostReviewGlobs({}, {}) });
+  const report = [
+    '# Code Review', '', '## Review Summary', '',
+    `- **Review Target Commit**: ${head}`,
+    `- **Reviewed Head**: ${head}`,
+    `- **Review Baseline Commit**: ${head}`,
+    `- **Reviewed Diff Base**: ${head}`,
+    `- **Reviewed Diff Fingerprint**: ${reviewed.fingerprint}`,
+    `- **Reviewed Snapshot Tree**: ${reviewed.tree}`,
+    '- **Overall Verdict**: Approved'
+  ].join('\n') + '\n';
+  const reviewPath = path.join(f.taskDir, 'review-code.md');
+  fs.writeFileSync(reviewPath, report);
+  const fact = {
+    event: 'review-code.completed', output: 'review-code.md', outputSha256: sha256File(reviewPath),
+    semanticDigest: canonicalSemanticDigest(report), requestId: 'fixture-review', result: '{}'
+  };
+  fs.writeFileSync(path.join(f.taskDir, 'task.md'), [
+    '---', `id: ${TASK_ID}`, 'status: active', 'current_step: code-review',
+    'delivery_remote: origin', 'delivery_base_ref: main',
+    `completion_facts: ${JSON.stringify(JSON.stringify([fact]))}`, '---', '', '# Task', '',
+    '## 活动日志', '',
+    '- 2026-01-01 00:00:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved → review-code.md', ''
+  ].join('\n'));
+  return { head };
+}
+
 test('catalog exposes exactly the approved artifact families', () => {
   assert.deepEqual(artifactFamilyCatalog.map((item) => item.family), [
     'analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'manual-validation', 'validation-run', 'pr-review'
@@ -83,6 +129,40 @@ test('inventory keeps family rounds independent and computes the next identity',
   assert.deepEqual(plans.next, { round: 4, name: 'plan-r4.md' });
   assert.equal(reviews.status, 'ready');
   assert.deepEqual(reviews.next, { round: 3, name: 'review-plan-r3.md' });
+});
+
+test('review-code can start with the current git diff when no code artifact exists', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
+  const result = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready', JSON.stringify(result.error));
+  assert.deepEqual(result.inputs, []);
+  assert.equal(result.selection?.disposition, 'create');
+  assert.equal(result.selection?.artifact.name, 'review-code.md');
+});
+
+test('review-code reuses only a completed report bound to the current commit', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
+  completedReviewFixture(f);
+  const unchanged = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(unchanged.status, 'ready', JSON.stringify(unchanged.error));
+  assert.equal(unchanged.selection?.disposition, 'reuse');
+  assert.equal(unchanged.selection?.artifact.name, 'review-code.md');
+
+  fs.mkdirSync(path.join(f.repoRoot, '.agents', 'skills'), { recursive: true });
+  const uncommittedPath = path.join(f.repoRoot, '.agents', 'skills', 'uncommitted.md');
+  fs.writeFileSync(uncommittedPath, 'uncommitted review scope\n');
+  const dirty = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(dirty.status, 'ready', JSON.stringify(dirty.error));
+  assert.equal(dirty.selection?.disposition, 'create');
+  fs.unlinkSync(uncommittedPath);
+
+  fs.writeFileSync(path.join(f.repoRoot, '.agents', 'skills', 'after-review.md'), 'new commit\n');
+  git(f.repoRoot, ['add', '.agents/skills/after-review.md']);
+  git(f.repoRoot, ['commit', '-qm', 'change reviewed head']);
+  const changed = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(changed.status, 'ready', JSON.stringify(changed.error));
+  assert.equal(changed.selection?.disposition, 'create');
+  assert.equal(changed.selection?.artifact.name, 'review-code-r2.md');
 });
 
 test('inventory is byte, mtime, and directory-entry pure', () => {

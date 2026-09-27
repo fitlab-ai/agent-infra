@@ -9,6 +9,7 @@ import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
 import { sha256File } from "../../../lib/task/artifact-receipts.ts";
 import { createInvalidationOperation, renderInvalidation, targetIdFor } from "../../../lib/task/invalidation.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
+import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
 import {
   buildTaskFrontmatter,
   parseValidatorPayload,
@@ -129,9 +130,24 @@ test("review-fact accepts an approved clean committed range with an independent 
   });
 });
 
-async function runCheck(taskDir: string) {
+async function runCheck(taskDir: string, attachEvidence = true) {
+  if (attachEvidence) addCompletionEvidence(taskDir);
   const result = await runValidator(["check", "review-fact", taskDir, "review-code.md", "--skill", "review-code"]);
   return { result, payload: parseValidatorPayload(result.stdout) };
+}
+
+function addCompletionEvidence(taskDir: string): void {
+  const taskPath = path.join(taskDir, "task.md");
+  let task = fs.readFileSync(taskPath, "utf8");
+  const artifactPath = path.join(taskDir, "review-code.md");
+  const report = fs.readFileSync(artifactPath, "utf8");
+  const fact = {
+    event: "review-code.completed", output: "review-code.md", outputSha256: sha256File(artifactPath),
+    semanticDigest: canonicalSemanticDigest(report), requestId: "review-code-test", result: JSON.stringify({ manualValidation: 0 })
+  };
+  task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`);
+  task = task.replace("**Review Code (Round 1)** by codex — done", "**Review Code (Round 1)** by codex — Verdict: Approved → review-code.md");
+  fs.writeFileSync(taskPath, task);
 }
 
 test("review-fact accepts an approved report whose HEAD, baseline, fingerprint, and task fact agree", onPlatforms("linux", "darwin", "win32"), async () => {
@@ -145,6 +161,43 @@ test("review-fact accepts an approved report whose HEAD, baseline, fingerprint, 
     assert.equal(payload.status, "pass");
   });
 });
+
+test("review-fact remains valid after a later Watch PR activity and requires report completion evidence", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-review-fact-later-watch-pr-", async (tempRoot) => {
+    const { taskDir, baseline } = setupRepo(tempRoot);
+    const task = taskContent(baseline).replace(
+      "- 2026-03-28 00:00:00+00:00 — **Review Code (Round 1)** by codex — done",
+      [
+        "- 2026-03-28 00:00:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved → review-code.md",
+        "- 2026-03-28 00:01:00+00:00 — **Watch PR** by codex — No changes"
+      ].join("\n")
+    );
+    write(path.join(taskDir, "task.md"), task);
+    write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
+
+    const { result, payload } = await runCheck(taskDir);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(payload.status, "pass");
+
+    const activity = await runValidator(["check", "activity-log", taskDir, "--skill", "review-code"]);
+    const activityPayload = parseValidatorPayload(activity.stdout);
+    assert.equal(activity.status, 0, activity.stderr || activity.stdout);
+    assert.equal(activityPayload.status, "pass");
+
+    const missingEvidence = await runCheckWithoutAttaching(taskDir);
+    assert.equal(missingEvidence.result.status, 1, missingEvidence.result.stdout);
+    assert.match(missingEvidence.payload.message, /completion fact|completion entry/i);
+  });
+});
+
+async function runCheckWithoutAttaching(taskDir: string) {
+  const taskPath = path.join(taskDir, "task.md");
+  const original = fs.readFileSync(taskPath, "utf8");
+  write(taskPath, original.replace(/^completion_facts:.*\n/mu, ""));
+  const result = await runValidator(["check", "review-fact", taskDir, "review-code.md", "--skill", "review-code"]);
+  write(taskPath, original);
+  return { result, payload: parseValidatorPayload(result.stdout) };
+}
 
 test("review-fact rejects an approved report when last_reviewed_commit is stale", onPlatforms("linux", "darwin", "win32"), async () => {
   await withTempRoot("agent-infra-review-fact-stale-", async (tempRoot) => {
@@ -274,7 +327,7 @@ test("review-fact does not require a task review commit for a non-approved repor
   });
 });
 
-test("review-fact accepts an approved uncommitted snapshot without a commit anchor", onPlatforms("linux", "darwin", "win32"), async () => {
+test("review-fact rejects an uncommitted snapshot until its changes are committed", onPlatforms("linux", "darwin", "win32"), async () => {
   await withTempRoot("agent-infra-review-fact-uncommitted-", async (tempRoot) => {
     const { taskDir, baseline } = setupRepo(tempRoot);
     write(path.join(tempRoot, ".agents/skills/x.md"), "base\nreviewed\nuncommitted\n");
@@ -282,8 +335,9 @@ test("review-fact accepts an approved uncommitted snapshot without a commit anch
     write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(tempRoot, baseline)));
 
     const { result, payload } = await runCheck(taskDir);
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(payload.status, "pass");
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(payload.status, "fail");
+    assert.match(payload.message, /uncommitted changes/i);
   });
 });
 
@@ -295,11 +349,14 @@ test("review-fact validates the task branch worktree instead of the task workspa
     const sandboxWorktree = path.join(tempRoot, "sandbox-worktree");
     git(tempRoot, ["worktree", "add", "-q", "-b", branch, registeredWorktree, baseline]);
     write(path.join(registeredWorktree, ".agents/skills/x.md"), "base\nreviewed\ntask worktree change\n");
+    git(tempRoot, ["-C", registeredWorktree, "add", ".agents/skills/x.md"]);
+    git(tempRoot, ["-C", registeredWorktree, "commit", "-qm", "commit task worktree change"]);
+    const reviewedHead = git(tempRoot, ["-C", registeredWorktree, "rev-parse", "HEAD"]);
     fs.renameSync(registeredWorktree, sandboxWorktree);
     const taskDir = path.join(sandboxWorktree, ".agents", "workspace", TASK_ID);
 
-    write(path.join(taskDir, "task.md"), taskContent(undefined, true, branch));
-    write(path.join(taskDir, "review-code.md"), artifactContent(baseline, snapshot(sandboxWorktree, baseline)));
+    write(path.join(taskDir, "task.md"), taskContent(reviewedHead, true, branch));
+    write(path.join(taskDir, "review-code.md"), artifactContent(reviewedHead, snapshot(sandboxWorktree, reviewedHead)));
 
     const { result, payload } = await runCheck(taskDir);
     assert.equal(result.status, 0, result.stderr || result.stdout);

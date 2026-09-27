@@ -4,7 +4,7 @@
 
 编写 `review-code.md` 或 `review-code-r{N}.md` 时使用本模板。
 
-> “审查输入”字段用于读者追溯。生命周期身份以 `review-code.started` 冻结的输入和完成 receipt 为准，不从本报告正文解析。
+> “审查输入”字段用于读者追溯，可为空。审查身份以报告中的确切 HEAD / diff snapshot、有效 `review-code.completed` completion fact 和指向本报告的 Activity Log done 行共同证明；code、plan artifact 仅作可选上下文。
 
 ## 输出模板
 
@@ -13,8 +13,9 @@
 
 - **审查轮次**：第 {review-round} 轮
 - **产物文件**：`{review-artifact}`
-- **审查输入**：
-  - `{code-artifact}`（本轮实际检视的最高轮实现产物——含如存在的最高轮修复产物，如 `code-r2.md`；无法可靠取得则留空）
+- **审查输入**（示例：`code.md`）：
+  - `{code-artifact}`（实际读取的最高轮实现产物；无该产物时写“缺失”，但仍审查 Git 差异）
+  - `{plan-artifact}`（实际读取的方案；无该产物时写“缺失”）
 
 ## 审查摘要
 

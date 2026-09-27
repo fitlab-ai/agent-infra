@@ -4,7 +4,7 @@
 
 Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
-> The `Review Input` field provides reader-facing traceability. Lifecycle identity uses the input frozen by `review-code.started` and the completion receipt; it is not parsed from this report body.
+> The `Review Input` field provides reader-facing traceability and may be empty. Review identity is proven by the report's exact HEAD/diff snapshot, a valid `review-code.completed` completion fact, and an Activity Log done row referencing this report. Code and plan artifacts are optional context.
 
 ## Output Template
 
@@ -13,8 +13,9 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 - **Review Round**: Round {review-round}
 - **Artifact File**: `{review-artifact}`
-- **Review Input**:
-  - `{code-artifact}` (the highest-round implementation artifact actually reviewed—plus the highest-round fix artifact if present, e.g. `code-r2.md`; leave blank if it cannot be reliably determined)
+- **Review Input** (example: `code.md`):
+  - `{code-artifact}` (the highest-round implementation artifact actually read; record “missing” when absent and still review the Git diff)
+  - `{plan-artifact}` (the plan actually read; record “missing” when absent)
 
 ## Review Summary
 
