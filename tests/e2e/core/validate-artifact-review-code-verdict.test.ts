@@ -1,4 +1,5 @@
 import test from "node:test";
+import fs from "node:fs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -7,6 +8,8 @@ import { gitSafeEnv, initIsolatedGitRepo } from "../../helpers.ts";
 import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
 import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
 import { renderArtifactSkeleton } from "../../../lib/task/artifact-schema.ts";
+import { sha256File } from "../../../lib/task/artifact-receipts.ts";
+import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
 import {
   buildTaskContent,
   buildTaskFrontmatter,
@@ -101,6 +104,22 @@ function buildReviewTask(baseline: string, overrides: Record<string, string | nu
   );
 }
 
+function addCompletionFact(taskDir: string): void {
+  const taskPath = path.join(taskDir, "task.md");
+  const artifactPath = path.join(taskDir, "review-code.md");
+  const report = fs.readFileSync(artifactPath, "utf8");
+  const fact = {
+    event: "review-code.completed",
+    output: "review-code.md",
+    outputSha256: sha256File(artifactPath),
+    semanticDigest: canonicalSemanticDigest(report),
+    requestId: "review-code-test",
+    result: JSON.stringify({ manualValidation: 0 })
+  };
+  const task = fs.readFileSync(taskPath, "utf8");
+  fs.writeFileSync(taskPath, task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`));
+}
+
 test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async () => {
   await withTempRoot("agent-infra-rcv-bad-", async (tempRoot) => {
     const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
@@ -109,6 +128,7 @@ test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async ()
       path.join(taskDir, "review-code.md"),
       buildReviewArtifact("**总体结论**：通过但有问题", baseline, reviewedFingerprint, reviewedTree)
     );
+    addCompletionFact(taskDir);
 
     const result = await runValidator(["gate", "review-code", taskDir, "review-code.md"]);
 
@@ -138,6 +158,7 @@ test("review-code gate accepts canonical zh-CN verdict (A-b-zh)", async () => {
       path.join(taskDir, "review-code.md"),
       buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint, reviewedTree)
     );
+    addCompletionFact(taskDir);
 
     const result = await runValidator(["gate", "review-code", taskDir, "review-code.md"]);
 
@@ -158,6 +179,7 @@ test("review-code gate fails when the baseline commit field is absent", async ()
       .filter((line) => !line.startsWith("- **审查基线提交**"))
       .join("\n");
     write(path.join(taskDir, "review-code.md"), artifact);
+    addCompletionFact(taskDir);
 
     const result = await runValidator(["gate", "review-code", taskDir, "review-code.md"]);
 
@@ -176,6 +198,7 @@ test("review-code gate fails when the ledger writeback section is absent", async
     const index = lines.indexOf("## 审查分歧账本回写");
     lines.splice(index, 3); // heading, blank line, body line
     write(path.join(taskDir, "review-code.md"), lines.join("\n"));
+    addCompletionFact(taskDir);
 
     const result = await runValidator(["gate", "review-code", taskDir, "review-code.md"]);
 
