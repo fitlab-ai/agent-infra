@@ -251,6 +251,44 @@ test('text output summarizes passing checks and keeps soft warnings', () => {
   assert.doesNotMatch(text, /\[pass\] platform\.comment-content/);
 });
 
+test('text output warns when a blocked platform check is normalized to pass', () => {
+  const text = renderTaskVerification({
+    status: 'pass', changed: false, event: 'code.completed', requestRef: 'TASK-20260101-000001',
+    taskId: 'TASK-20260101-000001', taskDir: '/tmp/task', taskState: 'active', skill: 'code-task', mode: 'checks', artifact: 'code.md', error: null,
+    invocations: [{
+      status: 'pass', exitCode: 0,
+      payload: {
+        skill: 'code-task', type: 'platform-sync', status: 'pass', checks: [{
+          type: 'platform-sync', checkId: 'platform.in-labels-computed', status: 'blocked', effectiveStatus: 'pass',
+          classification: 'soft', reason: 'network_error', message: 'GitHub is unavailable', action: 'Retry after restoring access'
+        }], action: 'All declared checks passed'
+      }
+    }]
+  });
+  assert.match(text, /Result: 1 passed, 0 failed/);
+  assert.match(text, /Warning: platform\.in-labels-computed \(raw BLOCKED; network_error\) - GitHub is unavailable; Retry after restoring access/);
+});
+
+test('text output preserves human-decided post-review exemption notices on passing checks', () => {
+  const message = 'Human-decided post-review exemption overrode PR_MERGE_IDENTITY_INVALID: PR merge identity does not match the reviewed head; PRC-1: maintainer allowed reviewed and merged identities';
+  const text = renderTaskVerification({
+    status: 'pass', changed: false, event: 'complete-task.prepared', requestRef: 'TASK-20260101-000001',
+    taskId: 'TASK-20260101-000001', taskDir: '/tmp/task', taskState: 'active', skill: 'complete-task', mode: 'gate', artifact: null, error: null,
+    invocations: [{
+      status: 'pass', exitCode: 0,
+      payload: {
+        skill: 'complete-task', gate: 'pass', checks: [{
+          type: 'post-review-commit', checkId: 'post-review-commit', status: 'pass', effectiveStatus: 'pass',
+          reason: 'OK', message, action: 'No action required'
+        }], summary: '1 passed, 0 failed', action: 'All declared checks passed'
+      }
+    }]
+  });
+  assert.match(text, /Result: 1 passed, 0 failed/);
+  assert.match(text, /Notice: post-review-commit - Human-decided post-review exemption overrode PR_MERGE_IDENTITY_INVALID/);
+  assert.match(text, /PRC-1: maintainer allowed reviewed and merged identities/);
+});
+
 test('text output lists only failed and blocked check diagnostics', () => {
   const text = renderTaskVerification({
     status: 'blocked', changed: false, event: 'complete-task.preflight', requestRef: 'TASK-20260101-000001',

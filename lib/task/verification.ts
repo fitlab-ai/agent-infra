@@ -153,15 +153,21 @@ function renderTaskVerification(result: TaskVerificationResult): string {
   for (const check of checks) {
     const rawStatus = check.status;
     const effectiveStatus = check.effectiveStatus ?? rawStatus;
-    const isSoftWarning = rawStatus === 'fail' && effectiveStatus === 'pass';
-    if (effectiveStatus === 'pass' && !isSoftWarning) continue;
+    const isSoftWarning = (rawStatus === 'fail' || rawStatus === 'blocked') && effectiveStatus === 'pass';
     const reason = check.reason ?? 'CHECK_FAILED';
     const message = check.message ?? reason;
     const action = check.action ?? 'Review validation output';
     const id = check.checkId ?? check.type;
+    const isHumanExemptionNotice = id === 'post-review-commit'
+      && typeof message === 'string'
+      && /^Human-decided post-review exemption overrode [A-Z0-9_]+:/.test(message)
+      && /\bPRC-\d+\s*:/.test(message);
+    if (effectiveStatus === 'pass' && !isSoftWarning && !isHumanExemptionNotice) continue;
     lines.push(isSoftWarning
-      ? `Warning: ${id} (${reason}) - ${message}; ${action}`
-      : `  [${statusLabel(effectiveStatus)}] ${id} (${reason}) - ${message}; ${action}`);
+      ? `Warning: ${id} (${rawStatus === 'blocked' ? `raw BLOCKED; ` : ''}${reason}) - ${message}; ${action}`
+      : isHumanExemptionNotice
+        ? `Notice: ${id} - ${message}; ${action}`
+        : `  [${statusLabel(effectiveStatus)}] ${id} (${reason}) - ${message}; ${action}`);
   }
   return `${lines.join('\n')}\n`;
 }
