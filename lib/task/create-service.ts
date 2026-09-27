@@ -19,7 +19,7 @@ type TaskCreateError = { code: string; message: string; retryable: boolean };
 type TaskCreateResult = Readonly<{
   status: TaskCreateStatus;
   changed: boolean;
-  task: { id: string | null; shortId: string | null };
+  task: { id: string | null; shortId: string | null; state: 'active' | 'blocked' | 'completed' | 'archive' | null };
   issue: { number: number; url: string } | null;
   operations: readonly TaskCreateOperation[];
   warnings: readonly TaskCreateWarning[];
@@ -87,9 +87,10 @@ export function parseTaskCreateResult(value: unknown): TaskCreateResult {
   if (!['applied', 'no-op', 'degraded', 'failed', 'blocked'].includes(result.status as string)
     || typeof result.changed !== 'boolean'
     || !result.task || typeof result.task !== 'object' || Array.isArray(result.task)
-    || !exactKeys(result.task as Record<string, unknown>, ['id', 'shortId'])
+    || !exactKeys(result.task as Record<string, unknown>, ['id', 'shortId', 'state'])
     || !validTaskReference((result.task as { id?: unknown }).id)
     || !validTaskReference((result.task as { shortId?: unknown }).shortId)
+    || ![null, 'active', 'blocked', 'completed', 'archive'].includes((result.task as { state?: unknown }).state as string | null)
     || !Array.isArray(result.operations)
     || !result.operations.every((operation) => {
       if (!operation || typeof operation !== 'object' || Array.isArray(operation)) return false;
@@ -136,7 +137,7 @@ export function taskCreateFailure(
   return {
     status: error.retryable ? 'blocked' : 'failed',
     changed: false,
-    task: { id: null, shortId: null },
+    task: { id: null, shortId: null, state: null },
     issue: null,
     operations: [],
     warnings: [],
@@ -206,6 +207,9 @@ async function createTask(value: unknown, options: CreateTaskOptions): Promise<T
   const operations: TaskCreateOperation[] = [{
     name: 'task:local', status: local.status, reasonCode: null
   }];
+  if (local.status === 'no-op' && local.task.state !== 'active') {
+    return { status: 'no-op', changed: false, task: local.task, issue: null, operations, warnings: [], error: null };
+  }
   let issue: TaskCreateResult['issue'] = null;
   const created = await dependencies.createIssue(local.task.id, { cwd: options.repoRoot, agent: candidate.agent });
   operations.push(...platformOperations('platform-create', created.operations));

@@ -19,6 +19,10 @@ const hostEnvironment = Object.fromEntries(
     && key !== 'AGENT_INFRA_EXECUTOR_MANIFEST')
 );
 
+function homeEnvironment(root: string): NodeJS.ProcessEnv {
+  return process.platform === 'win32' ? { USERPROFILE: root } : { HOME: root };
+}
+
 function fixture(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-cli-'));
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
@@ -114,6 +118,7 @@ async function runControlledTaskCreate(
     cwd: root,
     env: {
       ...hostEnvironment,
+      ...homeEnvironment(root),
       AGENT_INFRA_CONTROL_TOKEN: 'task-create-test-token',
       AGENT_INFRA_CONTROL_GENERATION: generation,
       AGENT_INFRA_CONTROL_ROOT_ID: controlRootId,
@@ -156,22 +161,25 @@ test('task-create internal CLI persists a task and replays as no-op', () => {
   fs.writeFileSync(input, JSON.stringify(candidate()));
   try {
     const first = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
-      cwd: root, encoding: 'utf8', env: hostEnvironment
+      cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
     });
     assert.equal(first.status, 0, first.stderr || first.stdout);
     const applied = JSON.parse(first.stdout);
     assert.equal(applied.status, 'applied');
+    assert.equal(applied.task.state, 'active');
     assert.deepEqual(applied.operations.at(-1), { name: 'task:verify', status: 'pass', reasonCode: null });
     assert.match(applied.task.id, /^TASK-\d{8}-\d{6}$/);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', applied.task.id, 'task.md')), true);
 
     const second = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
-      cwd: root, encoding: 'utf8', env: hostEnvironment
+      cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
     });
     assert.equal(second.status, 0, second.stderr || second.stdout);
     const replayed = JSON.parse(second.stdout);
     assert.equal(replayed.status, 'no-op');
     assert.equal(replayed.task.id, applied.task.id);
+    assert.equal(replayed.task.state, 'active');
+    assert.equal(fs.existsSync(path.join(root, '.agent-infra', 'run', 'demo', 'task-create-locks')), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -183,7 +191,7 @@ test('task-create internal CLI keeps qualification tables separate and routes li
   fs.writeFileSync(input, JSON.stringify(qualificationCandidate()));
   try {
     const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
-      cwd: root, encoding: 'utf8', env: hostEnvironment
+      cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const taskId = JSON.parse(result.stdout).task.id as string;
@@ -209,7 +217,7 @@ test('task-create internal CLI parses and routes 27 and 50 qualification candida
     fs.writeFileSync(input, JSON.stringify(qualificationCandidate(alternativeCount)));
     try {
       const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
-        cwd: root, encoding: 'utf8', env: hostEnvironment
+        cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
       });
       assert.equal(result.status, 0, result.stderr || result.stdout);
       const taskId = JSON.parse(result.stdout).task.id as string;
@@ -244,13 +252,12 @@ test('task-create internal CLI rejects an invalid qualification template before 
   ));
   try {
     const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
-      cwd: root, encoding: 'utf8', env: hostEnvironment
+      cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
     });
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CREATE_QUALIFICATION_INVALID');
     assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json')), false);
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-create')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -279,7 +286,7 @@ test('task-create preserves controlled candidate content without changing the ra
   fs.writeFileSync(input, JSON.stringify(raw));
   try {
     const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', input], {
-      cwd: root, encoding: 'utf8', env: hostEnvironment
+      cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const taskId = JSON.parse(result.stdout).task.id as string;
@@ -303,7 +310,7 @@ test('task-create internal CLI rejects symbolic-link input without writing', () 
   fs.symlinkSync(real, linked);
   try {
     const result = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-create', '--input', linked], {
-      cwd: root, encoding: 'utf8', env: hostEnvironment
+      cwd: root, encoding: 'utf8', env: { ...hostEnvironment, ...homeEnvironment(root) }
     });
     assert.equal(result.status, 1);
     assert.equal(JSON.parse(result.stdout).error.code, 'TASK_CREATE_INPUT_INVALID');

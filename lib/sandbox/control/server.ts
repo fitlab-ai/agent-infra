@@ -272,12 +272,15 @@ function taskCreateDomainEvidence(
     ? output.task as Record<string, unknown> : null;
   const taskId = typeof task?.id === 'string' ? task.id : null;
   const shortId = typeof task?.shortId === 'string' ? task.shortId : null;
-  if (!taskId || !shortId) return { consistent: false };
+  const state = task?.state;
+  if (!taskId || !['active', 'blocked', 'completed', 'archive'].includes(String(state))) return { consistent: false };
+  if (state === 'active' ? !shortId : output.status !== 'no-op' || shortId !== null) return { consistent: false };
   try {
     const resolved = resolveTaskRef(taskId, { repoRoot: manifest.repoRoot });
     const shortIds = loadShortIdByTaskId(manifest.repoRoot);
     return {
-      consistent: resolved.ok && resolved.taskId === taskId && resolved.state === 'active' && shortIds.get(taskId) === shortId,
+      consistent: resolved.ok && resolved.taskId === taskId && resolved.state === state
+        && (state === 'active' ? shortIds.get(taskId) === shortId : !shortIds.has(taskId)),
       taskId,
       shortId
     };

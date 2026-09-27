@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
@@ -8,6 +9,8 @@ import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-
 import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
 import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS, parseTaskQualification } from './qualification-audit.ts';
+import { enumerateAllTaskDirs } from './resolve-ref.ts';
+import { parseTaskFrontmatter } from './frontmatter.ts';
 
 const AGENTS = ['claude', 'codex', 'antigravity', 'opencode', 'cursor'] as const;
 const TYPES = ['feature', 'bugfix', 'refactor', 'docs', 'chore'] as const;
@@ -41,7 +44,7 @@ type TaskCreateCandidateV1 = Readonly<{
 type LocalTaskCreateResult = Readonly<{
   status: 'applied' | 'no-op';
   changed: boolean;
-  task: { id: string; shortId: string };
+  task: { id: string; shortId: string | null; state: 'active' | 'blocked' | 'completed' | 'archive' };
 }>;
 
 type LocalTaskCreateOptions = Readonly<{
@@ -345,16 +348,32 @@ function ensureRealDirectory(directory: string, code: string): void {
   fs.mkdirSync(directory, { mode: 0o700 });
 }
 
-function withCreateLock<T>(repoRoot: string, workspaceRoot: string, operation: () => T): T {
-  const lockRoot = path.join(workspaceRoot, '.task-create.lock');
-  fs.mkdirSync(lockRoot, { recursive: true, mode: 0o700 });
-  assertRealDirectory(lockRoot, 'TASK_CREATE_LOCK_FAILED');
+function createLockRoot(project: string): string {
+  const root = path.join(os.homedir(), '.agent-infra');
+  const directories = [root, path.join(root, 'run'), path.join(root, 'run', project), path.join(root, 'run', project, 'task-create-locks')];
+  for (const directory of directories) {
+    if (fs.existsSync(directory)) {
+      assertRealDirectory(directory, 'TASK_CREATE_LOCK_FAILED');
+      continue;
+    }
+    try {
+      fs.mkdirSync(directory, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      assertRealDirectory(directory, 'TASK_CREATE_LOCK_FAILED');
+    }
+  }
+  return directories.at(-1)!;
+}
+
+function withCreateLock<T>(repoRoot: string, project: string, operation: () => T): T {
+  const lockRoot = createLockRoot(project);
   let callbackError: unknown;
   try {
     return withTaskExecutionLock(repoRoot, 'task-create', 'task-create', () => {
       try { return operation(); }
       catch (error) { callbackError = error; throw error; }
-    }, { lockRoot });
+    }, { lockRoot, identityScope: `task-create\0${project}` });
   } catch (error) {
     if (callbackError !== undefined) throw callbackError;
     if (error instanceof TaskExecutionLockError && error.code === 'ORCHESTRATION_LOCK_BUSY') {
@@ -365,35 +384,21 @@ function withCreateLock<T>(repoRoot: string, workspaceRoot: string, operation: (
   }
 }
 
-function writeReceipt(receiptPath: string, value: unknown): void {
-  const temporary = `${receiptPath}.tmp.${process.pid}.${randomUUID()}`;
-  fs.writeFileSync(temporary, `${JSON.stringify(value)}\n`, { flag: 'wx', mode: 0o600 });
-  try { fs.renameSync(temporary, receiptPath); }
-  catch (error) {
-    try { fs.unlinkSync(temporary); } catch { /* best effort */ }
-    throw error;
-  }
-}
-
-function recoverPublishedTask(activeRoot: string, repoRoot: string, keyDigest: string, candidateDigest: string): { taskId: string; shortId: string } | null {
-  for (const name of fs.readdirSync(activeRoot)) {
-    if (!/^TASK-\d{8}-\d{6}$/.test(name)) continue;
-    const taskDir = path.join(activeRoot, name);
-    const stat = fs.lstatSync(taskDir);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
-    const taskMd = path.join(taskDir, 'task.md');
-    if (!fs.existsSync(taskMd)) continue;
+function recoverPublishedTask(repoRoot: string, keyDigest: string, candidateDigest: string): { taskId: string; shortId: string | null; state: 'active' | 'blocked' | 'completed' | 'archive' } | null {
+  for (const task of enumerateAllTaskDirs(repoRoot)) {
+    const taskMd = path.join(task.taskDir, 'task.md');
     const taskStat = fs.lstatSync(taskMd);
-    if (!taskStat.isFile() || taskStat.isSymbolicLink()) continue;
-    const content = fs.readFileSync(taskMd, 'utf8');
-    if (!content.includes(`task_create_key_digest: ${keyDigest}`)) continue;
-    if (!content.includes(`task_create_candidate_digest: ${candidateDigest}`)) {
+    if (!taskStat.isFile() || taskStat.isSymbolicLink()) throw new Error('TASK_CREATE_TASK_INVALID');
+    const frontmatter = parseTaskFrontmatter(fs.readFileSync(taskMd, 'utf8'));
+    if (frontmatter.task_create_key_digest !== keyDigest) continue;
+    if (frontmatter.task_create_candidate_digest !== candidateDigest) {
       throw new Error('TASK_CREATE_IDEMPOTENCY_CONFLICT');
     }
-    const shortId = loadShortIdByTaskId(repoRoot).get(name)
-      ?? mutateShortIdRegistry(repoRoot, name, 'alloc').shortId;
-    if (!shortId) throw new Error('TASK_CREATE_RECEIPT_INVALID');
-    return { taskId: name, shortId };
+    const shortId = task.state === 'active'
+      ? loadShortIdByTaskId(repoRoot).get(task.taskId) ?? mutateShortIdRegistry(repoRoot, task.taskId, 'alloc').shortId
+      : null;
+    if (task.state === 'active' && !shortId) throw new Error('TASK_CREATE_SHORT_ID_FAILED');
+    return { taskId: task.taskId, shortId, state: task.state };
   }
   return null;
 }
@@ -414,29 +419,10 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
   const canonical = canonicalTaskCreateCandidate(candidate);
   const candidateDigest = sha256(canonical);
   const keyDigest = sha256(candidate.idempotencyKey);
-  const receipts = path.join(workspaceRoot, '.task-create');
-
-  return withCreateLock(repoRoot, workspaceRoot, () => {
-    if (fs.existsSync(receipts)) assertRealDirectory(receipts, 'TASK_CREATE_RECEIPT_INVALID');
-    const receiptPath = path.join(receipts, `${keyDigest}.json`);
-    if (fs.existsSync(receiptPath)) {
-      const stat = fs.lstatSync(receiptPath);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('TASK_CREATE_RECEIPT_INVALID');
-      const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as { candidateDigest?: string; taskId?: string; shortId?: string };
-      if (receipt.candidateDigest !== candidateDigest) throw new Error('TASK_CREATE_IDEMPOTENCY_CONFLICT');
-      if (!receipt.taskId || !receipt.shortId || !fs.existsSync(path.join(activeRoot, receipt.taskId, 'task.md'))) {
-        throw new Error('TASK_CREATE_RECEIPT_INVALID');
-      }
-      return { status: 'no-op', changed: false, task: { id: receipt.taskId, shortId: receipt.shortId } };
-    }
-
-    const recovered = recoverPublishedTask(activeRoot, repoRoot, keyDigest, candidateDigest);
+  return withCreateLock(repoRoot, projectConfig.project, () => {
+    const recovered = recoverPublishedTask(repoRoot, keyDigest, candidateDigest);
     if (recovered) {
-      ensureRealDirectory(receipts, 'TASK_CREATE_RECEIPT_INVALID');
-      writeReceipt(receiptPath, {
-        version: 1, candidateDigest, taskId: recovered.taskId, shortId: recovered.shortId, status: 'recovered'
-      });
-      return { status: 'no-op', changed: false, task: { id: recovered.taskId, shortId: recovered.shortId } };
+      return { status: 'no-op', changed: false, task: { id: recovered.taskId, shortId: recovered.shortId, state: recovered.state } };
     }
 
     const base = options.now?.() ?? new Date();
@@ -455,29 +441,16 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
       agentInfraVersion, keyDigest, candidateDigest
     });
     validateRenderedQualification(rendered, candidate);
-    ensureRealDirectory(receipts, 'TASK_CREATE_RECEIPT_INVALID');
     const temporary = path.join(workspaceRoot, `.task-create.tmp.${process.pid}.${randomUUID()}`);
     fs.mkdirSync(temporary, { mode: 0o700 });
     fs.writeFileSync(path.join(temporary, 'task.md'), rendered, { flag: 'wx', mode: 0o600 });
     const destination = path.join(activeRoot, taskId);
     fs.renameSync(temporary, destination);
     let shortId: string;
-    try {
-      const allocated = mutateShortIdRegistry(repoRoot, taskId, 'alloc');
-      if (!allocated.shortId) throw new Error('TASK_CREATE_SHORT_ID_FAILED');
-      shortId = allocated.shortId;
-    } catch (error) {
-      fs.rmSync(destination, { recursive: true, force: true });
-      throw error;
-    }
-    try {
-      writeReceipt(receiptPath, { version: 1, candidateDigest, taskId, shortId, status: 'created' });
-    } catch (error) {
-      mutateShortIdRegistry(repoRoot, taskId, 'release');
-      fs.rmSync(destination, { recursive: true, force: true });
-      throw error;
-    }
-    return { status: 'applied', changed: true, task: { id: taskId, shortId } };
+    const allocated = mutateShortIdRegistry(repoRoot, taskId, 'alloc');
+    if (!allocated.shortId) throw new Error('TASK_CREATE_SHORT_ID_FAILED');
+    shortId = allocated.shortId;
+    return { status: 'applied', changed: true, task: { id: taskId, shortId, state: 'active' } };
   });
 }
 
