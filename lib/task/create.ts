@@ -352,8 +352,16 @@ function createLockRoot(project: string): string {
   const root = path.join(os.homedir(), '.agent-infra');
   const directories = [root, path.join(root, 'run'), path.join(root, 'run', project), path.join(root, 'run', project, 'task-create-locks')];
   for (const directory of directories) {
-    if (fs.existsSync(directory)) assertRealDirectory(directory, 'TASK_CREATE_LOCK_FAILED');
-    else fs.mkdirSync(directory, { mode: 0o700 });
+    if (fs.existsSync(directory)) {
+      assertRealDirectory(directory, 'TASK_CREATE_LOCK_FAILED');
+      continue;
+    }
+    try {
+      fs.mkdirSync(directory, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      assertRealDirectory(directory, 'TASK_CREATE_LOCK_FAILED');
+    }
   }
   return directories.at(-1)!;
 }

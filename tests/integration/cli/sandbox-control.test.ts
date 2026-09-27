@@ -40,8 +40,10 @@ import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { captureSandboxAuthority } from '../../../lib/sandbox/engines/authority.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
+import { createLocalTask } from '../../../lib/task/create.ts';
 import { taskCreateOutputUnavailableResult } from '../../../lib/task/create-service.ts';
 import { prepareTaskFinalization } from '../../../lib/task/finalization.ts';
+import { mutateShortIdRegistry } from '../../../lib/task/short-id.ts';
 import { platformResult } from '../../../lib/platform/types.ts';
 import { onPlatforms } from '../../helpers.ts';
 
@@ -2643,6 +2645,89 @@ test('broker restart accepts an existing unavailable task-create terminal', asyn
     controller.abort();
     await server;
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('broker recovery accepts a task-create no-op for a non-active task', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-non-active-recovery-'));
+  const requestId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  let server: Promise<void> | undefined;
+  let controller: AbortController | undefined;
+  try {
+    const manifestPath = writeControlManifest(root, initializeRepository(root), 'task-create-non-active-generation');
+    const manifest = readSandboxControlManifest(manifestPath);
+    fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'workspace', 'blocked'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'demo', task: { shortIdLength: 2 }, delivery: { remote: 'origin', baseRef: 'main' } }));
+    fs.copyFileSync(path.resolve('.agents/templates/task.md'), path.join(root, '.agents', 'templates', 'task.md'));
+    fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
+    const candidate = {
+      version: 1 as const,
+      idempotencyKey: '12345678-1234-4123-8123-123456789abc',
+      agent: 'codex' as const,
+      title: 'Recover non-active task-create output',
+      type: 'feature' as const,
+      branchSlug: 'recover-non-active-create-output',
+      priority: 'Medium' as const,
+      effort: 'Low' as const,
+      description: 'Recover a successful replay after the task leaves active.',
+      taskInput: { sources: [], facts: [], constraints: [], decisions: [], alternatives: [], acceptanceCriteria: [], openQuestions: [] }
+    };
+    const created = createLocalTask(candidate, { repoRoot: root, agentInfraVersion: 'v0.11.5' });
+    const blocked = path.join(root, '.agents', 'workspace', 'blocked', created.task.id);
+    mutateShortIdRegistry(root, created.task.id, 'release');
+    fs.renameSync(path.join(root, '.agents', 'workspace', 'active', created.task.id), blocked);
+
+    const output = `${JSON.stringify({
+      status: 'no-op', changed: false,
+      task: { id: created.task.id, shortId: null, state: 'blocked' },
+      issue: null, operations: [{ name: 'task:local', status: 'no-op', reasonCode: null }],
+      warnings: [], error: null
+    })}\n`;
+    const processing = path.join(manifest.processingDir, requestId);
+    fs.mkdirSync(path.join(processing, 'transitions'), { recursive: true });
+    for (const phase of ['started-committed', 'completed', 'evidence-written', 'publish-authorized'] as const) {
+      if (phase === 'started-committed') fs.writeFileSync(path.join(processing, 'transitions', `${phase}.json`), '{}\n');
+      else writeSandboxControlTransition(manifest, { requestId, phase });
+    }
+    fs.writeFileSync(path.join(processing, 'request.json'), `${JSON.stringify({
+      version: 3, id: requestId, token: manifest.token, generation: manifest.generation,
+      issuedAt: Date.now() - 100, expiresAt: Date.now() + 1_000, family: 'task-create', candidate,
+      controllerProcess: null, controllerProof: null
+    })}\n`);
+    fs.writeFileSync(path.join(processing, 'execution.json'), `${JSON.stringify({
+      version: 2, generation: manifest.generation, requestId, nonce: 'task-create-non-active-recovery',
+      child: { pid: 999_999_999, startTime: 0, processGroupId: null }, phase: 'running', updatedAt: Date.now()
+    })}\n`);
+    writeSandboxControlReservation(manifest, requestId, { logicalRecords: 1, bytes: 0 });
+    writeSandboxControlResultEvidence(manifest, requestId, { exitCode: 0, stdout: output, stderr: '' });
+    writeSandboxControlPayload(manifest, requestId, { stdout: output, stderr: '' });
+    writeSandboxControlTerminalResult(manifest, { id: requestId, family: 'task-create', operation: 'create' }, output);
+    fs.writeFileSync(path.join(manifest.channelDir, 'responses', `${requestId}.accepted.json`), `${JSON.stringify({
+      version: 2, id: requestId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
+    })}\n`);
+
+    controller = new AbortController();
+    server = serveSandboxControl(manifestPath, controller.signal, {
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: true, labels: {} }),
+      bindingCheck: () => null
+    });
+    await waitForStatusStateAsync(manifest.publicStatusDir, 'healthy', 5_000);
+    const responsePath = path.join(manifest.channelDir, 'responses', `${requestId}.json`);
+    waitForFile(responsePath, 5_000);
+    const response = readJsonFileAfterPublication(responsePath, 5_000);
+    assert.equal(response.phase, 'completed');
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.outputState, 'available');
+    const payload = readJsonFileAfterPublication(path.join(manifest.channelDir, 'responses', `${requestId}.payload.json`), 5_000);
+    assert.equal(JSON.parse(String(payload.stdout)).task.state, 'blocked');
+    assert.equal(JSON.parse(String(payload.stdout)).task.shortId, null);
+  } finally {
+    controller?.abort();
+    if (server) await server;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

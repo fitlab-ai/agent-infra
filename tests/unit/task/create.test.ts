@@ -354,6 +354,35 @@ test('task-create explicit lock identity is shared across checkouts and isolated
   }
 });
 
+test('project lock initialization tolerates another creator winning the directory race', () => {
+  const root = fixture();
+  const originalExistsSync = fs.existsSync;
+  const contested = path.join(root, '.agent-infra');
+  let interleaved = false;
+  try {
+    fs.existsSync = ((file: fs.PathLike) => {
+      const exists = originalExistsSync(file);
+      if (!interleaved && file === contested && !exists) {
+        interleaved = true;
+        fs.mkdirSync(contested, { mode: 0o700 });
+      }
+      return exists;
+    }) as typeof fs.existsSync;
+
+    const created = createLocalTask(candidate, {
+      repoRoot: root,
+      now: () => new Date(2026, 7, 13, 1, 2, 3),
+      agentInfraVersion: 'v0.9.5'
+    });
+    assert.equal(interleaved, true);
+    assert.equal(created.status, 'applied');
+    assert.equal(fs.existsSync(path.join(root, '.agent-infra', 'run', 'demo', 'task-create-locks')), true);
+  } finally {
+    fs.existsSync = originalExistsSync;
+    cleanupFixture(root);
+  }
+});
+
 test('local task creation recovers matching summaries in every lifecycle state', () => {
   const states = ['active', 'blocked', 'completed', 'archive'] as const;
   for (const state of states) {
@@ -374,6 +403,9 @@ test('local task creation recovers matching summaries in every lifecycle state',
         fs.renameSync(source, destination);
       }
 
+      const registryPath = path.join(root, '.agents', 'workspace', 'active', '.short-ids.json');
+      const registryBeforeReplay = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+
       const replay = createLocalTask(candidate, options);
       assert.equal(replay.status, 'no-op');
       assert.equal(replay.task.id, created.task.id);
@@ -384,8 +416,7 @@ test('local task creation recovers matching summaries in every lifecycle state',
         /TASK_CREATE_IDEMPOTENCY_CONFLICT/
       );
       if (state !== 'active') {
-        const registry = JSON.parse(fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')) as { ids: Record<string, string> };
-        assert.equal(Object.hasOwn(registry.ids, created.task.id), false);
+        assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, 'utf8')), registryBeforeReplay);
       }
     } finally {
       cleanupFixture(root);
