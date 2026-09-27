@@ -248,7 +248,7 @@ const SANDBOX_CONTROL_TEST_TIMEOUT_MS = 5_000;
 const SANDBOX_CONTROL_ENV_KEYS = [
   'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
   'AGENT_INFRA_CONTROL_ROOT_ID', 'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR',
-  'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST'
+  'AGENT_INFRA_RUNTIME_DIR', 'AGENT_INFRA_CONTROL_CONTROLLER_BINDING', 'AGENT_INFRA_EXECUTOR_MANIFEST', 'HOME', 'USERPROFILE'
 ] as const;
 
 function withSandboxControlEnvironment<T>(overrides: Partial<Record<typeof SANDBOX_CONTROL_ENV_KEYS[number], string>>, callback: () => T): T {
@@ -2372,6 +2372,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
       }
     };
     const response = withSandboxControlEnvironment({
+      ...(process.platform === 'win32' ? { USERPROFILE: root } : { HOME: root }),
       AGENT_INFRA_TASK_ID: undefined,
       AGENT_INFRA_CONTROL_ROOT_ID: 'a'.repeat(96),
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
@@ -2386,6 +2387,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
     assert.equal(response.exitCode, 0, response.stderr || response.stdout);
     const result = JSON.parse(response.stdout);
     assert.equal(result.status, 'applied');
+    assert.equal(result.task.state, 'active');
     assert.deepEqual(result.operations.at(-1), { name: 'task:verify', status: 'pass', reasonCode: null });
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', result.task.id, 'task.md')), true);
     const currentManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -2555,6 +2557,7 @@ test('broker recovery returns inspectable task-create output when the payload is
     assert.deepEqual(result.control, { requestId, accepted: true, recovery: 'inspect-domain-state' });
     assert.equal(result.task.id, null);
     assert.equal(result.task.shortId, null);
+    assert.equal(result.task.state, null);
     assert.equal(recoverSandboxControl(requestId, { channelDir: manifest.channelDir, timeoutMs: 100 }).stdout, response.stdout);
     assert.equal(fs.existsSync(processingDirectory), false);
     controller.abort();

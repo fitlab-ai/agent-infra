@@ -27,6 +27,7 @@ type LinkDisposition = 'exists' | 'missing' | TaskExecutionLockError;
 
 type TaskExecutionLockOptions = Readonly<{
   lockRoot?: string;
+  identityScope?: string;
   token?: () => string;
   now?: () => string;
   getStartTime?: (pid: number) => number | null;
@@ -74,9 +75,12 @@ function mapLinkError(operation: LinkOperation, error: unknown, key: string): Li
   );
 }
 
-function lockKey(repoRoot: string, taskId: string): Readonly<{ canonicalRepoRoot: string; key: string }> {
+function lockKey(repoRoot: string, taskId: string, identityScope?: string): Readonly<{ canonicalRepoRoot: string; key: string }> {
   const canonicalRepoRoot = fs.realpathSync.native(repoRoot);
-  const key = createHash('sha256').update(`${canonicalRepoRoot}\0${taskId}`).digest('hex');
+  const identity = identityScope === undefined
+    ? `${canonicalRepoRoot}\0${taskId}`
+    : `${identityScope}\0${taskId}`;
+  const key = createHash('sha256').update(identity).digest('hex');
   return { canonicalRepoRoot, key };
 }
 
@@ -190,7 +194,7 @@ function withTaskExecutionLock<T>(
 ): T {
   let identity: Readonly<{ canonicalRepoRoot: string; key: string }>;
   try {
-    identity = lockKey(repoRoot, taskId);
+    identity = lockKey(repoRoot, taskId, options.identityScope);
   } catch (error) {
     throw new TaskExecutionLockError(
       'ORCHESTRATION_LOCK_FAILED',

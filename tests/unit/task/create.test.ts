@@ -6,6 +6,7 @@ import test from 'node:test';
 import { onPlatforms } from '../../helpers.ts';
 
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
+import { mutateShortIdRegistry } from '../../../lib/task/short-id.ts';
 import {
   canonicalTaskCreateCandidate,
   createLocalTask,
@@ -42,6 +43,8 @@ const candidate: TaskCreateCandidateV1 = {
     openQuestions: []
   }
 };
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
 
 const qualificationCandidate: TaskCreateCandidateV1 = {
   ...candidate,
@@ -55,6 +58,8 @@ const qualificationCandidate: TaskCreateCandidateV1 = {
 
 function fixture(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-'));
+  if (process.platform === 'win32') process.env.USERPROFILE = root;
+  else process.env.HOME = root;
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
@@ -64,10 +69,21 @@ function fixture(): string {
   return root;
 }
 
+function cleanupFixture(root: string): void {
+  if (process.platform === 'win32' && process.env.USERPROFILE === root) {
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
+  } else if (process.platform !== 'win32' && process.env.HOME === root) {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
 function writeCreateLockOwner(root: string, owner: Readonly<{ pid: number; startTime: number }>): string {
-  const lockRoot = path.join(root, '.agents', 'workspace', '.task-create.lock');
+  const lockRoot = path.join(root, '.agent-infra', 'run', 'demo', 'task-create-locks');
   fs.mkdirSync(lockRoot, { recursive: true });
-  const { canonicalRepoRoot, key } = lockKey(root, 'task-create');
+  const { canonicalRepoRoot, key } = lockKey(root, 'task-create', 'task-create\0demo');
   const fixed = path.join(lockRoot, `${key}.lock`);
   fs.writeFileSync(fixed, `${JSON.stringify({
     version: 2,
@@ -101,9 +117,8 @@ test('local task creation rejects an invalid explicit version before creating wo
       /TASK_CREATE_VERSION_INVALID/
     );
     assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-create')), false);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -152,7 +167,6 @@ test('local task creation is idempotent and rejects key reuse with changed conte
     assert.equal(retry.status, 'no-op');
     assert.deepEqual(retry.task, first.task);
 
-    fs.rmSync(path.join(root, '.agents', 'workspace', '.task-create'), { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), '{"version":1,"ids":{}}\n');
     const recovered = createLocalTask(candidate, options);
     assert.equal(recovered.status, 'no-op');
@@ -163,7 +177,7 @@ test('local task creation is idempotent and rejects key reuse with changed conte
       /TASK_CREATE_IDEMPOTENCY_CONFLICT/
     );
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -188,7 +202,7 @@ test('local task creation keeps constraint and candidate qualification tables se
       ['B', 'Add a second qualification writer.']
     ]);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -215,7 +229,7 @@ test('local task creation supports 50 qualification candidates with unique parse
     assert.equal(ids[49], 'AX');
     assert.equal(new Set(ids).size, 50);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -234,9 +248,8 @@ test('local task creation rejects an invalid qualification template before publi
     );
     assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json')), false);
-    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-create')), false);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -252,7 +265,7 @@ test('local task creation safely restores missing runtime workspace directories'
     assert.equal(result.status, 'applied');
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', result.task.id, 'task.md')), true);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -265,7 +278,7 @@ test('local task creation rejects a symbolic-link workspace without writing outs
     assert.throws(() => createLocalTask(candidate, { repoRoot: root }), /TASK_CREATE_WORKSPACE_INVALID/);
     assert.deepEqual(fs.readdirSync(outside), []);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
     fs.rmSync(outside, { recursive: true, force: true });
   }
 });
@@ -287,7 +300,7 @@ test('same-second task creation advances to the next free TASK-id', () => {
     assert.equal(first.task.id, 'TASK-20260813-010203');
     assert.equal(second.task.id, 'TASK-20260813-010204');
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -303,7 +316,7 @@ test('local task creation reclaims a lock whose process identity is stale', () =
     assert.equal(result.status, 'applied');
     assert.equal(fs.existsSync(fixed), false);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -322,7 +335,61 @@ test('local task creation preserves a lock owned by the current process', () => 
     );
     assert.equal(fs.existsSync(fixed), true);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
+  }
+});
+
+test('task-create explicit lock identity is shared across checkouts and isolated by project', () => {
+  const left = fixture();
+  const right = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-checkout-'));
+  try {
+    const sharedLeft = lockKey(left, 'task-create', 'task-create\0demo');
+    const sharedRight = lockKey(right, 'task-create', 'task-create\0demo');
+    const otherProject = lockKey(right, 'task-create', 'task-create\0other');
+    assert.equal(sharedLeft.key, sharedRight.key);
+    assert.notEqual(sharedRight.key, otherProject.key);
+  } finally {
+    cleanupFixture(left);
+    fs.rmSync(right, { recursive: true, force: true });
+  }
+});
+
+test('local task creation recovers matching summaries in every lifecycle state', () => {
+  const states = ['active', 'blocked', 'completed', 'archive'] as const;
+  for (const state of states) {
+    const root = fixture();
+    try {
+      const options = { repoRoot: root, now: () => new Date(2026, 7, 13, 1, 2, 3), agentInfraVersion: 'v0.9.5' };
+      const created = createLocalTask(candidate, options);
+      const source = path.join(root, '.agents', 'workspace', 'active', created.task.id);
+      let destination: string;
+      if (state === 'archive') {
+        destination = path.join(root, '.agents', 'workspace', 'archive', '2026', '09', '27', created.task.id, 'local');
+      } else {
+        destination = path.join(root, '.agents', 'workspace', state, created.task.id);
+      }
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      if (state !== 'active') {
+        mutateShortIdRegistry(root, created.task.id, 'release');
+        fs.renameSync(source, destination);
+      }
+
+      const replay = createLocalTask(candidate, options);
+      assert.equal(replay.status, 'no-op');
+      assert.equal(replay.task.id, created.task.id);
+      assert.equal(replay.task.state, state);
+      assert.equal(replay.task.shortId, state === 'active' ? created.task.shortId : null);
+      assert.throws(
+        () => createLocalTask({ ...candidate, title: `Conflict in ${state}` }, options),
+        /TASK_CREATE_IDEMPOTENCY_CONFLICT/
+      );
+      if (state !== 'active') {
+        const registry = JSON.parse(fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')) as { ids: Record<string, string> };
+        assert.equal(Object.hasOwn(registry.ids, created.task.id), false);
+      }
+    } finally {
+      cleanupFixture(root);
+    }
   }
 });
 
@@ -355,7 +422,33 @@ test('platform failure preserves the local task and records a warning intent', a
     assert.equal(warningTask, result.task.id);
     assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', result.task.id!, 'task.md')), true);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
+  }
+});
+
+test('non-active idempotent task-create replay returns its state without platform work', async () => {
+  const root = fixture();
+  try {
+    const created = createLocalTask(candidate, { repoRoot: root, agentInfraVersion: 'v0.9.5' });
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', created.task.id);
+    const completedDir = path.join(root, '.agents', 'workspace', 'completed', created.task.id);
+    fs.mkdirSync(path.dirname(completedDir), { recursive: true });
+    mutateShortIdRegistry(root, created.task.id, 'release');
+    fs.renameSync(taskDir, completedDir);
+    let platformCalls = 0;
+    const result = await createTask(candidate, {
+      repoRoot: root,
+      agentInfraVersion: 'v0.9.5',
+      dependencies: {
+        createIssue: (() => { platformCalls += 1; throw new Error('must not create an Issue'); }) as never
+      }
+    });
+    assert.equal(result.status, 'no-op');
+    assert.deepEqual(result.task, { id: created.task.id, shortId: null, state: 'completed' });
+    assert.equal(platformCalls, 0);
+    assert.deepEqual(parseTaskCreateResult(result), result);
+  } finally {
+    cleanupFixture(root);
   }
 });
 
@@ -380,7 +473,7 @@ test('task-create result projection preserves control recovery evidence without 
     });
     assert.deepEqual(parseTaskCreateResult(projected), projected);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    cleanupFixture(root);
   }
 });
 
@@ -388,7 +481,7 @@ test('task-create output-unavailable fallback is a failed result with inspectabl
   const result = taskCreateOutputUnavailableResult('fedcba9876543210fedcba9876543210');
   assert.equal(result.status, 'failed');
   assert.equal(result.changed, false);
-  assert.deepEqual(result.task, { id: null, shortId: null });
+  assert.deepEqual(result.task, { id: null, shortId: null, state: null });
   assert.equal(result.issue, null);
   assert.deepEqual(result.control, {
     requestId: 'fedcba9876543210fedcba9876543210',
