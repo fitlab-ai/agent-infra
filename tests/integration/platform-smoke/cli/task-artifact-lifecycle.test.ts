@@ -63,7 +63,7 @@ function git(root: string, args: string[]): string {
   return result.stdout.trim();
 }
 
-function completedReviewFixture(f: ReturnType<typeof fixture>) {
+function completedReviewFixture(f: ReturnType<typeof fixture>, options: { includeReviewedHead?: boolean } = {}) {
   const aircPath = path.join(f.repoRoot, '.agents', '.airc.json');
   fs.mkdirSync(path.dirname(aircPath), { recursive: true });
   fs.writeFileSync(aircPath, JSON.stringify({ delivery: { remote: 'origin', baseRef: 'main' } }) + '\n');
@@ -77,7 +77,7 @@ function completedReviewFixture(f: ReturnType<typeof fixture>) {
   const report = [
     '# Code Review', '', '## Review Summary', '',
     `- **Review Target Commit**: ${head}`,
-    `- **Reviewed Head**: ${head}`,
+    ...(options.includeReviewedHead === false ? [] : [`- **Reviewed Head**: ${head}`]),
     `- **Review Baseline Commit**: ${head}`,
     `- **Reviewed Diff Base**: ${head}`,
     `- **Reviewed Diff Fingerprint**: ${reviewed.fingerprint}`,
@@ -163,6 +163,16 @@ test('review-code reuses only a completed report bound to the current commit', (
   assert.equal(changed.status, 'ready', JSON.stringify(changed.error));
   assert.equal(changed.selection?.disposition, 'create');
   assert.equal(changed.selection?.artifact.name, 'review-code-r2.md');
+});
+
+test('review-code creates a new round when a completed report omits Reviewed Head', () => {
+  const f = fixture({ 'analysis.md': STANDARD_ANALYSIS });
+  completedReviewFixture(f, { includeReviewedHead: false });
+
+  const result = resolveArtifactContext(TASK_ID, 'review-code', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready', JSON.stringify(result.error));
+  assert.equal(result.selection?.disposition, 'create');
+  assert.equal(result.selection?.artifact.name, 'review-code-r2.md');
 });
 
 test('inventory is byte, mtime, and directory-entry pure', () => {

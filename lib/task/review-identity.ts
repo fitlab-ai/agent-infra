@@ -9,7 +9,6 @@ import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import {
   extractReviewDiffBase,
   extractReviewDiffFingerprint,
-  extractReviewBaseline,
   extractReviewedHead,
   extractReviewTargetHead,
   extractReviewedSnapshotTree,
@@ -36,7 +35,7 @@ function result(
 }
 
 export function inspectReviewIdentity(taskDir: string, reportContent: string, repositoryRoot?: string): ReviewIdentityResult {
-  const reviewedHead = extractReviewedHead(reportContent) || extractReviewBaseline(reportContent);
+  const reviewedHead = extractReviewedHead(reportContent);
   const targetHead = extractReviewTargetHead(reportContent);
   const diffBase = extractReviewDiffBase(reportContent);
   const fingerprint = extractReviewDiffFingerprint(reportContent);
