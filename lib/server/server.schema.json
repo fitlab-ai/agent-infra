@@ -13,10 +13,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "path": {
-          "type": "string",
-          "description": "Log file path. Defaults to ~/.agent-infra/logs/<project>/server.log (outside the repo). Relative paths resolve against the primary worktree root; absolute paths are used as-is."
-        },
         "rotateAtBytes": {
           "type": "integer",
           "minimum": 0,

@@ -46,12 +46,12 @@ platformTest('loadServerConfig returns defaults when no server.json exists', () 
   }
 });
 
-platformTest('server.json deep-merges rotateAtBytes while log.path keeps the home default', () => {
+platformTest('server.json deep-merges rotateAtBytes while retaining the default log path', () => {
   const dir = makeRepo({ log: { rotateAtBytes: 1024 }, adapters: { dev: { enabled: false } } });
   try {
     const config = loadServerConfig({ rootDir: dir });
     assert.equal(config.log.rotateAtBytes, 1024);
-    // log.path not set in server.json → still defaults under the home dir (deep merge, not dropped)
+    // Partial log settings retain the project-scoped default path.
     const logBase = path.join(os.homedir(), '.agent-infra', 'logs', path.basename(dir));
     assert.equal(config.log.path, path.join(logBase, 'server.log'));
     assert.deepEqual(config.adapters, { dev: { enabled: false } });
@@ -94,27 +94,6 @@ platformTest('runtime paths are keyed by project regardless of checkout path', (
   } finally {
     fs.rmSync(a, { recursive: true, force: true });
     fs.rmSync(b, { recursive: true, force: true });
-  }
-});
-
-platformTest('an explicit relative log.path resolves against the primary worktree root', () => {
-  const dir = makeRepo({ log: { path: '.agents/server.log' } });
-  try {
-    const config = loadServerConfig({ rootDir: dir });
-    assert.equal(config.log.path, path.join(fs.realpathSync.native(dir), '.agents', 'server.log'));
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-platformTest('an explicit absolute log.path is used as-is', () => {
-  const abs = path.join(os.tmpdir(), 'server-abs-log', 'daemon.log');
-  const dir = makeRepo({ log: { path: abs } });
-  try {
-    const config = loadServerConfig({ rootDir: dir });
-    assert.equal(config.log.path, abs);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

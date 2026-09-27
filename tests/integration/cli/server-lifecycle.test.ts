@@ -197,15 +197,13 @@ test(
     let pid: number | null = null;
     try {
       fs.writeFileSync(path.join(primary, '.agents', 'server.json'), JSON.stringify({
-        heartbeatMs: 100,
-        log: { path: '.agents/primary-server.log' }
+        heartbeatMs: 100
       }));
       execFileSync('git', ['-C', primary, 'add', '.agents'], { env: gitSafeEnv() });
       execFileSync('git', ['-C', primary, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'server config'], { env: gitSafeEnv() });
       execFileSync('git', ['-C', primary, 'worktree', 'add', '-b', 'linked-server-test', linked], { env: gitSafeEnv() });
       fs.writeFileSync(path.join(linked, '.agents', 'server.json'), JSON.stringify({
-        heartbeatMs: 100,
-        log: { path: '.agents/linked-server.log' }
+        heartbeatMs: 10_000
       }));
 
       const started = runServerFrom(linked, primary, 'start');
@@ -214,13 +212,12 @@ test(
       pid = readPid(primary);
       assert.ok(pid !== null && pid > 0, 'primary runtime path should contain the shared pid record');
 
-      const primaryLog = path.join(primary, '.agents', 'primary-server.log');
+      const primaryLog = path.join(primary, '.agent-infra', 'logs', PROJECT, 'server.log');
       assert.ok(await waitFor(() => fs.existsSync(primaryLog) && /\[INFO\] heartbeat/.test(fs.readFileSync(primaryLog, 'utf8'))));
-      assert.equal(fs.existsSync(path.join(linked, '.agents', 'linked-server.log')), false);
 
       const status = runServerFrom(primary, primary, 'status');
       assert.match(status.stdout, /server: running/);
-      assert.match(status.stdout, /primary-server\.log/);
+      assert.match(status.stdout, /server\.log/);
       const logs = runServerFrom(linked, primary, 'logs');
       assert.match(logs.stdout, /\[INFO\] heartbeat/);
 
@@ -261,11 +258,10 @@ test(
   async () => {
     const primary = makeRepo();
     const linked = path.join(os.tmpdir(), `${path.basename(primary)}-foreground-linked`);
-    const primaryLog = path.join(primary, '.agents', 'primary-server.log');
+    const primaryLog = path.join(primary, '.agent-infra', 'logs', PROJECT, 'server.log');
     try {
       fs.writeFileSync(path.join(primary, '.agents', 'server.json'), JSON.stringify({
-        heartbeatMs: 100,
-        log: { path: '.agents/primary-server.log' }
+        heartbeatMs: 100
       }));
       execFileSync('git', ['-C', primary, 'add', '.agents'], { env: gitSafeEnv() });
       execFileSync('git', ['-C', primary, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'server config'], { env: gitSafeEnv() });

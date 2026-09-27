@@ -190,18 +190,11 @@ export function loadServerConfig({ rootDir }: { rootDir?: string } = {}): Server
   const projectKey = resolveProjectKey(repoRoot);
 
   const log = isPlainObject(merged.log) ? merged.log : {};
-  // No explicit log.path → default under ~/.agent-infra/logs/<project>/.
-  // Explicit relative path resolves against the primary worktree root; absolute is used as-is.
-  const explicitPath = typeof log.path === 'string' ? log.path : null;
-  const resolvedLogPath = explicitPath === null
-    ? runtimePath(projectKey, 'logs', 'server.log')
-    : (path.isAbsolute(explicitPath) ? explicitPath : path.join(repoRoot, explicitPath));
-
   return {
     repoRoot,
     pidFile: runtimePath(projectKey, 'run', 'server.pid'),
     log: {
-      path: resolvedLogPath,
+      path: runtimePath(projectKey, 'logs', 'server.log'),
       rotateAtBytes: typeof log.rotateAtBytes === 'number' ? log.rotateAtBytes : DEFAULT_ROTATE_BYTES
     },
     heartbeatMs: typeof merged.heartbeatMs === 'number' ? merged.heartbeatMs : DEFAULT_SERVER_CONFIG.heartbeatMs,
