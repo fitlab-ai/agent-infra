@@ -13,6 +13,7 @@ import { validateLifecycleExecution } from './lifecycle-execution.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
+import { validateQualificationAudit } from './qualification-audit.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 
 type ReviewFinalizationErrorCode =
@@ -256,6 +257,12 @@ function prepareReviewSummaryCandidate(
   if (!structure.ok) {
     return reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', structure.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; '), {
       artifactSha256, semanticDigest: structure.semanticDigest
+    });
+  }
+  const qualification = validateQualificationAudit(taskContent, artifactContent, { family: spec.family, artifact: request.artifact });
+  if (!qualification.ok) {
+    return reject('REVIEW_ARTIFACT_STRUCTURE_INVALID', `${qualification.code}: ${qualification.message}`, {
+      artifactSha256, semanticDigest
     });
   }
   const transformed = finalizeReviewSummaryContent(artifactContent, stageStatus.unresolvedFindingCounts, {

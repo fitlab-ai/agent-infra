@@ -26,7 +26,7 @@
 
 ## 资格审计
 
-> 按 `.agents/rules/decision-qualification.md` 填写以下五张表。
+> 按 `.agents/rules/decision-qualification.md` 填写三张决策表和一行资格快照。
 
 ### 约束依赖
 | constraint_id | constraint_digest | role | evidence |
@@ -40,13 +40,9 @@
 | decision_id | classification | evidence |
 | --- | --- | --- |
 
-### 上游关系
-| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
-| --- | --- | --- | --- | --- |
-
-### 依赖快照
-| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
-| --- | --- | --- |
+### 资格快照
+| task_input_digest | non_constraint_input_digest |
+| --- | --- |
 
 ## 变更文件
 

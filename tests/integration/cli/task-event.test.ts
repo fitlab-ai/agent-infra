@@ -11,7 +11,7 @@ import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
-import { upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { parseArtifactReceipts, upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import {
   finalizeLocalArtifact,
@@ -21,7 +21,7 @@ import {
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
-import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
+import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts';
@@ -55,14 +55,7 @@ function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
   const taskContent = fs.readFileSync(taskPath, 'utf8');
   const identity = parseQualificationArtifactName(path.basename(artifactPath));
   if (!identity || identity.family === 'manual-validation' || identity.family === 'validation-run' || identity.family === 'pr-review') return;
-  const expected = identity && (identity.family === 'analysis' || identity.family === 'review-analysis'
-    || identity.family === 'plan' || identity.family === 'review-plan'
-    || identity.family === 'code' || identity.family === 'review-code')
-    ? expectedQualificationRelations(taskContent, identity.family)
-    : { ok: true as const, relations: undefined };
-  assert.equal(expected.ok, true);
-  if (!expected.ok) return;
-  const built = buildQualificationAudit(taskContent, { upstreamRelations: expected.relations });
+  const built = buildQualificationAudit(taskContent);
   assert.equal(built.ok, true);
   if (!built.ok) return;
   const taskId = taskContent.match(/^id:\s*(TASK-\d{8}-\d{6})\s*$/m)?.[1] ?? 'TASK-20260101-000001';
@@ -488,6 +481,7 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
   assert.match(content, /current_step: technical-design/);
   assert.match(content, /`plan\.md`/);
+  assert.deepEqual(parseArtifactReceipts(content).rows.filter((row) => row.output === 'plan.md').map((row) => row.input), ['analysis.md', 'review-analysis.md']);
 });
 
 test('task-event rejects a different lifecycle start while one execution is open', () => {
@@ -1023,7 +1017,7 @@ test('dry-run returns planned without changing task bytes for start and completi
   const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--dry-run']);
   const completedResult = JSON.parse(completed.stdout);
   assert.equal(completedResult.status, 'planned');
-  assert.equal(completedResult.operations.length, 4);
+  assert.equal(completedResult.operations.length, 5);
   assert.deepEqual(fs.readFileSync(f.file), beforeCompletion);
 });
 
@@ -1055,7 +1049,7 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
 
 test('task-event timestamps keep an ASCII offset in negative-offset timezones', () => {
   const f = fixture();
-  const env = { ...process.env, TZ: 'America/Los_Angeles' };
+  const env = { ...sandboxControlSafeEnv(), TZ: 'America/Los_Angeles' };
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1'], env);
   assert.equal(started.status, 0, started.stderr);
   assert.match(JSON.parse(started.stdout).timestamp, /-\d{2}:\d{2}$/);
@@ -1229,10 +1223,7 @@ test('late qualification graph fallback records upstream-replaced reason', () =>
   assert.equal(started.status, 0, started.stdout || started.stderr);
   fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('| A | Rebuild the earliest stale stage | qualified |', '| A | Rebuild the earliest stale stage | rejected |'));
   const currentTask = fs.readFileSync(f.file, 'utf8');
-  const expected = expectedQualificationRelations(currentTask, 'analysis');
-  assert.equal(expected.ok, true);
-  if (!expected.ok) return;
-  const currentAudit = buildQualificationAudit(currentTask, { upstreamRelations: expected.relations });
+  const currentAudit = buildQualificationAudit(currentTask);
   assert.equal(currentAudit.ok, true);
   if (!currentAudit.ok) return;
   fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), `${localArtifact('analysis')}\n## 资格审计\n\n${renderQualificationAudit(currentAudit.audit)}\n`);

@@ -74,7 +74,7 @@ class DocumentMutationError extends Error {
 
 function parseTable(
   content: string,
-  input: { sectionAliases: readonly string[]; columns: readonly string[]; keyColumn?: string }
+  input: { sectionAliases: readonly string[]; columns: readonly string[]; keyColumn?: string | null }
 ): ParsedTable | null {
   validateAliases(input.sectionAliases, 'table section aliases');
   if (
@@ -84,8 +84,8 @@ function parseTable(
   ) {
     throw new DocumentMutationError('MUTATION_INVALID', 'table columns are invalid');
   }
-  const keyColumn = input.keyColumn ?? input.columns[0]!;
-  if (!input.columns.includes(keyColumn)) {
+  const keyColumn = input.keyColumn === undefined ? input.columns[0]! : input.keyColumn;
+  if (keyColumn !== null && !input.columns.includes(keyColumn)) {
     throw new DocumentMutationError('MUTATION_INVALID', 'table key column is invalid');
   }
   const sections = matchingSections(content, input.sectionAliases);
@@ -132,11 +132,11 @@ function parseTable(
       column,
       decodeCell(parsed.cells[columnIndex]!).trim()
     ]));
-    const key = values[keyColumn]!;
-    if (seen.has(key)) {
+    const key = keyColumn === null ? null : values[keyColumn]!;
+    if (key !== null && seen.has(key)) {
       throw new DocumentMutationError('TABLE_DUPLICATE_KEY', `duplicate table key '${key}'`);
     }
-    seen.add(key);
+    if (key !== null) seen.add(key);
     rows.push({ values, sourceLine: index - Math.max(firstContent, 0) });
   }
   return { heading: section.heading, rows };

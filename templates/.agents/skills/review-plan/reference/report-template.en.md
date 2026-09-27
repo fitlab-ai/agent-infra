@@ -26,7 +26,7 @@ Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 
 ## Qualification Audit Review
 
-> Use `.agents/rules/decision-qualification.md` to review the five tables: constraint dependencies, candidate qualification, classification results, upstream relations, and dependency snapshot.
+> Use `.agents/rules/decision-qualification.md` to review the three decision tables: constraint dependencies, candidate qualification, and classification results, plus a one-row qualification snapshot.
 
 ### Constraint Dependencies
 | constraint_id | constraint_digest | role | evidence |
@@ -40,13 +40,9 @@ Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 | decision_id | classification | evidence |
 | --- | --- | --- |
 
-### Upstream Relations
-| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
-| --- | --- | --- | --- | --- |
-
-### Dependency Snapshot
-| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
-| --- | --- | --- |
+### Qualification Snapshot
+| task_input_digest | non_constraint_input_digest |
+| --- | --- |
 
 ## Inspection Coverage
 
@@ -66,7 +62,7 @@ Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 
 > Scenario A (`ordinary`): keep the table above, record `Mini-ATAM: not-applicable` with a reviewable reason, and delete the Scenario B tables.
 >
-> Scenario B (`architecture-significant`): keep the table above and the five tables below, and delete the Scenario A guidance.
+> Scenario B (`architecture-significant`): keep the table above and the architecture assessment tables below, and delete the Scenario A guidance.
 
 | quality_scenario_id | source_id | business_driver | quality_attribute | priority | stimulus | context | expected_response | measure | result_or_gap |
 |---------------------|-----------|-----------------|-------------------|----------|----------|---------|-------------------|---------|---------------|

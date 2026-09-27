@@ -7,6 +7,7 @@ import { parseLifecyclePathDecision } from './lifecycle-path.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { canonicalSemanticDigest, inspectArtifactContract, sha256Content } from './artifact-operations.ts';
 import { getArtifactSchema } from './artifact-schema.ts';
+import { validateQualificationAudit } from './qualification-audit.ts';
 
 type LocalArtifactFamily = 'analysis' | 'plan' | 'code';
 
@@ -155,20 +156,29 @@ function prepareLocalArtifact(
   const validation = validateLocalArtifact(content, {
     family: request.family, requiredSections: request.requiredSections
   });
+  let qualificationError: string | null = null;
+  try {
+    const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    const qualification = validateQualificationAudit(taskContent, content, { family: request.family, artifact: request.artifact });
+    if (!qualification.ok) qualificationError = `${qualification.code}: ${qualification.message}`;
+  } catch (error) { qualificationError = `QUALIFICATION_AUDIT_INVALID: ${String(error)}`; }
   const artifactSha256 = sha256Content(content);
+  const diagnostics = qualificationError
+    ? [...validation.diagnostics, { code: 'LOCAL_STRUCTURAL_INVALID' as const, message: qualificationError, line: null }]
+    : validation.diagnostics;
   const result = failedFinalization(request, {
     code: 'LOCAL_ARTIFACT_INVALID',
-    message: validation.diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
+    message: diagnostics.map((item) => `${item.code}: ${item.message}`).join('; ')
   }, {
     taskId: resolved.taskId, taskDir: resolved.taskDir, artifactSha256,
-    semanticDigest: validation.semanticDigest, diagnostics: validation.diagnostics
+    semanticDigest: validation.semanticDigest, diagnostics
   });
 
   // Trusted local operators edit the canonical artifact directly.  A
   // finalization result is a fresh observation of those bytes, never a
   // capability minted by an earlier recovery attempt or generation.
   return {
-    result: validation.ok ? { ...result, status: 'passed', error: null } : result,
+    result: validation.ok && !qualificationError ? { ...result, status: 'passed', error: null } : result,
     content,
     repoRoot: resolved.repoRoot,
     lockAlreadyHeld: request.lockAlreadyHeld

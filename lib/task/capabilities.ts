@@ -338,7 +338,9 @@ function buildLifecycleFacts(taskDir: string, content: string, taskState = 'acti
         try { auditContent = fs.readFileSync(path.join(taskDir, name), 'utf8'); }
         catch { qualificationStaleArtifacts.push(name); continue; }
         const audit = parseQualificationAudit(auditContent);
-        if (!audit.ok || !audit.audit.present || !audit.audit.snapshot) { qualificationStaleArtifacts.push(name); continue; }
+        if (!audit.ok) { qualificationStaleArtifacts.push(name); continue; }
+        if (!audit.audit.present) continue;
+        if (!audit.audit.snapshot) { qualificationStaleArtifacts.push(name); continue; }
         const constraintsChanged = audit.audit.constraintDependencies.some((dependency) => constraints.get(dependency.constraintId) !== dependency.constraintDigest);
         const taskInputChanged = audit.audit.snapshot.taskInputDigest !== qualification.qualification.taskInputDigest;
         if (audit.audit.snapshot.nonConstraintInputDigest !== qualification.qualification.nonConstraintInputDigest

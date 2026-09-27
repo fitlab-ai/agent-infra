@@ -26,7 +26,7 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 
 ## Qualification Audit
 
-> Use `.agents/rules/decision-qualification.md` and fill these five tables.
+> Use `.agents/rules/decision-qualification.md` and fill the three decision tables and one-row snapshot.
 
 ### Constraint Dependencies
 | constraint_id | constraint_digest | role | evidence |
@@ -40,13 +40,9 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 | decision_id | classification | evidence |
 | --- | --- | --- |
 
-### Upstream Relations
-| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
-| --- | --- | --- | --- | --- |
-
-### Dependency Snapshot
-| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
-| --- | --- | --- |
+### Qualification Snapshot
+| task_input_digest | non_constraint_input_digest |
+| --- | --- |
 
 ## Changed Files
 

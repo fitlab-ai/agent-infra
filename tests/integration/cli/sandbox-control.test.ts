@@ -1235,10 +1235,12 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     }
     assert.equal(isProcessAlive(first.pid), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8')).brokerId, rotated.brokerId);
-    const statusAfterReplacement = fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8');
     const auditAfterReplacement = fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8');
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'), statusAfterReplacement);
+    await new Promise((resolve) => setTimeout(resolve, DEFAULT_SANDBOX_CONTROL_TIMING.controlTickMs * 2));
+    const statusAfterHeartbeat = JSON.parse(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'));
+    assert.equal(statusAfterHeartbeat.generation, 'rotated-generation');
+    assert.equal(statusAfterHeartbeat.broker.pid, rotated.pid);
+    assert.equal(statusAfterHeartbeat.broker.startTime, rotated.startTime);
     assert.equal(fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8'), auditAfterReplacement);
   } finally {
     if (brokerPid) {

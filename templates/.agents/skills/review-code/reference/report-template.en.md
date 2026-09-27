@@ -33,7 +33,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## Qualification Audit Review
 
-> Use `.agents/rules/decision-qualification.md` to review the five tables: constraint dependencies, candidate qualification, classification results, upstream relations, and dependency snapshot.
+> Use `.agents/rules/decision-qualification.md` to review the three decision tables: constraint dependencies, candidate qualification, and classification results, plus a one-row qualification snapshot.
 
 ### Constraint Dependencies
 | constraint_id | constraint_digest | role | evidence |
@@ -47,13 +47,9 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 | decision_id | classification | evidence |
 | --- | --- | --- |
 
-### Upstream Relations
-| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
-| --- | --- | --- | --- | --- |
-
-### Dependency Snapshot
-| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
-| --- | --- | --- |
+### Qualification Snapshot
+| task_input_digest | non_constraint_input_digest |
+| --- | --- |
 
 ## Inspection Coverage
 

@@ -361,6 +361,24 @@ test('qualification recovery only evaluates the latest active artifact in each f
   }
 });
 
+test('an absent qualification audit does not mark the latest artifact stale', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-qualification-optional-'));
+  try {
+    const taskDir = path.join(root, 'task');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const content = qualificationTask();
+    fs.writeFileSync(path.join(taskDir, 'task.md'), content);
+    fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# Analysis without qualification audit\n');
+    const result = buildLifecycleFacts(taskDir, content, 'active');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.facts.qualificationStale, false);
+    assert.deepEqual(result.facts.qualificationStaleArtifacts, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('explicit source provenance requires a matching artifact hash', () => {
   const result = canStart('analysis', {
     ...facts('completed'), artifactHashes: { 'review-code.md': 'a'.repeat(64) }

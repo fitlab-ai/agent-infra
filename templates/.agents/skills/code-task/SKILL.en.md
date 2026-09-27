@@ -23,7 +23,7 @@ This stage consumes only the canonical path fact parsed by core from the latest 
 
 Before generating the implementation report, read `.agents/rules/evidence-reporting.md`. Successful tests record the command, target scope, status or structured result, actual result, and uncovered parts; failures, blocking conditions, or disputes retain a reproducible entry point, exact location, and decisive excerpt instead of complete successful stdout.
 
-- When evaluating candidate qualification or `HD-N`, read `.agents/rules/decision-qualification.md`, audit normalized task constraints/candidates, and record the five qualification-audit tables in the implementation report; unknown or unconfirmed constraints must not automatically exclude a candidate
+- When evaluating candidate qualification or `HD-N`, read `.agents/rules/decision-qualification.md`, audit normalized task constraints/candidates, and record the three qualification-audit decision tables and snapshot in the implementation report; unknown or unconfirmed constraints must not automatically exclude a candidate
 - Follow the lifecycle input selected by core: `analysis.md` / `analysis-r{N}.md` for the streamlined path, and `plan.md` / `plan-r{N}.md` for the standard or full path
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”

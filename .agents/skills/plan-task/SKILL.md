@@ -21,7 +21,7 @@ description: >
 
 生成方案报告时，先读取 `.agents/rules/evidence-reporting.md`。状态核对和验证记录命令、目标范围、状态/结构化结果、实际结果和未覆盖部分；失败、阻塞或争议才附决定性原文摘录。
 
-- 涉及候选资格或 `HD-N` 判断时，先读取 `.agents/rules/decision-qualification.md`，基于 task.md 规范化约束/候选完成资格审计，并在方案产物记录五张资格审计表；不得把来源不明或未确认约束自动升级为排除条件
+- 涉及候选资格或 `HD-N` 判断时，先读取 `.agents/rules/decision-qualification.md`，基于 task.md 规范化约束/候选完成资格审计，并在方案产物记录三张资格审计决策表和资格快照；不得把来源不明或未确认约束自动升级为排除条件
 - 本技能仅产出技术方案文档（`plan.md` 或 `plan-r{N}.md`）—— 不修改任何业务代码
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 完整路径进入方案审查；标准路径完成方案后可直接进入实现阶段
@@ -92,7 +92,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
 
 ### 5. 设计技术方案
 
-方案必须按 `.agents/rules/decision-qualification.md` 复核规范化约束和候选，并在方案产物保留五张资格审计表及真实上游关系；来源不明或未人工确认的约束不得自动排除候选。
+方案必须按 `.agents/rules/decision-qualification.md` 复核规范化约束和候选，并在方案产物保留三张资格审计决策表和资格快照；来源不明或未人工确认的约束不得自动排除候选。
 
 遵循 `.agents/workflows/feature-development.yaml` 中的 `technical-design` 步骤：
 
