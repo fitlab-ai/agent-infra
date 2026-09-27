@@ -64,7 +64,7 @@ test('runAi runs commands from the configured working directory', async () => {
   Object.assign(process.env, envWithPrependedPath(process.env, binDir));
   try {
     const result = await runAi(['task', 'ls'], { cwd: tmpDir });
-    assert.equal(result.stdout, tmpDir);
+    assert.equal(result.stdout, fs.realpathSync.native(tmpDir));
   } finally {
     process.env = originalEnv;
     fs.rmSync(tmpDir, { recursive: true, force: true });

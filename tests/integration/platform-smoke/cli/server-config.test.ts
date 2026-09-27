@@ -32,7 +32,7 @@ platformTest('loadServerConfig returns defaults when no server.json exists', () 
   const dir = makeRepo();
   try {
     const config = loadServerConfig({ rootDir: dir });
-    assert.equal(config.repoRoot, dir);
+    assert.equal(config.repoRoot, fs.realpathSync.native(dir));
     assert.equal(config.heartbeatMs, DEFAULT_SERVER_CONFIG.heartbeatMs);
     assert.equal(config.log.rotateAtBytes, DEFAULT_SERVER_CONFIG.log.rotateAtBytes);
     assert.deepEqual(config.adapters, {});
@@ -101,7 +101,7 @@ platformTest('an explicit relative log.path resolves against the primary worktre
   const dir = makeRepo({ log: { path: '.agents/server.log' } });
   try {
     const config = loadServerConfig({ rootDir: dir });
-    assert.equal(config.log.path, path.join(dir, '.agents', 'server.log'));
+    assert.equal(config.log.path, path.join(fs.realpathSync.native(dir), '.agents', 'server.log'));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

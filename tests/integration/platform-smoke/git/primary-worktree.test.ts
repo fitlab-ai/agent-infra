@@ -35,7 +35,7 @@ test('resolves the primary worktree from primary, linked, and detached worktrees
     git(primaryRoot, ['worktree', 'add', '-b', 'linked-checkout', linkedRoot]);
     git(primaryRoot, ['worktree', 'add', '--detach', detachedRoot, 'HEAD']);
 
-    const expected = fs.realpathSync(primaryRoot);
+    const expected = fs.realpathSync.native(primaryRoot);
     assert.equal(resolvePrimaryWorktreeRoot(primaryRoot), expected);
     assert.equal(resolvePrimaryWorktreeRoot(linkedRoot), expected);
     assert.equal(resolvePrimaryWorktreeRoot(detachedRoot), expected);
