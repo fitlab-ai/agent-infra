@@ -111,6 +111,8 @@ Before writing the summary, the finalization intent checks decision-detail ids; 
 agent-infra-internal task-verify {task-id} review-plan.completed --artifact {review-artifact} --format text
 ```
 
+Present the verification summary per `.agents/rules/validation-output.md`, retaining necessary failure, blocked, and soft-warning diagnostics.
+
 ### 8. Tell the User
 
 Use the conclusion branch in `reference/output-templates.md` and render the selected next-step commands through the shared helper.

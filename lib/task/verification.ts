@@ -134,46 +134,36 @@ function statusLabel(status: unknown): string {
   return status === 'fail' ? 'FAIL' : status === 'blocked' ? 'BLOCKED' : 'pass';
 }
 
-function renderPayload(payload: Record<string, unknown>): string {
-  const lines: string[] = [];
-  if (Array.isArray(payload.checks)) {
-    const gateMode = typeof payload.gate === 'string';
-    lines.push(gateMode
-      ? `Verification: ${payload.gate} | Skill: ${payload.skill}`
-      : `Check: ${payload.status} | Skill: ${payload.skill} | Type: ${payload.type}`, '');
-    for (const check of payload.checks as Array<Record<string, unknown>>) {
-      const raw = statusLabel(check.status);
-      const effective = statusLabel(check.effectiveStatus ?? check.status);
-      const reason = check.reason ?? 'CHECK_FAILED';
-      const message = check.message ?? reason;
-      lines.push(`  [${effective}] ${check.checkId ?? check.type} (${check.classification ?? 'hard'}; raw ${raw}; reason ${reason}) - ${message}; ${check.action ?? 'Review validation output'}`);
-    }
-    const summary = payload.summary ?? (() => {
-      const checks = payload.checks as Array<Record<string, unknown>>;
-      const statuses = checks.map((check) => check.effectiveStatus ?? check.status);
-      return `${statuses.filter((status) => status === 'pass').length} passed, ${statuses.filter((status) => status === 'fail').length} failed${statuses.includes('blocked') ? `, ${statuses.filter((status) => status === 'blocked').length} blocked` : ''}`;
-    })();
-    lines.push('', `Result: ${summary} - ${payload.action}`);
-  } else {
-    lines.push(`Check: ${payload.status} | Skill: ${payload.skill} | Type: ${payload.type}`, '');
-    const raw = statusLabel(payload.status);
-    const effective = statusLabel(payload.effectiveStatus ?? payload.status);
-    const reason = payload.reason ?? 'CHECK_FAILED';
-    lines.push(`  [${effective}] ${payload.checkId ?? payload.type} (${payload.classification ?? 'hard'}; raw ${raw}; reason ${reason}) - ${payload.message ?? reason}; ${payload.action ?? 'Review validation output'}`);
-    const status = payload.effectiveStatus ?? payload.status;
-    const summary = status === 'pass' ? '1 passed, 0 failed'
-      : status === 'blocked' ? '0 passed, 0 failed, 1 blocked' : '0 passed, 1 failed';
-    const action = status === 'pass' ? 'Requested check passed'
-      : status === 'blocked' ? `Resolve blocked ${payload.type} check and re-run check`
-        : `Fix ${payload.type} issues and re-run check`;
-    lines.push('', `Result: ${summary} - ${action}`);
-  }
-  return `${lines.join('\n')}\n`;
-}
-
 function renderTaskVerification(result: TaskVerificationResult): string {
   if (result.status === 'failed') return `Verification failed: ${result.error?.code ?? 'VERIFY_FAILED'} - ${result.error?.message ?? 'unknown error'}\n`;
-  return result.invocations.map((invocation) => renderPayload(invocation.payload)).join('');
+  const target = `${result.event}${result.artifact ? ` (${result.artifact})` : ''}`;
+  const lines = [`Verification: ${result.status} | Target: ${target} | Skill: ${result.skill}`];
+  const checks = result.invocations.flatMap(({ payload }) => {
+    if (Array.isArray(payload.checks)) return payload.checks as Array<Record<string, unknown>>;
+    return [payload];
+  });
+  const counts = {
+    pass: checks.filter((check) => (check.effectiveStatus ?? check.status) === 'pass').length,
+    fail: checks.filter((check) => (check.effectiveStatus ?? check.status) === 'fail').length,
+    blocked: checks.filter((check) => (check.effectiveStatus ?? check.status) === 'blocked').length
+  };
+  const summary = `${counts.pass} passed, ${counts.fail} failed${counts.blocked > 0 ? `, ${counts.blocked} blocked` : ''}`;
+  lines.push('', `Result: ${summary}`);
+
+  for (const check of checks) {
+    const rawStatus = check.status;
+    const effectiveStatus = check.effectiveStatus ?? rawStatus;
+    const isSoftWarning = rawStatus === 'fail' && effectiveStatus === 'pass';
+    if (effectiveStatus === 'pass' && !isSoftWarning) continue;
+    const reason = check.reason ?? 'CHECK_FAILED';
+    const message = check.message ?? reason;
+    const action = check.action ?? 'Review validation output';
+    const id = check.checkId ?? check.type;
+    lines.push(isSoftWarning
+      ? `Warning: ${id} (${reason}) - ${message}; ${action}`
+      : `  [${statusLabel(effectiveStatus)}] ${id} (${reason}) - ${message}; ${action}`);
+  }
+  return `${lines.join('\n')}\n`;
 }
 
 export { VERIFICATION_CATALOG, renderTaskVerification, verifyTaskEvent };

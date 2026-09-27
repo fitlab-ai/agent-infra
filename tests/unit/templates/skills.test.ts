@@ -280,6 +280,24 @@ test("lifecycle report producers reference the shared evidence rule", () => {
   });
 });
 
+test("task verification consumers reference the shared output rule", () => {
+  const consumers = [
+    "analyze-task", "block-task", "cancel-task", "code-task", "commit",
+    "complete-manual-validation", "complete-task", "create-pr", "create-task",
+    "import-codescan", "import-dependabot", "import-issue", "plan-task",
+    "review-analysis", "review-code", "review-plan", "review-pr",
+    "run-manual-validation", "run-task", "watch-pr"
+  ];
+  for (const skill of consumers) {
+    for (const relativePath of skillDocPaths(skill)) {
+      assert.ok(
+        read(relativePath).includes(".agents/rules/validation-output.md"),
+        `${relativePath} should reference the shared validation output rule`
+      );
+    }
+  }
+});
+
 test("local artifact recovery rules expose the shared transaction contract structurally", () => {
   for (const relativePath of [
     ".agents/rules/local-artifact-repair.md",

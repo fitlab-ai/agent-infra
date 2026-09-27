@@ -165,6 +165,8 @@ If task.md has a valid `platform_issue_identity`, read `.agents/rules/issue-sync
 agent-infra-internal task-verify {task-id} code.completed --artifact {code-artifact} --format text
 ```
 
+Present the verification summary per `.agents/rules/validation-output.md`, retaining necessary failure, blocked, and soft-warning diagnostics.
+
 ### 13. Tell the User
 
 Use `reference/output-template.md` (or `reference/fix-mode.md` in fix mode) and render the selected next-step commands through the shared helper. Do not push, create a PR, or invoke the `commit` skill here.

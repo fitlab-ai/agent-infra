@@ -166,6 +166,8 @@ agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact 
   agent-infra-internal task-verify {task-id} review-pr.completed --artifact {pr-review-artifact} --format text
   ```
 
+Present the verification summary per `.agents/rules/validation-output.md`, retaining necessary failure, blocked, and soft-warning diagnostics.
+
 - **One-shot path**:
 
   ```bash

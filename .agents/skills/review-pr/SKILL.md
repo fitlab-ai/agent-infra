@@ -166,6 +166,8 @@ agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact 
   agent-infra-internal task-verify {task-id} review-pr.completed --artifact {pr-review-artifact} --format text
   ```
 
+按 `.agents/rules/validation-output.md` 展示当次校验摘要；失败、阻塞和软警告保留必要诊断。
+
 - **一次性路径**：
 
   ```bash

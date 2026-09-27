@@ -164,6 +164,8 @@ After platform writes succeed and before moving the directory or releasing the s
 agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
+Present the verification summary per `.agents/rules/validation-output.md`, retaining necessary failure, blocked, and soft-warning diagnostics.
+
 This event runs only the required-PR delivery hard preflight; host finalization still enforces identity, concurrency, and local atomicity before lifecycle. Peripheral review/manual/platform checks run through `complete-task.completed` after lifecycle and are projected as warning/pending steps. On a hard-gate non-zero exit (fail/blocked), keep the task active, record the stable code/target, and stop.
 
 If a summary must mirror a human-decided `post-review-commit` exemption, make a best-effort sync in Step 4 with the original failure code/message, PRC id/evidence, and ruling details. A sync failure records `SUMMARY_SYNC_FAILED` and still allows lifecycle; terminal verification decides the final state.

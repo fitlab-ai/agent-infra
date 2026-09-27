@@ -92,7 +92,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 agent-infra-internal task-verify {task-id} commit.completed --format text
 ```
 
-Do not claim task finalization without fresh verification output.
+Present the verification summary per `.agents/rules/validation-output.md`; do not claim task finalization without fresh verification output.
 
 ## 6. Render the next step
 

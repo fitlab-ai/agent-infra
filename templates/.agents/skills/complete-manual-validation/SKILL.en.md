@@ -126,7 +126,7 @@ Handle the result:
 Report:
 - Artifact path
 - PR summary sync result
-- Current verification output
+- Present the completion verification summary per `.agents/rules/validation-output.md`
 - Suggested next step: enter the final closing flow and run /complete-task --task {task-ref}
 
 Before rendering the final output, read `.agents/rules/next-step-output.md` and append `Completed at: YYYY-MM-DD HH:mm:ss` as the absolute last line.

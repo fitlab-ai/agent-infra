@@ -94,7 +94,7 @@ agent-infra-internal task-verify {task-id} import-dependabot.completed --format 
 - 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
 - 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
 
-将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+按 `.agents/rules/validation-output.md` 展示当次校验摘要；没有当次校验输出，不得声明完成。
 
 ### 5. 告知用户
 

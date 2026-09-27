@@ -92,7 +92,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 agent-infra-internal task-verify {task-id} commit.completed --format text
 ```
 
-没有当次校验输出，不得声明任务收尾完成。
+按 `.agents/rules/validation-output.md` 展示校验摘要；没有当次校验输出，不得声明任务收尾完成。
 
 ## 6. 输出下一步
 
