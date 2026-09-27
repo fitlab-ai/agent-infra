@@ -160,7 +160,7 @@ function renderTaskVerification(result: TaskVerificationResult): string {
     const id = check.checkId ?? check.type;
     const isHumanExemptionNotice = id === 'post-review-commit'
       && typeof message === 'string'
-      && /^Human-decided post-review exemption overrode [A-Z0-9_]+:/.test(message)
+      && /\bhuman-decided (?:post-review )?exemption\b/i.test(message)
       && /\bPRC-\d+\s*:/.test(message);
     if (effectiveStatus === 'pass' && !isSoftWarning && !isHumanExemptionNotice) continue;
     lines.push(isSoftWarning

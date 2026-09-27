@@ -8,6 +8,8 @@ This rule governs how `task-verify --format text` and lifecycle skills present v
 - For successful results, show only the summary; do not list passing check names.
 - Keep failure and blocked states distinct. List only effective failed or blocked checks, with a stable identifier, concise reason, and actionable step.
 - A soft check whose raw status is failed but effective status is pass must not count as a failure. When a user-facing notice is needed, show a concise warning with the necessary reason and action.
+- A soft check whose raw status is blocked but effective status is pass must also show a concise warning that preserves the raw blocked state, necessary reason, and action.
+- If a passing result carries a consumed human exemption or other required exception evidence, show a concise notice that preserves the exception evidence; continue to count the check by its effective status.
 
 ## Consumer Boundaries
 
