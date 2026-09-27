@@ -10,8 +10,9 @@ export type RunnerResult = {
 };
 
 export type RunnerOptions = {
-  spawn?: (file: string, args: string[], onChunk?: (chunk: string) => void | Promise<void>) => Promise<RunnerResult>;
+  spawn?: (file: string, args: string[], onChunk?: (chunk: string) => void | Promise<void>, cwd?: string) => Promise<RunnerResult>;
   onChunk?: (chunk: string) => void | Promise<void>;
+  cwd?: string;
 };
 
 function resolveCommand(file: string): string {
@@ -40,13 +41,15 @@ function needsShell(file: string): boolean {
 function spawnCapture(
   file: string,
   args: string[],
-  onChunk?: (chunk: string) => void | Promise<void>
+  onChunk?: (chunk: string) => void | Promise<void>,
+  cwd?: string
 ): Promise<RunnerResult> {
   return new Promise((resolve, reject) => {
     const resolvedFile = resolveCommand(file);
     const child = spawn(resolvedFile, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: needsShell(resolvedFile)
+      shell: needsShell(resolvedFile),
+      ...(cwd === undefined ? {} : { cwd })
     });
     let stdout = '';
     let stderr = '';
@@ -91,5 +94,5 @@ function spawnCapture(
 }
 
 export async function runAi(args: string[], options: RunnerOptions = {}): Promise<RunnerResult> {
-  return (options.spawn ?? spawnCapture)('ai', args, options.onChunk);
+  return (options.spawn ?? spawnCapture)('ai', args, options.onChunk, options.cwd);
 }

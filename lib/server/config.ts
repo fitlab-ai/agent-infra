@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { resolvePrimaryWorktreeRoot } from '../git/primary-worktree.ts';
 
 export type ServerLogConfig = {
   path: string;
@@ -52,17 +52,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-// Daemon runtime state (log + PID) lives OUTSIDE the repo, under the user's home
-// directory, keyed by the .airc.json "project" AND a stable hash of the repo
-// root path:
-//   ~/.agent-infra/logs/<project>/<repo-hash>/server.log
-//   ~/.agent-infra/run/<project>/<repo-hash>/server.pid
-// The <project> segment groups a project's checkouts for readability; the
-// <repo-hash> segment guarantees that two checkouts/worktrees of the same
-// project (same "project" but different absolute path) get ISOLATED runtime
-// dirs, so they never read/control each other's daemon. Using os.homedir() +
-// path.join keeps this correct on Windows too (C:\Users\<name>\.agent-infra\...).
-// An explicit log.path in server.json/.local/env still overrides the log default.
+// Runtime state is shared by all worktrees through the primary checkout.
 function resolveProjectKey(repoRoot: string): string {
   try {
     const airc = JSON.parse(
@@ -77,13 +67,8 @@ function resolveProjectKey(repoRoot: string): string {
   return path.basename(repoRoot);
 }
 
-// Short, stable, filesystem-safe discriminator for a checkout's absolute path.
-function repoKey(repoRoot: string): string {
-  return createHash('sha256').update(repoRoot).digest('hex').slice(0, 12);
-}
-
-function runtimePath(repoRoot: string, projectKey: string, kind: 'logs' | 'run', file: string): string {
-  return path.join(homedir(), '.agent-infra', kind, projectKey, repoKey(repoRoot), file);
+function runtimePath(projectKey: string, kind: 'logs' | 'run', file: string): string {
+  return path.join(homedir(), '.agent-infra', kind, projectKey, file);
 }
 
 function detectRepoRoot(): string {
@@ -185,7 +170,7 @@ export function validateServerConfig(committed: Record<string, unknown>): Server
 }
 
 export function loadServerConfig({ rootDir }: { rootDir?: string } = {}): ServerConfig {
-  const repoRoot = rootDir ?? detectRepoRoot();
+  const repoRoot = resolvePrimaryWorktreeRoot(rootDir ?? detectRepoRoot());
   const agentsDir = path.join(repoRoot, '.agents');
 
   const committed = readJsonIfPresent(path.join(agentsDir, 'server.json'));
@@ -205,18 +190,11 @@ export function loadServerConfig({ rootDir }: { rootDir?: string } = {}): Server
   const projectKey = resolveProjectKey(repoRoot);
 
   const log = isPlainObject(merged.log) ? merged.log : {};
-  // No explicit log.path → default under ~/.agent-infra/logs/<project>/.
-  // Explicit relative path resolves against the repo root; absolute is used as-is.
-  const explicitPath = typeof log.path === 'string' ? log.path : null;
-  const resolvedLogPath = explicitPath === null
-    ? runtimePath(repoRoot, projectKey, 'logs', 'server.log')
-    : (path.isAbsolute(explicitPath) ? explicitPath : path.join(repoRoot, explicitPath));
-
   return {
     repoRoot,
-    pidFile: runtimePath(repoRoot, projectKey, 'run', 'server.pid'),
+    pidFile: runtimePath(projectKey, 'run', 'server.pid'),
     log: {
-      path: resolvedLogPath,
+      path: runtimePath(projectKey, 'logs', 'server.log'),
       rotateAtBytes: typeof log.rotateAtBytes === 'number' ? log.rotateAtBytes : DEFAULT_ROTATE_BYTES
     },
     heartbeatMs: typeof merged.heartbeatMs === 'number' ? merged.heartbeatMs : DEFAULT_SERVER_CONFIG.heartbeatMs,

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { loadServerConfig } from './config.ts';
 import type { ServerConfig } from './config.ts';
@@ -91,7 +92,7 @@ export async function start({ foreground = false }: StartOptions = {}): Promise<
   }
 
   if (foreground) {
-    await runDaemon();
+    await runDaemon({ rootDir: config.repoRoot });
     return;
   }
 
@@ -103,8 +104,9 @@ export async function start({ foreground = false }: StartOptions = {}): Promise<
   // Re-spawn ourselves detached. process.execArgv is forwarded so the dev path
   // (node --experimental-strip-types ./bin/cli.ts) and the built path
   // (node dist/bin/cli.js) both work.
-  const child = spawn(process.execPath, [...process.execArgv, cliEntry, 'server', '__daemon'], {
+  const child = spawn(process.execPath, [...process.execArgv, path.resolve(cliEntry), 'server', '__daemon'], {
     detached: true,
+    cwd: config.repoRoot,
     stdio: 'ignore'
   });
   child.unref();

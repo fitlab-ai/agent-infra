@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 
 import { CLI_PATH, onPlatforms, gitSafeEnv, initIsolatedGitRepo, escapeRegExp } from '../../helpers.ts';
 import { buildProcessTreeStopCommand, buildStopCommand, isProcessAlive } from '../../../lib/server/process-control.ts';
@@ -95,43 +95,26 @@ function makeRepo(): string {
 // The daemon resolves its runtime paths from os.homedir(); pinning HOME (and
 // USERPROFILE on Windows) to the temp dir keeps logs/PID out of the real home.
 function runServer(dir: string, ...args: string[]): { status: number | null; stdout: string; stderr: string } {
+  return runServerFrom(dir, dir, ...args);
+}
+
+function runServerFrom(cwd: string, home: string, ...args: string[]): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [CLI_PATH, 'server', ...args], {
-    cwd: dir,
+    cwd,
     encoding: 'utf8',
-    env: gitSafeEnv({ HOME: dir, USERPROFILE: dir })
+    env: gitSafeEnv({ HOME: home, USERPROFILE: home })
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-// The default runtime paths include an opaque per-repo-hash segment
-// (~/.agent-infra/<kind>/<project>/<repo-hash>/server.*), so locate the files by
-// searching under the pinned-HOME tree rather than reconstructing the hash.
-function findUnder(root: string, name: string): string | null {
-  const stack: string[] = [root];
-  while (stack.length > 0) {
-    const cur = stack.pop();
-    if (cur === undefined) break;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(cur, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const full = path.join(cur, entry.name);
-      if (entry.isDirectory()) stack.push(full);
-      else if (entry.name === name) return full;
-    }
-  }
-  return null;
-}
-
 function logPathOf(dir: string): string | null {
-  return findUnder(path.join(dir, '.agent-infra', 'logs', PROJECT), 'server.log');
+  const file = path.join(dir, '.agent-infra', 'logs', PROJECT, 'server.log');
+  return fs.existsSync(file) ? file : null;
 }
 
 function pidPathOf(dir: string): string | null {
-  return findUnder(path.join(dir, '.agent-infra', 'run', PROJECT), 'server.pid');
+  const file = path.join(dir, '.agent-infra', 'run', PROJECT, 'server.pid');
+  return fs.existsSync(file) ? file : null;
 }
 
 function readPid(dir: string): number | null {
@@ -201,6 +184,113 @@ test(
         }
       }
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'linked worktree commands share the primary worktree config, pid, and log',
+  onPlatforms('linux', 'darwin'),
+  async () => {
+    const primary = makeRepo();
+    const linked = path.join(os.tmpdir(), `${path.basename(primary)}-linked`);
+    let pid: number | null = null;
+    try {
+      fs.writeFileSync(path.join(primary, '.agents', 'server.json'), JSON.stringify({
+        heartbeatMs: 100
+      }));
+      execFileSync('git', ['-C', primary, 'add', '.agents'], { env: gitSafeEnv() });
+      execFileSync('git', ['-C', primary, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'server config'], { env: gitSafeEnv() });
+      execFileSync('git', ['-C', primary, 'worktree', 'add', '-b', 'linked-server-test', linked], { env: gitSafeEnv() });
+      fs.writeFileSync(path.join(linked, '.agents', 'server.json'), JSON.stringify({
+        heartbeatMs: 10_000
+      }));
+
+      const started = runServerFrom(linked, primary, 'start');
+      assert.equal(started.status, 0, started.stderr);
+      assert.match(started.stdout, /server started \(pid \d+\)/);
+      pid = readPid(primary);
+      assert.ok(pid !== null && pid > 0, 'primary runtime path should contain the shared pid record');
+
+      const primaryLog = path.join(primary, '.agent-infra', 'logs', PROJECT, 'server.log');
+      assert.ok(await waitFor(() => fs.existsSync(primaryLog) && /\[INFO\] heartbeat/.test(fs.readFileSync(primaryLog, 'utf8'))));
+
+      const status = runServerFrom(primary, primary, 'status');
+      assert.match(status.stdout, /server: running/);
+      assert.match(status.stdout, /server\.log/);
+      const logs = runServerFrom(linked, primary, 'logs');
+      assert.match(logs.stdout, /\[INFO\] heartbeat/);
+
+      const stopped = runServerFrom(primary, primary, 'stop');
+      assert.equal(stopped.status, 0, stopped.stderr);
+      assert.ok(await waitFor(() => !isProcessAlive(pid as number)));
+      assert.equal(pidPathOf(primary), null);
+      pid = null;
+    } finally {
+      if (pid !== null && isProcessAlive(pid)) {
+        try { process.kill(pid, 'SIGKILL'); } catch { /* best effort cleanup */ }
+      }
+      fs.rmSync(linked, { recursive: true, force: true });
+      fs.rmSync(primary, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'server start fails outside a Git worktree without writing a pid record',
+  onPlatforms('linux', 'darwin'),
+  () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-outside-git-'));
+    try {
+      const started = runServerFrom(dir, dir, 'start');
+      assert.notEqual(started.status, 0);
+      assert.match(started.stderr, /server: current directory is not inside a git repository/);
+      assert.equal(pidPathOf(dir), null);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'foreground and direct daemon entrypoints change cwd to the primary worktree',
+  onPlatforms('linux'),
+  async () => {
+    const primary = makeRepo();
+    const linked = path.join(os.tmpdir(), `${path.basename(primary)}-foreground-linked`);
+    const primaryLog = path.join(primary, '.agent-infra', 'logs', PROJECT, 'server.log');
+    try {
+      fs.writeFileSync(path.join(primary, '.agents', 'server.json'), JSON.stringify({
+        heartbeatMs: 100
+      }));
+      execFileSync('git', ['-C', primary, 'add', '.agents'], { env: gitSafeEnv() });
+      execFileSync('git', ['-C', primary, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'server config'], { env: gitSafeEnv() });
+      execFileSync('git', ['-C', primary, 'worktree', 'add', '-b', 'linked-foreground-test', linked], { env: gitSafeEnv() });
+
+      for (const args of [['start', '--foreground'], ['__daemon']]) {
+        const child = spawn(process.execPath, [CLI_PATH, 'server', ...args], {
+          cwd: linked,
+          stdio: 'ignore',
+          env: gitSafeEnv({ HOME: primary, USERPROFILE: primary })
+        });
+        assert.ok(child.pid);
+        try {
+          assert.ok(await waitFor(() => fs.existsSync(primaryLog) && /\[INFO\] heartbeat/.test(fs.readFileSync(primaryLog, 'utf8'))));
+          assert.ok(await waitFor(() => {
+            try {
+              return fs.readlinkSync(`/proc/${child.pid}/cwd`) === primary;
+            } catch {
+              return false;
+            }
+          }));
+        } finally {
+          if (isProcessAlive(child.pid)) child.kill('SIGTERM');
+          assert.ok(await waitFor(() => !isProcessAlive(child.pid as number)));
+        }
+      }
+    } finally {
+      fs.rmSync(linked, { recursive: true, force: true });
+      fs.rmSync(primary, { recursive: true, force: true });
     }
   }
 );

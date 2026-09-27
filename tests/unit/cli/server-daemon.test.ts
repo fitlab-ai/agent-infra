@@ -107,10 +107,12 @@ test('dispatcher sends builtin replies through text fallback when structured rep
 
 test('dispatcher sends ai command streams as structured messages', async () => {
   const { message, displayReplies } = inbound('/task ls');
+  let runnerCwd: string | undefined;
   const dispatch = createMessageDispatcher({
     config,
     logger: { info: () => {} },
     runAi: async (_argv, options): Promise<RunnerResult> => {
+      runnerCwd = options?.cwd;
       await options?.onChunk?.('tasks');
       return { exitCode: 0, signal: null, stdout: 'tasks', stderr: '' };
     }
@@ -124,6 +126,7 @@ test('dispatcher sends ai command streams as structured messages', async () => {
     'tasks',
     'finished ai task ls exitCode=0 signal=null'
   ]);
+  assert.equal(runnerCwd, config.repoRoot);
 });
 
 test('dispatcher renders /task status directly from StatusModel', async () => {
