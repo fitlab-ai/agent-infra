@@ -44,7 +44,7 @@ Do not route by review round. Compare reviewed snapshot tree `T` with the tree o
 
 - `T != R^{tree}`: Branch A1 (commit).
 - `T == R^{tree}` without a PR: Branch A4 for `prFlow=disabled`; with PR flow enabled, always use Branch A2 (create PR), which delivers the task branch.
-- Existing PR with PR head != `R`: Branch A1 (commit/push).
+- Existing PR with PR head != `R`: Branch A2 (create or update the PR); `create-pr` performs task-delivery, verifies the remote SHA, and reuses the bound PR.
 - PR head = `R` with `pending|failed|cancelled` checks or temporarily unavailable platform state: Branch A3 (watch); never show completion.
 - PR head = `R` with `passed|no-required` checks: Branch A4 (complete).
 
@@ -61,7 +61,7 @@ Reminder: manual-validation findings must be carried in the PR description as a 
 
 #### Branch A1: Commit or Push
 
-Use this scenario when the snapshot tree differs from the reviewed HEAD, or an existing PR head differs from the reviewed commit and a new commit or push is required. Do not select it only because a task branch without a PR has not yet been pushed. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}`.
+Use this scenario when the snapshot tree differs from the reviewed HEAD and must first be committed. When an existing PR head is behind the reviewed commit, use Branch A2 to deliver the reviewed task branch and update or reuse the PR. Do not select this scenario only because a task branch without a PR has not yet been pushed. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}`.
 
 ```text
 Next step - commit or push the code:
@@ -70,7 +70,7 @@ Next step - commit or push the code:
 
 #### Branch A2: Create a Pull Request
 
-The `create-pr` skill calls task-delivery to push an undelivered task branch, verifies the remote SHA against local HEAD, and then creates or reuses a PR. Already-pushed branches are verified idempotently. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`.
+The `create-pr` skill calls task-delivery to push an undelivered or behind task branch, verifies the remote SHA against local HEAD, and then creates or reuses the bound PR. Already-pushed branches are verified idempotently. Use this branch when an existing PR head is behind the reviewed commit, so delivery goes through task-delivery instead of an ordinary commit push followed by a second create-pr step. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`.
 
 ```text
 Next step - create a Pull Request:
