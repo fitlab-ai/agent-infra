@@ -1140,9 +1140,33 @@ async function createExternalPullRequest(
   }
   if (base.prIdentity) {
     const inspected = await inspectExternalPullRequest(base, base.prIdentity!);
-    return inspected.status === 'failed' || inspected.status === 'blocked'
-      ? withCreation(inspected, PRECONDITION_NOT_CREATED)
-      : withCreation({ ...inspected, result: 'no_op' }, { kind: 'no-op', createdByCurrentOperation: false });
+    if (inspected.status === 'failed' || inspected.status === 'blocked') {
+      return withCreation(inspected, PRECONDITION_NOT_CREATED);
+    }
+    const deliveredHeadSha = typeof base.frontmatter.delivery_remote_head === 'string'
+      ? base.frontmatter.delivery_remote_head
+      : undefined;
+    const expectedHeadSha = verifiedHeadSha ?? deliveredHeadSha;
+    if (!expectedHeadSha) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      platform: base.context.platform,
+      capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber, identity: base.prIdentity },
+      pullRequest: inspected.pullRequest,
+      error: { code: 'PR_HEAD_UNVERIFIED', message: 'Unable to verify the bound pull request head SHA', retryable: false }
+    }), PRECONDITION_NOT_CREATED);
+    const identity = validateWriterIdentity(base, inspected.pullRequest ?? null, {
+      expectedHead: options.head,
+      expectedHeadSha,
+      errorCode: 'PR_BIND_IDENTITY_MISMATCH'
+    });
+    if (!identity.ok) return withCreation(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      platform: base.context.platform,
+      capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber, identity: base.prIdentity },
+      pullRequest: inspected.pullRequest,
+      error: identity.error
+    }), PRECONDITION_NOT_CREATED);
+    return withCreation({ ...inspected, result: 'no_op' }, { kind: 'no-op', createdByCurrentOperation: false });
   }
   if (options.dryRun) return withCreation(result('planned', base.resolved.taskId, base.issueNumber, null, {
     platform: base.context.platform,

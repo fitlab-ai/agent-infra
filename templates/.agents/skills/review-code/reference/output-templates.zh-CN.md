@@ -43,7 +43,7 @@
 通过后不得按轮次路由。先比较审查快照树 `T` 与基线 `R` 的树，再读取任务的 `prFlow` / verified `pr_delivery_fact`；存在 PR 时调用 `agent-infra-internal platform-checks inspect {task-id}`。只选择以下一个互斥出口：
 
 - `T != R^{tree}`：场景 A1（提交）。
-- `T == R^{tree}` 且无 PR：`prFlow=disabled` 用场景 A4（完成）；PR flow 开启且分支未推送时用场景 A1（`commit` push-only 后再创建 PR）；分支已推送时用场景 A2（创建 PR）。
+- `T == R^{tree}` 且无 PR：`prFlow=disabled` 用场景 A4（完成）；PR flow 开启时统一用场景 A2（创建 PR），由 `create-pr` 负责交付任务分支。
 - 已有 PR 但 PR head != `R`：场景 A1（提交/推送）。
 - PR head = `R`，checks 为 `pending|failed|cancelled` 或平台暂不可用：场景 A3（监控），不得输出完成命令。
 - PR head = `R`，checks 为 `passed|no-required`：场景 A4（完成）。
@@ -61,16 +61,16 @@
 
 #### 场景 A1：提交或推送
 
-当 `T == R^{tree}`、没有 PR 且任务分支未推送时，`commit` 只推送已审查的提交 `R`，不创建新的代码提交；推送成功后再运行 `create-pr`。其他 A1 状态由 `commit` 按当前工作树判断是否需要创建提交或推送。使用 `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+用于快照树与受审 HEAD 不一致，或已有 PR head 与受审提交不一致、需要重新提交或推送的状态。没有 PR 时不因任务分支尚未推送而选择本场景。使用 `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
 ```text
 下一步 - 提交或推送代码：
 {next-step-commands}
 ```
 
-#### 场景 A2：创建 Pull Request（已推送受审查提交）
+#### 场景 A2：创建 Pull Request
 
-本场景要求任务分支已推送。`create-pr` 会核验远端 SHA 与已审查提交后创建或复用 PR。未推送分支应先按场景 A1 推送已审查提交。使用 `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+`create-pr` 会调用 task-delivery 推送未交付的任务分支、核验远端 SHA 与本地 HEAD 一致，然后创建或复用 PR。已经推送的分支由 task-delivery 幂等核验。使用 `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
 ```text
 下一步 - 创建 Pull Request：

@@ -43,7 +43,7 @@ If the summary cannot be parsed safely, set `{last-readable-review-result}` to "
 Do not route by review round. Compare reviewed snapshot tree `T` with the tree of baseline `R`, then read `prFlow` / verified `pr_delivery_fact`; when a PR exists, call `agent-infra-internal platform-checks inspect {task-id}`. Select exactly one mutually exclusive exit:
 
 - `T != R^{tree}`: Branch A1 (commit).
-- `T == R^{tree}` without a PR: Branch A4 for `prFlow=disabled`; with PR flow enabled, use Branch A1 (`commit` push-only followed by PR creation) when the branch is unpushed, and Branch A2 (create PR) when it is already pushed.
+- `T == R^{tree}` without a PR: Branch A4 for `prFlow=disabled`; with PR flow enabled, always use Branch A2 (create PR), which delivers the task branch.
 - Existing PR with PR head != `R`: Branch A1 (commit/push).
 - PR head = `R` with `pending|failed|cancelled` checks or temporarily unavailable platform state: Branch A3 (watch); never show completion.
 - PR head = `R` with `passed|no-required` checks: Branch A4 (complete).
@@ -61,16 +61,16 @@ Reminder: manual-validation findings must be carried in the PR description as a 
 
 #### Branch A1: Commit or Push
 
-When `T == R^{tree}`, no PR exists, and the task branch is unpushed, `commit` only pushes the reviewed commit `R`; it does not create a new code commit. After the push succeeds, run `create-pr`. For other A1 states, `commit` determines whether the current worktree needs a new commit or a push. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}`.
+Use this scenario when the snapshot tree differs from the reviewed HEAD, or an existing PR head differs from the reviewed commit and a new commit or push is required. Do not select it only because a task branch without a PR has not yet been pushed. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}`.
 
 ```text
 Next step - commit or push the code:
 {next-step-commands}
 ```
 
-#### Branch A2: Create a Pull Request (reviewed commit already pushed)
+#### Branch A2: Create a Pull Request
 
-This branch requires the task branch to be pushed. The `create-pr` skill verifies the remote SHA against the reviewed commit before creating or reusing a PR. Route an unpushed branch through Branch A1 first. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`.
+The `create-pr` skill calls task-delivery to push an undelivered task branch, verifies the remote SHA against local HEAD, and then creates or reuses a PR. Already-pushed branches are verified idempotently. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`.
 
 ```text
 Next step - create a Pull Request:
