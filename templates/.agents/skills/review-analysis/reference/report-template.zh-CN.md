@@ -26,7 +26,7 @@
 
 ## 资格审计复核
 
-> 按 `.agents/rules/decision-qualification.md` 复核：约束依赖、候选资格、分类结果三张决策表和一行资格快照。
+> 仅当本阶段实际复核了候选资格、约束依赖或人工裁决资格时填写本节，并按 `.agents/rules/decision-qualification.md` 完整复核三张决策表和资格快照；否则删除整个审计段。
 
 ### 约束依赖
 | constraint_id | constraint_digest | role | evidence |

@@ -26,7 +26,7 @@ Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 
 ## Qualification Audit Review
 
-> Use `.agents/rules/decision-qualification.md` to review the three decision tables: constraint dependencies, candidate qualification, and classification results, plus a one-row qualification snapshot.
+> Include this section only when this stage actually reviews candidate qualification, constraint dependencies, or human-decision eligibility. In that case, review all three decision tables and the qualification snapshot per `.agents/rules/decision-qualification.md`; otherwise omit this section entirely.
 
 ### Constraint Dependencies
 | constraint_id | constraint_digest | role | evidence |

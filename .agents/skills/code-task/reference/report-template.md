@@ -26,7 +26,7 @@
 
 ## 资格审计
 
-> 按 `.agents/rules/decision-qualification.md` 填写三张决策表和一行资格快照。
+> 仅当本阶段实际判断候选资格、约束依赖或人工裁决资格时填写本节，并按 `.agents/rules/decision-qualification.md` 完整记录三张决策表和资格快照；否则删除整个审计段。
 
 ### 约束依赖
 | constraint_id | constraint_digest | role | evidence |

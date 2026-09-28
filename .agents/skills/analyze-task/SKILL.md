@@ -201,7 +201,7 @@ agent-infra-internal task-artifact {task-id} init --family analysis --artifact {
 
 ## 资格审计
 
-> 按 `.agents/rules/decision-qualification.md` 填写约束依赖、候选资格、分类结果三张决策表和一行资格快照；没有 artifact 上游时保留空表头，不虚构关系。
+> 仅当本阶段实际判断候选资格、约束依赖或人工裁决资格时填写本节，并按 `.agents/rules/decision-qualification.md` 完整记录三张决策表和资格快照；否则删除整个审计段。
 
 ## 假设
 

@@ -34,7 +34,7 @@ test('receipt upsert creates a portable task section and parses it back', () => 
 });
 
 test('code completion receipts accept the selected analysis or plan lifecycle input', () => {
-  for (const input of ['analysis.md', 'plan.md']) {
+  for (const input of ['analysis.md', 'review-analysis.md', 'plan.md']) {
     assert.doesNotThrow(() => upsertArtifactReceipt('# Task\n', {
       event: 'code.completed', output: 'code.md', input,
       inputSha256: 'a'.repeat(64), completedAt: '2026-08-19 20:00:00+00:00'

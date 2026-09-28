@@ -92,7 +92,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
 
 ### 5. 设计技术方案
 
-方案必须按 `.agents/rules/decision-qualification.md` 复核规范化约束和候选，并在方案产物保留三张资格审计决策表和资格快照；来源不明或未人工确认的约束不得自动排除候选。
+仅当方案阶段实际判断候选资格、约束依赖或人工裁决资格时，才按 `.agents/rules/decision-qualification.md` 复核规范化约束和候选，并在方案产物记录完整资格审计；否则省略整个审计段。来源不明或未人工确认的约束不得自动排除候选。
 
 遵循 `.agents/workflows/feature-development.yaml` 中的 `technical-design` 步骤：
 

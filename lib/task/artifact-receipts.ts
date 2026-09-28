@@ -71,7 +71,7 @@ function validateReceiptShape(event: ArtifactReceiptEvent, output: string, input
   if (!outputIdentity || !inputIdentity) throw new ArtifactReceiptError(`receipt artifact identity is invalid: ${output} -> ${input}`);
   const shape = RECEIPT_SHAPES[event];
   const inputMatches = event === 'code.completed'
-    ? inputIdentity.family === 'analysis' || inputIdentity.family === 'plan' || inputIdentity.family === 'review-plan' || inputIdentity.family === 'review-code'
+    ? inputIdentity.family === 'analysis' || inputIdentity.family === 'plan' || inputIdentity.family === 'review-analysis' || inputIdentity.family === 'review-plan' || inputIdentity.family === 'review-code'
     : event === 'plan.completed'
       ? inputIdentity.family === 'analysis' || inputIdentity.family === 'review-analysis' || inputIdentity.family === 'review-plan'
       : event === 'analysis.completed'
