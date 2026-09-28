@@ -444,10 +444,15 @@ function receiptGraphHasCycle(receipts: readonly ArtifactReceipt[]): boolean {
 function qualificationInvalidationSeeds(
   content: string,
   taskDir: string,
-  inventory: readonly { family: string; name: string }[]
+  inventory: readonly { family: string; name: string }[],
+  baselineDigest?: string
 ): { changed: boolean; safe: boolean; seeds: readonly string[] } {
   const task = parseTaskQualification(content);
   if (!task.ok) return { changed: true, safe: false, seeds: [] };
+  if (baselineDigest !== undefined) {
+    if (!/^[a-f0-9]{64}$/u.test(baselineDigest)) return { changed: true, safe: false, seeds: [] };
+    if (baselineDigest === task.qualification.taskInputDigest) return { changed: false, safe: true, seeds: [] };
+  }
   const audits: Array<{ name: string; snapshotTaskDigest: string; snapshotNonConstraintDigest: string; dependencies: readonly { constraintId: string; constraintDigest: string }[]; candidates: readonly { candidateId: string; status: string; impact: string; constraintIds: readonly string[]; evidence: string }[] }> = [];
   let observedQualification = false;
   for (const artifact of inventory) {
@@ -471,7 +476,7 @@ function qualificationInvalidationSeeds(
   if (!task.qualification.present) return { changed: false, safe: true, seeds: [] };
   const allAuditsPresent = observedQualification && audits.length === inventory.length;
   if (!allAuditsPresent) return { changed: true, safe: false, seeds: [] };
-  if (audits.every((audit) => audit.snapshotTaskDigest === task.qualification.taskInputDigest)) {
+  if (baselineDigest === undefined && audits.every((audit) => audit.snapshotTaskDigest === task.qualification.taskInputDigest)) {
     return { changed: false, safe: true, seeds: [] };
   }
   const candidateMap = new Map(task.qualification.candidates.map((candidate) => [candidate.candidateId, candidate]));
@@ -555,7 +560,7 @@ function invalidationMutationForCompletion(
     const currentIdentity = parseArtifactName(artifact.name);
     const previousName = currentIdentity && currentIdentity.round > 1 ? artifactName(sourceArtifactFamily, currentIdentity.round - 1) : null;
     const previous = previousName ? inventory.find((node) => node.family === sourceArtifactFamily && node.name === previousName) : null;
-    const previousFact = previousName ? completionFacts(frontmatter).find((fact) => fact.output === previousName && fact.event === `${sourceFamily === 'analyze' ? 'analysis' : sourceFamily}.completed`) : null;
+    const previousFact = previousName ? parseCompletionFacts(frontmatter.completion_facts).find((fact) => fact.output === previousName && fact.event === `${sourceFamily === 'analyze' ? 'analysis' : sourceFamily}.completed`) : null;
     if (!previous || !previousFact || previousFact.outputSha256 !== previous.sha256) graphUsable = false;
     if (graphUsable && previous) {
       selected.add(`${previous.family}/${previous.name}`);
@@ -573,7 +578,10 @@ function invalidationMutationForCompletion(
       selected.delete(`${previous.family}/${previous.name}`);
     }
   }
-  const qualification = qualificationInvalidationSeeds(content, taskDir, inventory);
+  const qualification = qualificationInvalidationSeeds(
+    content, taskDir, inventory,
+    typeof frontmatter.qualification_input_digest === 'string' ? frontmatter.qualification_input_digest : undefined
+  );
   let qualificationChange = qualification.changed;
   if (qualificationChange && (!graphUsable || !qualification.safe)) graphUsable = false;
   if (qualificationChange && graphUsable) {
@@ -597,11 +605,11 @@ function invalidationMutationForCompletion(
     : inventory.filter((node) => fallbackFamilies.includes(node.family)))
     .filter((node) => !(node.family === FAMILY[family].artifact && node.name === artifact.name));
   const targets = targetNodes.flatMap((node) => {
-    const shapes: Array<{ targetKind: InvalidationTargetKind; targetFamily: string; targetArtifact: string; targetRound: number; targetSha256: string }> = [
+    const shapes: Array<{ targetKind: InvalidationTargetKind; targetFamily: string; targetArtifact: string; targetInput?: string; targetRound: number; targetSha256: string }> = [
       { targetKind: 'artifact', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 }
     ];
     for (const receipt of receipts.filter((candidate) => candidate.output === node.name)) {
-      shapes.push({ targetKind: 'receipt', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: receipt.inputSha256 });
+      shapes.push({ targetKind: 'receipt', targetFamily: node.family, targetArtifact: node.name, targetInput: receipt.input, targetRound: node.round, targetSha256: receipt.inputSha256 });
     }
     if (node.family.startsWith('review-')) shapes.push({ targetKind: 'approval', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 });
     if (node.family === 'review-code') shapes.push({ targetKind: 'reviewed-snapshot', targetFamily: node.family, targetArtifact: node.name, targetRound: node.round, targetSha256: node.sha256 });
@@ -686,7 +694,7 @@ function buildCompletionReceipt(
     const raw = frontmatter.lifecycle_input_relations;
     if (typeof raw !== 'string') {
       const replayFact = currentCompletionFact(request, artifact);
-      const recordedFact = completionFacts(frontmatter).find((fact) => sameCompletionFact(fact, replayFact));
+      const recordedFact = parseCompletionFacts(frontmatter.completion_facts).find((fact) => sameCompletionFact(fact, replayFact));
       if (!recordedFact) {
         return { ok: false, message: 'started lifecycle input context is missing and no matching completion fact exists for replay' };
       }
@@ -731,35 +739,6 @@ function buildCompletionReceipt(
     } catch (error) { return { ok: false, message: `cannot verify lifecycle input '${input.name}': ${error instanceof Error ? error.message : String(error)}` }; }
   }
   return { ok: true, receipts };
-}
-
-type CompletionFact = Readonly<{
-  event: string;
-  output: string;
-  outputSha256: string;
-  semanticDigest: string;
-  requestId: string;
-  result: string;
-  lifecycleInputs?: readonly Readonly<{ name: string; sha256: string }>[];
-}>;
-
-function completionFacts(frontmatter: Record<string, unknown>): CompletionFact[] {
-  if (typeof frontmatter.completion_facts !== 'string') return [];
-  try {
-    const facts: unknown = JSON.parse(frontmatter.completion_facts);
-    if (!Array.isArray(facts)) return [];
-    return facts.filter((fact): fact is CompletionFact => Boolean(
-      fact && typeof fact === 'object' && !Array.isArray(fact)
-      && typeof (fact as CompletionFact).event === 'string'
-      && typeof (fact as CompletionFact).output === 'string'
-      && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).outputSha256)
-      && /^[a-f0-9]{64}$/u.test((fact as CompletionFact).semanticDigest)
-      && typeof (fact as CompletionFact).requestId === 'string'
-      && typeof (fact as CompletionFact).result === 'string'
-    ));
-  } catch {
-    return [];
-  }
 }
 
 function currentCompletionFact(
@@ -1052,6 +1031,11 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
   if (currentFact) frontmatterSet.completion_facts = JSON.stringify(replaceCompletionFact(parseCompletionFacts(frontmatter.completion_facts), currentFact));
+  if (completedArtifact && ['analyze', 'plan', 'code'].includes(eventIdentity.family)) {
+    const task = parseTaskQualification(content);
+    if (!task.ok) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: task.message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+    frontmatterSet.qualification_input_digest = task.qualification.taskInputDigest;
+  }
   let frontmatterRemove: string[] | undefined;
   if (eventIdentity.phase === 'started' && artifactContext && ['analyze', 'plan', 'code', 'review-analysis', 'review-plan', 'review-code'].includes(eventIdentity.family)) {
     try {

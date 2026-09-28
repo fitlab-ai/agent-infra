@@ -1195,6 +1195,51 @@ test('source completion records resumable invalidation and lifecycle starts reco
   assert.equal(reconciled.document.targets.every((target) => target.status === 'completed'), true);
 });
 
+test('source replacement distinguishes same-hash receipt inputs and reconciles both edges', () => {
+  const f = fixture('code');
+  try {
+    const analysisPath = path.join(f.dir, 'analysis.md');
+    fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), fs.readFileSync(analysisPath));
+    for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+      fs.writeFileSync(path.join(f.dir, name), `# ${name}\n`);
+    }
+    const analysisSha = sha256File(analysisPath);
+    addReceipt(f.file, { event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'code.completed', output: 'code.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'review-code.completed', output: 'review-code.md', input: 'code.md', inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    const previousFact = {
+      event: 'analysis.completed', output: 'analysis.md', outputSha256: analysisSha,
+      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:analysis-r1`, result: '{}'
+    };
+    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousFact])}'\n`));
+
+    const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:same-hash-receipts`, '--reason-code', 'new-requirement']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
+    const completed = run(f.root, [
+      f.id, 'analyze.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:same-hash-receipts`, '--reason-code', 'new-requirement',
+      '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(invalidation.ok, true);
+    if (!invalidation.ok) return;
+    const planReceiptTargets = invalidation.document.targets.filter((target) => target.targetKind === 'receipt' && target.targetArtifact === 'plan.md');
+    assert.deepEqual(planReceiptTargets.map((target) => target.targetInput).sort(), ['analysis.md', 'review-analysis.md']);
+    assert.equal(new Set(planReceiptTargets.map((target) => target.targetId)).size, 2);
+
+    const reconcile = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+    assert.equal(reconcile.status, 0, reconcile.stdout || reconcile.stderr);
+    const reconciled = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(reconciled.ok, true);
+    if (!reconciled.ok) return;
+    assert.equal(reconciled.document.targets.every((target) => target.status === 'completed'), true);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('source replacement uses static downstream invalidation when receipt graph has a disconnected cycle', () => {
   const f = fixture('technical-design');
   try {

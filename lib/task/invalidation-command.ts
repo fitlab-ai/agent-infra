@@ -41,8 +41,10 @@ function reconcileTaskInvalidation(taskRef: string, options: InvalidationCommand
   for (const target of parsed.document.targets) {
     if (target.status === 'completed') continue;
     if (target.targetKind === 'receipt') {
-      const receipt = receipts.find((candidate) => candidate.output === target.targetArtifact);
-      if (!receipt || receipt.inputSha256 !== target.targetSha256) {
+      const receiptExists = Boolean(target.targetInput) && receipts.some((candidate) => candidate.output === target.targetArtifact
+        && candidate.input === target.targetInput
+        && candidate.inputSha256 === target.targetSha256);
+      if (!receiptExists) {
         return {
           status: 'failed', changed: false, taskId: resolved.taskId, processed: 0, remaining: beforePending,
           error: { code: 'INVALIDATION_TARGET_HASH_CONFLICT', message: `invalidation receipt target '${target.targetArtifact}' changed before reconcile` }

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { parseArtifactName } from './artifact-name.ts';
 import { findSectionRange, parseTable } from './sections.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
 
@@ -8,6 +9,10 @@ const OPERATION_COLUMNS = [
   'status', 'processed', 'total', 'created_at', 'updated_at', 'completed_at', 'error'
 ] as const;
 const TARGET_COLUMNS = [
+  'target_id', 'operation_id', 'target_kind', 'target_family', 'target_artifact', 'target_input',
+  'target_round', 'target_sha256', 'status', 'reason_code', 'updated_at'
+] as const;
+const LEGACY_TARGET_COLUMNS = [
   'target_id', 'operation_id', 'target_kind', 'target_family', 'target_artifact',
   'target_round', 'target_sha256', 'status', 'reason_code', 'updated_at'
 ] as const;
@@ -34,6 +39,7 @@ type InvalidationTarget = {
   targetKind: InvalidationTargetKind;
   targetFamily: string;
   targetArtifact: string;
+  targetInput?: string;
   targetRound: number;
   targetSha256: string;
   status: InvalidationStatus;
@@ -69,8 +75,8 @@ function operationIdFor(source: Pick<InvalidationOperation, 'sourceFamily' | 'so
   return `INV-${hashIdentity([source.sourceFamily, source.sourceArtifact, source.sourceRound, source.sourceSha256])}`;
 }
 
-function targetIdFor(operationId: string, target: Pick<InvalidationTarget, 'targetKind' | 'targetFamily' | 'targetArtifact' | 'targetRound' | 'targetSha256'>): string {
-  return `INV-T-${hashIdentity([operationId, target.targetKind, target.targetFamily, target.targetArtifact, target.targetRound, target.targetSha256])}`;
+function targetIdFor(operationId: string, target: Pick<InvalidationTarget, 'targetKind' | 'targetFamily' | 'targetArtifact' | 'targetInput' | 'targetRound' | 'targetSha256'>): string {
+  return `INV-T-${hashIdentity([operationId, target.targetKind, target.targetFamily, target.targetArtifact, ...(target.targetKind === 'receipt' && target.targetInput ? [target.targetInput] : []), target.targetRound, target.targetSha256])}`;
 }
 
 function createInvalidationOperation(
@@ -86,14 +92,27 @@ function createInvalidationOperation(
   };
 }
 
-function parseInvalidationTable(body: string, heading: string, columns: readonly string[]) {
+function parseInvalidationTable(body: string, heading: string, columnChoices: readonly (readonly string[])[]) {
   const section = findSectionRange(body, [heading], 3);
   const lines = scanVisibleMarkdown(body).lines.filter((line) => line.text.trim());
-  const table = parseTable(lines.map((line) => line.text).join('\n'), { sectionAliases: [heading], columns });
+  let table: ReturnType<typeof parseTable> = null;
+  let legacy = false;
+  for (const columns of columnChoices) {
+    try {
+      const candidate = parseTable(lines.map((line) => line.text).join('\n'), { sectionAliases: [heading], columns });
+      if (candidate) {
+        table = candidate;
+        legacy = columns === LEGACY_TARGET_COLUMNS;
+        break;
+      }
+    } catch {
+      // Try the next explicitly supported schema.
+    }
+  }
   if (!section || !table || lines.filter((line) => line.start >= section.bodyStart && line.start < section.end).length !== table.rows.length + 2) {
     throw new Error(`invalidation ${heading} section must contain only its canonical table`);
   }
-  return table.rows;
+  return { rows: table.rows, legacy };
 }
 
 function required(value: string, field: string): string {
@@ -117,9 +136,10 @@ function parseInvalidationDocument(content: string): InvalidationParseResult {
   if (section === null) return { ok: true, present: false, document: { operations: [], targets: [] } };
   try {
     const body = content.slice(section.bodyStart, section.end);
-    const operationRows = parseInvalidationTable(body, 'Operations', OPERATION_COLUMNS);
-    const targetRows = parseInvalidationTable(body, 'Targets', TARGET_COLUMNS);
-    const operations = operationRows.map(({ values: row }) => ({
+    const operationRows = parseInvalidationTable(body, 'Operations', [OPERATION_COLUMNS]);
+    // TODO(compat): Remove legacy target table parsing once all persisted task.md invalidation tables include target_input; verify with a workspace inventory scan.
+    const targetRows = parseInvalidationTable(body, 'Targets', [TARGET_COLUMNS, LEGACY_TARGET_COLUMNS]);
+    const operations = operationRows.rows.map(({ values: row }) => ({
       operationId: required(row.operation_id!, 'operation_id'), sourceFamily: required(row.source_family!, 'source_family'),
       sourceArtifact: required(row.source_artifact!, 'source_artifact'), sourceRound: numberValue(row.source_round!, 'source_round', false),
       sourceSha256: required(row.source_sha256!, 'source_sha256'), status: status(row.status!, 'operation status'),
@@ -127,10 +147,11 @@ function parseInvalidationDocument(content: string): InvalidationParseResult {
       createdAt: required(row.created_at!, 'created_at'), updatedAt: required(row.updated_at!, 'updated_at'),
       completedAt: row.completed_at ?? '', error: row.error ?? ''
     } satisfies InvalidationOperation));
-    const targets = targetRows.map(({ values: row }) => ({
+    const targets = targetRows.rows.map(({ values: row }) => ({
       targetId: required(row.target_id!, 'target_id'), operationId: required(row.operation_id!, 'operation_id'),
       targetKind: row.target_kind as InvalidationTargetKind, targetFamily: required(row.target_family!, 'target_family'),
       targetArtifact: required(row.target_artifact!, 'target_artifact'), targetRound: numberValue(row.target_round!, 'target_round', false),
+      ...(row.target_input ? { targetInput: row.target_input } : {}),
       targetSha256: required(row.target_sha256!, 'target_sha256'), status: status(row.status!, 'target status'),
       reasonCode: required(row.reason_code!, 'reason_code'), updatedAt: required(row.updated_at!, 'updated_at')
     } satisfies InvalidationTarget));
@@ -148,6 +169,10 @@ function parseInvalidationDocument(content: string): InvalidationParseResult {
       if (targetIds.has(target.targetId)) throw new Error(`duplicate target '${target.targetId}'`);
       targetIds.add(target.targetId);
       if (!operationIds.has(target.operationId)) throw new Error(`target '${target.targetId}' references an unknown operation`);
+      if (target.targetKind === 'receipt') {
+        if (!target.targetInput && (!targetRows.legacy || target.status !== 'completed')) throw new Error(`receipt target '${target.targetId}' input identity is required`);
+        if (target.targetInput && !parseArtifactName(target.targetInput)) throw new Error(`receipt target '${target.targetId}' input identity is invalid`);
+      } else if (target.targetInput) throw new Error(`non-receipt target '${target.targetId}' cannot have an input identity`);
       if (target.targetId !== targetIdFor(target.operationId, target)) throw new Error(`target '${target.targetId}' has a non-canonical identity`);
       if (!/^[a-f0-9]{64}$/.test(target.targetSha256)) throw new Error(`target '${target.targetId}' hash is invalid`);
     }
@@ -187,7 +212,7 @@ function renderInvalidation(document: InvalidationDocument): string {
     '### Targets', '',
     table(TARGET_COLUMNS, targets.map((row) => [
       row.targetId, row.operationId, row.targetKind, row.targetFamily, row.targetArtifact,
-      row.targetRound, row.targetSha256, row.status, row.reasonCode, row.updatedAt
+      row.targetInput ?? '', row.targetRound, row.targetSha256, row.status, row.reasonCode, row.updatedAt
     ]))
   ].join('\n');
 }

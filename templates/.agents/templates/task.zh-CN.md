@@ -118,8 +118,8 @@ delivery_remote_head:          # 最近一次成功交付到 remote 的任务分
 
 ### Targets
 
-| target_id | operation_id | target_kind | target_family | target_artifact | target_round | target_sha256 | status | reason_code | updated_at |
-|-----------|--------------|-------------|---------------|-----------------|--------------|---------------|--------|-------------|------------|
+| target_id | operation_id | target_kind | target_family | target_artifact | target_input | target_round | target_sha256 | status | reason_code | updated_at |
+|-----------|--------------|-------------|---------------|-----------------|--------------|--------------|---------------|--------|-------------|------------|
 
 ## 活动日志
 

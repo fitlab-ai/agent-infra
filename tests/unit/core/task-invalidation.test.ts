@@ -53,6 +53,45 @@ test('invalidation schema round-trips operations and targets', () => {
   assert.deepEqual(parseInvalidationDocument(`## Artifact Invalidation\n\n${content.replaceAll('\n|', '\n\n|')}\n`), parsed);
 });
 
+test('receipt target identity includes the exact input artifact and reads completed legacy rows', () => {
+  const source = {
+    sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
+    sourceSha256: 'b'.repeat(64), createdAt: '2026-01-01 00:00:00+00:00',
+    updatedAt: '2026-01-01 00:00:00+00:00'
+  };
+  const operation = createInvalidationOperation(source);
+  const receipt = {
+    targetKind: 'receipt' as const, targetFamily: 'plan', targetArtifact: 'plan.md', targetRound: 1,
+    targetInput: 'analysis.md', targetSha256: 'a'.repeat(64), status: 'pending' as const,
+    reasonCode: 'upstream-replaced', updatedAt: '2026-01-01 00:00:00+00:00', operationId: operation.operationId
+  };
+  const otherInput = { ...receipt, targetInput: 'review-analysis.md' };
+  assert.notEqual(targetIdFor(operation.operationId, receipt), targetIdFor(operation.operationId, otherInput));
+  const target = { ...receipt, targetId: targetIdFor(operation.operationId, receipt) };
+  const fullOperation = createInvalidationOperation(source, [target]);
+  const current = renderInvalidation({ operations: [fullOperation], targets: [target] });
+  const parsed = parseInvalidationDocument(`## Artifact Invalidation\n\n${current}\n`);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.document.targets[0]?.targetInput, 'analysis.md');
+
+  const legacyShape = { ...receipt, targetInput: undefined };
+  const legacyTarget = { ...legacyShape, targetId: targetIdFor(operation.operationId, legacyShape), status: 'completed' as const };
+  const legacyOperation = { ...fullOperation, status: 'completed' as const, processed: 1, total: 1, completedAt: '2026-01-01 00:01:00+00:00' };
+  const legacyRow = `| ${legacyTarget.targetId} | ${legacyTarget.operationId} | receipt | plan | plan.md | 1 | ${legacyTarget.targetSha256} | completed | upstream-replaced | ${legacyTarget.updatedAt} |`;
+  const legacyText = `## Artifact Invalidation\n\n### Operations\n\n| operation_id | source_family | source_artifact | source_round | source_sha256 | status | processed | total | created_at | updated_at | completed_at | error |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| ${legacyOperation.operationId} | analysis | analysis-r2.md | 2 | ${legacyOperation.sourceSha256} | completed | 1 | 1 | ${legacyOperation.createdAt} | ${legacyOperation.updatedAt} | ${legacyOperation.completedAt} |  |\n\n### Targets\n\n| target_id | operation_id | target_kind | target_family | target_artifact | target_round | target_sha256 | status | reason_code | updated_at |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${legacyRow}\n`;
+  const legacyParsed = parseInvalidationDocument(legacyText);
+  assert.equal(legacyParsed.ok, true);
+  if (!legacyParsed.ok) return;
+  assert.equal(legacyParsed.document.targets[0]?.targetInput, undefined);
+  assert.match(renderInvalidation(legacyParsed.document), /\| target_input \|/);
+
+  const pendingLegacy = legacyText
+    .replace('| completed | 1 | 1 |', '| pending | 0 | 1 |')
+    .replace(`${legacyTarget.targetId} | ${legacyTarget.operationId} | receipt | plan | plan.md | 1 | ${legacyTarget.targetSha256} | completed |`, `${legacyTarget.targetId} | ${legacyTarget.operationId} | receipt | plan | plan.md | 1 | ${legacyTarget.targetSha256} | pending |`);
+  assert.equal(parseInvalidationDocument(pendingLegacy).ok, false);
+});
+
 test('reconcile is idempotent and completes each target before the operation', () => {
   const source = {
     sourceFamily: 'analysis', sourceArtifact: 'analysis-r2.md', sourceRound: 2,
