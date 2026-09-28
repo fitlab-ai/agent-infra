@@ -814,6 +814,20 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   return result;
 }
 
+function inspectGithubCommentOperation(taskRef: string, options: SyncOptions): { kind: 'task-comment' | 'artifact-comment' | 'summary-comment'; target: string; expectedDigest: string; id: string } | null {
+  if (options.kind === 'cancel') return null;
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return null;
+  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+  if (!taskIssueIdentity(parseTaskFrontmatter(taskContent))) return null;
+  const sourceContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
+  const desired = expectedComments(resolved.taskId, sourceContent, resolved.taskDir, resolved.repoRoot, options);
+  const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment' : 'artifact-comment';
+  const target = options.kind === 'artifact' ? options.artifact! : options.kind;
+  const expectedDigest = createHash('sha256').update(desired.map((chunk) => chunk.content).join('\0')).digest('hex');
+  return { kind, target, expectedDigest, id: createHash('sha256').update(`${kind}\0${target}\0${expectedDigest}`).digest('hex') };
+}
+
 async function listPlatformComments(issue: string | number, cwd = process.cwd(), client?: PlatformClient): Promise<PlatformResult & { comments?: RemoteComment[] }> {
   const loaded = await resolvePlatformProviderContext({ cwd, client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
@@ -871,6 +885,7 @@ export {
   COMMENT_BYTE_LIMIT,
   MARKERS,
   chunkArtifactComment,
+  inspectGithubCommentOperation,
   findMarkerComments,
   listRemoteComments,
   checkPlatformCommentOwner,

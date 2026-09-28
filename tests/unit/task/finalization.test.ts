@@ -90,7 +90,14 @@ function options(
     metadataProvider: () => METADATA,
     backfill: async () => platformResult('no-op') as any,
     commentSync,
-    verify
+    verify,
+    issueSync: async () => platformResult('no-op', ({
+      issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {} },
+      operations: ['requirements', 'issue-type', 'fields'].map((name) => ({ name, status: 'no-op', reasonCode: null }))
+    }) as any) as any,
+    issueInspect: async () => platformResult('no-op', ({
+      issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {} }
+    }) as any) as any
   };
 }
 
@@ -233,6 +240,54 @@ test('finalization keeps the active task document unchanged when terminal commen
     assert.equal(completed.status, 'completed');
     assert.deepEqual(diskStates, ['active', 'active']);
     assert.deepEqual(projectionStates, ['completed', 'completed']);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('finalization stops with the canonical task active when required Issue metadata cannot be confirmed', async () => {
+  const f = fixture();
+  let lifecycleCalls = 0;
+  try {
+    const result = await prepareTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+      issueSync: async () => platformResult('blocked', { error: { code: 'NETWORK_TIMEOUT', message: 'Issue update timed out', retryable: true } }) as any,
+      lifecycle: ((...args: Parameters<typeof applyTaskLifecycle>) => { lifecycleCalls += 1; return applyTaskLifecycle(...args); })
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'NETWORK_TIMEOUT');
+    assert.equal(lifecycleCalls, 0);
+    assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/^status: (.+)$/m)?.[1], 'active');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('final task comment uses the warning projection after summary recovery', async () => {
+  const f = fixture();
+  const staged = 'Delivered summary.\n';
+  fs.writeFileSync(path.join(f.taskDir, '.delivery-summary.json'), `${JSON.stringify({
+    taskId: TASK_ID, body: staged, sha256: createHash('sha256').update(staged).digest('hex')
+  })}\n`);
+  let summaryCalls = 0;
+  const taskProjections: string[] = [];
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
+    if (received.kind === 'task' && received.taskProjection) taskProjections.push(received.taskProjection.content);
+    if (received.kind === 'summary') {
+      summaryCalls += 1;
+      return summaryCalls === 1
+        ? platformResult('blocked', { error: { code: 'NETWORK_TIMEOUT', message: 'retry summary', retryable: true } })
+        : platformResult('applied');
+    }
+    return platformResult('applied');
+  };
+  try {
+    const first = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, async () => verification('pass')));
+    assert.equal(first.status, 'blocked');
+    const second = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, async () => verification('pass')));
+    assert.equal(second.status, 'prepared');
+    assert.equal(taskProjections.length, 2);
+    assert.match(taskProjections[1]!, /NETWORK_TIMEOUT \| resolved/u);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

@@ -51,3 +51,28 @@ test('task-local GitHub operation journal deduplicates stable operations and sto
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
+
+test('task-local GitHub operation journal records reconstructable Issue and PR intent fields', () => {
+  const f = fixture();
+  try {
+    const digest = createHash('sha256').update('intent fingerprint').digest('hex');
+    recordGithubOperation({
+      taskRef: f.taskId, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":42}',
+      expectedDigest: digest, issueMetadata: { requirements: true, issueType: true, fields: false },
+      dependency: 'required', state: 'pending'
+    });
+    recordGithubOperation({
+      taskRef: f.taskId, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main',
+      expectedDigest: digest, pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' },
+      dependency: 'required', state: 'pending'
+    });
+    const journal = readGithubOperationJournal(f.taskId, f.repoRoot);
+    assert.deepEqual(journal.operations.map((operation) => [operation.kind, operation.dependency]), [
+      ['issue-metadata', 'required'], ['pull-request', 'required']
+    ]);
+    assert.deepEqual(journal.operations[0]?.issueMetadata, { requirements: true, issueType: true, fields: false });
+    assert.deepEqual(journal.operations[1]?.pullRequest, { action: 'create', baseRef: 'main', headRef: 'feature' });
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});

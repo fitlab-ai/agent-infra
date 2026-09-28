@@ -9,6 +9,15 @@ const MAX_ATTEMPTS = 3;
 
 type GithubOperationKind = 'task-comment' | 'artifact-comment' | 'summary-comment' | 'issue-metadata' | 'pull-request';
 type GithubOperationState = 'pending' | 'unknown' | 'succeeded' | 'failed';
+type GithubIssueMetadataIntent = Readonly<{ requirements: boolean; issueType: boolean; fields: boolean }>;
+type GithubPullRequestIntent = Readonly<{
+  action: 'create' | 'bind' | 'sync';
+  baseRef?: string;
+  headRef?: string;
+  prToken?: string;
+  metadata?: boolean;
+  closingIssue?: boolean;
+}>;
 type GithubOperation = Readonly<{
   id: string;
   kind: GithubOperationKind;
@@ -19,6 +28,8 @@ type GithubOperation = Readonly<{
   attempts: number;
   maxAttempts: typeof MAX_ATTEMPTS;
   lastCode: string | null;
+  issueMetadata?: GithubIssueMetadataIntent;
+  pullRequest?: GithubPullRequestIntent;
   updatedAt: string;
 }>;
 type GithubOperationJournal = Readonly<{
@@ -35,6 +46,8 @@ type RecordOperationInput = Readonly<{
   dependency: 'deferred' | 'required';
   state: GithubOperationState;
   lastCode?: string | null;
+  issueMetadata?: GithubIssueMetadataIntent;
+  pullRequest?: GithubPullRequestIntent;
   cwd?: string;
 }>;
 
@@ -70,6 +83,18 @@ function parseJournal(file: string, taskId: string): GithubOperationJournal {
       || !Number.isSafeInteger(item.attempts) || item.attempts < 0 || item.attempts > MAX_ATTEMPTS
       || item.maxAttempts !== MAX_ATTEMPTS
       || !(item.lastCode === null || typeof item.lastCode === 'string')
+      || (item.kind === 'issue-metadata'
+        ? !item.issueMetadata || typeof item.issueMetadata.requirements !== 'boolean'
+          || typeof item.issueMetadata.issueType !== 'boolean' || typeof item.issueMetadata.fields !== 'boolean'
+          || (!item.issueMetadata.requirements && !item.issueMetadata.issueType && !item.issueMetadata.fields)
+        : item.issueMetadata !== undefined)
+      || (item.kind === 'pull-request'
+        ? !item.pullRequest || !['create', 'bind', 'sync'].includes(item.pullRequest.action)
+          || Object.entries(item.pullRequest).some(([key, field]) => key !== 'action'
+            && key !== 'metadata' && key !== 'closingIssue' && (typeof field !== 'string' || !field.trim()))
+          || (item.pullRequest.metadata !== undefined && typeof item.pullRequest.metadata !== 'boolean')
+          || (item.pullRequest.closingIssue !== undefined && typeof item.pullRequest.closingIssue !== 'boolean')
+        : item.pullRequest !== undefined)
       || typeof item.updatedAt !== 'string') {
       throw Object.assign(new Error('GitHub operation journal contains an invalid operation'), { code: 'GITHUB_OPERATION_JOURNAL_INVALID' });
     }
@@ -112,6 +137,8 @@ function recordGithubOperation(input: RecordOperationInput): GithubOperation {
     attempts: Math.min(MAX_ATTEMPTS, (previous?.attempts ?? 0) + (input.state === 'pending' ? 1 : 0)),
     maxAttempts: MAX_ATTEMPTS,
     lastCode: input.lastCode ?? null,
+    ...(input.issueMetadata ? { issueMetadata: input.issueMetadata } : {}),
+    ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),
     updatedAt: new Date().toISOString()
   };
   const operations = previous
@@ -127,4 +154,4 @@ function readGithubOperationJournal(taskRef: string, cwd?: string): GithubOperat
 }
 
 export { JOURNAL_FILE as GITHUB_OPERATION_JOURNAL_FILE, MAX_ATTEMPTS as GITHUB_OPERATION_MAX_ATTEMPTS, operationId, recordGithubOperation, readGithubOperationJournal };
-export type { GithubOperation, GithubOperationJournal, GithubOperationKind, GithubOperationState, RecordOperationInput };
+export type { GithubIssueMetadataIntent, GithubOperation, GithubOperationJournal, GithubOperationKind, GithubOperationState, GithubPullRequestIntent, RecordOperationInput };

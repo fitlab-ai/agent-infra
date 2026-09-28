@@ -43,14 +43,14 @@ agent-infra-internal platform-comment sync <task-ref> \
 
 ## Task-local platform operation recovery
 
-Task-bound task, artifact, and summary comment intents record their target marker, expected-content SHA-256, dependency class, state, attempt count, and last error code in `.github-operations.json` inside the task directory. The file is local process state; it is never uploaded as an artifact or comment. Comment bodies, credentials, and HTTP response bodies are not recorded.
+Task-bound task, artifact, and summary comment intents, Issue metadata syncs, and pull-request create/bind/metadata intents record their canonical target, expected-content SHA-256, dependency class, state, attempt count, and last error code in `.github-operations.json` inside the task directory. Issue metadata intent stores only the selected operation flags; pull-request intent stores only resource refs/identity and selected operation flags. The file is local process state; it is never uploaded as an artifact or comment. Comment bodies, credentials, and HTTP response bodies are not recorded.
 
 ```bash
 agent-infra-internal task-github-recovery <task-ref> inspect
 agent-infra-internal task-github-recovery <task-ref> recover --agent {standard-agent-token} [--selection required|deferred|all]
 ```
 
-Recovery replays only pending or unknown operations and calls the existing typed comment intent, which reads the marker set before writing. A confirmed existing target converges to `no-op`; marker conflicts and unknown remote state stop recovery. `complete-task` replays required task and artifact comment intents and checks their marker sets before local completion, so an unresolved required comment keeps the task active.
+Recovery replays only pending or unknown operations through their existing typed intents. Comment intents inspect marker sets; Issue metadata intents inspect the bound identity, call the typed sync, then inspect the same identity; PR bind/metadata intents call their typed handler. Unknown PR creation outcomes inspect the bound PR or find exactly one closing PR matching the bound repository, journaled base/head refs, and current head SHA before binding it. A changed comment digest closes the old operation as superseded and records the current digest separately; the newer content result is never attributed to the old operation. Marker conflicts, identity drift, ambiguous PR candidates, and unknown remote state stop recovery. `complete-task` checks required comment and Issue metadata outcomes before local completion, so an unresolved required backup keeps the task active.
 
 ## 降级与告警
 

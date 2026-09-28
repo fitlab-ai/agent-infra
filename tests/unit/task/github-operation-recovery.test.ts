@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { inspectGithubCommentOperation } from '../../../lib/platform/issue-comments.ts';
+import { recoverGithubOperations } from '../../../lib/task/github-operation-recovery.ts';
+import { readGithubOperationJournal, recordGithubOperation } from '../../../lib/task/github-operation-journal.ts';
+
+const TASK_ID = 'TASK-20260101-000001';
+
+function fixture() {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'github-operation-recovery-'));
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
+  fs.mkdirSync(taskDir, { recursive: true });
+  const taskFile = path.join(taskDir, 'task.md');
+  fs.writeFileSync(taskFile, `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":42}'\nstatus: active\n---\n\n# Original title\n`);
+  return { repoRoot, taskDir, taskFile };
+}
+
+test('recovery supersedes an old comment digest when its task projection changed', async () => {
+  const f = fixture();
+  try {
+    const first = inspectGithubCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
+    assert.ok(first);
+    recordGithubOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...first, dependency: 'deferred', state: 'pending' });
+    fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
+
+    await recoverGithubOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
+    const journal = readGithubOperationJournal(TASK_ID, f.repoRoot);
+    const stale = journal.operations.find((operation) => operation.id === first.id);
+    const current = journal.operations.find((operation) => operation.id !== first.id);
+    assert.equal(stale?.state, 'failed');
+    assert.equal(stale?.lastCode, 'GITHUB_OPERATION_SUPERSEDED');
+    assert.ok(current);
+    assert.notEqual(current.expectedDigest, first.expectedDigest);
+    assert.notEqual(current.state, 'succeeded');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});

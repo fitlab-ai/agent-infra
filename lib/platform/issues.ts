@@ -2,6 +2,7 @@ import type { PlatformIssueSnapshot as IssueSnapshot } from './snapshots.ts';
 import type { IssueFieldSchema } from './github-data.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { buildDefaultBody } from '../task/commands/issue-body.ts';
@@ -39,6 +40,7 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityEquals, resourceIdentityNumber, resourceIdentityString, serializeResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
+import { recordGithubOperation } from '../task/github-operation-journal.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { IssueSnapshot as ProviderIssueSnapshot, RepositoryMetadataSnapshot } from './provider-contract.ts';
 type IssueResult = PlatformResult & {
@@ -61,6 +63,7 @@ type SyncOptions = SharedOptions & {
   state?: 'open' | 'closed';
   closeReason?: 'completed' | 'not_planned';
   dryRun?: boolean;
+  dependency?: 'deferred' | 'required';
 };
 
 function result(
@@ -478,7 +481,7 @@ function desiredFieldValues(frontmatter: Record<string, string>, fields: IssueFi
   return desired;
 }
 
-async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+async function syncPlatformIssueImpl(taskRef: string, options: SyncOptions): Promise<IssueResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.issueIdentity) return result('failed', base.resolved.taskId, null, { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false } });
@@ -615,6 +618,60 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity }, issue: finalIssue,
     operations: plan.operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
   });
+}
+
+async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return syncPlatformIssueImpl(taskRef, options);
+  let frontmatter: Record<string, string>;
+  let taskContent: string;
+  try {
+    taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    frontmatter = parseTaskFrontmatter(taskContent);
+  }
+  catch { return syncPlatformIssueImpl(taskRef, options); }
+  const identity = taskIssueIdentity(frontmatter);
+  if (!identity || (!options.requirements && !options.issueType && !options.fields)) return syncPlatformIssueImpl(taskRef, options);
+  const operation = {
+    kind: 'issue-metadata' as const,
+    target: JSON.stringify(identity),
+    expectedDigest: createHash('sha256').update(JSON.stringify({
+      requirements: options.requirements === true,
+      issueType: options.issueType === true,
+      fields: options.fields === true,
+      task: resolved.taskId,
+      taskContent: createHash('sha256').update(taskContent).digest('hex')
+    })).digest('hex')
+  };
+  const issueMetadata = {
+    requirements: options.requirements === true,
+    issueType: options.issueType === true,
+    fields: options.fields === true
+  };
+  const dependency = options.dependency ?? 'deferred';
+  try {
+    recordGithubOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, issueMetadata, dependency, state: 'pending' });
+  } catch (error) {
+    const value = error as { code?: string; message?: string };
+    return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
+      error: { code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || 'Unable to record Issue metadata intent', retryable: true }
+    });
+  }
+  const synced = await syncPlatformIssueImpl(taskRef, options);
+  try {
+    const succeeded = (synced.status === 'applied' || synced.status === 'no-op') && !synced.error;
+    recordGithubOperation({
+      taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, issueMetadata, dependency,
+      state: succeeded ? 'succeeded' : synced.status === 'failed' && synced.error?.retryable === false ? 'failed' : 'unknown',
+      lastCode: synced.error?.code ?? null
+    });
+  } catch {
+    return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
+      platform: synced.platform, capabilities: synced.capabilities, operations: synced.operations,
+      error: { code: 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: 'Unable to persist Issue metadata outcome', retryable: true }
+    });
+  }
+  return synced;
 }
 
 export { bindPlatformIssue, createPlatformIssue, inspectPlatformIssue, requirementSectionAnchors, syncPlatformIssue };
