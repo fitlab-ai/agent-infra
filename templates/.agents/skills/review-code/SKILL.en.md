@@ -128,7 +128,7 @@ Update task.md:
 
   The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. After a failure, the model may edit the same controlled artifact and rerun the same intent only when the shared rule's mechanical gates pass; reassess convergence after every failure. The final complete result determines the verdict and counts from that same snapshot: `stageStatus.canAdvance=true` with an Approved conclusion permits cross-stage advancement; `stageStatus.canAdvance=false` still requires `agent-infra-internal task-event {task-id} review-code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`, using `changes-requested` and routing to same-stage revision/review (use `rejected` when the report explicitly rejects). On failure, model stop, lack of progress, or the emergency cap, do not publish a completion event or cross-stage command; use the `repair-stop` scenario in `reference/output-templates.md` to show existing summary/findings, the artifact, actual repair attempts, the last diagnostic, and the stop reason
 - Only when `canAdvance=true`, the verdict is Approved, and `T == R^{tree}`, write `last_reviewed_commit: {R}`. Clear an old value for an Approved snapshot with uncommitted differences; otherwise preserve the existing value and do not advance it
-- For an Approved exit, collect PR and all-check facts as defined in `reference/output-templates.md`: route uncommitted/unpushed code to `commit`, no PR to `create-pr` (except no-PR flow), non-terminal checks to `watch-pr`, and route to `complete-task` only when `HEAD == last_reviewed_commit == PR head` with checks `passed|no-required`; never route by review round alone
+- For an Approved exit, use `reference/output-templates.md` to select one branch and its `agent-client next-steps` helper to generate the next command.
 - After handling `last_reviewed_commit`, run `agent-infra-internal task-event {task-id} review-code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`
 
 Always include the `Manual-validation: {n}` field in the done log, including when it is 0.
@@ -162,7 +162,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **Important — branch labels are not values for the verdict field**. The four labels below are user-output template categories (scenarios A/B/C/D), **not** values for the `**Overall Verdict**:` field. The field accepts exactly one of the three canonical values (`Approved` / `Changes Requested` / `Rejected`, or zh-CN `通过` / `需要修改` / `拒绝`); combined phrases like `Approved with issues` will be rejected by the verify gate.
+> **Important — scenario labels are not values for the verdict field**. A/B/C are result scenarios; R displays existing results when lifecycle finalization stops. None are values for the `**Overall Verdict**:` field, which accepts exactly one of the three canonical values (`Approved` / `Changes Requested` / `Rejected`, or zh-CN `通过` / `需要修改` / `拒绝`).
 
 Choose exactly one branch based on the findings:
 - `stageStatus.canAdvance=true` -> approved
@@ -171,7 +171,7 @@ Choose exactly one branch based on the findings:
 
 manual-validation counts do not influence branch selection; they are displayed only as manual validation counts.
 
-> The full four-branch output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
+> The A/B/C output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
 
 > Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the current task's short id `NN` (see that file for lookup and fallback), while other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form; (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
 

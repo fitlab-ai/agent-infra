@@ -723,6 +723,31 @@ test('platform-pr create rechecks a bound PR before replaying it', () => {
   }
 });
 
+test('platform-pr create rejects a bound PR whose head differs from the verified branch', () => {
+  const fixture = createFixture();
+  try {
+    const taskPath = path.join(fixture.taskDir, 'task.md');
+    const task = fs.readFileSync(taskPath, 'utf8').replace(
+      /^pr_delivery_fact:.*$/m,
+      factLine(boundFixture(1, fixture.headSha))
+    );
+    fs.writeFileSync(taskPath, task);
+    const pullRequest = JSON.parse(fs.readFileSync(fixture.pr, 'utf8')) as Record<string, any>;
+    pullRequest.head.sha = 'f'.repeat(40);
+    fs.writeFileSync(fixture.pr, JSON.stringify(pullRequest));
+
+    const output = run([
+      'create', fixture.taskId, '--agent', 'codex', '--base', 'main', '--head', 'feature',
+      '--title-file', 'title.txt', '--body-file', 'body.md'
+    ], { cwd: fixture.root, env: fixture.env });
+
+    assert.equal(output.status, 1, output.stderr || output.stdout);
+    assert.equal(JSON.parse(output.stdout).error.code, 'PR_BIND_IDENTITY_MISMATCH');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('platform-pr create does not require commit finalization evidence before remote validation', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-gate-'));
   try {

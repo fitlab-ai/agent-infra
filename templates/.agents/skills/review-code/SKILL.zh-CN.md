@@ -126,7 +126,7 @@ agent-infra-internal task-artifact {task-id} init --family review-code --artifac
 
   该 intent 原子最终化报告摘要并返回同一次账本快照；不得再调用 `stage-status`、手工替换占位符或扫描问题清单。失败后，模型只能在共享规则的机械安全门通过时修改同一个受控 artifact，并完整重跑相同 intent；每次失败都重新判断是否收敛。最终一次完整成功返回决定同一快照的 verdict 和计数：`stageStatus.canAdvance=true` 且结论为 Approved 时允许跨阶段推进；`stageStatus.canAdvance=false` 时仍须执行 `agent-infra-internal task-event {task-id} review-code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`，使用 `changes-requested` 并路由到同阶段修订/复审（报告明确拒绝时使用 `rejected`）。失败、模型停止、无进展或紧急熔断时，不发布完成事件或跨阶段命令，但必须按 `reference/output-templates.md` 的 `repair-stop` 场景展示已有 summary/findings、artifact、实际修复次数、最后诊断和停止原因
 - 仅当 `canAdvance=true`、本轮结论为 Approved 且 `T == R^{tree}` 时写入 `last_reviewed_commit: {R}`；Approved 快照包含未提交差异时清除旧值。否则保留既有值，不得推进或清空
-- Approved 出口继续按 `reference/output-templates.md` 采集 PR 与全部 checks 事实：未提交/未推送走 `commit`，无 PR 走 `create-pr`（无 PR 流程除外），checks 未终态走 `watch-pr`，仅 `HEAD == last_reviewed_commit == PR head` 且 checks 为 `passed|no-required` 时走 `complete-task`；不得仅按审查轮次分流
+- Approved 出口按 `reference/output-templates.md` 选择唯一场景，并使用对应的 `agent-client next-steps` helper 生成下一步命令。
 - 完成 `last_reviewed_commit` 处理后执行 `agent-infra-internal task-event {task-id} review-code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`
 
 完成日志必须始终写入 `Manual-validation: {n}` 字段，0 也保留。
@@ -158,7 +158,7 @@ agent-infra-internal task-verify {task-id} review-code.completed --artifact {rev
 
 > 仅在校验通过后执行本步骤。
 
-> **重要：分支名 ≠ 字段值**。以下 4 个标签是用户输出模板的分类（场景 A/B/C/D），**不是**产物 `**总体结论**：` 字段的取值。产物字段只取 3 个规范值之一（`通过` / `需要修改` / `拒绝`，或 EN 对应 `Approved` / `Changes Requested` / `Rejected`）；写成 `通过但有问题`、`通过 / 需要修改` 等组合短语会被 verify gate 拦下。
+> **重要：场景名 ≠ 字段值**。以下 A/B/C 是结果输出场景，R 只展示生命周期停止时已有的结果；它们都不是产物 `**总体结论**：` 字段的取值。产物字段只取 3 个规范值之一（`通过` / `需要修改` / `拒绝`，或 EN 对应 `Approved` / `Changes Requested` / `Rejected`）。
 
 必须先判断结果，再只选择一个输出分支：
 - `stageStatus.canAdvance=true` -> 通过
@@ -167,7 +167,7 @@ agent-infra-internal task-verify {task-id} review-code.completed --artifact {rev
 
 manual-validation 的数量不参与分支选择，只作为人工校验计数显示。
 
-> 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
+> 完整的 A/B/C 输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 
 > 渲染最终输出前先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令的 `{task-ref}` 渲染为当前任务短号 `NN`（取值与回退见该文件），其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
 

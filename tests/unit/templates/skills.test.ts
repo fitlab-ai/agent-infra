@@ -1502,7 +1502,7 @@ test("review output templates reserve cross-stage commands for an advanceable le
     }
   }
 
-  const approvedRoutes = ["commit", "create-pr", "watch-pr", "complete-task"];
+  const approvedRoutes = ["create-pr", "watch-pr", "complete-task"];
   for (const locale of [null, "en", "zh-CN"] as const) {
     const relativePath = locale
       ? `templates/.agents/skills/review-code/reference/output-templates.${locale}.md`
