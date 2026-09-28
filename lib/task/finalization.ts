@@ -532,7 +532,14 @@ function mutationPatch(current: TaskFinalizationReceipt, mutation: FinalizationM
   if (mutation.scope === 'task-comment') {
     if (mutation.operation === 'succeeded') {
       const warnings = resolveStepWarnings(current, 'task-comment');
-      return { taskComment: mutation.state, warningProjection: warnings.length > 0 ? 'pending' : 'done', warnings, lastError: null };
+      const retryWithResolvedWarning = mutation.state === 'done'
+        && current.warnings.some((warning) => warning.step === 'task-comment' && warning.status === 'open');
+      return {
+        taskComment: retryWithResolvedWarning ? 'pending' : mutation.state,
+        warningProjection: warnings.length > 0 || retryWithResolvedWarning ? 'pending' : 'done',
+        warnings,
+        lastError: null
+      };
     }
     const warnings = replaceWarning(current, warningFromError('task-comment', mutation.error), 'open');
     return { taskComment: 'pending', warningProjection: 'pending', warnings, lastError: mutation.error };

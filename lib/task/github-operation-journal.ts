@@ -9,7 +9,13 @@ const MAX_ATTEMPTS = 3;
 
 type GithubOperationKind = 'task-comment' | 'artifact-comment' | 'summary-comment' | 'issue-metadata' | 'pull-request';
 type GithubOperationState = 'pending' | 'unknown' | 'succeeded' | 'failed';
-type GithubIssueMetadataIntent = Readonly<{ requirements: boolean; issueType: boolean; fields: boolean }>;
+type GithubIssueMetadataIntent = Readonly<{
+  requirements: boolean;
+  issueType: boolean;
+  fields: boolean;
+  inLabels?: 'from-diff' | 'none';
+  base?: string;
+}>;
 type GithubPullRequestIntent = Readonly<{
   action: 'create' | 'bind' | 'sync';
   baseRef?: string;
@@ -86,7 +92,9 @@ function parseJournal(file: string, taskId: string): GithubOperationJournal {
       || (item.kind === 'issue-metadata'
         ? !item.issueMetadata || typeof item.issueMetadata.requirements !== 'boolean'
           || typeof item.issueMetadata.issueType !== 'boolean' || typeof item.issueMetadata.fields !== 'boolean'
-          || (!item.issueMetadata.requirements && !item.issueMetadata.issueType && !item.issueMetadata.fields)
+          || (item.issueMetadata.inLabels !== undefined && !['from-diff', 'none'].includes(item.issueMetadata.inLabels))
+          || (item.issueMetadata.base !== undefined && (typeof item.issueMetadata.base !== 'string' || !item.issueMetadata.base.trim()))
+          || (!item.issueMetadata.requirements && !item.issueMetadata.issueType && !item.issueMetadata.fields && item.issueMetadata.inLabels === undefined)
         : item.issueMetadata !== undefined)
       || (item.kind === 'pull-request'
         ? !item.pullRequest || !['create', 'bind', 'sync'].includes(item.pullRequest.action)

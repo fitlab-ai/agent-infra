@@ -152,7 +152,7 @@ async function recoverGithubOperations(
           recordGithubOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
             expectedDigest: operation.expectedDigest, issueMetadata: operation.issueMetadata, dependency: operation.dependency,
             state: 'failed', lastCode: 'GITHUB_OPERATION_SUPERSEDED' });
-          targetOperation = { ...operation, expectedDigest: current.expectedDigest };
+          targetOperation = { ...operation, expectedDigest: current.expectedDigest, id: current.id };
         } catch (error) {
           const value = error as { code?: string; message?: string };
           return result('blocked', recovered, [...pending, operation.id], { code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || String(error), retryable: true });
@@ -177,7 +177,7 @@ async function recoverGithubOperations(
         try {
           recordGithubOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
             expectedDigest: operation.expectedDigest, dependency: operation.dependency, state: 'failed', lastCode: 'GITHUB_OPERATION_SUPERSEDED' });
-          targetOperation = { ...operation, expectedDigest: current.expectedDigest };
+          targetOperation = { ...operation, expectedDigest: current.expectedDigest, id: current.id };
         } catch (error) {
           const value = error as { code?: string; message?: string };
           return result('blocked', recovered, [...pending, operation.id], { code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || String(error), retryable: true });
@@ -205,6 +205,7 @@ async function recoverGithubOperations(
         target: operation.target,
         expectedDigest: targetOperation.expectedDigest,
         ...(operation.issueMetadata ? { issueMetadata: operation.issueMetadata } : {}),
+        ...(operation.pullRequest ? { pullRequest: operation.pullRequest } : {}),
         dependency: operation.dependency,
         state: succeeded ? 'succeeded' : remote.status === 'failed' && remote.error?.retryable === false ? 'failed' : 'unknown',
         lastCode: remote.error?.code ?? null

@@ -622,7 +622,7 @@ async function syncPlatformIssueImpl(taskRef: string, options: SyncOptions): Pro
 
 async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
-  if (!resolved.ok) return syncPlatformIssueImpl(taskRef, options);
+  if (!resolved.ok || options.dryRun) return syncPlatformIssueImpl(taskRef, options);
   let frontmatter: Record<string, string>;
   let taskContent: string;
   try {
@@ -631,24 +631,24 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
   }
   catch { return syncPlatformIssueImpl(taskRef, options); }
   const identity = taskIssueIdentity(frontmatter);
-  if (!identity || (!options.requirements && !options.issueType && !options.fields)) return syncPlatformIssueImpl(taskRef, options);
+  if (!identity || (!options.requirements && !options.issueType && !options.fields && !options.inLabels)) return syncPlatformIssueImpl(taskRef, options);
+  const issueMetadata = {
+    requirements: options.requirements === true,
+    issueType: options.issueType === true,
+    fields: options.fields === true,
+    ...(options.inLabels ? { inLabels: options.inLabels } : {}),
+    ...(options.base ? { base: options.base } : {})
+  };
   const operation = {
     kind: 'issue-metadata' as const,
     target: JSON.stringify(identity),
     expectedDigest: createHash('sha256').update(JSON.stringify({
-      requirements: options.requirements === true,
-      issueType: options.issueType === true,
-      fields: options.fields === true,
+      ...issueMetadata,
       task: resolved.taskId,
       taskContent: createHash('sha256').update(taskContent).digest('hex')
     })).digest('hex')
   };
-  const issueMetadata = {
-    requirements: options.requirements === true,
-    issueType: options.issueType === true,
-    fields: options.fields === true
-  };
-  const dependency = options.dependency ?? 'deferred';
+  const dependency = options.dependency ?? (options.inLabels === 'from-diff' ? 'required' : 'deferred');
   try {
     recordGithubOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, issueMetadata, dependency, state: 'pending' });
   } catch (error) {

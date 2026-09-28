@@ -142,12 +142,13 @@ function withCreation(output: PullRequestResult, creation: CreationOutcome): Pul
 
 async function journalPullRequestOperation(
   taskRef: string,
-  options: SharedOptions & { agent: string },
+  options: SharedOptions & { agent: string; dryRun?: boolean },
   intent: GithubPullRequestIntent,
   target: string,
   identityInput: unknown,
   execute: () => Promise<PullRequestResult>
 ): Promise<PullRequestResult> {
+  if (options.dryRun) return execute();
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return execute();
   const expectedDigest = createHash('sha256').update(JSON.stringify({ taskId: resolved.taskId, intent, identityInput })).digest('hex');
