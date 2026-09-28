@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import type { PlatformChangeRequestSnapshot } from "../../../lib/platform/snapshots.ts";
+import { renderTaskVerification } from "../../../lib/task/verification.ts";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 import { gitSafeEnv } from "../../helpers.ts";
 import { buildBoundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
@@ -247,6 +248,15 @@ test("complete-task consumes a human exemption for merged identity failures befo
     assert.match(active.checks[0].message, /PR merge identity does not match the reviewed head/);
     assert.match(active.checks[0].message, /PRC-1/);
     assert.match(active.checks[0].message, /maintainer allowed reviewed and merged identities/);
+    const rendered = renderTaskVerification({
+      status: "pass", changed: false, event: "complete-task.prepared", requestRef: taskId,
+      taskId, taskDir: activeTask, taskState: "active", skill: "complete-task", mode: "gate", artifact: null, error: null,
+      invocations: [{ status: "pass", exitCode: 0, payload: active }]
+    });
+    assert.match(rendered, /Result: 1 passed, 0 failed/);
+    assert.match(rendered, /Notice: post-review-commit - Human-decided post-review exemption/);
+    assert.match(rendered, /PR_MERGE_IDENTITY_INVALID/);
+    assert.match(rendered, /PRC-1: maintainer allowed reviewed and merged identities/);
 
     const completedTask = path.join(fixtureRoot, ".agents", "workspace", "completed", taskId);
     fs.mkdirSync(path.dirname(completedTask), { recursive: true });

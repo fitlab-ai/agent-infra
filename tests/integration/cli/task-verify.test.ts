@@ -50,11 +50,14 @@ test('internal task-verify resolves task identity and invokes the typed engine',
 
     const pass = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(pass.status, 0, pass.stderr);
-    assert.match(pass.stdout, /Verification: pass \| Skill: code-task/);
+    assert.match(pass.stdout, /Verification: pass \| Target: code\.completed \(code\.md\) \| Skill: code-task/);
+    assert.match(pass.stdout, /Result: \d+ passed, 0 failed/);
+    assert.doesNotMatch(pass.stdout, /artifact\.schema/);
 
     const preflight = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'complete-task.preflight', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(preflight.status, 0, preflight.stderr);
-    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 1);
+    assert.match(preflight.stdout, /Verification: pass \| Target: complete-task\.preflight \| Skill: complete-task/);
+    assert.match(preflight.stdout, /Result: \d+ passed, 0 failed/);
 
     const duplicate = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'commit.completed', '--format', 'json', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(duplicate.status, 1);
@@ -81,7 +84,7 @@ test('code artifact verification applies the local structural contract', () => {
 
     const passed = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(passed.status, 0, passed.stderr);
-    assert.match(passed.stdout, /Verification: pass \| Skill: code-task/);
+    assert.match(passed.stdout, /Verification: pass \| Target: code\.completed \(code\.md\) \| Skill: code-task/);
 
     fs.writeFileSync(path.join(dir, 'code.md'), fs.readFileSync(path.join(dir, 'code.md'), 'utf8').replace('## 测试结果', '## 测试结果：'));
     const failed = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
@@ -288,7 +291,8 @@ test('review-pr task-verify reports re-sync after publication write-back as a so
     // Verifying without re-sync retains the mismatch as a non-blocking audit.
     const before = run(['task-verify', id, 'review-pr.completed', '--artifact', 'pr-review.md', '--format', 'text']);
     assert.equal(before.status, 0, before.stdout);
-    assert.match(before.stdout, /platform\.comment-content \(soft; raw FAIL; reason check_failed\) - Comment content mismatch/);
+    assert.match(before.stdout, /Warning: platform\.comment-content \(check_failed\) - Comment content mismatch/);
+    assert.doesNotMatch(before.stdout, /\[pass\] platform\.comment-content/);
 
     // Step 7: re-sync the artifact comment to align local and remote.
     const reSync = run(['platform-comment', 'sync', id, '--kind', 'artifact', '--artifact', 'pr-review.md', '--agent', 'claude-code']);
@@ -298,7 +302,7 @@ test('review-pr task-verify reports re-sync after publication write-back as a so
     // Step 8: after re-sync the closed loop passes.
     const after = run(['task-verify', id, 'review-pr.completed', '--artifact', 'pr-review.md', '--format', 'text']);
     assert.equal(after.status, 0, after.stdout);
-    assert.match(after.stdout, /Verification: pass \| Skill: review-pr/);
+    assert.match(after.stdout, /Verification: pass \| Target: review-pr\.completed \(pr-review\.md\) \| Skill: review-pr/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

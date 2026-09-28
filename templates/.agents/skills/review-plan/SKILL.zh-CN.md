@@ -114,6 +114,8 @@ agent-infra-internal task-artifact {task-id} init --family review-plan --artifac
 agent-infra-internal task-verify {task-id} review-plan.completed --artifact {review-artifact} --format text
 ```
 
+按 `.agents/rules/validation-output.md` 展示当次校验摘要；失败、阻塞和软警告保留必要诊断。
+
 校验通过后继续告知用户；校验失败则修复报告或 task 状态后重跑。
 
 ### 8. 告知用户

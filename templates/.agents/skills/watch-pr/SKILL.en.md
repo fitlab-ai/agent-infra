@@ -90,6 +90,8 @@ Run the verification gate:
 agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 ```
 
+Present the verification summary per `.agents/rules/validation-output.md`, retaining necessary failure, blocked, and soft-warning diagnostics.
+
 Handle the result:
 - exit code 0 (all passed) -> continue to "Inform User"
 - exit code 1 (verification failed) -> fix per the output and re-run the gate

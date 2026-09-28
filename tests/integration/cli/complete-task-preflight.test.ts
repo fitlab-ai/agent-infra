@@ -98,7 +98,8 @@ test('preflight success permits one archive and releases the short id', () => {
   try {
     const preflight = run(f.root, ['task-verify', TASK_ID, 'complete-task.preflight', '--format', 'text']);
     assert.equal(preflight.status, 0, preflight.stderr);
-    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 1);
+    assert.match(preflight.stdout, /Verification: pass \| Target: complete-task\.preflight \| Skill: complete-task/);
+    assert.match(preflight.stdout, /Result: \d+ passed, 0 failed/);
     const completed = run(f.root, ['task-lifecycle', TASK_ID, 'complete', '--agent', 'codex']);
     assert.equal(completed.status, 0, completed.stderr);
     assert.equal(JSON.parse(completed.stdout).status, 'applied');
@@ -137,7 +138,7 @@ test('completed verification resolves the archived task without moving it back t
     assert.equal(run(f.root, ['task-lifecycle', TASK_ID, 'complete', '--agent', 'codex']).status, 0);
     const verified = run(f.root, ['task-verify', TASK_ID, 'complete-task.completed', '--format', 'text']);
     assert.equal(verified.status, 0, verified.stderr);
-    assert.match(verified.stdout, /Verification: pass \| Skill: complete-task/);
+    assert.match(verified.stdout, /Verification: pass \| Target: complete-task\.completed \| Skill: complete-task/);
     assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'active', TASK_ID)), false);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });

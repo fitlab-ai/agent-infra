@@ -153,6 +153,8 @@ The host `task-create` service runs the same typed gate before returning. Consum
 agent-infra-internal task-verify {task-id} create-task.completed --format text
 ```
 
+Present the verification summary per `.agents/rules/validation-output.md`, retaining necessary failure, blocked, and soft-warning diagnostics.
+
 Handle the result as follows:
 - exit code 0 (all checks passed) -> continue to the "Inform User" step
 - exit code 1 (validation failed) -> fix the reported issues and run the gate again
