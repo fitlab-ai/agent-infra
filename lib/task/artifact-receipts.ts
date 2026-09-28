@@ -79,7 +79,7 @@ function validateReceiptShape(event: ArtifactReceiptEvent, output: string, input
         : event === 'review-plan.completed'
           ? inputIdentity.family === 'plan' || inputIdentity.family === 'review-analysis'
           : event === 'review-code.completed'
-            ? inputIdentity.family === 'code' || inputIdentity.family === 'review-plan'
+            ? inputIdentity.family === 'code' || inputIdentity.family === 'plan' || inputIdentity.family === 'review-plan'
         : inputIdentity.family === shape.input;
   if (outputIdentity.family !== shape.output || !inputMatches) {
     throw new ArtifactReceiptError(`receipt event '${event}' does not match ${output} -> ${input}`);
