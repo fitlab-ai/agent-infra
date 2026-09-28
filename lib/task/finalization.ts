@@ -13,7 +13,9 @@ import {
   inspectTaskLifecycleProgress,
   type TaskLifecycleOptions,
   type TaskLifecycleRequest,
-  type TaskLifecycleResult
+  type TaskLifecycleResult,
+  type TaskCompletionProjection,
+  previewTaskCompletion
 } from './lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { inspectShortIdRegistry } from './short-id.ts';
@@ -471,13 +473,13 @@ function capabilityError(code: 'FINALIZATION_CAPABILITY_STALE' | 'FINALIZATION_S
   return error;
 }
 
-function hasPreparedTaskDocument(repoRoot: string, taskId: string): boolean {
+function hasFinalizationTaskDocument(repoRoot: string, taskId: string): boolean {
   const resolved = resolveTaskRef(taskId, { repoRoot });
-  if (!resolved.ok) return false;
-  if (resolved.state === 'completed') return true;
-  if (resolved.state !== 'active') return false;
-  try { return parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8')).status === 'completed'; }
-  catch { return false; }
+  if (!resolved.ok || (resolved.state !== 'active' && resolved.state !== 'completed')) return false;
+  try {
+    const journal = JSON.parse(fs.readFileSync(path.join(resolved.taskDir, '.task-lifecycle.json'), 'utf8')) as Record<string, unknown>;
+    return journal.taskId === taskId && journal.intent === 'complete';
+  } catch { return resolved.state === 'completed'; }
 }
 
 function mutationKeys(value: FinalizationMutation): string[] {
@@ -557,8 +559,8 @@ function applyFinalizationReceiptMutationUnderLock(
   mutation: FinalizationMutation,
   consumed: Set<string>
 ): TaskFinalizationReceipt {
-  if (!hasPreparedTaskDocument(repoRoot, receipt.taskId)) {
-    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active prepared task or a completed task');
+  if (!hasFinalizationTaskDocument(repoRoot, receipt.taskId)) {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active task or a completed task');
   }
   const current = readReceipt(repoRoot, receipt.taskId);
   if (!current || current.receiptId !== receipt.receiptId || current.revision !== receipt.revision) {
@@ -576,8 +578,8 @@ function applyFinalizationReceiptMutation(
   capability: FinalizationCapability,
   mutation: FinalizationMutation
 ): TaskFinalizationReceipt {
-  if (!hasPreparedTaskDocument(repoRoot, receipt.taskId)) {
-    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active prepared task or a completed task');
+  if (!hasFinalizationTaskDocument(repoRoot, receipt.taskId)) {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires an active task or a completed task');
   }
   return withTaskExecutionLock(repoRoot, receipt.taskId, 'task-finalization.receipt-mutation', () =>
     applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, mutation, new Set<string>())
@@ -627,6 +629,7 @@ async function syncPendingTaskComment(input: {
   taskId: string;
   agent: string;
   receipt: TaskFinalizationReceipt;
+  projection?: TaskCompletionProjection;
   commentSync: typeof syncPlatformComment;
   consumedCapabilities: Set<string>;
 }): Promise<TaskCommentSyncOutcome> {
@@ -641,7 +644,15 @@ async function syncPendingTaskComment(input: {
     };
   }
   try {
-    const result = await commentSync(taskId, { kind: 'task', agent, cwd: repoRoot });
+    const result = await commentSync(taskId, {
+      kind: 'task', agent, cwd: repoRoot, dependency: 'required',
+      ...(input.projection ? {
+        taskProjection: {
+          content: input.projection.content,
+          sha256: createHash('sha256').update(input.projection.content).digest('hex')
+        }
+      } : {})
+    });
     const step = commentStep(result);
     if (result.status === 'applied' || result.status === 'no-op') {
       const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
@@ -702,7 +713,7 @@ async function syncPendingSummary(input: {
   let { receipt } = input;
   try {
     const resolved = resolveTaskRef(input.taskId, { repoRoot: input.repoRoot });
-    if (!resolved.ok || !hasPreparedTaskDocument(input.repoRoot, input.taskId)) throw Object.assign(new Error('prepared task is unavailable for summary sync'), { code: 'SUMMARY_STAGING_INVALID' });
+    if (!resolved.ok || (resolved.state !== 'active' && resolved.state !== 'completed')) throw Object.assign(new Error('task is unavailable for summary sync'), { code: 'SUMMARY_STAGING_INVALID' });
     if (!fs.existsSync(path.join(resolved.taskDir, '.delivery-summary.json'))) {
       receipt = updateReceipt(input.repoRoot, receipt, { summary: 'skipped', lastError: null });
       return { receipt, step: { status: 'skipped', changed: false, error: null }, changed: false, error: null };
@@ -716,7 +727,8 @@ async function syncPendingSummary(input: {
     const summary = readDeliverySummary(resolved.taskDir, input.taskId);
     const result = await input.commentSync(input.taskId, {
       kind: 'summary', agent: input.agent, body: summary.body, cwd: input.repoRoot,
-      summaryAuthorization: { sha256: summary.sha256 }
+      summaryAuthorization: { sha256: summary.sha256 },
+      dependency: 'required'
     });
     const step = commentStep(result);
     if (result.status === 'applied' || result.status === 'no-op') {
@@ -921,9 +933,10 @@ async function prepareUnderLock(
   } else backfillResult = { status: 'no-op', changed: false, error: null };
 
   let lifecycleResult: TaskFinalizationStep | null = null;
+  let projection: TaskCompletionProjection | undefined;
   try {
     const resolved = resolveTaskRef(taskId, { repoRoot });
-    if (receipt.lifecycle === 'done' && resolved.ok && resolved.state === 'completed') {
+    if (resolved.ok && resolved.state === 'completed') {
       lifecycleResult = { status: 'no-op', changed: false, error: null };
       receipt = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
     } else {
@@ -937,6 +950,12 @@ async function prepareUnderLock(
         return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment: null, verification: null }, result.changed, lifecycleResult.error);
       }
       changed = changed || result.changed;
+      if (result.timestamp && result.agentInfraVersion) {
+        projection = previewTaskCompletion(taskId, request.agent, {
+          repoRoot,
+          metadataProvider: () => ({ timestamp: result.timestamp!, agentInfraVersion: result.agentInfraVersion! })
+        });
+      }
     }
   } catch (error) {
     const detail = errorOf(error, 'TASK_FINALIZATION_LIFECYCLE_FAILED');
@@ -971,7 +990,7 @@ async function prepareUnderLock(
       });
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
       const finalComment = await syncPendingTaskComment({
-        repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
+        repoRoot, taskId, agent: request.agent, receipt, projection, commentSync, consumedCapabilities
       });
       receipt = finalComment.receipt;
       if (finalComment.step.status !== 'no-op') taskComment = finalComment.step;
@@ -987,7 +1006,7 @@ async function prepareUnderLock(
       });
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
       const warningComment = await syncPendingTaskComment({
-        repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
+        repoRoot, taskId, agent: request.agent, receipt, projection, commentSync, consumedCapabilities
       });
       receipt = warningComment.receipt;
       taskComment = warningComment.step;
@@ -1017,7 +1036,7 @@ async function prepareUnderLock(
       }, changed, hardError);
     }
     try {
-      const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities });
+      const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, projection, commentSync, consumedCapabilities });
       receipt = warningComment.receipt;
       if (warningComment.step.status !== 'no-op') taskComment = warningComment.step;
       changed = changed || warningComment.changed;
@@ -1038,7 +1057,7 @@ async function prepareUnderLock(
   receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
   if (receipt.taskComment === 'pending') {
     const finalComment = await syncPendingTaskComment({
-      repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
+      repoRoot, taskId, agent: request.agent, receipt, projection, commentSync, consumedCapabilities
     });
     receipt = finalComment.receipt;
     taskComment = finalComment.step;

@@ -151,3 +151,7 @@ agent-infra-internal task-verify {task-id} create-pr.completed --format text
 - 无法访问 Issue 元数据：跳过继承并继续
 - PR 创建失败且已关联 `{task-id}`：调用 `agent-infra-internal task-warning {task-id} add --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "修复推送、权限或平台问题后重跑 create-pr"` 提交结构化 warning 意图，不写不完整 `pr_delivery_fact`
 - PR 摘要评论失败且已关联 `{task-id}`：按 `.agents/rules/pr-sync.md` 记录 `COMMENT_SYNC_FAILED` 告警，不回滚已创建 PR
+
+## 平台评论恢复
+
+后续任务步骤不依赖待处理评论时，按 `.agents/rules/issue-sync.md` 检查并恢复任务账本中的延后评论：`agent-infra-internal task-github-recovery {task-id} recover --agent {standard-agent-token} --selection deferred`。恢复失败时，仅在当前本地工作不依赖该远端事实的情况下记录 warning 并继续。执行硬依赖动作前，必须调用对应 typed intent；远端身份或期望状态无法确认时停止。

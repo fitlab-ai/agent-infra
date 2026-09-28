@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
+import { recordGithubOperation } from '../task/github-operation-journal.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { platformResult } from './types.ts';
@@ -51,6 +52,8 @@ type SyncOptions = {
   client?: PlatformClient;
   runtimeVersion?: string;
   summaryAuthorization?: { sha256: string };
+  dependency?: 'deferred' | 'required';
+  taskProjection?: { content: string; sha256: string };
 };
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
@@ -74,6 +77,8 @@ const ARTIFACT_TITLES: Record<string, string> = {
   'review-plan': '技术方案审查',
   code: '实现报告',
   'review-code': '代码审查',
+  'manual-validation': '人工验证',
+  'validation-run': '验证运行证据',
   'pr-review': 'PR 审查报告'
 };
 
@@ -150,7 +155,7 @@ function taskCommentLanguage(repoRoot: string): string {
 
 function artifactIdentity(artifact: string): { stem: string; title: string } {
   const stem = path.basename(artifact, '.md');
-  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|pr-review)(?:-r(\d+))?$/);
+  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run|pr-review)(?:-r(\d+))?$/);
   if (!match) throw new Error(`unsupported artifact '${artifact}'`);
   const base = ARTIFACT_TITLES[match[1]!]!;
   const round = match[2] ? Number(match[2]) : 1;
@@ -529,7 +534,7 @@ function writeComment(
   );
 }
 
-async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
+async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) {
     return platformResult('failed', {
@@ -547,7 +552,12 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   }
   let desired: RenderedChunk[];
   try {
-    desired = expectedComments(resolved.taskId, taskContent, resolved.taskDir, resolved.repoRoot, options);
+    const projectedContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
+    if (options.kind === 'task' && options.taskProjection
+      && createHash('sha256').update(projectedContent).digest('hex') !== options.taskProjection.sha256) {
+      throw Object.assign(new Error('finalization task projection digest does not match content'), { code: 'FINALIZATION_PROJECTION_INVALID' });
+    }
+    desired = expectedComments(resolved.taskId, projectedContent, resolved.taskDir, resolved.repoRoot, options);
   } catch (error) {
     return platformResult('failed', {
       resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask) },
@@ -740,6 +750,67 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
     comment: { kind: options.kind, marker: desired[0]?.marker ?? markerPrefix(resolved.taskId, options), ids, parts: desired.length },
     error: null
   });
+  return result;
+}
+
+async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
+  if (options.kind === 'cancel') return syncPlatformCommentImpl(taskRef, options);
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return syncPlatformCommentImpl(taskRef, options);
+  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+  if (!taskIssueIdentity(parseTaskFrontmatter(taskContent))) return syncPlatformCommentImpl(taskRef, options);
+
+  let operation: { kind: 'task-comment' | 'artifact-comment' | 'summary-comment'; target: string; expectedDigest: string };
+  try {
+    const sourceContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
+    const desired = expectedComments(resolved.taskId, sourceContent, resolved.taskDir, resolved.repoRoot, options);
+    const content = desired.map((chunk) => chunk.content).join('\0');
+    const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment' : 'artifact-comment';
+    const target = options.kind === 'artifact' ? options.artifact! : options.kind;
+    operation = { kind, target, expectedDigest: createHash('sha256').update(content).digest('hex') };
+  } catch {
+    return syncPlatformCommentImpl(taskRef, options);
+  }
+
+  try {
+    recordGithubOperation({
+      taskRef: resolved.taskId,
+      cwd: resolved.repoRoot,
+      ...operation,
+      dependency: options.dependency ?? 'deferred',
+      state: 'pending'
+    });
+  } catch (error) {
+    const value = error as { code?: string; message?: string };
+    return platformResult('failed', {
+      error: {
+        code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED',
+        message: value.message || 'Unable to persist GitHub operation before comment sync',
+        retryable: true
+      }
+    });
+  }
+
+  const result = await syncPlatformCommentImpl(taskRef, options);
+  try {
+    const succeeded = (result.status === 'applied' || result.status === 'no-op') && !result.error;
+    recordGithubOperation({
+      taskRef: resolved.taskId,
+      cwd: resolved.repoRoot,
+      ...operation,
+      dependency: options.dependency ?? 'deferred',
+      state: succeeded ? 'succeeded' : result.status === 'failed' && result.error?.retryable === false ? 'failed' : 'unknown',
+      lastCode: result.error?.code ?? null
+    });
+  } catch {
+    return platformResult('failed', {
+      platform: result.platform,
+      resource: result.resource,
+      capabilities: result.capabilities,
+      operations: result.operations,
+      error: { code: 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: 'Unable to persist GitHub comment outcome', retryable: true }
+    });
+  }
   return result;
 }
 

@@ -260,3 +260,7 @@ Issue 创建失败：
 
 - 空描述：提示 "Please provide a task description"
 - 描述过于模糊：在创建任务之前提出澄清问题
+
+## 平台评论恢复
+
+后续任务步骤不依赖待处理评论时，按 `.agents/rules/issue-sync.md` 检查并恢复任务账本中的延后评论：`agent-infra-internal task-github-recovery {task-id} recover --agent {standard-agent-token} --selection deferred`。恢复失败时，仅在当前本地工作不依赖该远端事实的情况下记录 warning 并继续。执行硬依赖动作前，必须调用对应 typed intent；远端身份或期望状态无法确认时停止。

@@ -153,3 +153,7 @@ Next step (alternative) - Skip active monitoring and attempt completion:
 - Inaccessible Issue metadata: skip inheritance and continue
 - PR creation failed with an associated `{task-id}`: run `agent-infra-internal task-warning {task-id} add --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "Fix push, permission, or platform issues and rerun create-pr"` to submit a structured warning intent, and do not write an incomplete `pr_delivery_fact`
 - PR summary comment failed with an associated `{task-id}`: record a `COMMENT_SYNC_FAILED` warning per `.agents/rules/pr-sync.md`, without rolling back an already-created PR
+
+## Platform comment recovery
+
+At a later task step that has no dependency on a pending comment, consult `.agents/rules/issue-sync.md` and run `agent-infra-internal task-github-recovery {task-id} recover --agent {standard-agent-token} --selection deferred` when the task journal contains deferred comment operations. Record a warning and continue only when the current local work does not depend on that remote fact. Before a hard-dependent action, use its typed intent and stop if the remote identity or expected state cannot be confirmed.

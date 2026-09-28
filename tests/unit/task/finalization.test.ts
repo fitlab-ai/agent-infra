@@ -209,6 +209,35 @@ test('host finalization stops before lifecycle when completion backfill has no s
   }
 });
 
+test('finalization keeps the active task document unchanged when terminal comment sync fails', async () => {
+  const f = fixture();
+  let commentCalls = 0;
+  const diskStates: string[] = [];
+  const projectionStates: string[] = [];
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
+    commentCalls += 1;
+    diskStates.push(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/^status: (.+)$/m)?.[1] ?? 'missing');
+    if (received.kind === 'task' && received.taskProjection) {
+      projectionStates.push(received.taskProjection.content.match(/^status: (.+)$/m)?.[1] ?? 'missing');
+    }
+    return commentCalls === 1
+      ? platformResult('blocked', { error: { code: 'NETWORK_ERROR', message: 'temporary', retryable: true } })
+      : platformResult('applied');
+  };
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => verification('pass');
+  try {
+    const failed = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    assert.equal(failed.status, 'blocked');
+    assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/^status: (.+)$/m)?.[1], 'active');
+    const completed = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    assert.equal(completed.status, 'completed');
+    assert.deepEqual(diskStates, ['active', 'active']);
+    assert.deepEqual(projectionStates, ['completed', 'completed']);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('completed finalization does not replay lifecycle for a backfill warning', async () => {
   const f = fixture();
   let calls = 0;

@@ -51,7 +51,7 @@ function referencedBackfillArtifact(taskDir: string, message: string): BackfillA
     .map((match) => match[1]!);
   if (names.length !== 1) return { status: 'ignored', artifact: null, error: null };
   const parsed = parseArtifactName(names[0]!);
-  if (!parsed || (parsed.family !== 'pr-review' && !COMPLETION_BACKFILL_FAMILIES.includes(parsed.family as typeof COMPLETION_BACKFILL_FAMILIES[number]))) {
+  if (!parsed || !COMPLETION_BACKFILL_FAMILIES.includes(parsed.family as typeof COMPLETION_BACKFILL_FAMILIES[number])) {
     return { status: 'ignored', artifact: null, error: null };
   }
   const artifactPath = path.join(taskDir, parsed.name);
@@ -141,6 +141,7 @@ async function backfillCompletionComments(
       artifact: artifact.name,
       agent: options.agent,
       backfill: true,
+      dependency: 'required',
       cwd: resolved.repoRoot,
       client: options.client
     });

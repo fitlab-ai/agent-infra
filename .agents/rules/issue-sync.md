@@ -41,6 +41,17 @@ agent-infra-internal platform-comment sync <task-ref> \
 - 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
 - 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 
+## Task-local platform operation recovery
+
+Task-bound task, artifact, and summary comment intents record their target marker, expected-content SHA-256, dependency class, state, attempt count, and last error code in `.github-operations.json` inside the task directory. The file is local process state; it is never uploaded as an artifact or comment. Comment bodies, credentials, and HTTP response bodies are not recorded.
+
+```bash
+agent-infra-internal task-github-recovery <task-ref> inspect
+agent-infra-internal task-github-recovery <task-ref> recover --agent {standard-agent-token} [--selection required|deferred|all]
+```
+
+Recovery replays only pending or unknown operations and calls the existing typed comment intent, which reads the marker set before writing. A confirmed existing target converges to `no-op`; marker conflicts and unknown remote state stop recovery. `complete-task` replays required task and artifact comment intents and checks their marker sets before local completion, so an unresolved required comment keeps the task active.
+
 ## 降级与告警
 
 平台结果不直接写 task.md。调用方在有关联任务时把关键失败映射为 workflow warning：
