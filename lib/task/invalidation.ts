@@ -137,7 +137,7 @@ function parseInvalidationDocument(content: string): InvalidationParseResult {
   try {
     const body = content.slice(section.bodyStart, section.end);
     const operationRows = parseInvalidationTable(body, 'Operations', [OPERATION_COLUMNS]);
-    // TODO(compat): Remove legacy target table parsing once all persisted task.md invalidation tables include target_input; verify with a workspace inventory scan.
+    // TODO(compat): Remove legacy target table parsing and completed receipt targets without target_input once a workspace inventory confirms all persisted targets have input identities.
     const targetRows = parseInvalidationTable(body, 'Targets', [TARGET_COLUMNS, LEGACY_TARGET_COLUMNS]);
     const operations = operationRows.rows.map(({ values: row }) => ({
       operationId: required(row.operation_id!, 'operation_id'), sourceFamily: required(row.source_family!, 'source_family'),
@@ -170,7 +170,7 @@ function parseInvalidationDocument(content: string): InvalidationParseResult {
       targetIds.add(target.targetId);
       if (!operationIds.has(target.operationId)) throw new Error(`target '${target.targetId}' references an unknown operation`);
       if (target.targetKind === 'receipt') {
-        if (!target.targetInput && (!targetRows.legacy || target.status !== 'completed')) throw new Error(`receipt target '${target.targetId}' input identity is required`);
+        if (!target.targetInput && target.status !== 'completed') throw new Error(`receipt target '${target.targetId}' input identity is required`);
         if (target.targetInput && !parseArtifactName(target.targetInput)) throw new Error(`receipt target '${target.targetId}' input identity is invalid`);
       } else if (target.targetInput) throw new Error(`non-receipt target '${target.targetId}' cannot have an input identity`);
       if (target.targetId !== targetIdFor(target.operationId, target)) throw new Error(`target '${target.targetId}' has a non-canonical identity`);

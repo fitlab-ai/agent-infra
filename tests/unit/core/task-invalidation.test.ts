@@ -84,7 +84,12 @@ test('receipt target identity includes the exact input artifact and reads comple
   assert.equal(legacyParsed.ok, true);
   if (!legacyParsed.ok) return;
   assert.equal(legacyParsed.document.targets[0]?.targetInput, undefined);
-  assert.match(renderInvalidation(legacyParsed.document), /\| target_input \|/);
+  const normalizedLegacy = renderInvalidation(legacyParsed.document);
+  assert.match(normalizedLegacy, /\| target_input \|/);
+  const roundTrippedLegacy = parseInvalidationDocument(`## Artifact Invalidation\n\n${normalizedLegacy}\n`);
+  assert.equal(roundTrippedLegacy.ok, true);
+  if (!roundTrippedLegacy.ok) return;
+  assert.equal(roundTrippedLegacy.document.targets[0]?.targetInput, undefined);
 
   const pendingLegacy = legacyText
     .replace('| completed | 1 | 1 |', '| pending | 0 | 1 |')
