@@ -158,7 +158,7 @@ agent-infra-internal task-verify {task-id} review-code.completed --artifact {rev
 
 > 仅在校验通过后执行本步骤。
 
-> **重要：分支名 ≠ 字段值**。以下 4 个标签是用户输出模板的分类（场景 A/B/C/D），**不是**产物 `**总体结论**：` 字段的取值。产物字段只取 3 个规范值之一（`通过` / `需要修改` / `拒绝`，或 EN 对应 `Approved` / `Changes Requested` / `Rejected`）；写成 `通过但有问题`、`通过 / 需要修改` 等组合短语会被 verify gate 拦下。
+> **重要：场景名 ≠ 字段值**。以下 A/B/C 是结果输出场景，R 只展示生命周期停止时已有的结果；它们都不是产物 `**总体结论**：` 字段的取值。产物字段只取 3 个规范值之一（`通过` / `需要修改` / `拒绝`，或 EN 对应 `Approved` / `Changes Requested` / `Rejected`）。
 
 必须先判断结果，再只选择一个输出分支：
 - `stageStatus.canAdvance=true` -> 通过
@@ -167,7 +167,7 @@ agent-infra-internal task-verify {task-id} review-code.completed --artifact {rev
 
 manual-validation 的数量不参与分支选择，只作为人工校验计数显示。
 
-> 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
+> 完整的 A/B/C 输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 
 > 渲染最终输出前先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令的 `{task-ref}` 渲染为当前任务短号 `NN`（取值与回退见该文件），其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
 
