@@ -118,8 +118,8 @@ delivery_remote_head:          # Most recent successfully delivered task branch 
 
 ### Targets
 
-| target_id | operation_id | target_kind | target_family | target_artifact | target_round | target_sha256 | status | reason_code | updated_at |
-|-----------|--------------|-------------|---------------|-----------------|--------------|---------------|--------|-------------|------------|
+| target_id | operation_id | target_kind | target_family | target_artifact | target_input | target_round | target_sha256 | status | reason_code | updated_at |
+|-----------|--------------|-------------|---------------|-----------------|--------------|--------------|---------------|--------|-------------|------------|
 
 ## Activity Log
 

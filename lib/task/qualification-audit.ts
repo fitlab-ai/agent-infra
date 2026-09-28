@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 
 import { parseArtifactName } from './artifact-name.ts';
-import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { findSectionRange, parseTable } from './sections.ts';
 import { scanVisibleMarkdown } from './markdown.ts';
 
@@ -9,13 +8,12 @@ const TASK_CONSTRAINT_HEADINGS = ['约束', 'Constraints'] as const;
 const TASK_CANDIDATE_HEADINGS = ['候选与否决方案', 'Candidate and Rejected Options', 'Candidates and Rejected Options', 'Candidates and Rejected Alternatives'] as const;
 const AUDIT_HEADINGS = ['资格审计', '资格审计复核', 'Qualification Audit', 'Qualification Audit Review'] as const;
 const CONFIRMATION_HEADINGS = ['资格确认记录', 'Qualification Confirmations'] as const;
-const AUDIT_SUBSECTIONS = ['约束依赖', '候选资格', '分类结果', '上游关系', '依赖快照'] as const;
+const AUDIT_SUBSECTIONS = ['约束依赖', '候选资格', '分类结果', '资格快照'] as const;
 const AUDIT_SUBSECTION_HEADINGS: Record<(typeof AUDIT_SUBSECTIONS)[number], readonly string[]> = {
   '约束依赖': ['约束依赖', 'Constraint Dependencies'],
   '候选资格': ['候选资格', 'Candidate Qualification'],
   '分类结果': ['分类结果', 'Classification Results'],
-  '上游关系': ['上游关系', 'Upstream Relations'],
-  '依赖快照': ['依赖快照', 'Dependency Snapshot']
+  '资格快照': ['资格快照', 'Qualification Snapshot']
 };
 
 const CONSTRAINT_COLUMNS = ['constraint_id', 'statement', 'status', 'authority', 'source', 'evidence', 'derived_from', 'approval_evidence'] as const;
@@ -23,12 +21,10 @@ const CANDIDATE_COLUMNS = ['candidate_id', 'statement', 'status', 'constraint_id
 const DEPENDENCY_COLUMNS = ['constraint_id', 'constraint_digest', 'role', 'evidence'] as const;
 const QUALIFICATION_COLUMNS = ['candidate_id', 'status', 'impact', 'constraint_ids', 'evidence'] as const;
 const CLASSIFICATION_COLUMNS = ['decision_id', 'classification', 'evidence'] as const;
-const RELATION_COLUMNS = ['upstream_family', 'upstream_artifact', 'upstream_round', 'upstream_sha256', 'relation'] as const;
-const SNAPSHOT_COLUMNS = ['task_input_digest', 'non_constraint_input_digest', 'upstream_artifact_digest'] as const;
+const SNAPSHOT_COLUMNS = ['task_input_digest', 'non_constraint_input_digest'] as const;
 const CONFIRMATION_COLUMNS = ['qcr_id', 'constraint_id', 'actor', 'entrypoint', 'request_id', 'approved_digest', 'confirmed_at', 'rationale'] as const;
 
 const ARTIFACT_FAMILIES = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'] as const;
-const RELATIONS = ['required-input', 'reviewed-input', 'review-context', 'approval-context'] as const;
 const CONSTRAINT_STATUSES = ['confirmed', 'derived', 'assumption', 'open', 'conflicted', 'superseded'] as const;
 const CANDIDATE_STATUSES = ['qualified', 'rejected', 'pending', 'needs-human-decision', 'confirmed', 'excluded'] as const;
 const CLASSIFICATIONS = ['deterministic', 'qualified', 'rejected', 'needs-human-decision', 'not-applicable'] as const;
@@ -38,7 +34,6 @@ type ConstraintStatus = (typeof CONSTRAINT_STATUSES)[number];
 type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
 type QualificationClassification = (typeof CLASSIFICATIONS)[number];
 type ArtifactFamily = (typeof ARTIFACT_FAMILIES)[number];
-type QualificationRelation = (typeof RELATIONS)[number];
 type QualificationRole = (typeof ROLES)[number];
 
 type Constraint = {
@@ -86,24 +81,15 @@ type QualificationClassificationRow = {
   classification: QualificationClassification;
   evidence: string;
 };
-type UpstreamRelation = {
-  upstreamFamily: ArtifactFamily;
-  upstreamArtifact: string;
-  upstreamRound: number;
-  upstreamSha256: string;
-  relation: QualificationRelation;
-};
 type DependencySnapshot = {
   taskInputDigest: string;
   nonConstraintInputDigest: string;
-  upstreamArtifactDigest: string;
 };
 type QualificationAudit = {
   present: boolean;
   constraintDependencies: readonly ConstraintDependency[];
   candidateQualifications: readonly CandidateQualification[];
   classifications: readonly QualificationClassificationRow[];
-  upstreamRelations: readonly UpstreamRelation[];
   snapshot: DependencySnapshot | null;
 };
 type QualificationConfirmation = {
@@ -304,80 +290,19 @@ function parseAuditTable(content: string, heading: (typeof AUDIT_SUBSECTIONS)[nu
   return table?.rows.map((row) => ({ ...row.values })) ?? null;
 }
 
-function parseAuditArtifactName(value: string): { family: ArtifactFamily; round: number } | null {
-  const identity = parseArtifactName(value);
-  return identity && ARTIFACT_FAMILIES.includes(identity.family as ArtifactFamily)
-    ? { family: identity.family as ArtifactFamily, round: identity.round } : null;
-}
-
-function upstreamArtifactDigest(rows: readonly UpstreamRelation[]): string {
-  return digest([...rows].map((row) => ({ ...row })).sort((a, b) =>
-    `${a.upstreamFamily}/${a.upstreamArtifact}/${a.relation}`.localeCompare(`${b.upstreamFamily}/${b.upstreamArtifact}/${b.relation}`)));
-}
-
-function validateUpstreamRelation(row: UpstreamRelation): void {
-  const identity = parseAuditArtifactName(row.upstreamArtifact);
-  if (!ARTIFACT_FAMILIES.includes(row.upstreamFamily) || !identity || identity.family !== row.upstreamFamily
-    || identity.round !== row.upstreamRound || !Number.isSafeInteger(row.upstreamRound)
-    || !/^[a-f0-9]{64}$/i.test(row.upstreamSha256) || !RELATIONS.includes(row.relation)) {
-    throw new Error(`invalid qualification upstream relation '${row.upstreamArtifact}'`);
-  }
-}
-
-function expectedQualificationRelations(
-  taskContent: string,
-  family: ArtifactFamily
-): { ok: true; relations: readonly UpstreamRelation[] | undefined } | { ok: false; code: string; message: string } {
-  let frontmatter;
-  try { frontmatter = parseTypedTaskFrontmatter(taskContent); }
-  catch (error) { return { ok: false, code: 'QUALIFICATION_STARTED_INPUT_INVALID', message: error instanceof Error ? error.message : String(error) }; }
-  const encoded = frontmatter.qualification_input_relations;
-  if (typeof encoded === 'string' && encoded) {
-    try {
-      const parsed = JSON.parse(encoded) as unknown;
-      if (!Array.isArray(parsed)) throw new Error('qualification_input_relations must be an array');
-      const relations = parsed.map((value) => {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('qualification input relation must be an object');
-        const row = value as Record<string, unknown>;
-        const relation: UpstreamRelation = {
-          upstreamFamily: row.upstreamFamily as ArtifactFamily,
-          upstreamArtifact: String(row.upstreamArtifact ?? ''),
-          upstreamRound: Number(row.upstreamRound),
-          upstreamSha256: String(row.upstreamSha256 ?? ''),
-          relation: row.relation as QualificationRelation
-        };
-        validateUpstreamRelation(relation);
-        return relation;
-      });
-      return { ok: true, relations };
-    } catch (error) {
-      return { ok: false, code: 'QUALIFICATION_STARTED_INPUT_INVALID', message: error instanceof Error ? error.message : String(error) };
-    }
-  }
-  const inputName = family === 'code' ? frontmatter.code_input_artifact : family.startsWith('review-') ? frontmatter.review_input_artifact : '';
-  const inputSha256 = family === 'code' ? frontmatter.code_input_sha256 : family.startsWith('review-') ? frontmatter.review_input_sha256 : '';
-  if (typeof inputName !== 'string' || !inputName || typeof inputSha256 !== 'string' || !inputSha256) return { ok: true, relations: undefined };
-  const identity = parseAuditArtifactName(inputName);
-  if (!identity) return { ok: false, code: 'QUALIFICATION_STARTED_INPUT_INVALID', message: `started input '${inputName}' is not canonical` };
-  const relation: UpstreamRelation = {
-    upstreamFamily: identity.family, upstreamArtifact: inputName, upstreamRound: identity.round,
-    upstreamSha256: inputSha256, relation: family === 'code' ? 'required-input' : 'reviewed-input'
-  };
-  try { validateUpstreamRelation(relation); }
-  catch (error) { return { ok: false, code: 'QUALIFICATION_STARTED_INPUT_INVALID', message: error instanceof Error ? error.message : String(error) }; }
-  return { ok: true, relations: [relation] };
-}
-
 function parseQualificationAudit(content: string): { ok: true; audit: QualificationAudit } | { ok: false; code: string; message: string } {
-  if (sectionBody(content, AUDIT_HEADINGS) === null) return { ok: true, audit: { present: false, constraintDependencies: [], candidateQualifications: [], classifications: [], upstreamRelations: [], snapshot: null } };
+  const auditBody = sectionBody(content, AUDIT_HEADINGS);
+  if (auditBody === null) return { ok: true, audit: { present: false, constraintDependencies: [], candidateQualifications: [], classifications: [], snapshot: null } };
   try {
+    if (sectionBody(auditBody, ['上游关系', 'Upstream Relations'], 3) !== null) {
+      throw new Error('qualification audit uses the obsolete lifecycle-relation format; regenerate it using the current format');
+    }
     const dependencies = parseAuditTable(content, '约束依赖', DEPENDENCY_COLUMNS);
     const qualifications = parseAuditTable(content, '候选资格', QUALIFICATION_COLUMNS);
     const classifications = parseAuditTable(content, '分类结果', CLASSIFICATION_COLUMNS);
-    const relations = parseAuditTable(content, '上游关系', RELATION_COLUMNS);
-    const snapshots = parseAuditTable(content, '依赖快照', SNAPSHOT_COLUMNS);
-    if (!dependencies || !qualifications || !classifications || !relations || !snapshots || snapshots.length !== 1) {
-      throw new Error('qualification audit requires all five canonical tables and exactly one dependency snapshot');
+    const snapshots = parseAuditTable(content, '资格快照', SNAPSHOT_COLUMNS);
+    if (!dependencies || !qualifications || !classifications || !snapshots || snapshots.length !== 1) {
+      throw new Error('qualification audit requires three decision tables and exactly one qualification snapshot');
     }
     const constraintDependencies = dependencies.map((row) => {
       if (!/^C-[1-9]\d*$/.test(row.constraint_id ?? '') || !/^[a-f0-9]{64}$/i.test(row.constraint_digest ?? '') || !ROLES.includes(row.role as QualificationRole) || !row.evidence?.trim()) throw new Error(`invalid qualification constraint dependency '${row.constraint_id ?? ''}'`);
@@ -392,19 +317,14 @@ function parseQualificationAudit(content: string): { ok: true; audit: Qualificat
       if (!row.decision_id?.trim() || !CLASSIFICATIONS.includes(row.classification as QualificationClassification) || !row.evidence?.trim()) throw new Error(`invalid qualification classification '${row.decision_id ?? ''}'`);
       return { decisionId: row.decision_id, classification: row.classification as QualificationClassification, evidence: row.evidence };
     });
-    const upstreamRelations = relations.map((row) => {
-      const relation = { upstreamFamily: row.upstream_family as ArtifactFamily, upstreamArtifact: row.upstream_artifact ?? '', upstreamRound: Number(row.upstream_round), upstreamSha256: row.upstream_sha256 ?? '', relation: row.relation as QualificationRelation };
-      validateUpstreamRelation(relation);
-      return relation;
-    });
     const snapshotRow = snapshots[0]!;
-    if (!/^[a-f0-9]{64}$/i.test(snapshotRow.task_input_digest ?? '') || !/^[a-f0-9]{64}$/i.test(snapshotRow.non_constraint_input_digest ?? '') || !/^[a-f0-9]{64}$/i.test(snapshotRow.upstream_artifact_digest ?? '')) throw new Error('qualification dependency snapshot has invalid digest');
+    if (!/^[a-f0-9]{64}$/i.test(snapshotRow.task_input_digest ?? '') || !/^[a-f0-9]{64}$/i.test(snapshotRow.non_constraint_input_digest ?? '')) throw new Error('qualification snapshot has invalid digest');
     return {
       ok: true,
       audit: {
         present: true, constraintDependencies, candidateQualifications,
-        classifications: classificationRows, upstreamRelations,
-        snapshot: { taskInputDigest: snapshotRow.task_input_digest!, nonConstraintInputDigest: snapshotRow.non_constraint_input_digest!, upstreamArtifactDigest: snapshotRow.upstream_artifact_digest! }
+        classifications: classificationRows,
+        snapshot: { taskInputDigest: snapshotRow.task_input_digest!, nonConstraintInputDigest: snapshotRow.non_constraint_input_digest! }
       }
     };
   } catch (error) {
@@ -443,14 +363,13 @@ function validateQualificationAudit(
     family?: ArtifactFamily;
     artifact?: string;
     require?: boolean;
-    expectedUpstreamRelations?: readonly UpstreamRelation[];
   } = {}
 ): QualificationValidationResult {
   const task = parseTaskQualification(taskContent);
   if (!task.ok) return task;
   const audit = parseQualificationAudit(artifactContent);
   if (!audit.ok) return audit;
-  if (!task.qualification.present && !options.require) return { ok: true, qualification: task.qualification, audit: audit.audit };
+  if (!audit.audit.present && !options.require) return { ok: true, qualification: task.qualification, audit: audit.audit };
   if (!task.qualification.present) return { ok: false, code: 'QUALIFICATION_TASK_CONTRACT_MISSING', message: 'task qualification contract is missing' };
   if (!audit.audit.present) return { ok: false, code: 'QUALIFICATION_AUDIT_MISSING', message: 'artifact qualification audit is missing' };
   const constraintMap = new Map(task.qualification.constraints.map((row) => [row.constraintId, row]));
@@ -490,13 +409,8 @@ function validateQualificationAudit(
   const snapshot = audit.audit.snapshot!;
   if (snapshot.taskInputDigest !== task.qualification.taskInputDigest) return { ok: false, code: 'QUALIFICATION_TASK_DIGEST_MISMATCH', message: 'qualification audit task input digest is stale' };
   if (snapshot.nonConstraintInputDigest !== task.qualification.nonConstraintInputDigest) return { ok: false, code: 'QUALIFICATION_NON_CONSTRAINT_DIGEST_MISMATCH', message: 'qualification audit non-constraint input digest is stale' };
-  if (snapshot.upstreamArtifactDigest !== upstreamArtifactDigest(audit.audit.upstreamRelations)) return { ok: false, code: 'QUALIFICATION_UPSTREAM_DIGEST_MISMATCH', message: 'qualification audit upstream digest does not match its relation rows' };
-  if (options.expectedUpstreamRelations && (
-    options.expectedUpstreamRelations.length !== audit.audit.upstreamRelations.length
-    || upstreamArtifactDigest(options.expectedUpstreamRelations) !== upstreamArtifactDigest(audit.audit.upstreamRelations)
-  )) return { ok: false, code: 'QUALIFICATION_UPSTREAM_RELATION_MISMATCH', message: 'qualification audit upstream relations do not match the started artifact inputs' };
   if (options.family && options.artifact) {
-    const identity = parseAuditArtifactName(options.artifact);
+    const identity = parseArtifactName(options.artifact);
     if (!identity || identity.family !== options.family) return { ok: false, code: 'QUALIFICATION_ARTIFACT_IDENTITY_INVALID', message: `artifact '${options.artifact}' is not canonical for '${options.family}'` };
   }
   return { ok: true, qualification: task.qualification, audit: audit.audit };
@@ -509,19 +423,18 @@ function renderQualificationAudit(audit: QualificationAudit): string {
     ...rows.map((row) => `| ${row.map((value) => value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ')).join(' | ')} |`)
   ].join('\n');
   const list = (values: readonly string[]) => values.join(',');
-  const snapshot = audit.snapshot ?? { taskInputDigest: '', nonConstraintInputDigest: '', upstreamArtifactDigest: upstreamArtifactDigest(audit.upstreamRelations) };
+  const snapshot = audit.snapshot ?? { taskInputDigest: '', nonConstraintInputDigest: '' };
   return [
     '### 约束依赖', '', table(DEPENDENCY_COLUMNS, audit.constraintDependencies.map((row) => [row.constraintId, row.constraintDigest, row.role, row.evidence])), '',
     '### 候选资格', '', table(QUALIFICATION_COLUMNS, audit.candidateQualifications.map((row) => [row.candidateId, row.status, row.impact, list(row.constraintIds), row.evidence])), '',
     '### 分类结果', '', table(CLASSIFICATION_COLUMNS, audit.classifications.map((row) => [row.decisionId, row.classification, row.evidence])), '',
-    '### 上游关系', '', table(RELATION_COLUMNS, audit.upstreamRelations.map((row) => [row.upstreamFamily, row.upstreamArtifact, String(row.upstreamRound), row.upstreamSha256, row.relation])), '',
-    '### 依赖快照', '', table(SNAPSHOT_COLUMNS, [[snapshot.taskInputDigest, snapshot.nonConstraintInputDigest, snapshot.upstreamArtifactDigest]])
+    '### 资格快照', '', table(SNAPSHOT_COLUMNS, [[snapshot.taskInputDigest, snapshot.nonConstraintInputDigest]])
   ].join('\n');
 }
 
 function buildQualificationAudit(
   taskContent: string,
-  input: { constraints?: readonly string[]; candidates?: readonly string[]; classifications?: readonly QualificationClassificationRow[]; upstreamRelations?: readonly UpstreamRelation[] } = {}
+  input: { constraints?: readonly string[]; candidates?: readonly string[]; classifications?: readonly QualificationClassificationRow[] } = {}
 ): { ok: true; audit: QualificationAudit } | { ok: false; code: string; message: string } {
   const parsed = parseTaskQualification(taskContent);
   if (!parsed.ok) return parsed;
@@ -530,13 +443,12 @@ function buildQualificationAudit(
   const candidates = input.candidates ?? parsed.qualification.candidates.map((row) => row.candidateId);
   const constraintDependencies = parsed.qualification.constraints.filter((row) => ids.has(row.constraintId)).map((row) => ({ constraintId: row.constraintId, constraintDigest: row.digest, role: 'required' as const, evidence: row.evidence }));
   const candidateQualifications = parsed.qualification.candidates.filter((row) => candidates.includes(row.candidateId)).map((row) => ({ candidateId: row.candidateId, status: row.status, impact: row.impact, constraintIds: row.constraintIds, evidence: row.evidence }));
-  const upstreamRelations = [...(input.upstreamRelations ?? [])];
   return {
     ok: true,
     audit: {
       present: true, constraintDependencies, candidateQualifications,
-      classifications: input.classifications ?? [], upstreamRelations,
-      snapshot: { taskInputDigest: parsed.qualification.taskInputDigest, nonConstraintInputDigest: parsed.qualification.nonConstraintInputDigest, upstreamArtifactDigest: upstreamArtifactDigest(upstreamRelations) }
+      classifications: input.classifications ?? [],
+      snapshot: { taskInputDigest: parsed.qualification.taskInputDigest, nonConstraintInputDigest: parsed.qualification.nonConstraintInputDigest }
     }
   };
 }
@@ -552,10 +464,8 @@ export {
   DEPENDENCY_COLUMNS,
   QUALIFICATION_COLUMNS,
   CLASSIFICATION_COLUMNS,
-  RELATION_COLUMNS,
   SNAPSHOT_COLUMNS,
   constraintDigest,
-  expectedQualificationRelations,
   buildQualificationAudit,
   nonConstraintInputDigest,
   parseQualificationAudit,
@@ -563,7 +473,6 @@ export {
   parseTaskQualification,
   renderQualificationAudit,
   taskInputDigest,
-  upstreamArtifactDigest,
   validateQualificationAudit
 };
 export type {
@@ -578,11 +487,9 @@ export type {
   QualificationConfirmation,
   QualificationClassification,
   QualificationClassificationRow,
-  QualificationRelation,
   QualificationRole,
   QualificationValidationError,
   QualificationValidationResult,
   TaskQualification,
-  UpstreamRelation,
   ArtifactFamily
 };

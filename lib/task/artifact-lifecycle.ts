@@ -327,7 +327,9 @@ const REQUIRED_INPUT: Partial<Record<ArtifactFamily, ArtifactFamily>> = {
 };
 const OPTIONAL_CONTEXT: Partial<Record<ArtifactFamily, readonly ArtifactFamily[]>> = {
   analysis: ['review-analysis'],
-  plan: ['review-plan'],
+  plan: ['review-analysis', 'review-plan'],
+  'review-plan': ['review-analysis'],
+  code: ['review-plan'],
   'review-code': ['code', 'plan', 'review-plan'],
   'manual-validation': ['review-code'],
   'validation-run': ['review-code']
@@ -492,6 +494,9 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   const codeMax = latestCode?.round ?? 0;
   const reviewMax = reviewCode.latest?.round ?? 0;
   const inputs = [source.latest];
+  const sourceReviewFamily = inputFamily === 'analysis' ? 'review-analysis' : 'review-plan';
+  const sourceReview = inspectTaskArtifacts(taskRef, sourceReviewFamily, options);
+  if (sourceReview.status === 'ready' && sourceReview.latest && sourceReview.reviewedInput?.name === source.latest.name) inputs.push(sourceReview.latest);
   if (latestCode) {
     try {
       const taskContent = fs.readFileSync(path.join(inventory.taskDir!, 'task.md'), 'utf8');

@@ -13,6 +13,7 @@ export type CompletionFact = Readonly<{
   semanticDigest: string;
   requestId: string;
   result: string;
+  lifecycleInputs?: readonly Readonly<{ name: string; sha256: string }>[];
 }>;
 
 export function parseCompletionFacts(value: unknown): CompletionFact[] {

@@ -6,7 +6,8 @@ import {
   parseArtifactReceipts,
   receiptForOutput,
   sha256Bytes,
-  upsertArtifactReceipt
+  upsertArtifactReceipt,
+  upsertArtifactReceipts
 } from '../../../lib/task/artifact-receipts.ts';
 
 const RECEIPT = {
@@ -33,12 +34,23 @@ test('receipt upsert creates a portable task section and parses it back', () => 
 });
 
 test('code completion receipts accept the selected analysis or plan lifecycle input', () => {
-  for (const input of ['analysis.md', 'plan.md']) {
+  for (const input of ['analysis.md', 'review-analysis.md', 'plan.md']) {
     assert.doesNotThrow(() => upsertArtifactReceipt('# Task\n', {
       event: 'code.completed', output: 'code.md', input,
       inputSha256: 'a'.repeat(64), completedAt: '2026-08-19 20:00:00+00:00'
     }));
   }
+});
+
+test('one lifecycle artifact can retain multiple distinct input edges', () => {
+  const content = '# Task\n';
+  const mutation = upsertArtifactReceipts(content, [
+    { event: 'plan.completed', output: 'plan.md', input: 'analysis.md', inputSha256: 'a'.repeat(64), completedAt: RECEIPT.completedAt },
+    { event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md', inputSha256: 'b'.repeat(64), completedAt: RECEIPT.completedAt }
+  ]);
+  const updated = `${content}\n## ${mutation.heading}\n\n${mutation.body}\n`;
+  assert.deepEqual(parseArtifactReceipts(updated).rows.map((row) => row.input), ['analysis.md', 'review-analysis.md']);
+  assert.throws(() => parseArtifactReceipts(`${updated}| plan.completed | plan.md | analysis.md | ${'c'.repeat(64)} | ${RECEIPT.completedAt} |\n`), ArtifactReceiptError);
 });
 
 test('receipt parsing fails closed for invalid digest and duplicate output', () => {

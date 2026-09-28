@@ -11,7 +11,7 @@ import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
-import { upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { parseArtifactReceipts, upsertArtifactReceipt, type ArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
 import {
   finalizeLocalArtifact,
@@ -21,7 +21,7 @@ import {
 import { parseInvalidationDocument } from '../../../lib/task/invalidation.ts';
 import { parseReworkIntentDocument } from '../../../lib/task/rework-intent.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
-import { buildQualificationAudit, expectedQualificationRelations, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
+import { buildQualificationAudit, renderQualificationAudit } from '../../../lib/task/qualification-audit.ts';
 import { renderArtifactSkeleton } from '../../../lib/task/artifact-schema.ts';
 import { snapshotReview } from '../../../lib/git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../../../lib/task/review-fingerprint.ts';
@@ -55,14 +55,7 @@ function writeQualifiedArtifact(taskPath: string, artifactPath: string) {
   const taskContent = fs.readFileSync(taskPath, 'utf8');
   const identity = parseQualificationArtifactName(path.basename(artifactPath));
   if (!identity || identity.family === 'manual-validation' || identity.family === 'validation-run' || identity.family === 'pr-review') return;
-  const expected = identity && (identity.family === 'analysis' || identity.family === 'review-analysis'
-    || identity.family === 'plan' || identity.family === 'review-plan'
-    || identity.family === 'code' || identity.family === 'review-code')
-    ? expectedQualificationRelations(taskContent, identity.family)
-    : { ok: true as const, relations: undefined };
-  assert.equal(expected.ok, true);
-  if (!expected.ok) return;
-  const built = buildQualificationAudit(taskContent, { upstreamRelations: expected.relations });
+  const built = buildQualificationAudit(taskContent);
   assert.equal(built.ok, true);
   if (!built.ok) return;
   const taskId = taskContent.match(/^id:\s*(TASK-\d{8}-\d{6})\s*$/m)?.[1] ?? 'TASK-20260101-000001';
@@ -488,6 +481,7 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
   assert.match(content, /current_step: technical-design/);
   assert.match(content, /`plan\.md`/);
+  assert.deepEqual(parseArtifactReceipts(content).rows.filter((row) => row.output === 'plan.md').map((row) => row.input), ['analysis.md', 'review-analysis.md']);
 });
 
 test('task-event rejects a different lifecycle start while one execution is open', () => {
@@ -1023,7 +1017,7 @@ test('dry-run returns planned without changing task bytes for start and completi
   const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan'), '--dry-run']);
   const completedResult = JSON.parse(completed.stdout);
   assert.equal(completedResult.status, 'planned');
-  assert.equal(completedResult.operations.length, 4);
+  assert.equal(completedResult.operations.length, 5);
   assert.deepEqual(fs.readFileSync(f.file), beforeCompletion);
 });
 
@@ -1055,7 +1049,7 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
 
 test('task-event timestamps keep an ASCII offset in negative-offset timezones', () => {
   const f = fixture();
-  const env = { ...process.env, TZ: 'America/Los_Angeles' };
+  const env = { ...sandboxControlSafeEnv(), TZ: 'America/Los_Angeles' };
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1'], env);
   assert.equal(started.status, 0, started.stderr);
   assert.match(JSON.parse(started.stdout).timestamp, /-\d{2}:\d{2}$/);
@@ -1201,7 +1195,192 @@ test('source completion records resumable invalidation and lifecycle starts reco
   assert.equal(reconciled.document.targets.every((target) => target.status === 'completed'), true);
 });
 
-test('late qualification graph fallback records upstream-replaced reason', () => {
+test('source replacement distinguishes same-hash receipt inputs and reconciles both edges', () => {
+  const f = fixture('code');
+  try {
+    const analysisPath = path.join(f.dir, 'analysis.md');
+    fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), fs.readFileSync(analysisPath));
+    for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+      fs.writeFileSync(path.join(f.dir, name), `# ${name}\n`);
+    }
+    const analysisSha = sha256File(analysisPath);
+    addReceipt(f.file, { event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'review-analysis.md', inputSha256: analysisSha, completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'code.completed', output: 'code.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'review-code.completed', output: 'review-code.md', input: 'code.md', inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    const previousFact = {
+      event: 'analysis.completed', output: 'analysis.md', outputSha256: analysisSha,
+      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:analysis-r1`, result: '{}'
+    };
+    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousFact])}'\n`));
+
+    const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:same-hash-receipts`, '--reason-code', 'new-requirement']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), localArtifact('analysis'));
+    const completed = run(f.root, [
+      f.id, 'analyze.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:same-hash-receipts`, '--reason-code', 'new-requirement',
+      '--artifact', 'analysis-r2.md', ...completionDigestArgs(f.dir, 'analysis-r2.md', 'analysis')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(invalidation.ok, true);
+    if (!invalidation.ok) return;
+    const planReceiptTargets = invalidation.document.targets.filter((target) => target.targetKind === 'receipt' && target.targetArtifact === 'plan.md');
+    assert.deepEqual(planReceiptTargets.map((target) => target.targetInput).sort(), ['analysis.md', 'review-analysis.md']);
+    assert.equal(new Set(planReceiptTargets.map((target) => target.targetId)).size, 2);
+
+    const reconcile = run(f.root, [f.id, 'review-analysis.started', '--agent', 'codex']);
+    assert.equal(reconcile.status, 0, reconcile.stdout || reconcile.stderr);
+    const reconciled = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(reconciled.ok, true);
+    if (!reconciled.ok) return;
+    assert.equal(reconciled.document.targets.every((target) => target.status === 'completed'), true);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('source replacement uses static downstream invalidation when receipt graph has a disconnected cycle', () => {
+  const f = fixture('technical-design');
+  try {
+    for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+      fs.writeFileSync(path.join(f.dir, name), name === 'plan.md' ? '# Plan\n' : `# ${name}\n`);
+    }
+    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'analysis.md', inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'code.completed', output: 'code.md', input: 'review-code.md', inputSha256: sha256File(path.join(f.dir, 'review-code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'review-code.completed', output: 'review-code.md', input: 'code.md', inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    const previousFact = {
+      event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(path.join(f.dir, 'plan.md')),
+      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:plan-r1`, result: '{}'
+    };
+    const task = fs.readFileSync(f.file, 'utf8');
+    fs.writeFileSync(f.file, task.replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousFact])}'\n`));
+
+    const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:plan-r2`, '--reason-code', 'new-requirement']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
+    const completed = run(f.root, [
+      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:plan-r2`, '--reason-code', 'new-requirement',
+      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(invalidation.ok, true);
+    if (!invalidation.ok) return;
+    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'code.md'), true);
+    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'review-code.md'), true);
+    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'upstream-replaced'), true);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('source replacement uses static downstream invalidation when the prior output identity is unverified', () => {
+  const f = fixture('technical-design');
+  try {
+    for (const name of ['plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+      fs.writeFileSync(path.join(f.dir, name), name === 'plan.md' ? '# Plan\n' : `# ${name}\n`);
+    }
+    addReceipt(f.file, { event: 'plan.completed', output: 'plan.md', input: 'analysis.md', inputSha256: sha256File(path.join(f.dir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'code.completed', output: 'code.md', input: 'plan.md', inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    addReceipt(f.file, { event: 'review-code.completed', output: 'review-code.md', input: 'code.md', inputSha256: sha256File(path.join(f.dir, 'code.md')), completedAt: '2026-01-01 00:00:00+00:00' });
+    const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:unverified-source`, '--reason-code', 'new-requirement']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
+    const completed = run(f.root, [
+      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:unverified-source`, '--reason-code', 'new-requirement',
+      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(invalidation.ok, true);
+    if (!invalidation.ok) return;
+    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'code.md'), true);
+    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'upstream-replaced'), true);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('qualification evidence gaps use the full lifecycle fallback for plan replacement', () => {
+  const f = fixture('technical-design');
+  try {
+    enableQualification(f.file);
+    fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+    fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+    fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+    fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+    fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
+    for (const [event, output, input] of [
+      ['review-analysis.completed', 'review-analysis.md', 'analysis.md'],
+      ['plan.completed', 'plan.md', 'analysis.md'],
+      ['plan.completed', 'plan.md', 'review-analysis.md'],
+      ['review-plan.completed', 'review-plan.md', 'plan.md'],
+      ['code.completed', 'code.md', 'plan.md'],
+      ['code.completed', 'code.md', 'review-plan.md'],
+      ['review-code.completed', 'review-code.md', 'code.md'],
+      ['review-code.completed', 'review-code.md', 'review-plan.md']
+    ] as const) addReceipt(f.file, {
+      event, output, input, inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-01 00:00:00+00:00'
+    });
+    const previousPlanFact = {
+      event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(path.join(f.dir, 'plan.md')),
+      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:plan-r1`, result: '{}'
+    };
+    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousPlanFact])}'\n`));
+
+    const started = run(f.root, [
+      f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+      '--request-id', `${f.id}:qualification-gap-plan-r2`, '--reason-code', 'new-requirement'
+    ]);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('Keep recovery bounded', 'Keep recovery auditable'));
+    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
+    const completed = run(f.root, [
+      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model',
+      '--request-id', `${f.id}:qualification-gap-plan-r2`, '--reason-code', 'new-requirement',
+      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(invalidation.ok, true);
+    if (!invalidation.ok) return;
+    const invalidatedArtifacts = new Set(invalidation.document.targets
+      .filter((target) => target.targetKind === 'artifact')
+      .map((target) => target.targetArtifact));
+    for (const name of ['analysis.md', 'review-analysis.md', 'plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+      assert.equal(invalidatedArtifacts.has(name), true, `${name} should be conservatively invalidated`);
+    }
+    assert.equal(invalidatedArtifacts.has('plan-r2.md'), false);
+    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'qualification-changed'), true);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('code completion rejects a missing lifecycle input freeze without writing completion facts or receipts', () => {
+  const f = fixture('code');
+  try {
+    fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+    fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+    addReceipt(f.file, {
+      event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+      inputSha256: sha256File(path.join(f.dir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+    });
+    const started = run(f.root, [f.id, 'code.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:missing-freeze`, '--reason-code', 'user-request']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^lifecycle_input_relations:.*\n/m, ''));
+    const before = fs.readFileSync(f.file, 'utf8');
+    fs.writeFileSync(path.join(f.dir, 'code.md'), codeReport());
+    const completed = run(f.root, [
+      f.id, 'code.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:missing-freeze`, '--reason-code', 'user-request',
+      '--artifact', 'code.md', '--files-modified', '0', '--tests-passed', '0', ...completionDigestArgs(f.dir, 'code.md', 'code')
+    ]);
+    assert.notEqual(completed.status, 0);
+    assert.match(completed.stdout, /lifecycle input context|frozen lifecycle input/i);
+    const after = fs.readFileSync(f.file, 'utf8');
+    assert.equal(after.includes('code.completed'), before.includes('code.completed'));
+    assert.doesNotMatch(after, /\| code\.completed \| code\.md \|/);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('candidate qualification changes trigger the conservative invalidation reason', () => {
   const f = fixture('code');
   enableQualification(f.file);
   fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
@@ -1229,10 +1408,7 @@ test('late qualification graph fallback records upstream-replaced reason', () =>
   assert.equal(started.status, 0, started.stdout || started.stderr);
   fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('| A | Rebuild the earliest stale stage | qualified |', '| A | Rebuild the earliest stale stage | rejected |'));
   const currentTask = fs.readFileSync(f.file, 'utf8');
-  const expected = expectedQualificationRelations(currentTask, 'analysis');
-  assert.equal(expected.ok, true);
-  if (!expected.ok) return;
-  const currentAudit = buildQualificationAudit(currentTask, { upstreamRelations: expected.relations });
+  const currentAudit = buildQualificationAudit(currentTask);
   assert.equal(currentAudit.ok, true);
   if (!currentAudit.ok) return;
   fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), `${localArtifact('analysis')}\n## 资格审计\n\n${renderQualificationAudit(currentAudit.audit)}\n`);
@@ -1245,7 +1421,63 @@ test('late qualification graph fallback records upstream-replaced reason', () =>
   assert.equal(invalidation.ok, true);
   if (!invalidation.ok) return;
   assert.equal(invalidation.document.targets.length > 0, true);
-  assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'upstream-replaced'), true);
+  assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'qualification-changed'), true);
+  assert.equal(invalidation.document.targets.some((target) => target.targetFamily === 'code'), true);
+});
+
+test('pure constraint changes seed receipt invalidation from qualified consumers only', () => {
+  const f = fixture('technical-design');
+  try {
+    enableQualification(f.file);
+    const names = ['analysis.md', 'review-analysis.md', 'plan.md', 'review-plan.md', 'code.md', 'review-code.md'];
+    for (const name of names) {
+      const input = fs.readFileSync(f.file, 'utf8');
+      const usesConstraint = name === 'plan.md' || name === 'review-plan.md';
+      const audit = buildQualificationAudit(input, { constraints: usesConstraint ? ['C-1'] : [] });
+      assert.equal(audit.ok, true);
+      if (!audit.ok) return;
+      const body = name === 'analysis.md' ? FULL_ANALYSIS : name === 'review-analysis.md' ? reviewArtifact('Analysis Review', 'analysis.md')
+        : name === 'plan.md' ? '# Plan\n' : name === 'review-plan.md' ? reviewArtifact('Plan Review', 'plan.md')
+          : name === 'code.md' ? '# Code\n' : reviewCodeArtifact();
+      fs.writeFileSync(path.join(f.dir, name), `${body}\n## 资格审计\n\n${renderQualificationAudit(audit.audit)}\n`);
+    }
+    for (const [event, output, input] of [
+      ['review-analysis.completed', 'review-analysis.md', 'analysis.md'],
+      ['plan.completed', 'plan.md', 'analysis.md'],
+      ['plan.completed', 'plan.md', 'review-analysis.md'],
+      ['review-plan.completed', 'review-plan.md', 'plan.md'],
+      ['code.completed', 'code.md', 'plan.md'],
+      ['code.completed', 'code.md', 'review-plan.md'],
+      ['review-code.completed', 'review-code.md', 'code.md'],
+      ['review-code.completed', 'review-code.md', 'review-plan.md']
+    ] as const) addReceipt(f.file, { event, output, input, inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-01 00:00:00+00:00' });
+    const previousPlanFact = {
+      event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(path.join(f.dir, 'plan.md')),
+      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:plan-r1`, result: '{}'
+    };
+    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousPlanFact])}'\n`));
+
+    const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:constraint-change`, '--reason-code', 'new-requirement']);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    let currentTask = fs.readFileSync(f.file, 'utf8').replace('Keep recovery bounded', 'Keep recovery auditable');
+    fs.writeFileSync(f.file, currentTask);
+    const currentAudit = buildQualificationAudit(currentTask);
+    assert.equal(currentAudit.ok, true);
+    if (!currentAudit.ok) return;
+    const nextPlan = localArtifact('plan').replace('artifact-context:TASK-20260101-000001:plan:plan.md', 'artifact-context:TASK-20260101-000001:plan:plan-r2.md');
+    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), `${nextPlan}\n## 资格审计\n\n${renderQualificationAudit(currentAudit.audit)}\n`);
+    const completed = run(f.root, [
+      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:constraint-change`, '--reason-code', 'new-requirement',
+      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(invalidation.ok, true);
+    if (!invalidation.ok) return;
+    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'code.md'), true);
+    assert.equal(invalidation.document.targets.some((target) => target.targetKind === 'artifact' && target.targetArtifact === 'review-analysis.md'), false);
+    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'qualification-changed'), true);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
 test('standalone started events may skip qualification recovery ordering', () => {
@@ -1951,7 +2183,7 @@ for (const scenario of reviewScenarios) {
   });
 }
 
-test('code completion records corrected counts and deduplicates unchanged results', () => {
+test('code completion keeps its original result counts and permits only exact replay', () => {
   const f = fixture('technical-design-review');
   try {
     fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
@@ -1962,23 +2194,34 @@ test('code completion records corrected counts and deduplicates unchanged result
     });
     const started = run(f.root, [f.id, 'code.started', '--agent', 'codex']);
     assert.equal(started.status, 0, started.stderr || started.stdout);
+    assert.match(fs.readFileSync(f.file, 'utf8'), /^lifecycle_input_relations: /m);
     fs.writeFileSync(path.join(f.dir, 'code.md'), codeReport());
     const args = [f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code.md',
       ...completionDigestArgs(f.dir, 'code.md', 'code')];
-    for (const [files, tests] of [[1, 10], [1, 20], [2, 20]]) {
-      const completedArgs = [...args, '--files-modified', String(files), '--tests-passed', String(tests)];
-      const completed = run(f.root, completedArgs);
-      assert.equal(completed.status, 0, completed.stderr || completed.stdout);
-      assert.equal(JSON.parse(completed.stdout).status, 'applied');
-      const after = fs.readFileSync(f.file, 'utf8');
-      assert.ok(after.includes(`Code implemented, ${files} files modified, ${tests} tests passed → code.md`));
-      const replay = run(f.root, completedArgs);
-      assert.equal(replay.status, 0, replay.stderr || replay.stdout);
-      assert.equal(JSON.parse(replay.stdout).status, 'no-op');
-      assert.equal(fs.readFileSync(f.file, 'utf8'), after);
-    }
+    const completedArgs = [...args, '--files-modified', '1', '--tests-passed', '10'];
+    const completed = run(f.root, completedArgs);
+    assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+    assert.equal(JSON.parse(completed.stdout).status, 'applied');
+    const after = fs.readFileSync(f.file, 'utf8');
+    assert.ok(after.includes('Code implemented, 1 files modified, 10 tests passed → code.md'));
+    const replay = run(f.root, completedArgs);
+    assert.equal(replay.status, 0, replay.stderr || replay.stdout);
+    assert.equal(JSON.parse(replay.stdout).status, 'no-op');
+    assert.equal(fs.readFileSync(f.file, 'utf8'), after);
+    assert.match(after, /lifecycleInputs/);
+    const withoutOptionalReceipt = after.split('\n')
+      .filter((line) => !line.startsWith('| code.completed | code.md | review-plan.md |'))
+      .join('\n');
+    fs.writeFileSync(f.file, withoutOptionalReceipt);
+    const missingOptionalReceipt = run(f.root, completedArgs);
+    assert.notEqual(missingOptionalReceipt.status, 0);
+    assert.match(missingOptionalReceipt.stdout, /receipt set is incomplete|input receipts do not match/i);
+    assert.equal(fs.readFileSync(f.file, 'utf8'), withoutOptionalReceipt);
+    const correctedCounts = run(f.root, [...args, '--files-modified', '2', '--tests-passed', '20']);
+    assert.notEqual(correctedCounts.status, 0);
+    assert.equal(fs.readFileSync(f.file, 'utf8'), withoutOptionalReceipt);
     const notes = fs.readFileSync(f.file, 'utf8').split('\n').filter((line) => line.includes(' — Code implemented,'));
-    assert.equal(notes.length, 3);
+    assert.equal(notes.length, 1);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 

@@ -33,7 +33,7 @@
 
 ## 资格审计复核
 
-> 按 `.agents/rules/decision-qualification.md` 复核：约束依赖、候选资格、分类结果、上游关系和依赖快照五张表。
+> 仅当本阶段实际复核了候选资格、约束依赖或人工裁决资格时填写本节，并按 `.agents/rules/decision-qualification.md` 完整复核三张决策表和资格快照；否则删除整个审计段。
 
 ### 约束依赖
 | constraint_id | constraint_digest | role | evidence |
@@ -47,13 +47,9 @@
 | decision_id | classification | evidence |
 | --- | --- | --- |
 
-### 上游关系
-| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
-| --- | --- | --- | --- | --- |
-
-### 依赖快照
-| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
-| --- | --- | --- |
+### 资格快照
+| task_input_digest | non_constraint_input_digest |
+| --- | --- |
 
 ## 检视覆盖声明
 

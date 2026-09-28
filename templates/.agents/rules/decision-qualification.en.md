@@ -6,7 +6,8 @@ Any analysis, plan, implementation, or review that decides whether a human decis
 
 - The `### Constraints` and `### Candidate and Rejected Options` tables in `task.md` are the only constraint and candidate fact source.
 - The constraint table uses `constraint_id`, `statement`, `status`, `authority`, `source`, `evidence`, `derived_from`, and `approval_evidence`; the candidate table uses `candidate_id`, `statement`, `status`, `constraint_ids`, `impact`, and `evidence`.
-- All six artifact families must include `## Qualification Audit` with actual constraint dependencies, candidate qualification, classification results, upstream relations, and a dependency snapshot. Each upstream relation records family, file name, round, and SHA-256.
+- Qualification audits are optional in all six lifecycle artifact families. When `## Qualification Audit` is present, it must contain three decision tables (constraint dependencies, candidate qualification, classification results) and one snapshot row (`task_input_digest`, `non_constraint_input_digest`). Candidate qualification must cover the complete candidate set in the task.
+- Lifecycle input relationships belong in the `Artifact Lifecycle Receipts` section of `task.md`. Freeze each stage's actual artifact inputs and SHA-256 values at stage start, then verify and record each input edge at completion. Do not duplicate lifecycle edges in qualification audits.
 
 ## Status and confirmation
 
@@ -17,6 +18,6 @@ Any analysis, plan, implementation, or review that decides whether a human decis
 
 ## Invalidation and review
 
-When a constraint changes, only artifacts declaring the affected `C-N` can be direct invalidation seeds; the change then follows the real downstream closure. All six families, including reviews, are symmetric. If snapshots, relations, or change classification cannot prove a pure constraint change, use the existing full invalidation path. The newly completed source artifact, its receipt, and its derived snapshot are excluded from the old target graph.
+When a lifecycle artifact is replaced, start from the old artifact and follow verified input edges in the task receipts to find and invalidate every downstream consumer. Exclude the new artifact from the old graph. If any relation is missing, identity or SHA-256 does not match, or the graph cannot be verified, use the existing static downstream invalidation scope.
 
-Missing or unknown references, digest mismatches, dangling relations, and cycles fail closed. Formatting-only changes must not change semantic digests; changes to meaning, provenance, status, candidates, or upstream identity require a new audit.
+When a qualification audit is present, missing or unknown references and digest mismatches block finalization. Audits in the old format with an upstream-relations table must be regenerated in the current format. Formatting-only changes must not change semantic digests; changes to meaning, provenance, status, or candidates require a new audit.

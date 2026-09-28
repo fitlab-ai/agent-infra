@@ -7,24 +7,30 @@ import { extractSection, findSectionHeading, parseTable } from './sections.ts';
 const RECEIPT_SECTION_ALIASES = ['产物生命周期收据', 'Artifact Lifecycle Receipts'] as const;
 const RECEIPT_COLUMNS = ['event', 'output', 'input', 'input_sha256', 'completed_at'] as const;
 const RECEIPT_EVENTS = new Set([
+  'analysis.completed',
+  'plan.completed',
   'review-analysis.completed',
   'review-plan.completed',
+  'code.completed',
   'review-code.completed',
-  'code.completed'
 ]);
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const RECEIPT_SHAPES = {
+  'analysis.completed': { output: 'analysis', input: 'review-analysis' },
+  'plan.completed': { output: 'plan', input: 'analysis' },
   'review-analysis.completed': { output: 'review-analysis', input: 'analysis' },
   'review-plan.completed': { output: 'review-plan', input: 'plan' },
-  'review-code.completed': { output: 'review-code', input: 'code' },
-  'code.completed': { output: 'code', input: 'plan' }
+  'code.completed': { output: 'code', input: 'plan' },
+  'review-code.completed': { output: 'review-code', input: 'code' }
 } as const;
 
 type ArtifactReceiptEvent =
+  | 'analysis.completed'
+  | 'plan.completed'
   | 'review-analysis.completed'
   | 'review-plan.completed'
-  | 'review-code.completed'
-  | 'code.completed';
+  | 'code.completed'
+  | 'review-code.completed';
 type ArtifactReceipt = {
   event: ArtifactReceiptEvent;
   output: string;
@@ -65,8 +71,16 @@ function validateReceiptShape(event: ArtifactReceiptEvent, output: string, input
   if (!outputIdentity || !inputIdentity) throw new ArtifactReceiptError(`receipt artifact identity is invalid: ${output} -> ${input}`);
   const shape = RECEIPT_SHAPES[event];
   const inputMatches = event === 'code.completed'
-    ? inputIdentity.family === 'analysis' || inputIdentity.family === 'plan'
-    : inputIdentity.family === shape.input;
+    ? inputIdentity.family === 'analysis' || inputIdentity.family === 'plan' || inputIdentity.family === 'review-analysis' || inputIdentity.family === 'review-plan' || inputIdentity.family === 'review-code'
+    : event === 'plan.completed'
+      ? inputIdentity.family === 'analysis' || inputIdentity.family === 'review-analysis' || inputIdentity.family === 'review-plan'
+      : event === 'analysis.completed'
+        ? inputIdentity.family === 'review-analysis'
+        : event === 'review-plan.completed'
+          ? inputIdentity.family === 'plan' || inputIdentity.family === 'review-analysis'
+          : event === 'review-code.completed'
+            ? inputIdentity.family === 'code' || inputIdentity.family === 'plan' || inputIdentity.family === 'review-plan'
+        : inputIdentity.family === shape.input;
   if (outputIdentity.family !== shape.output || !inputMatches) {
     throw new ArtifactReceiptError(`receipt event '${event}' does not match ${output} -> ${input}`);
   }
@@ -81,7 +95,9 @@ function parseArtifactReceipts(content: string): ArtifactReceiptParseResult {
     table = parseTable(content, {
       sectionAliases: [...RECEIPT_SECTION_ALIASES],
       columns: [...RECEIPT_COLUMNS],
-      keyColumn: 'output'
+      // A completed artifact can have multiple lifecycle inputs. Pair
+      // uniqueness is checked below because the table parser supports one key.
+      keyColumn: null
     });
   } catch (error) {
     throw new ArtifactReceiptError(error instanceof Error ? error.message : String(error));
@@ -109,15 +125,31 @@ function parseArtifactReceipts(content: string): ArtifactReceiptParseResult {
       completedAt
     };
   });
+  const edges = new Set<string>();
+  for (const row of rows) {
+    const edge = `${row.output}\0${row.input}`;
+    if (edges.has(edge)) throw new ArtifactReceiptError(`duplicate receipt edge '${row.output}' <- '${row.input}'`);
+    edges.add(edge);
+  }
   return { present: true, rows };
 }
 
+function receiptsForOutput(content: string, output: string): readonly ArtifactReceipt[] {
+  return parseArtifactReceipts(content).rows.filter((row) => row.output === output);
+}
+
 function receiptForOutput(content: string, output: string): ArtifactReceipt | null {
-  const parsed = parseArtifactReceipts(content);
-  return parsed.rows.find((row) => row.output === output) ?? null;
+  return receiptsForOutput(content, output)[0] ?? null;
 }
 
 function upsertArtifactReceipt(content: string, receipt: ArtifactReceipt): ReceiptSectionMutation {
+  return upsertArtifactReceipts(content, [receipt]);
+}
+
+function upsertArtifactReceipts(content: string, receiptsToAdd: readonly ArtifactReceipt[]): ReceiptSectionMutation {
+  if (receiptsToAdd.length === 0) throw new ArtifactReceiptError('at least one receipt is required');
+  const additions = new Map<string, ArtifactReceipt>();
+  for (const receipt of receiptsToAdd) {
   if (!RECEIPT_EVENTS.has(receipt.event)) throw new ArtifactReceiptError(`unknown receipt event '${receipt.event}'`);
   if (!receipt.output || !receipt.input) throw new ArtifactReceiptError('receipt output and input are required');
   validateReceiptShape(receipt.event, receipt.output, receipt.input);
@@ -126,12 +158,18 @@ function upsertArtifactReceipt(content: string, receipt: ArtifactReceipt): Recei
     throw new ArtifactReceiptError(`receipt completion time for '${receipt.output}' is invalid`);
   }
 
-  const existing = parseArtifactReceipts(content).rows;
-  const previous = existing.find((row) => row.output === receipt.output);
-  if (previous && JSON.stringify(previous) !== JSON.stringify(receipt)) {
-    throw new ArtifactReceiptError(`receipt for '${receipt.output}' already exists with different evidence`);
+    const key = `${receipt.output}\0${receipt.input}`;
+    const duplicate = additions.get(key);
+    if (duplicate && JSON.stringify(duplicate) !== JSON.stringify(receipt)) throw new ArtifactReceiptError(`receipt for '${receipt.output}' from '${receipt.input}' has conflicting evidence`);
+    additions.set(key, receipt);
   }
-  const rows = previous ? existing : [...existing, receipt];
+  const existing = parseArtifactReceipts(content).rows;
+  for (const receipt of additions.values()) {
+    const previous = existing.find((row) => row.output === receipt.output && row.input === receipt.input);
+    if (previous && JSON.stringify(previous) !== JSON.stringify(receipt)) throw new ArtifactReceiptError(`receipt for '${receipt.output}' from '${receipt.input}' already exists with different evidence`);
+  }
+  const rows = [...existing];
+  for (const receipt of additions.values()) if (!rows.some((row) => row.output === receipt.output && row.input === receipt.input)) rows.push(receipt);
   const heading = findSectionHeading(content, [...RECEIPT_SECTION_ALIASES]);
   const body = [
     `| ${RECEIPT_COLUMNS.join(' | ')} |`,
@@ -146,8 +184,10 @@ export {
   RECEIPT_SECTION_ALIASES,
   parseArtifactReceipts,
   receiptForOutput,
+  receiptsForOutput,
   sha256Bytes,
   sha256File,
-  upsertArtifactReceipt
+  upsertArtifactReceipt,
+  upsertArtifactReceipts
 };
 export type { ArtifactReceipt, ArtifactReceiptEvent, ArtifactReceiptParseResult, ReceiptSectionMutation };

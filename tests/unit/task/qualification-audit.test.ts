@@ -9,7 +9,6 @@ import {
   parseQualificationAudit,
   parseTaskQualification,
   renderQualificationAudit,
-  upstreamArtifactDigest,
   validateQualificationAudit
 } from '../../../lib/task/qualification-audit.ts';
 
@@ -102,11 +101,7 @@ test('qualification audit round-trips and rejects stale or unknown dependencies'
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   const built = buildQualificationAudit(taskContent(), {
-    classifications: [{ decisionId: 'HD-1', classification: 'deterministic', evidence: 'plan.md#HD-1' }],
-    upstreamRelations: [{
-      upstreamFamily: 'review-plan', upstreamArtifact: 'review-plan.md', upstreamRound: 1,
-      upstreamSha256: 'a'.repeat(64), relation: 'reviewed-input'
-    }]
+    classifications: [{ decisionId: 'HD-1', classification: 'deterministic', evidence: 'plan.md#HD-1' }]
   });
   assert.equal(built.ok, true);
   if (!built.ok) return;
@@ -114,8 +109,7 @@ test('qualification audit round-trips and rejects stale or unknown dependencies'
   const audit = parseQualificationAudit(`## Qualification Audit\n\n${rendered}`);
   assert.equal(audit.ok, true);
   if (!audit.ok) return;
-  assert.equal(audit.audit.upstreamRelations[0]?.upstreamArtifact, 'review-plan.md');
-  assert.equal(audit.audit.snapshot?.upstreamArtifactDigest, upstreamArtifactDigest(audit.audit.upstreamRelations));
+  assert.equal(audit.audit.snapshot?.taskInputDigest, parsed.qualification.taskInputDigest);
 
   const valid = validateQualificationAudit(taskContent(), `## Qualification Audit\n\n${rendered}`, { family: 'code', artifact: 'code.md', require: true });
   assert.equal(valid.ok, true);
@@ -150,21 +144,13 @@ test('qualification audit rejects candidate snapshots that diverge from task inp
   if (!result.ok) assert.equal(result.code, 'QUALIFICATION_CANDIDATE_MISMATCH');
 });
 
-test('qualification audit requires the exact started upstream relations', () => {
-  const expected = [{
-    upstreamFamily: 'plan' as const, upstreamArtifact: 'plan.md', upstreamRound: 1,
-    upstreamSha256: 'a'.repeat(64), relation: 'required-input' as const
-  }];
+test('old relation-table audits are rejected and absent audits remain optional', () => {
   const built = buildQualificationAudit(taskContent());
   assert.equal(built.ok, true);
   if (!built.ok) return;
-  const result = validateQualificationAudit(
-    taskContent(),
-    `## Qualification Audit\n\n${renderQualificationAudit(built.audit)}`,
-    { family: 'code', artifact: 'code.md', require: true, expectedUpstreamRelations: expected }
-  );
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.code, 'QUALIFICATION_UPSTREAM_RELATION_MISMATCH');
+  const old = `## Qualification Audit\n\n${renderQualificationAudit(built.audit)}\n\n### Upstream Relations\n\n| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |\n| --- | --- | --- | --- | --- |\n`;
+  assert.equal(parseQualificationAudit(old).ok, false);
+  assert.equal(validateQualificationAudit(taskContent(), '# Artifact\n').ok, true);
 });
 
 test('legacy task input remains explicitly unconfigured until migrated', () => {

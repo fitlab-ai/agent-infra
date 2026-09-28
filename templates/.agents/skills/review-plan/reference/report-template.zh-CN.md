@@ -26,7 +26,7 @@
 
 ## 资格审计复核
 
-> 按 `.agents/rules/decision-qualification.md` 复核：约束依赖、候选资格、分类结果、上游关系和依赖快照五张表。
+> 仅当本阶段实际复核了候选资格、约束依赖或人工裁决资格时填写本节，并按 `.agents/rules/decision-qualification.md` 完整复核三张决策表和资格快照；否则删除整个审计段。
 
 ### 约束依赖
 | constraint_id | constraint_digest | role | evidence |
@@ -40,13 +40,9 @@
 | decision_id | classification | evidence |
 | --- | --- | --- |
 
-### 上游关系
-| upstream_family | upstream_artifact | upstream_round | upstream_sha256 | relation |
-| --- | --- | --- | --- | --- |
-
-### 依赖快照
-| task_input_digest | non_constraint_input_digest | upstream_artifact_digest |
-| --- | --- | --- |
+### 资格快照
+| task_input_digest | non_constraint_input_digest |
+| --- | --- |
 
 ## 检视覆盖声明
 
@@ -66,7 +62,7 @@
 
 > 场景 A（`ordinary`）：保留上表，记录 `Mini-ATAM: not-applicable` 及可复核理由，并删除场景 B 的表格。
 >
-> 场景 B（`architecture-significant`）：保留上表和以下五张表，并删除场景 A 的说明。
+> 场景 B（`architecture-significant`）：保留上表和以下架构评估表，并删除场景 A 的说明。
 
 | quality_scenario_id | source_id | business_driver | quality_attribute | priority | stimulus | context | expected_response | measure | result_or_gap |
 |---------------------|-----------|-----------------|-------------------|----------|----------|---------|-------------------|---------|---------------|

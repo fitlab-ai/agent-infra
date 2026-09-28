@@ -95,7 +95,8 @@ export function readTaskFinalizationHandoff(
       try {
         const current = fs.lstatSync(file);
         if (current.isFile() && !current.isSymbolicLink()
-          && current.dev === initial.dev && current.ino === initial.ino) fs.unlinkSync(file);
+          && current.dev === initial.dev && current.ino === initial.ino
+          && current.birthtimeMs === initial.birthtimeMs) fs.unlinkSync(file);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }

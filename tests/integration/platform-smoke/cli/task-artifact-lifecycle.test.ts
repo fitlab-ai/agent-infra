@@ -319,10 +319,11 @@ test('artifact context accepts available inputs without qualification authorizat
   assert.equal(required.status, 'failed');
   assert.equal(required.error?.code, 'LIFECYCLE_PATH_INVALID');
 
+
   writeQualifiedArtifact(f, 'analysis.md');
   const planRecovery = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
   assert.equal(planRecovery.status, 'ready');
-  assert.deepEqual(planRecovery.inputs.map((item) => item.name), ['analysis.md', 'review-plan.md']);
+  assert.deepEqual(planRecovery.inputs.map((item) => item.name), ['analysis.md', 'review-analysis.md', 'review-plan.md']);
 });
 
 test('artifact context treats qualification data as context outside analysis and plan', () => {

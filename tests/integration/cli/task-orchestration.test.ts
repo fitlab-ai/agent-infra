@@ -476,7 +476,7 @@ test('task-orchestration CLI ignores qualification diagnostics, preserves fixed 
   writeQualificationFixture(qualification.dir);
   const planPath = path.join(qualification.dir, 'plan.md');
   fs.writeFileSync(planPath, fs.readFileSync(planPath, 'utf8').replace(
-    /(?<=\| task_input_digest \| non_constraint_input_digest \| upstream_artifact_digest \|\n\| --- \| --- \| --- \|\n\| )[a-f0-9]{64}/,
+    /(?<=\| task_input_digest \| non_constraint_input_digest \|\n\| --- \| --- \|\n\| )[a-f0-9]{64}/,
     '0'.repeat(64)
   ));
   const qualificationBefore = persistedArtifactState(qualification.dir);
