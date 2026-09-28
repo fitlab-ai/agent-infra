@@ -68,9 +68,9 @@ Next step - commit or push the code:
 {next-step-commands}
 ```
 
-#### Branch A2: Create a Pull Request
+#### Branch A2: Create a Pull Request (push the reviewed commit if needed)
 
-Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`.
+The `create-pr` skill delivers and verifies the reviewed task branch (pushing the reviewed checkpoint when necessary) before creating or reusing a PR. This does not create a new code commit. Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`.
 
 ```text
 Next step - create a Pull Request:

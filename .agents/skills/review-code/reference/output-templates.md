@@ -68,9 +68,9 @@
 {next-step-commands}
 ```
 
-#### 场景 A2：创建 Pull Request
+#### 场景 A2：创建 Pull Request（必要时推送已审查提交）
 
-使用 `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+`create-pr` 会先交付并核验已审查的任务分支（必要时推送已审查 checkpoint），再创建或复用 PR。该推送不会创建新的代码提交。使用 `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
 ```text
 下一步 - 创建 Pull Request：
