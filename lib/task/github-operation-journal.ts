@@ -19,6 +19,7 @@ type GithubIssueMetadataIntent = Readonly<{
   inLabels?: 'from-diff' | 'none';
   base?: string;
   fromDiffFiles?: readonly string[];
+  inLabelMappingDigest?: string;
   state?: 'open' | 'closed';
   closeReason?: 'completed' | 'not_planned';
 }>;
@@ -105,6 +106,7 @@ function parseJournal(file: string, taskId: string): GithubOperationJournal {
           || (item.issueMetadata.base !== undefined && (typeof item.issueMetadata.base !== 'string' || !item.issueMetadata.base.trim()))
           || (item.issueMetadata.fromDiffFiles !== undefined && (!Array.isArray(item.issueMetadata.fromDiffFiles)
             || item.issueMetadata.fromDiffFiles.some((file: unknown) => typeof file !== 'string')))
+          || (item.issueMetadata.inLabelMappingDigest !== undefined && !/^[a-f0-9]{64}$/u.test(item.issueMetadata.inLabelMappingDigest))
           || (item.issueMetadata.state !== undefined && !['open', 'closed'].includes(item.issueMetadata.state))
           || (item.issueMetadata.closeReason !== undefined && !['completed', 'not_planned'].includes(item.issueMetadata.closeReason))
           || (!item.issueMetadata.requirements && !item.issueMetadata.issueType && !item.issueMetadata.fields

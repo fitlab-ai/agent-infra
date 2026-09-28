@@ -5,10 +5,21 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { inspectGithubCommentOperation } from '../../../lib/platform/issue-comments.ts';
-import { recoverGithubOperations } from '../../../lib/task/github-operation-recovery.ts';
+import { labelsMatchOwnedPrefix, recoverGithubOperations } from '../../../lib/task/github-operation-recovery.ts';
 import { readGithubOperationJournal, recordGithubOperation } from '../../../lib/task/github-operation-journal.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
+
+test('Issue metadata recovery compares each label operation by its owned prefix', () => {
+  const finalLabels = ['in: core', 'status: cancelled', 'type: bug'];
+  const statusPlan = ['in: old', 'status: cancelled', 'type: bug'];
+  const inPlan = ['in: core', 'status: open', 'type: bug'];
+
+  assert.equal(labelsMatchOwnedPrefix(finalLabels, statusPlan, 'status:'), true);
+  assert.equal(labelsMatchOwnedPrefix(finalLabels, inPlan, 'in:'), true);
+  assert.equal(labelsMatchOwnedPrefix(finalLabels, statusPlan, 'in:'), false);
+  assert.equal(labelsMatchOwnedPrefix(finalLabels, inPlan, 'status:'), false);
+});
 
 function fixture() {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'github-operation-recovery-'));

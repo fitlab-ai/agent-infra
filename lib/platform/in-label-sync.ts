@@ -1,4 +1,5 @@
 import { computeInLabels } from './metadata-labels.ts';
+import { createHash } from 'node:crypto';
 import type { PlatformError } from './types.ts';
 
 type InLabelPlan = {
@@ -66,6 +67,16 @@ function validateInLabelMapping(value: unknown): { ok: true; value: Record<strin
     normalized[name] = rawPrefixes.map((prefix) => prefix.trim());
   }
   return { ok: true, value: normalized };
+}
+
+function inLabelMappingDigest(value: unknown): { ok: true; digest: string } | { ok: false; error: InLabelValidationError } {
+  const mapping = validateInLabelMapping(value);
+  if (!mapping.ok) return mapping;
+  const canonical = Object.fromEntries(Object.keys(mapping.value).sort().map((name) => [
+    name,
+    [...new Set(mapping.value[name]!)].sort()
+  ]));
+  return { ok: true, digest: createHash('sha256').update(JSON.stringify(canonical)).digest('hex') };
 }
 
 function repositoryLabelPages(value: unknown): unknown[][] | null {
@@ -197,6 +208,7 @@ export {
   extractRepositoryLabelNames,
   flattenPages,
   inLabels,
+  inLabelMappingDigest,
   labelDelta,
   mergeInLabels,
   planInLabelUpdate,

@@ -191,6 +191,31 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
     assert.notDeepEqual(retargeted?.issueMetadata?.fromDiffFiles, operation.issueMetadata?.fromDiffFiles, JSON.stringify(recoveredJournal));
     assert.equal(retargeted?.state, 'succeeded');
 
+    assert.ok(retargeted);
+    recordGithubOperation({ taskRef: taskId, cwd: root, ...retargeted, state: 'unknown' });
+    assert.equal(readGithubOperationJournal(taskId, root).operations.find((item) => item.id === retargeted.id)?.state, 'unknown');
+    const mappingFilesBefore = execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort();
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
+      platform: { type: 'github' }, labels: { in: { cli: ['lib/'] } }
+    }));
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).labels.in, { cli: ['lib/'] });
+    const mappingRecovery = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'required'], { cwd: root, env });
+    assert.equal(mappingRecovery.status, 0, mappingRecovery.stderr || mappingRecovery.stdout);
+    const mappingJournal = readGithubOperationJournal(taskId, root).operations;
+    const staleMapping = mappingJournal.find((item) => item.id === retargeted.id);
+    const currentMapping = mappingJournal.find((item) => item.id !== retargeted.id
+      && item.issueMetadata?.inLabels === 'from-diff'
+      && JSON.stringify(item.issueMetadata.fromDiffFiles) === JSON.stringify(retargeted.issueMetadata?.fromDiffFiles));
+    assert.equal(staleMapping?.state, 'failed', JSON.stringify({ mappingRecovery: mappingRecovery.stdout, mappingJournal }));
+    assert.equal(staleMapping?.lastCode, 'GITHUB_OPERATION_SUPERSEDED');
+    assert.ok(currentMapping);
+    assert.notEqual(currentMapping.id, retargeted.id);
+    assert.notEqual(currentMapping.issueMetadata?.inLabelMappingDigest, retargeted.issueMetadata?.inLabelMappingDigest, JSON.stringify({ retargeted, currentMapping }));
+    assert.deepEqual(currentMapping.issueMetadata?.fromDiffFiles, retargeted.issueMetadata?.fromDiffFiles);
+    assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), mappingFilesBefore);
+    assert.equal(currentMapping.state, 'succeeded');
+    assert.deepEqual(JSON.parse(fs.readFileSync(issuePath, 'utf8')).labels, ['in: cli']);
+
     const statusSync = run(['sync', taskId, '--agent', 'codex', '--status', 'none'], { cwd: root, env });
     assert.equal(statusSync.status, 0, statusSync.stderr || statusSync.stdout);
     const statusOperation = readGithubOperationJournal(taskId, root).operations.find((item) => item.issueMetadata?.status === 'none');

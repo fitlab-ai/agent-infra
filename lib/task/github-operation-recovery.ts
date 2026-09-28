@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 
 import { inspectGithubCommentOperation, syncPlatformComment } from '../platform/issue-comments.ts';
 import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
+import { inLabelMappingDigest } from '../platform/in-label-sync.ts';
 import { bindPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
@@ -24,6 +25,11 @@ type RecoveryResult = Readonly<{
   pending: readonly string[];
   error: { code: string; message: string; retryable: boolean } | null;
 }>;
+
+function labelsMatchOwnedPrefix(actual: readonly string[], expected: readonly string[], prefix: 'status:' | 'in:'): boolean {
+  return actual.filter((label) => label.startsWith(prefix)).sort().join('\0')
+    === expected.filter((label) => label.startsWith(prefix)).sort().join('\0');
+}
 
 function result(status: RecoveryResult['status'], recovered: string[], pending: string[], error: RecoveryResult['error'] = null): RecoveryResult {
   return { status, changed: recovered.length > 0, recovered, pending, error };
@@ -67,6 +73,7 @@ function currentIssueMetadataOperation(taskId: string, taskMdPath: string, repoR
   const identity = taskIssueIdentity(frontmatter);
   if (!identity) return null;
   let fromDiffFiles: string[] | undefined;
+  let mappingDigest: string | undefined;
   if (operation.issueMetadata.inLabels === 'from-diff') {
     const taskBase = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
     if (!taskBase || (operation.issueMetadata.base && operation.issueMetadata.base !== taskBase)) return null;
@@ -74,9 +81,17 @@ function currentIssueMetadataOperation(taskId: string, taskMdPath: string, repoR
       fromDiffFiles = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
         cwd: repoRoot, encoding: 'utf8'
       }).trim().split(/\r?\n/).filter(Boolean).sort();
+      const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { labels?: { in?: unknown } };
+      const mapping = inLabelMappingDigest(config.labels?.in);
+      if (!mapping.ok) return null;
+      mappingDigest = mapping.digest;
     } catch { return null; }
   }
-  const currentMetadata = { ...operation.issueMetadata, ...(fromDiffFiles ? { fromDiffFiles } : {}) };
+  const currentMetadata = {
+    ...operation.issueMetadata,
+    ...(fromDiffFiles ? { fromDiffFiles } : {}),
+    ...(mappingDigest ? { inLabelMappingDigest: mappingDigest } : {})
+  };
   const target = JSON.stringify(identity);
   const expectedDigest = createHash('sha256').update(JSON.stringify({
     ...currentMetadata,
@@ -113,7 +128,8 @@ async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof 
   const unconfirmed = sync.operations.some((item) => {
     if (!('value' in item) || item.value === undefined) return false;
     if (item.name === 'labels:status' || item.name === 'labels:in') {
-      return [...issue!.labels].sort().join('\0') !== [...item.value as string[]].sort().join('\0');
+      const prefix = item.name === 'labels:status' ? 'status:' : 'in:';
+      return !labelsMatchOwnedPrefix(issue!.labels, item.value as string[], prefix);
     }
     if (item.name === 'assignees') return [...issue!.assignees].sort().join('\0') !== [...item.value as string[]].sort().join('\0');
     if (item.name === 'milestone') return issue!.milestone !== item.value;
@@ -264,5 +280,5 @@ async function recoverGithubOperations(
   return result(pending.length ? 'blocked' : recovered.length ? 'applied' : 'no-op', recovered, pending, pending.length ? { code: 'GITHUB_OPERATION_RECOVERY_PENDING', message: 'GitHub operations remain pending after the recovery budget', retryable: true } : null);
 }
 
-export { recoverGithubOperations };
+export { labelsMatchOwnedPrefix, recoverGithubOperations };
 export type { RecoveryOptions, RecoveryResult };

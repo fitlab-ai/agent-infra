@@ -25,6 +25,7 @@ import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import {
   labelDelta,
+  inLabelMappingDigest,
   planInLabelUpdate,
   syncLabelDelta,
   validateInLabelMapping,
@@ -638,6 +639,7 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     options.inLabels !== undefined, options.state !== undefined
   ].some(Boolean)) return syncPlatformIssueImpl(taskRef, options);
   let fromDiffFiles: string[] | undefined;
+  let mappingDigest: string | undefined;
   if (options.inLabels === 'from-diff') {
     const taskBase = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
     if (taskBase && (!options.base || options.base === taskBase)) {
@@ -645,6 +647,12 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
         fromDiffFiles = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
           cwd: resolved.repoRoot, encoding: 'utf8'
         }).trim().split(/\r?\n/).filter(Boolean).sort();
+        const config = JSON.parse(fs.readFileSync(path.join(resolved.repoRoot, '.agents', '.airc.json'), 'utf8')) as { labels?: { in?: unknown } };
+        const mapping = inLabelMappingDigest(config.labels?.in);
+        if (!mapping.ok) return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
+          error: { code: mapping.error.code, message: mapping.error.message, retryable: false }
+        });
+        mappingDigest = mapping.digest;
       } catch {
         return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
           error: { code: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE', message: 'Unable to derive the current changed-file set for Issue metadata recovery', retryable: false }
@@ -662,6 +670,7 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     ...(options.inLabels ? { inLabels: options.inLabels } : {}),
     ...(options.base ? { base: options.base } : {}),
     ...(fromDiffFiles ? { fromDiffFiles } : {}),
+    ...(mappingDigest ? { inLabelMappingDigest: mappingDigest } : {}),
     ...(options.state ? { state: options.state } : {}),
     ...(options.closeReason ? { closeReason: options.closeReason } : {})
   };
