@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { inspectGithubCommentOperation } from '../../../lib/platform/issue-comments.ts';
-import { labelsMatchOwnedPrefix, recoverGithubOperations } from '../../../lib/task/github-operation-recovery.ts';
+import { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverGithubOperations } from '../../../lib/task/github-operation-recovery.ts';
 import { readGithubOperationJournal, recordGithubOperation } from '../../../lib/task/github-operation-journal.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -19,6 +19,14 @@ test('Issue metadata recovery compares each label operation by its owned prefix'
   assert.equal(labelsMatchOwnedPrefix(finalLabels, inPlan, 'in:'), true);
   assert.equal(labelsMatchOwnedPrefix(finalLabels, statusPlan, 'in:'), false);
   assert.equal(labelsMatchOwnedPrefix(finalLabels, inPlan, 'status:'), false);
+});
+
+test('Issue metadata recovery confirms requested fields while ignoring unrelated remote fields', () => {
+  const actual = { Priority: 'High', Team: 'Platform' };
+
+  assert.equal(fieldsMatchExpected(actual, { Priority: 'High' }), true);
+  assert.equal(fieldsMatchExpected(actual, { Priority: 'High', Effort: 'M' }), false);
+  assert.equal(fieldsMatchExpected(actual, { Priority: 'Low' }), false);
 });
 
 function fixture() {

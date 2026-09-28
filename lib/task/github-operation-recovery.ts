@@ -31,6 +31,13 @@ function labelsMatchOwnedPrefix(actual: readonly string[], expected: readonly st
     === expected.filter((label) => label.startsWith(prefix)).sort().join('\0');
 }
 
+function fieldsMatchExpected(
+  actual: Readonly<Record<string, string | number | null>>,
+  expected: Readonly<Record<string, string | number | null>>
+): boolean {
+  return Object.entries(expected).every(([name, value]) => actual[name] === value);
+}
+
 function result(status: RecoveryResult['status'], recovered: string[], pending: string[], error: RecoveryResult['error'] = null): RecoveryResult {
   return { status, changed: recovered.length > 0, recovered, pending, error };
 }
@@ -136,7 +143,7 @@ async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof 
     if (item.name === 'requirements') return issue!.body !== item.value;
     if (item.name === 'state') return issue!.state !== item.value;
     if (item.name === 'issue-type') return issue!.issueType !== item.value;
-    if (item.name === 'fields') return JSON.stringify(issue!.fields) !== JSON.stringify(item.value);
+    if (item.name === 'fields') return !fieldsMatchExpected(issue!.fields, item.value as Record<string, string | number | null>);
     return false;
   }) || (metadata.state !== undefined && issue!.state !== metadata.state)
     || (metadata.assignees === 'none' && issue!.assignees.length !== 0)
@@ -280,5 +287,5 @@ async function recoverGithubOperations(
   return result(pending.length ? 'blocked' : recovered.length ? 'applied' : 'no-op', recovered, pending, pending.length ? { code: 'GITHUB_OPERATION_RECOVERY_PENDING', message: 'GitHub operations remain pending after the recovery budget', retryable: true } : null);
 }
 
-export { labelsMatchOwnedPrefix, recoverGithubOperations };
+export { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverGithubOperations };
 export type { RecoveryOptions, RecoveryResult };
