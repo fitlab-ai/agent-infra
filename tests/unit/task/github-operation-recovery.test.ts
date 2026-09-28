@@ -27,7 +27,7 @@ test('recovery supersedes an old comment digest when its task projection changed
     recordGithubOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...first, dependency: 'deferred', state: 'pending' });
     fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
 
-    await recoverGithubOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
+    const recovered = await recoverGithubOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
     const journal = readGithubOperationJournal(TASK_ID, f.repoRoot);
     const stale = journal.operations.find((operation) => operation.id === first.id);
     const current = journal.operations.find((operation) => operation.id !== first.id);
@@ -36,6 +36,26 @@ test('recovery supersedes an old comment digest when its task projection changed
     assert.ok(current);
     assert.notEqual(current.expectedDigest, first.expectedDigest);
     assert.notEqual(current.state, 'succeeded');
+    assert.deepEqual(recovered.pending, [current.id]);
+    assert.equal(recovered.pending.includes(first.id), false);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('PR recovery preserves its typed intent when a replay does not succeed', async () => {
+  const f = fixture();
+  const intent = { action: 'create' as const, baseRef: 'main', headRef: 'feature' };
+  try {
+    const operation = recordGithubOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: `head:feature:base:main`,
+      expectedDigest: 'a'.repeat(64), dependency: 'required', state: 'pending', pullRequest: intent
+    });
+    await recoverGithubOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot });
+    const journal = readGithubOperationJournal(TASK_ID, f.repoRoot);
+    const persisted = journal.operations.find((item) => item.id === operation.id);
+    assert.deepEqual(persisted?.pullRequest, intent);
+    assert.ok(['unknown', 'failed', 'succeeded'].includes(persisted?.state ?? ''));
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

@@ -89,6 +89,11 @@ if (args[0] === "api" && args.includes("--paginate") && args.includes("--slurp")
   process.exit(0);
 }
 
+if (args[0] === "api" && args.includes("--paginate") && args.includes("--slurp") && args.some((arg) => /repos\/[^/]+\/[^/]+\/milestones\?state=open&per_page=100$/.test(arg))) {
+  process.stdout.write(JSON.stringify([[]]));
+  process.exit(0);
+}
+
 if (args[0] === "label" && args[1] === "list") {
   process.stdout.write(JSON.stringify(readJson("GH_FAKE_LABELS_PATH") || []));
   process.exit(0);

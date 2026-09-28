@@ -221,11 +221,13 @@ test('finalization keeps the active task document unchanged when terminal commen
   let commentCalls = 0;
   const diskStates: string[] = [];
   const projectionStates: string[] = [];
+  const taskProjections: string[] = [];
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
     commentCalls += 1;
     diskStates.push(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/^status: (.+)$/m)?.[1] ?? 'missing');
     if (received.kind === 'task' && received.taskProjection) {
       projectionStates.push(received.taskProjection.content.match(/^status: (.+)$/m)?.[1] ?? 'missing');
+      taskProjections.push(received.taskProjection.content);
     }
     return commentCalls === 1
       ? platformResult('blocked', { error: { code: 'NETWORK_ERROR', message: 'temporary', retryable: true } })
@@ -238,8 +240,12 @@ test('finalization keeps the active task document unchanged when terminal commen
     assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/^status: (.+)$/m)?.[1], 'active');
     const completed = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(completed.status, 'completed');
-    assert.deepEqual(diskStates, ['active', 'active']);
-    assert.deepEqual(projectionStates, ['completed', 'completed']);
+    assert.deepEqual(diskStates, ['active', 'active', 'active']);
+    assert.deepEqual(projectionStates, ['completed', 'completed', 'completed']);
+    assert.match(taskProjections[1]!, /NETWORK_ERROR \| open/u);
+    assert.match(taskProjections[2]!, /NETWORK_ERROR \| resolved/u);
+    const completedTask = path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md');
+    assert.equal(taskProjections[2], fs.readFileSync(completedTask, 'utf8'));
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1217,7 +1223,7 @@ test('host finalization retries only the pending terminal steps after a comment 
     assert.equal(first.lifecycle?.status, 'applied');
     assert.equal(first.pendingSteps.includes('task-comment'), true);
     assert.equal(second.status, 'completed');
-    assert.equal(commentCalls, 2);
+    assert.equal(commentCalls, 3);
     assert.equal(verifyCalls, 1);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
     const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
@@ -1280,7 +1286,7 @@ test('host finalization receipt mutations are lock-bound and scope-safe', async 
       (error: any) => error?.code === 'FINALIZATION_SCOPE_INVALID'
     );
     const updated = applyFinalizationReceiptMutation(f.repoRoot, receipt, capability, { scope: 'task-comment', operation: 'succeeded', state: 'done' });
-    assert.equal(updated.taskComment, 'done');
+    assert.equal(updated.taskComment, 'pending');
     const pendingProjection = { ...updated, warningProjection: 'pending' as const };
     fs.writeFileSync(receiptPath, `${JSON.stringify(pendingProjection)}\n`);
     const projectionCapability = createFinalizationCapability(pendingProjection, 'warning-projection');
