@@ -43,7 +43,8 @@ import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts'
 import { recordGithubOperation } from '../task/github-operation-journal.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { IssueSnapshot as ProviderIssueSnapshot, RepositoryMetadataSnapshot } from './provider-contract.ts';
-type IssueResult = PlatformResult & {
+type IssueResult = Omit<PlatformResult, 'operations'> & {
+  operations: PlannedOperation[];
   task: { id: string | null; issueNumber: number | null };
   issue: IssueSnapshot | null;
 };
@@ -631,13 +632,38 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
   }
   catch { return syncPlatformIssueImpl(taskRef, options); }
   const identity = taskIssueIdentity(frontmatter);
-  if (!identity || (!options.requirements && !options.issueType && !options.fields && !options.inLabels)) return syncPlatformIssueImpl(taskRef, options);
+  if (!identity || ![
+    options.requirements, options.issueType, options.fields, options.status !== undefined,
+    options.assignees !== undefined, options.milestone !== undefined,
+    options.inLabels !== undefined, options.state !== undefined
+  ].some(Boolean)) return syncPlatformIssueImpl(taskRef, options);
+  let fromDiffFiles: string[] | undefined;
+  if (options.inLabels === 'from-diff') {
+    const taskBase = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
+    if (taskBase && (!options.base || options.base === taskBase)) {
+      try {
+        fromDiffFiles = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+          cwd: resolved.repoRoot, encoding: 'utf8'
+        }).trim().split(/\r?\n/).filter(Boolean).sort();
+      } catch {
+        return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
+          error: { code: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE', message: 'Unable to derive the current changed-file set for Issue metadata recovery', retryable: false }
+        });
+      }
+    }
+  }
   const issueMetadata = {
     requirements: options.requirements === true,
     issueType: options.issueType === true,
     fields: options.fields === true,
+    ...(options.status !== undefined ? { status: options.status } : {}),
+    ...(options.assignees !== undefined ? { assignees: options.assignees } : {}),
+    ...(options.milestone !== undefined ? { milestone: options.milestone } : {}),
     ...(options.inLabels ? { inLabels: options.inLabels } : {}),
-    ...(options.base ? { base: options.base } : {})
+    ...(options.base ? { base: options.base } : {}),
+    ...(fromDiffFiles ? { fromDiffFiles } : {}),
+    ...(options.state ? { state: options.state } : {}),
+    ...(options.closeReason ? { closeReason: options.closeReason } : {})
   };
   const operation = {
     kind: 'issue-metadata' as const,

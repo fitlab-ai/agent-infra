@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 import { inspectGithubCommentOperation, syncPlatformComment } from '../platform/issue-comments.ts';
 import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
@@ -59,18 +60,30 @@ async function replayComment(taskId: string, taskDir: string, operation: ReturnT
   return platformResult('failed', { error: { code: 'GITHUB_OPERATION_UNSUPPORTED', message: `operation kind '${operation.kind}' has no registered recovery handler`, retryable: false } });
 }
 
-function currentIssueMetadataOperation(taskId: string, taskMdPath: string, operation: ReturnType<typeof readGithubOperationJournal>['operations'][number]) {
+function currentIssueMetadataOperation(taskId: string, taskMdPath: string, repoRoot: string, operation: ReturnType<typeof readGithubOperationJournal>['operations'][number]) {
   if (operation.kind !== 'issue-metadata' || !operation.issueMetadata) return null;
   const content = fs.readFileSync(taskMdPath, 'utf8');
-  const identity = taskIssueIdentity(parseTaskFrontmatter(content));
+  const frontmatter = parseTaskFrontmatter(content);
+  const identity = taskIssueIdentity(frontmatter);
   if (!identity) return null;
+  let fromDiffFiles: string[] | undefined;
+  if (operation.issueMetadata.inLabels === 'from-diff') {
+    const taskBase = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
+    if (!taskBase || (operation.issueMetadata.base && operation.issueMetadata.base !== taskBase)) return null;
+    try {
+      fromDiffFiles = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+        cwd: repoRoot, encoding: 'utf8'
+      }).trim().split(/\r?\n/).filter(Boolean).sort();
+    } catch { return null; }
+  }
+  const currentMetadata = { ...operation.issueMetadata, ...(fromDiffFiles ? { fromDiffFiles } : {}) };
   const target = JSON.stringify(identity);
   const expectedDigest = createHash('sha256').update(JSON.stringify({
-    ...operation.issueMetadata,
+    ...currentMetadata,
     task: taskId,
     taskContent: createHash('sha256').update(content).digest('hex')
   })).digest('hex');
-  return { kind: 'issue-metadata' as const, target, expectedDigest, id: operationId({ kind: 'issue-metadata', target, expectedDigest }) };
+  return { kind: 'issue-metadata' as const, target, expectedDigest, issueMetadata: currentMetadata, id: operationId({ kind: 'issue-metadata', target, expectedDigest }) };
 }
 
 async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof readGithubOperationJournal>['operations'][number], agent: string, cwd: string): Promise<PlatformResult> {
@@ -90,6 +103,32 @@ async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof 
     || !resourceIdentityEquals(after.issue.identity, expectedIdentity)) {
     return platformResult('blocked', { error: after.error ?? { code: 'GITHUB_OPERATION_IDENTITY_MISMATCH', message: 'Issue identity changed during metadata recovery', retryable: false } });
   }
+  const issue = after.issue;
+  const metadata = operation.issueMetadata;
+  const failedOperation = sync.operations.find((item) => item.status === 'failed' || item.status === 'skipped');
+  if (failedOperation) return platformResult('blocked', { error: {
+    code: failedOperation.reasonCode || 'GITHUB_OPERATION_METADATA_UNCONFIRMED',
+    message: `Issue metadata recovery did not confirm operation '${failedOperation.name}'`, retryable: true
+  } });
+  const unconfirmed = sync.operations.some((item) => {
+    if (!('value' in item) || item.value === undefined) return false;
+    if (item.name === 'labels:status' || item.name === 'labels:in') {
+      return [...issue!.labels].sort().join('\0') !== [...item.value as string[]].sort().join('\0');
+    }
+    if (item.name === 'assignees') return [...issue!.assignees].sort().join('\0') !== [...item.value as string[]].sort().join('\0');
+    if (item.name === 'milestone') return issue!.milestone !== item.value;
+    if (item.name === 'requirements') return issue!.body !== item.value;
+    if (item.name === 'state') return issue!.state !== item.value;
+    if (item.name === 'issue-type') return issue!.issueType !== item.value;
+    if (item.name === 'fields') return JSON.stringify(issue!.fields) !== JSON.stringify(item.value);
+    return false;
+  }) || (metadata.state !== undefined && issue!.state !== metadata.state)
+    || (metadata.assignees === 'none' && issue!.assignees.length !== 0)
+    || (metadata.milestone === 'none' && issue!.milestone !== null);
+  if (unconfirmed) return platformResult('blocked', { error: {
+    code: 'GITHUB_OPERATION_METADATA_UNCONFIRMED',
+    message: 'Issue metadata differs from the requested recovery target after reread', retryable: true
+  } });
   return platformResult('no-op', { changed: sync.changed || after.changed });
 }
 
@@ -139,7 +178,7 @@ async function recoverGithubOperations(
     }
     let targetOperation = operation;
     if (operation.kind === 'issue-metadata') {
-      const current = currentIssueMetadataOperation(resolved.taskId, resolved.taskMdPath, operation);
+      const current = currentIssueMetadataOperation(resolved.taskId, resolved.taskMdPath, resolved.repoRoot, operation);
       if (!current) {
         pending.push(operation.id);
         return result('blocked', recovered, pending, { code: 'GITHUB_OPERATION_TARGET_UNAVAILABLE', message: 'Current Issue metadata target cannot be reconstructed safely', retryable: true });
@@ -152,7 +191,7 @@ async function recoverGithubOperations(
           recordGithubOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
             expectedDigest: operation.expectedDigest, issueMetadata: operation.issueMetadata, dependency: operation.dependency,
             state: 'failed', lastCode: 'GITHUB_OPERATION_SUPERSEDED' });
-          targetOperation = { ...operation, expectedDigest: current.expectedDigest, id: current.id };
+          targetOperation = { ...operation, expectedDigest: current.expectedDigest, issueMetadata: current.issueMetadata, id: current.id };
         } catch (error) {
           const value = error as { code?: string; message?: string };
           return result('blocked', recovered, [...pending, operation.id], { code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || String(error), retryable: true });
@@ -204,7 +243,7 @@ async function recoverGithubOperations(
         kind: operation.kind,
         target: operation.target,
         expectedDigest: targetOperation.expectedDigest,
-        ...(operation.issueMetadata ? { issueMetadata: operation.issueMetadata } : {}),
+        ...(targetOperation.issueMetadata ? { issueMetadata: targetOperation.issueMetadata } : {}),
         ...(operation.pullRequest ? { pullRequest: operation.pullRequest } : {}),
         dependency: operation.dependency,
         state: succeeded ? 'succeeded' : remote.status === 'failed' && remote.error?.retryable === false ? 'failed' : 'unknown',

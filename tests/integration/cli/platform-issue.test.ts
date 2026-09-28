@@ -6,14 +6,20 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 
-import { filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
-import { readGithubOperationJournal } from '../../../lib/task/github-operation-journal.ts';
+import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { readGithubOperationJournal, recordGithubOperation } from '../../../lib/task/github-operation-journal.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-issue', ...args], {
     encoding: 'utf8',
     cwd: options.cwd,
     env: gitSafeEnv(options.env)
+  });
+}
+
+function runRecovery(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
+  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-github-recovery', ...args], {
+    encoding: 'utf8', cwd: options.cwd, env: sandboxControlSafeEnv(gitSafeEnv(options.env))
   });
 }
 
@@ -127,22 +133,30 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
       '---', `id: ${taskId}`, 'type: bugfix', 'status: active',
       'platform_issue_identity: \'{"kind":"number","value":7}\'', '---', '', '# Task', ''
     ].join('\n'));
-    execFileSync('git', ['add', '.agents', 'lib']);
+    execFileSync('git', ['add', '.agents']);
     const tree = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
     const commit = execFileSync('git', ['commit-tree', tree, '-m', 'fixture'], { cwd: root, encoding: 'utf8' }).trim();
     execFileSync('git', ['update-ref', 'refs/heads/main', commit], { cwd: root });
+    execFileSync('git', ['add', 'lib/sample.ts'], { cwd: root });
+    const featureTree = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
+    const featureCommit = execFileSync('git', ['commit-tree', featureTree, '-p', commit, '-m', 'feature fixture'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['update-ref', 'refs/heads/feature', featureCommit], { cwd: root });
+    execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/feature'], { cwd: root });
     fs.writeFileSync(path.join(taskDir, 'task.md'), fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8').replace('platform_issue_identity:', 'delivery_base_ref: main\nplatform_issue_identity:'));
     const issuePath = path.join(root, 'issue.json');
+    const labelsPath = path.join(root, 'labels.json');
     const fakeGhPath = path.join(root, 'fake-gh.cjs');
     fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fakeGhPath);
     fs.writeFileSync(issuePath, JSON.stringify({
       number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/fitlab-ai/agent-infra/issues/7',
-      state: 'open', title: 'Issue', body: 'Issue body', labels: [], assignees: [], milestone: null
+      state: 'open', title: 'Issue', body: 'Issue body', labels: ['in: core'], assignees: [], milestone: null
     }));
+    fs.writeFileSync(labelsPath, JSON.stringify([{ name: 'status: blocked' }]));
     const env = {
       AGENT_INFRA_GH_BIN: process.execPath,
       AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fakeGhPath]),
-      GH_FAKE_ISSUE_PATH: issuePath
+      GH_FAKE_ISSUE_PATH: issuePath,
+      GH_FAKE_LABELS_PATH: labelsPath
     };
 
     const dry = run(['sync', taskId, '--agent', 'codex', '--in-labels', 'from-diff', '--base', 'main', '--dry-run'], { cwd: root, env });
@@ -157,6 +171,32 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
     assert.equal(operation?.issueMetadata?.inLabels, 'from-diff');
     assert.equal(operation?.issueMetadata?.base, 'main');
     assert.equal(operation?.state, 'succeeded');
+
+    assert.ok(operation);
+    recordGithubOperation({ taskRef: taskId, cwd: root, ...operation, state: 'unknown' });
+    fs.writeFileSync(path.join(root, 'lib', 'second.ts'), 'export const second = true;\n');
+    execFileSync('git', ['add', 'lib/second.ts'], { cwd: root });
+    const nextTree = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
+    const nextCommit = execFileSync('git', ['commit-tree', nextTree, '-p', featureCommit, '-m', 'second fixture'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['update-ref', 'refs/heads/feature', nextCommit], { cwd: root });
+    execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/feature'], { cwd: root });
+    assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), ['lib/sample.ts', 'lib/second.ts']);
+    const recovered = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'required'], { cwd: root, env });
+    assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
+    const recoveredJournal = readGithubOperationJournal(taskId, root).operations;
+    const superseded = recoveredJournal.find((item) => item.id === operation.id);
+    const retargeted = recoveredJournal.find((item) => item.id !== operation.id && item.issueMetadata?.inLabels === 'from-diff');
+    assert.equal(superseded?.state, 'failed');
+    assert.equal(superseded?.lastCode, 'GITHUB_OPERATION_SUPERSEDED');
+    assert.notDeepEqual(retargeted?.issueMetadata?.fromDiffFiles, operation.issueMetadata?.fromDiffFiles, JSON.stringify(recoveredJournal));
+    assert.equal(retargeted?.state, 'succeeded');
+
+    const statusSync = run(['sync', taskId, '--agent', 'codex', '--status', 'none'], { cwd: root, env });
+    assert.equal(statusSync.status, 0, statusSync.stderr || statusSync.stdout);
+    const statusOperation = readGithubOperationJournal(taskId, root).operations.find((item) => item.issueMetadata?.status === 'none');
+    assert.equal(statusOperation?.kind, 'issue-metadata');
+    assert.equal(statusOperation?.issueMetadata?.requirements, false);
+    assert.equal(statusOperation?.state, 'succeeded');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

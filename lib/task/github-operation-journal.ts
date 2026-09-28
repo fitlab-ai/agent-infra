@@ -13,8 +13,14 @@ type GithubIssueMetadataIntent = Readonly<{
   requirements: boolean;
   issueType: boolean;
   fields: boolean;
+  status?: string;
+  assignees?: 'current' | 'none';
+  milestone?: 'initial' | 'specific' | 'none';
   inLabels?: 'from-diff' | 'none';
   base?: string;
+  fromDiffFiles?: readonly string[];
+  state?: 'open' | 'closed';
+  closeReason?: 'completed' | 'not_planned';
 }>;
 type GithubPullRequestIntent = Readonly<{
   action: 'create' | 'bind' | 'sync';
@@ -92,9 +98,18 @@ function parseJournal(file: string, taskId: string): GithubOperationJournal {
       || (item.kind === 'issue-metadata'
         ? !item.issueMetadata || typeof item.issueMetadata.requirements !== 'boolean'
           || typeof item.issueMetadata.issueType !== 'boolean' || typeof item.issueMetadata.fields !== 'boolean'
+          || (item.issueMetadata.status !== undefined && typeof item.issueMetadata.status !== 'string')
+          || (item.issueMetadata.assignees !== undefined && !['current', 'none'].includes(item.issueMetadata.assignees))
+          || (item.issueMetadata.milestone !== undefined && !['initial', 'specific', 'none'].includes(item.issueMetadata.milestone))
           || (item.issueMetadata.inLabels !== undefined && !['from-diff', 'none'].includes(item.issueMetadata.inLabels))
           || (item.issueMetadata.base !== undefined && (typeof item.issueMetadata.base !== 'string' || !item.issueMetadata.base.trim()))
-          || (!item.issueMetadata.requirements && !item.issueMetadata.issueType && !item.issueMetadata.fields && item.issueMetadata.inLabels === undefined)
+          || (item.issueMetadata.fromDiffFiles !== undefined && (!Array.isArray(item.issueMetadata.fromDiffFiles)
+            || item.issueMetadata.fromDiffFiles.some((file: unknown) => typeof file !== 'string')))
+          || (item.issueMetadata.state !== undefined && !['open', 'closed'].includes(item.issueMetadata.state))
+          || (item.issueMetadata.closeReason !== undefined && !['completed', 'not_planned'].includes(item.issueMetadata.closeReason))
+          || (!item.issueMetadata.requirements && !item.issueMetadata.issueType && !item.issueMetadata.fields
+            && item.issueMetadata.status === undefined && item.issueMetadata.assignees === undefined
+            && item.issueMetadata.milestone === undefined && item.issueMetadata.inLabels === undefined && item.issueMetadata.state === undefined)
         : item.issueMetadata !== undefined)
       || (item.kind === 'pull-request'
         ? !item.pullRequest || !['create', 'bind', 'sync'].includes(item.pullRequest.action)
