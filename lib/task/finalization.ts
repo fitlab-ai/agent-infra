@@ -642,6 +642,7 @@ async function syncPendingTaskComment(input: {
   agent: string;
   receipt: TaskFinalizationReceipt;
   projection?: TaskCompletionProjection;
+  refreshProjection?: () => TaskCompletionProjection | undefined;
   commentSync: typeof syncPlatformComment;
   consumedCapabilities: Set<string>;
 }): Promise<TaskCommentSyncOutcome> {
@@ -673,6 +674,14 @@ async function syncPendingTaskComment(input: {
         scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
       }, consumedCapabilities);
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      if (!skipped && receipt.taskComment === 'pending') {
+        const retry = await syncPendingTaskComment({
+          ...input,
+          receipt,
+          projection: input.refreshProjection?.() ?? input.projection
+        });
+        return { ...retry, changed: result.changed || retry.changed };
+      }
       return { receipt, step: skipped ? { ...step, status: 'skipped' } : step, changed: result.changed, error: null };
     }
     const detail = step.error ?? { code: 'COMMENT_SYNC_FAILED', message: 'task comment synchronization failed', retryable: true };
@@ -1078,7 +1087,7 @@ async function prepareUnderLock(
       });
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
       const finalComment = await syncPendingTaskComment({
-        repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), commentSync, consumedCapabilities
+        repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync, consumedCapabilities
       });
       receipt = finalComment.receipt;
       if (finalComment.step.status !== 'no-op') taskComment = finalComment.step;
@@ -1094,7 +1103,7 @@ async function prepareUnderLock(
       });
       receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
       const warningComment = await syncPendingTaskComment({
-        repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), commentSync, consumedCapabilities
+        repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync, consumedCapabilities
       });
       receipt = warningComment.receipt;
       taskComment = warningComment.step;
@@ -1124,7 +1133,7 @@ async function prepareUnderLock(
       }, changed, hardError);
     }
     try {
-    const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), commentSync, consumedCapabilities });
+    const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync, consumedCapabilities });
       receipt = warningComment.receipt;
       if (warningComment.step.status !== 'no-op') taskComment = warningComment.step;
       changed = changed || warningComment.changed;
@@ -1145,7 +1154,7 @@ async function prepareUnderLock(
   receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
   if (receipt.taskComment === 'pending') {
     const finalComment = await syncPendingTaskComment({
-      repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), commentSync, consumedCapabilities
+      repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync, consumedCapabilities
     });
     receipt = finalComment.receipt;
     taskComment = finalComment.step;
