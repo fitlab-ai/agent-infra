@@ -517,6 +517,7 @@ function invalidationMutationForCompletion(
     plan: ['review-plan', 'code', 'review-code'],
     code: ['review-code']
   };
+  const qualificationFallback = ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code'];
   const sourceFamily = family as 'analyze' | 'plan' | 'code';
   const sourceArtifactFamily = sourceFamily === 'analyze' ? 'analysis' : sourceFamily;
   let receipts: readonly ArtifactReceipt[] = [];
@@ -590,9 +591,10 @@ function invalidationMutationForCompletion(
     }
   }
   const reasonCode = qualificationChange ? 'qualification-changed' : 'upstream-replaced';
+  const fallbackFamilies = qualificationChange ? qualificationFallback : downstream[sourceFamily];
   const targetNodes = (graphUsable
     ? inventory.filter((node) => selected.has(`${node.family}/${node.name}`))
-    : inventory.filter((node) => downstream[sourceFamily].includes(node.family)))
+    : inventory.filter((node) => fallbackFamilies.includes(node.family)))
     .filter((node) => !(node.family === FAMILY[family].artifact && node.name === artifact.name));
   const targets = targetNodes.flatMap((node) => {
     const shapes: Array<{ targetKind: InvalidationTargetKind; targetFamily: string; targetArtifact: string; targetRound: number; targetSha256: string }> = [
@@ -667,7 +669,6 @@ function buildCompletionReceipt(
   artifact: ArtifactIdentity,
   completedAt: string,
   frontmatter: Record<string, unknown>,
-  artifactContext: ArtifactContextResult | null,
   request: TaskEventRequest
 ): { ok: true; receipts: readonly ArtifactReceipt[] } | { ok: false; message: string } | null {
   if (!['analyze', 'plan', 'code'].includes(family) && !family.startsWith('review-')) return null;
@@ -685,22 +686,19 @@ function buildCompletionReceipt(
     const raw = frontmatter.lifecycle_input_relations;
     if (typeof raw !== 'string') {
       const replayFact = currentCompletionFact(request, artifact);
-      if (!completionFacts(frontmatter).some((fact) => sameCompletionFact(fact, replayFact))) {
+      const recordedFact = completionFacts(frontmatter).find((fact) => sameCompletionFact(fact, replayFact));
+      if (!recordedFact) {
         return { ok: false, message: 'started lifecycle input context is missing and no matching completion fact exists for replay' };
       }
-      if (artifactContext?.status === 'ready') {
-        const expected = artifactContext.inputs.map((input) => ({ name: input.name, sha256: sha256File(input.path) }));
-        const actual = existingReceipts.map((receipt) => ({ name: receipt.input, sha256: receipt.inputSha256 }));
-        if (expected.length !== actual.length || expected.some((input) => !actual.some((receipt) => receipt.name === input.name && receipt.sha256 === input.sha256))) {
-          return { ok: false, message: 'started lifecycle input context is missing and existing receipts are incomplete' };
-        }
-      } else {
-        const requiredFamily = family === 'plan' || family === 'review-analysis' ? 'analysis'
-          : family === 'review-plan' ? 'plan' : family === 'review-code' ? 'code' : null;
-        const hasRequiredInput = family === 'code'
-          ? existingReceipts.some((receipt) => ['analysis', 'plan'].includes(parseArtifactName(receipt.input)?.family ?? ''))
-          : !requiredFamily || existingReceipts.some((receipt) => parseArtifactName(receipt.input)?.family === requiredFamily);
-        if (!hasRequiredInput) return { ok: false, message: 'started lifecycle input context is missing and existing receipts are incomplete' };
+      const expected = recordedFact.lifecycleInputs;
+      if (!Array.isArray(expected)
+        || expected.some((input) => !input || typeof input.name !== 'string' || !parseArtifactName(input.name)
+          || typeof input.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(input.sha256))) {
+        return { ok: false, message: 'matching completion fact does not record a valid lifecycle input set for replay' };
+      }
+      const actual = existingReceipts.map((receipt) => ({ name: receipt.input, sha256: receipt.inputSha256 }));
+      if (expected.length !== actual.length || expected.some((input) => !actual.some((receipt) => receipt.name === input.name && receipt.sha256 === input.sha256))) {
+        return { ok: false, message: 'existing input receipts do not match the complete input receipt set recorded at completion' };
       }
       for (const receipt of existingReceipts) {
         const identity = parseArtifactName(receipt.input);
@@ -742,6 +740,7 @@ type CompletionFact = Readonly<{
   semanticDigest: string;
   requestId: string;
   result: string;
+  lifecycleInputs?: readonly Readonly<{ name: string; sha256: string }>[];
 }>;
 
 function completionFacts(frontmatter: Record<string, unknown>): CompletionFact[] {
@@ -763,7 +762,11 @@ function completionFacts(frontmatter: Record<string, unknown>): CompletionFact[]
   }
 }
 
-function currentCompletionFact(request: TaskEventRequest, artifact: ArtifactIdentity): CompletionFact {
+function currentCompletionFact(
+  request: TaskEventRequest,
+  artifact: ArtifactIdentity,
+  lifecycleInputs?: readonly Readonly<{ name: string; sha256: string }>[]
+): CompletionFact {
   const content = fs.readFileSync(artifact.path, 'utf8');
   return {
     event: request.event,
@@ -781,7 +784,8 @@ function currentCompletionFact(request: TaskEventRequest, artifact: ArtifactIden
       verdict: request.verdict,
       fixFor: request.fixFor,
       implementationInput: request.implementationInput
-    })
+    }),
+    ...(lifecycleInputs ? { lifecycleInputs } : {})
   };
 }
 
@@ -1007,13 +1011,16 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   let completionInvalidation: ReturnType<typeof invalidationMutation> | null = null;
   let completionRework: ReturnType<typeof reworkIntentMutation> | null = null;
   if (eventIdentity.phase === 'completed' && completedArtifact) {
-    const receipt = buildCompletionReceipt(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter, artifactContext, normalized);
+    const receipt = buildCompletionReceipt(content, resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter, normalized);
     if (receipt && !receipt.ok) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: receipt.message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
     }
     completionReceipts = receipt?.receipts ?? [];
     try {
-      currentFact = currentCompletionFact(normalized, completedArtifact);
+      currentFact = currentCompletionFact(normalized, completedArtifact, completionReceipts.map((receipt) => ({
+        name: receipt.input,
+        sha256: receipt.inputSha256
+      })));
     } catch (error) {
       return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot inspect current completion result: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
     }

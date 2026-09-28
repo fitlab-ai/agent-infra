@@ -1255,6 +1255,60 @@ test('source replacement uses static downstream invalidation when the prior outp
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('qualification evidence gaps use the full lifecycle fallback for plan replacement', () => {
+  const f = fixture('technical-design');
+  try {
+    enableQualification(f.file);
+    fs.writeFileSync(path.join(f.dir, 'review-analysis.md'), reviewArtifact('Analysis Review', 'analysis.md'));
+    fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+    fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+    fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+    fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
+    for (const [event, output, input] of [
+      ['review-analysis.completed', 'review-analysis.md', 'analysis.md'],
+      ['plan.completed', 'plan.md', 'analysis.md'],
+      ['plan.completed', 'plan.md', 'review-analysis.md'],
+      ['review-plan.completed', 'review-plan.md', 'plan.md'],
+      ['code.completed', 'code.md', 'plan.md'],
+      ['code.completed', 'code.md', 'review-plan.md'],
+      ['review-code.completed', 'review-code.md', 'code.md'],
+      ['review-code.completed', 'review-code.md', 'review-plan.md']
+    ] as const) addReceipt(f.file, {
+      event, output, input, inputSha256: sha256File(path.join(f.dir, input)), completedAt: '2026-01-01 00:00:00+00:00'
+    });
+    const previousPlanFact = {
+      event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(path.join(f.dir, 'plan.md')),
+      semanticDigest: 'a'.repeat(64), requestId: `${f.id}:plan-r1`, result: '{}'
+    };
+    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(/^---\n/m, `---\ncompletion_facts: '${JSON.stringify([previousPlanFact])}'\n`));
+
+    const started = run(f.root, [
+      f.id, 'plan.started', '--agent', 'codex', '--initiator', 'model',
+      '--request-id', `${f.id}:qualification-gap-plan-r2`, '--reason-code', 'new-requirement'
+    ]);
+    assert.equal(started.status, 0, started.stdout || started.stderr);
+    fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('Keep recovery bounded', 'Keep recovery auditable'));
+    fs.writeFileSync(path.join(f.dir, 'plan-r2.md'), localArtifact('plan'));
+    const completed = run(f.root, [
+      f.id, 'plan.completed', '--agent', 'codex', '--initiator', 'model',
+      '--request-id', `${f.id}:qualification-gap-plan-r2`, '--reason-code', 'new-requirement',
+      '--artifact', 'plan-r2.md', ...completionDigestArgs(f.dir, 'plan-r2.md', 'plan')
+    ]);
+    assert.equal(completed.status, 0, completed.stdout || completed.stderr);
+    const invalidation = parseInvalidationDocument(fs.readFileSync(f.file, 'utf8'));
+    assert.equal(invalidation.ok, true);
+    if (!invalidation.ok) return;
+    const invalidatedArtifacts = new Set(invalidation.document.targets
+      .filter((target) => target.targetKind === 'artifact')
+      .map((target) => target.targetArtifact));
+    for (const name of ['analysis.md', 'review-analysis.md', 'plan.md', 'review-plan.md', 'code.md', 'review-code.md']) {
+      assert.equal(invalidatedArtifacts.has(name), true, `${name} should be conservatively invalidated`);
+    }
+    assert.equal(invalidatedArtifacts.has('plan-r2.md'), false);
+    assert.equal(invalidation.document.targets.every((target) => target.reasonCode === 'qualification-changed'), true);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('code completion rejects a missing lifecycle input freeze without writing completion facts or receipts', () => {
   const f = fixture('code');
   try {
@@ -2109,9 +2163,18 @@ test('code completion keeps its original result counts and permits only exact re
     assert.equal(replay.status, 0, replay.stderr || replay.stdout);
     assert.equal(JSON.parse(replay.stdout).status, 'no-op');
     assert.equal(fs.readFileSync(f.file, 'utf8'), after);
+    assert.match(after, /lifecycleInputs/);
+    const withoutOptionalReceipt = after.split('\n')
+      .filter((line) => !line.startsWith('| code.completed | code.md | review-plan.md |'))
+      .join('\n');
+    fs.writeFileSync(f.file, withoutOptionalReceipt);
+    const missingOptionalReceipt = run(f.root, completedArgs);
+    assert.notEqual(missingOptionalReceipt.status, 0);
+    assert.match(missingOptionalReceipt.stdout, /receipt set is incomplete|input receipts do not match/i);
+    assert.equal(fs.readFileSync(f.file, 'utf8'), withoutOptionalReceipt);
     const correctedCounts = run(f.root, [...args, '--files-modified', '2', '--tests-passed', '20']);
     assert.notEqual(correctedCounts.status, 0);
-    assert.equal(fs.readFileSync(f.file, 'utf8'), after);
+    assert.equal(fs.readFileSync(f.file, 'utf8'), withoutOptionalReceipt);
     const notes = fs.readFileSync(f.file, 'utf8').split('\n').filter((line) => line.includes(' — Code implemented,'));
     assert.equal(notes.length, 1);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
