@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { platformResult } from './types.ts';
@@ -11,6 +14,7 @@ import {
 } from './provider-bridge.ts';
 import { isResourceIdentity, resourceIdentityNumber, reviewMarker as resourceReviewMarker } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
+import type { PlatformPullRequestReviewIntent } from '../task/platform-operation-journal.ts';
 
 export type PrReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
 export type PrReviewIdentity = { scope: string; round: number; commitSha: string; resource?: ResourceIdentity };
@@ -90,6 +94,8 @@ export async function publishPrReview(options: {
   cwd?: string;
   client?: PlatformClient;
   dryRun?: boolean;
+  agent?: string;
+  skipQueue?: boolean;
   prNumber: PrToken;
   identity: PrReviewIdentity;
   event: PrReviewEvent;
@@ -120,6 +126,44 @@ export async function publishPrReview(options: {
       platform: context.platform, capabilities: context.capabilities,
       resource: { kind: 'pull-request', number: identityNumber, identity },
       error: { code: 'REVIEW_IDENTITY_INVALID', message: 'review scope must be a task id or pr{N}; commitSha is required', retryable: false }
+    });
+  }
+
+  if (/^TASK-\d{8}-\d{6}$/u.test(options.identity.scope) && !options.skipQueue && !options.dryRun) {
+    if (!options.agent) return platformResult('failed', {
+      platform: context.platform, capabilities: context.capabilities,
+      resource: { kind: 'pull-request', number: identityNumber, identity },
+      error: { code: 'PR_REVIEW_AGENT_REQUIRED', message: 'task-scoped review publication requires an agent token', retryable: false }
+    });
+    const pullRequestReview: PlatformPullRequestReviewIntent = {
+      prNumber: String(options.prNumber),
+      resource: identity,
+      scope: options.identity.scope,
+      round: options.identity.round,
+      commitSha: options.identity.commitSha,
+      event: options.event,
+      body: String(options.body || '')
+    };
+    return coordinatePlatformWrite({
+      operation: {
+        taskRef: options.identity.scope,
+        cwd: options.cwd || process.cwd(),
+        kind: 'pull-request-review',
+        target: JSON.stringify(identity),
+        expectedDigest: createHash('sha256').update(JSON.stringify(pullRequestReview)).digest('hex'),
+        dependency: 'required',
+        pullRequestReview
+      },
+      agent: options.agent,
+      execute: () => publishPrReview({ ...options, skipQueue: true }),
+      block: (error) => platformResult('blocked', {
+        platform: context.platform, capabilities: context.capabilities,
+        resource: { kind: 'pull-request', number: identityNumber, identity }, error
+      }),
+      persistenceFailure: (error) => platformResult('failed', {
+        platform: context.platform, capabilities: context.capabilities,
+        resource: { kind: 'pull-request', number: identityNumber, identity }, error
+      })
     });
   }
 

@@ -493,7 +493,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
 
 async function syncPullRequestSummary(
   taskRef: string,
-  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; lockAlreadyHeld?: boolean }
+  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; lockAlreadyHeld?: boolean; skipQueue?: boolean }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
@@ -726,15 +726,18 @@ async function syncPullRequestSummary(
         result: null, warnings: [], ...info
       };
       };
+      const operation = {
+        taskRef: resolved.taskId,
+        cwd: resolved.repoRoot,
+        kind: 'pull-request-summary' as const,
+        target: JSON.stringify(prIdentity),
+        expectedDigest: createHash('sha256').update(desired).digest('hex'),
+        dependency: 'deferred' as const,
+        pullRequestSummary: { body: options.body, changeReportFile: options.changeReportFile! }
+      };
+      if (options.skipQueue) return publish();
       return coordinatePlatformWrite({
-        operation: {
-          taskRef: resolved.taskId,
-          cwd: resolved.repoRoot,
-          kind: 'pull-request-summary',
-          target: JSON.stringify(prIdentity),
-          expectedDigest: createHash('sha256').update(desired).digest('hex'),
-          dependency: 'deferred'
-        },
+        operation,
         agent: options.agent,
         execute: publish,
         block: (error) => fail('blocked', context, error, prNumber),

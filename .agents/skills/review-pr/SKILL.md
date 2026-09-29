@@ -120,7 +120,7 @@ agent-infra-internal platform-pr-review inspect --pr {pr-number} [--cwd <path>]
 
 ```bash
 agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId|pr{pr-number}} --round {round} \
-  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} [--dry-run] [--cwd <path>]
+  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} --agent {agent} [--dry-run] [--cwd <path>]
 ```
 
 `publish` 由 core 生成并校验 marker（首行），按 marker + commit 幂等（重放 no-op；marker 命中但 commit 不一致稳定失败）。head 漂移时，先把旧 artifact 状态写为 `superseded`，再闭合旧轮：

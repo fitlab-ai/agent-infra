@@ -120,7 +120,7 @@ If the head matches step 1, assemble the body (head SHA / conclusion / findings 
 
 ```bash
 agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId|pr{pr-number}} --round {round} \
-  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} [--dry-run] [--cwd <path>]
+  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} --agent {agent} [--dry-run] [--cwd <path>]
 ```
 
 `publish` generates and validates the marker (first line) in core and is idempotent per marker + commit (replay is a no-op; marker hit on a different commit fails stably). On head drift, first set the old artifact status to `superseded`, then close the old round:

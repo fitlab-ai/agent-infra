@@ -2,6 +2,7 @@ import { recoverPlatformOperations } from '../task/platform-operation-recovery.t
 import { recordPlatformOperation } from '../task/platform-operation-journal.ts';
 import type { RecordOperationInput } from '../task/platform-operation-journal.ts';
 import type { PlatformError, PlatformStatus } from './types.ts';
+import type { PlatformClient } from './context.ts';
 
 type OperationResult = Readonly<{
   status: PlatformStatus;
@@ -12,6 +13,7 @@ type OperationResult = Readonly<{
 type CoordinateInput<T extends OperationResult> = Readonly<{
   operation: Omit<RecordOperationInput, 'state' | 'lastCode'>;
   agent: string;
+  client?: PlatformClient;
   drain?: (taskRef: string, excludeId: string, agent: string, cwd?: string) => Promise<{
     status: 'applied' | 'no-op' | 'blocked' | 'failed';
     error: PlatformError | null;
@@ -39,6 +41,7 @@ async function coordinatePlatformWrite<T extends OperationResult>(input: Coordin
     ? await input.drain(input.operation.taskRef, operationId, input.agent, input.operation.cwd)
     : await recoverPlatformOperations(input.operation.taskRef, 'all', {
       agent: input.agent,
+      client: input.client,
       cwd: input.operation.cwd,
       excludeId: operationId
     });

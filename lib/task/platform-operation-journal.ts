@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
+import type { ResourceIdentity } from '../platform/resource-identity.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 
 const JOURNAL_FILE = '.platform-operations.json';
 const MAX_ATTEMPTS = 3;
 
-type PlatformOperationKind = 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment' | 'issue-create' | 'issue-metadata' | 'pull-request' | 'pull-request-summary';
+type PlatformOperationKind = 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment' | 'issue-create' | 'issue-metadata' | 'pull-request' | 'pull-request-summary' | 'pull-request-review';
 type PlatformOperationState = 'queued' | 'pending' | 'unknown' | 'succeeded' | 'failed';
 type PlatformIssueMetadataIntent = Readonly<{
   requirements: boolean;
@@ -32,6 +33,16 @@ type PlatformPullRequestIntent = Readonly<{
   closingIssue?: boolean;
 }>;
 type PlatformIssueCreateIntent = Readonly<{ title: string; bodyDigest: string }>;
+type PlatformPullRequestSummaryIntent = Readonly<{ body: string; changeReportFile: string }>;
+type PlatformPullRequestReviewIntent = Readonly<{
+  prNumber: string;
+  resource?: ResourceIdentity;
+  scope: string;
+  round: number;
+  commitSha: string;
+  event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+  body: string;
+}>;
 type PlatformOperation = Readonly<{
   id: string;
   kind: PlatformOperationKind;
@@ -45,6 +56,8 @@ type PlatformOperation = Readonly<{
   issueMetadata?: PlatformIssueMetadataIntent;
   issueCreate?: PlatformIssueCreateIntent;
   pullRequest?: PlatformPullRequestIntent;
+  pullRequestSummary?: PlatformPullRequestSummaryIntent;
+  pullRequestReview?: PlatformPullRequestReviewIntent;
   updatedAt: string;
 }>;
 type PlatformOperationJournal = Readonly<{
@@ -64,6 +77,8 @@ type RecordOperationInput = Readonly<{
   issueMetadata?: PlatformIssueMetadataIntent;
   issueCreate?: PlatformIssueCreateIntent;
   pullRequest?: PlatformPullRequestIntent;
+  pullRequestSummary?: PlatformPullRequestSummaryIntent;
+  pullRequestReview?: PlatformPullRequestReviewIntent;
   cwd?: string;
 }>;
 
@@ -91,7 +106,7 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
   }
   for (const item of journal.operations) {
     if (!item || typeof item !== 'object' || !/^[a-f0-9]{64}$/u.test(item.id)
-      || !['task-comment', 'artifact-comment', 'summary-comment', 'cancel-comment', 'issue-create', 'issue-metadata', 'pull-request', 'pull-request-summary'].includes(item.kind)
+      || !['task-comment', 'artifact-comment', 'summary-comment', 'cancel-comment', 'issue-create', 'issue-metadata', 'pull-request', 'pull-request-summary', 'pull-request-review'].includes(item.kind)
       || typeof item.target !== 'string' || !item.target
       || !/^[a-f0-9]{64}$/u.test(item.expectedDigest)
       || !['deferred', 'required'].includes(item.dependency)
@@ -127,6 +142,19 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
         ? !item.issueCreate || typeof item.issueCreate.title !== 'string' || !item.issueCreate.title.trim()
           || !/^[a-f0-9]{64}$/u.test(item.issueCreate.bodyDigest)
         : item.issueCreate !== undefined)
+      || (item.kind === 'pull-request-summary'
+        ? !item.pullRequestSummary || typeof item.pullRequestSummary.body !== 'string'
+          || !item.pullRequestSummary.body.trim() || typeof item.pullRequestSummary.changeReportFile !== 'string'
+          || !item.pullRequestSummary.changeReportFile.trim()
+        : item.pullRequestSummary !== undefined)
+      || (item.kind === 'pull-request-review'
+        ? !item.pullRequestReview || typeof item.pullRequestReview.prNumber !== 'string'
+          || !item.pullRequestReview.prNumber.trim() || !/^TASK-\d{8}-\d{6}$|^pr\d+$/u.test(item.pullRequestReview.scope)
+          || !Number.isSafeInteger(item.pullRequestReview.round) || item.pullRequestReview.round <= 0
+          || !/^[0-9a-f]{7,40}$/iu.test(item.pullRequestReview.commitSha)
+          || !['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(item.pullRequestReview.event)
+          || typeof item.pullRequestReview.body !== 'string'
+        : item.pullRequestReview !== undefined)
       || typeof item.updatedAt !== 'string') {
       throw Object.assign(new Error('Platform operation journal contains an invalid operation'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
     }
@@ -172,6 +200,8 @@ function recordPlatformOperation(input: RecordOperationInput): PlatformOperation
     ...(input.issueMetadata ? { issueMetadata: input.issueMetadata } : {}),
     ...(input.issueCreate ? { issueCreate: input.issueCreate } : {}),
     ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),
+    ...(input.pullRequestSummary ? { pullRequestSummary: input.pullRequestSummary } : {}),
+    ...(input.pullRequestReview ? { pullRequestReview: input.pullRequestReview } : {}),
     updatedAt: new Date().toISOString()
   };
   const operations = previous
@@ -187,4 +217,4 @@ function readPlatformOperationJournal(taskRef: string, cwd?: string): PlatformOp
 }
 
 export { JOURNAL_FILE as PLATFORM_OPERATION_JOURNAL_FILE, MAX_ATTEMPTS as PLATFORM_OPERATION_MAX_ATTEMPTS, operationId, recordPlatformOperation, readPlatformOperationJournal };
-export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, RecordOperationInput };
+export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, PlatformPullRequestReviewIntent, PlatformPullRequestSummaryIntent, RecordOperationInput };

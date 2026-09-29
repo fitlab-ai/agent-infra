@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,8 @@ import {
   reviewedCommitMarker
 } from '../../../../lib/platform/pr-review.ts';
 import type { GitHubClient } from '../../../../lib/platform/github-client.ts';
+import { readPlatformOperationJournal, recordPlatformOperation } from '../../../../lib/task/platform-operation-journal.ts';
+import { recoverPlatformOperations } from '../../../../lib/task/platform-operation-recovery.ts';
 
 type MockReview = { id: number; commit_id: string; body: string; html_url: string };
 
@@ -82,7 +85,7 @@ test('publishPrReview generates the marker on first publish and the body starts 
   const root = fixture();
   try {
     const mock = mockClient();
-    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: '## Findings\n- something' });
+    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: '## Findings\n- something', skipQueue: true });
     assert.equal(result.status, 'applied');
     assert.equal(mock.postedBodies.length, 1);
     const posted = mock.postedBodies[0]!;
@@ -94,12 +97,75 @@ test('publishPrReview generates the marker on first publish and the body starts 
   }
 });
 
+test('task-scoped PR review publication is recorded by the shared platform queue', async () => {
+  const root = fixture();
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+  try {
+    const mock = mockClient();
+    const result = await publishPrReview({
+      cwd: root,
+      client: mock.client,
+      agent: 'codex',
+      prNumber: 42,
+      identity: IDENTITY,
+      event: 'COMMENT',
+      body: '## Findings\n- task-scoped review'
+    });
+    const operations = readPlatformOperationJournal(taskId, root).operations;
+
+    assert.equal(result.status, 'applied');
+    assert.equal(mock.postedBodies.length, 1);
+    assert.equal(operations.length, 1);
+    assert.equal(operations[0]?.kind, 'pull-request-review');
+    assert.equal(operations[0]?.state, 'succeeded');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('PR review recovery recognizes an accepted review before retrying its queued write', async () => {
+  const root = fixture();
+  const taskId = IDENTITY.scope;
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+  const resource = { kind: 'number' as const, value: 42 };
+  const reviewIntent = {
+    prNumber: '42', resource, scope: taskId, round: IDENTITY.round,
+    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, body: '## Findings\n- recovered'
+  };
+  const marker = reviewMarker({ ...IDENTITY, resource });
+  const mock = mockClient({ initial: [{
+    id: 101, commit_id: IDENTITY.commitSha,
+    body: `${marker}\n<!-- reviewed-commit: ${IDENTITY.commitSha} -->\n\n## Findings\n- recovered`,
+    html_url: 'https://github.com/acme/widgets/pull/42#r1'
+  }] });
+  try {
+    const operation = recordPlatformOperation({
+      taskRef: taskId, cwd: root, kind: 'pull-request-review', target: JSON.stringify(resource),
+      expectedDigest: createHash('sha256').update(JSON.stringify(reviewIntent)).digest('hex'),
+      dependency: 'required', state: 'unknown', pullRequestReview: reviewIntent
+    });
+    const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root, client: mock.client });
+    const persisted = readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === operation.id);
+
+    assert.equal(recovered.status, 'applied');
+    assert.deepEqual(mock.postedBodies, []);
+    assert.equal(persisted?.state, 'succeeded');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('publishPrReview is idempotent: replay with the same marker and commit is a no-op', async () => {
   const root = fixture();
   try {
     const existingBody = `${reviewMarker(IDENTITY)}\n<!-- reviewed-commit: ${IDENTITY.commitSha} -->\n\n## Findings`;
     const mock = mockClient({ initial: [{ id: 1, commit_id: IDENTITY.commitSha, body: existingBody, html_url: 'https://x' }] });
-    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'APPROVE', body: 'new body' });
+    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'APPROVE', body: 'new body', skipQueue: true });
     assert.equal(result.status, 'no-op');
     assert.equal(mock.postedBodies.length, 0);
   } finally {
@@ -112,7 +178,7 @@ test('publishPrReview fails with REVIEW_MARKER_CONFLICT when the marker targets 
   try {
     const existingBody = `${reviewMarker(IDENTITY)}\n<!-- reviewed-commit: ${'b'.repeat(40)} -->\n\n## Findings`;
     const mock = mockClient({ initial: [{ id: 1, commit_id: 'b'.repeat(40), body: existingBody, html_url: 'https://x' }] });
-    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'APPROVE', body: 'new body' });
+    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'APPROVE', body: 'new body', skipQueue: true });
     assert.equal(result.status, 'failed');
     assert.equal(result.error?.code, 'REVIEW_MARKER_CONFLICT');
     assert.equal(mock.postedBodies.length, 0);
@@ -130,7 +196,7 @@ test('publishPrReview rejects a scope that would break the marker contract', asy
       const result = await publishPrReview({
         cwd: root, client: mock.client, prNumber: 42,
         identity: { scope, round: 1, commitSha: 'a'.repeat(40) },
-        event: 'COMMENT', body: 'body'
+        event: 'COMMENT', body: 'body', skipQueue: true
       });
       assert.equal(result.status, 'failed');
       assert.equal(result.error?.code, 'REVIEW_IDENTITY_INVALID');
@@ -145,7 +211,7 @@ test('publishPrReview reconciles a lost POST by re-listing and marking CREATE_RE
   const root = fixture();
   try {
     const mock = mockClient({ failPostTimes: 1 });
-    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: 'body' });
+    const result = await publishPrReview({ cwd: root, client: mock.client, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: 'body', skipQueue: true });
     assert.equal(result.status, 'applied');
     assert.equal(result.operations?.[0]?.reasonCode, 'CREATE_RECONCILED');
   } finally {
@@ -176,7 +242,7 @@ test('publishPrReview blocks when a retryable POST cannot be reconciled', async 
       },
       text() { return { ok: true as const, value: '' }; }
     };
-    const result = await publishPrReview({ cwd: root, client: client as unknown as GitHubClient, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: 'body' });
+    const result = await publishPrReview({ cwd: root, client: client as unknown as GitHubClient, prNumber: 42, identity: IDENTITY, event: 'COMMENT', body: 'body', skipQueue: true });
     assert.equal(result.status, 'blocked');
     assert.equal(result.error?.code, 'REVIEW_CREATE_OUTCOME_UNKNOWN');
   } finally {

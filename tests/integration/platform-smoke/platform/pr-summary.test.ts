@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,6 +28,8 @@ import {
   writePrChangeReportAtomic
 } from '../../../../lib/platform/pr-change-report.ts';
 import { filePath } from '../../../helpers.ts';
+import { recoverPlatformOperations } from '../../../../lib/task/platform-operation-recovery.ts';
+import { readPlatformOperationJournal, recordPlatformOperation } from '../../../../lib/task/platform-operation-journal.ts';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -170,6 +173,42 @@ test('PR summary envelope owns marker and current HEAD', () => {
     'Summary',
     ''
   ].join('\n'));
+});
+
+test('queued PR summary recovery replays the desired summary through the configured client', async () => {
+  const fixture = summaryFixture();
+  const commentWrites = { value: 0 };
+  try {
+    const body = '## Summary\n\n<!-- canonical-pr-change-report -->';
+    const report = readPrChangeReport(fixture.reportPath);
+    assert.equal(report.ok, true);
+    if (!report.ok) return;
+    const rendered = replaceCanonicalReportPlaceholder(body, report.value);
+    assert.equal(rendered.ok, true);
+    if (!rendered.ok) return;
+    const desired = buildPullRequestSummary(fixture.taskId, rendered.value, fixture.headSha);
+    const operation = recordPlatformOperation({
+      taskRef: fixture.taskId,
+      cwd: fixture.root,
+      kind: 'pull-request-summary',
+      target: JSON.stringify({ kind: 'number', value: 42 }),
+      expectedDigest: createHash('sha256').update(desired).digest('hex'),
+      dependency: 'deferred',
+      state: 'queued',
+      pullRequestSummary: { body, changeReportFile: fixture.reportPath }
+    });
+    const recovered = await recoverPlatformOperations(fixture.taskId, 'all', {
+      agent: 'codex', cwd: fixture.root,
+      client: resolvedContextClient(fixture.root, 'success', fixture.baseSha, fixture.headSha, { commentWrites })
+    });
+    const persisted = readPlatformOperationJournal(fixture.taskId, fixture.root).operations.find((item) => item.id === operation.id);
+
+    assert.equal(recovered.status, 'applied');
+    assert.equal(commentWrites.value, 1);
+    assert.equal(persisted?.state, 'succeeded');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test('PR summary warning result preserves the primary lifecycle outcome', () => {

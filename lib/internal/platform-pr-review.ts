@@ -6,14 +6,15 @@ import { listPrReviews, publishPrReview } from '../platform/pr-review.ts';
 import type { PrReviewEvent } from '../platform/pr-review.ts';
 import type { PlatformResult } from '../platform/types.ts';
 import { ensureInternalHandlerRoute, internalHandlerRoute } from './cli-route-inventory.ts';
+import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-pr-review inspect --pr <token> [--cwd <path>]
        agent-infra-internal platform-pr-review list --pr <token> [--cwd <path>]
-       agent-infra-internal platform-pr-review publish --pr <token> --scope <taskId|pr{N}> --round <N> --commit <sha> --event <COMMENT|APPROVE|REQUEST_CHANGES> --body-file <path|-> [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr-review publish --pr <token> --scope <taskId|pr{N}> --round <N> --commit <sha> --event <COMMENT|APPROVE|REQUEST_CHANGES> --body-file <path|-> [--agent <agent>] [--dry-run] [--cwd <path>]
 `;
 
 const BOOLEAN_FLAGS = new Set(['--dry-run']);
-const VALUE_FLAGS = new Set(['--cwd', '--pr', '--scope', '--round', '--commit', '--event', '--body-file']);
+const VALUE_FLAGS = new Set(['--cwd', '--pr', '--scope', '--round', '--commit', '--event', '--body-file', '--agent']);
 
 function key(flag: string): string {
   return flag.slice(2).replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
@@ -67,7 +68,7 @@ async function platformPrReview(args: string[] = []): Promise<void> {
   const allowed: Record<string, string[]> = {
     inspect: ['cwd', 'pr'],
     list: ['cwd', 'pr'],
-    publish: ['cwd', 'pr', 'scope', 'round', 'commit', 'event', 'bodyFile', 'dryRun']
+    publish: ['cwd', 'pr', 'scope', 'round', 'commit', 'event', 'bodyFile', 'agent', 'dryRun']
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
@@ -86,6 +87,8 @@ async function platformPrReview(args: string[] = []): Promise<void> {
   const round = Number(values.round);
   const commit = typeof values.commit === 'string' ? values.commit : '';
   const event = values.event as string;
+  const rawAgent = typeof values.agent === 'string' ? values.agent : '';
+  const agent = rawAgent ? normalizeAgentToken(rawAgent) : null;
   if (!scope || !/^(?:pr\d+|TASK-\d{8}-\d{6})$/.test(scope)) { fail('publish requires --scope <taskId|pr{N}>'); return; }
   if (!internalHandlerRoute('platform-pr-review', 'publish-task', publishSelector)
     && !internalHandlerRoute('platform-pr-review', 'publish-pr', publishSelector)) {
@@ -95,6 +98,11 @@ async function platformPrReview(args: string[] = []): Promise<void> {
   if (!/^[0-9a-f]{7,40}$/i.test(commit)) { fail('publish requires --commit <sha>'); return; }
   if (!['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(event)) { fail('publish requires --event <COMMENT|APPROVE|REQUEST_CHANGES>'); return; }
   if (typeof values.bodyFile !== 'string') { fail('publish requires --body-file'); return; }
+  if (/^TASK-\d{8}-\d{6}$/u.test(scope) && !agent) {
+    fail(`task-scoped publish requires --agent <agent>${rawAgent ? `: invalid '${rawAgent}'` : ''}: ${AGENT_USAGE_HINT}`);
+    return;
+  }
+  if (rawAgent && !agent) { fail(`invalid --agent '${rawAgent}': ${AGENT_USAGE_HINT}`); return; }
   let body: string;
   try {
     body = readBodyFile(values.bodyFile, cwd);
@@ -108,6 +116,7 @@ async function platformPrReview(args: string[] = []): Promise<void> {
     identity: { scope, round, commitSha: commit },
     event: event as PrReviewEvent,
     body,
+    ...(agent ? { agent } : {}),
     dryRun: values.dryRun === true
   }));
 }

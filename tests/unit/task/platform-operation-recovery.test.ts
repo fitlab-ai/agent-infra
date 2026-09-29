@@ -96,6 +96,40 @@ test('serial recovery consumes the remaining attempt budget before retrying an u
   }
 });
 
+test('recovery stops at an exhausted earlier operation and leaves later writes queued', async () => {
+  const f = fixture();
+  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
+  try {
+    fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+      platform: {
+        type: 'trae',
+        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
+      }
+    }));
+    const earlier = {
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata' as const,
+      target: '{"kind":"number","value":42}', expectedDigest: 'a'.repeat(64),
+      issueMetadata: { requirements: true, issueType: false, fields: false },
+      dependency: 'deferred' as const, state: 'pending' as const
+    };
+    for (let attempt = 0; attempt < 3; attempt += 1) recordPlatformOperation(earlier);
+    const later = recordPlatformOperation({
+      ...earlier, target: '{"kind":"number","value":43}', expectedDigest: 'b'.repeat(64), state: 'queued'
+    });
+
+    const recovered = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
+    const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
+
+    assert.equal(recovered.status, 'blocked');
+    assert.deepEqual(recovered.pending, [journal.operations[0]!.id, later.id]);
+    assert.equal(journal.operations.find((operation) => operation.id === later.id)?.state, 'queued');
+    assert.equal(fs.existsSync(callsPath), false);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('PR recovery preserves its typed intent when a replay does not succeed', async () => {
   const f = fixture();
   const intent = { action: 'create' as const, baseRef: 'main', headRef: 'feature' };

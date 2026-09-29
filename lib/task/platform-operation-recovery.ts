@@ -8,7 +8,10 @@ import { inspectPlatformIssue, syncPlatformIssue } from '../platform/issues.ts';
 import { resolvePlatformProviderContext } from '../platform/context.ts';
 import { providerOperationContext, providerError, unsupportedProviderOperation } from '../platform/provider-bridge.ts';
 import { inLabelMappingDigest } from '../platform/in-label-sync.ts';
-import { bindPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
+import { bindPlatformPullRequest, inspectPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
+import { syncPullRequestSummary } from '../platform/pr-summary.ts';
+import { publishPrReview } from '../platform/pr-review.ts';
+import type { PlatformClient } from '../platform/context.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
 import { parseResourceIdentity, resourceIdentityEquals } from '../platform/resource-identity.ts';
@@ -19,7 +22,7 @@ import type { PlatformResult } from '../platform/types.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { readPlatformOperationJournal, recordPlatformOperation } from './platform-operation-journal.ts';
 
-type RecoveryOptions = Readonly<{ agent: string; cwd?: string; limit?: number; excludeId?: string }>;
+type RecoveryOptions = Readonly<{ agent: string; client?: PlatformClient; cwd?: string; limit?: number; excludeId?: string }>;
 type RecoveryResult = Readonly<{
   status: 'applied' | 'no-op' | 'blocked' | 'failed';
   changed: boolean;
@@ -57,23 +60,23 @@ function summaryPayload(taskDir: string, taskId: string): { body: string; sha256
   return { body: data.body, sha256: data.sha256 };
 }
 
-async function replayComment(taskId: string, taskDir: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string): Promise<PlatformResult> {
+async function replayComment(taskId: string, taskDir: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
   if (operation.kind === 'task-comment') {
-    return syncPlatformComment(taskId, { kind: 'task', agent, cwd, dependency: operation.dependency, skipQueue: true });
+    return syncPlatformComment(taskId, { kind: 'task', agent, cwd, client, dependency: operation.dependency, skipQueue: true });
   }
   if (operation.kind === 'artifact-comment') {
-    return syncPlatformComment(taskId, { kind: 'artifact', artifact: operation.target, agent, cwd, dependency: operation.dependency, skipQueue: true });
+    return syncPlatformComment(taskId, { kind: 'artifact', artifact: operation.target, agent, cwd, client, dependency: operation.dependency, skipQueue: true });
   }
   if (operation.kind === 'summary-comment') {
     const summary = summaryPayload(taskDir, taskId);
     if (!summary) return platformResult('failed', { error: { code: 'SUMMARY_STAGING_MISSING', message: 'delivery summary staging record is unavailable', retryable: false } });
     return syncPlatformComment(taskId, {
       kind: 'summary', body: summary.body, agent, cwd,
-      summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency, skipQueue: true
+      summaryAuthorization: { sha256: summary.sha256 }, dependency: operation.dependency, client, skipQueue: true
     });
   }
   if (operation.kind === 'cancel-comment') {
-    return syncPlatformComment(taskId, { kind: 'cancel', agent, cwd, dependency: operation.dependency, skipQueue: true });
+    return syncPlatformComment(taskId, { kind: 'cancel', agent, cwd, client, dependency: operation.dependency, skipQueue: true });
   }
   return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_UNSUPPORTED', message: `operation kind '${operation.kind}' has no registered recovery handler`, retryable: false } });
 }
@@ -113,19 +116,19 @@ function currentIssueMetadataOperation(taskId: string, taskMdPath: string, repoR
   return { kind: 'issue-metadata' as const, target, expectedDigest, issueMetadata: currentMetadata, id: operationId({ kind: 'issue-metadata', target, expectedDigest }) };
 }
 
-async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string): Promise<PlatformResult> {
+async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
   if (!operation.issueMetadata) return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Issue metadata recovery parameters are missing', retryable: false } });
   let expectedIdentity;
   try { expectedIdentity = parseResourceIdentity(JSON.parse(operation.target), 'journal Issue identity'); }
   catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Journal Issue identity is invalid', retryable: false } }); }
-  const before = await inspectPlatformIssue(taskId, { cwd });
+  const before = await inspectPlatformIssue(taskId, { cwd, client });
   if (before.status !== 'no-op' || before.error || !before.issue
     || !resourceIdentityEquals(before.issue.identity, expectedIdentity)) {
     return platformResult('blocked', { error: before.error ?? { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound Issue identity differs from the journal target', retryable: false } });
   }
-  const sync = await syncPlatformIssue(taskId, { ...operation.issueMetadata, agent, cwd, dependency: operation.dependency, skipQueue: true });
+  const sync = await syncPlatformIssue(taskId, { ...operation.issueMetadata, agent, cwd, client, dependency: operation.dependency, skipQueue: true });
   if ((sync.status !== 'applied' && sync.status !== 'no-op') || sync.error) return sync;
-  const after = await inspectPlatformIssue(taskId, { cwd });
+  const after = await inspectPlatformIssue(taskId, { cwd, client });
   if (after.status !== 'no-op' || after.error || !after.issue
     || !resourceIdentityEquals(after.issue.identity, expectedIdentity)) {
     return platformResult('blocked', { error: after.error ?? { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Issue identity changed during metadata recovery', retryable: false } });
@@ -160,11 +163,11 @@ async function replayIssueMetadata(taskId: string, operation: ReturnType<typeof 
   return platformResult('no-op', { changed: sync.changed || after.changed });
 }
 
-async function verifyIssueCreate(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], cwd: string): Promise<PlatformResult> {
+async function verifyIssueCreate(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], cwd: string, client?: PlatformClient): Promise<PlatformResult> {
   if (!operation.issueCreate) return platformResult('failed', { error: {
     code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Issue creation recovery identity is missing', retryable: false
   } });
-  const current = await inspectPlatformIssue(taskId, { cwd });
+  const current = await inspectPlatformIssue(taskId, { cwd, client });
   if (!current.issue) return platformResult('blocked', { error: current.error ?? {
     code: 'PLATFORM_OPERATION_TARGET_UNAVAILABLE',
     message: 'Issue creation outcome is unknown and the task has no bound Issue identity; bind the verified remote Issue before continuing',
@@ -177,11 +180,11 @@ async function verifyIssueCreate(taskId: string, operation: ReturnType<typeof re
   return platformResult('no-op');
 }
 
-async function verifyPullRequestSummary(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], cwd: string): Promise<PlatformResult> {
+async function replayPullRequestSummary(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
   let identity;
   try { identity = parseResourceIdentity(JSON.parse(operation.target), 'queued pull-request summary identity'); }
   catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request summary identity is invalid', retryable: false } }); }
-  const resolved = await resolvePlatformProviderContext({ cwd });
+  const resolved = await resolvePlatformProviderContext({ cwd, client });
   if (!resolved.ok) return resolved.context;
   const listed = resolved.value.provider.comments?.list
     ? await resolved.value.provider.comments.list({ context: providerOperationContext(resolved.value), parent: identity })
@@ -195,7 +198,45 @@ async function verifyPullRequestSummary(taskId: string, operation: ReturnType<ty
   if (summaries.length === 1 && createHash('sha256').update(normalizeCommentContent(summaries[0]!.body)).digest('hex') === operation.expectedDigest) {
     return platformResult('no-op');
   }
-  return platformResult('no-op');
+  if (!operation.pullRequestSummary) return platformResult('blocked', { error: {
+    code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request summary recovery content is missing', retryable: false
+  } });
+  const bound = await inspectPlatformPullRequest(taskId, { cwd, client });
+  if (!bound.pullRequest || !resourceIdentityEquals(bound.pullRequest.identity, identity)) return platformResult('blocked', { error: bound.error ?? {
+    code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Bound pull request differs from the queued summary target', retryable: false
+  } });
+  const replayed = await syncPullRequestSummary(taskId, {
+    agent,
+    cwd,
+    client,
+    body: operation.pullRequestSummary.body,
+    changeReportFile: operation.pullRequestSummary.changeReportFile,
+    primaryResult: 'no_op',
+    strict: true,
+    skipQueue: true,
+    lockAlreadyHeld: true
+  });
+  if ((replayed.status === 'applied' || replayed.status === 'no-op') && !replayed.error && replayed.warnings.length === 0) {
+    return platformResult(replayed.status, { changed: replayed.changed });
+  }
+  return platformResult('blocked', { error: replayed.error ?? {
+    code: 'PR_SUMMARY_RECOVERY_UNCONFIRMED', message: 'Pull-request summary replay did not confirm the requested remote state', retryable: true
+  } });
+}
+
+async function replayPullRequestReview(operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
+  const intent = operation.pullRequestReview;
+  if (!intent) return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request review recovery parameters are missing', retryable: false } });
+  return publishPrReview({
+    cwd,
+    client,
+    agent,
+    prNumber: intent.prNumber,
+    identity: { scope: intent.scope, round: intent.round, commitSha: intent.commitSha, ...(intent.resource ? { resource: intent.resource } : {}) },
+    event: intent.event,
+    body: intent.body,
+    skipQueue: true
+  });
 }
 
 async function replayPullRequest(taskId: string, operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string): Promise<PlatformResult> {
@@ -239,7 +280,8 @@ async function recoverPlatformOperations(
   const limit = options.limit === undefined ? candidates.length : Math.max(1, options.limit);
   const recovered: string[] = [];
   const pending: string[] = [];
-  for (const operation of candidates.slice(0, limit)) {
+  const selected = candidates.slice(0, limit);
+  for (const [index, operation] of selected.entries()) {
     if (operation.state === 'failed') {
       pending.push(operation.id);
       return result('blocked', recovered, pending, {
@@ -249,8 +291,13 @@ async function recoverPlatformOperations(
       });
     }
     if (operation.attempts >= operation.maxAttempts) {
-      pending.push(operation.id);
-      continue;
+      pending.push(operation.id, ...selected.slice(index + 1).map((next) => next.id));
+      pending.push(...candidates.slice(limit).map((next) => next.id));
+      return result('blocked', recovered, pending, {
+        code: operation.lastCode || 'PLATFORM_OPERATION_RETRY_LIMIT_REACHED',
+        message: 'A previous platform operation exhausted its recovery attempts; later writes remain queued',
+        retryable: false
+      });
     }
     if (operation.kind !== 'issue-create') {
       try {
@@ -260,7 +307,9 @@ async function recoverPlatformOperations(
           dependency: operation.dependency, state: 'pending',
           ...(operation.issueMetadata ? { issueMetadata: operation.issueMetadata } : {}),
           ...(operation.issueCreate ? { issueCreate: operation.issueCreate } : {}),
-          ...(operation.pullRequest ? { pullRequest: operation.pullRequest } : {})
+          ...(operation.pullRequest ? { pullRequest: operation.pullRequest } : {}),
+          ...(operation.pullRequestSummary ? { pullRequestSummary: operation.pullRequestSummary } : {}),
+          ...(operation.pullRequestReview ? { pullRequestReview: operation.pullRequestReview } : {})
         });
       } catch (error) {
         const value = error as { code?: string; message?: string };
@@ -323,7 +372,9 @@ async function recoverPlatformOperations(
       remote = operation.kind === 'issue-create'
         ? await verifyIssueCreate(resolved.taskId, operation, resolved.repoRoot)
         : operation.kind === 'pull-request-summary'
-        ? await verifyPullRequestSummary(resolved.taskId, operation, resolved.repoRoot)
+        ? await replayPullRequestSummary(resolved.taskId, operation, options.agent, resolved.repoRoot, options.client)
+        : operation.kind === 'pull-request-review'
+        ? await replayPullRequestReview(operation, options.agent, resolved.repoRoot, options.client)
         : operation.kind === 'issue-metadata'
         ? await replayIssueMetadata(resolved.taskId, targetOperation, options.agent, resolved.repoRoot)
         : operation.kind === 'pull-request'
@@ -345,6 +396,8 @@ async function recoverPlatformOperations(
         ...(targetOperation.issueMetadata ? { issueMetadata: targetOperation.issueMetadata } : {}),
         ...(operation.issueCreate ? { issueCreate: operation.issueCreate } : {}),
         ...(operation.pullRequest ? { pullRequest: operation.pullRequest } : {}),
+        ...(operation.pullRequestSummary ? { pullRequestSummary: operation.pullRequestSummary } : {}),
+        ...(operation.pullRequestReview ? { pullRequestReview: operation.pullRequestReview } : {}),
         dependency: operation.dependency,
         state: succeeded ? 'succeeded' : remote.status === 'failed' && remote.error?.retryable === false ? 'failed' : 'unknown',
         lastCode: remote.error?.code ?? null
