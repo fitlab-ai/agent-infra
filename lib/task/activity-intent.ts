@@ -108,6 +108,7 @@ const REVIEW_ACTION_RE = /^Review PR \(Round ([1-9]\d*)\)( \[started\])?$/;
 const VERDICTS: ReadonlySet<string> = new Set(['approved', 'changes-requested', 'commented']);
 const OUTCOMES: ReadonlySet<string> = new Set(['aborted', 'superseded']);
 const SUCCESS_STATUSES: ReadonlySet<PrReviewArtifactStatus> = new Set(['applied', 'no-op']);
+const LOCAL_COMPLETION_STATUSES: ReadonlySet<PrReviewArtifactStatus> = new Set(['applied', 'no-op', 'blocked', 'failed']);
 const ARTIFACT_STATUSES: ReadonlySet<string> = new Set([
   'pending', 'applied', 'no-op', 'blocked', 'failed', 'aborted', 'superseded'
 ]);
@@ -209,7 +210,7 @@ function readSnapshot(taskRef: string, repoRoot?: string):
     if (terminal.length === 1) {
       const note = terminal[0]!.note;
       const terminalMatchesStatus =
-        (note.startsWith('Verdict: ') && SUCCESS_STATUSES.has(parsed.status))
+        (note.startsWith('Verdict: ') && LOCAL_COMPLETION_STATUSES.has(parsed.status))
         || (note.startsWith('Outcome: Aborted, ') && parsed.status === 'aborted')
         || (note.startsWith('Outcome: Superseded, ') && parsed.status === 'superseded')
         || (note.startsWith('receipt ') && SUCCESS_STATUSES.has(parsed.status));
@@ -338,8 +339,8 @@ function applyLocked(intent: PrReviewActivityIntent, normalizedAgent: string, op
     if (roundState.startedAgent === null) {
       return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${base} has no matching started row`, state.taskId);
     }
-    if (intent.kind === 'pr-review-complete' && !SUCCESS_STATUSES.has(roundState.status)) {
-      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${intent.artifact} must be applied or no-op before completion`, state.taskId);
+    if (intent.kind === 'pr-review-complete' && !LOCAL_COMPLETION_STATUSES.has(roundState.status)) {
+      return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${intent.artifact} must record a publication outcome before completion`, state.taskId);
     }
     if (intent.kind === 'pr-review-terminate' && roundState.status !== intent.outcome) {
       return failed(intent, 'ACTIVITY_STATE_CONFLICT', `${intent.artifact} status must match outcome ${intent.outcome}`, state.taskId);

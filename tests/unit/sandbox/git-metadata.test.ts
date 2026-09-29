@@ -48,7 +48,7 @@ test('sandbox Git metadata projects a linked worktree gitfile without changing t
       process.env.GIT_COMMON_DIR = path.join(unrelatedRepoRoot, '.git');
       const metadata = materializeSandboxGitMetadata(worktreeRoot, controlDir);
 
-      assert.equal(metadata.commonDir, commonDir);
+      assert.equal(path.normalize(metadata.commonDir), path.normalize(commonDir));
       assert.equal(
         fs.readFileSync(metadata.worktreeGitFile, 'utf8'),
         `gitdir: /run/agent-infra/git/${expectedRelativeGitDir}\n`

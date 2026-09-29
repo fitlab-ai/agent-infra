@@ -68,6 +68,10 @@
 
 - **{标题}**：{描述} · `{file}:{line}` · 证据：{evidence} · 影响：{impact} · 建议：{suggestion}
 
+## 正式 Review 正文
+
+**正文文件**：`pr-review-body.md`（Round 1）或 `pr-review-body-r{N}.md`（后续轮次），与本报告同目录。文件保存不含平台 marker 的完整正式 Review 正文；发布与恢复按轮次读取同一文件并核对摘要。
+
 ## 发布结果
 
 - **正式 Review 状态**：{pending / applied / no-op / aborted / superseded / blocked / failed}

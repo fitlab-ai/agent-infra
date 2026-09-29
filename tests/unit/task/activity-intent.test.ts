@@ -127,6 +127,27 @@ test('identical PR review start and terminal intents replay as no-op', () => {
   }
 });
 
+test('a task review can close locally while formal publication remains blocked', () => {
+  const fixture = fixtureTask();
+  try {
+    writeArtifact(fixture.taskDir);
+    assert.equal(applyPrReviewActivityIntent({
+      kind: 'pr-review-start', taskRef: fixture.taskId, agent: 'codex', artifact: 'pr-review.md', head: HEAD
+    }, { repoRoot: fixture.root }).status, 'applied');
+    setArtifactStatus(fixture.taskDir, 'pr-review.md', 'blocked');
+    assert.equal(applyPrReviewActivityIntent({
+      kind: 'pr-review-complete', taskRef: fixture.taskId, agent: 'codex', artifact: 'pr-review.md',
+      head: HEAD, verdict: 'commented', blockers: 0, major: 0, minor: 0
+    }, { repoRoot: fixture.root }).status, 'applied');
+    const inspection = inspectPrReviewActivity({ kind: 'pr-review-inspect', taskRef: fixture.taskId }, { repoRoot: fixture.root });
+    assert.equal(inspection.status, 'ready');
+    assert.equal(inspection.snapshot?.open, null);
+    assert.equal(inspection.snapshot?.latestTerminal?.artifactStatus, 'blocked');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('PR review terminate closes an open row and rejects a conflicting terminal payload', () => {
   const fixture = fixtureTask();
   try {

@@ -36,6 +36,18 @@
 - `task-verify` 在进程内执行 typed catalog/check registry；SKILL 只声明业务事件，不传 task-dir、skill 名或特殊 check 序列。
 - 两个入口均保持只读；验证退出码固定为 `0=pass`、`1=fail`、`2=blocked`，网络或平台阻塞不得降格为成功。
 
+## 平台结果与技能阻塞边界
+
+平台写入返回 `blocked` 只表示该操作尚未完成；技能是否停止由当前技能的交付目标决定。平台写入的排队、恢复和幂等由 typed core 执行，技能只消费结构化结果，不自行重放。
+
+- `import-issue`：源 Issue 读取失败时停止导入。
+- `create-pr`：PR 未创建或无法确认其身份时停止创建流程。
+- `review-pr`：PR 或被审 head 无法读取时停止审查；本地审查完成后，评论或正式 Review 写入失败按技能记录待恢复事实，不阻断已完成的本地审查。
+- `cancel-task`：按技能的完整取消标准判断；必要的 Issue 同步失败时不得宣称取消全部完成。
+- `complete-task`：按技能的完整完成标准判断；归档前收敛待恢复操作，必要的远端事实未确认时不得宣称任务完成。
+
+其他技能按各自的本地交付目标继续处理可延后写入。`create-task` 已在本地创建任务、但伴生 Issue 创建失败时，保留本地任务并记录失败，不停止后续可独立执行的工作。
+
 ## 常见命令的状态更新要求
 
 - `create-task`：创建 `branch`、`workflow`、`status`、`created_at`、`updated_at`、`assigned_to`、`agent_infra_version`

@@ -1,6 +1,7 @@
 import { normalizePullRequest, type RemotePullRequest } from './github-data.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
@@ -41,6 +42,8 @@ import {
 import { isResourceIdentity, resourceIdentityEquals, resourceIdentityNumber, serializeResourceIdentity } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
+import type { PlatformPullRequestIntent } from '../task/platform-operation-journal.ts';
 import type { ChangeRequestSnapshot as ProviderChangeRequestSnapshot, IssueSnapshot as ProviderIssueSnapshot } from './provider-contract.ts';
 
 type PullRequestSnapshot = PlatformChangeRequestSnapshot;
@@ -63,7 +66,7 @@ type PullRequestResult = PlatformResult & {
   }>;
 };
 type InspectionOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
-type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
+type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string; skipQueue?: boolean };
 type CreateOptions = SharedOptions & {
   agent: string;
   base: string;
@@ -135,6 +138,30 @@ function externalResult(
 
 function withCreation(output: PullRequestResult, creation: CreationOutcome): PullRequestResult {
   return { ...output, creation };
+}
+
+async function journalPullRequestOperation(
+  taskRef: string,
+  options: SharedOptions & { agent: string; dryRun?: boolean },
+  intent: PlatformPullRequestIntent,
+  target: string,
+  identityInput: unknown,
+  execute: () => Promise<PullRequestResult>
+): Promise<PullRequestResult> {
+  if (options.dryRun) return execute();
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return execute();
+  const expectedDigest = createHash('sha256').update(JSON.stringify({ taskId: resolved.taskId, intent, identityInput })).digest('hex');
+  const operation = { kind: 'pull-request' as const, target: intent.action === 'sync' ? `bound-pr:${resolved.taskId}` : target, expectedDigest };
+  const dependency = intent.action === 'sync' ? 'deferred' : 'required';
+  if (options.skipQueue) return execute();
+  return coordinatePlatformWrite({
+    operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, pullRequest: intent, dependency },
+    agent: options.agent,
+    execute,
+    block: (error) => result('blocked', resolved.taskId, null, null, { error }),
+    persistenceFailure: (error) => result('failed', resolved.taskId, null, null, { error })
+  });
 }
 
 const PRECONDITION_NOT_CREATED: CreationOutcome = {
@@ -851,7 +878,7 @@ function bindIdentity(
   }, { repoRoot: base.resolved.repoRoot, metadataProvider: () => metadata });
 }
 
-async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
+async function bindPlatformPullRequestImpl(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.fact) return result('failed', base.resolved.taskId, base.issueNumber, null, {
@@ -882,6 +909,12 @@ async function bindPlatformPullRequest(taskRef: string, options: BindOptions): P
     resource: { kind: 'pull-request', number: inspected.pullRequest.number, identity: pullRequestIdentity(inspected.pullRequest) }, pullRequest: inspected.pullRequest,
     operations: [{ name: 'task:bind-pr', status: options.dryRun ? 'planned' : written.status === 'no-op' ? 'no-op' : 'applied', reasonCode: null }], error: null
   });
+}
+
+async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
+  const intent: PlatformPullRequestIntent = { action: 'bind', prToken: String(options.pr) };
+  return journalPullRequestOperation(taskRef, options, intent, `pr:${options.pr}`, { pr: String(options.pr) },
+    () => bindPlatformPullRequestImpl(taskRef, options));
 }
 
 function externalEvidenceNote(
@@ -1077,7 +1110,7 @@ async function resolveExternalPullRequest(taskRef: string, options: ResolveExter
   }), { mode: 'external', authorization: selected.source, candidates: selected.candidates, eligible: selected.eligible, selected: selectedPullRequest });
 }
 
-async function createPlatformPullRequest(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
+async function createPlatformPullRequestImpl(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return withCreation(base.output, PRECONDITION_NOT_CREATED);
   if (!options.base || !options.head || !options.title.trim() || !options.body.trim()) {
@@ -1110,6 +1143,66 @@ async function createPlatformPullRequest(taskRef: string, options: CreateOptions
       }
     }), PRECONDITION_NOT_CREATED);
   }
+}
+
+async function recoverCreatedPullRequest(
+  taskRef: string,
+  options: SharedOptions & { agent: string; base: string; head: string }
+): Promise<PullRequestResult> {
+  const base = await resolvedContext(taskRef, options);
+  if (!base.ok) return base.output;
+  if (!base.issueIdentity) return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    error: { code: 'PLATFORM_OPERATION_ISSUE_REQUIRED', message: 'Pull-request recovery requires a bound Issue identity', retryable: false }
+  });
+  const head = base.provider.changeRequests?.verifyHead
+    ? await base.provider.changeRequests.verifyHead({ context: providerOperationContext(base.loadedContext), head: options.head })
+    : unsupportedProviderOperation(base.provider, 'changeRequests.verifyHead');
+  if (!head.ok) return providerPullRequestError(base, head.error, base.prNumber);
+  if (base.prIdentity) {
+    const inspected = await inspectExternalPullRequest(base, base.prIdentity);
+    if (!inspected.pullRequest || inspected.status === 'failed' || inspected.status === 'blocked'
+      || inspected.pullRequest.base.repository !== base.context.platform.repository
+      || inspected.pullRequest.base.ref !== options.base || inspected.pullRequest.head.ref !== options.head
+      || inspected.pullRequest.head.sha !== head.value.sha) {
+      return result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
+        error: inspected.error ?? { code: 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', message: 'Bound pull request does not match the pending create intent', retryable: true }
+      });
+    }
+    return inspected;
+  }
+  const candidates = base.provider.changeRequests?.listClosing
+    ? await base.provider.changeRequests.listClosing({ context: providerOperationContext(base.loadedContext), issue: base.issueIdentity })
+    : unsupportedProviderOperation(base.provider, 'changeRequests.listClosing');
+  if (!candidates.ok) return providerPullRequestError(base, candidates.error, null);
+  const matches = candidates.value.map((candidate) => normalizeProviderPullRequest(candidate, base.context.platform.repository!, candidate.number || 0))
+    .filter((candidate) => candidate.base.repository === base.context.platform.repository
+      && candidate.base.ref === options.base
+      && candidate.head.repository === base.context.platform.repository
+      && candidate.head.ref === options.head
+      && candidate.head.sha === head.value.sha);
+  if (matches.length !== 1 || !matches[0]?.number) return result('blocked', base.resolved.taskId, base.issueNumber, null, {
+    error: { code: matches.length > 1 ? 'PLATFORM_OPERATION_PR_AMBIGUOUS' : 'PLATFORM_OPERATION_PR_NOT_CONFIRMED',
+      message: 'Pending pull-request creation does not resolve to one exact repository/base/head identity', retryable: true }
+  });
+  const bound = await bindPlatformPullRequest(base.resolved.taskId, { agent: options.agent, cwd: base.resolved.repoRoot, pr: matches[0].number });
+  if (!bound.pullRequest || (bound.status !== 'applied' && bound.status !== 'no-op') || bound.error) return bound;
+  if (bound.pullRequest.base.repository !== base.context.platform.repository || bound.pullRequest.base.ref !== options.base
+    || bound.pullRequest.head.repository !== base.context.platform.repository || bound.pullRequest.head.ref !== options.head
+    || bound.pullRequest.head.sha !== head.value.sha) return result('blocked', base.resolved.taskId, base.issueNumber, bound.task.prNumber, {
+    error: { code: 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', message: 'Bound pull request changed while recovering the create intent', retryable: true }
+  });
+  return bound;
+}
+
+async function createPlatformPullRequest(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
+  const intent: PlatformPullRequestIntent = { action: 'create', baseRef: options.base, headRef: options.head };
+  const identityInput = {
+    title: createHash('sha256').update(options.title).digest('hex'),
+    body: createHash('sha256').update(options.body).digest('hex'),
+    draft: options.draft === true
+  };
+  return journalPullRequestOperation(taskRef, options, intent, `head:${options.head}:base:${options.base}`, identityInput,
+    () => createPlatformPullRequestImpl(taskRef, options));
 }
 
 async function createExternalPullRequest(
@@ -1266,7 +1359,7 @@ async function createExternalPullRequest(
   }), { kind: 'created', createdByCurrentOperation: true });
 }
 
-async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
+async function syncPlatformPullRequestImpl(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   const softenFailure = (output: PullRequestResult): PullRequestResult => {
     const authorityError = output.error?.code.startsWith('IN_LABEL_SYNC') || output.error?.code.startsWith('PR_IDENTITY');
@@ -1430,6 +1523,13 @@ async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): P
   }
 }
 
+async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
+  const intent: PlatformPullRequestIntent = { action: 'sync', metadata: options.metadata === true, closingIssue: options.closingIssue === true };
+  return journalPullRequestOperation(taskRef, options, intent, `bound-pr:${taskRef}`, {
+    metadata: options.metadata === true, closingIssue: options.closingIssue === true
+  }, () => syncPlatformPullRequestImpl(taskRef, options));
+}
+
 function readProjectPrFlow(repoRoot: string): 'required' | 'disabled' | undefined {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { prFlow?: unknown };
@@ -1527,6 +1627,6 @@ async function skipPlatformPullRequestFact(taskRef: string, options: SkipFactOpt
   }
 }
 
-export { bindPlatformPullRequest, createPlatformPullRequest, inspectPlatformPullRequest, inspectPlatformPullRequestByNumber, resolveExternalPullRequest, skipPlatformPullRequestFact, selectExternalPullRequest, selectPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels };
+export { bindPlatformPullRequest, createPlatformPullRequest, inspectPlatformPullRequest, inspectPlatformPullRequestByNumber, recoverCreatedPullRequest, resolveExternalPullRequest, skipPlatformPullRequestFact, selectExternalPullRequest, selectPullRequest, syncPlatformPullRequest, syncPlatformPullRequestInLabels };
 export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, PullRequestPrimaryResult, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SkipFactOptions, SyncOptions };
 export { warningResultForPrimary };

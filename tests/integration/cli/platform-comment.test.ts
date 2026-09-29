@@ -65,6 +65,25 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(second.stdout).status, 'no-op');
   assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+  const operationJournalPath = path.join(path.dirname(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md')), '.platform-operations.json');
+  const operationJournal = JSON.parse(fs.readFileSync(operationJournalPath, 'utf8'));
+  assert.equal(operationJournal.operations.length, 1);
+  assert.equal(operationJournal.operations[0].kind, 'task-comment');
+  assert.equal(operationJournal.operations[0].target, 'task');
+  assert.equal(operationJournal.operations[0].state, 'succeeded');
+  assert.equal(operationJournal.operations[0].dependency, 'deferred');
+  assert.equal(JSON.stringify(operationJournal).includes('## Task'), false);
+
+  const journalInspection = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'inspect'], {
+    cwd: f.root, env: f.env, encoding: 'utf8'
+  });
+  assert.equal(journalInspection.status, 0, journalInspection.stderr || journalInspection.stdout);
+  assert.equal(JSON.parse(journalInspection.stdout).journal.operations.length, 1);
+  const recovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
+    cwd: f.root, env: f.env, encoding: 'utf8'
+  });
+  assert.equal(recovery.status, 0, recovery.stderr || recovery.stdout);
+  assert.equal(JSON.parse(recovery.stdout).status, 'no-op');
 
   const stagingDir = path.join(f.root, '.agents', 'workspace', '.restore-staging-cli-test');
   const outputPath = path.join(stagingDir, 'task.md');
@@ -258,7 +277,7 @@ test('ordinary summary sync refuses to re-post an out-of-order summary without f
   }
 });
 
-test('platform-comment backfill syncs only completion artifacts and resolves only matching excluded pr-review warnings', () => {
+test('platform-comment backfill syncs all completion artifacts and resolves matching artifact warnings', () => {
   const f = fixture();
   try {
     const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
@@ -275,7 +294,7 @@ test('platform-comment backfill syncs only completion artifacts and resolves onl
     ].join('\n'));
     const taskDir = path.dirname(taskMd);
     for (const name of [
-      'analysis.md', 'plan.md', 'code.md', 'manual-validation.md', 'validation-run.md', 'pr-review.md'
+      'analysis.md', 'plan.md', 'code.md', 'manual-validation.md', 'validation-run.md', 'pr-review.md', 'pr-review-r2.md'
     ]) {
       fs.writeFileSync(path.join(taskDir, name), `# ${name}\n`);
     }
@@ -283,26 +302,27 @@ test('platform-comment backfill syncs only completion artifacts and resolves onl
     const result = runComment(['backfill', f.taskId, '--agent', 'codex'], f);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const output = JSON.parse(result.stdout);
-    assert.deepEqual(output.artifacts.map((item: { artifact: string }) => item.artifact), ['analysis.md', 'plan.md', 'code.md']);
+    assert.deepEqual(output.artifacts.map((item: { artifact: string }) => item.artifact), [
+      'analysis.md', 'plan.md', 'code.md', 'manual-validation.md', 'validation-run.md', 'pr-review.md', 'pr-review-r2.md'
+    ]);
     const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
-    assert.equal(comments.length, 3);
+    assert.equal(comments.length, 7);
     const updated = fs.readFileSync(taskMd, 'utf8');
     assert.match(updated, /\| WW-1 \|[^\n]+\| resolved \|/);
     assert.match(updated, /\| WW-2 \|[^\n]+\| open \|/);
 
     const replay = runComment(['backfill', f.taskId, '--agent', 'codex'], f);
     assert.equal(replay.status, 0, replay.stderr || replay.stdout);
-    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 3);
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 7);
 
     const direct = runComment(['sync', f.taskId, '--kind', 'artifact', '--artifact', 'pr-review.md', '--agent', 'codex'], f);
     assert.equal(direct.status, 0, direct.stderr || direct.stdout);
-    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 7);
 
     for (const artifact of ['manual-validation.md', 'validation-run.md']) {
-      const rejected = runComment(['sync', f.taskId, '--kind', 'artifact', '--artifact', artifact, '--agent', 'codex'], f);
-      assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
-      assert.equal(JSON.parse(rejected.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
-      assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+      const synced = runComment(['sync', f.taskId, '--kind', 'artifact', '--artifact', artifact, '--agent', 'codex'], f);
+      assert.equal(synced.status, 0, synced.stderr || synced.stdout);
+      assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 7);
     }
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });

@@ -81,7 +81,7 @@ agent-infra-internal task-activity {task-id} pr-review-start --agent {agent} \
   --artifact {pr-review-artifact} --head {head-sha}
 ```
 
-The one-shot path never calls `task-activity`. For a controlled failure after started where the formal Review is known not to have been published, first set the artifact status to `aborted`, then call `pr-review-terminate --outcome aborted --reason <single-line>` with the same artifact/head. If publication outcome is uncertain, leave the round open rather than guessing aborted.
+The one-shot path never calls `task-activity`. If reading the PR, confirming the head, or completing the local review fails, set the artifact status to `aborted` and call `pr-review-terminate --outcome aborted --reason <single-line>` with the same artifact/head. A publication failure after the local review is complete records recovery evidence instead of aborting the review round.
 
 ### 2. Single decide: evidence enumeration + classification + risk + mode
 
@@ -99,7 +99,7 @@ Complete this round's artifact per `reference/report-template.md`; the task-anch
 
 ### 4. Sync the Issue artifact comments (task-anchored path)
 
-Sync the task comment, then the artifact comment, and capture a stable comment URL:
+Attempt the task and artifact comment syncs in order. Record warnings and recovery evidence on failure, then continue the local review:
 
 ```bash
 agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
@@ -116,11 +116,11 @@ Read the remote head again to confirm it did not drift during the review:
 agent-infra-internal platform-pr-review inspect --pr {pr-number} [--cwd <path>]
 ```
 
-If the head matches step 1, assemble the body (head SHA / conclusion / findings / receipt / Issue artifact link, **without a marker**) and publish the formal Review:
+If the head matches step 1, assemble the body (head SHA / conclusion / findings / receipt / available Issue artifact link; use the artifact identity when its comment is pending, **without a marker**). Write the entire body to `pr-review-body.md` (Round 1) or `pr-review-body-r{N}.md` (later rounds) beside the current report, and bind `{review-body-file}` to its absolute path. The report's `Formal Review Body` section records only that filename. For a task-anchored review, use the file in the task directory; recovery rereads it by round and checks its digest. Then publish the formal Review:
 
 ```bash
 agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId|pr{pr-number}} --round {round} \
-  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} [--dry-run] [--cwd <path>]
+  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body-file} --artifact {pr-review-artifact} --agent {agent} [--dry-run] [--cwd <path>]
 ```
 
 `publish` generates and validates the marker (first line) in core and is idempotent per marker + commit (replay is a no-op; marker hit on a different commit fails stably). On head drift, first set the old artifact status to `superseded`, then close the old round:
@@ -131,11 +131,11 @@ agent-infra-internal task-activity {task-id} pr-review-terminate --agent {agent}
   --outcome superseded --reason "head changed before publish"
 ```
 
-After closure, re-run step 1 for the next canonical round; never start the new round first. If the remote outcome of `publish` is uncertain, keep the round open and recover through marker + commit idempotency on retry.
+After closure, re-run step 1 for the next canonical round; never start the new round first. If `publish` has an uncertain outcome and a durable task journal entry exists, keep the operation pending and finish the local review round. Keep the round open when recovery evidence cannot be proven durable.
 
 ### 6. Write back the publication result and task state
 
-- **Task-anchored path**: after publish returns `applied` / `no-op`, write the Review ID/URL and matching Formal Review Status into the `pr-review-rN.md` "Publication Result" section, then close the Activity Log with the exact verdict/counts frozen in step 3:
+- **Task-anchored path**: write the actual publication status in the `pr-review-rN.md` "Publication Result" section. Record the Review ID/URL for `applied` / `no-op`; for a failed write with a durable journal entry, record `blocked` / `failed`, the error code, and recovery action. Then close the local Activity Log with the verdict/counts frozen in step 3:
 
   ```bash
   agent-infra-internal task-activity {task-id} pr-review-complete --agent {agent} \
@@ -145,11 +145,11 @@ After closure, re-run step 1 for the next canonical round; never start the new r
 
   `task-activity` generates `Verdict: <result>, blockers: N, major: N, minor: N → {pr-review-artifact}` from the typed payload and atomically writes the Activity Log, `## Review Feedback` link, and version stamp through `writeTask`. It never changes `current_step` or puts receipt/head/Review URL into the NOTE.
 
-- **One-shot path (no task)**: write the Review ID/URL only into the `pr-review-rN.md` "Publication Result" section; do not call `task-activity`.
+- **One-shot path (no task)**: record the actual publication status in the `pr-review-rN.md` "Publication Result" section. Record the Review ID/URL on success, or the error and lack of automatic recovery on failure. Do not call `task-activity`.
 
 ### 7. Re-sync after write-back (task-anchored path)
 
-Step 6 rewrote the local `pr-review-rN.md` "Publication Result" section and task.md (Activity Log), while step 4 synced the older snapshot. `verify_comment_content` / `verify_task_comment_content` compare full content, so you must re-sync first to align local and remote. Run in order:
+Step 6 rewrote the local `pr-review-rN.md` "Publication Result" section and task.md (Activity Log), while step 4 synced the older snapshot. Attempt the syncs again in order; record failures as warnings for `complete-task` to restore before archiving:
 
 ```bash
 agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
@@ -178,13 +178,13 @@ Exit code 0 passes; 1 means fix per the output and re-run; 2 means stop and ask 
 
 ### 9. Inform the user
 
-Pick the single exit branch per `reference/output-guidance.md` (published / blocked-requires-link / one-shot), and read `.agents/rules/next-step-output.md` before rendering the next step.
+Pick the single exit branch per `reference/output-guidance.md` (local review complete / blocked-requires-link / one-shot), and read `.agents/rules/next-step-output.md` before rendering the next step.
 
 ## Completion Checklist
 
 - [ ] Completed the evidence-graded PR review and produced `pr-review-rN.md`
-- [ ] Published the formal Review on the target PR, bound to the reviewed head SHA
-- [ ] Synced and re-synced the Issue artifact/task comments on the task-anchored path
+- [ ] Published the formal Review, durably recorded its pending publication, or accurately recorded a one-shot publication failure
+- [ ] Synced the Issue artifact/task comments or recorded their pending recovery on the task-anchored path
 - [ ] Ran the completion verification (`task-verify` or `verify-artifact`)
 - [ ] Updated task.md and appended the Activity Log entry (task-anchored path)
 

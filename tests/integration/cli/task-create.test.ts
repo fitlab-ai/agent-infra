@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { canonicalTaskCreateCandidate, validateTaskCreateCandidate } from '../../../lib/task/create.ts';
+import { createTask } from '../../../lib/task/create-service.ts';
 import { buildLifecycleFacts, recommendNext } from '../../../lib/task/capabilities.ts';
 import { parseTaskQualification } from '../../../lib/task/qualification-audit.ts';
 import { writeSandboxControlIdentitySentinel } from '../../../lib/sandbox/control/identity-sentinel.ts';
@@ -65,6 +66,28 @@ function qualificationCandidate(alternativeCount = 2) {
     }
   };
 }
+
+test('a locally created task remains progressable when Issue creation is blocked', async () => {
+  const root = fixture();
+  try {
+    const created = await createTask(candidate(), {
+      repoRoot: root,
+      dependencies: {
+        createIssue: async () => ({
+          status: 'blocked', operations: [], issue: null,
+          error: { code: 'NETWORK_TIMEOUT', message: 'Issue creation timed out', retryable: true }
+        }) as any,
+        addWarning: () => ({ status: 'applied' }) as any
+      }
+    });
+    assert.equal(created.status, 'degraded');
+    assert.equal(created.warnings[0]?.code, 'ISSUE_CREATE_FAILED');
+    assert.ok(created.task.id);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', created.task.id!, 'task.md')), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 async function waitForRequestAsync(requestsDir: string, timeoutMs: number): Promise<string> {
   const deadline = Date.now() + timeoutMs;

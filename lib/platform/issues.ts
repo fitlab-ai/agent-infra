@@ -2,6 +2,7 @@ import type { PlatformIssueSnapshot as IssueSnapshot } from './snapshots.ts';
 import type { IssueFieldSchema } from './github-data.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { buildDefaultBody } from '../task/commands/issue-body.ts';
@@ -24,6 +25,7 @@ import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 import {
   labelDelta,
+  inLabelMappingDigest,
   planInLabelUpdate,
   syncLabelDelta,
   validateInLabelMapping,
@@ -39,9 +41,11 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityEquals, resourceIdentityNumber, resourceIdentityString, serializeResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { IssueSnapshot as ProviderIssueSnapshot, RepositoryMetadataSnapshot } from './provider-contract.ts';
-type IssueResult = PlatformResult & {
+type IssueResult = Omit<PlatformResult, 'operations'> & {
+  operations: PlannedOperation[];
   task: { id: string | null; issueNumber: number | null };
   issue: IssueSnapshot | null;
 };
@@ -61,6 +65,8 @@ type SyncOptions = SharedOptions & {
   state?: 'open' | 'closed';
   closeReason?: 'completed' | 'not_planned';
   dryRun?: boolean;
+  dependency?: 'deferred' | 'required';
+  skipQueue?: boolean;
 };
 
 function result(
@@ -305,7 +311,7 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
     platform: base.context.platform, capabilities: base.context.capabilities,
     operations: [{ name: 'issue:create', status: 'planned', reasonCode: null }], error: null
   });
-  {
+  const execute = async (): Promise<IssueResult> => {
     const created = base.provider.issues?.create
       ? await base.provider.issues.create({
         context: providerOperationContext(base.loadedContext),
@@ -344,7 +350,7 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
     if (written.status === 'failed') return result('failed', base.resolved.taskId, null, {
       platform: base.context.platform, capabilities: base.context.capabilities,
       resource: { kind: 'issue', number: issueNumber, identity: inspected.value.identity || createdIdentity },
-      error: { code: 'ISSUE_CREATED_BIND_FAILED', message: written.error.message, retryable: false }
+      error: { code: 'ISSUE_CREATED_BIND_FAILED', message: written.error.message, retryable: true }
     });
     return result('applied', base.resolved.taskId, issueNumber, {
       changed: true,
@@ -355,7 +361,26 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
       issue: normalizeProviderIssue(inspected.value, repository, issueNumber),
       error: null
     });
-  }
+  };
+  const issueCreate = { title: payload.title, bodyDigest: createHash('sha256').update(payload.body).digest('hex') };
+  const operation = {
+    kind: 'issue-create' as const,
+    target: `task:${base.resolved.taskId}`,
+    expectedDigest: createHash('sha256').update(JSON.stringify({
+      taskId: base.resolved.taskId,
+      title: payload.title,
+      body: createHash('sha256').update(payload.body).digest('hex'),
+      labels: payload.labels || [], assignees: payload.assignees,
+      milestone: typeof payload.milestone === 'string' ? payload.milestone : null
+    })).digest('hex')
+  };
+  return coordinatePlatformWrite({
+    operation: { taskRef: base.resolved.taskId, cwd: base.resolved.repoRoot, ...operation, issueCreate, dependency: 'required' },
+    agent: options.agent,
+    execute,
+    block: (error) => result('blocked', base.resolved.taskId, null, { platform: base.context.platform, capabilities: base.context.capabilities, error }),
+    persistenceFailure: (error) => result('failed', base.resolved.taskId, null, { error })
+  });
 }
 
 async function bindPlatformIssue(taskRef: string, options: BindOptions): Promise<IssueResult> {
@@ -478,7 +503,7 @@ function desiredFieldValues(frontmatter: Record<string, string>, fields: IssueFi
   return desired;
 }
 
-async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+async function syncPlatformIssueImpl(taskRef: string, options: SyncOptions): Promise<IssueResult> {
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.issueIdentity) return result('failed', base.resolved.taskId, null, { error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no valid platform issue identity', retryable: false } });
@@ -614,6 +639,79 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     changed: updated.value.changed, platform: base.context.platform, capabilities: base.context.capabilities,
     resource: { kind: 'issue', number: base.issueNumber, identity: base.issueIdentity }, issue: finalIssue,
     operations: plan.operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
+  });
+}
+
+async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise<IssueResult> {
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok || options.dryRun) return syncPlatformIssueImpl(taskRef, options);
+  let frontmatter: Record<string, string>;
+  let taskContent: string;
+  try {
+    taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    frontmatter = parseTaskFrontmatter(taskContent);
+  }
+  catch { return syncPlatformIssueImpl(taskRef, options); }
+  const identity = taskIssueIdentity(frontmatter);
+  if (!identity || ![
+    options.requirements, options.issueType, options.fields, options.status !== undefined,
+    options.assignees !== undefined, options.milestone !== undefined,
+    options.inLabels !== undefined, options.state !== undefined
+  ].some(Boolean)) return syncPlatformIssueImpl(taskRef, options);
+  let fromDiffFiles: string[] | undefined;
+  let mappingDigest: string | undefined;
+  if (options.inLabels === 'from-diff') {
+    const taskBase = typeof frontmatter.delivery_base_ref === 'string' ? frontmatter.delivery_base_ref.trim() : '';
+    if (taskBase && (!options.base || options.base === taskBase)) {
+      try {
+        fromDiffFiles = execFileSync('git', ['diff', `${taskBase}...HEAD`, '--name-only'], {
+          cwd: resolved.repoRoot, encoding: 'utf8'
+        }).trim().split(/\r?\n/).filter(Boolean).sort();
+        const config = JSON.parse(fs.readFileSync(path.join(resolved.repoRoot, '.agents', '.airc.json'), 'utf8')) as { labels?: { in?: unknown } };
+        const mapping = inLabelMappingDigest(config.labels?.in);
+        if (!mapping.ok) return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
+          error: { code: mapping.error.code, message: mapping.error.message, retryable: false }
+        });
+        mappingDigest = mapping.digest;
+      } catch {
+        return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
+          error: { code: 'IN_LABEL_SYNC_EVIDENCE_UNAVAILABLE', message: 'Unable to derive the current changed-file set for Issue metadata recovery', retryable: false }
+        });
+      }
+    }
+  }
+  const issueMetadata = {
+    requirements: options.requirements === true,
+    issueType: options.issueType === true,
+    fields: options.fields === true,
+    ...(options.status !== undefined ? { status: options.status } : {}),
+    ...(options.assignees !== undefined ? { assignees: options.assignees } : {}),
+    ...(options.milestone !== undefined ? { milestone: options.milestone } : {}),
+    ...(options.inLabels ? { inLabels: options.inLabels } : {}),
+    ...(options.base ? { base: options.base } : {}),
+    ...(fromDiffFiles ? { fromDiffFiles } : {}),
+    ...(mappingDigest ? { inLabelMappingDigest: mappingDigest } : {}),
+    ...(options.state ? { state: options.state } : {}),
+    ...(options.closeReason ? { closeReason: options.closeReason } : {})
+  };
+  const operation = {
+    kind: 'issue-metadata' as const,
+    target: JSON.stringify(identity),
+    expectedDigest: createHash('sha256').update(JSON.stringify({
+      ...issueMetadata,
+      task: resolved.taskId,
+      taskContent: createHash('sha256').update(taskContent).digest('hex')
+    })).digest('hex')
+  };
+  const dependency = options.dependency ?? (options.state === 'closed' && options.closeReason === 'not_planned' ? 'required' : 'deferred');
+  const execute = () => syncPlatformIssueImpl(taskRef, options);
+  if (options.skipQueue) return execute();
+  return coordinatePlatformWrite({
+    operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, issueMetadata, dependency },
+    agent: options.agent,
+    execute,
+    block: (error) => result('blocked', resolved.taskId, resourceIdentityNumber(identity), { error }),
+    persistenceFailure: (error) => result('failed', resolved.taskId, resourceIdentityNumber(identity), { error })
   });
 }
 

@@ -89,6 +89,11 @@ if (args[0] === "api" && args.includes("--paginate") && args.includes("--slurp")
   process.exit(0);
 }
 
+if (args[0] === "api" && args.includes("--paginate") && args.includes("--slurp") && args.some((arg) => /repos\/[^/]+\/[^/]+\/milestones\?state=open&per_page=100$/.test(arg))) {
+  process.stdout.write(JSON.stringify([[]]));
+  process.exit(0);
+}
+
 if (args[0] === "label" && args[1] === "list") {
   process.stdout.write(JSON.stringify(readJson("GH_FAKE_LABELS_PATH") || []));
   process.exit(0);
@@ -215,6 +220,27 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(arg
   }
 
   process.stdout.write(JSON.stringify(restIssue));
+  process.exit(0);
+}
+
+if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+\/labels(?:\/[^/]+)?$/.test(args[1])) {
+  const issue = readJson("GH_FAKE_ISSUE_REST_PATH") ?? readJson("GH_FAKE_ISSUE_PATH");
+  const methodIndex = args.indexOf("-X");
+  const method = methodIndex === -1 ? "GET" : args[methodIndex + 1];
+  const labelMatch = args[1].match(/\/labels\/([^/]+)$/);
+  const labels = [...(issue?.labels || [])];
+  if (method === "DELETE" && labelMatch) {
+    const label = decodeURIComponent(labelMatch[1]);
+    issue.labels = labels.filter((entry) => entry !== label);
+  } else if (method === "POST") {
+    const inputIndex = args.indexOf("--input");
+    const inputPath = inputIndex === -1 ? "" : args[inputIndex + 1];
+    const payload = inputPath ? JSON.parse(fs.readFileSync(inputPath === "-" ? 0 : inputPath, "utf8")) : {};
+    issue.labels = [...new Set([...labels, ...(payload.labels || [])])].sort();
+  }
+  const targetPath = process.env.GH_FAKE_ISSUE_REST_PATH || process.env.GH_FAKE_ISSUE_PATH;
+  if (targetPath && method !== "GET") fs.writeFileSync(targetPath, JSON.stringify(issue));
+  process.stdout.write(JSON.stringify(issue?.labels || []));
   process.exit(0);
 }
 

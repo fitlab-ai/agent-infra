@@ -1679,6 +1679,22 @@ test("review-pr keeps the sync -> write-back -> re-sync -> verify closed-loop or
   });
 });
 
+test("review-pr publisher commands bind task-scoped bodies to their canonical artifact", () => {
+  const variants = [
+    ".agents/skills/review-pr/SKILL.md",
+    "templates/.agents/skills/review-pr/SKILL.zh-CN.md",
+    "templates/.agents/skills/review-pr/SKILL.en.md"
+  ];
+
+  variants.forEach((relativePath) => {
+    const commands = [...read(relativePath).matchAll(/```bash\n([\s\S]*?)```/g)].map((match) => match[1]!);
+    const publish = commands.find((command) => /\bplatform-pr-review publish\b/.test(command));
+
+    assert.ok(publish, `${relativePath} should define a PR Review publish command`);
+    assert.match(publish, /--artifact \{pr-review-artifact\}/, `${relativePath} should bind task-scoped publication to its canonical report`);
+  });
+});
+
 test("platform workflow docs delegate comment mechanics to internal intents", () => {
   const requiredIntentBySkill: Record<string, string> = {
     "analyze-task": "platform-comment sync {task-id}",

@@ -68,6 +68,10 @@ Land the following in order before the line-level findings, without impersonatin
 
 - **{title}**: {description} · `{file}:{line}` · Evidence: {evidence} · Impact: {impact} · Suggestion: {suggestion}
 
+## Formal Review Body
+
+**Body file**: `pr-review-body.md` (Round 1) or `pr-review-body-r{N}.md` (later rounds), beside this report. The file contains the complete formal Review body without the platform marker. Publication and recovery read the same file by round and check its digest.
+
 ## Publication Result
 
 - **Formal Review Status**: {pending / applied / no-op / aborted / superseded / blocked / failed}

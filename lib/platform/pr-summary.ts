@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTypedTaskFrontmatter } from '../task/frontmatter.ts';
@@ -13,6 +14,7 @@ import { normalizeCommentContent } from './issue-comments.ts';
 import { CONTROL_MARKER_PATTERN, sanitizeMarkdownDocument, splitDocumentPlaceholder } from './comment-safety.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import type { OperationWarning } from '../task/operation-outcome.ts';
 import { providerError, providerOperationContext, providerStatus, providerResourceToken, resourceIdentityNumber, unsupportedProviderOperation } from './provider-bridge.ts';
 import { resourceIdentityEquals } from './resource-identity.ts';
@@ -491,7 +493,7 @@ async function reportWrite(taskRef: string, options: ReportWriteOptions): Promis
 
 async function syncPullRequestSummary(
   taskRef: string,
-  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; lockAlreadyHeld?: boolean }
+  options: { agent: string; body: string; changeReportFile?: string; cwd?: string; client?: PlatformClient; dryRun?: boolean; strict?: boolean; primaryResult: PullRequestPrimaryResult; runtimeVersion?: string; manualValidation?: ManualValidationSummaryOptions; lockAlreadyHeld?: boolean; skipQueue?: boolean }
 ): Promise<PullRequestSummaryResult> {
   const warningResult = warningResultForPrimary(options.primaryResult);
   let knownPrNumber: number | null = null;
@@ -657,6 +659,7 @@ async function syncPullRequestSummary(
         operations: [{ name: `summary:${reconciliation.action}`, status: 'planned', reasonCode: null }],
         result: null, warnings: [], ...info
       };
+      const publish = async (): Promise<PullRequestSummaryResult> => {
       const existingComment = reconciliation.commentId === null
         ? undefined
         : providerResourceToken(loaded.value.provider, 'comment', String(reconciliation.commentId));
@@ -722,6 +725,24 @@ async function syncPullRequestSummary(
         operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }],
         result: null, warnings: [], ...info
       };
+      };
+      const operation = {
+        taskRef: resolved.taskId,
+        cwd: resolved.repoRoot,
+        kind: 'pull-request-summary' as const,
+        target: JSON.stringify(prIdentity),
+        expectedDigest: createHash('sha256').update(desired).digest('hex'),
+        dependency: 'deferred' as const,
+        pullRequestSummary: { body: options.body, changeReportFile: options.changeReportFile! }
+      };
+      if (options.skipQueue) return publish();
+      return coordinatePlatformWrite({
+        operation,
+        agent: options.agent,
+        execute: publish,
+        block: (error) => fail('blocked', context, error, prNumber),
+        persistenceFailure: (error) => fail('failed', context, error, prNumber)
+      });
     };
     return await (options.lockAlreadyHeld
       ? execute()

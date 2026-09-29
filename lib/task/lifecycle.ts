@@ -5,7 +5,8 @@ import path from 'node:path';
 import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { artifactFamilyCatalog, inspectArtifactDirectory } from './artifact-lifecycle.ts';
 import { parseArtifactName } from './artifact-name.ts';
-import { parseTypedTaskFrontmatter } from './frontmatter.ts';
+import { parseTypedTaskFrontmatter, updateTaskFrontmatter } from './frontmatter.ts';
+import { upsertSection } from './sections.ts';
 import { locateHotTaskDirs, resolveTaskRef, TASK_ID_RE } from './resolve-ref.ts';
 import {
   configuredShortIdLength, executeShortIdCommand, loadShortIdByTaskId,
@@ -111,6 +112,8 @@ type TaskLifecycleOptions = {
    * and short-id mutation for a separately authorized commit. */
   prepareOnly?: boolean;
 };
+
+type TaskCompletionProjection = Readonly<{ taskId: string; content: string; timestamp: string; agentInfraVersion: string }>;
 
 const STEPS: readonly LifecycleStep[] = ['task-written', 'directory-moved', 'registry-committed'];
 const DEFAULT_IO: LifecycleFileSystem = {
@@ -302,6 +305,25 @@ function mutationsFor(request: TaskLifecycleRequest, content: string, metadata: 
     });
   }
   return mutations;
+}
+
+function previewTaskCompletion(taskRef: string, agent: string, options: Pick<TaskLifecycleOptions, 'repoRoot' | 'metadataProvider'> = {}): TaskCompletionProjection {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) throw Object.assign(new Error(resolved.message), { code: resolved.code });
+  if (resolved.state !== 'active') throw Object.assign(new Error(`task ${resolved.taskId} is ${resolved.state}, expected active`), { code: 'TASK_STATE_MISMATCH' });
+  const original = fs.readFileSync(resolved.taskMdPath, 'utf8');
+  const metadata = (options.metadataProvider ?? captureTaskWriteMetadata)();
+  if (!isValidAgentInfraVersion(metadata.agentInfraVersion)) throw Object.assign(new Error('metadata agentInfraVersion is invalid'), { code: 'LIFECYCLE_METADATA_FAILED' });
+  const mutations = mutationsFor({ taskRef: resolved.taskId, intent: 'complete', agent }, original, metadata, 0);
+  if (!Array.isArray(mutations)) throw Object.assign(new Error(mutations.message), { code: mutations.code });
+  let content = original;
+  for (const mutation of mutations) {
+    if (mutation.kind === 'frontmatter') content = updateTaskFrontmatter(content, mutation.set, mutation.remove);
+    else if (mutation.kind === 'section') content = upsertSection(content, mutation).content;
+    else throw Object.assign(new Error('completion projection contains an unsupported mutation'), { code: 'LIFECYCLE_PROJECTION_INVALID' });
+  }
+  content = updateTaskFrontmatter(content, { updated_at: metadata.timestamp, agent_infra_version: metadata.agentInfraVersion });
+  return { taskId: resolved.taskId, content, timestamp: metadata.timestamp, agentInfraVersion: metadata.agentInfraVersion };
 }
 
 function writeJournal(file: string, journal: LifecycleJournal, io: LifecycleFileSystem, create = false): void {
@@ -590,6 +612,16 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     if (completed.has('directory-moved')) completed.add('registry-committed');
   }
   let taskOperations: readonly TaskOperationSummary[] = [];
+  if (options.prepareOnly && !matchingCompletion(io.readFileSync(path.join(sourcePath, 'task.md')), request, restoredFiles)) {
+    return {
+      ...failed(request, { code: '', message: '' }), status: 'applied', changed: true, error: null,
+      taskId, sourceState, targetState: spec.target, sourcePath, targetPath,
+      task: { operations: [] }, directory: { effect: 'unchanged', changed: false },
+      shortId: { effect: 'unchanged', shortId: null, changed: false },
+      timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion,
+      journalPath, completedSteps: [...completed], pendingSteps: STEPS.filter((step) => !completed.has(step))
+    };
+  }
   if (matchingCompletion(io.readFileSync(path.join(sourcePath, 'task.md')), request, restoredFiles)) completed.add('task-written');
   if (!completed.has('task-written')) {
     const current = io.readFileSync(path.join(sourcePath, 'task.md'));
@@ -687,8 +719,8 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   };
 }
 
-export { lifecycleIntentCatalog, lifecycleFailureCatalog, lifecycleProducerCatalog, applyTaskLifecycle };
+export { lifecycleIntentCatalog, lifecycleFailureCatalog, lifecycleProducerCatalog, applyTaskLifecycle, previewTaskCompletion };
 export type {
   TaskLifecycleIntent, TaskLifecycleRequest, TaskLifecycleResult, TaskLifecycleOptions,
-  LifecycleError, LifecycleJournal, LifecycleStep
+  LifecycleError, LifecycleJournal, LifecycleStep, TaskCompletionProjection
 };

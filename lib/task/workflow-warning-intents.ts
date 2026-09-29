@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { resolveTaskRef } from './resolve-ref.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
@@ -142,7 +143,14 @@ function projectFinalizationWarning(
   if (!resolved.ok) return { status: 'failed', changed: false, error: { code: resolved.code, message: resolved.message } };
   let prepared = resolved.state === 'completed';
   if (!prepared && resolved.state === 'active') {
-    try { prepared = parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8')).status === 'completed'; }
+    try {
+      const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      prepared = parseTaskFrontmatter(taskContent).status === 'completed';
+      if (!prepared) {
+        const lifecycle = JSON.parse(fs.readFileSync(path.join(resolved.taskDir, '.task-lifecycle.json'), 'utf8')) as Record<string, unknown>;
+        prepared = lifecycle.taskId === resolved.taskId && lifecycle.intent === 'complete';
+      }
+    }
     catch { prepared = false; }
   }
   if (!prepared) {

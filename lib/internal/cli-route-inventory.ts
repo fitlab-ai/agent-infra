@@ -63,6 +63,7 @@ export const INTERNAL_HANDLER_ROUTE_SELECTORS = Object.freeze({
   'task-invalidation': ['reconcile'],
   'task-lifecycle': ['intent'],
   'task-finalization': ['complete'],
+  'task-platform-recovery': ['inspect', 'recover'],
   'task-short-id': ['list', 'list-verify', 'alloc', 'release', 'resolve'],
   'task-snapshot': ['snapshot'],
   'task-verify': ['event'],
@@ -89,6 +90,7 @@ export function internalRouteSelector(command: string, args: readonly string[]):
   if (command === 'task-qualification') return args[1] ?? '';
   if (command === 'task-lifecycle') return args[1] ? 'intent' : '';
   if (command === 'task-finalization') return args[1] === 'complete' ? 'complete' : '';
+  if (command === 'task-platform-recovery') return args[1] ?? '';
   if (command === 'task-event') return args[1] ? 'event' : '';
   if (command === 'task-verify') return args[0] && args[1] ? 'event' : '';
   if (command === 'task-snapshot') return 'snapshot';

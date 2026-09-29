@@ -81,7 +81,7 @@ agent-infra-internal task-activity {task-id} pr-review-start --agent {agent} \
   --artifact {pr-review-artifact} --head {head-sha}
 ```
 
-一次性路径不调用 `task-activity`。任意 started 后、正式 Review 明确尚未发布的受控失败，都先把 artifact 状态写为 `aborted`，再以同一 artifact/head 调用 `pr-review-terminate --outcome aborted --reason <single-line>`；发布结果不确定时保持 open，不臆断 aborted。
+一次性路径不调用 `task-activity`。读取 PR、确定 head 或本地审查失败时，先把 artifact 状态写为 `aborted`，再以同一 artifact/head 调用 `pr-review-terminate --outcome aborted --reason <single-line>`。本地审查结论完成后的发布失败记录恢复事实，不将审查轮次误判为 aborted。
 
 ### 2. 单次 decide：证据枚举 + 场景分类 + 风险分级 + 模式选择
 
@@ -99,7 +99,7 @@ agent-infra-internal pr-review-grade decide --input-file {decide-input.json} [--
 
 ### 4. 同步 Issue artifact 评论（任务锚定路径）
 
-依次同步 task 评论与 artifact 评论，取得稳定 comment URL：
+依次尝试同步 task 评论与 artifact 评论；失败时记录 warning 和恢复事实，继续本地审查：
 
 ```bash
 agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
@@ -116,11 +116,11 @@ agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact 
 agent-infra-internal platform-pr-review inspect --pr {pr-number} [--cwd <path>]
 ```
 
-若 head 与步骤 1 记录一致，组装正文（head SHA / 结论 / finding / receipt / Issue artifact 链接，**不含 marker**），发布正式 Review：
+若 head 与步骤 1 记录一致，组装正文（head SHA / 结论 / finding / receipt / 已取得的 Issue artifact 链接；评论待恢复时写明 artifact 身份，**不含 marker**）。把完整正文写入与本轮报告同目录的 `pr-review-body.md`（Round 1）或 `pr-review-body-r{N}.md`（后续轮次），并将 `{review-body-file}` 绑定为该文件的绝对路径。本轮报告的「正式 Review 正文」段只记录该文件名。任务锚定路径必须使用任务目录中的该文件；失败恢复会按报告轮次重读该文件并核对正文摘要。然后发布正式 Review：
 
 ```bash
 agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId|pr{pr-number}} --round {round} \
-  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} [--dry-run] [--cwd <path>]
+  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body-file} --artifact {pr-review-artifact} --agent {agent} [--dry-run] [--cwd <path>]
 ```
 
 `publish` 由 core 生成并校验 marker（首行），按 marker + commit 幂等（重放 no-op；marker 命中但 commit 不一致稳定失败）。head 漂移时，先把旧 artifact 状态写为 `superseded`，再闭合旧轮：
@@ -131,11 +131,11 @@ agent-infra-internal task-activity {task-id} pr-review-terminate --agent {agent}
   --outcome superseded --reason "head changed before publish"
 ```
 
-闭合成功后重新执行步骤 1，进入下一 canonical round；不得先写新轮 started。若 publish 调用的远端结果不确定，保留 open 并在重试时依赖 marker + commit 恢复。
+闭合成功后重新执行步骤 1，进入下一 canonical round；不得先写新轮 started。publish 结果不确定且已有任务账本记录时，保留待恢复操作并继续本地审查轮次；无法证明恢复事实已持久化时保持 open。
 
 ### 6. 回写发布结果与任务状态
 
-- **任务锚定路径**：publish 返回 `applied` / `no-op` 后，把 Review ID/URL 与同名正式 Review 状态写入 `pr-review-rN.md`「发布结果」段，再以步骤 3 冻结的同一组 verdict/counts 闭合活动日志：
+- **任务锚定路径**：把 publish 的实际状态写入 `pr-review-rN.md`「发布结果」段。`applied` / `no-op` 时记录 Review ID/URL；写入失败且已有任务账本记录时写 `blocked` / `failed`、错误码和恢复动作。随后以步骤 3 冻结的同一组 verdict/counts 闭合本地活动日志：
 
   ```bash
   agent-infra-internal task-activity {task-id} pr-review-complete --agent {agent} \
@@ -145,11 +145,11 @@ agent-infra-internal task-activity {task-id} pr-review-terminate --agent {agent}
 
   `task-activity` 由 typed payload 生成 `Verdict: <结论>, blockers: N, major: N, minor: N → {pr-review-artifact}`，并经 `writeTask` 原子完成 Activity Log、`## 审查反馈` 链接与版本戳刷新；不改 `current_step`，也不把 receipt/head/Review URL 写入 NOTE。
 
-- **一次性路径（无任务）**：Review ID/URL 只写 `pr-review-rN.md`「发布结果」段，不调用 `task-activity`。
+- **一次性路径（无任务）**：把实际发布状态写入 `pr-review-rN.md`「发布结果」段；成功时记录 Review ID/URL，失败时记录错误与不可自动恢复的限制。不调用 `task-activity`。
 
 ### 7. 发布后回写再同步（任务锚定路径）
 
-步骤 6 已改写本地 `pr-review-rN.md`「发布结果」段与 task.md（活动日志），而步骤 4 同步的是旧快照。`verify_comment_content` / `verify_task_comment_content` 会全文比对，必须先再同步使本地与远端一致。依次调用：
+步骤 6 已改写本地 `pr-review-rN.md`「发布结果」段与 task.md（活动日志），而步骤 4 同步的是旧快照。依次尝试再同步；失败记录 warning，由 `complete-task` 在归档前补齐：
 
 ```bash
 agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
@@ -178,13 +178,13 @@ agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact 
 
 ### 9. 告知用户
 
-按 `reference/output-guidance.md` 选择唯一出口（正常发布 / 阻塞要求关联 / 一次性检视），渲染下一步前读取 `.agents/rules/next-step-output.md`。
+按 `reference/output-guidance.md` 选择唯一出口（本地审查完成 / 阻塞要求关联 / 一次性检视），渲染下一步前读取 `.agents/rules/next-step-output.md`。
 
 ## 完成检查清单
 
 - [ ] 已按证据分级完成 PR 审查并产出 `pr-review-rN.md`
-- [ ] 正式 Review 已发布到目标 PR，绑定被审 head SHA
-- [ ] 任务锚定路径的 Issue artifact/task 评论已同步并再同步
+- [ ] 正式 Review 已发布、任务账本已记录待恢复操作，或一次性路径已如实记录发布失败
+- [ ] 任务锚定路径的 Issue artifact/task 评论已同步，或失败已记录待恢复
 - [ ] 已完成校验（`task-verify` 或 `verify-artifact`）
 - [ ] 已更新 task.md 并追加 Activity Log（任务锚定路径）
 

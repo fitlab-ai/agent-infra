@@ -155,7 +155,7 @@ echo "$result"
 
 测试通过后，先创建报告并运行 `task-artifact {task-id} preflight --family code --artifact {code-artifact}`；preflight 失败只允许在同一受控 candidate 中修复并完整重跑，且不得产生 checkpoint、ledger、completed 或平台副作用。preflight 通过后，才通过 `agent-infra-internal git-workflow commit --input {checkpoint-input}` 调用共享 commit core，输入 `delivery: { "mode": "local" }`、明确 paths、expected HEAD/tree、task ref、agent 和 code round。该调用只创建本地 checkpoint，不访问远端；core 会在 commit 前写入 durable intent，并在 task writer 成功后清理 intent。checkpoint 失败或 task 状态未闭合时，不得发送 `code.completed`。
 
-checkpoint 成功后，若任务存在 `platform_issue_identity`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`，由 task-bound `delivery_base_ref` 产生 Issue 的 `in:` target；该同步失败时记录 warning 并停止本轮，不发送 `code.completed`。
+checkpoint 成功后，若任务存在 `platform_issue_identity`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`，由 task-bound `delivery_base_ref` 产生 Issue 的 `in:` target；同步失败时记录 warning，继续完成本地代码阶段。`complete-task` 在归档前补齐并核验该证据。
 
 排查测试失败或行为不符合预期时，先读取 `.agents/rules/debugging-guide.md`，按其四阶段流程定位根因，禁止盲目改代码重试。
 
@@ -199,7 +199,7 @@ echo "$finalizer"
   - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}`
   - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --initiator {trigger-initiator} --request-id {request-id} --reason-code {reason-code} --artifact {code-artifact} --artifact-sha256 {artifact-sha256} --semantic-digest {semantic-digest} --implementation-input {input-id} --files-modified {n} --tests-passed {n} {execution-flag}`
 
-如果 task.md 中存在有效的 `platform_issue_identity`，执行以下同步操作（状态/评论失败按规则记录 warning；Issue `in:` evidence 同步失败不得发送 `code.completed`；边界见 `.agents/rules/issue-sync.md`）：
+如果 task.md 中存在有效的 `platform_issue_identity`，执行以下同步操作（失败按规则记录 warning，继续本地流程；边界见 `.agents/rules/issue-sync.md`）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {standard-agent-token}`

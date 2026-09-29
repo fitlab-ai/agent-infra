@@ -39,10 +39,12 @@ Check these directories in order:
 
 Handling rules:
 - If found in `active/` or `blocked/`: continue
-- If found only in `completed/`: inform the user the task is already moved and stop
+- If found only in `completed/` with valid `cancelled_at` and `cancel_reason`, reuse the recorded reason, skip Steps 3-5, and continue at Step 6 to recover Issue closure and comments; stop for other completed tasks
 - If not found anywhere: prompt `Task {task-id} not found`
 
 ### 2. Choose the Cancellation Label
+
+When retrying a completed task, use only the `cancel_reason` already recorded in `task.md`; do not replace it with new input.
 
 Infer the Issue closing label from the cancellation reason:
 - `status: superseded`: reason implies duplicate, replaced, merged into, or already covered by another Issue or PR
@@ -76,7 +78,7 @@ Confirm the task directory was moved successfully.
 
 Check whether `task.md` contains a valid `platform_issue_identity`. If not, skip this step.
 
-If a valid `platform_issue_identity` exists:
+If a valid `platform_issue_identity` exists, require `applied` / `no-op` without an error for every operation before declaring cancellation fully complete. On failure, retain the local terminal state and recovery record, then retry this skill for the same task after repair:
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
 - Write the cancellation body to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`

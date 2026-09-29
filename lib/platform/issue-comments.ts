@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { platformResult } from './types.ts';
@@ -51,6 +52,9 @@ type SyncOptions = {
   client?: PlatformClient;
   runtimeVersion?: string;
   summaryAuthorization?: { sha256: string };
+  dependency?: 'deferred' | 'required';
+  skipQueue?: boolean;
+  taskProjection?: { content: string; sha256: string };
 };
 
 function providerCommentId(id: string, provider: { identity?: { comment?: string } }): number | string {
@@ -74,6 +78,8 @@ const ARTIFACT_TITLES: Record<string, string> = {
   'review-plan': '技术方案审查',
   code: '实现报告',
   'review-code': '代码审查',
+  'manual-validation': '人工验证',
+  'validation-run': '验证运行证据',
   'pr-review': 'PR 审查报告'
 };
 
@@ -150,7 +156,7 @@ function taskCommentLanguage(repoRoot: string): string {
 
 function artifactIdentity(artifact: string): { stem: string; title: string } {
   const stem = path.basename(artifact, '.md');
-  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|pr-review)(?:-r(\d+))?$/);
+  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|manual-validation|validation-run|pr-review)(?:-r(\d+))?$/);
   if (!match) throw new Error(`unsupported artifact '${artifact}'`);
   const base = ARTIFACT_TITLES[match[1]!]!;
   const round = match[2] ? Number(match[2]) : 1;
@@ -529,7 +535,7 @@ function writeComment(
   );
 }
 
-async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
+async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) {
     return platformResult('failed', {
@@ -547,7 +553,12 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   }
   let desired: RenderedChunk[];
   try {
-    desired = expectedComments(resolved.taskId, taskContent, resolved.taskDir, resolved.repoRoot, options);
+    const projectedContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
+    if (options.kind === 'task' && options.taskProjection
+      && createHash('sha256').update(projectedContent).digest('hex') !== options.taskProjection.sha256) {
+      throw Object.assign(new Error('finalization task projection digest does not match content'), { code: 'FINALIZATION_PROJECTION_INVALID' });
+    }
+    desired = expectedComments(resolved.taskId, projectedContent, resolved.taskDir, resolved.repoRoot, options);
   } catch (error) {
     return platformResult('failed', {
       resource: { kind: 'issue', number: resourceIdentityNumber(issueIdentityFromTask) },
@@ -743,6 +754,50 @@ async function syncPlatformComment(taskRef: string, options: SyncOptions): Promi
   return result;
 }
 
+async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return syncPlatformCommentImpl(taskRef, options);
+  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+  if (!taskIssueIdentity(parseTaskFrontmatter(taskContent))) return syncPlatformCommentImpl(taskRef, options);
+
+  let operation: { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string };
+  try {
+    const sourceContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
+    const desired = expectedComments(resolved.taskId, sourceContent, resolved.taskDir, resolved.repoRoot, options);
+    const content = desired.map((chunk) => chunk.content).join('\0');
+    const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment'
+      : options.kind === 'cancel' ? 'cancel-comment' : 'artifact-comment';
+    const target = options.kind === 'artifact' ? options.artifact! : options.kind;
+    operation = { kind, target, expectedDigest: createHash('sha256').update(content).digest('hex') };
+  } catch {
+    return syncPlatformCommentImpl(taskRef, options);
+  }
+
+  const execute = () => syncPlatformCommentImpl(taskRef, options);
+  if (options.skipQueue) return execute();
+  return coordinatePlatformWrite({
+    operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, dependency: options.dependency ?? 'deferred' },
+    agent: options.agent,
+    execute,
+    block: (error) => platformResult('blocked', { error }),
+    persistenceFailure: (error) => platformResult('failed', { error })
+  });
+}
+
+function inspectPlatformCommentOperation(taskRef: string, options: SyncOptions): { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string; id: string } | null {
+  const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
+  if (!resolved.ok) return null;
+  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+  if (!taskIssueIdentity(parseTaskFrontmatter(taskContent))) return null;
+  const sourceContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
+  const desired = expectedComments(resolved.taskId, sourceContent, resolved.taskDir, resolved.repoRoot, options);
+  const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment'
+    : options.kind === 'cancel' ? 'cancel-comment' : 'artifact-comment';
+  const target = options.kind === 'artifact' ? options.artifact! : options.kind;
+  const expectedDigest = createHash('sha256').update(desired.map((chunk) => chunk.content).join('\0')).digest('hex');
+  return { kind, target, expectedDigest, id: createHash('sha256').update(`${kind}\0${target}\0${expectedDigest}`).digest('hex') };
+}
+
 async function listPlatformComments(issue: string | number, cwd = process.cwd(), client?: PlatformClient): Promise<PlatformResult & { comments?: RemoteComment[] }> {
   const loaded = await resolvePlatformProviderContext({ cwd, client });
   const context = loaded.ok ? loaded.value.context : loaded.context;
@@ -800,6 +855,7 @@ export {
   COMMENT_BYTE_LIMIT,
   MARKERS,
   chunkArtifactComment,
+  inspectPlatformCommentOperation,
   findMarkerComments,
   listRemoteComments,
   checkPlatformCommentOwner,

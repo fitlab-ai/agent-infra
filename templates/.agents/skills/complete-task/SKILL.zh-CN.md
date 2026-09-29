@@ -177,6 +177,8 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
+active 任务的 finalization 先恢复账本中的待处理平台操作，并将 `delivery_base_ref` 对应的 Issue `in:` 标签与需求、Issue Type、字段一并同步及复读。任一必要事实无法确认时保持 active，不提交完成状态。
+
 finalization 按允许的 artifact backfill → lifecycle → task 评论 → core verification → warning task 评论更新 → summary seal 的固定顺序执行。每项实际运行的 backfill 必须取得成功终态，否则不得进入 lifecycle；完整 receipt 且无恢复事实的普通重入不执行 backfill、评论、验证或 summary。任何可能写入 managed comment 的 completed 恢复会先把 done summary 持久化为 pending，恢复末尾才重新 seal。summary seal 始终读取任务目录中保留的 durable staging record；平台入口负责校验 marker、owner 和 digest，必要时删除并重建摘要，再复读最终远端顺序。`result=completed` 即表示宿主已依据结构化结果和 receipt 安全完成；若还有外围 warning 或 pending step，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。沙箱不得从旧挂载执行 `ls completed` 或本地终态校验来重新裁决该结果。
 
 ### 7. 处理 finalization 重试与结果
