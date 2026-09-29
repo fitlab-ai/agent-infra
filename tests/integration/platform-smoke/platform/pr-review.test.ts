@@ -18,10 +18,10 @@ import { recoverPlatformOperations } from '../../../../lib/task/platform-operati
 
 type MockReview = { id: number; commit_id: string; body: string; html_url: string };
 
-function fixture() {
+function fixture(repository = 'acme/widgets') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-review-adapter-'));
   execFileSync('git', ['init', '-q'], { cwd: root });
-  execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { cwd: root });
+  execFileSync('git', ['remote', 'add', 'origin', `git@github.com:${repository}.git`], { cwd: root });
   fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
   return root;
@@ -30,27 +30,31 @@ function fixture() {
 function mockClient(options: {
   initial?: MockReview[];
   failPostTimes?: number;
+  repository?: string;
 } = {}) {
+  const repository = options.repository ?? 'acme/widgets';
   const reviews: MockReview[] = [...(options.initial || [])];
   const postedBodies: string[] = [];
+  const requests: string[] = [];
   let nextId = 100;
   let transientFailures = options.failPostTimes ?? 0;
 
   const json = (args: string[], request: { method?: string; input?: string } = {}) => {
     const joined = args.join(' ');
-    if (joined.includes('api --paginate --slurp repos/acme/widgets/pulls/') && joined.includes('/reviews')) {
+    requests.push(`${request.method ?? 'GET'} ${joined}`);
+    if (joined.includes(`api --paginate --slurp repos/${repository}/pulls/`) && joined.includes('/reviews')) {
       return { ok: true as const, value: [reviews] };
     }
-    if (args.includes('-X') && args.includes('POST') && joined.includes('/pulls/42/reviews')) {
+    if (args.includes('-X') && args.includes('POST') && joined.includes(`repos/${repository}/pulls/42/reviews`)) {
       const input = JSON.parse(request.input || '{}') as { commit_id?: string; body?: string; event?: string };
       postedBodies.push(input.body || '');
       if (transientFailures > 0) {
         transientFailures -= 1;
-        reviews.push({ id: nextId, commit_id: input.commit_id || '', body: input.body || '', html_url: 'https://github.com/acme/widgets/pull/42#r1' });
+        reviews.push({ id: nextId, commit_id: input.commit_id || '', body: input.body || '', html_url: `https://github.com/${repository}/pull/42#r1` });
         nextId += 1;
         return { ok: false as const, error: { code: 'NETWORK_TRANSIENT', message: 'timeout', retryable: true } };
       }
-      const created: MockReview = { id: nextId, commit_id: input.commit_id || '', body: input.body || '', html_url: 'https://github.com/acme/widgets/pull/42#r1' };
+      const created: MockReview = { id: nextId, commit_id: input.commit_id || '', body: input.body || '', html_url: `https://github.com/${repository}/pull/42#r1` };
       nextId += 1;
       reviews.push(created);
       return { ok: true as const, value: created };
@@ -59,7 +63,7 @@ function mockClient(options: {
       return { ok: true as const, value: { data: { viewer: { login: 'codex' } } } };
     }
     if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+$/.test(args[1] || '')) {
-      return { ok: true as const, value: { full_name: 'acme/widgets', fork: false, permissions: { triage: true, push: true, admin: false } } };
+      return { ok: true as const, value: { full_name: repository, fork: false, permissions: { triage: true, push: true, admin: false } } };
     }
     return { ok: false as const, error: { code: 'PLATFORM_REQUEST_FAILED', message: `unexpected call: ${joined}`, retryable: false } };
   };
@@ -69,7 +73,7 @@ function mockClient(options: {
     json,
     text() { return { ok: true as const, value: '' }; }
   };
-  return { client: client as unknown as GitHubClient, reviews, postedBodies };
+  return { client: client as unknown as GitHubClient, reviews, postedBodies, requests };
 }
 
 const IDENTITY = { scope: 'TASK-20260101-000001', round: 1, commitSha: 'a'.repeat(40) };
@@ -134,7 +138,7 @@ test('PR review recovery recognizes an accepted review before retrying its queue
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const resource = { kind: 'number' as const, value: 42 };
   const reviewIntent = {
-    prNumber: '42', resource, scope: taskId, round: IDENTITY.round,
+    prNumber: '42', resource, providerScopeId: 'acme/widgets', scope: taskId, round: IDENTITY.round,
     commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, body: '## Findings\n- recovered'
   };
   const marker = reviewMarker({ ...IDENTITY, resource });
@@ -168,7 +172,7 @@ test('PR review recovery stops when the journal target differs from its persiste
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
   const intentResource = { kind: 'number' as const, value: 42 };
   const reviewIntent = {
-    prNumber: '42', resource: intentResource, scope: taskId, round: IDENTITY.round,
+    prNumber: '42', resource: intentResource, providerScopeId: 'acme/widgets', scope: taskId, round: IDENTITY.round,
     commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, body: '## Findings\n- identity-bound'
   };
   const mock = mockClient();
@@ -185,6 +189,38 @@ test('PR review recovery stops when the journal target differs from its persiste
 
     assert.equal(recovered.status, 'failed');
     assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_IDENTITY_MISMATCH');
+    assert.deepEqual(mock.postedBodies, []);
+    assert.equal(persisted?.state, 'failed');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('PR review recovery rejects the same PR identity in a different provider scope before listing or writing', async () => {
+  const root = fixture('other/widgets');
+  const taskId = IDENTITY.scope;
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+  const resource = { kind: 'number' as const, value: 42 };
+  const reviewIntent = {
+    prNumber: '42', resource, providerScopeId: 'acme/widgets', scope: taskId, round: IDENTITY.round,
+    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, body: '## Findings\n- scope-bound'
+  };
+  const mock = mockClient({ repository: 'other/widgets' });
+  try {
+    const operation = recordPlatformOperation({
+      taskRef: taskId, cwd: root, kind: 'pull-request-review', target: JSON.stringify(resource),
+      expectedDigest: createHash('sha256').update(JSON.stringify(reviewIntent)).digest('hex'),
+      dependency: 'required', state: 'unknown', pullRequestReview: reviewIntent
+    });
+
+    const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root, client: mock.client });
+    const persisted = readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === operation.id);
+
+    assert.equal(recovered.status, 'failed');
+    assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_IDENTITY_MISMATCH');
+    assert.deepEqual(mock.requests.filter((request) => request.includes('/pulls/42/reviews')), []);
     assert.deepEqual(mock.postedBodies, []);
     assert.equal(persisted?.state, 'failed');
   } finally {

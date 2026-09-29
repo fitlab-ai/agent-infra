@@ -239,6 +239,7 @@ async function replayPullRequestReview(operation: ReturnType<typeof readPlatform
     agent,
     prNumber: intent.prNumber,
     expectedResource: target,
+    expectedProviderScopeId: intent.providerScopeId,
     identity: { scope: intent.scope, round: intent.round, commitSha: intent.commitSha, ...(intent.resource ? { resource: intent.resource } : {}) },
     event: intent.event,
     body: intent.body,

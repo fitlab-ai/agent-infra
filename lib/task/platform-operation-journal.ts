@@ -38,6 +38,7 @@ type PlatformPullRequestSummaryIntent = Readonly<{ body: string; changeReportFil
 type PlatformPullRequestReviewIntent = Readonly<{
   prNumber: string;
   resource: ResourceIdentity;
+  providerScopeId: string;
   scope: string;
   round: number;
   commitSha: string;
@@ -151,6 +152,7 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
       || (item.kind === 'pull-request-review'
         ? !item.pullRequestReview || typeof item.pullRequestReview.prNumber !== 'string'
           || !isResourceIdentity(item.pullRequestReview.resource)
+          || typeof item.pullRequestReview.providerScopeId !== 'string' || !item.pullRequestReview.providerScopeId.trim()
           || !item.pullRequestReview.prNumber.trim() || !/^TASK-\d{8}-\d{6}$|^pr\d+$/u.test(item.pullRequestReview.scope)
           || !Number.isSafeInteger(item.pullRequestReview.round) || item.pullRequestReview.round <= 0
           || !/^[0-9a-f]{7,40}$/iu.test(item.pullRequestReview.commitSha)

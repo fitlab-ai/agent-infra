@@ -97,6 +97,7 @@ export async function publishPrReview(options: {
   agent?: string;
   skipQueue?: boolean;
   expectedResource?: ResourceIdentity;
+  expectedProviderScopeId?: string;
   prNumber: PrToken;
   identity: PrReviewIdentity;
   event: PrReviewEvent;
@@ -106,6 +107,13 @@ export async function publishPrReview(options: {
   const context = loaded.ok ? loaded.value.context : loaded.context;
   if (!hasUsableContext(context)) {
     return platformResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error });
+  }
+  const providerScopeId = loaded.ok ? loaded.value.snapshot.scope.id : null;
+  if (options.expectedProviderScopeId && providerScopeId !== options.expectedProviderScopeId) {
+    return platformResult('failed', {
+      platform: context.platform, capabilities: context.capabilities,
+      error: { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Current provider scope differs from the persisted operation target', retryable: false }
+    });
   }
   const identity = loaded.ok ? (() => { try { return providerResourceToken(loaded.value.provider, 'pull-request', String(options.prNumber)); } catch { return null; } })() : null;
   if (!identity) {
@@ -146,6 +154,7 @@ export async function publishPrReview(options: {
     const pullRequestReview: PlatformPullRequestReviewIntent = {
       prNumber: String(options.prNumber),
       resource: identity,
+      providerScopeId: providerScopeId!,
       scope: options.identity.scope,
       round: options.identity.round,
       commitSha: options.identity.commitSha,
@@ -163,7 +172,7 @@ export async function publishPrReview(options: {
         pullRequestReview
       },
       agent: options.agent,
-      execute: () => publishPrReview({ ...options, skipQueue: true }),
+      execute: () => publishPrReview({ ...options, expectedProviderScopeId: providerScopeId!, skipQueue: true }),
       block: (error) => platformResult('blocked', {
         platform: context.platform, capabilities: context.capabilities,
         resource: { kind: 'pull-request', number: identityNumber, identity }, error
