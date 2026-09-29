@@ -195,5 +195,3 @@ render the selected next-step commands through the shared helper. If `.agents/.a
 
 - Task not found: `Task {task-id} not found`
 - Missing code report: `Code report not found, please run the code-task skill first`
-
-## Platform comment recovery

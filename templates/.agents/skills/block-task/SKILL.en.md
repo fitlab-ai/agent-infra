@@ -156,5 +156,3 @@ Resume from the preserved `current_step`. On failure, retry the same intent from
 - Task already blocked: Prompt "Task {task-id} is already in blocked directory"
 - Task already completed: Prompt "Task {task-id} is already completed"
 - Move failed: Prompt error and suggest manual move
-
-## Platform comment recovery

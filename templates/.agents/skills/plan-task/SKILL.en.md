@@ -225,5 +225,3 @@ The full path proceeds to plan review here; the standard path proceeds directly 
 
 - Task not found: output "Task {task-id} not found, please check the task ID"
 - Analysis missing: output "Analysis not found, please run the analyze-task skill first"
-
-## Platform comment recovery

@@ -265,5 +265,3 @@ Completed at: {completion-time}
 - Already completed: Prompt "Task {task-id} is already in completed directory"
 - Task is blocked: Prompt "Task {task-id} is blocked. Unblock it first by moving to active/"
 - Move failed: Prompt error and suggest manual move
-
-## Platform comment recovery

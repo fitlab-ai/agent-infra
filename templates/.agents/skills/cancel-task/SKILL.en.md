@@ -150,5 +150,3 @@ Next step - inspect the moved task:
 - Task not found: `Task {task-id} not found`
 - Task already moved: inform the user it is already in `completed/`
 - Issue sync failed: keep the local move result and tell the user manual platform follow-up is required
-
-## Platform comment recovery

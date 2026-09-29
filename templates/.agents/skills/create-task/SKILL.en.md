@@ -264,5 +264,3 @@ Wait for the user to run the `analyze-task` skill.
 
 - Empty description: output "Please provide a task description"
 - Description too vague: ask clarification questions before creating the task
-
-## Platform comment recovery

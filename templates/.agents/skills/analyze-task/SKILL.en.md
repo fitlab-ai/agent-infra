@@ -321,5 +321,3 @@ After completing the checklist, **stop immediately**. Wait for the user to invok
 ## Error Handling
 
 - Task not found: output "Task {task-id} not found, please check the task ID"
-
-## Platform comment recovery
