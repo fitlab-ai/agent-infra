@@ -22,6 +22,7 @@ import { run, runEngine, runOk, runOkEngine, runSafe, runSafeEngine } from './sh
 import {
   parseSandboxWorkspaceIdentity,
   resolveSandboxCleanupTarget,
+  resolveSandboxTarget,
   sameSandboxWorkspaceIdentity,
   type SandboxCleanupTarget,
   type SandboxWorkspaceKey
@@ -1112,7 +1113,10 @@ async function rmUnbound(
   tools: SandboxTool[],
   options: { dryRun: boolean; assumeYes: boolean }
 ): Promise<void> {
-  return rmUnboundCore(config, tools, options);
+  return withRepositoryMutationLock(
+    config.repoRoot,
+    () => rmUnboundCore(config, tools, options)
+  );
 }
 
 async function rmUnboundCore(
@@ -1127,32 +1131,66 @@ async function rmUnboundCore(
     sandboxBranchLabel(config),
     { mode: sandboxWorkspaceModeLabel(config), taskId: sandboxTaskIdLabel(config) }
   );
-  const rows = [...listed.running, ...listed.nonRunning];
+  const discovered = [...listed.running, ...listed.nonRunning];
+  const branchMismatches: Array<{ container: string; labelBranch: string; taskBranch: string }> = [];
+  const classified = discovered.map((row) => {
+    if (!row.branch) return { row, protected: true, cleanupTarget: null };
+    if (row.workspaceMode === 'task-bound' && row.taskId) {
+      try {
+        resolveSandboxTarget(row.taskId, config.repoRoot);
+        return { row, protected: true, cleanupTarget: null };
+      } catch {
+        try {
+          const cleanupTarget = resolveSandboxCleanupTarget(row.taskId, config.repoRoot, { allowProtected: true });
+          if (cleanupTarget.taskState === 'blocked'
+            || cleanupTarget.taskState === 'completed'
+            || cleanupTarget.taskState === 'archive') {
+            if (row.branch !== cleanupTarget.branch) {
+              branchMismatches.push({ container: row.name, labelBranch: row.branch, taskBranch: cleanupTarget.branch });
+              return { row, protected: true, cleanupTarget: null };
+            }
+            const activeBranchTarget = resolveSandboxTarget(cleanupTarget.branch, config.repoRoot);
+            if (activeBranchTarget.workspace.mode === 'branch-only') {
+              return { row, protected: false, cleanupTarget };
+            }
+          }
+        } catch {
+          // An unresolved task identity has no active short-id evidence, so keep it out of bulk cleanup.
+        }
+        return { row, protected: true, cleanupTarget: null };
+      }
+    }
+    if (row.workspaceMode !== 'branch-only') return { row, protected: true, cleanupTarget: null };
+    const cleanupTarget = resolveSandboxCleanupTarget(row.branch, config.repoRoot);
+    return cleanupTarget.workspace.mode === 'branch-only'
+      ? { row, protected: false, cleanupTarget }
+      : { row, protected: true, cleanupTarget: null };
+  });
+  const protectedBranches = new Set(classified
+    .filter((entry) => entry.protected)
+    .map(({ row }) => row.branch));
+  const targets = classified
+    .filter((entry) => !entry.protected && !protectedBranches.has(entry.row.branch) && entry.cleanupTarget)
+    .map(({ row, cleanupTarget }) => ({
+      row,
+      cleanupTarget: cleanupTarget!,
+      target: resolveRmTarget(config, tools, cleanupTarget!, { discoveredContainers: [row.name] })
+    }));
   p.intro(pc.cyan(`Removing sandboxes for ${config.project}`));
+  for (const mismatch of branchMismatches) {
+    p.log.warn(`Skipping task-bound sandbox '${mismatch.container}': container branch '${mismatch.labelBranch}' differs from task record branch '${mismatch.taskBranch}'. Inspect the task record and container labels before retrying cleanup.`);
+  }
   if (options.dryRun) {
-    p.outro(`Dry run: ${rows.length} sandbox(es) found, nothing deleted`);
+    p.outro(`Dry run: ${targets.length} sandbox(es) found, nothing deleted`);
     return;
   }
-  for (const row of rows) {
-    if (!row.branch) {
-      runSafeEngine(engine, 'docker', ['rm', '-f', row.name]);
-      continue;
-    }
-    const cleanupTarget: SandboxCleanupTarget = {
-      requestedRef: row.branch,
-      branch: row.branch,
-      workspace: row.workspaceMode === 'task-bound' && row.taskId
-        ? { mode: 'task-bound', taskId: row.taskId }
-        : { mode: 'branch-only' },
-      taskState: 'branch-only'
-    };
-    const target = resolveRmTarget(config, tools, cleanupTarget, { discoveredContainers: [row.name] });
-    await rmOne(config, tools, cleanupTarget.branch, {
+  for (const { row, cleanupTarget, target } of targets) {
+    await runRmOneUnderRepositoryLock(config, tools, cleanupTarget.branch, {
       assumeYes: options.assumeYes,
       target,
       cleanupTarget
     });
   }
-  p.outro(pc.green(`Removed ${rows.length} sandbox(es)`));
+  p.outro(pc.green(`Removed ${targets.length} sandbox(es)`));
 }
 export { authorizeWorktrees, rmOne, rmPurge, rmUnbound };

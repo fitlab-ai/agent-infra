@@ -10,6 +10,7 @@ import { sandboxManagedPathKey } from "../../../lib/sandbox/removal.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
+import { withRepositoryMutationLock } from "../../../lib/task/task-execution-lock.ts";
 
 import {
   cliArgs,
@@ -202,6 +203,15 @@ test("sandbox rm help documents task-state and identity boundaries", () => {
   assert.match(output, /full TASK-id for a task-bound sandbox/);
   assert.match(output, /branch for branch-only sandboxes/);
   assert.match(output, /rm --unbound \[--dry-run\] \[--yes\]/);
+});
+
+test("sandbox ls help explains that a missing SHORT id may be eligible for unbound cleanup", () => {
+  const output = execFileSync(process.execPath, cliArgs("sandbox", "ls", "--help"), {
+    encoding: "utf8"
+  });
+
+  assert.match(output, /SHORT value of '-' means this container has no active task short id/);
+  assert.match(output, /may\s+be eligible for "ai sandbox rm --unbound" cleanup/);
 });
 
 test("sandbox create help documents the host aliases file", () => {
@@ -422,6 +432,51 @@ test("sandbox rm --unbound --yes routes each unbound branch through rmOne cleanu
   }
 });
 
+test("sandbox rm --unbound acquires the repository mutation lock before listing rows", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-lock-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-locked", "feature/locked")
+    });
+
+    withRepositoryMutationLock(fixture.repoDir, () => {
+      const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+      assert.notEqual(result.status, 0);
+      assert.equal(fixture.readDockerCalls().some((call) => call[0] === "ps"), false);
+      assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm"), false);
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound validates every target before deleting the first one", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-invalid-target-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-valid-first", "feature/valid-first"),
+        sandboxRow("sb-invalid-second", "invalid..branch")
+      ].join("\n")
+    });
+    const firstBranchDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..valid-first");
+    fs.mkdirSync(firstBranchDir, { recursive: true });
+    fs.writeFileSync(path.join(firstBranchDir, ".bash_aliases"), "alias demo=true\n", "utf8");
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Invalid branch name/);
+    assert.equal(fs.existsSync(firstBranchDir), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm resolves a missing task record from a unique task-bound container", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-missing-task-record-"));
   const taskId = "TASK-20260101-000105";
@@ -464,7 +519,7 @@ test("sandbox rm rejects a missing task record with multiple sandbox branches", 
   }
 });
 
-test("sandbox rm --unbound --yes removes task-bound sandboxes regardless of task state", () => {
+test("sandbox rm --unbound --yes preserves active short-id sandboxes and removes task sandboxes with released short ids", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-task-states-"));
   const tasks = [
     { state: "active", taskId: "TASK-20260101-000101", branch: "feature/remove-active", container: "sb-remove-active" },
@@ -483,18 +538,155 @@ test("sandbox rm --unbound --yes removes task-bound sandboxes regardless of task
       writeTaskBranch(fixture.repoDir, task.state, task.taskId, task.branch);
       fs.mkdirSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", "..")), { recursive: true });
     }
+    writeShortIdRegistry(fixture.repoDir, { "05": tasks[0].taskId });
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
 
     assert.equal(result.status, 0, result.stderr);
     for (const task of tasks) {
-      assert.equal(fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", ".."))), false);
-      assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === task.container), true);
+      const remainsBoundToActiveShortId = task.state === "active";
+      assert.equal(
+        fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", ".."))),
+        remainsBoundToActiveShortId
+      );
+      assert.equal(
+        fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === task.container),
+        !remainsBoundToActiveShortId
+      );
     }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("sandbox rm --unbound --yes preserves a branch-only row tied to an active task", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-active-branch-"));
+  const taskId = "TASK-20260101-000105";
+  const branch = "feature/active-branch";
+  const container = "sb-active-branch";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow(container, branch)
+    });
+    writeActiveTaskBranch(fixture.repoDir, taskId, branch);
+    writeShortIdRegistry(fixture.repoDir, { "05": taskId });
+    const shellDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..active-branch");
+    fs.mkdirSync(shellDir, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(shellDir), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === container), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound --yes preserves branch state shared with a task-bound row", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-shared-branch-"));
+  const branch = "feature/shared-branch";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-task-bound", branch, "demo", "task-bound", "TASK-20260101-000106"),
+        sandboxRow("sb-branch-only", branch)
+      ].join("\n")
+    });
+    const shellDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..shared-branch");
+    fs.mkdirSync(shellDir, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(shellDir), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound --yes preserves a task-bound row sharing a branch with an active task", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-terminal-active-branch-"));
+  const branch = "feature/terminal-active-branch";
+  const oldTaskId = "TASK-20260101-000107";
+  const activeTaskId = "TASK-20260101-000108";
+  const container = "sb-old-task-bound";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow(container, branch, "demo", "task-bound", oldTaskId)
+    });
+    writeTaskBranch(fixture.repoDir, "blocked", oldTaskId, branch);
+    writeActiveTaskBranch(fixture.repoDir, activeTaskId, branch);
+    writeShortIdRegistry(fixture.repoDir, { "05": activeTaskId });
+    const shellDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..terminal-active-branch");
+    fs.mkdirSync(shellDir, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(shellDir), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === container), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound --yes preserves a task-bound row when its branch label differs from the task record", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-mismatched-task-branch-"));
+  const taskId = "TASK-20260101-000109";
+  const labeledBranch = "feature/container-label";
+  const recordedBranch = "feature/task-record";
+  const container = "sb-mismatched-task-branch";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow(container, labeledBranch, "demo", "task-bound", taskId)
+    });
+    writeTaskBranch(fixture.repoDir, "completed", taskId, recordedBranch);
+    const shellDir = path.join(tmpDir, ".agent-infra", "config", "demo", recordedBranch.replaceAll("/", ".."));
+    const shareDir = path.join(tmpDir, ".agent-infra", "share", "demo", "branches", recordedBranch.replaceAll("/", ".."));
+    fs.mkdirSync(shellDir, { recursive: true });
+    fs.mkdirSync(shareDir, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(shellDir), true);
+    assert.equal(fs.existsSync(shareDir), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === container), false);
+    assert.match(result.stdout, /differs from task record branch/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound --yes preserves rows with invalid identity or missing branch", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-invalid-identity-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        "sb-legacy\tUp 1 minute\tdemo.sandbox=true,demo.sandbox.branch=feature/legacy-identity",
+        "sb-no-branch\tUp 1 minute\tdemo.sandbox=true,demo.sandbox.workspace-mode=branch-only"
+      ].join("\n")
+    });
+    const legacyShellDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..legacy-identity");
+    fs.mkdirSync(legacyShellDir, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(legacyShellDir), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --all returns a migration error before loading project config", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-removed-"));
   try {
@@ -1310,6 +1502,26 @@ test("sandbox ls format is engine-neutral and embeds raw Labels", async () => {
     containerListFormat(),
     "{{.Names}}\t{{.Status}}\t{{.Labels}}"
   );
+});
+
+test("sandbox ls runtime hint explains active branch protection for SHORT '-'", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-ls-short-cleanup-hint-"));
+  const taskId = "TASK-20260101-000107";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-active-branch", "feature/active-branch")
+    });
+    writeActiveTaskBranch(fixture.repoDir, taskId, "feature/active-branch");
+    writeShortIdRegistry(fixture.repoDir, { "05": taskId });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["ls"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /SHORT '-' = no active task short id is displayed; --unbound may clean this sandbox if its branch is not tied to an active task\./);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("sandbox ls formatContainerTable aligns header and rows by column width", async () => {

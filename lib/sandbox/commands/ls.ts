@@ -22,8 +22,9 @@ display-only row number; the 'SHORT' column shows the active task short
 id bound to each container's branch (via
 .agents/workspace/active/.short-ids.json), or '-' if no active task is
 bound. Pass the SHORT value to "ai sandbox exec" (e.g. 'ai sandbox exec 11').
-A '-' means no active task is bound to that branch, so the sandbox is free
-to remove with "ai sandbox rm <branch>".
+A SHORT value of '-' means this container has no active task short id and may
+be eligible for "ai sandbox rm --unbound" cleanup. Use a full TASK-id to
+remove a specific task-bound sandbox.
 
 Use "ai sandbox show <ref>" for a single sandbox's worktree and per-tool
 state paths.`;
@@ -97,7 +98,7 @@ export function ls(args: string[] = []): void {
     }
     if (tableRows.some((r) => r.shortId === '-')) {
       process.stdout.write(
-        `  SHORT '-' = no active task bound; that sandbox is free to remove with 'ai sandbox rm <branch>'.\n`
+        `  SHORT '-' = no active task short id is displayed; --unbound may clean this sandbox if its branch is not tied to an active task.\n`
       );
     }
   }
