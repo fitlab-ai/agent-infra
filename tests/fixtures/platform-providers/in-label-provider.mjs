@@ -115,6 +115,12 @@ export default async function createPlatformProvider(input) {
       }
     },
     changeRequests: {
+      ...(config.recoveryVerifyHead ? {
+        async verifyHead() {
+          recordCall(config, 'changeRequests.verifyHead');
+          return { ok: true, value: { sha: 'a'.repeat(40) } };
+        }
+      } : {}),
       async inspect(request) {
         recordCall(config, 'changeRequests.inspect');
         if (JSON.stringify(request.target) !== JSON.stringify(pullRequestIdentity)) return wrongTarget('Change request inspect target identity was not preserved');

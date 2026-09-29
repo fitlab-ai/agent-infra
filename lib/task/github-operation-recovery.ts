@@ -246,6 +246,27 @@ async function recoverGithubOperations(
         }
       }
     }
+    if (operation.kind === 'pull-request' && operation.pullRequest?.action === 'create') {
+      try {
+        targetOperation = recordGithubOperation({
+          taskRef: resolved.taskId,
+          cwd: resolved.repoRoot,
+          kind: operation.kind,
+          target: targetOperation.target,
+          expectedDigest: targetOperation.expectedDigest,
+          pullRequest: targetOperation.pullRequest,
+          dependency: targetOperation.dependency,
+          state: 'pending'
+        });
+      } catch (error) {
+        const value = error as { code?: string; message?: string };
+        return result('blocked', recovered, [...pending, operation.id], {
+          code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED',
+          message: value.message || String(error),
+          retryable: true
+        });
+      }
+    }
     let remote: PlatformResult;
     try {
       remote = operation.kind === 'issue-metadata'

@@ -62,6 +62,40 @@ test('recovery supersedes an old comment digest when its task projection changed
   }
 });
 
+test('serial recovery consumes the remaining attempt budget before retrying an unknown operation', async () => {
+  const f = fixture();
+  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
+  try {
+    fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+      platform: {
+        type: 'trae',
+        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
+      }
+    }));
+    const operation = recordGithubOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main',
+      expectedDigest: 'a'.repeat(64), pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' },
+      dependency: 'required', state: 'pending'
+    });
+
+    for (const attempts of [2, 3]) {
+      const recovery = await recoverGithubOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot });
+      const persisted = readGithubOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
+      assert.equal(persisted?.attempts, attempts);
+      assert.equal(persisted?.state, 'unknown', JSON.stringify({ recovery, providerCalls: fs.readFileSync(callsPath, 'utf8') }));
+    }
+
+    await recoverGithubOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot });
+    const exhausted = readGithubOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
+    assert.equal(exhausted?.attempts, 3);
+    assert.equal(exhausted?.state, 'unknown');
+    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 2);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('PR recovery preserves its typed intent when a replay does not succeed', async () => {
   const f = fixture();
   const intent = { action: 'create' as const, baseRef: 'main', headRef: 'feature' };
