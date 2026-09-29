@@ -41,14 +41,6 @@ agent-infra-internal platform-comment sync <task-ref> \
 - 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
 - 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 
-## 任务平台写入顺序
-
-与任务关联的平台写入由平台适配层统一排队，并在发起新写入前按依赖类别检查未完成操作。同类前序操作仍失败、身份不明确或远端状态未知时，当前操作只保存在本地队列，不发送当前写请求；可延后操作不得阻挡不依赖它的 PR 创建等主要交付目标。流程中的读取和检查不进入写入队列。
-
-队列按远端目标和期望状态保存最少必要信息。重试前先读取远端状态：目标已达成时只记录完成；只有确认尚未达成且目标身份唯一时才重放写入。无法确认时保留待处理记录并停止同类后续写入，避免重复创建资源或越过前序操作。此处的写入 `blocked` 不直接等于技能主流程阻塞；`import-issue` 的源 Issue 读取、`create-pr` 的 PR 身份、`review-pr` 的 PR/head 读取、`cancel-task` 与 `complete-task` 的完整标准仍为阻塞边界。`complete-task` 在归档前收敛所有待恢复操作。队列位于任务目录，仅作为本地过程状态，不同步为产物或评论；凭据和 HTTP 响应正文不写入记录。
-
-平台差异由对应适配器处理。通用规则与生命周期技能不调用特定平台的恢复命令，也不负责重放细节。
-
 ## 降级与告警
 
 平台结果不直接写 task.md。调用方在有关联任务时把关键失败映射为 workflow warning：

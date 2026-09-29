@@ -36,6 +36,18 @@ The seven internal commands (`task-event` / `task-lifecycle` / `task-finalizatio
 - `task-verify` executes the typed catalog/check registry in-process; skills declare business events only.
 - Both entrypoints are read-only. Verification exits remain `0=pass`, `1=fail`, and `2=blocked`; network or platform blocking must never be downgraded to success.
 
+## Platform Results and Skill Blocking Boundaries
+
+A `blocked` platform write means only that the operation is unfinished. Whether the skill stops depends on its delivery goal. The typed core handles write queuing, recovery, and idempotency; skills consume structured results and do not replay writes themselves.
+
+- `import-issue`: stop importing when the source Issue cannot be read.
+- `create-pr`: stop the creation flow when the PR was not created or its identity cannot be confirmed.
+- `review-pr`: stop reviewing when the PR or reviewed head cannot be read. After local review is complete, record recoverable comment or formal Review write failures as the skill specifies without blocking the completed local review.
+- `cancel-task`: apply the skill's full cancellation criteria; do not claim full cancellation when required Issue synchronization fails.
+- `complete-task`: apply the skill's full completion criteria; resolve pending recoverable operations before archiving and do not claim completion while required remote facts remain unconfirmed.
+
+Other skills continue past deferrable writes according to their local delivery goals. If `create-task` has created the local task but creation of the associated Issue fails, retain the local task and record the failure so independent subsequent work can continue.
+
 ## Required State Updates by Command
 
 - `create-task`: create `branch`, `workflow`, `status`, `created_at`, `updated_at`, `assigned_to`, `agent_infra_version`
