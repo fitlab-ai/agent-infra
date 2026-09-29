@@ -719,6 +719,7 @@ test('merge workspace preserves relative symlinks in replacement backups', onPla
 
 test('merge workspace moves task across sections when source section is newer', () => {
   const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
   const sourceWorkspace = makeTempWorkspace(repoDir);
   const localWorkspace = path.join(repoDir, '.agents', 'workspace');
 
@@ -732,10 +733,7 @@ test('merge workspace moves task across sections when source section is newer', 
       updatedAt: '2026-04-09 15:15:15'
     });
 
-    const output = execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), {
-      cwd: repoDir,
-      encoding: 'utf8'
-    });
+    const output = runMerge(repoDir, sourceWorkspace, homeDir);
 
     assert.equal(fs.existsSync(path.join(localWorkspace, 'active/TASK-20260409-151515')), false);
     assert.ok(fs.existsSync(path.join(localWorkspace, 'completed/TASK-20260409-151515/task.md')));
@@ -777,6 +775,7 @@ test('merge workspace keeps local section when timestamps are equal across secti
 
 test('merge workspace compares task.md mtime when updated_at is missing', () => {
   const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
   const sourceWorkspace = makeTempWorkspace(repoDir);
   const localWorkspace = path.join(repoDir, '.agents', 'workspace');
 
@@ -795,10 +794,7 @@ test('merge workspace compares task.md mtime when updated_at is missing', () => 
     setTimestamp(path.join(localTaskDir, 'task.md'), '2026-04-09T17:00:00Z');
     setTimestamp(path.join(sourceTaskDir, 'task.md'), '2026-04-09T17:17:17Z');
 
-    execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), {
-      cwd: repoDir,
-      encoding: 'utf8'
-    });
+    runMerge(repoDir, sourceWorkspace, homeDir);
 
     assert.match(read(path.join(localWorkspace, 'active/TASK-20260409-171717/task.md')), /source from mtime/);
     assert.equal(read(path.join(localWorkspace, 'active/TASK-20260409-171717/note.txt')), 'source\n');
