@@ -1132,6 +1132,7 @@ async function rmUnboundCore(
     { mode: sandboxWorkspaceModeLabel(config), taskId: sandboxTaskIdLabel(config) }
   );
   const discovered = [...listed.running, ...listed.nonRunning];
+  const branchMismatches: Array<{ container: string; labelBranch: string; taskBranch: string }> = [];
   const classified = discovered.map((row) => {
     if (!row.branch) return { row, protected: true, cleanupTarget: null };
     if (row.workspaceMode === 'task-bound' && row.taskId) {
@@ -1144,6 +1145,10 @@ async function rmUnboundCore(
           if (cleanupTarget.taskState === 'blocked'
             || cleanupTarget.taskState === 'completed'
             || cleanupTarget.taskState === 'archive') {
+            if (row.branch !== cleanupTarget.branch) {
+              branchMismatches.push({ container: row.name, labelBranch: row.branch, taskBranch: cleanupTarget.branch });
+              return { row, protected: true, cleanupTarget: null };
+            }
             const activeBranchTarget = resolveSandboxTarget(cleanupTarget.branch, config.repoRoot);
             if (activeBranchTarget.workspace.mode === 'branch-only') {
               return { row, protected: false, cleanupTarget };
@@ -1172,6 +1177,9 @@ async function rmUnboundCore(
       target: resolveRmTarget(config, tools, cleanupTarget!, { discoveredContainers: [row.name] })
     }));
   p.intro(pc.cyan(`Removing sandboxes for ${config.project}`));
+  for (const mismatch of branchMismatches) {
+    p.log.warn(`Skipping task-bound sandbox '${mismatch.container}': container branch '${mismatch.labelBranch}' differs from task record branch '${mismatch.taskBranch}'. Inspect the task record and container labels before retrying cleanup.`);
+  }
   if (options.dryRun) {
     p.outro(`Dry run: ${targets.length} sandbox(es) found, nothing deleted`);
     return;

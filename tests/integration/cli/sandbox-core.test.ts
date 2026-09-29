@@ -635,6 +635,35 @@ test("sandbox rm --unbound --yes preserves a task-bound row sharing a branch wit
   }
 });
 
+test("sandbox rm --unbound --yes preserves a task-bound row when its branch label differs from the task record", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-mismatched-task-branch-"));
+  const taskId = "TASK-20260101-000109";
+  const labeledBranch = "feature/container-label";
+  const recordedBranch = "feature/task-record";
+  const container = "sb-mismatched-task-branch";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow(container, labeledBranch, "demo", "task-bound", taskId)
+    });
+    writeTaskBranch(fixture.repoDir, "completed", taskId, recordedBranch);
+    const shellDir = path.join(tmpDir, ".agent-infra", "config", "demo", recordedBranch.replaceAll("/", ".."));
+    const shareDir = path.join(tmpDir, ".agent-infra", "share", "demo", "branches", recordedBranch.replaceAll("/", ".."));
+    fs.mkdirSync(shellDir, { recursive: true });
+    fs.mkdirSync(shareDir, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(shellDir), true);
+    assert.equal(fs.existsSync(shareDir), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === container), false);
+    assert.match(result.stdout, /differs from task record branch/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound --yes preserves rows with invalid identity or missing branch", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-invalid-identity-"));
   try {
