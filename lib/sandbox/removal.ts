@@ -1127,23 +1127,26 @@ async function rmUnboundCore(
     sandboxBranchLabel(config),
     { mode: sandboxWorkspaceModeLabel(config), taskId: sandboxTaskIdLabel(config) }
   );
-  const rows = [...listed.running, ...listed.nonRunning];
+  const discovered = [...listed.running, ...listed.nonRunning];
+  const protectedBranches = new Set(discovered
+    .filter((row) => row.workspaceMode !== 'branch-only')
+    .map((row) => row.branch));
+  const rows = discovered.filter((row) =>
+    row.workspaceMode === 'branch-only'
+      && Boolean(row.branch)
+      && !protectedBranches.has(row.branch)
+      && resolveSandboxCleanupTarget(row.branch, config.repoRoot).workspace.mode === 'branch-only'
+  );
   p.intro(pc.cyan(`Removing sandboxes for ${config.project}`));
   if (options.dryRun) {
     p.outro(`Dry run: ${rows.length} sandbox(es) found, nothing deleted`);
     return;
   }
   for (const row of rows) {
-    if (!row.branch) {
-      runSafeEngine(engine, 'docker', ['rm', '-f', row.name]);
-      continue;
-    }
     const cleanupTarget: SandboxCleanupTarget = {
       requestedRef: row.branch,
       branch: row.branch,
-      workspace: row.workspaceMode === 'task-bound' && row.taskId
-        ? { mode: 'task-bound', taskId: row.taskId }
-        : { mode: 'branch-only' },
+      workspace: { mode: 'branch-only' },
       taskState: 'branch-only'
     };
     const target = resolveRmTarget(config, tools, cleanupTarget, { discoveredContainers: [row.name] });
