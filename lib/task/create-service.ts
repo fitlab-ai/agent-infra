@@ -4,6 +4,7 @@ import type { PlatformResult } from '../platform/types.ts';
 import { VERSION } from '../version.ts';
 import { applyWorkflowWarningIntent } from './workflow-warning-intents.ts';
 import { createLocalTask, type TaskCreateCandidateV1 } from './create.ts';
+import { TaskExecutionLockError } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 
 type TaskCreateStatus = 'applied' | 'no-op' | 'degraded' | 'failed' | 'blocked';
@@ -200,8 +201,9 @@ async function createTask(value: unknown, options: CreateTaskOptions): Promise<T
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const code = /^([A-Z][A-Z0-9_]+)/.exec(message)?.[1] ?? 'TASK_CREATE_FAILED';
-    return taskCreateFailure({ code, message, retryable: code === 'TASK_CREATE_LOCK_TIMEOUT' });
+    const lockBusy = error instanceof TaskExecutionLockError && error.code === 'ORCHESTRATION_LOCK_BUSY';
+    const code = lockBusy ? error.code : /^([A-Z][A-Z0-9_]+)/.exec(message)?.[1] ?? 'TASK_CREATE_FAILED';
+    return taskCreateFailure({ code, message, retryable: lockBusy || code === 'TASK_CREATE_LOCK_TIMEOUT' });
   }
 
   const operations: TaskCreateOperation[] = [{

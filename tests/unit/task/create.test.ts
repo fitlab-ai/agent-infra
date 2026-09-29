@@ -196,6 +196,34 @@ test('local task creation joins the repository mutation lock before publishing a
   }
 });
 
+test('task creation reports repository lock contention as retryable without publishing a task', async () => {
+  const root = fixture();
+  let platformCalls = 0;
+  let resultPromise: ReturnType<typeof createTask> | undefined;
+  try {
+    withRepositoryMutationLock(root, () => {
+      resultPromise = createTask(candidate, {
+        repoRoot: root,
+        agentInfraVersion: 'v0.9.5',
+        dependencies: {
+          createIssue: (() => { platformCalls += 1; throw new Error('platform work must not start'); }) as never
+        }
+      });
+    });
+
+    assert.ok(resultPromise);
+    const result = await resultPromise;
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'ORCHESTRATION_LOCK_BUSY');
+    assert.equal(result.error?.retryable, true);
+    assert.equal(result.task.id, null);
+    assert.equal(platformCalls, 0);
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+  } finally {
+    cleanupFixture(root);
+  }
+});
+
 test('local task creation keeps constraint and candidate qualification tables separate', () => {
   const root = fixture();
   try {
