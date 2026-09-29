@@ -33,12 +33,12 @@ test('sandbox Git metadata projects a linked worktree gitfile without changing t
 
     const hostGitFile = path.join(worktreeRoot, '.git');
     const originalGitFile = fs.readFileSync(hostGitFile, 'utf8');
-    const commonDir = execFileSync('git', [
+    const commonDir = fs.realpathSync.native(execFileSync('git', [
       '-C', worktreeRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir'
-    ], { encoding: 'utf8', env: gitSafeEnv() }).trim();
-    const adminDir = execFileSync('git', ['-C', worktreeRoot, 'rev-parse', '--absolute-git-dir'], {
-      encoding: 'utf8', env: gitSafeEnv()
-    }).trim();
+    ], { encoding: 'utf8', env: gitSafeEnv() }).trim());
+    const adminDir = fs.realpathSync.native(execFileSync('git', [
+      '-C', worktreeRoot, 'rev-parse', '--absolute-git-dir'
+    ], { encoding: 'utf8', env: gitSafeEnv() }).trim());
     const expectedRelativeGitDir = path.relative(commonDir, adminDir).split(path.sep).join('/');
 
     const originalGitDir = process.env.GIT_DIR;
