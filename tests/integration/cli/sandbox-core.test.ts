@@ -519,7 +519,7 @@ test("sandbox rm rejects a missing task record with multiple sandbox branches", 
   }
 });
 
-test("sandbox rm --unbound --yes preserves active short-id sandboxes and removes completed unbound sandboxes", () => {
+test("sandbox rm --unbound --yes preserves active short-id sandboxes and removes task sandboxes with released short ids", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-task-states-"));
   const tasks = [
     { state: "active", taskId: "TASK-20260101-000101", branch: "feature/remove-active", container: "sb-remove-active" },
@@ -538,13 +538,13 @@ test("sandbox rm --unbound --yes preserves active short-id sandboxes and removes
       writeTaskBranch(fixture.repoDir, task.state, task.taskId, task.branch);
       fs.mkdirSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", "..")), { recursive: true });
     }
-    writeShortIdRegistry(fixture.repoDir, { "05": tasks[0].taskId, "06": tasks[1].taskId });
+    writeShortIdRegistry(fixture.repoDir, { "05": tasks[0].taskId });
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
 
     assert.equal(result.status, 0, result.stderr);
     for (const task of tasks) {
-      const remainsBoundToActiveShortId = task.state === "active" || task.state === "blocked";
+      const remainsBoundToActiveShortId = task.state === "active";
       assert.equal(
         fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", ".."))),
         remainsBoundToActiveShortId

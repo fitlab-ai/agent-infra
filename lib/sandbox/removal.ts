@@ -1141,7 +1141,9 @@ async function rmUnboundCore(
       } catch {
         try {
           const cleanupTarget = resolveSandboxCleanupTarget(row.taskId, config.repoRoot, { allowProtected: true });
-          if (cleanupTarget.taskState === 'completed' || cleanupTarget.taskState === 'archive') {
+          if (cleanupTarget.taskState === 'blocked'
+            || cleanupTarget.taskState === 'completed'
+            || cleanupTarget.taskState === 'archive') {
             return { row, protected: false, cleanupTarget };
           }
         } catch {
