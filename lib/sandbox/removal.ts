@@ -1144,7 +1144,10 @@ async function rmUnboundCore(
           if (cleanupTarget.taskState === 'blocked'
             || cleanupTarget.taskState === 'completed'
             || cleanupTarget.taskState === 'archive') {
-            return { row, protected: false, cleanupTarget };
+            const activeBranchTarget = resolveSandboxTarget(cleanupTarget.branch, config.repoRoot);
+            if (activeBranchTarget.workspace.mode === 'branch-only') {
+              return { row, protected: false, cleanupTarget };
+            }
           }
         } catch {
           // An unresolved task identity has no active short-id evidence, so keep it out of bulk cleanup.
