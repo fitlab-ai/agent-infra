@@ -606,6 +606,46 @@ test("syncTemplates rejects client ids in sandbox.tools.ids without rewriting co
   }
 });
 
+test("syncTemplates rejects unsupported sandbox tool shapes without rewriting config", async () => {
+  for (const [sandbox, expectedPath] of [
+    [{ tools: ["agent-infra", "codex"] }, "sandbox.tools"],
+    [{ tools: { ids: ["agent-infra"], definitions: {} }, customTools: [] }, "sandbox.customTools"]
+  ] as const) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-invalid-sandbox-tools-"));
+    try {
+      const projectRoot = path.join(tmpDir, "project");
+      const { templateRoot } = createTemplateInstall(tmpDir);
+      fs.mkdirSync(projectRoot, { recursive: true });
+      const config = {
+        project: "demo",
+        org: "acme",
+        language: "en",
+        platform: { type: "github" },
+        agentClients: [
+          { id: "claude-code", enabled: false, installInSandbox: false },
+          { id: "codex", enabled: true, installInSandbox: true },
+          { id: "antigravity-cli", enabled: false, installInSandbox: false },
+          { id: "opencode", enabled: false, installInSandbox: false },
+          { id: "traecli", enabled: false, installInSandbox: false }
+        ],
+        sandbox,
+        files: { managed: [], merged: [], ejected: [] }
+      };
+      writeJson(projectRoot, ".agents/.airc.json", config);
+      const configPath = path.join(projectRoot, ".agents", ".airc.json");
+      const before = fs.readFileSync(configPath, "utf8");
+      const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+
+      const report = syncTemplates(projectRoot, templateRoot);
+
+      assert.equal(report.error, `INVALID_AGENT_CLIENTS at ${expectedPath}`);
+      assert.equal(fs.readFileSync(configPath, "utf8"), before);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("syncTemplates preserves canonical client selection and non-client sandbox tools", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-custom-tools-"));
 

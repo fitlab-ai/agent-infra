@@ -317,7 +317,7 @@ TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra
 
 | 字段 | 含义 |
 |------|------|
-| 定义对象的键 | 小写工具 ID，匹配 `^[a-z0-9][a-z0-9-]*$`；必须与 `sandbox.tools.ids` 中的 ID 一致；不可与内建 id 冲突。 |
+| 定义对象的键 | 小写工具 ID，匹配 `^[a-z0-9][a-z0-9-]*$`；`ids` 中选用的自定义工具必须有对应定义；未列入 `ids` 的定义可以保留为未启用工具；不可与内建 id 冲突。 |
 | `install` | 安装描述符。`{ "type": "npm", "cmd": "<npm 包规范>" }` 执行 `npm install -g <cmd>`；`{ "type": "shell", "cmd": "<shell>" }` 在镜像构建阶段以 `devuser` 执行 shell。`cmd` 必须非空。 |
 
 最小入口——把一个工具装进镜像所需的契约只有这两个字段：

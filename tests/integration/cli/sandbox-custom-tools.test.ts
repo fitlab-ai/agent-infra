@@ -202,35 +202,6 @@ test("loadConfig parses an id-keyed sandbox.tools definition and fills optional 
   }
 });
 
-test("loadConfig rejects the previous sandbox.tools array schema", async () => {
-  const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tools-old-shape-"));
-  const previousCwd = process.cwd();
-
-  try {
-    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
-    writeAirc(tmpDir, { project: "demo", sandbox: { tools: ["agent-infra"] } });
-    process.chdir(tmpDir);
-
-    assert.throws(
-      () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
-      /sandbox\.tools must be an object/
-    );
-
-    writeAirc(tmpDir, {
-      project: "demo",
-      sandbox: { tools: { ids: [], definitions: {} }, customTools: [] }
-    });
-    assert.throws(
-      () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
-      /sandbox\.customTools is no longer supported/
-    );
-  } finally {
-    process.chdir(previousCwd);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
 test("loadConfig reports invalid sandbox.tools ids and definitions with precise paths", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tools-invalid-shape-"));

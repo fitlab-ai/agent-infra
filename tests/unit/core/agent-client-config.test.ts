@@ -219,6 +219,19 @@ test('legacy fields are rejected after canonical validation and do not affect st
   );
 });
 
+test('agent client config rejects unsupported sandbox tool configuration shapes', () => {
+  for (const [sandbox, path] of [
+    [{ tools: ['agent-infra', 'codex'] }, 'sandbox.tools'],
+    [{ tools: { ids: ['agent-infra'], definitions: {} }, customTools: [] }, 'sandbox.customTools'],
+    [{ tools: { definitions: {} } }, 'sandbox.tools.ids']
+  ] as const) {
+    assert.deepEqual(
+      errorDetails(() => normalizeAgentClients({ agentClients: canonical(), sandbox })),
+      { code: 'INVALID_AGENT_CLIENTS', path }
+    );
+  }
+});
+
 test('canonical normalization preserves non-client sandbox tools without projecting them', () => {
   const input = {
     agentClients: canonical(['codex'], ['claude-code']),

@@ -337,10 +337,17 @@ function normalizeAgentClientConfig(cfg) {
   const sandbox = cfg.sandbox && typeof cfg.sandbox === 'object' && !Array.isArray(cfg.sandbox)
     ? cfg.sandbox
     : undefined;
-  const tools = sandbox?.tools && typeof sandbox.tools === 'object' && !Array.isArray(sandbox.tools)
-    ? sandbox.tools
-    : undefined;
-  if (Array.isArray(tools?.ids)) {
+  if (sandbox && own(sandbox, 'customTools')) {
+    return failure('INVALID_AGENT_CLIENTS', 'sandbox.customTools');
+  }
+  if (sandbox && own(sandbox, 'tools')) {
+    const tools = sandbox.tools;
+    if (!tools || typeof tools !== 'object' || Array.isArray(tools)) {
+      return failure('INVALID_AGENT_CLIENTS', 'sandbox.tools');
+    }
+    if (!Array.isArray(tools.ids)) {
+      return failure('INVALID_AGENT_CLIENTS', 'sandbox.tools.ids');
+    }
     for (const [index, tool] of tools.ids.entries()) {
       if (AGENT_CLIENT_IDS.includes(tool)) {
         return failure('INVALID_AGENT_CLIENTS', `sandbox.tools.ids[${index}]`);

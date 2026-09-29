@@ -319,7 +319,7 @@ Namespaced custom TUI:
 
 | Field | Meaning |
 |-------|---------|
-| Definition object key | Lowercase tool ID matching `^[a-z0-9][a-z0-9-]*$`. It must appear in `sandbox.tools.ids` and must not collide with a built-in id. |
+| Definition object key | Lowercase tool ID matching `^[a-z0-9][a-z0-9-]*$`. Every selected custom tool in `sandbox.tools.ids` needs a matching definition. Definitions not listed in `ids` may remain unused. Keys must not collide with a built-in id. |
 | `install` | Install descriptor. `{ "type": "npm", "cmd": "<npm package spec>" }` runs `npm install -g <cmd>`. `{ "type": "shell", "cmd": "<shell>" }` runs the shell command(s) as `devuser` during image build. `cmd` must be non-empty. |
 
 Minimal entry — the contract for getting a tool into the image is just these two fields:
