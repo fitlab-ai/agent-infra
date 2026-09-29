@@ -132,7 +132,7 @@ jobs:
             ],
             "sandbox": {
               "runtimes": ["node20"],
-              "tools": ["agent-infra"]
+              "tools": { "ids": ["agent-infra"], "definitions": {} }
             }
           }
           JSON
@@ -288,7 +288,7 @@ jobs:
             ],
             "sandbox": {
               "runtimes": ["node20"],
-              "tools": ["agent-infra"]
+              "tools": { "ids": ["agent-infra"], "definitions": {} }
             }
           }
           JSON
