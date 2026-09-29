@@ -54,7 +54,6 @@ type ArchiveCounts = Record<ArchiveAction, ReportEntry[]>;
 type MergeReport = {
   sourcePath: string;
   backupRoot: string;
-  migratedBackupBatches: number;
   sections: Record<MutableSection, MutableCounts> & { archive: ArchiveCounts };
   details: ReportEntry[];
   backupCount: number;
@@ -444,149 +443,6 @@ function resolveRecoveryProjectKey(repoRoot: string): string {
   return projectKey;
 }
 
-type BackupManifestEntry = {
-  path: string;
-  type: 'directory' | 'file' | 'symlink';
-  sha256?: string;
-  target?: string;
-};
-
-function backupDirectoryManifest(rootDir: string): BackupManifestEntry[] {
-  const rootStat = fs.lstatSync(rootDir);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    throw new Error(`Merge backup path must be a real directory: ${rootDir}`);
-  }
-
-  const manifest: BackupManifestEntry[] = [];
-  const visit = (currentDir: string, relativeDir: string): void => {
-    for (const entry of fs.readdirSync(currentDir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
-      const absolutePath = path.join(currentDir, entry.name);
-      const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
-      const stat = fs.lstatSync(absolutePath);
-      if (stat.isSymbolicLink()) {
-        manifest.push({ path: relativePath, type: 'symlink', target: fs.readlinkSync(absolutePath) });
-      } else if (stat.isDirectory()) {
-        manifest.push({ path: relativePath, type: 'directory' });
-        visit(absolutePath, relativePath);
-      } else if (stat.isFile()) {
-        const sha256 = crypto.createHash('sha256').update(fs.readFileSync(absolutePath)).digest('hex');
-        manifest.push({ path: relativePath, type: 'file', sha256 });
-      } else {
-        throw new Error(`Unsupported entry in merge backup: ${absolutePath}`);
-      }
-    }
-  };
-  visit(rootDir, '');
-  return manifest;
-}
-
-function directoryContentsMatch(leftDir: string, rightDir: string): boolean {
-  return JSON.stringify(backupDirectoryManifest(leftDir)) === JSON.stringify(backupDirectoryManifest(rightDir));
-}
-
-function directoryContentsInclude(sourceDir: string, targetDir: string): boolean {
-  const targetEntries = new Map(backupDirectoryManifest(targetDir).map((entry) => [entry.path, JSON.stringify(entry)]));
-  return backupDirectoryManifest(sourceDir).every((entry) => targetEntries.get(entry.path) === JSON.stringify(entry));
-}
-
-function copyVerifiedBackup(sourceDir: string, targetDir: string): boolean {
-  const sourceManifest = backupDirectoryManifest(sourceDir);
-  try {
-    fs.mkdirSync(path.dirname(targetDir), { recursive: true });
-    fs.mkdirSync(targetDir);
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
-      if (directoryContentsMatch(sourceDir, targetDir)) return false;
-      throw new Error(`Merge backup destination conflict: ${targetDir}`);
-    }
-    throw error;
-  }
-
-  try {
-    fs.cpSync(sourceDir, targetDir, { recursive: true, verbatimSymlinks: true });
-    const targetManifest = backupDirectoryManifest(targetDir);
-    if (JSON.stringify(sourceManifest) !== JSON.stringify(targetManifest)) {
-      throw new Error(`Merge backup copy verification failed: ${targetDir}`);
-    }
-    return true;
-  } catch (error) {
-    fs.rmSync(targetDir, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-// TODO(compat): Remove legacy migration after this repository's .merge-backup batches are verified and the source root is absent.
-function migrateLegacyBackups(legacyRoot: string, recoveryRoot: string): number {
-  let legacyStat: fs.Stats;
-  try {
-    legacyStat = fs.lstatSync(legacyRoot);
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return 0;
-    throw error;
-  }
-  if (!legacyStat.isDirectory() || legacyStat.isSymbolicLink()) {
-    throw new Error(`Legacy merge backup root must be a real directory: ${legacyRoot}`);
-  }
-
-  let migrated = 0;
-  const pendingRoot = path.join(legacyRoot, '.migration-pending');
-  let pendingStat: fs.Stats | null = null;
-  try {
-    pendingStat = fs.lstatSync(pendingRoot);
-  } catch (error) {
-    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') throw error;
-  }
-  if (pendingStat && (!pendingStat.isDirectory() || pendingStat.isSymbolicLink())) {
-    throw new Error(`Pending merge backup root must be a real directory: ${pendingRoot}`);
-  }
-  if (pendingStat) {
-    const pendingBatches = fs.readdirSync(pendingRoot, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
-    for (const pending of pendingBatches) {
-      const match = /^(\d{8}-\d{6})\.migration-pending$/.exec(pending.name);
-      if (!pending.isDirectory() || pending.isSymbolicLink() || !match) {
-        throw new Error(`Invalid pending merge backup batch: ${path.join(pendingRoot, pending.name)}`);
-      }
-      const pendingBatch = path.join(pendingRoot, pending.name);
-      const targetBatch = path.join(recoveryRoot, match[1]!);
-      let targetStat: fs.Stats;
-      try {
-        targetStat = fs.lstatSync(targetBatch);
-      } catch (error) {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-          throw new Error(`Verified merge backup destination is missing: ${targetBatch}`);
-        }
-        throw error;
-      }
-      if (!targetStat.isDirectory() || targetStat.isSymbolicLink() || !directoryContentsInclude(pendingBatch, targetBatch)) {
-        throw new Error(`Verified merge backup destination does not contain pending source data: ${targetBatch}`);
-      }
-      // The pending name is written only after a whole-batch copy passed verification and was atomically renamed here.
-      removeDirRecursive(pendingBatch);
-      migrated += 1;
-    }
-    fs.rmdirSync(pendingRoot);
-  }
-
-  const batches = fs.readdirSync(legacyRoot, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
-  for (const batch of batches) {
-    if (!batch.isDirectory() || batch.isSymbolicLink()) {
-      throw new Error(`Legacy merge backup batch must be a directory: ${path.join(legacyRoot, batch.name)}`);
-    }
-    const sourceBatch = path.join(legacyRoot, batch.name);
-    const targetBatch = path.join(recoveryRoot, batch.name);
-    copyVerifiedBackup(sourceBatch, targetBatch);
-    fs.mkdirSync(pendingRoot, { recursive: true });
-    const pendingBatch = path.join(pendingRoot, `${batch.name}.migration-pending`);
-    fs.renameSync(sourceBatch, pendingBatch);
-    removeDirRecursive(pendingBatch);
-    migrated += 1;
-  }
-
-  if (fs.existsSync(pendingRoot)) fs.rmdirSync(pendingRoot);
-  fs.rmdirSync(legacyRoot);
-  return migrated;
-}
-
 function toPosixPath(relativePath: string): string {
   return relativePath.split(path.sep).join('/');
 }
@@ -703,7 +559,8 @@ function buildWorkspaceIndex(workspaceDir: string): Map<string, WorkspaceRecord>
 
 function backupTaskDir(backupRoot: string, section: MutableSection, taskDir: string, taskId: string): string {
   const backupDir = path.join(backupRoot, section, taskId);
-  copyVerifiedBackup(taskDir, backupDir);
+  fs.mkdirSync(path.dirname(backupDir), { recursive: true });
+  fs.cpSync(taskDir, backupDir, { recursive: true, verbatimSymlinks: true });
   return backupDir;
 }
 
@@ -990,7 +847,6 @@ function createReport(sourcePath: string, backupRoot: string): MergeReport {
   return {
     sourcePath,
     backupRoot,
-    migratedBackupBatches: 0,
     sections: {
       active: { copied: [], updated: [], moved: [], skipped: [] },
       blocked: { copied: [], updated: [], moved: [], skipped: [] },
@@ -1205,12 +1061,6 @@ function printReport(report: MergeReport): void {
     ''
   ];
 
-  if (report.migratedBackupBatches > 0) {
-    lines.push(`Migrated backup batches: ${report.migratedBackupBatches}`);
-    lines.push(`Recovery root: ${path.dirname(report.backupRoot)}`);
-    lines.push('');
-  }
-
   for (const section of MUTABLE_SECTIONS) {
     printSection(lines, section, report.sections[section]);
   }
@@ -1261,13 +1111,10 @@ async function cmdMerge(args: string[]): Promise<void> {
   const projectKey = resolveRecoveryProjectKey(repoRoot);
   const recoveryRoot = path.join(os.homedir(), '.agent-infra', 'recovery-backups', projectKey, 'workspace-merge');
   const backupRoot = path.join(recoveryRoot, backupStamp);
-  const legacyRoot = path.join(workspaceDir, '.merge-backup');
   const report = createReport(resolvedSource, backupRoot);
   detectSourceMode(resolvedSource);
   validateSourceWorkspace(resolvedSource);
   validateArchiveSection(workspaceDir, new Map());
-  report.migratedBackupBatches = migrateLegacyBackups(legacyRoot, recoveryRoot);
-
   for (const section of ALL_SECTIONS) {
     fs.mkdirSync(path.join(workspaceDir, section), { recursive: true });
   }
