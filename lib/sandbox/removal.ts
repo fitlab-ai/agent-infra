@@ -1112,7 +1112,10 @@ async function rmUnbound(
   tools: SandboxTool[],
   options: { dryRun: boolean; assumeYes: boolean }
 ): Promise<void> {
-  return rmUnboundCore(config, tools, options);
+  return withRepositoryMutationLock(
+    config.repoRoot,
+    () => rmUnboundCore(config, tools, options)
+  );
 }
 
 async function rmUnboundCore(
@@ -1137,25 +1140,31 @@ async function rmUnboundCore(
       && !protectedBranches.has(row.branch)
       && resolveSandboxCleanupTarget(row.branch, config.repoRoot).workspace.mode === 'branch-only'
   );
-  p.intro(pc.cyan(`Removing sandboxes for ${config.project}`));
-  if (options.dryRun) {
-    p.outro(`Dry run: ${rows.length} sandbox(es) found, nothing deleted`);
-    return;
-  }
-  for (const row of rows) {
+  const targets = rows.map((row) => {
     const cleanupTarget: SandboxCleanupTarget = {
       requestedRef: row.branch,
       branch: row.branch,
       workspace: { mode: 'branch-only' },
       taskState: 'branch-only'
     };
-    const target = resolveRmTarget(config, tools, cleanupTarget, { discoveredContainers: [row.name] });
-    await rmOne(config, tools, cleanupTarget.branch, {
+    return {
+      row,
+      cleanupTarget,
+      target: resolveRmTarget(config, tools, cleanupTarget, { discoveredContainers: [row.name] })
+    };
+  });
+  p.intro(pc.cyan(`Removing sandboxes for ${config.project}`));
+  if (options.dryRun) {
+    p.outro(`Dry run: ${targets.length} sandbox(es) found, nothing deleted`);
+    return;
+  }
+  for (const { row, cleanupTarget, target } of targets) {
+    await runRmOneUnderRepositoryLock(config, tools, cleanupTarget.branch, {
       assumeYes: options.assumeYes,
       target,
       cleanupTarget
     });
   }
-  p.outro(pc.green(`Removed ${rows.length} sandbox(es)`));
+  p.outro(pc.green(`Removed ${targets.length} sandbox(es)`));
 }
 export { authorizeWorktrees, rmOne, rmPurge, rmUnbound };

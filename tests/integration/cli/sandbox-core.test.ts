@@ -10,6 +10,7 @@ import { sandboxManagedPathKey } from "../../../lib/sandbox/removal.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 import { captureSandboxAuthority } from "../../../lib/sandbox/engines/authority.ts";
+import { withRepositoryMutationLock } from "../../../lib/task/task-execution-lock.ts";
 
 import {
   cliArgs,
@@ -426,6 +427,51 @@ test("sandbox rm --unbound --yes routes each unbound branch through rmOne cleanu
     assert.equal(fs.existsSync(removedBranchDir), false);
     // A different branch's dir is untouched (batch only targeted the unbound one).
     assert.equal(fs.existsSync(keptBranchDir), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound acquires the repository mutation lock before listing rows", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-lock-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-locked", "feature/locked")
+    });
+
+    withRepositoryMutationLock(fixture.repoDir, () => {
+      const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+      assert.notEqual(result.status, 0);
+      assert.equal(fixture.readDockerCalls().some((call) => call[0] === "ps"), false);
+      assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm"), false);
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound validates every target before deleting the first one", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-invalid-target-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-valid-first", "feature/valid-first"),
+        sandboxRow("sb-invalid-second", "invalid..branch")
+      ].join("\n")
+    });
+    const firstBranchDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..valid-first");
+    fs.mkdirSync(firstBranchDir, { recursive: true });
+    fs.writeFileSync(path.join(firstBranchDir, ".bash_aliases"), "alias demo=true\n", "utf8");
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Invalid branch name/);
+    assert.equal(fs.existsSync(firstBranchDir), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm"), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
