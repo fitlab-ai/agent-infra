@@ -790,6 +790,123 @@ test('merge workspace preserves both copies and stops when a legacy backup targe
   }
 });
 
+test('merge workspace preserves relative symlinks while migrating legacy backups', onPlatforms('linux', 'darwin'), () => {
+  const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const project = 'merge-project';
+  const stamp = '20260409-141414';
+  const taskId = 'TASK-20260409-141414';
+  const legacyTask = writeFlatTask(path.join(repoDir, '.agents', 'workspace', '.merge-backup', stamp), 'active', taskId, {
+    title: 'legacy relative link',
+    extraFiles: { 'notes/restore.txt': 'restore data\n' }
+  });
+  const legacyLink = path.join(legacyTask, 'notes', 'restore-link');
+  const targetLink = path.join(homeDir, '.agent-infra', 'recovery-backups', project, 'workspace-merge', stamp, 'active', taskId, 'notes', 'restore-link');
+
+  try {
+    writeMergeProject(repoDir, project);
+    fs.symlinkSync('restore.txt', legacyLink);
+
+    runMerge(repoDir, sourceWorkspace, homeDir);
+
+    assert.equal(fs.readlinkSync(targetLink), 'restore.txt');
+    assert.equal(fs.readFileSync(targetLink, 'utf8'), 'restore data\n');
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge workspace preserves relative symlinks in replacement backups', onPlatforms('linux', 'darwin'), () => {
+  const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const taskId = 'TASK-20260409-151515';
+  const localTask = writeFlatTask(path.join(repoDir, '.agents', 'workspace'), 'active', taskId, {
+    title: 'local relative link',
+    updatedAt: '2026-04-09 15:00:00',
+    extraFiles: { 'notes/restore.txt': 'local restore data\n' }
+  });
+  const localLink = path.join(localTask, 'notes', 'restore-link');
+  const recoveryRoot = path.join(homeDir, '.agent-infra', 'recovery-backups', path.basename(repoDir), 'workspace-merge');
+
+  try {
+    fs.symlinkSync('restore.txt', localLink);
+    writeFlatTask(sourceWorkspace, 'active', taskId, { title: 'newer source', updatedAt: '2026-04-09 15:15:15' });
+
+    runMerge(repoDir, sourceWorkspace, homeDir);
+
+    const [backupBatch] = fs.readdirSync(recoveryRoot);
+    const backupLink = path.join(recoveryRoot, backupBatch ?? '', 'active', taskId, 'notes', 'restore-link');
+    assert.equal(fs.readlinkSync(backupLink), 'restore.txt');
+    assert.equal(fs.readFileSync(backupLink, 'utf8'), 'local restore data\n');
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge workspace resumes cleanup after an interrupted verified migration', () => {
+  const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const project = 'merge-project';
+  const stamp = '20260409-161616';
+  const taskId = 'TASK-20260409-161616';
+  const legacyRoot = path.join(repoDir, '.agents', 'workspace', '.merge-backup');
+  const pendingTask = writeFlatTask(path.join(legacyRoot, '.migration-pending', `${stamp}.migration-pending`), 'active', taskId, {
+    title: 'partially cleaned source',
+    extraFiles: { 'notes/restore.txt': 'verified restore data\n' }
+  });
+  const recoveryRoot = path.join(homeDir, '.agent-infra', 'recovery-backups', project, 'workspace-merge');
+  const targetTask = path.join(recoveryRoot, stamp, 'active', taskId);
+
+  try {
+    writeMergeProject(repoDir, project);
+    fs.mkdirSync(path.dirname(targetTask), { recursive: true });
+    fs.cpSync(pendingTask, targetTask, { recursive: true });
+    fs.rmSync(path.join(pendingTask, 'notes', 'restore.txt'));
+
+    const output = runMerge(repoDir, sourceWorkspace, homeDir);
+
+    assert.match(output, /Migrated backup batches: 1/);
+    assert.equal(fs.existsSync(path.join(legacyRoot, '.migration-pending')), false);
+    assert.equal(fs.existsSync(legacyRoot), false);
+    assert.equal(fs.readFileSync(path.join(targetTask, 'notes', 'restore.txt'), 'utf8'), 'verified restore data\n');
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge workspace preserves pending migration data when its verified destination is missing', () => {
+  const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const project = 'merge-project';
+  const stamp = '20260409-171717';
+  const taskId = 'TASK-20260409-171717';
+  const pendingTask = writeFlatTask(path.join(repoDir, '.agents', 'workspace', '.merge-backup', '.migration-pending', `${stamp}.migration-pending`), 'active', taskId, {
+    title: 'pending source without target',
+    extraFiles: { 'notes/restore.txt': 'pending data\n' }
+  });
+
+  try {
+    writeMergeProject(repoDir, project);
+    fs.rmSync(path.join(pendingTask, 'notes', 'restore.txt'));
+
+    assert.throws(
+      () => runMerge(repoDir, sourceWorkspace, homeDir),
+      (error: NodeJS.ErrnoException & { stderr?: Buffer }) => {
+        assert.match(String(error.stderr), /verified merge backup destination is missing/i);
+        return true;
+      }
+    );
+    assert.match(fs.readFileSync(path.join(pendingTask, 'task.md'), 'utf8'), /pending source without target/);
+    assert.equal(fs.existsSync(pendingTask), true);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
 test('merge workspace moves task across sections when source section is newer', () => {
   const repoDir = makeTempRepo();
   const sourceWorkspace = makeTempWorkspace(repoDir);

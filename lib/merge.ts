@@ -484,6 +484,11 @@ function directoryContentsMatch(leftDir: string, rightDir: string): boolean {
   return JSON.stringify(backupDirectoryManifest(leftDir)) === JSON.stringify(backupDirectoryManifest(rightDir));
 }
 
+function directoryContentsInclude(sourceDir: string, targetDir: string): boolean {
+  const targetEntries = new Map(backupDirectoryManifest(targetDir).map((entry) => [entry.path, JSON.stringify(entry)]));
+  return backupDirectoryManifest(sourceDir).every((entry) => targetEntries.get(entry.path) === JSON.stringify(entry));
+}
+
 function copyVerifiedBackup(sourceDir: string, targetDir: string): boolean {
   const sourceManifest = backupDirectoryManifest(sourceDir);
   try {
@@ -498,7 +503,7 @@ function copyVerifiedBackup(sourceDir: string, targetDir: string): boolean {
   }
 
   try {
-    fs.cpSync(sourceDir, targetDir, { recursive: true });
+    fs.cpSync(sourceDir, targetDir, { recursive: true, verbatimSymlinks: true });
     const targetManifest = backupDirectoryManifest(targetDir);
     if (JSON.stringify(sourceManifest) !== JSON.stringify(targetManifest)) {
       throw new Error(`Merge backup copy verification failed: ${targetDir}`);
@@ -524,6 +529,44 @@ function migrateLegacyBackups(legacyRoot: string, recoveryRoot: string): number 
   }
 
   let migrated = 0;
+  const pendingRoot = path.join(legacyRoot, '.migration-pending');
+  let pendingStat: fs.Stats | null = null;
+  try {
+    pendingStat = fs.lstatSync(pendingRoot);
+  } catch (error) {
+    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') throw error;
+  }
+  if (pendingStat && (!pendingStat.isDirectory() || pendingStat.isSymbolicLink())) {
+    throw new Error(`Pending merge backup root must be a real directory: ${pendingRoot}`);
+  }
+  if (pendingStat) {
+    const pendingBatches = fs.readdirSync(pendingRoot, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
+    for (const pending of pendingBatches) {
+      const match = /^(\d{8}-\d{6})\.migration-pending$/.exec(pending.name);
+      if (!pending.isDirectory() || pending.isSymbolicLink() || !match) {
+        throw new Error(`Invalid pending merge backup batch: ${path.join(pendingRoot, pending.name)}`);
+      }
+      const pendingBatch = path.join(pendingRoot, pending.name);
+      const targetBatch = path.join(recoveryRoot, match[1]!);
+      let targetStat: fs.Stats;
+      try {
+        targetStat = fs.lstatSync(targetBatch);
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+          throw new Error(`Verified merge backup destination is missing: ${targetBatch}`);
+        }
+        throw error;
+      }
+      if (!targetStat.isDirectory() || targetStat.isSymbolicLink() || !directoryContentsInclude(pendingBatch, targetBatch)) {
+        throw new Error(`Verified merge backup destination does not contain pending source data: ${targetBatch}`);
+      }
+      // The pending name is written only after a whole-batch copy passed verification and was atomically renamed here.
+      removeDirRecursive(pendingBatch);
+      migrated += 1;
+    }
+    fs.rmdirSync(pendingRoot);
+  }
+
   const batches = fs.readdirSync(legacyRoot, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
   for (const batch of batches) {
     if (!batch.isDirectory() || batch.isSymbolicLink()) {
@@ -532,10 +575,14 @@ function migrateLegacyBackups(legacyRoot: string, recoveryRoot: string): number 
     const sourceBatch = path.join(legacyRoot, batch.name);
     const targetBatch = path.join(recoveryRoot, batch.name);
     copyVerifiedBackup(sourceBatch, targetBatch);
-    removeDirRecursive(sourceBatch);
+    fs.mkdirSync(pendingRoot, { recursive: true });
+    const pendingBatch = path.join(pendingRoot, `${batch.name}.migration-pending`);
+    fs.renameSync(sourceBatch, pendingBatch);
+    removeDirRecursive(pendingBatch);
     migrated += 1;
   }
 
+  if (fs.existsSync(pendingRoot)) fs.rmdirSync(pendingRoot);
   fs.rmdirSync(legacyRoot);
   return migrated;
 }
