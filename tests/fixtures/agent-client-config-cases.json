@@ -17,7 +17,7 @@
         { "id": "opencode", "enabled": true, "installInSandbox": false },
         { "id": "traecli", "enabled": false, "installInSandbox": true }
       ],
-      "sandbox": { "tools": ["agent-infra", "custom-tool"] }
+      "sandbox": { "tools": { "ids": ["agent-infra", "custom-tool"], "definitions": {} } }
     }
   },
   {
@@ -63,7 +63,7 @@
         { "id": "opencode", "enabled": true, "installInSandbox": true },
         { "id": "traecli", "enabled": true, "installInSandbox": true }
       ],
-      "sandbox": { "tools": ["agent-infra", "codex"] }
+      "sandbox": { "tools": { "ids": ["agent-infra", "codex"], "definitions": {} } }
     }
   },
   {

@@ -150,25 +150,23 @@ function writeAirc(repoRoot: string, body: Record<string, unknown>): void {
   );
 }
 
-test("loadConfig parses the minimal {id, install} customTools entry and fills all other fields with defaults", async () => {
+test("loadConfig parses an id-keyed sandbox.tools definition and fills optional fields with defaults", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tools-minimal-"));
   const previousCwd = process.cwd();
 
   try {
     execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
-    // The minimal entry is the contract that documentation promises: 2 fields
-    // (id + install) are required; everything else gets a sensible default.
+    // The definition key provides the tool id; install is the only required field.
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
-        tools: ["my-tool"],
-        customTools: [
-          {
-            id: "my-tool",
-            install: { type: "shell", cmd: SHELL_INSTALL_CMD }
+        tools: {
+          ids: ["my-tool"],
+          definitions: {
+            "my-tool": { install: { type: "shell", cmd: SHELL_INSTALL_CMD } }
           }
-        ]
+        }
       }
     });
 
@@ -196,8 +194,65 @@ test("loadConfig parses the minimal {id, install} customTools entry and fills al
     assert.equal(tool?.hostPreSeedDirs, undefined);
     assert.equal(tool?.pathRewriteFiles, undefined);
     assert.equal(tool?.postSetupCmds, undefined);
-    // tools array preserves user order, including non-builtin id
+    // The ids array preserves user order, including non-builtin id.
     assert.deepEqual(config.tools, ["my-tool"]);
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig rejects the previous sandbox.tools array schema", async () => {
+  const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tools-old-shape-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    writeAirc(tmpDir, { project: "demo", sandbox: { tools: ["agent-infra"] } });
+    process.chdir(tmpDir);
+
+    assert.throws(
+      () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
+      /sandbox\.tools must be an object/
+    );
+
+    writeAirc(tmpDir, {
+      project: "demo",
+      sandbox: { tools: { ids: [], definitions: {} }, customTools: [] }
+    });
+    assert.throws(
+      () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
+      /sandbox\.customTools is no longer supported/
+    );
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig reports invalid sandbox.tools ids and definitions with precise paths", async () => {
+  const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tools-invalid-shape-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    process.chdir(tmpDir);
+
+    for (const tools of [
+      {},
+      { ids: ["tool", 1] },
+      { ids: [], definitions: [] },
+      { ids: [], definitions: null },
+      { ids: [], definitions: { tool: { id: "different", install: { type: "shell", cmd: "true" } } } }
+    ]) {
+      writeAirc(tmpDir, { project: "demo", sandbox: { tools } });
+      assert.throws(
+        () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
+        /sandbox\.tools\.(ids|definitions)/
+      );
+    }
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -217,17 +272,18 @@ test("loadConfig honours user-supplied versionCmd to support binary names that d
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
-        tools: ["anthropic-claude"],
-        customTools: [
-          {
-            id: "anthropic-claude",
+        tools: {
+          ids: ["anthropic-claude"],
+          definitions: {
+            "anthropic-claude": {
             install: { type: "npm", cmd: "@anthropic-ai/claude-code@stable" },
             versionCmd: "claude --version",
             hostLiveMounts: [
               { hostPath: "/home/u/.claude/.credentials.json", containerSubpath: ".credentials.json" }
             ]
           }
-        ]
+          }
+        }
       }
     });
 
@@ -255,13 +311,15 @@ test("loadConfig rejects an explicit relative containerMount even though the fie
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
-        customTools: [
-          {
-            id: "bad-tool",
+        tools: {
+          ids: [],
+          definitions: {
+            "bad-tool": {
             install: { type: "shell", cmd: "echo hi" },
             containerMount: "relative/path"
           }
-        ]
+          }
+        }
       }
     });
 
@@ -289,13 +347,15 @@ test("loadConfig rejects an explicit empty versionCmd to prevent bash -lc '' fro
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
-        customTools: [
-          {
-            id: "no-version",
+        tools: {
+          ids: [],
+          definitions: {
+            "no-version": {
             install: { type: "shell", cmd: "echo hi" },
             versionCmd: ""
           }
-        ]
+          }
+        }
       }
     });
 
@@ -320,13 +380,15 @@ test("loadConfig rejects an explicit empty setupHint while accepting omission", 
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
-        customTools: [
-          {
-            id: "no-hint",
+        tools: {
+          ids: [],
+          definitions: {
+            "no-hint": {
             install: { type: "shell", cmd: "echo hi" },
             setupHint: ""
           }
-        ]
+          }
+        }
       }
     });
 
@@ -351,15 +413,17 @@ test("loadConfig always assigns the default sandboxBase and ignores user-supplie
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
-        customTools: [
-          {
-            id: "fixed-base",
+        tools: {
+          ids: [],
+          definitions: {
+            "fixed-base": {
             install: { type: "shell", cmd: "echo hi" },
             // User attempts to override sandboxBase — the loader must ignore
             // it so `ai sandbox rm` / `prune` keep finding the canonical path.
             sandboxBase: "/some/unexpected/host/path"
           }
-        ]
+          }
+        }
       }
     });
 
@@ -385,12 +449,14 @@ test("loadConfig rejects customTools entries with empty install.cmd", async () =
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
-        customTools: [
-          {
-            id: "empty-cmd",
+        tools: {
+          ids: [],
+          definitions: {
+            "empty-cmd": {
             install: { type: "shell", cmd: "" }
           }
-        ]
+          }
+        }
       }
     });
 

@@ -20,7 +20,7 @@
       "schema": "plan"
     },
     "activity-log": {
-      "expected_action_pattern": "(Plan Task|Technical Design) \\(Round \\d+\\)"
+      "expected_action_pattern": "((Plan Task|Technical Design) \\(Round \\d+\\)|Human Decision)"
     },
     "review-ledger": {
       "stage_scope": [

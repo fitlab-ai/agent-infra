@@ -51,7 +51,7 @@ test("sandbox create injects the detected host timezone into docker run", onPlat
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["codex"] }
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
     commitInitialFile(fixture.repoDir);
 

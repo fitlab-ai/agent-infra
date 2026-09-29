@@ -167,10 +167,11 @@ function normalizeAgentClients(
   }
   if (hasOwn(input, 'tuis')) fail('INVALID_AGENT_CLIENTS', 'tuis');
   const sandbox = isRecord(input.sandbox) ? input.sandbox : undefined;
-  if (Array.isArray(sandbox?.tools)) {
-    for (const [index, tool] of sandbox.tools.entries()) {
+  const tools = isRecord(sandbox?.tools) ? sandbox.tools : undefined;
+  if (Array.isArray(tools?.ids)) {
+    for (const [index, tool] of tools.ids.entries()) {
       if (isAgentClientId(tool)) {
-        fail('INVALID_AGENT_CLIENTS', `sandbox.tools[${index}]`);
+        fail('INVALID_AGENT_CLIENTS', `sandbox.tools.ids[${index}]`);
       }
     }
   }

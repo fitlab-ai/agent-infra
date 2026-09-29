@@ -119,7 +119,7 @@ test("loadConfig combines canonical Agent Client state with non-client sandbox t
           { id: "traecli", enabled: false, installInSandbox: false }
         ],
         sandbox: {
-          tools: ["agent-infra"]
+          tools: { ids: ["agent-infra"], definitions: {} }
         }
       }, null, 2) + "\n",
       "utf8"

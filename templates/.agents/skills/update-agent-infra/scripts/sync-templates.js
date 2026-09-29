@@ -60,9 +60,12 @@ const DEFAULTS = {
     "runtimes": [
       "node22"
     ],
-    "tools": [
-      "agent-infra"
-    ],
+    "tools": {
+      "ids": [
+        "agent-infra"
+      ],
+      "definitions": {}
+    },
     "refreshIntervalDays": 7,
     "dockerfile": null,
     "vm": {
@@ -334,10 +337,13 @@ function normalizeAgentClientConfig(cfg) {
   const sandbox = cfg.sandbox && typeof cfg.sandbox === 'object' && !Array.isArray(cfg.sandbox)
     ? cfg.sandbox
     : undefined;
-  if (Array.isArray(sandbox?.tools)) {
-    for (const [index, tool] of sandbox.tools.entries()) {
+  const tools = sandbox?.tools && typeof sandbox.tools === 'object' && !Array.isArray(sandbox.tools)
+    ? sandbox.tools
+    : undefined;
+  if (Array.isArray(tools?.ids)) {
+    for (const [index, tool] of tools.ids.entries()) {
       if (AGENT_CLIENT_IDS.includes(tool)) {
-        return failure('INVALID_AGENT_CLIENTS', `sandbox.tools[${index}]`);
+        return failure('INVALID_AGENT_CLIENTS', `sandbox.tools.ids[${index}]`);
       }
     }
   }

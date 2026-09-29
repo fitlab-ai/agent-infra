@@ -1743,7 +1743,7 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["codex", "opencode"] }
+      sandbox: { tools: { ids: ["codex", "opencode"], definitions: {} } }
     });
     commitInitialFile(fixture.repoDir);
     // Host auth.json makes the codex live-mount eligible so we can assert it is
@@ -1888,7 +1888,7 @@ test("sandbox create skips missing tmpfs seed entries", onPlatforms("linux", "da
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["codex"] }
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
     commitInitialFile(fixture.repoDir);
 

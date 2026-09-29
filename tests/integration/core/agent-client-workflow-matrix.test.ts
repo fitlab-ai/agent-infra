@@ -37,7 +37,7 @@ test('all 16 project integration combinations stay equivalent across core and st
         language: 'en',
         platform: { type: 'github' },
         agentClients: serializeAgentClients(state),
-        sandbox: { tools: ['agent-infra'] },
+        sandbox: { tools: { ids: ['agent-infra'], definitions: {} } },
         files: { managed: [], merged: [], ejected: [] }
       };
       const plan = planAgentClientReconciliation({

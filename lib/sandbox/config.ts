@@ -32,7 +32,7 @@ type WriteStderr = (chunk: string) => unknown;
 type SandboxConfigInput = {
   engine?: SandboxEngineInput;
   runtimes?: string[];
-  tools?: string[];
+  tools?: unknown;
   customTools?: unknown;
   refreshIntervalDays?: unknown;
   dockerfile?: string | null;
@@ -115,10 +115,22 @@ function resolveSandboxToolIds(
   sandbox: SandboxConfigInput,
   defaults: readonly string[]
 ): string[] {
-  if (Array.isArray(sandbox.tools)) {
-    return sandbox.tools.filter((tool): tool is string => typeof tool === 'string');
+  if (sandbox.tools === undefined) {
+    return [...defaults];
   }
-  return [...defaults];
+  if (typeof sandbox.tools !== 'object' || sandbox.tools === null || Array.isArray(sandbox.tools)) {
+    throw new Error('sandbox.tools must be an object when configured');
+  }
+  const tools = sandbox.tools as Record<string, unknown>;
+  if (!Array.isArray(tools.ids)) {
+    throw new Error('sandbox.tools.ids must be an array');
+  }
+  return tools.ids.map((id, index) => {
+    if (typeof id !== 'string') {
+      throw new Error(`sandbox.tools.ids[${index}] must be a string`);
+    }
+    return id;
+  });
 }
 
 export function loadConfig({
@@ -180,7 +192,13 @@ export function loadConfig({
     }
   }
 
-  const customTools = parseCustomTools(sandbox.customTools, { home });
+  const toolsConfig = sandbox.tools && typeof sandbox.tools === 'object' && !Array.isArray(sandbox.tools)
+    ? sandbox.tools as Record<string, unknown>
+    : undefined;
+  if (sandbox.customTools !== undefined) {
+    throw new Error('sandbox.customTools is no longer supported; use sandbox.tools.definitions');
+  }
+  const customTools = parseCustomTools(toolsConfig?.definitions, { home });
   const tools = resolveSandboxToolIds(sandbox, defaults.tools);
 
   return {

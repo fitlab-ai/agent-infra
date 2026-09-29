@@ -572,7 +572,7 @@ test("syncTemplates persists the exact prerelease template version idempotently"
   }
 });
 
-test("syncTemplates rejects client ids in sandbox.tools without rewriting config", async () => {
+test("syncTemplates rejects client ids in sandbox.tools.ids without rewriting config", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-tools-"));
 
   try {
@@ -588,7 +588,7 @@ test("syncTemplates rejects client ids in sandbox.tools without rewriting config
       sandbox: {
         engine: null,
         runtimes: ["node22"],
-        tools: ["claude-code"],
+        tools: { ids: ["claude-code"], definitions: {} },
         dockerfile: null,
         vm: { cpu: null, memory: null, disk: null }
       },
@@ -599,8 +599,8 @@ test("syncTemplates rejects client ids in sandbox.tools without rewriting config
     const report = syncTemplates(projectRoot, templateRoot);
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
 
-    assert.equal(report.error, "INVALID_AGENT_CLIENTS at sandbox.tools[0]");
-    assert.deepEqual(cfg.sandbox.tools, ["claude-code"]);
+    assert.equal(report.error, "INVALID_AGENT_CLIENTS at sandbox.tools.ids[0]");
+    assert.deepEqual(cfg.sandbox.tools, { ids: ["claude-code"], definitions: {} });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -629,7 +629,7 @@ test("syncTemplates preserves canonical client selection and non-client sandbox 
       sandbox: {
         engine: null,
         runtimes: ["node22"],
-        tools: ["agent-infra"],
+        tools: { ids: ["agent-infra"], definitions: {} },
         dockerfile: null,
         vm: { cpu: null, memory: null, disk: null }
       },
@@ -641,7 +641,7 @@ test("syncTemplates preserves canonical client selection and non-client sandbox 
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
 
     assert.equal(report.error, undefined);
-    assert.deepEqual(cfg.sandbox.tools, ["agent-infra"]);
+    assert.deepEqual(cfg.sandbox.tools, { ids: ["agent-infra"], definitions: {} });
     assert.equal(
       cfg.agentClients.find((entry: { id: string }) => entry.id === "codex").installInSandbox,
       true

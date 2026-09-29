@@ -1603,7 +1603,7 @@ test("sandbox prune aborts without deleting when docker ps fails", onPlatforms("
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project,
-      sandbox: { tools: ["codex"] }
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
     const shellConfigBase = path.join(tmpDir, ".agent-infra", "config", project);
     const branchDir = path.join(shellConfigBase, "feature..live");
@@ -1632,7 +1632,7 @@ test("sandbox prune --dry-run lists orphans without deleting them", onPlatforms(
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project,
-      sandbox: { tools: ["codex"] },
+      sandbox: { tools: { ids: ["codex"], definitions: {} } },
       dockerStdoutForPs: `${project}.sandbox=true,${project}.sandbox.branch=feature/live`
     });
     const shellConfigBase = path.join(tmpDir, ".agent-infra", "config", project);

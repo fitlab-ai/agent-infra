@@ -88,16 +88,23 @@ function writeSandboxEngineFixture(
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(dockerStatePath, dockerStdoutForPs, "utf8");
   initIsolatedGitRepo(repoDir);
-  const configuredSandbox = Array.isArray(sandbox.tools)
+  const sandboxTools = sandbox.tools && typeof sandbox.tools === "object" && !Array.isArray(sandbox.tools)
+    ? sandbox.tools as Record<string, unknown>
+    : undefined;
+  const inputToolIds = Array.isArray(sandboxTools?.ids) ? sandboxTools.ids : [];
+  const configuredSandbox = sandboxTools
     ? {
       ...sandbox,
-      tools: sandbox.tools.filter((tool) =>
-        typeof tool === "string" && !AGENT_CLIENT_IDS.some((id) => id === tool))
+      tools: {
+        ...sandboxTools,
+        ids: inputToolIds.filter((tool) =>
+          typeof tool === "string" && !AGENT_CLIENT_IDS.some((id) => id === tool))
+      }
     }
     : sandbox;
   const selectedClientIds = new Set(
-    Array.isArray(sandbox.tools)
-      ? sandbox.tools.filter((tool): tool is string =>
+    inputToolIds.length > 0
+      ? inputToolIds.filter((tool): tool is string =>
         typeof tool === "string" && AGENT_CLIENT_IDS.some((id) => id === tool))
       : []
   );
@@ -112,10 +119,17 @@ function writeSandboxEngineFixture(
       { enabled: entry.enabled, installInSandbox: entry.installInSandbox }
     ])
   ) as AgentClientState;
-  const configuredToolIds = Array.isArray(configuredSandbox.tools)
-    ? configuredSandbox.tools.filter((tool): tool is string => typeof tool === "string")
+  const configuredToolShape = configuredSandbox.tools && typeof configuredSandbox.tools === "object" && !Array.isArray(configuredSandbox.tools)
+    ? configuredSandbox.tools as Record<string, unknown>
+    : undefined;
+  const configuredToolIds = Array.isArray(configuredToolShape?.ids)
+    ? configuredToolShape.ids.filter((tool): tool is string => typeof tool === "string")
     : ["agent-infra"];
-  const configuredCustomTools = parseCustomTools(configuredSandbox.customTools, { home: "/home/devuser" });
+  const configuredCustomTools = parseCustomTools(configuredToolShape?.definitions, { home: "/home/devuser" });
+  const selectedRuntimeToolIds = [
+    ...configuredToolIds,
+    ...AGENT_CLIENT_IDS.filter((id) => configuredAgentClientState[id].installInSandbox)
+  ];
   const runtimeCapabilitySignature = createSandboxCapabilityPlan({
     home: "/home/devuser",
     project,
@@ -152,7 +166,7 @@ function writeSandboxEngineFixture(
       "const crypto = require('node:crypto');",
       `const project = ${JSON.stringify(project)};`,
       `const repoDir = ${JSON.stringify(repoDir)};`,
-      `const sandboxConfig = ${JSON.stringify(sandbox)};`,
+      `const selectedRuntimeToolIds = ${JSON.stringify(selectedRuntimeToolIds)};`,
       `const dockerStdoutForPs = ${JSON.stringify(dockerStdoutForPs)};`,
       `const dockerStatePath = ${JSON.stringify(dockerStatePath)};`,
       `const removedContainersPath = ${JSON.stringify(`${dockerStatePath}.removed`)};`,
@@ -275,10 +289,7 @@ function writeSandboxEngineFixture(
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'share', project, 'branches', branchDir), Destination: '/share/branch', RW: true },",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'config', project, branchDir), Destination: '/home/devuser/.host-shell-config', RW: false }",
       "    ];",
-      "    const selectedTools = Array.isArray(sandboxConfig.tools)",
-      "      ? sandboxConfig.tools",
-      "      : ['agent-infra', ...agentClientFixtures.map(({ id }) => id)];",
-      "    for (const toolId of selectedTools) {",
+      "    for (const toolId of selectedRuntimeToolIds) {",
       "      if (toolId === 'agent-infra') defaults.push({ Type: 'bind', Source: path.join(home, '.agent-infra', 'sandboxes', 'agent-infra', project, branchDir), Destination: '/home/devuser/.agent-infra-cli', RW: true });",
       "      const fixture = agentClientFixtures.find(({ id }) => id === toolId);",
       "      if (!fixture) continue;",

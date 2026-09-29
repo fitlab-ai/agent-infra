@@ -443,7 +443,7 @@ test("sandbox exec rejects a relative Claude credentials override", onPlatforms(
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["claude-code"] },
+      sandbox: { tools: { ids: ["claude-code"], definitions: {} } },
       dockerStdoutForPs: "demo-dev-agent-infra-feature-cli-generic-sandbox\tUp 5 minutes\tdemo.sandbox.branch=agent-infra-feature-cli-generic-sandbox"
     });
 
@@ -502,7 +502,7 @@ test("sandbox exec reconciles newer Claude credentials from a neighbouring proje
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "alpha",
-      sandbox: { tools: ["claude-code"] },
+      sandbox: { tools: { ids: ["claude-code"], definitions: {} } },
       dockerStdoutForPs: "alpha-dev-agent-infra-feature-cli-generic-sandbox"
     });
 
@@ -795,7 +795,7 @@ test("sandbox create resolves to configured engine", onPlatforms("linux", "darwi
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["codex"] }
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
 
     spawnSandboxCli(
@@ -821,7 +821,7 @@ test("sandbox create fails before image inspection when BuildKit is unavailable"
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["codex"] }
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
     const result = spawnSandboxCli(
       fixture,
@@ -848,7 +848,7 @@ test("sandbox create refreshes stale image before docker run", onPlatforms("linu
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["codex"] }
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
     const signature = await sandboxImageSignature(fixture.repoDir);
 
@@ -887,7 +887,7 @@ test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "dar
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["codex"] }
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
     const signature = await sandboxImageSignature(fixture.repoDir);
 
@@ -921,7 +921,7 @@ test("sandbox create continues when due refresh build fails", onPlatforms("linux
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      sandbox: { tools: ["codex"] }
+      sandbox: { tools: { ids: ["codex"], definitions: {} } }
     });
     fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "fixture\n", "utf8");
     execFileSync("git", ["add", "README.md"], { cwd: fixture.repoDir, env: gitSafeEnv(), stdio: "pipe" });
