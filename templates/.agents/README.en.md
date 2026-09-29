@@ -252,7 +252,7 @@ ai agent-client configure
 
 TraeCode CLI uses `.agents/skills/` as the canonical Skill source. agent-infra generates lightweight slash-command wrappers under `.traecli/commands/`; each wrapper reads the corresponding shared Skill and forwards `$ARGUMENTS` when that Skill declares arguments. It does not mirror Skill packages into `.trae/skills/`, which remains user-owned for intentional Trae-specific overrides.
 
-`agentClients` is the sole source of truth for built-in client state. The top-level array must contain all five built-in clients in the fixed canonical order; `sandbox.tools` lists only non-client tools such as `agent-infra` and custom tools. A legacy `tuis` field or a built-in client id in `sandbox.tools` is rejected, and configuration is never rewritten automatically.
+`agentClients` is the sole source of truth for built-in client state. The top-level array must contain all five built-in clients in the fixed canonical order; `sandbox.tools.ids` lists non-client tools such as `agent-infra` and custom tools, while `sandbox.tools.definitions` maps custom tool IDs to their definitions. A legacy `tuis` field or a built-in client id in `sandbox.tools.ids` is rejected, and configuration is never rewritten automatically.
 
 ### Side effects of disabling an Agent Client
 
@@ -260,7 +260,7 @@ When you disable a built-in client, reconciliation stops maintaining its seed co
 
 ### Relation to other config fields
 
-- `sandbox.tools` now lists non-client tools such as `agent-infra` and custom tools. Built-in client installation belongs in `agentClients[].installInSandbox`.
+- `sandbox.tools.ids` lists non-client tools such as `agent-infra` and custom tools; custom definitions belong in `sandbox.tools.definitions`. Built-in client installation belongs in `agentClients[].installInSandbox`.
 - `agentClients` is independent from `customTUIs` (see below). Custom TUI command files are preserved even when their directory is under a disabled built-in client's path prefix.
 
 ## Custom TUI Configuration
@@ -313,13 +313,13 @@ Namespaced custom TUI:
 
 ## Sandbox Custom Tools
 
-`customTUIs` generates slash-command files but does not change the sandbox image. To install a non-npm CLI or tool (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under `sandbox.customTools` in `.agents/.airc.json`. Built-in Agent Clients are installed according to `agentClients[].installInSandbox`; `agent-infra` remains a non-client entry in `sandbox.tools` and only provides the in-sandbox `ai` / `agent-infra` CLI.
+`customTUIs` generates slash-command files but does not change the sandbox image. To install a non-npm CLI or tool (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under an ID key in `sandbox.tools.definitions` in `.agents/.airc.json`. Built-in Agent Clients are installed according to `agentClients[].installInSandbox`; `agent-infra` remains a non-client entry in `sandbox.tools.ids` and only provides the in-sandbox `ai` / `agent-infra` CLI.
 
 ### Required fields
 
 | Field | Meaning |
 |-------|---------|
-| `id` | Lowercase id matching `^[a-z0-9][a-z0-9-]*$`. Referenced from `sandbox.tools`. Must not collide with a built-in id. |
+| Definition object key | Lowercase tool ID matching `^[a-z0-9][a-z0-9-]*$`. Every selected custom tool in `sandbox.tools.ids` needs a matching definition. Definitions not listed in `ids` may remain unused. Keys must not collide with a built-in id. |
 | `install` | Install descriptor. `{ "type": "npm", "cmd": "<npm package spec>" }` runs `npm install -g <cmd>`. `{ "type": "shell", "cmd": "<shell>" }` runs the shell command(s) as `devuser` during image build. `cmd` must be non-empty. |
 
 Minimal entry — the contract for getting a tool into the image is just these two fields:
@@ -327,13 +327,14 @@ Minimal entry — the contract for getting a tool into the image is just these t
 ```json
 {
   "sandbox": {
-    "tools": ["my-shell-tool"],
-    "customTools": [
-      {
-        "id": "my-shell-tool",
-        "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" }
+    "tools": {
+      "ids": ["my-shell-tool"],
+      "definitions": {
+        "my-shell-tool": {
+          "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" }
+        }
       }
-    ]
+    }
   }
 }
 ```
@@ -354,24 +355,25 @@ Add only the fields your tool actually needs. Omit them and the loader fills sen
 | `hostLiveMounts` | (none) | Share host credentials live (e.g. OAuth tokens) with the container. Read-write. |
 | `postSetupCmds` | (none) | Run commands inside the container after first setup (e.g. symlinks). |
 
-> **`sandboxBase` is not user-configurable.** The loader always assigns `~/.agent-infra/sandboxes/<id>` so `ai sandbox rm` / `prune` can find tool state. Any `sandboxBase` value in `customTools` entries is silently ignored.
+> **`sandboxBase` is not user-configurable.** The loader always assigns `~/.agent-infra/sandboxes/<id>` so `ai sandbox rm` / `prune` can find tool state. Any `sandboxBase` value in a definition is silently ignored.
 
 Real-world example — `anthropic-claude` as a user-defined id with binary name `claude` and host credential live-mount:
 
 ```json
 {
   "sandbox": {
-    "tools": ["claude-code", "anthropic-claude"],
-    "customTools": [
-      {
-        "id": "anthropic-claude",
+    "tools": {
+      "ids": ["anthropic-claude"],
+      "definitions": {
+        "anthropic-claude": {
         "install": { "type": "npm", "cmd": "@anthropic-ai/claude-code@stable" },
         "versionCmd": "claude --version",
         "hostLiveMounts": [
           { "hostPath": "~/.claude/.credentials.json", "containerSubpath": ".credentials.json" }
         ]
+        }
       }
-    ]
+    }
   }
 }
 ```
@@ -386,7 +388,7 @@ Real-world example — `anthropic-claude` as a user-defined id with binary name 
 
 ### Interaction with `sandbox.dockerfile`
 
-When you set `sandbox.dockerfile` to point at your own Dockerfile, agent-infra still passes both `AI_TOOL_PACKAGES` (space-separated npm package specs) and `AI_TOOLS_SHELL_INSTALL_B64` (base64-encoded shell install script) as `--build-arg`. Your custom Dockerfile decides whether to consume them; if it does not declare the matching `ARG`, the shell installs for `customTools` are silently skipped — taking over the Dockerfile means taking over the install path.
+When you set `sandbox.dockerfile` to point at your own Dockerfile, agent-infra still passes both `AI_TOOL_PACKAGES` (space-separated npm package specs) and `AI_TOOLS_SHELL_INSTALL_B64` (base64-encoded shell install script) as `--build-arg`. Your custom Dockerfile decides whether to consume them; if it does not declare the matching `ARG`, the shell installs declared in `sandbox.tools.definitions` are silently skipped — taking over the Dockerfile means taking over the install path.
 
 ## Skill Authoring Conventions
 

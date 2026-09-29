@@ -39,7 +39,12 @@ function projectConfig(): Record<string, unknown> {
       enabled: id === 'codex',
       installInSandbox: id === 'claude-code'
     })),
-    sandbox: { tools: ['agent-infra', 'custom'], customTools: [{ id: 'custom' }] },
+    sandbox: {
+      tools: {
+        ids: ['agent-infra', 'custom'],
+        definitions: { custom: { install: { type: 'shell', cmd: 'true' } } }
+      }
+    },
     files: { managed: [], merged: [], ejected: [] }
   };
 }
@@ -65,7 +70,7 @@ test('canonical state is normalized before enabled mutation without rewriting sa
     assert.equal(plan.desired.opencode.enabled, true);
     assert.equal(plan.desired.opencode.installInSandbox, false);
     assert.deepEqual(
-      (plan.nextConfig.sandbox as { tools: string[] }).tools,
+      (plan.nextConfig.sandbox as { tools: { ids: string[] } }).tools.ids,
       ['agent-infra', 'custom']
     );
     assert.deepEqual(

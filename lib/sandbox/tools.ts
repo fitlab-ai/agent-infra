@@ -202,9 +202,9 @@ function parseTmpfs(value: unknown, context: string): SandboxTool['tmpfs'] {
 export function parseCustomTool(
   entry: unknown,
   index: number,
-  options: { home: string }
+  options: { home: string },
+  context = `customTools[${index}]`
 ): SandboxTool {
-  const context = `customTools[${index}]`;
   if (!isPlainObject(entry)) {
     throw new Error(`${context} must be an object`);
   }
@@ -243,13 +243,30 @@ export function parseCustomTool(
 }
 
 export function parseCustomTools(value: unknown, options: { home: string }): SandboxTool[] {
-  if (value === undefined || value === null) {
+  if (value === undefined) {
     return [];
   }
-  if (!Array.isArray(value)) {
-    throw new Error('sandbox: "customTools" must be an array');
+  if (!isPlainObject(value)) {
+    throw new Error('sandbox.tools.definitions must be an object');
   }
-  return value.map((entry, index) => parseCustomTool(entry, index, options));
+  return Object.entries(value).map(([id, definition], index) => {
+    const context = `sandbox.tools.definitions.${id}`;
+    if (!TOOL_ID_PATTERN.test(id)) {
+      throw new Error(`${context}: tool id must match ${TOOL_ID_PATTERN.source}`);
+    }
+    if (!isPlainObject(definition)) {
+      throw new Error(`${context} must be an object`);
+    }
+    if (Object.hasOwn(definition, 'id')) {
+      throw new Error(`${context}.id is not allowed; the definition key is the tool id`);
+    }
+    return parseCustomTool(
+      { ...definition, id },
+      index,
+      options,
+      context
+    );
+  });
 }
 
 export function resolveTools(config: ToolsConfig): SandboxTool[] {

@@ -48,7 +48,12 @@ test('enable changes only enabled in canonical state', () => {
       language: 'en',
       platform: { type: 'github' },
       agentClients: canonical(['codex'], ['claude-code']),
-      sandbox: { tools: ['agent-infra', 'custom'], customTools: [{ id: 'custom' }] },
+      sandbox: {
+        tools: {
+          ids: ['agent-infra', 'custom'],
+          definitions: { custom: { install: { type: 'shell', cmd: 'true' } } }
+        }
+      },
       files: { managed: [], merged: [], ejected: [] }
     });
 
@@ -59,10 +64,45 @@ test('enable changes only enabled in canonical state', () => {
     const config = JSON.parse(fs.readFileSync(path.join(root, '.agents/.airc.json'), 'utf8'));
 
     assert.deepEqual(config.agentClients, canonical(['codex', 'opencode'], ['claude-code']));
-    assert.deepEqual(config.sandbox.tools, ['agent-infra', 'custom']);
-    assert.deepEqual(config.sandbox.customTools, [{ id: 'custom' }]);
+    assert.deepEqual(config.sandbox.tools, {
+      ids: ['agent-infra', 'custom'],
+      definitions: { custom: { install: { type: 'shell', cmd: 'true' } } }
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('agent-client writes fail without changing a config that uses unsupported sandbox tool shapes', () => {
+  for (const [sandbox, expectedPath] of [
+    [{ tools: ['agent-infra', 'codex'] }, 'sandbox.tools'],
+    [{ tools: { ids: ['agent-infra'], definitions: {} }, customTools: [] }, 'sandbox.customTools']
+  ] as const) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-invalid-sandbox-tools-'));
+    try {
+      const initial = {
+        project: 'demo',
+        org: 'acme',
+        language: 'en',
+        platform: { type: 'github' },
+        agentClients: canonical(['codex'], ['claude-code']),
+        sandbox,
+        files: { managed: [], merged: [], ejected: [] }
+      };
+      writeConfig(root, initial);
+      const configPath = path.join(root, '.agents/.airc.json');
+      const before = fs.readFileSync(configPath, 'utf8');
+      const result = spawnSync(process.execPath, cliArgs('agent-client', 'enable', 'opencode'), {
+        cwd: root,
+        encoding: 'utf8'
+      });
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, new RegExp(`INVALID_AGENT_CLIENTS.*${expectedPath.replaceAll('.', '\\.')}`));
+      assert.equal(fs.readFileSync(configPath, 'utf8'), before);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -75,7 +115,7 @@ test('disable preserves installInSandbox and unknown ids fail without writes', (
       language: 'en',
       platform: { type: 'github' },
       agentClients: canonical(['codex', 'opencode'], ['codex', 'opencode']),
-      sandbox: { tools: ['agent-infra'] },
+      sandbox: { tools: { ids: ['agent-infra'], definitions: {} } },
       files: { managed: [], merged: [], ejected: [] }
     };
     writeConfig(root, initial);
@@ -110,7 +150,7 @@ test('status is read-only and configure edits both independent dimensions', () =
       language: 'en',
       platform: { type: 'github' },
       agentClients: canonical(['codex'], ['claude-code']),
-      sandbox: { tools: ['agent-infra'] },
+      sandbox: { tools: { ids: ['agent-infra'], definitions: {} } },
       files: { managed: [], merged: [], ejected: [] }
     });
     const configPath = path.join(root, '.agents/.airc.json');

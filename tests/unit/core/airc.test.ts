@@ -47,16 +47,17 @@ test(".agents/.airc.json declares default sandbox configuration", () => {
   assert.deepEqual(collaborator.sandbox, {
     engine: { darwin: "orbstack" },
     runtimes: ["node22"],
-    tools: ["agent-infra", "git-lfs"],
-    customTools: [
-      {
-        id: "git-lfs",
+    tools: {
+      ids: ["agent-infra", "git-lfs"],
+      definitions: {
+        "git-lfs": {
         name: "Git LFS",
         install: { type: "shell", cmd: GIT_LFS_INSTALL_COMMAND },
         versionCmd: "git lfs version",
         setupHint: "Git LFS should be installed in the sandbox image."
       }
-    ],
+      }
+    },
     dockerfile: null,
     initCommand: "npm ci",
     vm: { cpu: null, memory: null, disk: null }
@@ -90,12 +91,12 @@ test(".agents/.airc.json declares canonical Agent Client configuration", () => {
 });
 
 test(".agents/.airc.json resolves every selected sandbox tool", () => {
-  const customTools = parseCustomTools(collaborator.sandbox.customTools, { home: "/tmp" });
+  const customTools = parseCustomTools(collaborator.sandbox.tools.definitions, { home: "/tmp" });
   const agentClients = normalizeAgentClients(collaborator);
   const tools = resolveTools({
     home: "/tmp",
     project: collaborator.project,
-    tools: collaborator.sandbox.tools,
+    tools: collaborator.sandbox.tools.ids,
     customTools,
     agentClientState: agentClients.state
   });

@@ -60,9 +60,12 @@ const DEFAULTS = {
     "runtimes": [
       "node22"
     ],
-    "tools": [
-      "agent-infra"
-    ],
+    "tools": {
+      "ids": [
+        "agent-infra"
+      ],
+      "definitions": {}
+    },
     "refreshIntervalDays": 7,
     "dockerfile": null,
     "vm": {
@@ -334,10 +337,20 @@ function normalizeAgentClientConfig(cfg) {
   const sandbox = cfg.sandbox && typeof cfg.sandbox === 'object' && !Array.isArray(cfg.sandbox)
     ? cfg.sandbox
     : undefined;
-  if (Array.isArray(sandbox?.tools)) {
-    for (const [index, tool] of sandbox.tools.entries()) {
+  if (sandbox && own(sandbox, 'customTools')) {
+    return failure('INVALID_AGENT_CLIENTS', 'sandbox.customTools');
+  }
+  if (sandbox && own(sandbox, 'tools')) {
+    const tools = sandbox.tools;
+    if (!tools || typeof tools !== 'object' || Array.isArray(tools)) {
+      return failure('INVALID_AGENT_CLIENTS', 'sandbox.tools');
+    }
+    if (!Array.isArray(tools.ids)) {
+      return failure('INVALID_AGENT_CLIENTS', 'sandbox.tools.ids');
+    }
+    for (const [index, tool] of tools.ids.entries()) {
       if (AGENT_CLIENT_IDS.includes(tool)) {
-        return failure('INVALID_AGENT_CLIENTS', `sandbox.tools[${index}]`);
+        return failure('INVALID_AGENT_CLIENTS', `sandbox.tools.ids[${index}]`);
       }
     }
   }

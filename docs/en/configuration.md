@@ -132,7 +132,7 @@ Claude Code lifecycle evidence is weaker than Codex's and is declared as such: `
 Three configuration concepts remain independent:
 
 - `agentClients` records the project's desired state for built-in clients.
-- `sandbox.tools` contains non-Agent Client sandbox tools, including `agent-infra` and custom tools.
+- `sandbox.tools.ids` selects non-Agent Client sandbox tools, including `agent-infra` and custom tools; `sandbox.tools.definitions` stores custom tool definitions by ID.
 - Adapter capabilities describe what a client integration can do. They do not change when a project disables that client.
 
 Each adapter capability uses one of these identifiers:
@@ -157,7 +157,7 @@ Support maturity is recorded per capability as a single closed level:
 
 The `verification` capability names an integration area; the `verified` support level names maturity. They are not interchangeable.
 
-`agentClients` is the only source of built-in client state. The top-level array must contain all five built-in clients exactly once and in the fixed canonical order. `sandbox.tools` accepts only non-client tools, including `agent-infra` and custom tools. The legacy `tuis` field and built-in client IDs in `sandbox.tools` are rejected with a path-specific configuration error; agent-infra never rewrites those inputs.
+`agentClients` is the only source of built-in client state. The top-level array must contain all five built-in clients exactly once and in the fixed canonical order. `sandbox.tools.ids` lists non-client tools in selection order, including `agent-infra` and custom tools; `sandbox.tools.definitions` maps custom tool IDs to their definitions. The legacy `tuis` field and built-in client IDs in `sandbox.tools.ids` are rejected with a path-specific configuration error; agent-infra never rewrites those inputs.
 
 ## External template and skill sources
 

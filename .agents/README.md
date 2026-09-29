@@ -250,7 +250,7 @@ ai agent-client configure
 
 TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra 仅在 `.traecli/commands/` 下生成轻量 slash-command 包装文件；每个包装文件读取对应的共享 Skill，并在该 Skill 声明参数时转发 `$ARGUMENTS`。它不会把 Skill 包镜像到 `.trae/skills/`；该目录继续由用户所有，仅用于有意添加的 Trae 专属覆盖。
 
-`agentClients` 是内建客户端状态的唯一配置来源。顶层数组必须按固定规范顺序包含全部五个内建客户端；`sandbox.tools` 只列出 `agent-infra` 和自定义工具等非客户端工具。旧 `tuis` 字段或 `sandbox.tools` 中的内建客户端 id 会被拒绝，配置不会被自动改写。
+`agentClients` 是内建客户端状态的唯一配置来源。顶层数组必须按固定规范顺序包含全部五个内建客户端；`sandbox.tools.ids` 按顺序列出 `agent-infra` 和自定义工具等非客户端工具，`sandbox.tools.definitions` 用工具 ID 键控自定义工具定义。旧 `tuis` 字段或 `sandbox.tools.ids` 中的内建客户端 id 会被拒绝，配置不会被自动改写。
 
 ### 取消 Agent Client 的副作用
 
@@ -258,7 +258,7 @@ TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra
 
 ### 与其他配置字段的关系
 
-- `sandbox.tools` 现在只列出 `agent-infra` 和自定义工具等非客户端工具。内建客户端的安装状态由 `agentClients[].installInSandbox` 表达。
+- `sandbox.tools.ids` 只列出 `agent-infra` 和自定义工具等非客户端工具；自定义定义放在 `sandbox.tools.definitions`。内建客户端的安装状态由 `agentClients[].installInSandbox` 表达。
 - `agentClients` 与 `customTUIs`（见下）相互独立。即使自定义 TUI 目录落在已取消的内建客户端路径前缀下，其命令文件也会被保留。
 
 ## 自定义 TUI 配置
@@ -311,13 +311,13 @@ TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra
 
 ## 沙箱自定义工具（Sandbox Custom Tools）
 
-`customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 CLI 或工具（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.customTools` 中声明。内建 Agent Client 按 `agentClients[].installInSandbox` 安装；`agent-infra` 仍是 `sandbox.tools` 中的非客户端条目，只提供沙箱内的 `ai` / `agent-infra` CLI。
+`customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 CLI 或工具（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.tools.definitions` 中按工具 ID 声明。内建 Agent Client 按 `agentClients[].installInSandbox` 安装；`agent-infra` 仍是 `sandbox.tools.ids` 中的非客户端条目，只提供沙箱内的 `ai` / `agent-infra` CLI。
 
 ### 必填字段
 
 | 字段 | 含义 |
 |------|------|
-| `id` | 小写 id，匹配 `^[a-z0-9][a-z0-9-]*$`；由 `sandbox.tools` 引用；不可与内建 id 冲突。 |
+| 定义对象的键 | 小写工具 ID，匹配 `^[a-z0-9][a-z0-9-]*$`；`ids` 中选用的自定义工具必须有对应定义；未列入 `ids` 的定义可以保留为未启用工具；不可与内建 id 冲突。 |
 | `install` | 安装描述符。`{ "type": "npm", "cmd": "<npm 包规范>" }` 执行 `npm install -g <cmd>`；`{ "type": "shell", "cmd": "<shell>" }` 在镜像构建阶段以 `devuser` 执行 shell。`cmd` 必须非空。 |
 
 最小入口——把一个工具装进镜像所需的契约只有这两个字段：
@@ -325,13 +325,14 @@ TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra
 ```json
 {
   "sandbox": {
-    "tools": ["my-shell-tool"],
-    "customTools": [
-      {
-        "id": "my-shell-tool",
-        "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" }
+    "tools": {
+      "ids": ["my-shell-tool"],
+      "definitions": {
+        "my-shell-tool": {
+          "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" }
+        }
       }
-    ]
+    }
   }
 }
 ```
@@ -352,24 +353,25 @@ TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra
 | `hostLiveMounts` | （无） | 把宿主凭证（如 OAuth token）实时挂进容器，读写共享。 |
 | `postSetupCmds` | （无） | 首次安装完成后在容器内执行命令（如建符号链接）。 |
 
-> **`sandboxBase` 不由用户配置。** loader 永远使用 `~/.agent-infra/sandboxes/<id>`，这样 `ai sandbox rm` / `prune` 才能找到工具状态目录。`customTools` 条目里写的任何 `sandboxBase` 都会被静默忽略。
+> **`sandboxBase` 不由用户配置。** loader 永远使用 `~/.agent-infra/sandboxes/<id>`，这样 `ai sandbox rm` / `prune` 才能找到工具状态目录。定义对象里写的任何 `sandboxBase` 都会被静默忽略。
 
 实际场景示例——`anthropic-claude` 作为用户自定义 id，二进制名是 `claude`，并把宿主凭证 live-mount 进来：
 
 ```json
 {
   "sandbox": {
-    "tools": ["claude-code", "anthropic-claude"],
-    "customTools": [
-      {
-        "id": "anthropic-claude",
+    "tools": {
+      "ids": ["anthropic-claude"],
+      "definitions": {
+        "anthropic-claude": {
         "install": { "type": "npm", "cmd": "@anthropic-ai/claude-code@stable" },
         "versionCmd": "claude --version",
         "hostLiveMounts": [
           { "hostPath": "~/.claude/.credentials.json", "containerSubpath": ".credentials.json" }
         ]
+        }
       }
-    ]
+    }
   }
 }
 ```

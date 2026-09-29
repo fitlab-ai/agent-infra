@@ -206,9 +206,9 @@ test('legacy fields are rejected after canonical validation and do not affect st
   assert.deepEqual(
     errorDetails(() => normalizeAgentClients({
       agentClients: canonical(),
-      sandbox: { tools: ['agent-infra', 'codex'] }
+      sandbox: { tools: { ids: ['agent-infra', 'codex'] } }
     })),
-    { code: 'INVALID_AGENT_CLIENTS', path: 'sandbox.tools[1]' }
+    { code: 'INVALID_AGENT_CLIENTS', path: 'sandbox.tools.ids[1]' }
   );
   assert.equal(
     errorDetails(() => normalizeAgentClients({
@@ -219,10 +219,23 @@ test('legacy fields are rejected after canonical validation and do not affect st
   );
 });
 
+test('agent client config rejects unsupported sandbox tool configuration shapes', () => {
+  for (const [sandbox, path] of [
+    [{ tools: ['agent-infra', 'codex'] }, 'sandbox.tools'],
+    [{ tools: { ids: ['agent-infra'], definitions: {} }, customTools: [] }, 'sandbox.customTools'],
+    [{ tools: { definitions: {} } }, 'sandbox.tools.ids']
+  ] as const) {
+    assert.deepEqual(
+      errorDetails(() => normalizeAgentClients({ agentClients: canonical(), sandbox })),
+      { code: 'INVALID_AGENT_CLIENTS', path }
+    );
+  }
+});
+
 test('canonical normalization preserves non-client sandbox tools without projecting them', () => {
   const input = {
     agentClients: canonical(['codex'], ['claude-code']),
-    sandbox: { tools: ['agent-infra', 'custom-tool'] }
+    sandbox: { tools: { ids: ['agent-infra', 'custom-tool'], definitions: {} } }
   };
   const result = normalizeAgentClients(input);
 

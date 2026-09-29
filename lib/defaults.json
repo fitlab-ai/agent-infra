@@ -34,9 +34,12 @@
     "runtimes": [
       "node22"
     ],
-    "tools": [
-      "agent-infra"
-    ],
+    "tools": {
+      "ids": [
+        "agent-infra"
+      ],
+      "definitions": {}
+    },
     "refreshIntervalDays": 7,
     "dockerfile": null,
     "vm": {

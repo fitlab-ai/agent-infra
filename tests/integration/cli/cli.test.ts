@@ -225,7 +225,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.deepEqual(config.sandbox, {
       engine: DEFAULT_SANDBOX_ENGINE ? { [CURRENT_PLATFORM]: DEFAULT_SANDBOX_ENGINE } : null,
       runtimes: ["node22"],
-      tools: ["agent-infra"],
+      tools: { ids: ["agent-infra"], definitions: {} },
       refreshIntervalDays: 7,
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
@@ -760,7 +760,7 @@ test("agent-infra sync refreshes seed files and syncs file registry", async () =
     assert.deepEqual(updated.sandbox, {
       engine: null,
       runtimes: ["node22"],
-      tools: ["agent-infra"],
+      tools: { ids: ["agent-infra"], definitions: {} },
       refreshIntervalDays: 7,
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
@@ -829,7 +829,7 @@ test("agent-infra sync rejects legacy sandbox client tools without rewriting con
     sandbox: {
       engine: null,
       runtimes: ["node22"],
-      tools: ["agent-infra", "opencode"],
+      tools: { ids: ["agent-infra", "opencode"], definitions: {} },
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
     }

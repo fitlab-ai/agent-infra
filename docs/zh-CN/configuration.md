@@ -132,7 +132,7 @@ Claude Code 的生命周期证据强度弱于 Codex，且如实声明为此：`d
 以下三类配置概念相互独立：
 
 - `agentClients` 记录项目对内建客户端的期望状态。
-- `sandbox.tools` 保存非 Agent Client 的沙箱工具，包括 `agent-infra` 和自定义工具。
+- `sandbox.tools.ids` 选择 `agent-infra` 和自定义工具等非 Agent Client 的沙箱工具；`sandbox.tools.definitions` 按 ID 保存自定义定义。
 - Adapter capability 描述客户端集成能做什么；项目禁用客户端不会改变其能力声明。
 
 每项 adapter capability 使用以下标识之一：
@@ -157,7 +157,7 @@ Claude Code 的生命周期证据强度弱于 Codex，且如实声明为此：`d
 
 `verification` capability 表示集成领域，`verified` 支持等级表示成熟度，两者不可互换。
 
-`agentClients` 是内建客户端状态的唯一配置来源。顶层数组必须按固定规范顺序恰好包含全部五个内建客户端。`sandbox.tools` 只接受 `agent-infra` 和自定义工具等非客户端工具。旧 `tuis` 字段及 `sandbox.tools` 中的内建客户端 ID 会触发带路径的配置错误；agent-infra 不会自动改写这些输入。
+`agentClients` 是内建客户端状态的唯一配置来源。顶层数组必须按固定规范顺序恰好包含全部五个内建客户端。`sandbox.tools.ids` 按顺序列出 `agent-infra` 和自定义工具等非客户端工具；`sandbox.tools.definitions` 按自定义工具 ID 保存定义。旧 `tuis` 字段及 `sandbox.tools.ids` 中的内建客户端 ID 会触发带路径的配置错误；agent-infra 不会自动改写这些输入。
 
 ## 外部模板与 skill 源
 

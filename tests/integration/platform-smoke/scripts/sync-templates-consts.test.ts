@@ -58,7 +58,7 @@ test("generated standalone scripts project the Registry manifest", () => {
 });
 
 test("canonical defaults keep client installation state outside sandbox tools", () => {
-  assert.deepEqual(defaults.sandbox.tools, ["agent-infra"]);
+  assert.deepEqual(defaults.sandbox.tools, { ids: ["agent-infra"], definitions: {} });
   assert.deepEqual(
     defaults.agentClients.map((entry) => entry.id),
     createAgentClientManifest().map((entry) => entry.id)
