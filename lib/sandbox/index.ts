@@ -20,7 +20,7 @@ Commands:
   rm <branch | TASK-id> | --unbound | --purge
                                Remove one sandbox; use a full TASK-id for task-bound
                                cleanup and a branch for branch-only cleanup. --unbound
-                               removes branch-only sandboxes not bound to active tasks.
+                               removes sandboxes not bound to an active task short id.
   start [--recreate] <branch | TASK-id | N>
                                Verify or recover an existing sandbox container;
                                optionally replace only the container on failure

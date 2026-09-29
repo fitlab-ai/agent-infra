@@ -22,6 +22,7 @@ import { run, runEngine, runOk, runOkEngine, runSafe, runSafeEngine } from './sh
 import {
   parseSandboxWorkspaceIdentity,
   resolveSandboxCleanupTarget,
+  resolveSandboxTarget,
   sameSandboxWorkspaceIdentity,
   type SandboxCleanupTarget,
   type SandboxWorkspaceKey
@@ -1131,28 +1132,40 @@ async function rmUnboundCore(
     { mode: sandboxWorkspaceModeLabel(config), taskId: sandboxTaskIdLabel(config) }
   );
   const discovered = [...listed.running, ...listed.nonRunning];
-  const protectedBranches = new Set(discovered
-    .filter((row) => row.workspaceMode !== 'branch-only')
-    .map((row) => row.branch));
-  const rows = discovered.filter((row) =>
-    row.workspaceMode === 'branch-only'
-      && Boolean(row.branch)
-      && !protectedBranches.has(row.branch)
-      && resolveSandboxCleanupTarget(row.branch, config.repoRoot).workspace.mode === 'branch-only'
-  );
-  const targets = rows.map((row) => {
-    const cleanupTarget: SandboxCleanupTarget = {
-      requestedRef: row.branch,
-      branch: row.branch,
-      workspace: { mode: 'branch-only' },
-      taskState: 'branch-only'
-    };
-    return {
-      row,
-      cleanupTarget,
-      target: resolveRmTarget(config, tools, cleanupTarget, { discoveredContainers: [row.name] })
-    };
+  const classified = discovered.map((row) => {
+    if (!row.branch) return { row, protected: true, cleanupTarget: null };
+    if (row.workspaceMode === 'task-bound' && row.taskId) {
+      try {
+        resolveSandboxTarget(row.taskId, config.repoRoot);
+        return { row, protected: true, cleanupTarget: null };
+      } catch {
+        try {
+          const cleanupTarget = resolveSandboxCleanupTarget(row.taskId, config.repoRoot, { allowProtected: true });
+          if (cleanupTarget.taskState === 'completed' || cleanupTarget.taskState === 'archive') {
+            return { row, protected: false, cleanupTarget };
+          }
+        } catch {
+          // An unresolved task identity has no active short-id evidence, so keep it out of bulk cleanup.
+        }
+        return { row, protected: true, cleanupTarget: null };
+      }
+    }
+    if (row.workspaceMode !== 'branch-only') return { row, protected: true, cleanupTarget: null };
+    const cleanupTarget = resolveSandboxCleanupTarget(row.branch, config.repoRoot);
+    return cleanupTarget.workspace.mode === 'branch-only'
+      ? { row, protected: false, cleanupTarget }
+      : { row, protected: true, cleanupTarget: null };
   });
+  const protectedBranches = new Set(classified
+    .filter((entry) => entry.protected)
+    .map(({ row }) => row.branch));
+  const targets = classified
+    .filter((entry) => !entry.protected && !protectedBranches.has(entry.row.branch) && entry.cleanupTarget)
+    .map(({ row, cleanupTarget }) => ({
+      row,
+      cleanupTarget: cleanupTarget!,
+      target: resolveRmTarget(config, tools, cleanupTarget!, { discoveredContainers: [row.name] })
+    }));
   p.intro(pc.cyan(`Removing sandboxes for ${config.project}`));
   if (options.dryRun) {
     p.outro(`Dry run: ${targets.length} sandbox(es) found, nothing deleted`);

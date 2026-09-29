@@ -14,7 +14,7 @@ import { rmOne, rmPurge, rmUnbound } from '../removal.ts';
 
 const USAGE = `Usage:
   ai sandbox rm <branch | TASK-id | short id> Remove one sandbox; use a full TASK-id for a task-bound sandbox and a branch for branch-only sandboxes
-  ai sandbox rm --unbound [--dry-run] [--yes] Remove branch-only sandboxes not bound to active tasks
+  ai sandbox rm --unbound [--dry-run] [--yes] Remove sandboxes not bound to an active task short id
   ai sandbox rm --purge                     Tear down ALL sandboxes for the project (containers, worktrees, image, VM)`;
 
 function resolveMissingTaskSandboxBranch(taskId: string, config: ReturnType<typeof loadConfig>): string | null {

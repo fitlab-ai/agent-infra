@@ -205,13 +205,13 @@ test("sandbox rm help documents task-state and identity boundaries", () => {
   assert.match(output, /rm --unbound \[--dry-run\] \[--yes\]/);
 });
 
-test("sandbox ls help clarifies that a missing SHORT id does not imply safe cleanup", () => {
+test("sandbox ls help explains that a missing SHORT id may be eligible for unbound cleanup", () => {
   const output = execFileSync(process.execPath, cliArgs("sandbox", "ls", "--help"), {
     encoding: "utf8"
   });
 
-  assert.match(output, /SHORT value of '-' means no active task short id is displayed/);
-  assert.match(output, /does not indicate that the branch or sandbox is safe to remove/);
+  assert.match(output, /SHORT value of '-' means this container has no active task short id/);
+  assert.match(output, /may\s+be eligible for "ai sandbox rm --unbound" cleanup/);
 });
 
 test("sandbox create help documents the host aliases file", () => {
@@ -519,7 +519,7 @@ test("sandbox rm rejects a missing task record with multiple sandbox branches", 
   }
 });
 
-test("sandbox rm --unbound --yes preserves task-bound sandboxes in every task state", () => {
+test("sandbox rm --unbound --yes preserves active short-id sandboxes and removes completed unbound sandboxes", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-task-states-"));
   const tasks = [
     { state: "active", taskId: "TASK-20260101-000101", branch: "feature/remove-active", container: "sb-remove-active" },
@@ -538,14 +538,21 @@ test("sandbox rm --unbound --yes preserves task-bound sandboxes in every task st
       writeTaskBranch(fixture.repoDir, task.state, task.taskId, task.branch);
       fs.mkdirSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", "..")), { recursive: true });
     }
-    writeShortIdRegistry(fixture.repoDir, { "05": tasks[0].taskId });
+    writeShortIdRegistry(fixture.repoDir, { "05": tasks[0].taskId, "06": tasks[1].taskId });
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
 
     assert.equal(result.status, 0, result.stderr);
     for (const task of tasks) {
-      assert.equal(fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", ".."))), true);
-      assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === task.container), false);
+      const remainsBoundToActiveShortId = task.state === "active" || task.state === "blocked";
+      assert.equal(
+        fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", task.branch.replaceAll("/", ".."))),
+        remainsBoundToActiveShortId
+      );
+      assert.equal(
+        fixture.readDockerCalls().some((call) => call[0] === "rm" && call.at(-1) === task.container),
+        !remainsBoundToActiveShortId
+      );
     }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1441,7 +1448,7 @@ test("sandbox ls format is engine-neutral and embeds raw Labels", async () => {
   );
 });
 
-test("sandbox ls runtime hint does not equate SHORT '-' with safe cleanup", () => {
+test("sandbox ls runtime hint explains active branch protection for SHORT '-'", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-ls-short-cleanup-hint-"));
   const taskId = "TASK-20260101-000107";
   try {
@@ -1455,7 +1462,7 @@ test("sandbox ls runtime hint does not equate SHORT '-' with safe cleanup", () =
     const result = spawnSandboxCli(fixture, tmpDir, ["ls"]);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /SHORT '-' = no active task short id is displayed for this container; it does not indicate that the branch or sandbox is safe to remove\./);
+    assert.match(result.stdout, /SHORT '-' = no active task short id is displayed; --unbound may clean this sandbox if its branch is not tied to an active task\./);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

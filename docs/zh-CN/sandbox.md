@@ -188,7 +188,7 @@ tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/
 - `/share/branch` <- `~/.agent-infra/share/<project>/branches/<branch>/`：分支独占。
 - `/clipboard` <- `~/.agent-infra/clipboard/`：macOS 图片粘贴桥接使用的只读存储。
 
-这两条路径硬编码，不暴露 `.airc.json` 配置项。首次 `create` 时会自动创建宿主目录；执行 `ai sandbox rm <branch>` 删除时会附带询问是否清理（默认 yes）。`ai sandbox rm --unbound` 批量删除**未绑定 active 任务**的 branch-only 沙箱。task-bound 沙箱即使在 `ai sandbox ls` 中显示短号 `-`，也不会被批量删除；如需清理，须显式使用完整 TASK-id。可加 `--dry-run` 预览，或 `--yes` 跳过普通确认（非交互 shell 中必须显式传 `--yes`）。`ai sandbox rm --purge` 则拆除项目的**全部**沙箱（容器、worktree、镜像、VM）。**破坏性变更**：`--all` 已移除；旧调用会返回迁移错误，必须改用 `--unbound`。
+这两条路径硬编码，不暴露 `.airc.json` 配置项。首次 `create` 时会自动创建宿主目录；执行 `ai sandbox rm <branch>` 删除时会附带询问是否清理（默认 yes）。`ai sandbox rm --unbound` 批量删除**未绑定当前有效任务短号**的沙箱，包括已完成或归档任务绑定的沙箱；仍绑定有效短号的沙箱及其共享分支状态会保留。可加 `--dry-run` 预览，或 `--yes` 跳过普通确认（非交互 shell 中必须显式传 `--yes`）。`ai sandbox rm --purge` 则拆除项目的**全部**沙箱（容器、worktree、镜像、VM）。**破坏性变更**：`--all` 已移除；旧调用会返回迁移错误，必须改用 `--unbound`。
 
 `ai sandbox rm`、`--unbound` 和 `--purge` 还会扫描仓库中的规范任务辅助目录。只有在任务已终态、完成回执、artifact 或 Git identity 以及路径所有权检查全部匹配时，才会删除已消费的本地 artifact finalization intent 或已同步的 commit intent；规范辅助目录只有在真实为空时才会逐层删除。任务文档、artifact、完成回执、orchestration evidence、run 元数据和输出、生命周期记录、process-data、control 状态以及用户数据继续受保护。
 

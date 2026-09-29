@@ -205,9 +205,9 @@ These paths are intentionally hardcoded; there is no `.airc.json` knob. Both
 host directories are created automatically on first `create`. When you
 `ai sandbox rm <branch>`, you will be prompted (default yes) to clean up the
 corresponding share dirs alongside the worktrees. `ai sandbox rm --unbound`
-batch-removes branch-only sandboxes **not bound to an active task**. Task-bound
-sandboxes remain protected even when `ai sandbox ls` shows `-` in the SHORT
-column; remove one explicitly with its full TASK-id. Add `--dry-run` to preview
+batch-removes sandboxes **not bound to an active task short id**, including
+completed task-bound sandboxes. Sandboxes still bound to an active short id and
+their shared branch state remain protected. Add `--dry-run` to preview
 or `--yes` to skip the ordinary
 confirmation (required in non-interactive shells). `ai sandbox rm --purge`
 tears down **all** project sandboxes (containers, worktrees, image, VM).
