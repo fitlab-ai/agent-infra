@@ -28,6 +28,14 @@ function makeTempRepo() {
   return repoDir;
 }
 
+function runMerge(repoDir: string, sourceWorkspace: string, homeDir: string): string {
+  return execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), {
+    cwd: repoDir,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir }
+  });
+}
+
 type TaskOptions = {
   title: string;
   type?: string;
@@ -618,6 +626,7 @@ test('merge workspace transports receipt-backed review context across mtime chan
 
 test('merge workspace updates same-section task when source is newer and creates backup', () => {
   const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
   const sourceWorkspace = makeTempWorkspace(repoDir);
   const localWorkspace = path.join(repoDir, '.agents', 'workspace');
 
@@ -633,19 +642,17 @@ test('merge workspace updates same-section task when source is newer and creates
       extraFiles: { 'note.txt': 'source\n' }
     });
 
-    const output = execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), {
-      cwd: repoDir,
-      encoding: 'utf8'
-    });
+    const output = runMerge(repoDir, sourceWorkspace, homeDir);
 
     assert.match(read(path.join(localWorkspace, 'active/TASK-20260409-131313/task.md')), /source newer/);
     assert.equal(read(path.join(localWorkspace, 'active/TASK-20260409-131313/note.txt')), 'source\n');
     assert.match(output, /↑ Updated\s+: 1/);
     assert.match(output, /TASK-20260409-131313\s+active\s+updated \(source newer: 2026-04-09 13:13:13 > 2026-04-09 13:00:00\)/);
 
-    const backupRoot = path.join(repoDir, '.agents', 'workspace', '.merge-backup');
+    const backupRoot = path.join(homeDir, '.agent-infra', 'recovery-backups', path.basename(repoDir), 'workspace-merge');
     const backupBatches = fs.readdirSync(backupRoot);
     assert.equal(backupBatches.length, 1);
+    assert.equal(output.includes(backupRoot), true);
     assert.match(
       read(path.join(backupRoot, backupBatches[0] ?? '', 'active/TASK-20260409-131313/task.md')),
       /local older/
@@ -657,6 +664,7 @@ test('merge workspace updates same-section task when source is newer and creates
 
 test('merge workspace skips task when local version is newer', () => {
   const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
   const sourceWorkspace = makeTempWorkspace(repoDir);
   const localWorkspace = path.join(repoDir, '.agents', 'workspace');
 
@@ -670,15 +678,40 @@ test('merge workspace skips task when local version is newer', () => {
       updatedAt: '2026-04-09 14:00:00'
     });
 
-    const output = execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), {
-      cwd: repoDir,
-      encoding: 'utf8'
-    });
+    const output = runMerge(repoDir, sourceWorkspace, homeDir);
 
     assert.match(read(path.join(localWorkspace, 'blocked/TASK-20260409-141414/task.md')), /local newer/);
     assert.match(output, /⊘ Skipped\s+: 1/);
     assert.match(output, /TASK-20260409-141414\s+blocked\s+skipped \(local newer: 2026-04-09 14:14:14 > 2026-04-09 14:00:00\)/);
-    assert.equal(fs.existsSync(path.join(localWorkspace, '.merge-backup')), false);
+    assert.equal(fs.existsSync(path.join(homeDir, '.agent-infra')), false);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge workspace preserves relative symlinks in replacement backups', onPlatforms('linux', 'darwin'), () => {
+  const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const taskId = 'TASK-20260409-151515';
+  const localTask = writeFlatTask(path.join(repoDir, '.agents', 'workspace'), 'active', taskId, {
+    title: 'local relative link',
+    updatedAt: '2026-04-09 15:00:00',
+    extraFiles: { 'notes/restore.txt': 'local restore data\n' }
+  });
+  const localLink = path.join(localTask, 'notes', 'restore-link');
+  const recoveryRoot = path.join(homeDir, '.agent-infra', 'recovery-backups', path.basename(repoDir), 'workspace-merge');
+
+  try {
+    fs.symlinkSync('restore.txt', localLink);
+    writeFlatTask(sourceWorkspace, 'active', taskId, { title: 'newer source', updatedAt: '2026-04-09 15:15:15' });
+
+    runMerge(repoDir, sourceWorkspace, homeDir);
+
+    const [backupBatch] = fs.readdirSync(recoveryRoot);
+    const backupLink = path.join(recoveryRoot, backupBatch ?? '', 'active', taskId, 'notes', 'restore-link');
+    assert.equal(fs.readlinkSync(backupLink), 'restore.txt');
+    assert.equal(fs.readFileSync(backupLink, 'utf8'), 'local restore data\n');
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }

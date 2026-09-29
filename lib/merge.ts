@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { removeDirRecursive } from './remove-dir.ts';
@@ -424,6 +425,24 @@ function formatBackupTimestamp(date: Date): string {
   ].join('') + `-${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}${String(date.getSeconds()).padStart(2, '0')}`;
 }
 
+function resolveRecoveryProjectKey(repoRoot: string): string {
+  let projectKey: string | undefined;
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { project?: unknown };
+    if (typeof config.project === 'string' && config.project.trim() !== '') {
+      projectKey = config.project.trim();
+    }
+  } catch {
+    // Fall back to the repository directory when project config is unavailable.
+  }
+
+  projectKey ??= path.basename(repoRoot);
+  if (!/^[A-Za-z0-9_.@-]+$/.test(projectKey) || projectKey === '.' || projectKey === '..') {
+    throw new Error(`Invalid project name for recovery backups: ${projectKey}`);
+  }
+  return projectKey;
+}
+
 function toPosixPath(relativePath: string): string {
   return relativePath.split(path.sep).join('/');
 }
@@ -541,7 +560,7 @@ function buildWorkspaceIndex(workspaceDir: string): Map<string, WorkspaceRecord>
 function backupTaskDir(backupRoot: string, section: MutableSection, taskDir: string, taskId: string): string {
   const backupDir = path.join(backupRoot, section, taskId);
   fs.mkdirSync(path.dirname(backupDir), { recursive: true });
-  fs.cpSync(taskDir, backupDir, { recursive: true });
+  fs.cpSync(taskDir, backupDir, { recursive: true, verbatimSymlinks: true });
   return backupDir;
 }
 
@@ -1085,16 +1104,17 @@ async function cmdMerge(args: string[]): Promise<void> {
     throw new Error(`Source path is not a directory: ${sourcePath}`);
   }
 
-  const workspaceDir = path.join(process.cwd(), '.agents', 'workspace');
+  const repoRoot = process.cwd();
+  const workspaceDir = path.join(repoRoot, '.agents', 'workspace');
   const archiveDir = path.join(workspaceDir, 'archive');
   const backupStamp = formatBackupTimestamp(new Date());
-  const backupRootRelative = `.agents/workspace/.merge-backup/${backupStamp}/`;
-  const backupRoot = path.join(workspaceDir, '.merge-backup', backupStamp);
-  const report = createReport(resolvedSource, backupRootRelative);
+  const projectKey = resolveRecoveryProjectKey(repoRoot);
+  const recoveryRoot = path.join(os.homedir(), '.agent-infra', 'recovery-backups', projectKey, 'workspace-merge');
+  const backupRoot = path.join(recoveryRoot, backupStamp);
+  const report = createReport(resolvedSource, backupRoot);
   detectSourceMode(resolvedSource);
   validateSourceWorkspace(resolvedSource);
   validateArchiveSection(workspaceDir, new Map());
-
   for (const section of ALL_SECTIONS) {
     fs.mkdirSync(path.join(workspaceDir, section), { recursive: true });
   }
