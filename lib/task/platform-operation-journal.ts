@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
+import { isResourceIdentity } from '../platform/resource-identity.ts';
 import type { ResourceIdentity } from '../platform/resource-identity.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 
@@ -36,7 +37,7 @@ type PlatformIssueCreateIntent = Readonly<{ title: string; bodyDigest: string }>
 type PlatformPullRequestSummaryIntent = Readonly<{ body: string; changeReportFile: string }>;
 type PlatformPullRequestReviewIntent = Readonly<{
   prNumber: string;
-  resource?: ResourceIdentity;
+  resource: ResourceIdentity;
   scope: string;
   round: number;
   commitSha: string;
@@ -149,6 +150,7 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
         : item.pullRequestSummary !== undefined)
       || (item.kind === 'pull-request-review'
         ? !item.pullRequestReview || typeof item.pullRequestReview.prNumber !== 'string'
+          || !isResourceIdentity(item.pullRequestReview.resource)
           || !item.pullRequestReview.prNumber.trim() || !/^TASK-\d{8}-\d{6}$|^pr\d+$/u.test(item.pullRequestReview.scope)
           || !Number.isSafeInteger(item.pullRequestReview.round) || item.pullRequestReview.round <= 0
           || !/^[0-9a-f]{7,40}$/iu.test(item.pullRequestReview.commitSha)

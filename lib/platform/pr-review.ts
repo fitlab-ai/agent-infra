@@ -12,7 +12,7 @@ import {
   providerResourceToken,
   unsupportedProviderOperation
 } from './provider-bridge.ts';
-import { isResourceIdentity, resourceIdentityNumber, reviewMarker as resourceReviewMarker } from './resource-identity.ts';
+import { isResourceIdentity, resourceIdentityEquals, resourceIdentityNumber, reviewMarker as resourceReviewMarker } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { PlatformPullRequestReviewIntent } from '../task/platform-operation-journal.ts';
 
@@ -96,6 +96,7 @@ export async function publishPrReview(options: {
   dryRun?: boolean;
   agent?: string;
   skipQueue?: boolean;
+  expectedResource?: ResourceIdentity;
   prNumber: PrToken;
   identity: PrReviewIdentity;
   event: PrReviewEvent;
@@ -114,6 +115,13 @@ export async function publishPrReview(options: {
     });
   }
   const identityNumber = resourceIdentityNumber(identity);
+  if (options.expectedResource && !resourceIdentityEquals(identity, options.expectedResource)) {
+    return platformResult('failed', {
+      platform: context.platform, capabilities: context.capabilities,
+      resource: { kind: 'pull-request', number: identityNumber, identity },
+      error: { code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Current pull request identity differs from the persisted operation target', retryable: false }
+    });
+  }
   if (!REVIEW_EVENTS.includes(options.event)) {
     return platformResult('failed', {
       platform: context.platform, capabilities: context.capabilities,

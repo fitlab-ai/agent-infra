@@ -160,6 +160,61 @@ test('PR review recovery recognizes an accepted review before retrying its queue
   }
 });
 
+test('PR review recovery stops when the journal target differs from its persisted resource identity', async () => {
+  const root = fixture();
+  const taskId = IDENTITY.scope;
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+  const intentResource = { kind: 'number' as const, value: 42 };
+  const reviewIntent = {
+    prNumber: '42', resource: intentResource, scope: taskId, round: IDENTITY.round,
+    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, body: '## Findings\n- identity-bound'
+  };
+  const mock = mockClient();
+  try {
+    const operation = recordPlatformOperation({
+      taskRef: taskId, cwd: root, kind: 'pull-request-review',
+      target: JSON.stringify({ kind: 'number', value: 43 }),
+      expectedDigest: createHash('sha256').update(JSON.stringify(reviewIntent)).digest('hex'),
+      dependency: 'required', state: 'unknown', pullRequestReview: reviewIntent
+    });
+
+    const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root, client: mock.client });
+    const persisted = readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === operation.id);
+
+    assert.equal(recovered.status, 'failed');
+    assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_IDENTITY_MISMATCH');
+    assert.deepEqual(mock.postedBodies, []);
+    assert.equal(persisted?.state, 'failed');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('PR review publisher rejects a resource identity changed by the current provider', async () => {
+  const root = fixture();
+  try {
+    const mock = mockClient();
+    const result = await publishPrReview({
+      cwd: root,
+      client: mock.client,
+      prNumber: 42,
+      identity: IDENTITY,
+      expectedResource: { kind: 'id', value: '42' },
+      event: 'COMMENT',
+      body: '## Findings\n- identity-bound',
+      skipQueue: true
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PLATFORM_OPERATION_IDENTITY_MISMATCH');
+    assert.deepEqual(mock.postedBodies, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('publishPrReview is idempotent: replay with the same marker and commit is a no-op', async () => {
   const root = fixture();
   try {

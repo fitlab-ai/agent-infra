@@ -227,11 +227,18 @@ async function replayPullRequestSummary(taskId: string, operation: ReturnType<ty
 async function replayPullRequestReview(operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number], agent: string, cwd: string, client?: PlatformClient): Promise<PlatformResult> {
   const intent = operation.pullRequestReview;
   if (!intent) return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Pull-request review recovery parameters are missing', retryable: false } });
+  let target;
+  try { target = parseResourceIdentity(JSON.parse(operation.target), 'queued pull-request review identity'); }
+  catch { return platformResult('failed', { error: { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Queued pull-request review identity is invalid', retryable: false } }); }
+  if (!intent.resource || !resourceIdentityEquals(target, intent.resource)) return platformResult('failed', { error: {
+    code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Pull-request review identity differs from the journal target', retryable: false
+  } });
   return publishPrReview({
     cwd,
     client,
     agent,
     prNumber: intent.prNumber,
+    expectedResource: target,
     identity: { scope: intent.scope, round: intent.round, commitSha: intent.commitSha, ...(intent.resource ? { resource: intent.resource } : {}) },
     event: intent.event,
     body: intent.body,
