@@ -28,6 +28,19 @@ function makeTempRepo() {
   return repoDir;
 }
 
+function writeMergeProject(repoDir: string, project: string) {
+  fs.mkdirSync(path.join(repoDir, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, '.agents', '.airc.json'), JSON.stringify({ project }), 'utf8');
+}
+
+function runMerge(repoDir: string, sourceWorkspace: string, homeDir: string): string {
+  return execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), {
+    cwd: repoDir,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir }
+  });
+}
+
 type TaskOptions = {
   title: string;
   type?: string;
@@ -618,6 +631,7 @@ test('merge workspace transports receipt-backed review context across mtime chan
 
 test('merge workspace updates same-section task when source is newer and creates backup', () => {
   const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
   const sourceWorkspace = makeTempWorkspace(repoDir);
   const localWorkspace = path.join(repoDir, '.agents', 'workspace');
 
@@ -633,19 +647,17 @@ test('merge workspace updates same-section task when source is newer and creates
       extraFiles: { 'note.txt': 'source\n' }
     });
 
-    const output = execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), {
-      cwd: repoDir,
-      encoding: 'utf8'
-    });
+    const output = runMerge(repoDir, sourceWorkspace, homeDir);
 
     assert.match(read(path.join(localWorkspace, 'active/TASK-20260409-131313/task.md')), /source newer/);
     assert.equal(read(path.join(localWorkspace, 'active/TASK-20260409-131313/note.txt')), 'source\n');
     assert.match(output, /↑ Updated\s+: 1/);
     assert.match(output, /TASK-20260409-131313\s+active\s+updated \(source newer: 2026-04-09 13:13:13 > 2026-04-09 13:00:00\)/);
 
-    const backupRoot = path.join(repoDir, '.agents', 'workspace', '.merge-backup');
+    const backupRoot = path.join(homeDir, '.agent-infra', 'recovery-backups', path.basename(repoDir), 'workspace-merge');
     const backupBatches = fs.readdirSync(backupRoot);
     assert.equal(backupBatches.length, 1);
+    assert.equal(output.includes(backupRoot), true);
     assert.match(
       read(path.join(backupRoot, backupBatches[0] ?? '', 'active/TASK-20260409-131313/task.md')),
       /local older/
@@ -657,6 +669,7 @@ test('merge workspace updates same-section task when source is newer and creates
 
 test('merge workspace skips task when local version is newer', () => {
   const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
   const sourceWorkspace = makeTempWorkspace(repoDir);
   const localWorkspace = path.join(repoDir, '.agents', 'workspace');
 
@@ -670,15 +683,108 @@ test('merge workspace skips task when local version is newer', () => {
       updatedAt: '2026-04-09 14:00:00'
     });
 
-    const output = execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), {
-      cwd: repoDir,
-      encoding: 'utf8'
-    });
+    const output = runMerge(repoDir, sourceWorkspace, homeDir);
 
     assert.match(read(path.join(localWorkspace, 'blocked/TASK-20260409-141414/task.md')), /local newer/);
     assert.match(output, /⊘ Skipped\s+: 1/);
     assert.match(output, /TASK-20260409-141414\s+blocked\s+skipped \(local newer: 2026-04-09 14:14:14 > 2026-04-09 14:00:00\)/);
-    assert.equal(fs.existsSync(path.join(localWorkspace, '.merge-backup')), false);
+    assert.equal(fs.existsSync(path.join(homeDir, '.agent-infra')), false);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge workspace migrates legacy backup batches after verifying their contents', () => {
+  const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const project = 'merge-project';
+  const legacyRoot = path.join(repoDir, '.agents', 'workspace', '.merge-backup');
+  const recoveryRoot = path.join(homeDir, '.agent-infra', 'recovery-backups', project, 'workspace-merge');
+
+  try {
+    writeMergeProject(repoDir, project);
+    const batches = [
+      ['20260409-101010', 'active', 'TASK-20260409-101010'],
+      ['20260410-111111', 'blocked', 'TASK-20260410-111111']
+    ] as const;
+    for (const [stamp, state, taskId] of batches) {
+      writeFlatTask(path.join(legacyRoot, stamp), state, taskId, {
+        title: `${state} backup`,
+        extraFiles: { 'notes/restore.txt': `${taskId}\n` }
+      });
+    }
+
+    const output = runMerge(repoDir, sourceWorkspace, homeDir);
+
+    assert.match(output, /Migrated backup batches: 2/);
+    for (const [stamp, state, taskId] of batches) {
+      const targetTask = path.join(recoveryRoot, stamp, state, taskId);
+      assert.match(fs.readFileSync(path.join(targetTask, 'task.md'), 'utf8'), new RegExp(`${state} backup`));
+      assert.equal(fs.readFileSync(path.join(targetTask, 'notes', 'restore.txt'), 'utf8'), `${taskId}\n`);
+      assert.equal(fs.existsSync(path.join(legacyRoot, stamp, state, taskId)), false);
+    }
+    assert.equal(fs.existsSync(legacyRoot), false);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge workspace treats a matching legacy backup target as an idempotent migration', () => {
+  const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const project = 'merge-project';
+  const stamp = '20260409-121212';
+  const taskId = 'TASK-20260409-121212';
+  const legacyBatch = path.join(repoDir, '.agents', 'workspace', '.merge-backup', stamp);
+  const legacyTask = writeFlatTask(legacyBatch, 'active', taskId, { title: 'matching backup' });
+  const targetTask = path.join(homeDir, '.agent-infra', 'recovery-backups', project, 'workspace-merge', stamp, 'active', taskId);
+
+  try {
+    writeMergeProject(repoDir, project);
+    fs.mkdirSync(path.dirname(targetTask), { recursive: true });
+    fs.cpSync(legacyTask, targetTask, { recursive: true });
+
+    const output = runMerge(repoDir, sourceWorkspace, homeDir);
+
+    assert.match(output, /Migrated backup batches: 1/);
+    assert.equal(fs.existsSync(path.join(legacyBatch, 'active', taskId)), false);
+    assert.match(fs.readFileSync(path.join(targetTask, 'task.md'), 'utf8'), /matching backup/);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge workspace preserves both copies and stops when a legacy backup target differs', () => {
+  const repoDir = makeTempRepo();
+  const homeDir = path.join(repoDir, 'home');
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const localWorkspace = path.join(repoDir, '.agents', 'workspace');
+  const project = 'merge-project';
+  const stamp = '20260409-131313';
+  const taskId = 'TASK-20260409-131313';
+  const legacyTask = writeFlatTask(path.join(localWorkspace, '.merge-backup', stamp), 'active', taskId, { title: 'legacy copy' });
+  const targetTask = path.join(homeDir, '.agent-infra', 'recovery-backups', project, 'workspace-merge', stamp, 'active', taskId);
+
+  try {
+    writeMergeProject(repoDir, project);
+    writeFlatTask(localWorkspace, 'active', taskId, { title: 'local task', updatedAt: '2026-04-09 13:00:00' });
+    writeFlatTask(sourceWorkspace, 'active', taskId, { title: 'newer source task', updatedAt: '2026-04-09 13:13:13' });
+    fs.mkdirSync(path.dirname(targetTask), { recursive: true });
+    fs.cpSync(legacyTask, targetTask, { recursive: true });
+    fs.writeFileSync(path.join(targetTask, 'task.md'), 'different content\n', 'utf8');
+
+    assert.throws(
+      () => runMerge(repoDir, sourceWorkspace, homeDir),
+      (error: NodeJS.ErrnoException & { stderr?: Buffer }) => {
+        assert.match(String(error.stderr), /backup destination conflict/i);
+        return true;
+      }
+    );
+    assert.match(fs.readFileSync(path.join(localWorkspace, 'active', taskId, 'task.md'), 'utf8'), /local task/);
+    assert.match(fs.readFileSync(path.join(legacyTask, 'task.md'), 'utf8'), /legacy copy/);
+    assert.equal(fs.readFileSync(path.join(targetTask, 'task.md'), 'utf8'), 'different content\n');
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }

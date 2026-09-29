@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { removeDirRecursive } from './remove-dir.ts';
@@ -53,6 +54,7 @@ type ArchiveCounts = Record<ArchiveAction, ReportEntry[]>;
 type MergeReport = {
   sourcePath: string;
   backupRoot: string;
+  migratedBackupBatches: number;
   sections: Record<MutableSection, MutableCounts> & { archive: ArchiveCounts };
   details: ReportEntry[];
   backupCount: number;
@@ -424,6 +426,120 @@ function formatBackupTimestamp(date: Date): string {
   ].join('') + `-${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}${String(date.getSeconds()).padStart(2, '0')}`;
 }
 
+function resolveRecoveryProjectKey(repoRoot: string): string {
+  let projectKey: string | undefined;
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')) as { project?: unknown };
+    if (typeof config.project === 'string' && config.project.trim() !== '') {
+      projectKey = config.project.trim();
+    }
+  } catch {
+    // Fall back to the repository directory when project config is unavailable.
+  }
+
+  projectKey ??= path.basename(repoRoot);
+  if (!/^[A-Za-z0-9_.@-]+$/.test(projectKey) || projectKey === '.' || projectKey === '..') {
+    throw new Error(`Invalid project name for recovery backups: ${projectKey}`);
+  }
+  return projectKey;
+}
+
+type BackupManifestEntry = {
+  path: string;
+  type: 'directory' | 'file' | 'symlink';
+  sha256?: string;
+  target?: string;
+};
+
+function backupDirectoryManifest(rootDir: string): BackupManifestEntry[] {
+  const rootStat = fs.lstatSync(rootDir);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error(`Merge backup path must be a real directory: ${rootDir}`);
+  }
+
+  const manifest: BackupManifestEntry[] = [];
+  const visit = (currentDir: string, relativeDir: string): void => {
+    for (const entry of fs.readdirSync(currentDir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const absolutePath = path.join(currentDir, entry.name);
+      const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      const stat = fs.lstatSync(absolutePath);
+      if (stat.isSymbolicLink()) {
+        manifest.push({ path: relativePath, type: 'symlink', target: fs.readlinkSync(absolutePath) });
+      } else if (stat.isDirectory()) {
+        manifest.push({ path: relativePath, type: 'directory' });
+        visit(absolutePath, relativePath);
+      } else if (stat.isFile()) {
+        const sha256 = crypto.createHash('sha256').update(fs.readFileSync(absolutePath)).digest('hex');
+        manifest.push({ path: relativePath, type: 'file', sha256 });
+      } else {
+        throw new Error(`Unsupported entry in merge backup: ${absolutePath}`);
+      }
+    }
+  };
+  visit(rootDir, '');
+  return manifest;
+}
+
+function directoryContentsMatch(leftDir: string, rightDir: string): boolean {
+  return JSON.stringify(backupDirectoryManifest(leftDir)) === JSON.stringify(backupDirectoryManifest(rightDir));
+}
+
+function copyVerifiedBackup(sourceDir: string, targetDir: string): boolean {
+  const sourceManifest = backupDirectoryManifest(sourceDir);
+  try {
+    fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+    fs.mkdirSync(targetDir);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+      if (directoryContentsMatch(sourceDir, targetDir)) return false;
+      throw new Error(`Merge backup destination conflict: ${targetDir}`);
+    }
+    throw error;
+  }
+
+  try {
+    fs.cpSync(sourceDir, targetDir, { recursive: true });
+    const targetManifest = backupDirectoryManifest(targetDir);
+    if (JSON.stringify(sourceManifest) !== JSON.stringify(targetManifest)) {
+      throw new Error(`Merge backup copy verification failed: ${targetDir}`);
+    }
+    return true;
+  } catch (error) {
+    fs.rmSync(targetDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+// TODO(compat): Remove legacy migration after this repository's .merge-backup batches are verified and the source root is absent.
+function migrateLegacyBackups(legacyRoot: string, recoveryRoot: string): number {
+  let legacyStat: fs.Stats;
+  try {
+    legacyStat = fs.lstatSync(legacyRoot);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return 0;
+    throw error;
+  }
+  if (!legacyStat.isDirectory() || legacyStat.isSymbolicLink()) {
+    throw new Error(`Legacy merge backup root must be a real directory: ${legacyRoot}`);
+  }
+
+  let migrated = 0;
+  const batches = fs.readdirSync(legacyRoot, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
+  for (const batch of batches) {
+    if (!batch.isDirectory() || batch.isSymbolicLink()) {
+      throw new Error(`Legacy merge backup batch must be a directory: ${path.join(legacyRoot, batch.name)}`);
+    }
+    const sourceBatch = path.join(legacyRoot, batch.name);
+    const targetBatch = path.join(recoveryRoot, batch.name);
+    copyVerifiedBackup(sourceBatch, targetBatch);
+    removeDirRecursive(sourceBatch);
+    migrated += 1;
+  }
+
+  fs.rmdirSync(legacyRoot);
+  return migrated;
+}
+
 function toPosixPath(relativePath: string): string {
   return relativePath.split(path.sep).join('/');
 }
@@ -540,8 +656,7 @@ function buildWorkspaceIndex(workspaceDir: string): Map<string, WorkspaceRecord>
 
 function backupTaskDir(backupRoot: string, section: MutableSection, taskDir: string, taskId: string): string {
   const backupDir = path.join(backupRoot, section, taskId);
-  fs.mkdirSync(path.dirname(backupDir), { recursive: true });
-  fs.cpSync(taskDir, backupDir, { recursive: true });
+  copyVerifiedBackup(taskDir, backupDir);
   return backupDir;
 }
 
@@ -828,6 +943,7 @@ function createReport(sourcePath: string, backupRoot: string): MergeReport {
   return {
     sourcePath,
     backupRoot,
+    migratedBackupBatches: 0,
     sections: {
       active: { copied: [], updated: [], moved: [], skipped: [] },
       blocked: { copied: [], updated: [], moved: [], skipped: [] },
@@ -1042,6 +1158,12 @@ function printReport(report: MergeReport): void {
     ''
   ];
 
+  if (report.migratedBackupBatches > 0) {
+    lines.push(`Migrated backup batches: ${report.migratedBackupBatches}`);
+    lines.push(`Recovery root: ${path.dirname(report.backupRoot)}`);
+    lines.push('');
+  }
+
   for (const section of MUTABLE_SECTIONS) {
     printSection(lines, section, report.sections[section]);
   }
@@ -1085,15 +1207,19 @@ async function cmdMerge(args: string[]): Promise<void> {
     throw new Error(`Source path is not a directory: ${sourcePath}`);
   }
 
-  const workspaceDir = path.join(process.cwd(), '.agents', 'workspace');
+  const repoRoot = process.cwd();
+  const workspaceDir = path.join(repoRoot, '.agents', 'workspace');
   const archiveDir = path.join(workspaceDir, 'archive');
   const backupStamp = formatBackupTimestamp(new Date());
-  const backupRootRelative = `.agents/workspace/.merge-backup/${backupStamp}/`;
-  const backupRoot = path.join(workspaceDir, '.merge-backup', backupStamp);
-  const report = createReport(resolvedSource, backupRootRelative);
+  const projectKey = resolveRecoveryProjectKey(repoRoot);
+  const recoveryRoot = path.join(os.homedir(), '.agent-infra', 'recovery-backups', projectKey, 'workspace-merge');
+  const backupRoot = path.join(recoveryRoot, backupStamp);
+  const legacyRoot = path.join(workspaceDir, '.merge-backup');
+  const report = createReport(resolvedSource, backupRoot);
   detectSourceMode(resolvedSource);
   validateSourceWorkspace(resolvedSource);
   validateArchiveSection(workspaceDir, new Map());
+  report.migratedBackupBatches = migrateLegacyBackups(legacyRoot, recoveryRoot);
 
   for (const section of ALL_SECTIONS) {
     fs.mkdirSync(path.join(workspaceDir, section), { recursive: true });
