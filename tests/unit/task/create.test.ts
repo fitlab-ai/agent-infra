@@ -21,7 +21,7 @@ import {
   taskCreateExitCode,
   taskCreateOutputUnavailableResult
 } from '../../../lib/task/create-service.ts';
-import { lockKey } from '../../../lib/task/task-execution-lock.ts';
+import { lockKey, withRepositoryMutationLock } from '../../../lib/task/task-execution-lock.ts';
 
 const candidate: TaskCreateCandidateV1 = {
   version: 1,
@@ -176,6 +176,21 @@ test('local task creation is idempotent and rejects key reuse with changed conte
       () => createLocalTask({ ...candidate, title: 'Changed title' }, options),
       /TASK_CREATE_IDEMPOTENCY_CONFLICT/
     );
+  } finally {
+    cleanupFixture(root);
+  }
+});
+
+test('local task creation joins the repository mutation lock before publishing an active task', () => {
+  const root = fixture();
+  try {
+    withRepositoryMutationLock(root, () => {
+      assert.throws(
+        () => createLocalTask(candidate, { repoRoot: root, agentInfraVersion: 'v0.9.5' }),
+        (error: { code?: string }) => error.code === 'ORCHESTRATION_LOCK_BUSY'
+      );
+    });
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
   } finally {
     cleanupFixture(root);
   }

@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import { TaskExecutionLockError, withRepositoryMutationLock, withTaskExecutionLock } from './task-execution-lock.ts';
 import { readDeliveryDefaults, validateBaseRef, validateRemote } from './delivery-target.ts';
 import { buildUnboundFact, encodePrDeliveryFact } from './pr-delivery-fact.ts';
 import { CANDIDATE_COLUMNS, CONSTRAINT_COLUMNS, parseTaskQualification } from './qualification-audit.ts';
@@ -419,7 +419,7 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
   const canonical = canonicalTaskCreateCandidate(candidate);
   const candidateDigest = sha256(canonical);
   const keyDigest = sha256(candidate.idempotencyKey);
-  return withCreateLock(repoRoot, projectConfig.project, () => {
+  function createUnderRepositoryLock(): LocalTaskCreateResult {
     const recovered = recoverPublishedTask(repoRoot, keyDigest, candidateDigest);
     if (recovered) {
       return { status: 'no-op', changed: false, task: { id: recovered.taskId, shortId: recovered.shortId, state: recovered.state } };
@@ -446,12 +446,24 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
     fs.writeFileSync(path.join(temporary, 'task.md'), rendered, { flag: 'wx', mode: 0o600 });
     const destination = path.join(activeRoot, taskId);
     fs.renameSync(temporary, destination);
-    let shortId: string;
     const allocated = mutateShortIdRegistry(repoRoot, taskId, 'alloc');
     if (!allocated.shortId) throw new Error('TASK_CREATE_SHORT_ID_FAILED');
-    shortId = allocated.shortId;
-    return { status: 'applied', changed: true, task: { id: taskId, shortId, state: 'active' } };
+    return { status: 'applied', changed: true, task: { id: taskId, shortId: allocated.shortId, state: 'active' } };
+  }
+
+  return withCreateLock(repoRoot, projectConfig.project, () => {
+    let callbackError: unknown;
+    try {
+      return withRepositoryMutationLock(repoRoot, () => {
+        try { return createUnderRepositoryLock(); }
+        catch (error) { callbackError = error; throw error; }
+      });
+    } catch (error) {
+      if (callbackError !== undefined) throw callbackError;
+      throw error;
+    }
   });
+
 }
 
 export {
