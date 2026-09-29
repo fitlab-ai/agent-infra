@@ -38,10 +38,12 @@ description: >
 
 处理规则：
 - 如果在 `active/` 或 `blocked/` 中找到：继续
-- 如果只在 `completed/` 中找到：告知用户任务已转移，停止
+- 如果只在 `completed/` 中找到且 `cancelled_at` 与 `cancel_reason` 有效：复用已记录的取消原因，跳过步骤 3-5，继续步骤 6 补齐 Issue 关闭与评论；其他 completed 任务停止
 - 如果都不存在：提示 `Task {task-id} not found`
 
 ### 2. 判断取消标签
+
+从 completed 任务重试时，只使用 `task.md` 已记录的 `cancel_reason`，不得采用本次输入改写取消原因。
 
 根据取消原因推断 Issue 关闭标签：
 - `status: superseded`：原因包含“重复”、“替代”、“合并到”、“已由 #123 / PR 替代”等语义
@@ -75,7 +77,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 
 检查 `task.md` 中是否存在有效的 `platform_issue_identity`。如果没有，跳过此步骤。
 
-如果存在有效的 `platform_issue_identity`：
+如果存在有效的 `platform_issue_identity`，以下操作均须取得 `applied` / `no-op` 且无错误后才能宣称取消全部完成；失败时保留本地终态和待恢复记录，修复后以同一任务重试本技能：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
 - 将取消正文写入临时文件，调用 `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`

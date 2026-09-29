@@ -250,7 +250,7 @@ async function createTask(value: unknown, options: CreateTaskOptions): Promise<T
       task: local.task, issue, operations, warnings: [], error: verified.error
     };
     return {
-      status: platformFailure.status === 'blocked' ? 'blocked' : 'degraded',
+      status: 'degraded',
       changed: local.changed,
       task: local.task,
       issue,

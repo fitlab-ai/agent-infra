@@ -703,7 +703,7 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
       taskContent: createHash('sha256').update(taskContent).digest('hex')
     })).digest('hex')
   };
-  const dependency = options.dependency ?? (options.inLabels === 'from-diff' ? 'required' : 'deferred');
+  const dependency = options.dependency ?? (options.state === 'closed' && options.closeReason === 'not_planned' ? 'required' : 'deferred');
   const execute = () => syncPlatformIssueImpl(taskRef, options);
   if (options.skipQueue) return execute();
   return coordinatePlatformWrite({

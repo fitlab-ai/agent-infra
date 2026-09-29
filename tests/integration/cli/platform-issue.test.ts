@@ -114,7 +114,7 @@ test('platform-issue requirements sync persists once and converges across CLI pr
   }
 });
 
-test('platform-issue in-label sync journals its hard dependency and dry-run is not recoverable', () => {
+test('platform-issue in-label sync stays deferred until completion and dry-run is not recoverable', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-issue-in-labels-'));
   try {
     execFileSync('git', ['init', '-qb', 'main'], { cwd: root });
@@ -167,7 +167,7 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
     assert.equal(synced.status, 0, synced.stderr || synced.stdout);
     const operation = readPlatformOperationJournal(taskId, root).operations[0];
     assert.equal(operation?.kind, 'issue-metadata');
-    assert.equal(operation?.dependency, 'required');
+    assert.equal(operation?.dependency, 'deferred');
     assert.equal(operation?.issueMetadata?.inLabels, 'from-diff');
     assert.equal(operation?.issueMetadata?.base, 'main');
     assert.equal(operation?.state, 'succeeded');
@@ -181,7 +181,7 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
     execFileSync('git', ['update-ref', 'refs/heads/feature', nextCommit], { cwd: root });
     execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/feature'], { cwd: root });
     assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), ['lib/sample.ts', 'lib/second.ts']);
-    const recovered = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'required'], { cwd: root, env });
+    const recovered = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'deferred'], { cwd: root, env });
     assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
     const recoveredJournal = readPlatformOperationJournal(taskId, root).operations;
     const superseded = recoveredJournal.find((item) => item.id === operation.id);
@@ -199,7 +199,7 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
       platform: { type: 'github' }, labels: { in: { cli: ['lib/'] } }
     }));
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).labels.in, { cli: ['lib/'] });
-    const mappingRecovery = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'required'], { cwd: root, env });
+    const mappingRecovery = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'deferred'], { cwd: root, env });
     assert.equal(mappingRecovery.status, 0, mappingRecovery.stderr || mappingRecovery.stdout);
     const mappingJournal = readPlatformOperationJournal(taskId, root).operations;
     const staleMapping = mappingJournal.find((item) => item.id === retargeted.id);

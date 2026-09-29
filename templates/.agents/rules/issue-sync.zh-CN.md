@@ -34,6 +34,7 @@ agent-infra-internal platform-comment sync <task-ref> \
 ```
 
 - `applied|no-op|degraded` → exit 0；`failed` → exit 1；`blocked` → exit 2。
+- 写入结果的 `blocked` 只表示该次平台操作未完成，不直接阻止无依赖的本地任务流程。`import-issue` 的源 Issue 读取、`create-pr` 的 PR 身份、`review-pr` 的 PR/head 读取、`cancel-task` 与 `complete-task` 的完整标准仍为阻塞边界；`complete-task` 在归档前收敛待恢复操作。
 - 生命周期验证把 Issue Type、milestone、labels、需求锚点和非关键评论作为平台审计。每条审计保留 check id、原始状态、reason 和 action；缺失、权限不足或值不一致不会阻塞 gate。身份歧义、协议冲突、实际写入失败和写后状态未知仍为硬失败。
 - task 评论保持 `<details>` frontmatter 可逆格式，只同步确定性的当前任务投影，并折叠保留创建任务、人工决策等关联动作。artifact 评论在正文前折叠显示该产物动作及其提交记录；交付摘要保留创建 PR 与完成任务记录。每条评论的元数据可包含多条日志。恢复核心从这些元数据重建活动日志，绝不把完整 `task.md` 作为评论载荷保存。artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
 - 长度预检与 platform verification 使用同一最终渲染正文的 UTF-8 字节数。正文超限时失败关闭；本地 `task.md` 不会被截断。

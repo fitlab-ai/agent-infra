@@ -219,7 +219,7 @@ export async function publishPrReview(options: {
         kind: 'pull-request-review',
         target: JSON.stringify(identity),
         expectedDigest: createHash('sha256').update(JSON.stringify(pullRequestReview)).digest('hex'),
-        dependency: 'required',
+        dependency: 'deferred',
         pullRequestReview
       },
       agent: options.agent,

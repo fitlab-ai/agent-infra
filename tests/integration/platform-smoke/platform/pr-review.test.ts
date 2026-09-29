@@ -234,7 +234,7 @@ test('PR review recovery recognizes an accepted review before retrying its queue
     const operation = recordPlatformOperation({
       taskRef: taskId, cwd: root, kind: 'pull-request-review', target: JSON.stringify(resource),
       expectedDigest: createHash('sha256').update(JSON.stringify(reviewIntent)).digest('hex'),
-      dependency: 'required', state: 'unknown', pullRequestReview: reviewIntent
+      dependency: 'deferred', state: 'unknown', pullRequestReview: reviewIntent
     });
     const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root, client: mock.client });
     const persisted = readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === operation.id);
@@ -266,7 +266,7 @@ test('PR review recovery fails closed when its canonical body changes after queu
     const operation = recordPlatformOperation({
       taskRef: taskId, cwd: root, kind: 'pull-request-review', target: JSON.stringify(resource),
       expectedDigest: createHash('sha256').update(JSON.stringify(intent)).digest('hex'),
-      dependency: 'required', state: 'unknown', pullRequestReview: intent
+      dependency: 'deferred', state: 'unknown', pullRequestReview: intent
     });
 
     writeReviewArtifact(root, '## Findings\n- changed after queue');
@@ -302,7 +302,7 @@ test('PR review recovery stops when the journal target differs from its persiste
       taskRef: taskId, cwd: root, kind: 'pull-request-review',
       target: JSON.stringify({ kind: 'number', value: 43 }),
       expectedDigest: createHash('sha256').update(JSON.stringify(reviewIntent)).digest('hex'),
-      dependency: 'required', state: 'unknown', pullRequestReview: reviewIntent
+      dependency: 'deferred', state: 'unknown', pullRequestReview: reviewIntent
     });
 
     const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root, client: mock.client });
@@ -335,7 +335,7 @@ test('PR review recovery rejects the same PR identity in a different provider sc
     const operation = recordPlatformOperation({
       taskRef: taskId, cwd: root, kind: 'pull-request-review', target: JSON.stringify(resource),
       expectedDigest: createHash('sha256').update(JSON.stringify(reviewIntent)).digest('hex'),
-      dependency: 'required', state: 'unknown', pullRequestReview: reviewIntent
+      dependency: 'deferred', state: 'unknown', pullRequestReview: reviewIntent
     });
 
     const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root, client: mock.client });

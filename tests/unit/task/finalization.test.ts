@@ -27,6 +27,7 @@ import {
   readTaskFinalizationHandoff
 } from '../../../lib/task/finalization-handoff.ts';
 import { applyTaskLifecycle } from '../../../lib/task/lifecycle.ts';
+import { recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 import type { TaskVerificationResult } from '../../../lib/task/verification.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
@@ -102,6 +103,28 @@ function options(
 }
 
 const request: TaskFinalizationRequest = { taskRef: TASK_ID, intent: 'complete', agent: 'codex' };
+
+test('finalization keeps the task active while a deferred platform operation remains unresolved', async () => {
+  const f = fixture();
+  try {
+    recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'analysis.md',
+      expectedDigest: createHash('sha256').update('analysis').digest('hex'),
+      dependency: 'deferred', state: 'failed', lastCode: 'NETWORK_TIMEOUT'
+    });
+    let backfillCalled = false;
+    const prepared = await prepareTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+      backfill: async () => { backfillCalled = true; return platformResult('no-op') as any; }
+    });
+    assert.equal(prepared.status, 'failed');
+    assert.equal(backfillCalled, false);
+    assert.equal(fs.existsSync(path.join(f.taskDir, 'task.md')), true);
+    assert.match(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), /^status: active$/m);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
 
 test('completion backfill eligibility accepts only structured artifact warnings with controlled identities', () => {
   const f = fixture();
@@ -264,6 +287,35 @@ test('finalization stops with the canonical task active when required Issue meta
     assert.equal(result.error?.code, 'NETWORK_TIMEOUT');
     assert.equal(lifecycleCalls, 0);
     assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').match(/^status: (.+)$/m)?.[1], 'active');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('finalization requires the deferred Issue in-label evidence before completing', async () => {
+  const f = fixture();
+  const taskFile = path.join(f.taskDir, 'task.md');
+  fs.writeFileSync(taskFile, fs.readFileSync(taskFile, 'utf8').replace('status: active', 'delivery_base_ref: main\nstatus: active'));
+  try {
+    const prepared = await prepareTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+      issueSync: async (_task, syncOptions) => {
+        assert.equal(syncOptions.inLabels, 'from-diff');
+        assert.equal(syncOptions.base, 'main');
+        return platformResult('no-op', {
+          issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {}, labels: ['in: core'] },
+          operations: [
+            ...['requirements', 'issue-type', 'fields'].map((name) => ({ name, status: 'no-op', reasonCode: null })),
+            { name: 'labels:in', status: 'applied', reasonCode: null, value: ['in: core'] }
+          ]
+        } as any) as any;
+      },
+      issueInspect: async () => platformResult('no-op', {
+        issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {}, labels: [] }
+      } as any) as any
+    });
+    assert.equal(prepared.error?.code, 'FINALIZATION_IN_LABELS_UNCONFIRMED');
+    assert.match(fs.readFileSync(taskFile, 'utf8'), /^status: active$/m);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

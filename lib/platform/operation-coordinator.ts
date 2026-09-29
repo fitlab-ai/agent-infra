@@ -37,9 +37,11 @@ async function coordinatePlatformWrite<T extends OperationResult>(input: Coordin
     });
   }
 
+  const selection = input.operation.kind === 'issue-metadata' && input.operation.issueMetadata?.state === 'closed'
+    ? 'all' : input.operation.dependency;
   const drained = input.drain
     ? await input.drain(input.operation.taskRef, operationId, input.agent, input.operation.cwd)
-    : await recoverPlatformOperations(input.operation.taskRef, 'all', {
+    : await recoverPlatformOperations(input.operation.taskRef, selection, {
       agent: input.agent,
       client: input.client,
       cwd: input.operation.cwd,
