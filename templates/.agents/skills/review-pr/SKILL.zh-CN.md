@@ -116,11 +116,11 @@ agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact 
 agent-infra-internal platform-pr-review inspect --pr {pr-number} [--cwd <path>]
 ```
 
-若 head 与步骤 1 记录一致，组装正文（head SHA / 结论 / finding / receipt / Issue artifact 链接，**不含 marker**），将正文原文写入本轮报告的「正式 Review 正文」段，再发布正式 Review：
+若 head 与步骤 1 记录一致，组装正文（head SHA / 结论 / finding / receipt / Issue artifact 链接，**不含 marker**）。把完整正文写入与本轮报告同目录的 `pr-review-body.md`（Round 1）或 `pr-review-body-r{N}.md`（后续轮次），并将 `{review-body-file}` 绑定为该文件的绝对路径。本轮报告的「正式 Review 正文」段只记录该文件名。任务锚定路径必须使用任务目录中的该文件；失败恢复会按报告轮次重读该文件并核对正文摘要。然后发布正式 Review：
 
 ```bash
 agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId|pr{pr-number}} --round {round} \
-  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} --artifact {pr-review-artifact} --agent {agent} [--dry-run] [--cwd <path>]
+  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body-file} --artifact {pr-review-artifact} --agent {agent} [--dry-run] [--cwd <path>]
 ```
 
 `publish` 由 core 生成并校验 marker（首行），按 marker + commit 幂等（重放 no-op；marker 命中但 commit 不一致稳定失败）。head 漂移时，先把旧 artifact 状态写为 `superseded`，再闭合旧轮：

@@ -79,7 +79,9 @@ function mockClient(options: {
 function writeReviewArtifact(root: string, body: string, artifact = 'pr-review.md'): string {
   const taskDir = path.join(root, '.agents', 'workspace', 'active', IDENTITY.scope);
   const file = path.join(taskDir, artifact);
-  fs.writeFileSync(file, `# PR review\n\n<!-- platform-review-body:start -->\n${body}\n<!-- platform-review-body:end -->\n`);
+  const bodyFile = artifact.replace(/^pr-review/u, 'pr-review-body');
+  fs.writeFileSync(file, `# PR review\n\nBody file: ${bodyFile}\n`);
+  fs.writeFileSync(path.join(taskDir, bodyFile), `${body}\n`);
   return artifact;
 }
 

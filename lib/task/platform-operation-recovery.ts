@@ -10,7 +10,7 @@ import { providerOperationContext, providerError, unsupportedProviderOperation }
 import { inLabelMappingDigest } from '../platform/in-label-sync.ts';
 import { bindPlatformPullRequest, inspectPlatformPullRequest, recoverCreatedPullRequest, syncPlatformPullRequest } from '../platform/pull-requests.ts';
 import { syncPullRequestSummary } from '../platform/pr-summary.ts';
-import { publishPrReview, readReviewArtifactBody } from '../platform/pr-review.ts';
+import { publishPrReview, readReviewBodyFile } from '../platform/pr-review.ts';
 import type { PlatformClient } from '../platform/context.ts';
 import { parseTaskFrontmatter } from './frontmatter.ts';
 import { taskIssueIdentity } from '../platform/task-identities.ts';
@@ -234,7 +234,7 @@ async function replayPullRequestReview(operation: ReturnType<typeof readPlatform
     code: 'PLATFORM_OPERATION_IDENTITY_MISMATCH', message: 'Pull-request review identity differs from the journal target', retryable: false
   } });
   let body: string;
-  try { body = readReviewArtifactBody(intent.scope, intent.round, intent.artifactFile, intent.bodyDigest, cwd); }
+  try { body = readReviewBodyFile(intent.scope, intent.round, intent.artifactFile, intent.bodyDigest, cwd); }
   catch { return platformResult('failed', { error: {
     code: 'PLATFORM_OPERATION_PAYLOAD_INVALID', message: 'Canonical pull-request review body is unavailable or does not match the queued digest', retryable: false
   } }); }

@@ -70,11 +70,7 @@
 
 ## 正式 Review 正文
 
-任务锚定路径在以下标记之间逐字记录正式 Review 正文，不包含平台生成的 marker；发布接口会校验正文与本轮报告一致。
-
-<!-- platform-review-body:start -->
-{正式 Review 正文}
-<!-- platform-review-body:end -->
+**正文文件**：`pr-review-body.md`（Round 1）或 `pr-review-body-r{N}.md`（后续轮次），与本报告同目录。文件保存不含平台 marker 的完整正式 Review 正文；发布与恢复按轮次读取同一文件并核对摘要。
 
 ## 发布结果
 

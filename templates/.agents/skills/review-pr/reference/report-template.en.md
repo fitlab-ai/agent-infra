@@ -70,11 +70,7 @@ Land the following in order before the line-level findings, without impersonatin
 
 ## Formal Review Body
 
-For task-anchored reviews, record the exact formal Review body between these markers, excluding the platform-generated marker. The publish interface checks that the body matches this report.
-
-<!-- platform-review-body:start -->
-{formal Review body}
-<!-- platform-review-body:end -->
+**Body file**: `pr-review-body.md` (Round 1) or `pr-review-body-r{N}.md` (later rounds), beside this report. The file contains the complete formal Review body without the platform marker. Publication and recovery read the same file by round and check its digest.
 
 ## Publication Result
 
