@@ -62,6 +62,12 @@ export function readReviewBodyFile(taskRef: string, round: number, artifactFile:
   const task = resolveTaskRef(taskRef, cwd ? { repoRoot: cwd } : {});
   if (!task.ok) throw Object.assign(new Error(task.message), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });
   const bodyFile = artifactFile.replace(/^pr-review/u, 'pr-review-body');
+  const report = fs.readFileSync(path.join(task.taskDir, artifactFile), 'utf8');
+  const bodyReferences = [...report.matchAll(/^\*\*(?:正文文件|Body file)\*\*(?:：|:)\s*`([^`]+)`[^\r\n]*$/gmu)]
+    .map((match) => match[1]);
+  if (bodyReferences.length !== 1 || bodyReferences[0] !== bodyFile) {
+    throw Object.assign(new Error('Pull-request review artifact does not reference its canonical body file'), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });
+  }
   const body = canonicalReviewBody(fs.readFileSync(path.join(task.taskDir, bodyFile), 'utf8'));
   if (!body || createHash('sha256').update(body).digest('hex') !== bodyDigest) {
     throw Object.assign(new Error('Canonical pull-request review body does not match its persisted digest'), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });

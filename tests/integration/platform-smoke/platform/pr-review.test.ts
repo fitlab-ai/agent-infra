@@ -80,7 +80,7 @@ function writeReviewArtifact(root: string, body: string, artifact = 'pr-review.m
   const taskDir = path.join(root, '.agents', 'workspace', 'active', IDENTITY.scope);
   const file = path.join(taskDir, artifact);
   const bodyFile = artifact.replace(/^pr-review/u, 'pr-review-body');
-  fs.writeFileSync(file, `# PR review\n\nBody file: ${bodyFile}\n`);
+  fs.writeFileSync(file, `# PR review\n\n**Body file**: \`${bodyFile}\`\n`);
   fs.writeFileSync(path.join(taskDir, bodyFile), `${body}\n`);
   return artifact;
 }
@@ -145,6 +145,67 @@ test('task-scoped PR review publication is recorded by the shared platform queue
     });
     const journal = fs.readFileSync(path.join(taskDir, '.platform-operations.json'), 'utf8');
     assert.equal(journal.includes(body), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-scoped PR review publication rejects a missing report before queueing or publishing', async () => {
+  const root = fixture();
+  const taskId = IDENTITY.scope;
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+  const body = '## Findings\n- body without report';
+  fs.writeFileSync(path.join(taskDir, 'pr-review-body.md'), `${body}\n`);
+  try {
+    const mock = mockClient();
+    const result = await publishPrReview({
+      cwd: root,
+      client: mock.client,
+      agent: 'codex',
+      prNumber: 42,
+      identity: IDENTITY,
+      event: 'COMMENT',
+      body,
+      recoveryArtifact: 'pr-review.md'
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PR_REVIEW_ARTIFACT_MISMATCH');
+    assert.equal(readPlatformOperationJournal(taskId, root).operations.length, 0);
+    assert.deepEqual(mock.postedBodies, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-scoped PR review publication rejects a report that references another body file', async () => {
+  const root = fixture();
+  const taskId = IDENTITY.scope;
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+  const body = '## Findings\n- wrong report reference';
+  const artifact = writeReviewArtifact(root, body);
+  fs.writeFileSync(path.join(taskDir, artifact), '# PR review\n\n**Body file**: `pr-review-body-r2.md`\n');
+  try {
+    const mock = mockClient();
+    const result = await publishPrReview({
+      cwd: root,
+      client: mock.client,
+      agent: 'codex',
+      prNumber: 42,
+      identity: IDENTITY,
+      event: 'COMMENT',
+      body,
+      recoveryArtifact: artifact
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.code, 'PR_REVIEW_ARTIFACT_MISMATCH');
+    assert.equal(readPlatformOperationJournal(taskId, root).operations.length, 0);
+    assert.deepEqual(mock.postedBodies, []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
