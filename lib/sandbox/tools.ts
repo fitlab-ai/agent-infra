@@ -85,6 +85,16 @@ function asOptionalNonEmptyString(value: unknown, field: string, context: string
   return value;
 }
 
+function asOptionalBoolean(value: unknown, field: string, context: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'boolean') {
+    throw new Error(`${context}: field "${field}" must be a boolean when provided`);
+  }
+  return value;
+}
+
 function asStringRecord(value: unknown, field: string, context: string): Record<string, string> | undefined {
   if (value === undefined) {
     return undefined;
@@ -193,9 +203,11 @@ function parseTmpfs(value: unknown, context: string): SandboxTool['tmpfs'] {
   if (!isPlainObject(value)) {
     throw new Error(`${context}: field "tmpfs" must be an object when provided`);
   }
+  const exec = asOptionalBoolean(value.exec, 'tmpfs.exec', context);
   return {
     size: asOptionalNonEmptyString(value.size, 'tmpfs.size', context),
-    seed: asStringArray(value.seed, 'tmpfs.seed', context)
+    seed: asStringArray(value.seed, 'tmpfs.seed', context),
+    ...(exec === undefined ? {} : { exec })
   };
 }
 

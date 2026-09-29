@@ -950,9 +950,10 @@ function runSandboxAuthoritySafeCommand(
 
 // `docker run` args for mounting a tool's containerMount as an in-container
 // tmpfs. containerMount is an in-container path, so it is NOT engine-converted.
-export function buildTmpfsRunArgs(containerMount: string, tmpfs: { size?: string }): string[] {
+export function buildTmpfsRunArgs(containerMount: string, tmpfs: { size?: string; exec?: boolean }): string[] {
   const size = tmpfs.size ?? '512m';
-  return ['--tmpfs', `${containerMount}:rw,size=${size}`];
+  const options = ['rw', ...(tmpfs.exec ? ['exec'] : []), `size=${size}`];
+  return ['--tmpfs', `${containerMount}:${options.join(',')}`];
 }
 
 export function buildImage(
