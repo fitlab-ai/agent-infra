@@ -24,7 +24,7 @@ const taskWorkflowCommand = command === 'task-artifact'
   || command === 'task-ledger'
   || command === 'task-invalidation'
   || command === 'task-warning';
-const taskGithubRecoveryCommand = command === 'task-github-recovery';
+const taskPlatformRecoveryCommand = command === 'task-platform-recovery';
 const manualValidationWorkflowCommand = command === 'manual-validation';
 const taskControlMarkers = [
   'AGENT_INFRA_TASK_ID', 'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
@@ -58,9 +58,9 @@ function taskControlTransportFailure(message: string, code = 'TASK_CONTROL_TRANS
 }
 
 let controlRouted = false;
-if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand || taskGithubRecoveryCommand)) {
+if (!taskViewGuardFailed && !markerlessHelp && (taskControlCommand || taskWorkflowCommand || manualValidationWorkflowCommand || taskPlatformRecoveryCommand)) {
   const transport = resolveSandboxControlTransport(process.env, {
-    localWorkflow: command === 'task-orchestration' || command === 'task-finalization' || taskWorkflowCommand || manualValidationWorkflowCommand || taskGithubRecoveryCommand
+    localWorkflow: command === 'task-orchestration' || command === 'task-finalization' || taskWorkflowCommand || manualValidationWorkflowCommand || taskPlatformRecoveryCommand
   });
   switch (transport.kind) {
     case 'fail-closed': {
@@ -100,9 +100,9 @@ if (!controlRouted && !taskViewGuardFailed && internalRouteRegistered) switch (c
     await taskFinalization(process.argv.slice(3));
     break;
   }
-  case 'task-github-recovery': {
-    const { taskGithubRecovery } = await import('../lib/internal/task-github-recovery.ts');
-    await taskGithubRecovery(process.argv.slice(3));
+  case 'task-platform-recovery': {
+    const { taskPlatformRecovery } = await import('../lib/internal/task-platform-recovery.ts');
+    await taskPlatformRecovery(process.argv.slice(3));
     break;
   }
 

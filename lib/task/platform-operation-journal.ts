@@ -4,12 +4,12 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { resolveTaskRef } from './resolve-ref.ts';
 
-const JOURNAL_FILE = '.github-operations.json';
+const JOURNAL_FILE = '.platform-operations.json';
 const MAX_ATTEMPTS = 3;
 
-type GithubOperationKind = 'task-comment' | 'artifact-comment' | 'summary-comment' | 'issue-metadata' | 'pull-request';
-type GithubOperationState = 'pending' | 'unknown' | 'succeeded' | 'failed';
-type GithubIssueMetadataIntent = Readonly<{
+type PlatformOperationKind = 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment' | 'issue-create' | 'issue-metadata' | 'pull-request' | 'pull-request-summary';
+type PlatformOperationState = 'queued' | 'pending' | 'unknown' | 'succeeded' | 'failed';
+type PlatformIssueMetadataIntent = Readonly<{
   requirements: boolean;
   issueType: boolean;
   fields: boolean;
@@ -23,7 +23,7 @@ type GithubIssueMetadataIntent = Readonly<{
   state?: 'open' | 'closed';
   closeReason?: 'completed' | 'not_planned';
 }>;
-type GithubPullRequestIntent = Readonly<{
+type PlatformPullRequestIntent = Readonly<{
   action: 'create' | 'bind' | 'sync';
   baseRef?: string;
   headRef?: string;
@@ -31,36 +31,39 @@ type GithubPullRequestIntent = Readonly<{
   metadata?: boolean;
   closingIssue?: boolean;
 }>;
-type GithubOperation = Readonly<{
+type PlatformIssueCreateIntent = Readonly<{ title: string; bodyDigest: string }>;
+type PlatformOperation = Readonly<{
   id: string;
-  kind: GithubOperationKind;
+  kind: PlatformOperationKind;
   target: string;
   expectedDigest: string;
   dependency: 'deferred' | 'required';
-  state: GithubOperationState;
+  state: PlatformOperationState;
   attempts: number;
   maxAttempts: typeof MAX_ATTEMPTS;
   lastCode: string | null;
-  issueMetadata?: GithubIssueMetadataIntent;
-  pullRequest?: GithubPullRequestIntent;
+  issueMetadata?: PlatformIssueMetadataIntent;
+  issueCreate?: PlatformIssueCreateIntent;
+  pullRequest?: PlatformPullRequestIntent;
   updatedAt: string;
 }>;
-type GithubOperationJournal = Readonly<{
+type PlatformOperationJournal = Readonly<{
   version: 1;
   taskId: string;
-  operations: readonly GithubOperation[];
+  operations: readonly PlatformOperation[];
 }>;
 
 type RecordOperationInput = Readonly<{
   taskRef: string;
-  kind: GithubOperationKind;
+  kind: PlatformOperationKind;
   target: string;
   expectedDigest: string;
   dependency: 'deferred' | 'required';
-  state: GithubOperationState;
+  state: PlatformOperationState;
   lastCode?: string | null;
-  issueMetadata?: GithubIssueMetadataIntent;
-  pullRequest?: GithubPullRequestIntent;
+  issueMetadata?: PlatformIssueMetadataIntent;
+  issueCreate?: PlatformIssueCreateIntent;
+  pullRequest?: PlatformPullRequestIntent;
   cwd?: string;
 }>;
 
@@ -74,25 +77,25 @@ function journalPath(taskDir: string): string {
   return path.join(taskDir, JOURNAL_FILE);
 }
 
-function parseJournal(file: string, taskId: string): GithubOperationJournal {
+function parseJournal(file: string, taskId: string): PlatformOperationJournal {
   let value: unknown;
   try { value = JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, taskId, operations: [] };
-    throw Object.assign(new Error(`GitHub operation journal is unreadable: ${String(error)}`), { code: 'GITHUB_OPERATION_JOURNAL_INVALID' });
+    throw Object.assign(new Error(`Platform operation journal is unreadable: ${String(error)}`), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
   }
-  if (!value || typeof value !== 'object') throw Object.assign(new Error('GitHub operation journal is invalid'), { code: 'GITHUB_OPERATION_JOURNAL_INVALID' });
-  const journal = value as Partial<GithubOperationJournal>;
+  if (!value || typeof value !== 'object') throw Object.assign(new Error('Platform operation journal is invalid'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
+  const journal = value as Partial<PlatformOperationJournal>;
   if (journal.version !== 1 || journal.taskId !== taskId || !Array.isArray(journal.operations)) {
-    throw Object.assign(new Error('GitHub operation journal identity or version is invalid'), { code: 'GITHUB_OPERATION_JOURNAL_INVALID' });
+    throw Object.assign(new Error('Platform operation journal identity or version is invalid'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
   }
   for (const item of journal.operations) {
     if (!item || typeof item !== 'object' || !/^[a-f0-9]{64}$/u.test(item.id)
-      || !['task-comment', 'artifact-comment', 'summary-comment', 'issue-metadata', 'pull-request'].includes(item.kind)
+      || !['task-comment', 'artifact-comment', 'summary-comment', 'cancel-comment', 'issue-create', 'issue-metadata', 'pull-request', 'pull-request-summary'].includes(item.kind)
       || typeof item.target !== 'string' || !item.target
       || !/^[a-f0-9]{64}$/u.test(item.expectedDigest)
       || !['deferred', 'required'].includes(item.dependency)
-      || !['pending', 'unknown', 'succeeded', 'failed'].includes(item.state)
+      || !['queued', 'pending', 'unknown', 'succeeded', 'failed'].includes(item.state)
       || !Number.isSafeInteger(item.attempts) || item.attempts < 0 || item.attempts > MAX_ATTEMPTS
       || item.maxAttempts !== MAX_ATTEMPTS
       || !(item.lastCode === null || typeof item.lastCode === 'string')
@@ -120,14 +123,18 @@ function parseJournal(file: string, taskId: string): GithubOperationJournal {
           || (item.pullRequest.metadata !== undefined && typeof item.pullRequest.metadata !== 'boolean')
           || (item.pullRequest.closingIssue !== undefined && typeof item.pullRequest.closingIssue !== 'boolean')
         : item.pullRequest !== undefined)
+      || (item.kind === 'issue-create'
+        ? !item.issueCreate || typeof item.issueCreate.title !== 'string' || !item.issueCreate.title.trim()
+          || !/^[a-f0-9]{64}$/u.test(item.issueCreate.bodyDigest)
+        : item.issueCreate !== undefined)
       || typeof item.updatedAt !== 'string') {
-      throw Object.assign(new Error('GitHub operation journal contains an invalid operation'), { code: 'GITHUB_OPERATION_JOURNAL_INVALID' });
+      throw Object.assign(new Error('Platform operation journal contains an invalid operation'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });
     }
   }
-  return journal as GithubOperationJournal;
+  return journal as PlatformOperationJournal;
 }
 
-function writeJournal(file: string, journal: GithubOperationJournal): void {
+function writeJournal(file: string, journal: PlatformOperationJournal): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
@@ -144,15 +151,15 @@ function resolveJournal(taskRef: string, cwd?: string): { taskId: string; file: 
   return { taskId: resolved.taskId, file: journalPath(resolved.taskDir) };
 }
 
-function recordGithubOperation(input: RecordOperationInput): GithubOperation {
+function recordPlatformOperation(input: RecordOperationInput): PlatformOperation {
   if (!/^[a-f0-9]{64}$/u.test(input.expectedDigest) || !input.target.trim()) {
-    throw Object.assign(new Error('GitHub operation requires a stable target and SHA-256 digest'), { code: 'GITHUB_OPERATION_PAYLOAD_INVALID' });
+    throw Object.assign(new Error('Platform operation requires a stable target and SHA-256 digest'), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });
   }
   const { taskId, file } = resolveJournal(input.taskRef, input.cwd);
   const journal = parseJournal(file, taskId);
   const id = operationId(input);
   const previous = journal.operations.find((item) => item.id === id);
-  const next: GithubOperation = {
+  const next: PlatformOperation = {
     id,
     kind: input.kind,
     target: input.target,
@@ -163,6 +170,7 @@ function recordGithubOperation(input: RecordOperationInput): GithubOperation {
     maxAttempts: MAX_ATTEMPTS,
     lastCode: input.lastCode ?? null,
     ...(input.issueMetadata ? { issueMetadata: input.issueMetadata } : {}),
+    ...(input.issueCreate ? { issueCreate: input.issueCreate } : {}),
     ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),
     updatedAt: new Date().toISOString()
   };
@@ -173,10 +181,10 @@ function recordGithubOperation(input: RecordOperationInput): GithubOperation {
   return next;
 }
 
-function readGithubOperationJournal(taskRef: string, cwd?: string): GithubOperationJournal {
+function readPlatformOperationJournal(taskRef: string, cwd?: string): PlatformOperationJournal {
   const { taskId, file } = resolveJournal(taskRef, cwd);
   return parseJournal(file, taskId);
 }
 
-export { JOURNAL_FILE as GITHUB_OPERATION_JOURNAL_FILE, MAX_ATTEMPTS as GITHUB_OPERATION_MAX_ATTEMPTS, operationId, recordGithubOperation, readGithubOperationJournal };
-export type { GithubIssueMetadataIntent, GithubOperation, GithubOperationJournal, GithubOperationKind, GithubOperationState, GithubPullRequestIntent, RecordOperationInput };
+export { JOURNAL_FILE as PLATFORM_OPERATION_JOURNAL_FILE, MAX_ATTEMPTS as PLATFORM_OPERATION_MAX_ATTEMPTS, operationId, recordPlatformOperation, readPlatformOperationJournal };
+export type { PlatformIssueCreateIntent, PlatformIssueMetadataIntent, PlatformOperation, PlatformOperationJournal, PlatformOperationKind, PlatformOperationState, PlatformPullRequestIntent, RecordOperationInput };

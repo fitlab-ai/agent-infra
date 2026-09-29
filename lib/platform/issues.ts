@@ -41,7 +41,7 @@ import {
 } from './provider-bridge.ts';
 import { resourceIdentityEquals, resourceIdentityNumber, resourceIdentityString, serializeResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
-import { recordGithubOperation } from '../task/github-operation-journal.ts';
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { IssueSnapshot as ProviderIssueSnapshot, RepositoryMetadataSnapshot } from './provider-contract.ts';
 type IssueResult = Omit<PlatformResult, 'operations'> & {
@@ -66,6 +66,7 @@ type SyncOptions = SharedOptions & {
   closeReason?: 'completed' | 'not_planned';
   dryRun?: boolean;
   dependency?: 'deferred' | 'required';
+  skipQueue?: boolean;
 };
 
 function result(
@@ -310,7 +311,7 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
     platform: base.context.platform, capabilities: base.context.capabilities,
     operations: [{ name: 'issue:create', status: 'planned', reasonCode: null }], error: null
   });
-  {
+  const execute = async (): Promise<IssueResult> => {
     const created = base.provider.issues?.create
       ? await base.provider.issues.create({
         context: providerOperationContext(base.loadedContext),
@@ -349,7 +350,7 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
     if (written.status === 'failed') return result('failed', base.resolved.taskId, null, {
       platform: base.context.platform, capabilities: base.context.capabilities,
       resource: { kind: 'issue', number: issueNumber, identity: inspected.value.identity || createdIdentity },
-      error: { code: 'ISSUE_CREATED_BIND_FAILED', message: written.error.message, retryable: false }
+      error: { code: 'ISSUE_CREATED_BIND_FAILED', message: written.error.message, retryable: true }
     });
     return result('applied', base.resolved.taskId, issueNumber, {
       changed: true,
@@ -360,7 +361,26 @@ async function createPlatformIssue(taskRef: string, options: CreateOptions): Pro
       issue: normalizeProviderIssue(inspected.value, repository, issueNumber),
       error: null
     });
-  }
+  };
+  const issueCreate = { title: payload.title, bodyDigest: createHash('sha256').update(payload.body).digest('hex') };
+  const operation = {
+    kind: 'issue-create' as const,
+    target: `task:${base.resolved.taskId}`,
+    expectedDigest: createHash('sha256').update(JSON.stringify({
+      taskId: base.resolved.taskId,
+      title: payload.title,
+      body: createHash('sha256').update(payload.body).digest('hex'),
+      labels: payload.labels || [], assignees: payload.assignees,
+      milestone: typeof payload.milestone === 'string' ? payload.milestone : null
+    })).digest('hex')
+  };
+  return coordinatePlatformWrite({
+    operation: { taskRef: base.resolved.taskId, cwd: base.resolved.repoRoot, ...operation, issueCreate, dependency: 'required' },
+    agent: options.agent,
+    execute,
+    block: (error) => result('blocked', base.resolved.taskId, null, { platform: base.context.platform, capabilities: base.context.capabilities, error }),
+    persistenceFailure: (error) => result('failed', base.resolved.taskId, null, { error })
+  });
 }
 
 async function bindPlatformIssue(taskRef: string, options: BindOptions): Promise<IssueResult> {
@@ -684,29 +704,15 @@ async function syncPlatformIssue(taskRef: string, options: SyncOptions): Promise
     })).digest('hex')
   };
   const dependency = options.dependency ?? (options.inLabels === 'from-diff' ? 'required' : 'deferred');
-  try {
-    recordGithubOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, issueMetadata, dependency, state: 'pending' });
-  } catch (error) {
-    const value = error as { code?: string; message?: string };
-    return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
-      error: { code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || 'Unable to record Issue metadata intent', retryable: true }
-    });
-  }
-  const synced = await syncPlatformIssueImpl(taskRef, options);
-  try {
-    const succeeded = (synced.status === 'applied' || synced.status === 'no-op') && !synced.error;
-    recordGithubOperation({
-      taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, issueMetadata, dependency,
-      state: succeeded ? 'succeeded' : synced.status === 'failed' && synced.error?.retryable === false ? 'failed' : 'unknown',
-      lastCode: synced.error?.code ?? null
-    });
-  } catch {
-    return result('failed', resolved.taskId, resourceIdentityNumber(identity), {
-      platform: synced.platform, capabilities: synced.capabilities, operations: synced.operations,
-      error: { code: 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: 'Unable to persist Issue metadata outcome', retryable: true }
-    });
-  }
-  return synced;
+  const execute = () => syncPlatformIssueImpl(taskRef, options);
+  if (options.skipQueue) return execute();
+  return coordinatePlatformWrite({
+    operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, issueMetadata, dependency },
+    agent: options.agent,
+    execute,
+    block: (error) => result('blocked', resolved.taskId, resourceIdentityNumber(identity), { error }),
+    persistenceFailure: (error) => result('failed', resolved.taskId, resourceIdentityNumber(identity), { error })
+  });
 }
 
 export { bindPlatformIssue, createPlatformIssue, inspectPlatformIssue, requirementSectionAnchors, syncPlatformIssue };

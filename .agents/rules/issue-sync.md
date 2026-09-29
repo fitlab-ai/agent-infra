@@ -41,16 +41,13 @@ agent-infra-internal platform-comment sync <task-ref> \
 - 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
 - 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 
-## Task-local platform operation recovery
+## 任务平台写入顺序
 
-Task-bound task, artifact, and summary comment intents, Issue metadata syncs, and pull-request create/bind/metadata intents record their canonical target, expected-content SHA-256, dependency class, state, attempt count, and last error code in `.github-operations.json` inside the task directory. Issue metadata intent stores only the selected operation flags; pull-request intent stores only resource refs/identity and selected operation flags. The file is local process state; it is never uploaded as an artifact or comment. Comment bodies, credentials, and HTTP response bodies are not recorded.
+与任务关联的平台写入由平台适配层统一排队，并在发起新写入前按记录顺序检查和处理未完成操作。前序操作仍失败、身份不明确或远端状态未知时，当前操作只保存在本地队列，不发送当前写请求；流程中的读取和检查不进入写入队列。
 
-```bash
-agent-infra-internal task-github-recovery <task-ref> inspect
-agent-infra-internal task-github-recovery <task-ref> recover --agent {standard-agent-token} [--selection required|deferred|all]
-```
+队列按远端目标和期望状态保存最少必要信息。重试前先读取远端状态：目标已达成时只记录完成；只有确认尚未达成且目标身份唯一时才重放写入。无法确认时保留待处理记录并停止后续写入，避免重复创建资源或越过前序操作。队列位于任务目录，仅作为本地过程状态，不同步为产物或评论；凭据和 HTTP 响应正文不写入记录。
 
-Recovery replays only pending or unknown operations through their existing typed intents. Comment intents inspect marker sets; Issue metadata intents inspect the bound identity, call the typed sync, then inspect the same identity; PR bind/metadata intents call their typed handler. Unknown PR creation outcomes inspect the bound PR or find exactly one closing PR matching the bound repository, journaled base/head refs, and current head SHA before binding it. A changed comment digest closes the old operation as superseded and records the current digest separately; the newer content result is never attributed to the old operation. Marker conflicts, identity drift, ambiguous PR candidates, and unknown remote state stop recovery. `complete-task` checks required comment and Issue metadata outcomes before local completion, so an unresolved required backup keeps the task active.
+平台差异由对应适配器处理。通用规则与生命周期技能不调用特定平台的恢复命令，也不负责重放细节。
 
 ## 降级与告警
 

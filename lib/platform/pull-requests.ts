@@ -42,8 +42,8 @@ import {
 import { isResourceIdentity, resourceIdentityEquals, resourceIdentityNumber, serializeResourceIdentity } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import { taskIssueIdentity, taskIssueIdentityError } from './task-identities.ts';
-import { recordGithubOperation } from '../task/github-operation-journal.ts';
-import type { GithubPullRequestIntent } from '../task/github-operation-journal.ts';
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
+import type { PlatformPullRequestIntent } from '../task/platform-operation-journal.ts';
 import type { ChangeRequestSnapshot as ProviderChangeRequestSnapshot, IssueSnapshot as ProviderIssueSnapshot } from './provider-contract.ts';
 
 type PullRequestSnapshot = PlatformChangeRequestSnapshot;
@@ -66,7 +66,7 @@ type PullRequestResult = PlatformResult & {
   }>;
 };
 type InspectionOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
-type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string };
+type SharedOptions = { cwd?: string; client?: PlatformClient; runtimeVersion?: string; skipQueue?: boolean };
 type CreateOptions = SharedOptions & {
   agent: string;
   base: string;
@@ -143,7 +143,7 @@ function withCreation(output: PullRequestResult, creation: CreationOutcome): Pul
 async function journalPullRequestOperation(
   taskRef: string,
   options: SharedOptions & { agent: string; dryRun?: boolean },
-  intent: GithubPullRequestIntent,
+  intent: PlatformPullRequestIntent,
   target: string,
   identityInput: unknown,
   execute: () => Promise<PullRequestResult>
@@ -154,24 +154,14 @@ async function journalPullRequestOperation(
   const expectedDigest = createHash('sha256').update(JSON.stringify({ taskId: resolved.taskId, intent, identityInput })).digest('hex');
   const operation = { kind: 'pull-request' as const, target: intent.action === 'sync' ? `bound-pr:${resolved.taskId}` : target, expectedDigest };
   const dependency = intent.action === 'sync' ? 'deferred' : 'required';
-  try {
-    recordGithubOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, pullRequest: intent, dependency, state: 'pending' });
-  } catch (error) {
-    const value = error as { code?: string; message?: string };
-    return result('failed', resolved.taskId, null, null, {
-      error: { code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || 'Unable to persist pull-request intent', retryable: true }
-    });
-  }
-  const output = await execute();
-  try {
-    const succeeded = (output.status === 'applied' || output.status === 'no-op') && !output.error && output.warnings.length === 0;
-    recordGithubOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, pullRequest: intent, dependency,
-      state: succeeded ? 'succeeded' : output.status === 'failed' && output.error?.retryable === false ? 'failed' : 'unknown',
-      lastCode: output.error?.code ?? output.warnings[0]?.code ?? null });
-  } catch {
-    return { ...output, status: 'failed', changed: false, error: { code: 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: 'Unable to persist pull-request outcome', retryable: true } };
-  }
-  return output;
+  if (options.skipQueue) return execute();
+  return coordinatePlatformWrite({
+    operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, pullRequest: intent, dependency },
+    agent: options.agent,
+    execute,
+    block: (error) => result('blocked', resolved.taskId, null, null, { error }),
+    persistenceFailure: (error) => result('failed', resolved.taskId, null, null, { error })
+  });
 }
 
 const PRECONDITION_NOT_CREATED: CreationOutcome = {
@@ -922,7 +912,7 @@ async function bindPlatformPullRequestImpl(taskRef: string, options: BindOptions
 }
 
 async function bindPlatformPullRequest(taskRef: string, options: BindOptions): Promise<PullRequestResult> {
-  const intent: GithubPullRequestIntent = { action: 'bind', prToken: String(options.pr) };
+  const intent: PlatformPullRequestIntent = { action: 'bind', prToken: String(options.pr) };
   return journalPullRequestOperation(taskRef, options, intent, `pr:${options.pr}`, { pr: String(options.pr) },
     () => bindPlatformPullRequestImpl(taskRef, options));
 }
@@ -1162,7 +1152,7 @@ async function recoverCreatedPullRequest(
   const base = await resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.issueIdentity) return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
-    error: { code: 'GITHUB_OPERATION_ISSUE_REQUIRED', message: 'Pull-request recovery requires a bound Issue identity', retryable: false }
+    error: { code: 'PLATFORM_OPERATION_ISSUE_REQUIRED', message: 'Pull-request recovery requires a bound Issue identity', retryable: false }
   });
   const head = base.provider.changeRequests?.verifyHead
     ? await base.provider.changeRequests.verifyHead({ context: providerOperationContext(base.loadedContext), head: options.head })
@@ -1175,7 +1165,7 @@ async function recoverCreatedPullRequest(
       || inspected.pullRequest.base.ref !== options.base || inspected.pullRequest.head.ref !== options.head
       || inspected.pullRequest.head.sha !== head.value.sha) {
       return result('blocked', base.resolved.taskId, base.issueNumber, base.prNumber, {
-        error: inspected.error ?? { code: 'GITHUB_OPERATION_PR_NOT_CONFIRMED', message: 'Bound pull request does not match the pending create intent', retryable: true }
+        error: inspected.error ?? { code: 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', message: 'Bound pull request does not match the pending create intent', retryable: true }
       });
     }
     return inspected;
@@ -1191,7 +1181,7 @@ async function recoverCreatedPullRequest(
       && candidate.head.ref === options.head
       && candidate.head.sha === head.value.sha);
   if (matches.length !== 1 || !matches[0]?.number) return result('blocked', base.resolved.taskId, base.issueNumber, null, {
-    error: { code: matches.length > 1 ? 'GITHUB_OPERATION_PR_AMBIGUOUS' : 'GITHUB_OPERATION_PR_NOT_CONFIRMED',
+    error: { code: matches.length > 1 ? 'PLATFORM_OPERATION_PR_AMBIGUOUS' : 'PLATFORM_OPERATION_PR_NOT_CONFIRMED',
       message: 'Pending pull-request creation does not resolve to one exact repository/base/head identity', retryable: true }
   });
   const bound = await bindPlatformPullRequest(base.resolved.taskId, { agent: options.agent, cwd: base.resolved.repoRoot, pr: matches[0].number });
@@ -1199,13 +1189,13 @@ async function recoverCreatedPullRequest(
   if (bound.pullRequest.base.repository !== base.context.platform.repository || bound.pullRequest.base.ref !== options.base
     || bound.pullRequest.head.repository !== base.context.platform.repository || bound.pullRequest.head.ref !== options.head
     || bound.pullRequest.head.sha !== head.value.sha) return result('blocked', base.resolved.taskId, base.issueNumber, bound.task.prNumber, {
-    error: { code: 'GITHUB_OPERATION_PR_NOT_CONFIRMED', message: 'Bound pull request changed while recovering the create intent', retryable: true }
+    error: { code: 'PLATFORM_OPERATION_PR_NOT_CONFIRMED', message: 'Bound pull request changed while recovering the create intent', retryable: true }
   });
   return bound;
 }
 
 async function createPlatformPullRequest(taskRef: string, options: CreateOptions): Promise<PullRequestResult> {
-  const intent: GithubPullRequestIntent = { action: 'create', baseRef: options.base, headRef: options.head };
+  const intent: PlatformPullRequestIntent = { action: 'create', baseRef: options.base, headRef: options.head };
   const identityInput = {
     title: createHash('sha256').update(options.title).digest('hex'),
     body: createHash('sha256').update(options.body).digest('hex'),
@@ -1534,7 +1524,7 @@ async function syncPlatformPullRequestImpl(taskRef: string, options: SyncOptions
 }
 
 async function syncPlatformPullRequest(taskRef: string, options: SyncOptions): Promise<PullRequestResult> {
-  const intent: GithubPullRequestIntent = { action: 'sync', metadata: options.metadata === true, closingIssue: options.closingIssue === true };
+  const intent: PlatformPullRequestIntent = { action: 'sync', metadata: options.metadata === true, closingIssue: options.closingIssue === true };
   return journalPullRequestOperation(taskRef, options, intent, `bound-pr:${taskRef}`, {
     metadata: options.metadata === true, closingIssue: options.closingIssue === true
   }, () => syncPlatformPullRequestImpl(taskRef, options));

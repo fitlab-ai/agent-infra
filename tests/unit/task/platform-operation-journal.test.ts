@@ -6,14 +6,14 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 import {
-  GITHUB_OPERATION_JOURNAL_FILE,
-  GITHUB_OPERATION_MAX_ATTEMPTS,
-  readGithubOperationJournal,
-  recordGithubOperation
-} from '../../../lib/task/github-operation-journal.ts';
+  PLATFORM_OPERATION_JOURNAL_FILE,
+  PLATFORM_OPERATION_MAX_ATTEMPTS,
+  readPlatformOperationJournal,
+  recordPlatformOperation
+} from '../../../lib/task/platform-operation-journal.ts';
 
 function fixture() {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'github-operation-journal-'));
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-operation-journal-'));
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
@@ -21,7 +21,7 @@ function fixture() {
   return { repoRoot, taskId, taskDir };
 }
 
-test('task-local GitHub operation journal deduplicates stable operations and stores only digests', () => {
+test('task-local platform operation journal deduplicates stable operations and stores only digests', () => {
   const f = fixture();
   try {
     const expectedDigest = createHash('sha256').update('projected artifact bytes').digest('hex');
@@ -34,17 +34,17 @@ test('task-local GitHub operation journal deduplicates stable operations and sto
       dependency: 'required' as const,
       state: 'pending' as const
     };
-    const first = recordGithubOperation(input);
-    const second = recordGithubOperation({ ...input, state: 'unknown', lastCode: 'NETWORK_TIMEOUT' });
-    const journal = readGithubOperationJournal(f.taskId, f.repoRoot);
-    const serialized = fs.readFileSync(path.join(f.taskDir, GITHUB_OPERATION_JOURNAL_FILE), 'utf8');
+    const first = recordPlatformOperation(input);
+    const second = recordPlatformOperation({ ...input, state: 'unknown', lastCode: 'NETWORK_TIMEOUT' });
+    const journal = readPlatformOperationJournal(f.taskId, f.repoRoot);
+    const serialized = fs.readFileSync(path.join(f.taskDir, PLATFORM_OPERATION_JOURNAL_FILE), 'utf8');
 
     assert.equal(first.id, second.id);
     assert.equal(second.attempts, 1);
     assert.equal(journal.operations.length, 1);
     assert.equal(journal.operations[0]?.state, 'unknown');
     assert.equal(journal.operations[0]?.lastCode, 'NETWORK_TIMEOUT');
-    assert.equal(journal.operations[0]?.maxAttempts, GITHUB_OPERATION_MAX_ATTEMPTS);
+    assert.equal(journal.operations[0]?.maxAttempts, PLATFORM_OPERATION_MAX_ATTEMPTS);
     assert.equal(serialized.includes('projected artifact bytes'), false);
     assert.equal(serialized.includes(expectedDigest), true);
   } finally {
@@ -52,21 +52,21 @@ test('task-local GitHub operation journal deduplicates stable operations and sto
   }
 });
 
-test('task-local GitHub operation journal records reconstructable Issue and PR intent fields', () => {
+test('task-local platform operation journal records reconstructable Issue and PR intent fields', () => {
   const f = fixture();
   try {
     const digest = createHash('sha256').update('intent fingerprint').digest('hex');
-    recordGithubOperation({
+    recordPlatformOperation({
       taskRef: f.taskId, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":42}',
       expectedDigest: digest, issueMetadata: { requirements: true, issueType: true, fields: false },
       dependency: 'required', state: 'pending'
     });
-    recordGithubOperation({
+    recordPlatformOperation({
       taskRef: f.taskId, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main',
       expectedDigest: digest, pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' },
       dependency: 'required', state: 'pending'
     });
-    const journal = readGithubOperationJournal(f.taskId, f.repoRoot);
+    const journal = readPlatformOperationJournal(f.taskId, f.repoRoot);
     assert.deepEqual(journal.operations.map((operation) => [operation.kind, operation.dependency]), [
       ['issue-metadata', 'required'], ['pull-request', 'required']
     ]);

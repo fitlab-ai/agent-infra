@@ -152,5 +152,3 @@ Next step - inspect the moved task:
 - Issue sync failed: keep the local move result and tell the user manual platform follow-up is required
 
 ## Platform comment recovery
-
-At a later task step that has no dependency on a pending comment, consult `.agents/rules/issue-sync.md` and run `agent-infra-internal task-github-recovery {task-id} recover --agent {standard-agent-token} --selection deferred` when the task journal contains deferred comment operations. Record a warning and continue only when the current local work does not depend on that remote fact. Before a hard-dependent action, use its typed intent and stop if the remote identity or expected state cannot be confirmed.

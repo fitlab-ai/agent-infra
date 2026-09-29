@@ -65,7 +65,7 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(second.stdout).status, 'no-op');
   assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
-  const operationJournalPath = path.join(path.dirname(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md')), '.github-operations.json');
+  const operationJournalPath = path.join(path.dirname(path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md')), '.platform-operations.json');
   const operationJournal = JSON.parse(fs.readFileSync(operationJournalPath, 'utf8'));
   assert.equal(operationJournal.operations.length, 1);
   assert.equal(operationJournal.operations[0].kind, 'task-comment');
@@ -74,12 +74,12 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(operationJournal.operations[0].dependency, 'deferred');
   assert.equal(JSON.stringify(operationJournal).includes('## Task'), false);
 
-  const journalInspection = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-github-recovery', f.taskId, 'inspect'], {
+  const journalInspection = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'inspect'], {
     cwd: f.root, env: f.env, encoding: 'utf8'
   });
   assert.equal(journalInspection.status, 0, journalInspection.stderr || journalInspection.stdout);
   assert.equal(JSON.parse(journalInspection.stdout).journal.operations.length, 1);
-  const recovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-github-recovery', f.taskId, 'recover', '--agent', 'codex'], {
+  const recovery = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', f.taskId, 'recover', '--agent', 'codex'], {
     cwd: f.root, env: f.env, encoding: 'utf8'
   });
   assert.equal(recovery.status, 0, recovery.stderr || recovery.stdout);

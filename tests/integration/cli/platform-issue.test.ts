@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 
 import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
-import { readGithubOperationJournal, recordGithubOperation } from '../../../lib/task/github-operation-journal.ts';
+import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-issue', ...args], {
@@ -18,7 +18,7 @@ function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } 
 }
 
 function runRecovery(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
-  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-github-recovery', ...args], {
+  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-platform-recovery', ...args], {
     encoding: 'utf8', cwd: options.cwd, env: sandboxControlSafeEnv(gitSafeEnv(options.env))
   });
 }
@@ -161,11 +161,11 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
 
     const dry = run(['sync', taskId, '--agent', 'codex', '--in-labels', 'from-diff', '--base', 'main', '--dry-run'], { cwd: root, env });
     assert.equal(dry.status, 0, dry.stderr || dry.stdout);
-    assert.equal(fs.existsSync(path.join(taskDir, '.github-operations.json')), false);
+    assert.equal(fs.existsSync(path.join(taskDir, '.platform-operations.json')), false);
 
     const synced = run(['sync', taskId, '--agent', 'codex', '--in-labels', 'from-diff', '--base', 'main'], { cwd: root, env });
     assert.equal(synced.status, 0, synced.stderr || synced.stdout);
-    const operation = readGithubOperationJournal(taskId, root).operations[0];
+    const operation = readPlatformOperationJournal(taskId, root).operations[0];
     assert.equal(operation?.kind, 'issue-metadata');
     assert.equal(operation?.dependency, 'required');
     assert.equal(operation?.issueMetadata?.inLabels, 'from-diff');
@@ -173,7 +173,7 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
     assert.equal(operation?.state, 'succeeded');
 
     assert.ok(operation);
-    recordGithubOperation({ taskRef: taskId, cwd: root, ...operation, state: 'unknown' });
+    recordPlatformOperation({ taskRef: taskId, cwd: root, ...operation, state: 'unknown' });
     fs.writeFileSync(path.join(root, 'lib', 'second.ts'), 'export const second = true;\n');
     execFileSync('git', ['add', 'lib/second.ts'], { cwd: root });
     const nextTree = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
@@ -183,17 +183,17 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
     assert.deepEqual(execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort(), ['lib/sample.ts', 'lib/second.ts']);
     const recovered = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'required'], { cwd: root, env });
     assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
-    const recoveredJournal = readGithubOperationJournal(taskId, root).operations;
+    const recoveredJournal = readPlatformOperationJournal(taskId, root).operations;
     const superseded = recoveredJournal.find((item) => item.id === operation.id);
     const retargeted = recoveredJournal.find((item) => item.id !== operation.id && item.issueMetadata?.inLabels === 'from-diff');
     assert.equal(superseded?.state, 'failed');
-    assert.equal(superseded?.lastCode, 'GITHUB_OPERATION_SUPERSEDED');
+    assert.equal(superseded?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
     assert.notDeepEqual(retargeted?.issueMetadata?.fromDiffFiles, operation.issueMetadata?.fromDiffFiles, JSON.stringify(recoveredJournal));
     assert.equal(retargeted?.state, 'succeeded');
 
     assert.ok(retargeted);
-    recordGithubOperation({ taskRef: taskId, cwd: root, ...retargeted, state: 'unknown' });
-    assert.equal(readGithubOperationJournal(taskId, root).operations.find((item) => item.id === retargeted.id)?.state, 'unknown');
+    recordPlatformOperation({ taskRef: taskId, cwd: root, ...retargeted, state: 'unknown' });
+    assert.equal(readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === retargeted.id)?.state, 'unknown');
     const mappingFilesBefore = execFileSync('git', ['diff', 'main...HEAD', '--name-only'], { cwd: root, encoding: 'utf8' }).trim().split(/\r?\n/).sort();
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({
       platform: { type: 'github' }, labels: { in: { cli: ['lib/'] } }
@@ -201,13 +201,13 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', '.airc.json'), 'utf8')).labels.in, { cli: ['lib/'] });
     const mappingRecovery = runRecovery([taskId, 'recover', '--agent', 'codex', '--selection', 'required'], { cwd: root, env });
     assert.equal(mappingRecovery.status, 0, mappingRecovery.stderr || mappingRecovery.stdout);
-    const mappingJournal = readGithubOperationJournal(taskId, root).operations;
+    const mappingJournal = readPlatformOperationJournal(taskId, root).operations;
     const staleMapping = mappingJournal.find((item) => item.id === retargeted.id);
     const currentMapping = mappingJournal.find((item) => item.id !== retargeted.id
       && item.issueMetadata?.inLabels === 'from-diff'
       && JSON.stringify(item.issueMetadata.fromDiffFiles) === JSON.stringify(retargeted.issueMetadata?.fromDiffFiles));
     assert.equal(staleMapping?.state, 'failed', JSON.stringify({ mappingRecovery: mappingRecovery.stdout, mappingJournal }));
-    assert.equal(staleMapping?.lastCode, 'GITHUB_OPERATION_SUPERSEDED');
+    assert.equal(staleMapping?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
     assert.ok(currentMapping);
     assert.notEqual(currentMapping.id, retargeted.id);
     assert.notEqual(currentMapping.issueMetadata?.inLabelMappingDigest, retargeted.issueMetadata?.inLabelMappingDigest, JSON.stringify({ retargeted, currentMapping }));
@@ -218,7 +218,7 @@ test('platform-issue in-label sync journals its hard dependency and dry-run is n
 
     const statusSync = run(['sync', taskId, '--agent', 'codex', '--status', 'none'], { cwd: root, env });
     assert.equal(statusSync.status, 0, statusSync.stderr || statusSync.stdout);
-    const statusOperation = readGithubOperationJournal(taskId, root).operations.find((item) => item.issueMetadata?.status === 'none');
+    const statusOperation = readPlatformOperationJournal(taskId, root).operations.find((item) => item.issueMetadata?.status === 'none');
     assert.equal(statusOperation?.kind, 'issue-metadata');
     assert.equal(statusOperation?.issueMetadata?.requirements, false);
     assert.equal(statusOperation?.state, 'succeeded');

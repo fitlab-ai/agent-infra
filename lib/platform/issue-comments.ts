@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { recordGithubOperation } from '../task/github-operation-journal.ts';
+import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import { resolvePlatformProviderContext } from './context.ts';
 import type { PlatformClient } from './context.ts';
 import { platformResult } from './types.ts';
@@ -53,6 +53,7 @@ type SyncOptions = {
   runtimeVersion?: string;
   summaryAuthorization?: { sha256: string };
   dependency?: 'deferred' | 'required';
+  skipQueue?: boolean;
   taskProjection?: { content: string; sha256: string };
 };
 
@@ -754,75 +755,44 @@ async function syncPlatformCommentImpl(taskRef: string, options: SyncOptions): P
 }
 
 async function syncPlatformComment(taskRef: string, options: SyncOptions): Promise<PlatformResult> {
-  if (options.kind === 'cancel') return syncPlatformCommentImpl(taskRef, options);
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return syncPlatformCommentImpl(taskRef, options);
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   if (!taskIssueIdentity(parseTaskFrontmatter(taskContent))) return syncPlatformCommentImpl(taskRef, options);
 
-  let operation: { kind: 'task-comment' | 'artifact-comment' | 'summary-comment'; target: string; expectedDigest: string };
+  let operation: { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string };
   try {
     const sourceContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
     const desired = expectedComments(resolved.taskId, sourceContent, resolved.taskDir, resolved.repoRoot, options);
     const content = desired.map((chunk) => chunk.content).join('\0');
-    const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment' : 'artifact-comment';
+    const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment'
+      : options.kind === 'cancel' ? 'cancel-comment' : 'artifact-comment';
     const target = options.kind === 'artifact' ? options.artifact! : options.kind;
     operation = { kind, target, expectedDigest: createHash('sha256').update(content).digest('hex') };
   } catch {
     return syncPlatformCommentImpl(taskRef, options);
   }
 
-  try {
-    recordGithubOperation({
-      taskRef: resolved.taskId,
-      cwd: resolved.repoRoot,
-      ...operation,
-      dependency: options.dependency ?? 'deferred',
-      state: 'pending'
-    });
-  } catch (error) {
-    const value = error as { code?: string; message?: string };
-    return platformResult('failed', {
-      error: {
-        code: value.code || 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED',
-        message: value.message || 'Unable to persist GitHub operation before comment sync',
-        retryable: true
-      }
-    });
-  }
-
-  const result = await syncPlatformCommentImpl(taskRef, options);
-  try {
-    const succeeded = (result.status === 'applied' || result.status === 'no-op') && !result.error;
-    recordGithubOperation({
-      taskRef: resolved.taskId,
-      cwd: resolved.repoRoot,
-      ...operation,
-      dependency: options.dependency ?? 'deferred',
-      state: succeeded ? 'succeeded' : result.status === 'failed' && result.error?.retryable === false ? 'failed' : 'unknown',
-      lastCode: result.error?.code ?? null
-    });
-  } catch {
-    return platformResult('failed', {
-      platform: result.platform,
-      resource: result.resource,
-      capabilities: result.capabilities,
-      operations: result.operations,
-      error: { code: 'GITHUB_OPERATION_JOURNAL_WRITE_FAILED', message: 'Unable to persist GitHub comment outcome', retryable: true }
-    });
-  }
-  return result;
+  const execute = () => syncPlatformCommentImpl(taskRef, options);
+  if (options.skipQueue) return execute();
+  return coordinatePlatformWrite({
+    operation: { taskRef: resolved.taskId, cwd: resolved.repoRoot, ...operation, dependency: options.dependency ?? 'deferred' },
+    agent: options.agent,
+    execute,
+    block: (error) => platformResult('blocked', { error }),
+    persistenceFailure: (error) => platformResult('failed', { error })
+  });
 }
 
-function inspectGithubCommentOperation(taskRef: string, options: SyncOptions): { kind: 'task-comment' | 'artifact-comment' | 'summary-comment'; target: string; expectedDigest: string; id: string } | null {
-  if (options.kind === 'cancel') return null;
+function inspectPlatformCommentOperation(taskRef: string, options: SyncOptions): { kind: 'task-comment' | 'artifact-comment' | 'summary-comment' | 'cancel-comment'; target: string; expectedDigest: string; id: string } | null {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return null;
   const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
   if (!taskIssueIdentity(parseTaskFrontmatter(taskContent))) return null;
   const sourceContent = options.kind === 'task' && options.taskProjection ? options.taskProjection.content : taskContent;
   const desired = expectedComments(resolved.taskId, sourceContent, resolved.taskDir, resolved.repoRoot, options);
-  const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment' : 'artifact-comment';
+  const kind = options.kind === 'task' ? 'task-comment' : options.kind === 'summary' ? 'summary-comment'
+    : options.kind === 'cancel' ? 'cancel-comment' : 'artifact-comment';
   const target = options.kind === 'artifact' ? options.artifact! : options.kind;
   const expectedDigest = createHash('sha256').update(desired.map((chunk) => chunk.content).join('\0')).digest('hex');
   return { kind, target, expectedDigest, id: createHash('sha256').update(`${kind}\0${target}\0${expectedDigest}`).digest('hex') };
@@ -885,7 +855,7 @@ export {
   COMMENT_BYTE_LIMIT,
   MARKERS,
   chunkArtifactComment,
-  inspectGithubCommentOperation,
+  inspectPlatformCommentOperation,
   findMarkerComments,
   listRemoteComments,
   checkPlatformCommentOwner,

@@ -10,7 +10,7 @@ import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts'
 import { buildBoundFact, buildUnboundFact, encodePrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
 import { parseTypedTaskFrontmatter } from '../../../lib/task/frontmatter.ts';
 import { readPrDeliveryFact } from '../../../lib/task/pr-delivery-fact.ts';
-import { readGithubOperationJournal } from '../../../lib/task/github-operation-journal.ts';
+import { readPlatformOperationJournal } from '../../../lib/task/platform-operation-journal.ts';
 
 function factLine(fact: ReturnType<typeof buildUnboundFact> | ReturnType<typeof buildBoundFact>): string {
   return `pr_delivery_fact: ${JSON.stringify(encodePrDeliveryFact(fact))}`;
@@ -425,7 +425,7 @@ test('platform-pr bind dry-run does not create a replayable journal operation', 
     const output = run(['bind', f.taskId, '--agent', 'codex', '--pr', '1', '--dry-run'], { cwd: f.root, env: f.env });
     assert.equal(output.status, 0, output.stderr || output.stdout);
     assert.equal(JSON.parse(output.stdout).status, 'planned');
-    assert.equal(readGithubOperationJournal(f.taskId, f.root).operations.some((operation) => operation.kind === 'pull-request'), false);
+    assert.equal(readPlatformOperationJournal(f.taskId, f.root).operations.some((operation) => operation.kind === 'pull-request'), false);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
