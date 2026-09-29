@@ -12,6 +12,8 @@ const config = {
 
 test('task-bound mount topology exposes isolated state mounts and one writable task child', () => {
   const mounts = sandboxCoreBindMounts(config, 'feature', {
+    gitCommonDir: '/repo/.git',
+    worktreeGitFile: '/control/current/workspace.git',
     worktree: '/worktree',
     shellConfigHostDir: '/shell/feature',
     workspaceViewRoot: '/views/current',
@@ -20,6 +22,11 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
     taskSources: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
     taskId: 'TASK-20260809-010203'
   });
+  assert.deepEqual(mounts.slice(0, 3), [
+    { hostPaths: ['/repo/.git'], containerPath: '/run/agent-infra/git', readOnly: false },
+    { hostPaths: ['/worktree'], containerPath: '/workspace', readOnly: false },
+    { hostPaths: ['/control/current/workspace.git'], containerPath: '/workspace/.git', readOnly: true }
+  ]);
   const workspace = mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace'));
   assert.deepEqual(workspace, [
     {
@@ -63,6 +70,8 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
 
 test('branch-only topology mounts each isolated workspace state read-only', () => {
   const mounts = sandboxCoreBindMounts(config, 'feature', {
+    gitCommonDir: '/repo/.git',
+    worktreeGitFile: '/control/empty/workspace.git',
     workspaceViewRoot: '/views/empty',
     controlDir: '/control/empty',
     controlStatusDir: '/control/status-empty'

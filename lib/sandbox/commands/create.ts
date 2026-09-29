@@ -83,6 +83,7 @@ import { atomicWriteJson } from '../control/state.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
+import { materializeSandboxGitMetadata } from '../git-metadata.ts';
 import {
   assertSandboxTaskSource,
   finalizeSandboxControlManifest,
@@ -1460,6 +1461,7 @@ export async function create(
               engine,
               replacementLease,
             });
+            const gitMetadata = materializeSandboxGitMetadata(worktree, control.channelDir);
             hostShellConfig = prepareHostShellConfig({
               home: effectiveConfig.home,
               project: effectiveConfig.project,
@@ -1467,6 +1469,8 @@ export async function create(
               repoRoot: effectiveConfig.repoRoot
             });
             const coreVolumes = sandboxCoreBindMounts(effectiveConfig, branch, {
+              gitCommonDir: gitMetadata.commonDir,
+              worktreeGitFile: gitMetadata.worktreeGitFile,
               worktree,
               shellConfigHostDir: hostShellConfig.hostDir,
               workspaceViewRoot: workspaceView.root,
@@ -1573,12 +1577,6 @@ export async function create(
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
               ...coreVolumes,
               ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
-              '-v',
-              volumeArg(
-                engine,
-                path.join(effectiveConfig.repoRoot, '.git'),
-                `${toEnginePath(engine, effectiveConfig.repoRoot)}/.git`
-              ),
               ...dotfilesMount,
               ...toolVolumes,
               ...tmpfsArgs,

@@ -7,6 +7,7 @@ import {
 } from './constants.ts';
 import type { SandboxConfig } from './config.ts';
 import { sandboxWorkspaceViewStatePaths } from './workspace-view.ts';
+import { SANDBOX_GIT_COMMON_DIR } from './git-metadata.ts';
 
 export type SandboxBindMountDeclaration = {
   hostPaths: string[];
@@ -26,6 +27,8 @@ export function sandboxCoreBindMounts(
     workspaceViewRoot: string;
     controlDir: string;
     controlStatusDir: string;
+    gitCommonDir?: string;
+    worktreeGitFile?: string;
     runtimeDir?: string;
     taskSources?: string[];
     taskId?: string;
@@ -46,7 +49,17 @@ export function sandboxCoreBindMounts(
           readOnly: true
         }
   );
+  if (Boolean(overrides.gitCommonDir) !== Boolean(overrides.worktreeGitFile)) {
+    throw new Error('SANDBOX_GIT_METADATA_INCOMPLETE');
+  }
+  const gitCommonMount = overrides.gitCommonDir
+    ? { hostPaths: [overrides.gitCommonDir], containerPath: SANDBOX_GIT_COMMON_DIR, readOnly: false }
+    : null;
+  const worktreeGitFileMount = overrides.worktreeGitFile
+    ? { hostPaths: [overrides.worktreeGitFile], containerPath: '/workspace/.git', readOnly: true }
+    : null;
   const mounts: SandboxBindMountDeclaration[] = [
+    ...(gitCommonMount ? [gitCommonMount] : []),
     {
       hostPaths: overrides.worktree
         ? [overrides.worktree]
@@ -54,6 +67,7 @@ export function sandboxCoreBindMounts(
       containerPath: '/workspace',
       readOnly: false
     },
+    ...(worktreeGitFileMount ? [worktreeGitFileMount] : []),
     ...workspaceMounts,
   ];
   if (taskBound) {

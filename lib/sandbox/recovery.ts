@@ -24,6 +24,7 @@ import type {
 import type { SandboxConfig } from './config.ts';
 import { toEnginePath } from './engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from './mounts.ts';
+import { resolveSandboxGitMetadata } from './git-metadata.ts';
 import {
   assertSandboxTaskSource,
   sandboxControlPaths,
@@ -764,7 +765,19 @@ function expectedMounts(params: {
     ? recoveryTaskSources(config.repoRoot, params.workspace.taskId)
     : null;
   const taskId = params.workspace.mode === 'task-bound' ? params.workspace.taskId : null;
+  const worktrees = worktreeDirCandidates(config, branch).filter((candidate) =>
+    fs.existsSync(path.join(candidate, '.git'))
+  );
+  const gitMetadata = worktrees.length === 1
+    ? resolveSandboxGitMetadata(worktrees[0]!, control.channelDir)
+    : null;
   const core = sandboxCoreBindMounts(config, branch, {
+    ...(gitMetadata === null
+      ? {}
+      : {
+        gitCommonDir: gitMetadata.commonDir,
+        worktreeGitFile: gitMetadata.worktreeGitFile
+      }),
     workspaceViewRoot: view.root,
     controlDir: control.channelDir,
     controlStatusDir: control.statusDir,

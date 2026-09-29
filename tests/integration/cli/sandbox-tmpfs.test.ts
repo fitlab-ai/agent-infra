@@ -29,6 +29,10 @@ import { createSandboxCapabilityPlan } from "../../../lib/sandbox/agent-client-r
 import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 import type { AgentClientState } from "../../../lib/agent-clients/types.ts";
 import {
+  materializeSandboxGitMetadata,
+  resolveSandboxGitMetadata
+} from "../../../lib/sandbox/git-metadata.ts";
+import {
   materializeSandboxControl,
   materializeSandboxWorkspaceView
 } from "../../../lib/sandbox/workspace-view.ts";
@@ -163,7 +167,7 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
     container: "demo-dev-feature..demo",
     identity: { mode: "branch-only" }
   });
-  materializeSandboxControl({
+  const control = materializeSandboxControl({
     base: config.controlBase,
     repoRoot: config.repoRoot,
     worktreeRoot: path.join(config.worktreeBase, branchDir),
@@ -172,6 +176,7 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
     branch: "feature/demo",
     identity: { mode: "branch-only" }
   });
+  materializeSandboxGitMetadata(path.join(config.worktreeBase, branchDir), control.channelDir);
   return config;
 }
 
@@ -188,8 +193,12 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
   const view = fs.readdirSync(path.join(config.workspaceViewBase, config.project, "demo-dev-feature..demo"))[0]!;
   const viewRoot = path.join(config.workspaceViewBase, config.project, "demo-dev-feature..demo", view);
   const control = fs.readdirSync(path.join(config.controlBase, config.project, "demo-dev-feature..demo"))[0]!;
+  const controlDir = path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "channel");
+  const gitMetadata = resolveSandboxGitMetadata(path.join(config.worktreeBase, branchDir), controlDir);
   return [
+    { Type: "bind", Source: gitMetadata.commonDir, Destination: "/run/agent-infra/git", RW: true },
     { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
+    { Type: "bind", Source: gitMetadata.worktreeGitFile, Destination: "/workspace/.git", RW: false },
     ...["active", "completed", "blocked", "archive"].map((state) => ({
       Type: "bind",
       Source: path.join(viewRoot, state),
@@ -235,6 +244,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     branch: "feature/demo",
     identity
   });
+  const gitMetadata = materializeSandboxGitMetadata(path.join(config.worktreeBase, branchDir), control.channelDir);
   const seedDir = path.join(
     config.home,
     ".agent-infra",
@@ -244,7 +254,9 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     branchDir
   );
   const mounts = [
+    { Type: "bind", Source: gitMetadata.commonDir, Destination: "/run/agent-infra/git", RW: true },
     { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
+    { Type: "bind", Source: gitMetadata.worktreeGitFile, Destination: "/workspace/.git", RW: false },
     { Type: "bind", Source: path.join(view.root, "active", ".short-ids.json"), Destination: "/workspace/.agents/workspace/active/.short-ids.json", RW: false },
     ...["completed", "blocked", "archive"].map((state) => ({
       Type: "bind",
