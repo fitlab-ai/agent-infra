@@ -116,11 +116,11 @@ Read the remote head again to confirm it did not drift during the review:
 agent-infra-internal platform-pr-review inspect --pr {pr-number} [--cwd <path>]
 ```
 
-If the head matches step 1, assemble the body (head SHA / conclusion / findings / receipt / Issue artifact link, **without a marker**) and publish the formal Review:
+If the head matches step 1, assemble the body (head SHA / conclusion / findings / receipt / Issue artifact link, **without a marker**), write it verbatim into the current report's `Formal Review Body` section, and publish the formal Review:
 
 ```bash
 agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId|pr{pr-number}} --round {round} \
-  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} --agent {agent} [--dry-run] [--cwd <path>]
+  --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} --artifact {pr-review-artifact} --agent {agent} [--dry-run] [--cwd <path>]
 ```
 
 `publish` generates and validates the marker (first line) in core and is idempotent per marker + commit (replay is a no-op; marker hit on a different commit fails stably). On head drift, first set the old artifact status to `superseded`, then close the old round:

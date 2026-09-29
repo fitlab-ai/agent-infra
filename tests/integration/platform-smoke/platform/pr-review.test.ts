@@ -76,6 +76,13 @@ function mockClient(options: {
   return { client: client as unknown as GitHubClient, reviews, postedBodies, requests };
 }
 
+function writeReviewArtifact(root: string, body: string, artifact = 'pr-review.md'): string {
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', IDENTITY.scope);
+  const file = path.join(taskDir, artifact);
+  fs.writeFileSync(file, `# PR review\n\n<!-- platform-review-body:start -->\n${body}\n<!-- platform-review-body:end -->\n`);
+  return artifact;
+}
+
 const IDENTITY = { scope: 'TASK-20260101-000001', round: 1, commitSha: 'a'.repeat(40) };
 
 test('reviewMarker and reviewedCommitMarker define the marker contract', () => {
@@ -107,6 +114,8 @@ test('task-scoped PR review publication is recorded by the shared platform queue
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+  const body = '## Findings\n- task-scoped review';
+  const artifact = writeReviewArtifact(root, body);
   try {
     const mock = mockClient();
     const result = await publishPrReview({
@@ -116,7 +125,8 @@ test('task-scoped PR review publication is recorded by the shared platform queue
       prNumber: 42,
       identity: IDENTITY,
       event: 'COMMENT',
-      body: '## Findings\n- task-scoped review'
+      body,
+      recoveryArtifact: artifact
     });
     const operations = readPlatformOperationJournal(taskId, root).operations;
 
@@ -125,6 +135,14 @@ test('task-scoped PR review publication is recorded by the shared platform queue
     assert.equal(operations.length, 1);
     assert.equal(operations[0]?.kind, 'pull-request-review');
     assert.equal(operations[0]?.state, 'succeeded');
+    assert.deepEqual(operations[0]?.pullRequestReview, {
+      prNumber: '42', resource: { kind: 'number', value: 42 }, providerScopeId: 'acme/widgets',
+      scope: taskId, round: 1, commitSha: IDENTITY.commitSha, event: 'COMMENT',
+      artifactFile: artifact,
+      bodyDigest: createHash('sha256').update(body).digest('hex')
+    });
+    const journal = fs.readFileSync(path.join(taskDir, '.platform-operations.json'), 'utf8');
+    assert.equal(journal.includes(body), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -139,7 +157,9 @@ test('PR review recovery recognizes an accepted review before retrying its queue
   const resource = { kind: 'number' as const, value: 42 };
   const reviewIntent = {
     prNumber: '42', resource, providerScopeId: 'acme/widgets', scope: taskId, round: IDENTITY.round,
-    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, body: '## Findings\n- recovered'
+    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const,
+    artifactFile: writeReviewArtifact(root, '## Findings\n- recovered'),
+    bodyDigest: createHash('sha256').update('## Findings\n- recovered').digest('hex')
   };
   const marker = reviewMarker({ ...IDENTITY, resource });
   const mock = mockClient({ initial: [{
@@ -164,6 +184,42 @@ test('PR review recovery recognizes an accepted review before retrying its queue
   }
 });
 
+test('PR review recovery fails closed when its canonical body changes after queuing', async () => {
+  const root = fixture();
+  const taskId = IDENTITY.scope;
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nstatus: active\n---\n`);
+  const resource = { kind: 'number' as const, value: 42 };
+  const body = '## Findings\n- canonical source';
+  const artifact = writeReviewArtifact(root, body);
+  const intent = {
+    prNumber: '42', resource, providerScopeId: 'acme/widgets', scope: taskId, round: IDENTITY.round,
+    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, artifactFile: artifact,
+    bodyDigest: createHash('sha256').update(body).digest('hex')
+  };
+  const mock = mockClient();
+  try {
+    const operation = recordPlatformOperation({
+      taskRef: taskId, cwd: root, kind: 'pull-request-review', target: JSON.stringify(resource),
+      expectedDigest: createHash('sha256').update(JSON.stringify(intent)).digest('hex'),
+      dependency: 'required', state: 'unknown', pullRequestReview: intent
+    });
+
+    writeReviewArtifact(root, '## Findings\n- changed after queue');
+    const recovered = await recoverPlatformOperations(taskId, 'all', { agent: 'codex', cwd: root, client: mock.client });
+    const persisted = readPlatformOperationJournal(taskId, root).operations.find((item) => item.id === operation.id);
+
+    assert.equal(recovered.status, 'failed');
+    assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_PAYLOAD_INVALID');
+    assert.deepEqual(mock.requests.filter((request) => request.includes('/pulls/42/reviews')), []);
+    assert.deepEqual(mock.postedBodies, []);
+    assert.equal(persisted?.state, 'failed');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('PR review recovery stops when the journal target differs from its persisted resource identity', async () => {
   const root = fixture();
   const taskId = IDENTITY.scope;
@@ -173,7 +229,9 @@ test('PR review recovery stops when the journal target differs from its persiste
   const intentResource = { kind: 'number' as const, value: 42 };
   const reviewIntent = {
     prNumber: '42', resource: intentResource, providerScopeId: 'acme/widgets', scope: taskId, round: IDENTITY.round,
-    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, body: '## Findings\n- identity-bound'
+    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const,
+    artifactFile: writeReviewArtifact(root, '## Findings\n- identity-bound'),
+    bodyDigest: createHash('sha256').update('## Findings\n- identity-bound').digest('hex')
   };
   const mock = mockClient();
   try {
@@ -205,7 +263,9 @@ test('PR review recovery rejects the same PR identity in a different provider sc
   const resource = { kind: 'number' as const, value: 42 };
   const reviewIntent = {
     prNumber: '42', resource, providerScopeId: 'acme/widgets', scope: taskId, round: IDENTITY.round,
-    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const, body: '## Findings\n- scope-bound'
+    commitSha: IDENTITY.commitSha, event: 'COMMENT' as const,
+    artifactFile: writeReviewArtifact(root, '## Findings\n- scope-bound'),
+    bodyDigest: createHash('sha256').update('## Findings\n- scope-bound').digest('hex')
   };
   const mock = mockClient({ repository: 'other/widgets' });
   try {

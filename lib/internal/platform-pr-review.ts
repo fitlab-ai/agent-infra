@@ -10,11 +10,11 @@ import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.t
 
 const USAGE = `Usage: agent-infra-internal platform-pr-review inspect --pr <token> [--cwd <path>]
        agent-infra-internal platform-pr-review list --pr <token> [--cwd <path>]
-       agent-infra-internal platform-pr-review publish --pr <token> --scope <taskId|pr{N}> --round <N> --commit <sha> --event <COMMENT|APPROVE|REQUEST_CHANGES> --body-file <path|-> [--agent <agent>] [--dry-run] [--cwd <path>]
+       agent-infra-internal platform-pr-review publish --pr <token> --scope <taskId|pr{N}> --round <N> --commit <sha> --event <COMMENT|APPROVE|REQUEST_CHANGES> --body-file <path|-> [--artifact <pr-review-artifact>] [--agent <agent>] [--dry-run] [--cwd <path>]
 `;
 
 const BOOLEAN_FLAGS = new Set(['--dry-run']);
-const VALUE_FLAGS = new Set(['--cwd', '--pr', '--scope', '--round', '--commit', '--event', '--body-file', '--agent']);
+const VALUE_FLAGS = new Set(['--cwd', '--pr', '--scope', '--round', '--commit', '--event', '--body-file', '--artifact', '--agent']);
 
 function key(flag: string): string {
   return flag.slice(2).replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
@@ -68,7 +68,7 @@ async function platformPrReview(args: string[] = []): Promise<void> {
   const allowed: Record<string, string[]> = {
     inspect: ['cwd', 'pr'],
     list: ['cwd', 'pr'],
-    publish: ['cwd', 'pr', 'scope', 'round', 'commit', 'event', 'bodyFile', 'agent', 'dryRun']
+    publish: ['cwd', 'pr', 'scope', 'round', 'commit', 'event', 'bodyFile', 'artifact', 'agent', 'dryRun']
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
@@ -98,6 +98,7 @@ async function platformPrReview(args: string[] = []): Promise<void> {
   if (!/^[0-9a-f]{7,40}$/i.test(commit)) { fail('publish requires --commit <sha>'); return; }
   if (!['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(event)) { fail('publish requires --event <COMMENT|APPROVE|REQUEST_CHANGES>'); return; }
   if (typeof values.bodyFile !== 'string') { fail('publish requires --body-file'); return; }
+  if (/^TASK-\d{8}-\d{6}$/u.test(scope) && typeof values.artifact !== 'string') { fail('task-scoped publish requires --artifact <pr-review-artifact>'); return; }
   if (/^TASK-\d{8}-\d{6}$/u.test(scope) && !agent) {
     fail(`task-scoped publish requires --agent <agent>${rawAgent ? `: invalid '${rawAgent}'` : ''}: ${AGENT_USAGE_HINT}`);
     return;
@@ -116,6 +117,7 @@ async function platformPrReview(args: string[] = []): Promise<void> {
     identity: { scope, round, commitSha: commit },
     event: event as PrReviewEvent,
     body,
+    ...(typeof values.artifact === 'string' ? { recoveryArtifact: values.artifact } : {}),
     ...(agent ? { agent } : {}),
     dryRun: values.dryRun === true
   }));

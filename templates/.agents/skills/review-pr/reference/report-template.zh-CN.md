@@ -68,6 +68,14 @@
 
 - **{标题}**：{描述} · `{file}:{line}` · 证据：{evidence} · 影响：{impact} · 建议：{suggestion}
 
+## 正式 Review 正文
+
+任务锚定路径在以下标记之间逐字记录正式 Review 正文，不包含平台生成的 marker；发布接口会校验正文与本轮报告一致。
+
+<!-- platform-review-body:start -->
+{正式 Review 正文}
+<!-- platform-review-body:end -->
+
 ## 发布结果
 
 - **正式 Review 状态**：{pending / applied / no-op / aborted / superseded / blocked / failed}

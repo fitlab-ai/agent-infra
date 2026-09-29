@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { coordinatePlatformWrite } from './operation-coordinator.ts';
 import { resolvePlatformProviderContext } from './context.ts';
@@ -15,6 +17,7 @@ import {
 import { isResourceIdentity, resourceIdentityEquals, resourceIdentityNumber, reviewMarker as resourceReviewMarker } from './resource-identity.ts';
 import type { ResourceIdentity } from './resource-identity.ts';
 import type { PlatformPullRequestReviewIntent } from '../task/platform-operation-journal.ts';
+import { resolveTaskRef } from '../task/resolve-ref.ts';
 
 export type PrReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
 export type PrReviewIdentity = { scope: string; round: number; commitSha: string; resource?: ResourceIdentity };
@@ -26,6 +29,8 @@ const REVIEW_EVENTS: readonly PrReviewEvent[] = ['COMMENT', 'APPROVE', 'REQUEST_
 // (`pr{N}`). Any other value (e.g. one containing `\r\n` or `-->`) would break
 // the first-line marker idempotency contract of `reviewMarker` (PL-6).
 const REVIEW_SCOPE_PATTERN = /^(?:pr\d+|TASK-\d{8}-\d{6})$/;
+const REVIEW_BODY_START = '<!-- platform-review-body:start -->';
+const REVIEW_BODY_END = '<!-- platform-review-body:end -->';
 
 export function reviewMarker(identity: PrReviewIdentity): string {
   const scope = identity.resource && isResourceIdentity(identity.resource) && identity.resource.kind !== 'number'
@@ -40,6 +45,37 @@ export function reviewedCommitMarker(sha: string): string {
 
 function normalizeBody(body: string): string {
   return String(body || '').replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
+}
+
+function canonicalReviewBody(body: string): string {
+  return normalizeBody(body).replace(/\n$/u, '');
+}
+
+function reviewArtifactName(round: number, artifactFile: string): boolean {
+  return path.basename(artifactFile) === artifactFile
+    && (artifactFile === 'pr-review.md' && round === 1 || artifactFile === `pr-review-r${round}.md`);
+}
+
+export function readReviewArtifactBody(taskRef: string, round: number, artifactFile: string, bodyDigest: string, cwd?: string): string {
+  if (!/^TASK-\d{8}-\d{6}$/u.test(taskRef) || path.basename(artifactFile) !== artifactFile
+    || !reviewArtifactName(round, artifactFile)) {
+    throw Object.assign(new Error('Pull-request review artifact identity is invalid'), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });
+  }
+  const task = resolveTaskRef(taskRef, cwd ? { repoRoot: cwd } : {});
+  if (!task.ok) throw Object.assign(new Error(task.message), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });
+  const content = fs.readFileSync(path.join(task.taskDir, artifactFile), 'utf8');
+  const startIndex = content.indexOf(REVIEW_BODY_START);
+  const endIndex = content.indexOf(REVIEW_BODY_END);
+  if (startIndex < 0 || endIndex < startIndex || content.indexOf(REVIEW_BODY_START, startIndex + REVIEW_BODY_START.length) >= 0
+    || content.indexOf(REVIEW_BODY_END, endIndex + REVIEW_BODY_END.length) >= 0) {
+    throw Object.assign(new Error('Canonical pull-request review body is missing or ambiguous'), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });
+  }
+  const rawBody = content.slice(startIndex + REVIEW_BODY_START.length, endIndex).replace(/^\r?\n/u, '').replace(/\r?\n$/u, '');
+  const body = canonicalReviewBody(rawBody);
+  if (!body || createHash('sha256').update(body).digest('hex') !== bodyDigest) {
+    throw Object.assign(new Error('Canonical pull-request review body does not match its persisted digest'), { code: 'PLATFORM_OPERATION_PAYLOAD_INVALID' });
+  }
+  return body;
 }
 
 function firstLine(body: string): string {
@@ -98,6 +134,7 @@ export async function publishPrReview(options: {
   skipQueue?: boolean;
   expectedResource?: ResourceIdentity;
   expectedProviderScopeId?: string;
+  recoveryArtifact?: string;
   prNumber: PrToken;
   identity: PrReviewIdentity;
   event: PrReviewEvent;
@@ -151,6 +188,22 @@ export async function publishPrReview(options: {
       resource: { kind: 'pull-request', number: identityNumber, identity },
       error: { code: 'PR_REVIEW_AGENT_REQUIRED', message: 'task-scoped review publication requires an agent token', retryable: false }
     });
+    if (!options.recoveryArtifact || !reviewArtifactName(options.identity.round, options.recoveryArtifact)) return platformResult('failed', {
+      platform: context.platform, capabilities: context.capabilities,
+      resource: { kind: 'pull-request', number: identityNumber, identity },
+      error: { code: 'PR_REVIEW_ARTIFACT_REQUIRED', message: 'task-scoped review publication requires its canonical review artifact', retryable: false }
+    });
+    const body = canonicalReviewBody(options.body);
+    const bodyDigest = createHash('sha256').update(body).digest('hex');
+    try {
+      if (readReviewArtifactBody(options.identity.scope, options.identity.round, options.recoveryArtifact, bodyDigest, options.cwd) !== body) throw new Error('body mismatch');
+    } catch {
+      return platformResult('failed', {
+        platform: context.platform, capabilities: context.capabilities,
+        resource: { kind: 'pull-request', number: identityNumber, identity },
+        error: { code: 'PR_REVIEW_ARTIFACT_MISMATCH', message: 'Review body must match the canonical review artifact', retryable: false }
+      });
+    }
     const pullRequestReview: PlatformPullRequestReviewIntent = {
       prNumber: String(options.prNumber),
       resource: identity,
@@ -159,7 +212,8 @@ export async function publishPrReview(options: {
       round: options.identity.round,
       commitSha: options.identity.commitSha,
       event: options.event,
-      body: String(options.body || '')
+      artifactFile: options.recoveryArtifact,
+      bodyDigest
     };
     return coordinatePlatformWrite({
       operation: {

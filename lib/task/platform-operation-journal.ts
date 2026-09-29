@@ -43,7 +43,8 @@ type PlatformPullRequestReviewIntent = Readonly<{
   round: number;
   commitSha: string;
   event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
-  body: string;
+  artifactFile: string;
+  bodyDigest: string;
 }>;
 type PlatformOperation = Readonly<{
   id: string;
@@ -157,7 +158,12 @@ function parseJournal(file: string, taskId: string): PlatformOperationJournal {
           || !Number.isSafeInteger(item.pullRequestReview.round) || item.pullRequestReview.round <= 0
           || !/^[0-9a-f]{7,40}$/iu.test(item.pullRequestReview.commitSha)
           || !['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(item.pullRequestReview.event)
-          || typeof item.pullRequestReview.body !== 'string'
+          || typeof item.pullRequestReview.artifactFile !== 'string'
+          || !/^pr-review(?:-r\d+)?\.md$/u.test(item.pullRequestReview.artifactFile)
+          || (item.pullRequestReview.artifactFile === 'pr-review.md'
+            ? item.pullRequestReview.round !== 1
+            : item.pullRequestReview.artifactFile !== `pr-review-r${item.pullRequestReview.round}.md`)
+          || !/^[a-f0-9]{64}$/u.test(item.pullRequestReview.bodyDigest)
         : item.pullRequestReview !== undefined)
       || typeof item.updatedAt !== 'string') {
       throw Object.assign(new Error('Platform operation journal contains an invalid operation'), { code: 'PLATFORM_OPERATION_JOURNAL_INVALID' });

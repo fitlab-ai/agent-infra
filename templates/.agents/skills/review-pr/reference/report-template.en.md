@@ -68,6 +68,14 @@ Land the following in order before the line-level findings, without impersonatin
 
 - **{title}**: {description} · `{file}:{line}` · Evidence: {evidence} · Impact: {impact} · Suggestion: {suggestion}
 
+## Formal Review Body
+
+For task-anchored reviews, record the exact formal Review body between these markers, excluding the platform-generated marker. The publish interface checks that the body matches this report.
+
+<!-- platform-review-body:start -->
+{formal Review body}
+<!-- platform-review-body:end -->
+
 ## Publication Result
 
 - **Formal Review Status**: {pending / applied / no-op / aborted / superseded / blocked / failed}
