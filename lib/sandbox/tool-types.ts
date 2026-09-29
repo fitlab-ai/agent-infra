@@ -16,7 +16,7 @@ type SandboxTool = {
   pathRewriteFiles?: string[];
   hostLiveMounts?: Array<{ hostPath: string; containerSubpath: string }>;
   postSetupCmds?: string[];
-  tmpfs?: { size?: string; seed?: string[] };
+  tmpfs?: { size?: string; seed?: string[]; exec?: boolean };
 };
 
 type SandboxAlias = Readonly<{

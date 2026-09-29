@@ -1139,7 +1139,7 @@ test("codex tool declares a tmpfs mount so its high-churn logs stay in RAM", asy
     agentClientState: stateWithInstalled(["codex"])
   });
 
-  assert.deepEqual(required(maybeTool).tmpfs, { size: "512m", seed: ["config.toml", "model-catalogs"] });
+  assert.deepEqual(required(maybeTool).tmpfs, { size: "512m", seed: ["config.toml", "model-catalogs"], exec: true });
 });
 
 test("non-tmpfs builtin tools leave the tmpfs field unset", async () => {
@@ -1163,6 +1163,13 @@ test("parseCustomTool accepts a tmpfs object and rejects malformed tmpfs", async
     { home: "/home/host-user" }
   );
   assert.deepEqual(parsed.tmpfs, { size: "256m", seed: ["config.toml"] });
+
+  const executable = sandboxTools.parseCustomTool(
+    { id: "ram-tool", install: { type: "shell", cmd: "echo hi" }, tmpfs: { size: "256m", seed: ["config.toml"], exec: true } },
+    0,
+    { home: "/home/host-user" }
+  );
+  assert.deepEqual(executable.tmpfs, { size: "256m", seed: ["config.toml"], exec: true });
 
   assert.throws(
     () => sandboxTools.parseCustomTool(
@@ -1189,6 +1196,10 @@ test("buildTmpfsRunArgs emits a sized --tmpfs flag for the container mount", asy
   assert.deepEqual(
     create.buildTmpfsRunArgs("/home/devuser/.codex", { size: "512m" }),
     ["--tmpfs", "/home/devuser/.codex:rw,size=512m"]
+  );
+  assert.deepEqual(
+    create.buildTmpfsRunArgs("/home/devuser/.codex", { size: "512m", exec: true }),
+    ["--tmpfs", "/home/devuser/.codex:rw,exec,size=512m"]
   );
   // Missing size falls back to the 512m default.
   assert.deepEqual(

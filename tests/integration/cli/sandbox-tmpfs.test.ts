@@ -1776,7 +1776,7 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
 
     // codex home is a tmpfs, not a host bind mount.
     assert.ok(
-      runCall.some((arg, index) => arg === "--tmpfs" && runCall[index + 1] === "/home/devuser/.codex:rw,size=512m"),
+      runCall.some((arg, index) => arg === "--tmpfs" && runCall[index + 1] === "/home/devuser/.codex:rw,exec,size=512m"),
       `expected docker run to receive --tmpfs for codex, got ${JSON.stringify(runCall)}`
     );
     assert.equal(
