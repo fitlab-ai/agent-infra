@@ -46,7 +46,7 @@
 }
 ```
 
-`customTUIs` 每个条目对应一个自定义 TUI。`dir` 字段仍属于该工具的配置；`update-agent-infra` 不再读取其中的命令文件来为项目自定义 skill 创建命令。
+每个 `customTUIs` 条目用于定义对应自定义 TUI 命令在下一步提示中的显示方式。
 
 ### 既有命令文件
 

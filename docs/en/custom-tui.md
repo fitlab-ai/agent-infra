@@ -46,7 +46,7 @@ Namespaced custom TUI:
 }
 ```
 
-`customTUIs` should contain one entry per custom TUI. The `dir` value is retained as configuration for this TUI; `update-agent-infra` does not read command files from it to create commands for project custom skills.
+Each `customTUIs` entry defines how the corresponding custom TUI command is shown in next-step guidance.
 
 ### Existing command files
 
