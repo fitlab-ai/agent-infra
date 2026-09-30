@@ -12,6 +12,7 @@
       "definitions": {
         "your-tui": {
           "name": "Your TUI",
+          "install": { "type": "npm", "cmd": "<你的 CLI 包名>" },
           "invoke": "your-cli ${skillName}"
         }
       }

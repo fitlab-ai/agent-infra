@@ -12,6 +12,7 @@ Register a custom CLI/TUI as a sandbox tool in `.agents/.airc.json`. Add its ID 
       "definitions": {
         "your-tui": {
           "name": "Your TUI",
+          "install": { "type": "npm", "cmd": "<your-cli-package>" },
           "invoke": "your-cli ${skillName}"
         }
       }
