@@ -259,7 +259,7 @@ TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra
 ### 与其他配置字段的关系
 
 - `sandbox.tools.ids` 只列出 `agent-infra` 和自定义工具等非客户端工具；自定义定义放在 `sandbox.tools.definitions`。内建客户端的安装状态由 `agentClients[].installInSandbox` 表达。
-- 自定义工具的下一步命令通过 `sandbox.tools.definitions.<id>.invoke` 配置。完整示例见 [自定义 TUI 配置说明](../docs/zh-CN/custom-tui.md)。
+- 自定义工具的下一步命令通过 `sandbox.tools.definitions.<id>.invoke` 配置。完整示例见 [自定义 TUI 配置说明](https://github.com/fitlab-ai/agent-infra/blob/main/docs/zh-CN/custom-tui.md)。
 
 ## 沙箱自定义工具（Sandbox Custom Tools）
 
