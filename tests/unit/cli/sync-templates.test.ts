@@ -256,7 +256,7 @@ test("syncTemplates rejects a symbolic-link runtime workspace before template wr
   }
 });
 
-test("syncTemplates resolves template roots via PATH lookup and removes legacy templateSource", async () => {
+test("syncTemplates uses PATH templates even in an agent-infra project and removes legacy templateSource", async () => {
   const originalExecSync = childProcess.execSync;
   const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-"));
@@ -268,6 +268,11 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
 
     fs.mkdirSync(projectRoot, { recursive: true });
     fs.mkdirSync(path.join(installRoot, "bin"), { recursive: true });
+    writeJson(projectRoot, "package.json", {
+      name: "@fitlab-ai/agent-infra",
+      version: "9.8.7-alpha.0"
+    });
+    writeFile(projectRoot, "templates/docs/guide.zh-CN.md", "本地开发模板\n");
 
     writeFile(templateRoot, "docs/guide.en.md", "Project {{project}}\n");
     writeFile(templateRoot, "docs/guide.zh-CN.md", "项目 {{project}}\n");
@@ -320,6 +325,7 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
       normalize(firstReport.templateRoot),
       normalize(fs.realpathSync(templateRoot))
     );
+    assert.equal(firstReport.templateVersion, "v0.0.0-test");
     assert.equal(firstReport.configUpdated, true);
     assert.deepEqual(firstReport.templateSources, {
       configured: 0,
@@ -517,8 +523,7 @@ test("agent-infra package lookup failure is diagnostic and does not install into
     }>(".agents/scripts/lib/agent-infra-package.js");
     const result = locator.resolveAgentInfraPackage({
       env: {},
-      platform: "linux",
-      startPath: path.join(projectRoot, ".agents/scripts/lib/agent-infra-package.js")
+      platform: "linux"
     });
     const message = locator.formatAgentInfraPackageError(result);
 

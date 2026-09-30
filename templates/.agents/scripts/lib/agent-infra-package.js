@@ -1,7 +1,6 @@
 import childProcess from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const PACKAGE_NAME = "@fitlab-ai/agent-infra";
 const COMMAND_NAMES = ["ai", "agent-infra"];
@@ -82,7 +81,6 @@ function rootsForCommand(commandPath, platform) {
 function resolveAgentInfraPackage(options = {}) {
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
-  const startPath = options.startPath || fileURLToPath(import.meta.url);
   const attempts = [];
   const tryRoot = (candidate, source) => {
     const inspected = inspectPackageRoot(candidate, source);
@@ -93,11 +91,6 @@ function resolveAgentInfraPackage(options = {}) {
   if (env.AGENT_INFRA_PACKAGE_ROOT) {
     const explicit = tryRoot(env.AGENT_INFRA_PACKAGE_ROOT, "AGENT_INFRA_PACKAGE_ROOT");
     if (explicit) return { ...explicit, attempts };
-  }
-
-  for (const candidate of packageRootsAbove(startPath)) {
-    const self = tryRoot(candidate, "current installation");
-    if (self) return { ...self, attempts };
   }
 
   for (const command of COMMAND_NAMES) {

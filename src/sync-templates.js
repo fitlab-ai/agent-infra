@@ -1071,9 +1071,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const configPathRel = norm(path.relative(projectRoot, cfgPath));
   let templateRoot = templateRootOverride;
   if (!templateRoot) {
-    const packageResolution = resolveAgentInfraPackage({
-      startPath: path.join(projectRoot, '.agents', 'scripts', 'lib', 'agent-infra-package.js')
-    });
+    const packageResolution = resolveAgentInfraPackage();
     if (packageResolution.templateRoot && fs.existsSync(packageResolution.templateRoot)) {
       templateRoot = packageResolution.templateRoot;
     } else {
