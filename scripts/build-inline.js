@@ -28,7 +28,6 @@ const targetPaths = [
 
 const DEFAULTS_EXPR = /const DEFAULTS = JSON\.parse\(\s*fs\.readFileSync\(new URL\('..\/lib\/defaults\.json', import\.meta\.url\), 'utf8'\)\s*\);/m;
 const AGENT_CLIENT_MANIFEST_EXPR = /const AGENT_CLIENT_MANIFEST = JSON\.parse\('__AGENT_CLIENT_MANIFEST__'\);/m;
-const CUSTOM_TUI_CONTRACT_EXPR = /const CUSTOM_TUI_CONTRACT = JSON\.parse\('__CUSTOM_TUI_CONTRACT__'\);/m;
 
 function requireSingleExpression(source, expression, name) {
   const matches = source.match(new RegExp(expression.source, 'gm')) ?? [];
@@ -119,20 +118,6 @@ function validateManifest(manifest, registry) {
   }
 }
 
-function validateCustomTUIContract(contract) {
-  const roundTripped = JSON.parse(JSON.stringify(contract));
-  if (
-    JSON.stringify(roundTripped) !== JSON.stringify(contract)
-    || !Array.isArray(contract?.requiredFields)
-    || !Array.isArray(contract?.allowedPlaceholders)
-    || JSON.stringify(contract.requiredFields) !== JSON.stringify(['name', 'dir', 'invoke'])
-    || JSON.stringify(contract.allowedPlaceholders) !== JSON.stringify(['skillName', 'projectName'])
-    || Object.keys(contract).sort().join(',') !== 'allowedPlaceholders,requiredFields'
-  ) {
-    throw new Error('Invalid custom TUI contract');
-  }
-}
-
 function compileRegistry(outputDir) {
   const tscPath = path.join(rootDir, 'node_modules', 'typescript', 'bin', 'tsc');
   execFileSync(
@@ -148,17 +133,11 @@ async function buildInlineContent(outputDir) {
   const registryModule = await import(
     pathToFileURL(path.join(outputDir, 'lib', 'agent-clients', 'registry.js')).href
   );
-  const customTUIModule = await import(
-    pathToFileURL(path.join(outputDir, 'lib', 'agent-clients', 'custom-tuis.js')).href
-  );
   const manifest = registryModule.createAgentClientManifest();
-  const customTUIContract = customTUIModule.CUSTOM_TUI_CONTRACT;
 
   requireSingleExpression(source, DEFAULTS_EXPR, 'DEFAULTS');
   requireSingleExpression(source, AGENT_CLIENT_MANIFEST_EXPR, 'AGENT_CLIENT_MANIFEST');
-  requireSingleExpression(source, CUSTOM_TUI_CONTRACT_EXPR, 'CUSTOM_TUI_CONTRACT');
   validateManifest(manifest, registryModule.AGENT_CLIENT_REGISTRY);
-  validateCustomTUIContract(customTUIContract);
 
   return source
     .replace(
@@ -168,10 +147,6 @@ async function buildInlineContent(outputDir) {
     .replace(
       AGENT_CLIENT_MANIFEST_EXPR,
       () => `const AGENT_CLIENT_MANIFEST = ${JSON.stringify(manifest, null, 2)};`
-    )
-    .replace(
-      CUSTOM_TUI_CONTRACT_EXPR,
-      () => `const CUSTOM_TUI_CONTRACT = ${JSON.stringify(customTUIContract, null, 2)};`
     )
     .replace(
       "from '../.agents/scripts/lib/agent-infra-package.js'",

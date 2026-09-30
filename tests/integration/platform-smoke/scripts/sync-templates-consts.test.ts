@@ -10,25 +10,13 @@ import defaults from "../../../../lib/defaults.json" with { type: "json" };
 import {
   createAgentClientManifest
 } from "../../../../lib/agent-clients/registry.ts";
-import {
-  CUSTOM_TUI_CONTRACT
-} from "../../../../lib/agent-clients/custom-tuis.ts";
 
 function readGeneratedManifest(target: string) {
   const generated = fs.readFileSync(filePath(target), "utf8");
   const match = generated.match(
-    /const AGENT_CLIENT_MANIFEST = (\[[\s\S]*?\n\]);\nconst CUSTOM_TUI_CONTRACT/
+    /const AGENT_CLIENT_MANIFEST = (\[[\s\S]*?\n\]);\n\/\/ Add a new identifier/
   );
   assert.ok(match, `expected generated manifest in ${target}`);
-  return JSON.parse(match[1]!);
-}
-
-function readGeneratedCustomTUIContract(target: string) {
-  const generated = fs.readFileSync(filePath(target), "utf8");
-  const match = generated.match(
-    /const CUSTOM_TUI_CONTRACT = (\{[\s\S]*?\n\});\n\/\/ Add a new identifier/
-  );
-  assert.ok(match, `expected generated custom TUI contract in ${target}`);
   return JSON.parse(match[1]!);
 }
 
@@ -36,10 +24,6 @@ test("src/sync-templates.js has one Agent Client manifest build placeholder", ()
   const src = fs.readFileSync(filePath("src/sync-templates.js"), "utf8");
   assert.equal(
     src.match(/const AGENT_CLIENT_MANIFEST = JSON\.parse\('__AGENT_CLIENT_MANIFEST__'\);/g)?.length,
-    1
-  );
-  assert.equal(
-    src.match(/const CUSTOM_TUI_CONTRACT = JSON\.parse\('__CUSTOM_TUI_CONTRACT__'\);/g)?.length,
     1
   );
 });
@@ -53,7 +37,6 @@ test("generated standalone scripts project the Registry manifest", () => {
 
   for (const target of targets) {
     assert.deepEqual(readGeneratedManifest(target), expected);
-    assert.deepEqual(readGeneratedCustomTUIContract(target), CUSTOM_TUI_CONTRACT);
   }
 });
 
@@ -85,7 +68,6 @@ test("inline build staging leaves existing targets untouched when preparation fa
         "  fs.readFileSync(new URL('../lib/defaults.json', import.meta.url), 'utf8')",
         ");",
         "const AGENT_CLIENT_MANIFEST = JSON.parse('__AGENT_CLIENT_MANIFEST__');",
-        "const CUSTOM_TUI_CONTRACT = JSON.parse('__CUSTOM_TUI_CONTRACT__');",
         ""
       ].join("\n")
     );
@@ -101,11 +83,6 @@ test("inline build staging leaves existing targets untouched when preparation fa
         ""
       ].join("\n")
     );
-    write(
-      "dist/lib/agent-clients/custom-tuis.js",
-      "export const CUSTOM_TUI_CONTRACT = { requiredFields: ['name', 'dir', 'invoke'], allowedPlaceholders: ['skillName', 'projectName'] };\n"
-    );
-
     const firstTarget = path.join(
       root,
       "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js"

@@ -47,22 +47,6 @@ type SyncTemplatesReport = {
       updated: string[];
       unchanged: string[];
     };
-    customTUIs: {
-      skipped: Array<{
-        index: number;
-        name: string;
-        dir: string;
-        reason: string;
-      }>;
-      skippedRefs: Array<{
-        index: number;
-        name: string;
-        dir: string;
-        file: string;
-        skill: string;
-        reason: string;
-      }>;
-    };
   };
 };
 type SyncTemplatesModule = {

@@ -29,7 +29,6 @@ const DEFAULTS = JSON.parse(
 );
 
 const AGENT_CLIENT_MANIFEST = JSON.parse('__AGENT_CLIENT_MANIFEST__');
-const CUSTOM_TUI_CONTRACT = JSON.parse('__CUSTOM_TUI_CONTRACT__');
 // Add a new identifier here only after shipping matching .{platform}. template variants.
 const KNOWN_PLATFORMS = new Set(['github', 'none']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
@@ -238,10 +237,6 @@ function trustedBaseline(value) {
   return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value) ? value : null;
 }
 
-function normDir(p) {
-  return norm(p).replace(/^\.\//, '').replace(/\/+$/, '');
-}
-
 function isInsideProject(projectRoot, relativePath) {
   if (typeof relativePath !== 'string' || relativePath.trim() === '' || path.isAbsolute(relativePath)) {
     return false;
@@ -399,14 +394,6 @@ function isCustomProtected(targetPath, customSkills, customCommandTargets) {
   return customSkills.some(({ dirName }) => (
     normalized.startsWith(`.agents/skills/${dirName}/`)
   )) || customCommandTargets.has(normalized);
-}
-
-function recordCustomTUISkipped(report, entry) {
-  report?.custom?.customTUIs?.skipped?.push(entry);
-}
-
-function recordCustomTUISkippedRef(report, entry) {
-  report?.custom?.customTUIs?.skippedRefs?.push(entry);
 }
 
 function expandHome(inputPath) {
@@ -650,204 +637,6 @@ function generateAgentClientCommand(skill, lang, descriptor) {
   return `${lines.join('\n')}\n`;
 }
 
-function validateCustomTUIs(projectRoot, customTUIs, report) {
-  if (customTUIs === undefined) return [];
-  if (!Array.isArray(customTUIs)) {
-    recordCustomTUISkipped(report, {
-      index: -1,
-      name: '',
-      dir: '',
-      reason: 'customTUIs must be an array'
-    });
-    return [];
-  }
-  const tools = customTUIs;
-  return tools
-    .map((tool, index) => {
-      if (
-        typeof tool !== 'object'
-        || tool === null
-        || Array.isArray(tool)
-      ) {
-        recordCustomTUISkipped(report, {
-          index,
-          name: '',
-          dir: '',
-          reason: 'invalid custom TUI'
-        });
-        return null;
-      }
-
-      for (const field of CUSTOM_TUI_CONTRACT.requiredFields) {
-        if (
-          typeof tool[field] !== 'string'
-          || tool[field].trim() === ''
-          || /[\r\n]/.test(tool[field])
-        ) {
-          recordCustomTUISkipped(report, {
-            index,
-            name: String(tool.name || ''),
-            dir: String(tool.dir || ''),
-            reason: `invalid ${field}`
-          });
-          return null;
-        }
-      }
-
-      if (typeof tool?.dir !== 'string' || tool.dir.trim() === '') {
-        recordCustomTUISkipped(report, {
-          index,
-          name: String(tool?.name || ''),
-          dir: String(tool?.dir || ''),
-          reason: 'invalid dir'
-        });
-        return null;
-      }
-
-      if (tool.dir.includes('\\')) {
-        recordCustomTUISkipped(report, {
-          index,
-          name: tool.name,
-          dir: tool.dir,
-          reason: 'dir must use POSIX separators'
-        });
-        return null;
-      }
-
-      if (!isInsideProject(projectRoot, tool.dir)) {
-        recordCustomTUISkipped(report, {
-          index,
-          name: String(tool?.name || ''),
-          dir: tool.dir,
-          reason: 'dir must be a relative path inside the project root'
-        });
-        return null;
-      }
-
-      const placeholders = [...tool.invoke.matchAll(/\$\{([^}]+)\}/g)]
-        .map((match) => match[1]);
-      if (
-        !placeholders.includes('skillName')
-        || placeholders.some((placeholder) =>
-          !CUSTOM_TUI_CONTRACT.allowedPlaceholders.includes(placeholder)
-        )
-        || tool.invoke
-          .replaceAll('${skillName}', '')
-          .replaceAll('${projectName}', '')
-          .includes('${')
-      ) {
-        recordCustomTUISkipped(report, {
-          index,
-          name: tool.name,
-          dir: tool.dir,
-          reason: 'invalid invoke placeholders'
-        });
-        return null;
-      }
-
-      return { ...tool, index, dir: normDir(tool.dir) };
-    })
-    .filter(Boolean);
-}
-
-function customTUITargetPath(tool, refFile, refSkillName, skillName) {
-  const targetFile = refFile.includes(refSkillName)
-    ? refFile.replaceAll(refSkillName, skillName)
-    : `${skillName}${path.extname(refFile)}`;
-  return norm(path.join(tool.dir, targetFile));
-}
-
-function findCustomTUIReference(projectRoot, tool, templateSkillNames, report, logSkipped = false) {
-  const cmdDir = path.join(projectRoot, tool.dir);
-  if (!fs.existsSync(cmdDir) || !fs.statSync(cmdDir).isDirectory()) {
-    if (logSkipped) {
-      recordCustomTUISkipped(report, {
-        index: tool.index,
-        name: String(tool.name || ''),
-        dir: tool.dir,
-        reason: 'directory not found'
-      });
-    }
-    return null;
-  }
-
-  const cmdFiles = fs.readdirSync(cmdDir)
-    .filter((file) => fs.statSync(path.join(cmdDir, file)).isFile())
-    .sort((left, right) => left.localeCompare(right));
-  if (cmdFiles.length === 0) {
-    if (logSkipped) {
-      recordCustomTUISkipped(report, {
-        index: tool.index,
-        name: String(tool.name || ''),
-        dir: tool.dir,
-        reason: 'no command files'
-      });
-    }
-    return null;
-  }
-
-  let sawKnownSkillReference = false;
-
-  for (const file of cmdFiles) {
-    const content = fs.readFileSync(path.join(cmdDir, file), 'utf8');
-    const match = content.match(/\.agents\/skills\/([^/]+)\/SKILL\.md/);
-    if (!match) continue;
-
-    const skillName = match[1];
-    if (!templateSkillNames.has(skillName)) continue;
-
-    const skillMd = path.join(projectRoot, '.agents/skills', skillName, 'SKILL.md');
-    if (!fs.existsSync(skillMd)) continue;
-
-    const meta = parseSkillFrontmatter(skillMd);
-    if (!meta.description) continue;
-
-    sawKnownSkillReference = true;
-    if (!content.includes(meta.description)) {
-      if (logSkipped) {
-        recordCustomTUISkippedRef(report, {
-          index: tool.index,
-          name: String(tool.name || ''),
-          dir: tool.dir,
-          file,
-          skill: skillName,
-          reason: 'description not found in reference command file'
-        });
-      }
-      continue;
-    }
-
-    return { content, file, skillName, skillDesc: meta.description };
-  }
-
-  if (logSkipped) {
-    recordCustomTUISkipped(report, {
-      index: tool.index,
-      name: String(tool.name || ''),
-      dir: tool.dir,
-      reason: sawKnownSkillReference
-        ? 'no reference command file with matching description'
-        : 'no usable reference command file'
-    });
-  }
-
-  return null;
-}
-
-function buildCustomTUICommandTargets(projectRoot, customSkills, customTUIs, templateSkillNames) {
-  const targets = new Set();
-  for (const tool of customTUIs) {
-    const ref = findCustomTUIReference(projectRoot, tool, templateSkillNames, null, false);
-    if (!ref) continue;
-
-    for (const skill of customSkills) {
-      targets.add(customTUITargetPath(tool, ref.file, ref.skillName, skill.dirName));
-    }
-  }
-
-  return targets;
-}
-
 function buildBuiltinCustomCommandTargets(customSkills, enabledTUIs) {
   return new Set(AGENT_CLIENT_MANIFEST.flatMap((adapter) => {
     if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) return [];
@@ -857,33 +646,10 @@ function buildBuiltinCustomCommandTargets(customSkills, enabledTUIs) {
   }));
 }
 
-function learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkillNames, report) {
-  const ref = findCustomTUIReference(projectRoot, tool, templateSkillNames, report, true);
-  if (!ref) return;
-
-  for (const skill of customSkills) {
-    const descToken = '__AGENT_INFRA_CUSTOM_SKILL_DESCRIPTION__';
-    const generated = ref.content
-      .replaceAll(ref.skillDesc, descToken)
-      .replaceAll(ref.skillName, skill.dirName)
-      .replaceAll(descToken, skill.description);
-
-    writeIfChanged(
-      projectRoot,
-      customTUITargetPath(tool, ref.file, ref.skillName, skill.dirName),
-      generated,
-      report.custom.commands
-    );
-  }
-}
-
 function generateCustomCommands(
-  projectRoot,
   customSkills,
   lang,
   report,
-  customTUIs,
-  templateSkillNames,
   enabledTUIs,
   managedWriter
 ) {
@@ -900,11 +666,6 @@ function generateCustomCommands(
         report.custom.commands
       );
     }
-  }
-
-  const tools = Array.isArray(customTUIs) ? customTUIs : [];
-  for (const tool of tools) {
-    learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkillNames, report);
   }
 }
 
@@ -1095,7 +856,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
     AGENT_CLIENT_IDS.filter((id) => enabledResolution.state[id].enabled)
   );
   materializeAgentClientConfig(cfg, enabledResolution);
-  const customTUIsConfig = Array.isArray(cfg.customTUIs) ? cfg.customTUIs : [];
   const vars = { project, org };
   const templateSkillNames = listTemplateSkillNames(templateRoot);
   const protectedCustomSkills = detectCustomSkills(projectRoot, templateSkillNames);
@@ -1182,24 +942,13 @@ function syncTemplates(projectRoot, templateRootOverride) {
       unchanged: [],
       removed: [],
       sourceErrors: [],
-      customTUIs: { skipped: [], skippedRefs: [] },
       commands: { generated: [], updated: [], unchanged: [] }
     },
     ejected: { created: [], skipped: [] },
     merged:  { pending: [] },
     configUpdated: false
   };
-  const customTUIs = validateCustomTUIs(projectRoot, customTUIsConfig, report);
-  const customTUICommandTargets = buildCustomTUICommandTargets(
-    projectRoot,
-    protectedCustomSkills,
-    customTUIs,
-    templateSkillNames
-  );
-  const customCommandTargets = new Set([
-    ...buildBuiltinCustomCommandTargets(protectedCustomSkills, enabledTUIs),
-    ...customTUICommandTargets
-  ]);
+  const customCommandTargets = buildBuiltinCustomCommandTargets(protectedCustomSkills, enabledTUIs);
 
   for (const category of ['managed', 'merged', 'ejected']) {
     const before = currentRegistry[category];
@@ -1688,12 +1437,9 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const customSkills = detectCustomSkills(projectRoot, templateSkillNames);
   report.custom.detected = customSkills.map((skill) => skill.dirName);
   generateCustomCommands(
-    projectRoot,
     customSkills,
     lang,
     report,
-    customTUIs,
-    templateSkillNames,
     enabledTUIs,
     writeProtectedManaged
   );
