@@ -2,11 +2,11 @@
 
 [← 返回 README](../../README.zh-CN.md) · [English](../en/custom-tui.md)
 
-当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTUIs` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义 TUI 目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
+当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTUIs` 数组。该配置用于让 agent-infra 为该 TUI 输出正确的下一步命令。
 
 | 字段 | 必填 | 含义 |
 |------|------|------|
-| `name` | 是 | 报告和下一步提示中展示的工具名称，例如 `<your-tui-name>`。 |
+| `name` | 是 | 下一步提示中展示的工具名称，例如 `<your-tui-name>`。 |
 | `dir` | 是 | 相对项目根目录的命令目录，例如 `.<your-tui>/commands`。路径必须位于项目根目录内。 |
 | `invoke` | 是 | 面向用户展示的命令模板，用于生成下一步提示。 |
 
@@ -46,4 +46,8 @@
 }
 ```
 
-`customTUIs` 每个条目对应一个自定义 TUI。若希望 `update-agent-infra` 为自定义 skill 生成命令文件，请在 `dir` 中保留至少一个引用内置 skill 路径的既有命令文件，例如 `.agents/skills/analyze-task/SKILL.md`；agent-infra 会以该文件作为格式参考。
+`customTUIs` 每个条目对应一个自定义 TUI。`dir` 字段仍属于该工具的配置；`update-agent-infra` 不再读取其中的命令文件来为项目自定义 skill 创建命令。
+
+### 既有命令文件
+
+位于 `files.managed` 目录之外的文件不会由 managed 文件清理流程处理。managed 目录中的陈旧文件按该目录的常规规则处理：仍在预期列表中的文件，以及标记为 merged 或 ejected 的文件会保留；其他陈旧文件可能被删除。对于当前由启用的内建客户端管理的目录，只有内容与可信基线一致的陈旧文件才会被删除；来源未知或经过用户修改的文件在该分支会受到保护。回退 updater 不会恢复已删除文件；恢复时请使用项目版本控制或备份。
