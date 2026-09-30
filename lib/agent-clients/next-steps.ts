@@ -15,7 +15,7 @@ type NextStepCommand = Readonly<{
 type RenderNextStepsInput = Readonly<{
   projectName: string;
   state: AgentClientState;
-  customTUIs: readonly CustomTUI[];
+  customTools: readonly CustomTUI[];
   skillName: string;
   taskRef?: string;
   version?: string;
@@ -69,7 +69,7 @@ function renderNextStepCommands(
       )
     })
   );
-  const custom = input.customTUIs.map(
+  const custom = input.customTools.map(
     (tool): NextStepCommand => Object.freeze({
       source: 'custom',
       displayName: tool.name,

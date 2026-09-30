@@ -216,11 +216,11 @@ function planAgentClientReconciliation(input: Readonly<{
     delete (nextConfig.files as Record<string, unknown>).managedBaselines;
   }
 
-  const custom = normalizeCustomTUIs(input.projectRoot, input.config.customTUIs ?? []);
+  const custom = normalizeCustomTUIs(input.projectRoot, input.config);
   const nextSteps = renderNextStepCommands({
     projectName,
     state: desired,
-    customTUIs: custom.items,
+    customTools: custom.items,
     skillName: 'update-agent-infra'
   });
   const actionableSeed = seedOperations.some((operation) =>

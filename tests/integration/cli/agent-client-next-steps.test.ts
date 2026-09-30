@@ -37,9 +37,18 @@ test('agent-client next-steps renders enabled built-ins and custom TUIs in text 
   const root = fixture({
     project: 'demo',
     agentClients: canonical(['codex', 'antigravity-cli']),
-    customTUIs: [
-      { name: 'Acme', dir: '.acme/commands', invoke: 'acme ${projectName}:${skillName}' }
-    ]
+    sandbox: {
+      tools: {
+        ids: ['acme'],
+        definitions: {
+          acme: {
+            name: 'Acme',
+            dir: '.acme/commands',
+            invoke: 'acme ${projectName}:${skillName}'
+          }
+        }
+      }
+    }
   });
 
   const text = run(root, ['--skill', 'review-code', '--task-ref', '16']);
@@ -86,7 +95,7 @@ test('agent-client next-steps fails closed for legacy selection and preserves em
   assert.equal(legacyResult.status, 1);
   assert.equal(JSON.parse(legacyResult.stdout).error.code, 'MISSING_AGENT_CLIENT');
 
-  const empty = fixture({ project: 'demo', agentClients: canonical([]), customTUIs: [] });
+  const empty = fixture({ project: 'demo', agentClients: canonical([]), sandbox: { tools: { ids: [], definitions: {} } } });
   const emptyResult = run(empty, ['--skill', 'commit']);
   assert.equal(emptyResult.status, 0, emptyResult.stderr);
   assert.equal(emptyResult.stdout, '');
@@ -96,16 +105,42 @@ test('agent-client next-steps reports custom diagnostics without hiding valid co
   const root = fixture({
     project: 'demo',
     agentClients: canonical(['codex']),
-    customTUIs: [
-      { name: 'Bad', dir: '../outside', invoke: 'bad ${skillName}' },
-      { name: 'Good', dir: '.good', invoke: 'good ${skillName}' }
-    ]
+    sandbox: {
+      tools: {
+        ids: ['bad', 'good'],
+        definitions: {
+          bad: { name: 'Bad', dir: '../outside', invoke: 'bad ${skillName}' },
+          good: { name: 'Good', dir: '.good', invoke: 'good ${skillName}' }
+        }
+      }
+    }
   });
   const result = run(root, ['--skill', 'commit']);
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '  - Codex: $commit\n  - Good: good commit\n');
-  assert.match(result.stderr, /INVALID_CUSTOM_TUI at customTUIs\[0\]\.dir/);
+  assert.match(result.stderr, /INVALID_CUSTOM_TUI at sandbox\.tools\.definitions\.bad\.dir/);
+});
+
+test('agent-client next-steps includes selected custom tools when built-in clients are disabled', () => {
+  const root = fixture({
+    project: 'demo',
+    agentClients: canonical([]),
+    sandbox: {
+      tools: {
+        ids: ['beta', 'acme'],
+        definitions: {
+          acme: { name: 'Acme', dir: '.acme', invoke: 'acme ${skillName}' },
+          beta: { name: 'Beta', dir: '.beta', invoke: 'beta ${skillName}' },
+          unused: { name: 'Unused', dir: '.unused', invoke: 'unused ${skillName}' }
+        }
+      }
+    }
+  });
+  const result = run(root, ['--skill', 'plan-task', '--task-ref', '03']);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '  - Beta: beta plan-task --task 03\n  - Acme: acme plan-task --task 03\n');
 });
 
 test('agent-client next-steps fails closed for invalid config and arguments', () => {

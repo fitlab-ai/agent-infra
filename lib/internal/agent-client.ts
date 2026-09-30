@@ -148,11 +148,11 @@ function agentClient(args: string[] = []): void {
 
   try {
     const clients = normalizeAgentClients(config);
-    const custom = normalizeCustomTUIs(process.cwd(), config.customTUIs ?? []);
+    const custom = normalizeCustomTUIs(process.cwd(), config);
     const commands = renderNextStepCommands({
       projectName: String(config.project ?? ''),
       state: clients.state,
-      customTUIs: custom.items,
+      customTools: custom.items,
       skillName: parsed.skillName,
       ...(parsed.taskRef ? { taskRef: parsed.taskRef } : {}),
       ...(parsed.version ? { version: parsed.version } : {})

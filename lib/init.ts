@@ -314,8 +314,8 @@ async function cmdInit(): Promise<void> {
   console.log('    npm install -g @fitlab-ai/agent-infra');
   console.log('');
   if (workflowPlan.nextSteps.length === 0) {
-    console.log('  No Agent Client project integration enabled.');
-    console.log(`  Configure "customTUIs" in ${configPath} before running update-agent-infra.`);
+    console.log('  No Agent Client or sandbox custom tool integration enabled.');
+    console.log(`  Configure a custom tool in "sandbox.tools.definitions" and select it in "sandbox.tools.ids" in ${configPath}.`);
     console.log('');
   } else {
     console.log('  Next step: open this project in any AI TUI and run:');

@@ -27,7 +27,6 @@ type UpdateConfig = {
   labels?: Record<string, unknown>;
   files?: Partial<FileRegistry>;
   agentClients?: unknown;
-  customTUIs?: unknown;
 };
 
 type Defaults = {
@@ -189,8 +188,8 @@ async function cmdSync(): Promise<void> {
   ok('Seed files synced successfully!');
   console.log('');
   if (workflowPlan.nextSteps.length === 0) {
-    console.log('  No Agent Client project integration enabled.');
-    console.log(`  Configure "customTUIs" in ${CONFIG_PATH} if needed.`);
+    console.log('  No Agent Client or sandbox custom tool integration enabled.');
+    console.log(`  Configure a custom tool in "sandbox.tools.definitions" and select it in "sandbox.tools.ids" in ${CONFIG_PATH}.`);
     console.log('');
   } else {
     console.log('  Next step: run the full update in your AI TUI:');

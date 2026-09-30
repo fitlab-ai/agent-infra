@@ -637,6 +637,232 @@ function generateAgentClientCommand(skill, lang, descriptor) {
   return `${lines.join('\n')}\n`;
 }
 
+function validateCustomTUIs(projectRoot, definitions, selectedIds, report) {
+  if (!Array.isArray(selectedIds)) {
+    recordCustomTUISkipped(report, {
+      index: -1,
+      name: '',
+      dir: '',
+      reason: 'sandbox.tools.ids must be an array'
+    });
+    return [];
+  }
+  if (typeof definitions !== 'object' || definitions === null || Array.isArray(definitions)) {
+    return [];
+  }
+  return selectedIds
+    .map((id, index) => {
+      if (typeof id !== 'string') {
+        recordCustomTUISkipped(report, {
+          index,
+          name: '',
+          dir: '',
+          reason: 'invalid sandbox tool id'
+        });
+        return null;
+      }
+      const definition = definitions[id];
+      if (typeof definition !== 'object' || definition === null || Array.isArray(definition)) return null;
+      if (definition.dir === undefined && definition.invoke === undefined) return null;
+      const tool = { ...definition, name: definition.name ?? id };
+      if (
+        typeof tool !== 'object'
+        || tool === null
+        || Array.isArray(tool)
+      ) {
+        recordCustomTUISkipped(report, {
+          index,
+          name: '',
+          dir: '',
+          reason: 'invalid custom TUI'
+        });
+        return null;
+      }
+
+      for (const field of CUSTOM_TUI_CONTRACT.requiredFields) {
+        if (
+          typeof tool[field] !== 'string'
+          || tool[field].trim() === ''
+          || /[\r\n]/.test(tool[field])
+        ) {
+          recordCustomTUISkipped(report, {
+            index,
+            name: String(tool.name || ''),
+            dir: String(tool.dir || ''),
+            reason: `invalid ${field}`
+          });
+          return null;
+        }
+      }
+
+      if (tool.name !== undefined && (
+        typeof tool.name !== 'string'
+        || tool.name.trim() === ''
+        || /[\r\n]/.test(tool.name)
+      )) {
+        recordCustomTUISkipped(report, {
+          index,
+          name: String(tool.name || ''),
+          dir: String(tool.dir || ''),
+          reason: 'invalid name'
+        });
+        return null;
+      }
+
+      if (typeof tool?.dir !== 'string' || tool.dir.trim() === '') {
+        recordCustomTUISkipped(report, {
+          index,
+          name: String(tool?.name || ''),
+          dir: String(tool?.dir || ''),
+          reason: 'invalid dir'
+        });
+        return null;
+      }
+
+      if (tool.dir.includes('\\')) {
+        recordCustomTUISkipped(report, {
+          index,
+          name: tool.name,
+          dir: tool.dir,
+          reason: 'dir must use POSIX separators'
+        });
+        return null;
+      }
+
+      if (!isInsideProject(projectRoot, tool.dir)) {
+        recordCustomTUISkipped(report, {
+          index,
+          name: String(tool?.name || ''),
+          dir: tool.dir,
+          reason: 'dir must be a relative path inside the project root'
+        });
+        return null;
+      }
+
+      const placeholders = [...tool.invoke.matchAll(/\$\{([^}]+)\}/g)]
+        .map((match) => match[1]);
+      if (
+        !placeholders.includes('skillName')
+        || placeholders.some((placeholder) =>
+          !CUSTOM_TUI_CONTRACT.allowedPlaceholders.includes(placeholder)
+        )
+        || tool.invoke
+          .replaceAll('${skillName}', '')
+          .replaceAll('${projectName}', '')
+          .includes('${')
+      ) {
+        recordCustomTUISkipped(report, {
+          index,
+          name: tool.name,
+          dir: tool.dir,
+          reason: 'invalid invoke placeholders'
+        });
+        return null;
+      }
+
+      return { ...tool, index, dir: normDir(tool.dir) };
+    })
+    .filter(Boolean);
+}
+
+function customTUITargetPath(tool, refFile, refSkillName, skillName) {
+  const targetFile = refFile.includes(refSkillName)
+    ? refFile.replaceAll(refSkillName, skillName)
+    : `${skillName}${path.extname(refFile)}`;
+  return norm(path.join(tool.dir, targetFile));
+}
+
+function findCustomTUIReference(projectRoot, tool, templateSkillNames, report, logSkipped = false) {
+  const cmdDir = path.join(projectRoot, tool.dir);
+  if (!fs.existsSync(cmdDir) || !fs.statSync(cmdDir).isDirectory()) {
+    if (logSkipped) {
+      recordCustomTUISkipped(report, {
+        index: tool.index,
+        name: String(tool.name || ''),
+        dir: tool.dir,
+        reason: 'directory not found'
+      });
+    }
+    return null;
+  }
+
+  const cmdFiles = fs.readdirSync(cmdDir)
+    .filter((file) => fs.statSync(path.join(cmdDir, file)).isFile())
+    .sort((left, right) => left.localeCompare(right));
+  if (cmdFiles.length === 0) {
+    if (logSkipped) {
+      recordCustomTUISkipped(report, {
+        index: tool.index,
+        name: String(tool.name || ''),
+        dir: tool.dir,
+        reason: 'no command files'
+      });
+    }
+    return null;
+  }
+
+  let sawKnownSkillReference = false;
+
+  for (const file of cmdFiles) {
+    const content = fs.readFileSync(path.join(cmdDir, file), 'utf8');
+    const match = content.match(/\.agents\/skills\/([^/]+)\/SKILL\.md/);
+    if (!match) continue;
+
+    const skillName = match[1];
+    if (!templateSkillNames.has(skillName)) continue;
+
+    const skillMd = path.join(projectRoot, '.agents/skills', skillName, 'SKILL.md');
+    if (!fs.existsSync(skillMd)) continue;
+
+    const meta = parseSkillFrontmatter(skillMd);
+    if (!meta.description) continue;
+
+    sawKnownSkillReference = true;
+    if (!content.includes(meta.description)) {
+      if (logSkipped) {
+        recordCustomTUISkippedRef(report, {
+          index: tool.index,
+          name: String(tool.name || ''),
+          dir: tool.dir,
+          file,
+          skill: skillName,
+          reason: 'description not found in reference command file'
+        });
+      }
+      continue;
+    }
+
+    return { content, file, skillName, skillDesc: meta.description };
+  }
+
+  if (logSkipped) {
+    recordCustomTUISkipped(report, {
+      index: tool.index,
+      name: String(tool.name || ''),
+      dir: tool.dir,
+      reason: sawKnownSkillReference
+        ? 'no reference command file with matching description'
+        : 'no usable reference command file'
+    });
+  }
+
+  return null;
+}
+
+function buildCustomTUICommandTargets(projectRoot, customSkills, customTUIs, templateSkillNames) {
+  const targets = new Set();
+  for (const tool of customTUIs) {
+    const ref = findCustomTUIReference(projectRoot, tool, templateSkillNames, null, false);
+    if (!ref) continue;
+
+    for (const skill of customSkills) {
+      targets.add(customTUITargetPath(tool, ref.file, ref.skillName, skill.dirName));
+    }
+  }
+
+  return targets;
+}
+
 function buildBuiltinCustomCommandTargets(customSkills, enabledTUIs) {
   return new Set(AGENT_CLIENT_MANIFEST.flatMap((adapter) => {
     if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) return [];
@@ -856,6 +1082,12 @@ function syncTemplates(projectRoot, templateRootOverride) {
     AGENT_CLIENT_IDS.filter((id) => enabledResolution.state[id].enabled)
   );
   materializeAgentClientConfig(cfg, enabledResolution);
+  const sandboxConfig = cfg.sandbox && typeof cfg.sandbox === 'object' && !Array.isArray(cfg.sandbox)
+    ? cfg.sandbox
+    : {};
+  const sandboxToolsConfig = sandboxConfig.tools && typeof sandboxConfig.tools === 'object' && !Array.isArray(sandboxConfig.tools)
+    ? sandboxConfig.tools
+    : {};
   const vars = { project, org };
   const templateSkillNames = listTemplateSkillNames(templateRoot);
   const protectedCustomSkills = detectCustomSkills(projectRoot, templateSkillNames);
@@ -948,7 +1180,22 @@ function syncTemplates(projectRoot, templateRootOverride) {
     merged:  { pending: [] },
     configUpdated: false
   };
-  const customCommandTargets = buildBuiltinCustomCommandTargets(protectedCustomSkills, enabledTUIs);
+  const customTUIs = validateCustomTUIs(
+    projectRoot,
+    sandboxToolsConfig.definitions ?? {},
+    sandboxToolsConfig.ids ?? [],
+    report
+  );
+  const customTUICommandTargets = buildCustomTUICommandTargets(
+    projectRoot,
+    protectedCustomSkills,
+    customTUIs,
+    templateSkillNames
+  );
+  const customCommandTargets = new Set([
+    ...buildBuiltinCustomCommandTargets(protectedCustomSkills, enabledTUIs),
+    ...customTUICommandTargets
+  ]);
 
   for (const category of ['managed', 'merged', 'ejected']) {
     const before = currentRegistry[category];

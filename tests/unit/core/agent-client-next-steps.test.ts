@@ -36,22 +36,13 @@ test('shared invocation renderer expands adapter placeholders and appends argume
   );
 });
 
-test('custom TUI contract is JSON-safe and normalization preserves valid input order', () => {
+test('custom tool command contract is JSON-safe and normalization preserves selected order', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(CUSTOM_TUI_CONTRACT)), CUSTOM_TUI_CONTRACT);
 
-  const input = [
-    {
-      name: 'Acme',
-      dir: './.acme/commands',
-      invoke: 'acme ${projectName} ${skillName}',
-      extra: true
-    },
-    {
-      name: 'Beta',
-      dir: '.beta/prompts',
-      invoke: 'beta ${skillName}'
-    }
-  ];
+  const input = { sandbox: { tools: { ids: ['acme', 'beta'], definitions: {
+    acme: { name: 'Acme', dir: './.acme/commands', invoke: 'acme ${projectName} ${skillName}', extra: true },
+    beta: { dir: '.beta/prompts', invoke: 'beta ${skillName}' }
+  } } } };
   const before = structuredClone(input);
   const result = normalizeCustomTUIs('/repo', input);
 
@@ -63,7 +54,7 @@ test('custom TUI contract is JSON-safe and normalization preserves valid input o
         invocation: 'acme ${projectName} ${skillName}'
       },
       {
-        name: 'Beta',
+        name: 'beta',
         dir: '.beta/prompts',
         invocation: 'beta ${skillName}'
       }
@@ -79,43 +70,42 @@ test('custom TUI contract is JSON-safe and normalization preserves valid input o
 test('custom TUI normalization skips invalid entries with stable paths', () => {
   assert.deepEqual(normalizeCustomTUIs('/repo', null), {
     items: [],
-    diagnostics: [{ code: 'INVALID_CUSTOM_TUIS', path: 'customTUIs' }]
+    diagnostics: []
   });
 
-  const result = normalizeCustomTUIs('/repo', [
-    null,
-    { name: '', dir: '.x', invoke: 'x ${skillName}' },
-    { name: 'X', dir: '../outside', invoke: 'x ${skillName}' },
-    { name: 'X', dir: '.x\\commands', invoke: 'x ${skillName}' },
-    { name: 'X', dir: '.x', invoke: 'x' },
-    { name: 'X', dir: '.x', invoke: 'x ${unknown} ${skillName}' },
-    { name: 'X', dir: '.x', invoke: 'x ${skillName} ${unknown' },
-    { name: 'X\nY', dir: '.x', invoke: 'x ${skillName}' },
-    { name: 'X', dir: '.x', invoke: 'x ${skillName}\nnext' }
-  ]);
+  const ids = ['empty-name', 'escape', 'backslash', 'missing-skill', 'unknown-placeholder', 'malformed-placeholder', 'newline-name', 'newline-invoke'];
+  const result = normalizeCustomTUIs('/repo', { sandbox: { tools: { ids, definitions: {
+    'empty-name': { name: '', dir: '.x', invoke: 'x ${skillName}' },
+    escape: { name: 'X', dir: '../outside', invoke: 'x ${skillName}' },
+    backslash: { name: 'X', dir: '.x\\commands', invoke: 'x ${skillName}' },
+    'missing-skill': { name: 'X', dir: '.x', invoke: 'x' },
+    'unknown-placeholder': { name: 'X', dir: '.x', invoke: 'x ${unknown} ${skillName}' },
+    'malformed-placeholder': { name: 'X', dir: '.x', invoke: 'x ${skillName} ${unknown' },
+    'newline-name': { name: 'X\nY', dir: '.x', invoke: 'x ${skillName}' },
+    'newline-invoke': { name: 'X', dir: '.x', invoke: 'x ${skillName}\nnext' }
+  } } } });
 
   assert.deepEqual(result.items, []);
   assert.deepEqual(result.diagnostics, [
-    { code: 'INVALID_CUSTOM_TUI', path: 'customTUIs[0]' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'customTUIs[1].name' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'customTUIs[2].dir' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'customTUIs[3].dir' },
-    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'customTUIs[4].invoke' },
-    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'customTUIs[5].invoke' },
-    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'customTUIs[6].invoke' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'customTUIs[7].name' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'customTUIs[8].invoke' }
+    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.empty-name.name' },
+    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.escape.dir' },
+    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.backslash.dir' },
+    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.missing-skill.invoke' },
+    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.unknown-placeholder.invoke' },
+    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.malformed-placeholder.invoke' },
+    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.newline-name.name' },
+    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.newline-invoke.invoke' }
   ]);
 });
 
 test('next-step renderer uses Registry order, appends custom entries, and freezes output', () => {
-  const custom = normalizeCustomTUIs('/repo', [
-    { name: 'Acme', dir: '.acme', invoke: 'acme ${projectName}:${skillName}' }
-  ]).items;
+  const custom = normalizeCustomTUIs('/repo', { sandbox: { tools: { ids: ['acme'], definitions: {
+    acme: { name: 'Acme', dir: '.acme', invoke: 'acme ${projectName}:${skillName}' }
+  } } } }).items;
   const result = renderNextStepCommands({
     projectName: 'demo',
     state: stateFor(['opencode', 'codex']),
-    customTUIs: custom,
+    customTools: custom,
     skillName: 'review-code',
     taskRef: '16'
   });
@@ -144,7 +134,7 @@ test('next-step renderer uses Registry order, appends custom entries, and freeze
   assert.deepEqual(renderNextStepCommands({
     projectName: 'demo',
     state: stateFor([]),
-    customTUIs: [],
+    customTools: [],
     skillName: 'commit'
   }), []);
 });
@@ -153,7 +143,7 @@ test('next-step renderer preserves positional arguments for non-task versioned s
   const result = renderNextStepCommands({
     projectName: 'demo',
     state: stateFor(['codex']),
-    customTUIs: [],
+    customTools: [],
     skillName: 'post-release',
     taskRef: '16',
     version: '1.2.3-rc.1'
@@ -166,7 +156,7 @@ test('next-step renderer emits an explicit task flag for task-scoped skills', ()
   const result = renderNextStepCommands({
     projectName: 'demo',
     state: stateFor(['codex']),
-    customTUIs: [],
+    customTools: [],
     skillName: 'commit',
     taskRef: '16'
   });
@@ -178,7 +168,7 @@ test('next-step renderer validates names and task refs without evaluating invoca
   const base = {
     projectName: 'demo',
     state: stateFor(['claude-code']),
-    customTUIs: [],
+    customTools: [],
     skillName: 'review-plan'
   };
 

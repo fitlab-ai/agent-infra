@@ -22,7 +22,7 @@ type NormalizeCustomTUIsResult = Readonly<{
 }>;
 
 const CUSTOM_TUI_CONTRACT = Object.freeze({
-  requiredFields: Object.freeze(['name', 'dir', 'invoke']),
+  requiredFields: Object.freeze(['dir', 'invoke']),
   allowedPlaceholders: Object.freeze(['skillName', 'projectName'])
 });
 
@@ -82,30 +82,55 @@ function hasValidPlaceholders(invocation: string): boolean {
 
 function normalizeCustomTUIs(
   projectRoot: string,
-  input: unknown
+  config: unknown
 ): NormalizeCustomTUIsResult {
   const items: CustomTUI[] = [];
   const diagnostics: CustomTUIDiagnostic[] = [];
 
-  if (!Array.isArray(input)) {
+  const root = isRecord(config) ? config : {};
+  const sandbox = isRecord(root.sandbox) ? root.sandbox : {};
+  const sandboxTools = isRecord(sandbox.tools) ? sandbox.tools : { ids: ['agent-infra'] };
+  const definitions = sandboxTools.definitions ?? {};
+  const selectedIds = sandboxTools.ids;
+
+  if (!Array.isArray(selectedIds)) {
     return Object.freeze({
       items: Object.freeze([]),
       diagnostics: Object.freeze([
         Object.freeze({
           code: 'INVALID_CUSTOM_TUIS' as const,
-          path: 'customTUIs'
+          path: 'sandbox.tools.ids'
         })
       ])
     });
   }
 
-  for (const [index, candidate] of input.entries()) {
-    const base = `customTUIs[${index}]`;
-    if (!isRecord(candidate)) {
-      diagnostics.push({ code: 'INVALID_CUSTOM_TUI', path: base });
+  if (!isRecord(definitions)) {
+    return Object.freeze({
+      items: Object.freeze([]),
+      diagnostics: Object.freeze([
+        Object.freeze({
+          code: 'INVALID_CUSTOM_TUIS' as const,
+          path: 'sandbox.tools.definitions'
+        })
+      ])
+    });
+  }
+
+  for (const [index, id] of selectedIds.entries()) {
+    if (typeof id !== 'string') {
+      diagnostics.push({
+        code: 'INVALID_CUSTOM_TUI',
+        path: `sandbox.tools.ids[${index}]`
+      });
       continue;
     }
-    if (!isNonEmptySingleLine(candidate.name)) {
+    const candidate = definitions[id];
+    if (!isRecord(candidate)) continue;
+    if (candidate.dir === undefined && candidate.invoke === undefined) continue;
+    const base = `sandbox.tools.definitions.${id}`;
+    const name = candidate.name === undefined ? id : candidate.name;
+    if (!isNonEmptySingleLine(name)) {
       diagnostics.push({ code: 'INVALID_CUSTOM_TUI', path: `${base}.name` });
       continue;
     }
@@ -126,7 +151,7 @@ function normalizeCustomTUIs(
       continue;
     }
     items.push(Object.freeze({
-      name: candidate.name,
+      name,
       dir,
       invocation: candidate.invoke
     }));

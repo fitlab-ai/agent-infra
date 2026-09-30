@@ -118,6 +118,20 @@ function validateManifest(manifest, registry) {
   }
 }
 
+function validateCustomTUIContract(contract) {
+  const roundTripped = JSON.parse(JSON.stringify(contract));
+  if (
+    JSON.stringify(roundTripped) !== JSON.stringify(contract)
+    || !Array.isArray(contract?.requiredFields)
+    || !Array.isArray(contract?.allowedPlaceholders)
+    || JSON.stringify(contract.requiredFields) !== JSON.stringify(['dir', 'invoke'])
+    || JSON.stringify(contract.allowedPlaceholders) !== JSON.stringify(['skillName', 'projectName'])
+    || Object.keys(contract).sort().join(',') !== 'allowedPlaceholders,requiredFields'
+  ) {
+    throw new Error('Invalid custom TUI contract');
+  }
+}
+
 function compileRegistry(outputDir) {
   const tscPath = path.join(rootDir, 'node_modules', 'typescript', 'bin', 'tsc');
   execFileSync(

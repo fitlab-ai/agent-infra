@@ -202,6 +202,60 @@ test("loadConfig parses an id-keyed sandbox.tools definition and fills optional 
   }
 });
 
+test("loadConfig preserves paired custom tool command fields and rejects partial pairs", async () => {
+  const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tool-command-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    process.chdir(tmpDir);
+    writeAirc(tmpDir, {
+      project: "demo",
+      sandbox: {
+        tools: {
+          ids: ["my-tool"],
+          definitions: {
+            "my-tool": {
+              install: { type: "shell", cmd: SHELL_INSTALL_CMD },
+              dir: ".acme/commands",
+              invoke: "acme ${skillName} --project ${projectName}"
+            }
+          }
+        }
+      }
+    });
+
+    const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
+    assert.equal(config.customTools[0]?.dir, ".acme/commands");
+    assert.equal(config.customTools[0]?.invoke, "acme ${skillName} --project ${projectName}");
+
+    for (const commandFields of [{ dir: ".acme/commands" }, { invoke: "acme ${skillName}" }]) {
+      writeAirc(tmpDir, {
+        project: "demo",
+        sandbox: {
+          tools: {
+            ids: ["my-tool"],
+            definitions: {
+              "my-tool": {
+                install: { type: "shell", cmd: SHELL_INSTALL_CMD },
+                ...commandFields
+              }
+            }
+          }
+        }
+      });
+      assert.throws(
+        () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
+        /fields "dir" and "invoke" must be configured together/
+      );
+    }
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("loadConfig reports invalid sandbox.tools ids and definitions with precise paths", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tools-invalid-shape-"));

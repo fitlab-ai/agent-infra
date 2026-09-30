@@ -125,8 +125,8 @@ test("agent-infra sync with empty canonical state installs no built-in seeds", (
     assert.ok(!updated.files.managed.includes(".opencode/commands/"));
     assert.ok(!updated.files.managed.includes(".codex/hooks.json"));
     // Next-step hint points to customTUIs configuration.
-    assert.match(output, /No Agent Client project integration enabled/);
-    assert.match(output, /Configure "customTUIs"/);
+    assert.match(output, /No Agent Client or sandbox custom tool integration enabled/);
+    assert.match(output, /sandbox\.tools\.definitions/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
