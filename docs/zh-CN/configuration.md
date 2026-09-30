@@ -43,7 +43,6 @@
         "your-tui": {
           "name": "<your-tui-name>",
           "install": { "type": "npm", "cmd": "<your-cli-package>" },
-          "dir": ".<your-tui>/commands",
           "invoke": "<your-cli> ${skillName}"
         }
       }
@@ -80,8 +79,8 @@
 | `templates.sources` | 可选的外部模板源列表，按顺序应用。当前仅支持 `type: "local"`。 |
 | `skills` | 可选的自定义 skill 同步配置。 |
 | `skills.sources` | 可选的外部自定义 skill 源列表，按顺序应用。当前仅支持 `type: "local"`。 |
-| `sandbox.tools.ids` | 已选沙箱工具列表，顺序决定下一步提示中自定义工具的顺序。配置了有效 `dir` 和 `invoke` 的自定义工具会出现在生命周期下一步提示中。 |
-| `sandbox.tools.definitions` | 按工具 ID 保存的自定义沙箱工具定义；定义可包含命令目录和生命周期调用模板。 |
+| `sandbox.tools.ids` | 已选沙箱工具列表，顺序决定下一步提示中自定义工具的顺序。配置了有效 `invoke` 的自定义工具会出现在生命周期下一步提示中。 |
+| `sandbox.tools.definitions` | 按工具 ID 保存的自定义沙箱工具定义；配置 `invoke` 后，该工具会出现在下一步提示中。 |
 | `files` | 针对具体路径配置 `managed`、`merged`、`ejected` 三类更新策略。 |
 | `files.managedBaselines` | 工具维护的内建 guarded managed 文件 SHA-256 来源基线。请勿手工编辑；该映射用于安全三方更新 GitHub 生命周期 workflows。 |
 

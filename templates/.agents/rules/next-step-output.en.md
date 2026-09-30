@@ -33,7 +33,7 @@ agent-infra-internal agent-client next-steps \
 
 - Pass the next skill name for the already-selected scenario. Include `--task-ref` only when that command needs a task reference.
 - Include `--version` only for a versioned release command. It must start with a digit and satisfy `semver.valid(raw) === raw`; never pass an action, complete command, shell fragment, whitespace, or a `v` / `V` / `=` prefix.
-- The helper lists enabled built-in clients, followed by selected sandbox custom tools with valid `dir` and `invoke` fields in `sandbox.tools.ids` order.
+- The helper lists enabled built-in clients, followed by selected sandbox custom tools with a valid `invoke` field in `sandbox.tools.ids` order.
 - Insert non-empty stdout verbatim at `{next-step-commands}` below the current "Next steps" heading. When stdout is empty, omit the client command block while still rendering reminders, warnings, and `Completed at`.
 - If the helper writes stderr or exits non-zero, use the current skill's error path and stop; never fall back to a hard-coded client table.
 - A complex skill selects one scenario first and invokes the helper once for that scenario; it must not pre-render every branch.

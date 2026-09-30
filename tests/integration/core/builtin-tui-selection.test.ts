@@ -229,20 +229,12 @@ test("syncTemplates: Antigravity uses shared skills without client-owned project
   }
 });
 
-test("syncTemplates: independent customTUI dir is unaffected by disabled built-in TUI", async () => {
+test("syncTemplates leaves user-owned command files outside managed paths untouched", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-custom-indep-"));
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, {
-      agentClients: canonicalAgentClients(["claude-code"]),
-      sandbox: { tools: { ids: ["acme"], definitions: {
-        acme: { name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }
-      } } }
-    });
-    // Seed an existing custom command file referencing analyze-task so the
-    // custom-skill-command synthesis path doesn't fail. Use the seeded
-    // template skill description verbatim.
+    makeProject(projectRoot, { agentClients: canonicalAgentClients(["claude-code"]) });
     writeFile(
       projectRoot,
       ".acme/commands/analyze-task.cmd",
@@ -257,61 +249,6 @@ test("syncTemplates: independent customTUI dir is unaffected by disabled built-i
     assert.ok(fs.existsSync(path.join(projectRoot, ".acme/commands/analyze-task.cmd")));
     // No .acme/* path should be in removed.
     assert.ok(!report.managed.removed.some((p) => p.startsWith(".acme/")));
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("syncTemplates: customTUI dir under disabled built-in TUI owned prefix is protected", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-custom-overlap-"));
-  try {
-    const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, {
-      agentClients: canonicalAgentClients(["claude-code"]),
-      sandbox: { tools: { ids: ["my-codex"], definitions: {
-        "my-codex": { name: "My Codex", dir: ".codex/commands", invoke: "codex ${skillName}" }
-      } } }
-    });
-    // Seed a customTUI reference file under the disabled-TUI owned prefix.
-    writeFile(
-      projectRoot,
-      ".codex/commands/analyze-task.md",
-      "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
-    );
-    writeFile(
-      projectRoot,
-      ".agents/skills/analyze-task/SKILL.md",
-      [
-        "---",
-        "name: analyze-task",
-        'description: "Analyze requirements for analyze-task"',
-        "---",
-        ""
-      ].join("\n")
-    );
-    writeFile(
-      projectRoot,
-      ".agents/skills/test/SKILL.md",
-      [
-        "---",
-        "name: test",
-        'description: "Run local tests"',
-        "---",
-        ""
-      ].join("\n")
-    );
-    writeFile(templateRoot, ".codex/commands/test.en.md", "codex test\n");
-    writeFile(projectRoot, ".codex/hooks.json", "{}\n");
-
-    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
-      ".agents/skills/update-agent-infra/scripts/sync-templates.js"
-    );
-    const report = syncTemplates(projectRoot, templateRoot);
-
-    assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
-    assert.ok(report.managed.removed.includes(".codex/hooks.json"));
-    assert.ok(!mergedPendingTargets(report as SyncReport).includes(".codex/commands/test.md"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

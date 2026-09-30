@@ -88,11 +88,6 @@ test('schema is JSON-safe and expresses the canonical tuple order', () => {
   assert.equal(schema.properties.sandbox.properties.tools.properties.ids.items.type, 'string');
   assert.equal(
     schema.properties.sandbox.properties.tools.properties.definitions
-      .additionalProperties.properties.dir.type,
-    'string'
-  );
-  assert.equal(
-    schema.properties.sandbox.properties.tools.properties.definitions
       .additionalProperties.properties.invoke.type,
     'string'
   );

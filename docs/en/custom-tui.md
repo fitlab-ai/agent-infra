@@ -1,35 +1,18 @@
-# Custom TUI Configuration
+# Custom TUI Next-Step Commands
 
 [← Back to README](../../README.md) · [中文](../zh-CN/custom-tui.md)
 
-Configure a custom CLI/TUI in `.agents/.airc.json` under `sandbox.tools.definitions`. The tool definition keeps sandbox installation and lifecycle command information together. Select the tool in `sandbox.tools.ids` to make it available and include it in next-step guidance. The `dir` field also lets agent-infra generate command files for project custom skills by learning from an existing command in that directory.
-
-| Field | Required | Meaning |
-|-------|----------|---------|
-| `name` | No | Display name shown in next-step guidance. Defaults to the tool ID. |
-| `dir` | With `invoke` | Command directory relative to the project root, for example `.<your-tui>/commands`. The path must stay inside the project root. |
-| `invoke` | With `dir` | User-facing command template used in next-step guidance. |
-
-Supported `invoke` placeholders:
-
-| Placeholder | Replaced with | Example |
-|-------------|---------------|---------|
-| `${skillName}` | The skill command name, such as `review-code` or `commit`. | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
-| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-code` |
-
-Non-namespaced custom TUI:
+Register a custom CLI/TUI as a sandbox tool in `.agents/.airc.json`. Add its ID to `sandbox.tools.ids` and define an `invoke` template. The selected tool then appears in lifecycle next-step guidance even when no built-in Agent Client is enabled.
 
 ```json
 {
   "sandbox": {
     "tools": {
-      "ids": ["your-tui"],
+      "ids": ["agent-infra", "your-tui"],
       "definitions": {
         "your-tui": {
-          "name": "<your-tui-name>",
-          "install": { "type": "npm", "cmd": "<your-cli-package>" },
-          "dir": ".<your-tui>/commands",
-          "invoke": "<your-cli> ${skillName}"
+          "name": "Your TUI",
+          "invoke": "your-cli ${skillName}"
         }
       }
     }
@@ -37,25 +20,6 @@ Non-namespaced custom TUI:
 }
 ```
 
-Namespaced custom TUI:
+`invoke` supports `${skillName}` and `${projectName}`. For a namespaced command, use a template such as `/${projectName}:${skillName}`. The name is optional and defaults to the tool ID.
 
-```json
-{
-  "project": "agent-infra",
-  "sandbox": {
-    "tools": {
-      "ids": ["your-tui"],
-      "definitions": {
-        "your-tui": {
-          "name": "<your-tui-name>",
-          "install": { "type": "npm", "cmd": "<your-cli-package>" },
-          "dir": ".<your-tui>/commands",
-          "invoke": "/${projectName}:${skillName}"
-        }
-      }
-    }
-  }
-}
-```
-
-List each enabled custom tool ID in `sandbox.tools.ids`; next-step guidance includes tools with valid `dir` and `invoke` fields in that order. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
+Custom skills use the shared `.agents/skills/` location. Maintain any client-specific command files in that client's own configuration; `update-agent-infra` does not inspect or generate those files.

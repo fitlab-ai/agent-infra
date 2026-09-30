@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  CUSTOM_TUI_CONTRACT,
   normalizeCustomTUIs
 } from '../../../lib/agent-clients/custom-tuis.ts';
 import {
@@ -36,26 +35,22 @@ test('shared invocation renderer expands adapter placeholders and appends argume
   );
 });
 
-test('custom tool command contract is JSON-safe and normalization preserves selected order', () => {
-  assert.deepEqual(JSON.parse(JSON.stringify(CUSTOM_TUI_CONTRACT)), CUSTOM_TUI_CONTRACT);
-
+test('custom tool invocation normalization preserves selected order', () => {
   const input = { sandbox: { tools: { ids: ['acme', 'beta'], definitions: {
-    acme: { name: 'Acme', dir: './.acme/commands', invoke: 'acme ${projectName} ${skillName}', extra: true },
-    beta: { dir: '.beta/prompts', invoke: 'beta ${skillName}' }
+    acme: { name: 'Acme', invoke: 'acme ${projectName} ${skillName}', extra: true },
+    beta: { invoke: 'beta ${skillName}' }
   } } } };
   const before = structuredClone(input);
-  const result = normalizeCustomTUIs('/repo', input);
+  const result = normalizeCustomTUIs(input);
 
   assert.deepEqual(result, {
     items: [
       {
         name: 'Acme',
-        dir: '.acme/commands',
         invocation: 'acme ${projectName} ${skillName}'
       },
       {
         name: 'beta',
-        dir: '.beta/prompts',
         invocation: 'beta ${skillName}'
       }
     ],
@@ -67,29 +62,25 @@ test('custom tool command contract is JSON-safe and normalization preserves sele
   assert.ok(Object.isFrozen(result.diagnostics));
 });
 
-test('custom TUI normalization skips invalid entries with stable paths', () => {
-  assert.deepEqual(normalizeCustomTUIs('/repo', null), {
+test('custom tool invocation normalization skips invalid entries with stable paths', () => {
+  assert.deepEqual(normalizeCustomTUIs(null), {
     items: [],
     diagnostics: []
   });
 
-  const ids = ['empty-name', 'escape', 'backslash', 'missing-skill', 'unknown-placeholder', 'malformed-placeholder', 'newline-name', 'newline-invoke'];
-  const result = normalizeCustomTUIs('/repo', { sandbox: { tools: { ids, definitions: {
-    'empty-name': { name: '', dir: '.x', invoke: 'x ${skillName}' },
-    escape: { name: 'X', dir: '../outside', invoke: 'x ${skillName}' },
-    backslash: { name: 'X', dir: '.x\\commands', invoke: 'x ${skillName}' },
-    'missing-skill': { name: 'X', dir: '.x', invoke: 'x' },
-    'unknown-placeholder': { name: 'X', dir: '.x', invoke: 'x ${unknown} ${skillName}' },
-    'malformed-placeholder': { name: 'X', dir: '.x', invoke: 'x ${skillName} ${unknown' },
-    'newline-name': { name: 'X\nY', dir: '.x', invoke: 'x ${skillName}' },
-    'newline-invoke': { name: 'X', dir: '.x', invoke: 'x ${skillName}\nnext' }
+  const ids = ['empty-name', 'missing-skill', 'unknown-placeholder', 'malformed-placeholder', 'newline-name', 'newline-invoke'];
+  const result = normalizeCustomTUIs({ sandbox: { tools: { ids, definitions: {
+    'empty-name': { name: '', invoke: 'x ${skillName}' },
+    'missing-skill': { name: 'X', invoke: 'x' },
+    'unknown-placeholder': { name: 'X', invoke: 'x ${unknown} ${skillName}' },
+    'malformed-placeholder': { name: 'X', invoke: 'x ${skillName} ${unknown' },
+    'newline-name': { name: 'X\nY', invoke: 'x ${skillName}' },
+    'newline-invoke': { name: 'X', invoke: 'x ${skillName}\nnext' }
   } } } });
 
   assert.deepEqual(result.items, []);
   assert.deepEqual(result.diagnostics, [
     { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.empty-name.name' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.escape.dir' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.backslash.dir' },
     { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.missing-skill.invoke' },
     { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.unknown-placeholder.invoke' },
     { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.malformed-placeholder.invoke' },
@@ -99,8 +90,8 @@ test('custom TUI normalization skips invalid entries with stable paths', () => {
 });
 
 test('next-step renderer uses Registry order, appends custom entries, and freezes output', () => {
-  const custom = normalizeCustomTUIs('/repo', { sandbox: { tools: { ids: ['acme'], definitions: {
-    acme: { name: 'Acme', dir: '.acme', invoke: 'acme ${projectName}:${skillName}' }
+  const custom = normalizeCustomTUIs({ sandbox: { tools: { ids: ['acme'], definitions: {
+    acme: { name: 'Acme', invoke: 'acme ${projectName}:${skillName}' }
   } } } }).items;
   const result = renderNextStepCommands({
     projectName: 'demo',

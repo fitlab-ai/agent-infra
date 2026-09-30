@@ -123,7 +123,7 @@ test("ai init persists tuis: [] when user types 'none' and skips all built-in se
     assert.ok(!cfg.files.managed.includes(".claude/commands/"));
     assert.ok(!cfg.files.managed.includes(".opencode/commands/"));
     assert.ok(!cfg.files.managed.includes(".codex/hooks.json"));
-    // Next-step block points users to customTUIs.
+    // Next-step block points users to custom sandbox tool configuration.
     assert.match(output, /No Agent Client or sandbox custom tool integration enabled/);
     assert.match(output, /sandbox\.tools\.definitions/);
   } finally {

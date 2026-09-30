@@ -216,7 +216,7 @@ function planAgentClientReconciliation(input: Readonly<{
     delete (nextConfig.files as Record<string, unknown>).managedBaselines;
   }
 
-  const custom = normalizeCustomTUIs(input.projectRoot, input.config);
+  const custom = normalizeCustomTUIs(input.config);
   const nextSteps = renderNextStepCommands({
     projectName,
     state: desired,

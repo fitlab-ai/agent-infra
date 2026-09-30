@@ -1,8 +1,5 @@
-import path from 'node:path';
-
 type CustomTUI = Readonly<{
   name: string;
-  dir: string;
   invocation: string;
 }>;
 
@@ -21,10 +18,7 @@ type NormalizeCustomTUIsResult = Readonly<{
   diagnostics: readonly CustomTUIDiagnostic[];
 }>;
 
-const CUSTOM_TUI_CONTRACT = Object.freeze({
-  requiredFields: Object.freeze(['dir', 'invoke']),
-  allowedPlaceholders: Object.freeze(['skillName', 'projectName'])
-});
+const ALLOWED_PLACEHOLDERS = Object.freeze(['skillName', 'projectName']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -36,43 +30,13 @@ function isNonEmptySingleLine(value: unknown): value is string {
     && !/[\r\n]/.test(value);
 }
 
-function normalizeDir(projectRoot: string, value: unknown): string | null {
-  if (
-    !isNonEmptySingleLine(value)
-    || value.includes('\\')
-    || path.isAbsolute(value)
-    || /^[a-zA-Z]:/.test(value)
-  ) {
-    return null;
-  }
-  const normalized = path.posix.normalize(value);
-  if (
-    normalized === '.'
-    || normalized === '..'
-    || normalized.startsWith('../')
-    || normalized.split('/').includes('..')
-  ) {
-    return null;
-  }
-  const relative = path.relative(
-    path.resolve(projectRoot),
-    path.resolve(projectRoot, normalized)
-  );
-  return relative === ''
-    || path.isAbsolute(relative)
-    || relative === '..'
-    || relative.startsWith(`..${path.sep}`)
-    ? null
-    : normalized;
-}
-
 function hasValidPlaceholders(invocation: string): boolean {
   const placeholders = [
     ...invocation.matchAll(/\$\{([^}]+)\}/g)
   ].map((match) => match[1]!);
   return placeholders.includes('skillName')
     && placeholders.every((placeholder) =>
-      CUSTOM_TUI_CONTRACT.allowedPlaceholders.includes(placeholder)
+      ALLOWED_PLACEHOLDERS.includes(placeholder)
     )
     && !invocation
       .replaceAll('${skillName}', '')
@@ -80,10 +44,7 @@ function hasValidPlaceholders(invocation: string): boolean {
       .includes('${');
 }
 
-function normalizeCustomTUIs(
-  projectRoot: string,
-  config: unknown
-): NormalizeCustomTUIsResult {
+function normalizeCustomTUIs(config: unknown): NormalizeCustomTUIsResult {
   const items: CustomTUI[] = [];
   const diagnostics: CustomTUIDiagnostic[] = [];
 
@@ -127,16 +88,11 @@ function normalizeCustomTUIs(
     }
     const candidate = definitions[id];
     if (!isRecord(candidate)) continue;
-    if (candidate.dir === undefined && candidate.invoke === undefined) continue;
+    if (candidate.invoke === undefined) continue;
     const base = `sandbox.tools.definitions.${id}`;
     const name = candidate.name === undefined ? id : candidate.name;
     if (!isNonEmptySingleLine(name)) {
       diagnostics.push({ code: 'INVALID_CUSTOM_TUI', path: `${base}.name` });
-      continue;
-    }
-    const dir = normalizeDir(projectRoot, candidate.dir);
-    if (!dir) {
-      diagnostics.push({ code: 'INVALID_CUSTOM_TUI', path: `${base}.dir` });
       continue;
     }
     if (!isNonEmptySingleLine(candidate.invoke)) {
@@ -152,7 +108,6 @@ function normalizeCustomTUIs(
     }
     items.push(Object.freeze({
       name,
-      dir,
       invocation: candidate.invoke
     }));
   }
@@ -165,7 +120,7 @@ function normalizeCustomTUIs(
   });
 }
 
-export { CUSTOM_TUI_CONTRACT, normalizeCustomTUIs };
+export { normalizeCustomTUIs };
 export type {
   CustomTUI,
   CustomTUIDiagnostic,

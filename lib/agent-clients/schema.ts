@@ -56,7 +56,6 @@ const AGENT_CLIENTS_SCHEMA = {
                 type: 'object',
                 properties: {
                   name: { type: 'string' },
-                  dir: { type: 'string' },
                   invoke: { type: 'string' }
                 }
               }

@@ -33,7 +33,7 @@ function run(root: string, args: string[]) {
   );
 }
 
-test('agent-client next-steps renders enabled built-ins and custom TUIs in text and JSON', () => {
+test('agent-client next-steps renders enabled built-ins and selected custom tools in text and JSON', () => {
   const root = fixture({
     project: 'demo',
     agentClients: canonical(['codex', 'antigravity-cli']),
@@ -43,7 +43,6 @@ test('agent-client next-steps renders enabled built-ins and custom TUIs in text 
         definitions: {
           acme: {
             name: 'Acme',
-            dir: '.acme/commands',
             invoke: 'acme ${projectName}:${skillName}'
           }
         }
@@ -109,8 +108,8 @@ test('agent-client next-steps reports custom diagnostics without hiding valid co
       tools: {
         ids: ['bad', 'good'],
         definitions: {
-          bad: { name: 'Bad', dir: '../outside', invoke: 'bad ${skillName}' },
-          good: { name: 'Good', dir: '.good', invoke: 'good ${skillName}' }
+          bad: { name: 'Bad', invoke: 'bad ${unknown} ${skillName}' },
+          good: { name: 'Good', invoke: 'good ${skillName}' }
         }
       }
     }
@@ -119,7 +118,7 @@ test('agent-client next-steps reports custom diagnostics without hiding valid co
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '  - Codex: $commit\n  - Good: good commit\n');
-  assert.match(result.stderr, /INVALID_CUSTOM_TUI at sandbox\.tools\.definitions\.bad\.dir/);
+  assert.match(result.stderr, /INVALID_CUSTOM_TUI_PLACEHOLDER at sandbox\.tools\.definitions\.bad\.invoke/);
 });
 
 test('agent-client next-steps includes selected custom tools when built-in clients are disabled', () => {
@@ -130,9 +129,9 @@ test('agent-client next-steps includes selected custom tools when built-in clien
       tools: {
         ids: ['beta', 'acme'],
         definitions: {
-          acme: { name: 'Acme', dir: '.acme', invoke: 'acme ${skillName}' },
-          beta: { name: 'Beta', dir: '.beta', invoke: 'beta ${skillName}' },
-          unused: { name: 'Unused', dir: '.unused', invoke: 'unused ${skillName}' }
+          acme: { name: 'Acme', invoke: 'acme ${skillName}' },
+          beta: { name: 'Beta', invoke: 'beta ${skillName}' },
+          unused: { name: 'Unused', invoke: 'unused ${skillName}' }
         }
       }
     }

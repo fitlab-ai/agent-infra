@@ -124,7 +124,7 @@ test("agent-infra sync with empty canonical state installs no built-in seeds", (
     assert.ok(!updated.files.managed.includes(".claude/commands/"));
     assert.ok(!updated.files.managed.includes(".opencode/commands/"));
     assert.ok(!updated.files.managed.includes(".codex/hooks.json"));
-    // Next-step hint points to customTUIs configuration.
+    // Next-step hint points to custom sandbox tool configuration.
     assert.match(output, /No Agent Client or sandbox custom tool integration enabled/);
     assert.match(output, /sandbox\.tools\.definitions/);
   } finally {

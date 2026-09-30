@@ -10,7 +10,6 @@ type SandboxTool = {
   containerMount: string;
   versionCmd: string;
   setupHint: string;
-  dir?: string;
   invoke?: string;
   envVars?: Record<string, string>;
   hostPreSeedFiles?: Array<{ hostPath: string; sandboxName: string }>;

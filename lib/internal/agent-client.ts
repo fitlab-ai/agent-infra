@@ -148,7 +148,7 @@ function agentClient(args: string[] = []): void {
 
   try {
     const clients = normalizeAgentClients(config);
-    const custom = normalizeCustomTUIs(process.cwd(), config);
+    const custom = normalizeCustomTUIs(config);
     const commands = renderNextStepCommands({
       projectName: String(config.project ?? ''),
       state: clients.state,

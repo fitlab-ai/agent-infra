@@ -43,7 +43,6 @@ The generated `.agents/.airc.json` file is the central contract between the boot
         "your-tui": {
           "name": "<your-tui-name>",
           "install": { "type": "npm", "cmd": "<your-cli-package>" },
-          "dir": ".<your-tui>/commands",
           "invoke": "<your-cli> ${skillName}"
         }
       }
@@ -80,8 +79,8 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
 | `skills` | Optional custom skill sync configuration. |
 | `skills.sources` | Optional ordered list of external custom skill sources. Only `type: "local"` is supported today. |
-| `sandbox.tools.ids` | Ordered list of selected sandbox tools. Selected custom tools with valid `dir` and `invoke` values also appear in lifecycle next-step guidance. |
-| `sandbox.tools.definitions` | Custom sandbox tool definitions keyed by tool ID; a definition can include its command directory and lifecycle invocation template. |
+| `sandbox.tools.ids` | Ordered list of selected sandbox tools. Selected custom tools with a valid `invoke` value appear in lifecycle next-step guidance. |
+| `sandbox.tools.definitions` | Custom sandbox tool definitions keyed by tool ID. Set `invoke` to include the tool in next-step guidance. |
 | `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
 | `files.managedBaselines` | Tool-maintained SHA-256 source baselines for built-in guarded managed files. Do not edit manually; they enable safe three-way updates for the GitHub lifecycle workflows. |
 

@@ -33,7 +33,7 @@ agent-infra-internal agent-client next-steps \
 
 - 静态传入当前已选场景的下一 skill 名；只有命令需要任务引用时才传 `--task-ref`。
 - 只有版本化发布命令需要版本时才传 `--version`；值必须是以数字开头且 `semver.valid(raw) === raw` 的规范 SemVer。不得传 action、完整命令、shell 片段、空白或 `v` / `V` / `=` 前缀。
-- helper 展示 `.agents/.airc.json` 中 `agentClients` 已启用的内建客户端，并按 `sandbox.tools.ids` 顺序追加具有有效 `dir` / `invoke` 的已选自定义沙箱工具。
+- helper 展示 `.agents/.airc.json` 中 `agentClients` 已启用的内建客户端，并按 `sandbox.tools.ids` 顺序追加具有有效 `invoke` 的已选自定义沙箱工具。
 - 将非空 stdout 原样放入当前“下一步”标题后的 `{next-step-commands}`；stdout 为空时省略整个客户端命令块，但继续输出提醒、告警和 `Completed at`。
 - helper 写 stderr 或返回非零时，按当前 skill 的错误路径报告并停止；禁止回退到硬编码客户端表。
 - 复杂 skill 先选定唯一场景，再只为该场景调用一次 helper，不得提前渲染所有分支。
