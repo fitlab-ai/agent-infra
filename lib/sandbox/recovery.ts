@@ -8,12 +8,10 @@ import {
   containerNameCandidates,
   sandboxBranchLabel,
   sandboxLabel,
-  sandboxRuntimeCapabilityLabel,
   sandboxTaskIdLabel,
   sandboxWorkspaceModeLabel,
   worktreeDirCandidates
 } from './constants.ts';
-import { isAgentClientId } from '../agent-clients/types.ts';
 import {
   createSandboxCapabilityPlan
 } from './agent-client-reconciler.ts';
@@ -100,8 +98,6 @@ export type SandboxRecoverySnapshot = {
   workspaceTopology?: 'legacy-parent' | 'per-state' | 'unknown';
   taskView?: { path: string; readable: boolean };
   runtimeStoreOk?: boolean;
-  runtimeCapabilityOk?: boolean;
-  unexpectedCapabilityMounts?: string[];
   mounts: Array<{
     path: string;
     expectedType: string;
@@ -452,12 +448,6 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
         : `Container identity ${actualIdentity} on branch ${snapshot.actualBranch ?? 'unknown'} does not match requested ${expectedIdentity} on branch ${snapshot.expectedBranch}.`
     });
   }
-  if (snapshot.runtimeCapabilityOk === false) {
-    findings.push({
-      repairKind: 'hard-failure',
-      message: 'Container runtime capability signature does not match the current sandbox plan.'
-    });
-  }
   if (snapshot.workspaceTopology === 'legacy-parent') {
     findings.push({
       repairKind: 'hard-failure',
@@ -482,14 +472,6 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
       path: '/run/agent-infra/runtime'
     });
   }
-  for (const mountPath of snapshot.unexpectedCapabilityMounts ?? []) {
-    findings.push({
-      repairKind: 'hard-failure',
-      message: `Disabled Agent Client capability remains mounted at ${mountPath}.`,
-      path: mountPath
-    });
-  }
-
   for (const mount of snapshot.mounts) {
     if (
       snapshot.workspaceTopology === 'legacy-parent'
@@ -964,11 +946,6 @@ export function collectSandboxRecoverySnapshot(params: {
     mode: sandboxWorkspaceModeLabel(params.config),
     taskId: sandboxTaskIdLabel(params.config)
   });
-  const selectedToolIds = new Set(tools.map((tool) => tool.id));
-  const unexpectedCapabilityMounts = capabilityPlan.cleanupInventory
-    .filter((tool) => isAgentClientId(tool.id) && !selectedToolIds.has(tool.id))
-    .map((tool) => tool.containerMount)
-    .filter((mountPath) => mountsByDestination.has(mountPath));
   const mountSnapshots = expectedMounts({
     config: params.config,
     branch: params.branch,
@@ -1035,8 +1012,6 @@ export function collectSandboxRecoverySnapshot(params: {
     identityOk: typeof inspection.Id === 'string' && inspection.Id.length > 0
       && branchLabel === params.branch
       && sameSandboxWorkspaceIdentity(containerWorkspace, workspace),
-    runtimeCapabilityOk: labels[sandboxRuntimeCapabilityLabel(params.config)] === capabilityPlan.runtimeSignature,
-    unexpectedCapabilityMounts,
     mounts: mountSnapshots,
     tmpfs,
     seeds,

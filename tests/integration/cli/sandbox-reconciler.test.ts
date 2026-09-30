@@ -294,7 +294,7 @@ test('custom tools remain independent from Agent Client selection', () => {
   assert.deepEqual(plan.tools.map((tool) => tool.id), ['agent-infra', 'git-lfs']);
 });
 
-test('recovery treats a stale runtime signature and disabled client mount as hard failures', () => {
+test('recovery does not compare container capabilities against the current host plan', () => {
   const findings = classifySandboxRecovery({
     identityOk: true,
     containerIdValid: true,
@@ -302,8 +302,6 @@ test('recovery treats a stale runtime signature and disabled client mount as har
     actualBranch: 'feature/demo',
     expectedWorkspace: { mode: 'branch-only' },
     actualWorkspace: { mode: 'branch-only' },
-    runtimeCapabilityOk: false,
-    unexpectedCapabilityMounts: ['/home/devuser/.claude'],
     mounts: [],
     tmpfs: [],
     seeds: [],
@@ -311,14 +309,5 @@ test('recovery treats a stale runtime signature and disabled client mount as har
     agentClientChecks: []
   });
 
-  assert.deepEqual(
-    findings.map((finding) => ({
-      repairKind: finding.repairKind,
-      path: finding.path
-    })),
-    [
-      { repairKind: 'hard-failure', path: undefined },
-      { repairKind: 'hard-failure', path: '/home/devuser/.claude' }
-    ]
-  );
+  assert.deepEqual(findings, []);
 });
