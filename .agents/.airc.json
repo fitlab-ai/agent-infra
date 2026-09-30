@@ -245,12 +245,12 @@
     {
       "id": "opencode",
       "enabled": true,
-      "installInSandbox": true
+      "installInSandbox": false
     },
     {
       "id": "traecli",
       "enabled": true,
-      "installInSandbox": true
+      "installInSandbox": false
     }
   ]
 }
