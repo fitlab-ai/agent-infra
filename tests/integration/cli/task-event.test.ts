@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
+import { verifyTaskEvent } from '../../../lib/task/verification.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
@@ -482,6 +483,35 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.match(content, /current_step: technical-design/);
   assert.match(content, /`plan\.md`/);
   assert.deepEqual(parseArtifactReceipts(content).rows.filter((row) => row.output === 'plan.md').map((row) => row.input), ['analysis.md', 'review-analysis.md']);
+});
+
+test('plan completion gate allows a valid plan to resume after review-plan advances current_step', async () => {
+  const f = fixture();
+  try {
+    const configDir = path.join(f.root, '.agents', 'skills', 'plan-task', 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.copyFileSync(path.join(process.cwd(), '.agents', 'skills', 'plan-task', 'config', 'verify.json'), path.join(configDir, 'verify.json'));
+    const content = fs.readFileSync(f.file, 'utf8').replace(
+      `id: ${f.id}`,
+      `id: ${f.id}\ntype: bugfix\nworkflow: bug-fix\ncreated_at: '2026-01-01 00:00:00+00:00'\nbranch: agent-infra-bugfix-lifecycle-resume-fixture`
+    );
+    fs.writeFileSync(f.file, content);
+    assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']).status, 0);
+    fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+    const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
+    assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+    assert.equal(run(f.root, [f.id, 'review-plan.started', '--agent', 'codex', '--round', '1']).status, 0);
+    fs.writeFileSync(path.join(f.dir, 'review-plan.md'), reviewArtifact('Plan Review', 'plan.md'));
+    const reviewCompleted = run(f.root, [f.id, 'review-plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'review-plan.md', '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0']);
+    assert.equal(reviewCompleted.status, 0, reviewCompleted.stderr || reviewCompleted.stdout);
+    const codeStarted = run(f.root, [f.id, 'code.started', '--agent', 'codex', '--initiator', 'model', '--request-id', `${f.id}:code-resume`, '--reason-code', 'user-request']);
+    assert.equal(codeStarted.status, 0, codeStarted.stderr || codeStarted.stdout);
+
+    const verified = await verifyTaskEvent({ taskRef: f.id, event: 'plan.completed', artifact: 'plan.md' }, { repoRoot: f.root });
+    assert.equal(verified.status, 'pass', JSON.stringify(verified));
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test('task-event rejects a different lifecycle start while one execution is open', () => {

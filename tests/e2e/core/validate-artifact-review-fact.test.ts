@@ -140,10 +140,13 @@ function addCompletionEvidence(taskDir: string): void {
   const taskPath = path.join(taskDir, "task.md");
   let task = fs.readFileSync(taskPath, "utf8");
   const artifactPath = path.join(taskDir, "review-code.md");
+  const inputPath = path.join(taskDir, "code.md");
+  write(inputPath, "# Code fixture\n");
   const report = fs.readFileSync(artifactPath, "utf8");
   const fact = {
     event: "review-code.completed", output: "review-code.md", outputSha256: sha256File(artifactPath),
-    semanticDigest: canonicalSemanticDigest(report), requestId: "review-code-test", result: JSON.stringify({ manualValidation: 0 })
+    semanticDigest: canonicalSemanticDigest(report), requestId: "review-code-test", result: JSON.stringify({ manualValidation: 0 }),
+    lifecycleInputs: [{ name: "code.md", sha256: sha256File(inputPath) }]
   };
   task = task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`);
   task = task.replace("**Review Code (Round 1)** by codex — done", "**Review Code (Round 1)** by codex — Verdict: Approved → review-code.md");

@@ -16,6 +16,7 @@ import {
 } from "../../helpers.ts";
 import {
   addWorktree,
+  attachArtifactCompletionFact,
   assertPayloadStatus,
   buildArtifactComment,
   buildIssueFieldsPayload,
@@ -619,9 +620,11 @@ for (const c of implementSyncCases) {
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     if (c.skill === "code-task") {
       write(path.join(ctx.taskDir, "code.md"), artifactContent);
+      if (c.gate) attachArtifactCompletionFact(ctx.taskDir, "code");
     }
+    const syncedTaskContent = fs.readFileSync(path.join(ctx.taskDir, "task.md"), "utf8");
     writeJson(ctx.issuePath, c.issuePayload || buildIssuePayload());
-    writeJson(ctx.commentsPath, c.comments(taskContent, artifactContent));
+    writeJson(ctx.commentsPath, c.comments(syncedTaskContent, artifactContent));
 
     const args = c.gate
       ? ["gate", "code-task", ctx.taskDir, "code.md"]
@@ -1341,10 +1344,11 @@ for (const c of retryCases) {
     const artifactContent = loadFixture("valid-code.md");
     write(path.join(ctx.taskDir, "task.md"), taskContent);
     write(path.join(ctx.taskDir, "code.md"), artifactContent);
+    attachArtifactCompletionFact(ctx.taskDir, "code");
     writeJson(ctx.issuePath, buildIssuePayload());
     writeJson(ctx.commentsPath, [
       { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
-      { body: buildTaskComment(taskId, taskContent) }
+      { body: buildTaskComment(taskId, fs.readFileSync(path.join(ctx.taskDir, "task.md"), "utf8")) }
     ]);
     write(counterPath, "1");
 

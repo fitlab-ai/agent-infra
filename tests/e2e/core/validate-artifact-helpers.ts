@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
+import { canonicalSemanticDigest } from "../../../lib/task/artifact-operations.ts";
+import { sha256File } from "../../../lib/task/artifact-receipts.ts";
 import { buildBoundFact, buildSkippedFact, buildUnboundFact, encodePrDeliveryFact } from "../../../lib/task/pr-delivery-fact.ts";
 import { parseTypedTaskFrontmatter } from "../../../lib/task/frontmatter.ts";
 import { CONTROL_MARKER_PATTERN, renderSafeCodeFence, sanitizeMarkdownDocument } from "../../../lib/platform/comment-safety.ts";
@@ -122,6 +124,24 @@ function formatTimestampInTimeZone(date: Date, timeZone: string): string {
 function write(filePathname: string, content: string) {
   fs.mkdirSync(path.dirname(filePathname), { recursive: true });
   fs.writeFileSync(filePathname, content, "utf8");
+}
+
+function attachArtifactCompletionFact(taskDir: string, family: "code" | "review-code") {
+  const output = `${family}.md`;
+  const input = family === "code" ? "plan.md" : "code.md";
+  const outputPath = path.join(taskDir, output);
+  const inputPath = path.join(taskDir, input);
+  if (!fs.existsSync(inputPath)) write(inputPath, `# ${input.replace(/\.md$/u, "")} fixture\n`);
+  const report = fs.readFileSync(outputPath, "utf8");
+  const fact = {
+    event: `${family}.completed`, output,
+    outputSha256: sha256File(outputPath), semanticDigest: canonicalSemanticDigest(report),
+    requestId: `fixture:${family}`, result: "{}",
+    lifecycleInputs: [{ name: input, sha256: sha256File(inputPath) }]
+  };
+  const taskPath = path.join(taskDir, "task.md");
+  const task = fs.readFileSync(taskPath, "utf8");
+  write(taskPath, task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`));
 }
 
 function writeJson(filePathname: string, value: unknown) {
@@ -666,6 +686,7 @@ function assertPayloadStatus(result: SpawnSyncReturns<string>, expected: Payload
 
 export {
   addWorktree,
+  attachArtifactCompletionFact,
   assertHasCanonicalPrSyncStructure,
   assertPayloadStatus,
   assertPointsToPrSyncRule,

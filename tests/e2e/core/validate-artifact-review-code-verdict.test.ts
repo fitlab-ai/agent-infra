@@ -107,6 +107,8 @@ function buildReviewTask(baseline: string, overrides: Record<string, string | nu
 function addCompletionFact(taskDir: string): void {
   const taskPath = path.join(taskDir, "task.md");
   const artifactPath = path.join(taskDir, "review-code.md");
+  const inputPath = path.join(taskDir, "code.md");
+  fs.writeFileSync(inputPath, "# Code fixture\n");
   const report = fs.readFileSync(artifactPath, "utf8");
   const fact = {
     event: "review-code.completed",
@@ -114,7 +116,8 @@ function addCompletionFact(taskDir: string): void {
     outputSha256: sha256File(artifactPath),
     semanticDigest: canonicalSemanticDigest(report),
     requestId: "review-code-test",
-    result: JSON.stringify({ manualValidation: 0 })
+    result: JSON.stringify({ manualValidation: 0 }),
+    lifecycleInputs: [{ name: "code.md", sha256: sha256File(inputPath) }]
   };
   const task = fs.readFileSync(taskPath, "utf8");
   fs.writeFileSync(taskPath, task.replace(/\n---\s*\n/u, `\ncompletion_facts: ${JSON.stringify(JSON.stringify([fact]))}\n---\n`));
