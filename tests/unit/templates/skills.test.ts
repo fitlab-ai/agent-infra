@@ -1517,10 +1517,10 @@ test("review output templates reserve cross-stage commands for an advanceable le
         `${relativePath} should expose the expected helper-driven ${route} routes`
       );
       if (route === "create-pr") {
-        assert.equal(
-          (content.match(/^#### (?:场景|Branch) A1(?:b)?[:：]/gm) ?? []).length,
-          2,
-          `${relativePath} should keep separate create and existing-PR output branches`
+        assert.deepEqual(
+          [...content.matchAll(/^#### (?:场景|Branch) A([1-4])[:：]/gm)].map((match) => match[1]),
+          ["1", "2", "3", "4"],
+          `${relativePath} should expose the four review outcomes with consecutive identifiers`
         );
       }
     }

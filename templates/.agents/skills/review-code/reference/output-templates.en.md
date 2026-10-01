@@ -41,10 +41,10 @@ If the summary cannot be parsed safely, set `{last-readable-review-result}` to "
 
 Do not route by review round. Read `prFlow` / verified `pr_delivery_fact`; when a PR exists, call `agent-infra-internal platform-checks inspect {task-id}`. Select exactly one mutually exclusive exit:
 
-- No PR: use Branch A3 (complete) when `prFlow=disabled`; otherwise use Branch A1 (create PR).
-- Existing PR with PR head != `R`: Branch A1b (update the existing PR).
-- PR head = `R` with `pending|failed|cancelled` checks or temporarily unavailable platform state: Branch A2 (watch); never show completion.
-- PR head = `R` with `passed|no-required` checks: Branch A3 (complete).
+- No PR: use Branch A4 (complete) when `prFlow=disabled`; otherwise use Branch A1 (create PR).
+- Existing PR with PR head != `R`: Branch A2 (update the existing PR).
+- PR head = `R` with `pending|failed|cancelled` checks or temporarily unavailable platform state: Branch A3 (watch); never show completion.
+- PR head = `R` with `passed|no-required` checks: Branch A4 (complete).
 
 Common Branch A summary:
 
@@ -63,7 +63,7 @@ Next step - create a Pull Request:
 {next-step-commands}
 ```
 
-#### Branch A1b: Update an Existing Pull Request
+#### Branch A2: Update an Existing Pull Request
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`. `create-pr` delivers the current branch and reuses the existing bound PR.
 
@@ -72,7 +72,7 @@ Next step - update the existing Pull Request:
 {next-step-commands}
 ```
 
-#### Branch A2: Watch All Checks
+#### Branch A3: Watch All Checks
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}`.
 
@@ -81,7 +81,7 @@ Next step - watch PR checks:
 {next-step-commands}
 ```
 
-#### Branch A3: Complete and Archive
+#### Branch A4: Complete and Archive
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
 
