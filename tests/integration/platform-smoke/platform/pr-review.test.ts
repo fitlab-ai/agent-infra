@@ -277,7 +277,7 @@ test('PR review recovery fails closed when its canonical body changes after queu
     assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_PAYLOAD_INVALID');
     assert.deepEqual(mock.requests.filter((request) => request.includes('/pulls/42/reviews')), []);
     assert.deepEqual(mock.postedBodies, []);
-    assert.equal(persisted?.state, 'failed');
+    assert.equal(persisted?.state, 'unknown');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -311,7 +311,7 @@ test('PR review recovery stops when the journal target differs from its persiste
     assert.equal(recovered.status, 'failed');
     assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_IDENTITY_MISMATCH');
     assert.deepEqual(mock.postedBodies, []);
-    assert.equal(persisted?.state, 'failed');
+    assert.equal(persisted?.state, 'unknown');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -345,7 +345,7 @@ test('PR review recovery rejects the same PR identity in a different provider sc
     assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_IDENTITY_MISMATCH');
     assert.deepEqual(mock.requests.filter((request) => request.includes('/pulls/42/reviews')), []);
     assert.deepEqual(mock.postedBodies, []);
-    assert.equal(persisted?.state, 'failed');
+    assert.equal(persisted?.state, 'unknown');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

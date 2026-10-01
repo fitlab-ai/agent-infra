@@ -4,15 +4,6 @@ function recordCall(config, operation) {
   if (typeof config.callsPath === 'string') fs.appendFileSync(config.callsPath, `${operation}\n`);
 }
 
-function breakJournalWrite(config) {
-  if (typeof config.journalPath !== 'string' || config.breakJournalWrite !== true) return;
-  if (typeof config.captureJournalPath === 'string' && !fs.existsSync(config.captureJournalPath)) {
-    fs.copyFileSync(config.journalPath, config.captureJournalPath);
-  }
-  fs.unlinkSync(config.journalPath);
-  fs.mkdirSync(config.journalPath);
-}
-
 function receipt(id, changed = true) {
   return { ok: true, value: { remoteId: id, changed } };
 }
@@ -66,9 +57,9 @@ function changeRequest(config, labels) {
 
 export default async function createPlatformProvider(input) {
   const config = input.config || {};
+  let verifyHeadCalls = 0;
   let issueLabels = ['in: core', 'keep'];
   let pullRequestLabels = ['in: stale', 'type: feature'];
-  let issueInspectCount = 0;
   const context = {
     type: input.providerType,
     scope: { id: 'external/project', label: 'external/project' },
@@ -84,10 +75,6 @@ export default async function createPlatformProvider(input) {
     identity: { issue: config.identityKind || 'number', 'pull-request': config.identityKind || 'number' },
     context: {
       async resolve() {
-        if (typeof config.journalPath === 'string' && typeof config.captureJournalPath === 'string'
-          && !fs.existsSync(config.captureJournalPath)) {
-          fs.copyFileSync(config.journalPath, config.captureJournalPath);
-        }
         recordCall(config, 'context.resolve');
         return { ok: true, value: context };
       }
@@ -110,10 +97,7 @@ export default async function createPlatformProvider(input) {
       async inspect(request) {
         recordCall(config, 'issues.inspect');
         if (JSON.stringify(request.target) !== JSON.stringify(issueIdentity)) return wrongTarget('Issue inspect target identity was not preserved');
-        issueInspectCount += 1;
-        const value = issue(config, issueLabels);
-        if (config.breakJournalWrite === true && issueInspectCount === 3) breakJournalWrite(config);
-        return { ok: true, value };
+        return { ok: true, value: issue(config, issueLabels) };
       },
       async create() {
         recordCall(config, 'issues.create');
@@ -135,6 +119,10 @@ export default async function createPlatformProvider(input) {
       ...(config.recoveryVerifyHead ? {
         async verifyHead() {
           recordCall(config, 'changeRequests.verifyHead');
+          verifyHeadCalls += 1;
+          if (verifyHeadCalls <= (config.verifyHeadFailures || 0)) {
+            return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: 'Configured transient failure', retryable: false } };
+          }
           return { ok: true, value: { sha: 'a'.repeat(40) } };
         }
       } : {}),

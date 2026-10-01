@@ -7,7 +7,6 @@ import { createHash } from 'node:crypto';
 
 import {
   PLATFORM_OPERATION_JOURNAL_FILE,
-  PLATFORM_OPERATION_MAX_ATTEMPTS,
   readPlatformOperationJournal,
   recordPlatformOperation
 } from '../../../lib/task/platform-operation-journal.ts';
@@ -44,7 +43,6 @@ test('task-local platform operation journal deduplicates stable operations and s
     assert.equal(journal.operations.length, 1);
     assert.equal(journal.operations[0]?.state, 'unknown');
     assert.equal(journal.operations[0]?.lastCode, 'NETWORK_TIMEOUT');
-    assert.equal(journal.operations[0]?.maxAttempts, PLATFORM_OPERATION_MAX_ATTEMPTS);
     assert.equal(serialized.includes('projected artifact bytes'), false);
     assert.equal(serialized.includes(expectedDigest), true);
   } finally {

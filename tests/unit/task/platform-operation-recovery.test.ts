@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { inspectPlatformCommentOperation } from '../../../lib/platform/issue-comments.ts';
-import { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations, resolvePlatformOperation } from '../../../lib/task/platform-operation-recovery.ts';
-import { readPlatformOperationJournal, recordPlatformOperation, resolveFailedPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
+import { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations } from '../../../lib/task/platform-operation-recovery.ts';
+import { readPlatformOperationJournal, recordPlatformOperation } from '../../../lib/task/platform-operation-journal.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -44,25 +44,29 @@ test('recovery supersedes an old comment digest when its task projection changed
     const first = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
     assert.ok(first);
     recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...first, dependency: 'deferred', state: 'pending' });
+    const later = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'later.md', expectedDigest: 'b'.repeat(64),
+      dependency: 'deferred', state: 'queued'
+    });
     fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
 
     const recovered = await recoverPlatformOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
     const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
-    const stale = journal.operations.find((operation) => operation.id === first.id);
-    const current = journal.operations.find((operation) => operation.id !== first.id);
-    assert.equal(stale?.state, 'failed');
-    assert.equal(stale?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
+    const current = journal.operations[0];
+    assert.notEqual(current?.id, first.id);
     assert.ok(current);
     assert.notEqual(current.expectedDigest, first.expectedDigest);
-    assert.notEqual(current.state, 'succeeded');
-    assert.deepEqual(recovered.pending, [current.id]);
-    assert.equal(recovered.pending.includes(first.id), false);
+    assert.equal(current.attempts, 4);
+    assert.equal(current.state, 'unknown');
+    assert.deepEqual(recovered.pending, [current.id, later.id]);
+    assert.equal(journal.operations[1]?.id, later.id);
+    assert.equal(journal.operations[1]?.state, 'queued');
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
 
-test('serial recovery consumes the remaining attempt budget before retrying an unknown operation', async () => {
+test('each automatic recovery run retries the head three times and records cumulative attempts', async () => {
   const f = fixture();
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
   try {
@@ -79,24 +83,19 @@ test('serial recovery consumes the remaining attempt budget before retrying an u
       dependency: 'required', state: 'pending'
     });
 
-    for (const attempts of [2, 3]) {
+    for (const attempts of [4, 7]) {
       const recovery = await recoverPlatformOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot });
       const persisted = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
       assert.equal(persisted?.attempts, attempts);
       assert.equal(persisted?.state, 'unknown', JSON.stringify({ recovery, providerCalls: fs.readFileSync(callsPath, 'utf8') }));
     }
-
-    await recoverPlatformOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot });
-    const exhausted = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
-    assert.equal(exhausted?.attempts, 3);
-    assert.equal(exhausted?.state, 'unknown');
-    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 2);
+    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 6);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
 
-test('recovery stops at an exhausted earlier operation and leaves later writes queued', async () => {
+test('recovery retries the failed head and leaves later writes queued', async () => {
   const f = fixture();
   const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
   try {
@@ -108,23 +107,55 @@ test('recovery stops at an exhausted earlier operation and leaves later writes q
       }
     }));
     const earlier = {
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata' as const,
-      target: '{"kind":"number","value":42}', expectedDigest: 'a'.repeat(64),
-      issueMetadata: { requirements: true, issueType: false, fields: false },
-      dependency: 'deferred' as const, state: 'pending' as const
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request' as const,
+      target: 'head:feature:base:main', expectedDigest: 'a'.repeat(64),
+      pullRequest: { action: 'create' as const, baseRef: 'main', headRef: 'feature' },
+      dependency: 'required' as const, state: 'pending' as const
     };
-    for (let attempt = 0; attempt < 3; attempt += 1) recordPlatformOperation(earlier);
+    const firstOperation = recordPlatformOperation(earlier);
     const later = recordPlatformOperation({
-      ...earlier, target: '{"kind":"number","value":43}', expectedDigest: 'b'.repeat(64), state: 'queued'
+      ...earlier, target: 'head:other:base:main', expectedDigest: 'b'.repeat(64), state: 'queued'
     });
 
     const recovered = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
     const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
+    const first = journal.operations[0]!;
 
     assert.equal(recovered.status, 'blocked');
-    assert.deepEqual(recovered.pending, [journal.operations[0]!.id, later.id]);
+    assert.deepEqual(recovered.pending, [firstOperation.id, later.id]);
+    assert.equal(first.id, firstOperation.id);
+    assert.equal(first.attempts, 4);
+    assert.equal(first.state, 'unknown');
     assert.equal(journal.operations.find((operation) => operation.id === later.id)?.state, 'queued');
-    assert.equal(fs.existsSync(callsPath), false);
+    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 3);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('human supplied retry count overrides the automatic retry budget even when errors say non-retryable', async () => {
+  const f = fixture();
+  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
+  try {
+    fs.mkdirSync(path.join(f.repoRoot, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+      platform: {
+        type: 'trae',
+        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true, verifyHeadFailures: 5 } } }
+      }
+    }));
+    const operation = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main',
+      expectedDigest: 'a'.repeat(64), pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' },
+      dependency: 'required', state: 'pending'
+    });
+
+    const recovery = await recoverPlatformOperations(TASK_ID, 'required', { agent: 'codex', cwd: f.repoRoot, attempts: 5 });
+    const persisted = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((item) => item.id === operation.id);
+    assert.equal(recovery.status, 'failed');
+    assert.equal(persisted?.attempts, 6);
+    assert.equal(persisted?.state, 'unknown');
+    assert.equal(fs.readFileSync(callsPath, 'utf8').split('\n').filter((call) => call === 'changeRequests.verifyHead').length, 5);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -143,353 +174,6 @@ test('PR recovery preserves its typed intent when a replay does not succeed', as
     const persisted = journal.operations.find((item) => item.id === operation.id);
     assert.deepEqual(persisted?.pullRequest, intent);
     assert.ok(['unknown', 'failed', 'succeeded'].includes(persisted?.state ?? ''));
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('failed operation resolution binds the current identity and persists operator evidence', () => {
-  const f = fixture();
-  try {
-    const failed = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":42}',
-      expectedDigest: 'c'.repeat(64), issueMetadata: { requirements: true, issueType: false, fields: false },
-      dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
-    });
-    const resolved = resolveFailedPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
-      expectedState: 'failed', action: 'confirm-applied', agent: 'codex',
-      evidence: 'Remote Issue readback showed the requested body digest.', remoteState: 'applied'
-    });
-    assert.equal(resolved.state, 'succeeded');
-    assert.equal(resolved.attempts, 0);
-    assert.equal(resolved.resolutions?.[0]?.action, 'confirm-applied');
-    assert.equal(resolved.resolutions?.[0]?.evidenceSource, 'operator-attestation');
-    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations[0]?.resolutions?.length, 1);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('retry resolution preserves attempts and rejects unsafe or stale operation facts', () => {
-  const f = fixture();
-  try {
-    const failed = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":42}',
-      expectedDigest: 'd'.repeat(64), issueMetadata: { requirements: true, issueType: false, fields: false },
-      dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
-    });
-    for (const input of [
-      { expectedDigest: 'e'.repeat(64), action: 'retry' as const, remoteState: 'absent' as const, replaySafe: true },
-      { expectedDigest: failed.expectedDigest, action: 'retry' as const, remoteState: 'absent' as const, replaySafe: false },
-      { expectedDigest: failed.expectedDigest, action: 'supersede' as const, remoteState: 'replaced' as const, dependenciesPreserved: false }
-    ]) {
-      assert.throws(() => resolveFailedPlatformOperation({
-        taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedState: 'failed', agent: 'codex',
-        evidence: 'Remote status was checked and dependency impact was reviewed.', ...input
-      }));
-    }
-    const retried = resolveFailedPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
-      expectedState: 'failed', action: 'retry', agent: 'codex',
-      evidence: 'Remote Issue readback confirmed target state is absent.', remoteState: 'absent', replaySafe: true
-    });
-    assert.equal(retried.state, 'queued');
-    assert.equal(retried.attempts, failed.attempts);
-    assert.equal(retried.resolutions?.[0]?.replaySafe, true);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('supersede requires evidence that replacement preserves dependencies', async () => {
-  const f = fixture();
-  try {
-    const failed = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: 'f'.repeat(64),
-      dependency: 'deferred', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
-    });
-    const superseded = resolveFailedPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
-      expectedState: 'failed', action: 'supersede', agent: 'codex',
-      evidence: 'The replacement comment is current and no later operation depends on this payload.',
-      remoteState: 'replaced', dependenciesPreserved: true
-    });
-    assert.equal(superseded.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
-    assert.equal(superseded.state, 'failed');
-    const drained = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
-    assert.equal(drained.status, 'no-op');
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('retry resolves only its selected operation and leaves later writes queued on an unknown result', async () => {
-  const f = fixture();
-  try {
-    const failed = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: '9'.repeat(64),
-      dependency: 'deferred', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
-    });
-    const later = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'code.md', expectedDigest: '8'.repeat(64),
-      dependency: 'deferred', state: 'queued'
-    });
-    const resolved = await resolvePlatformOperation(TASK_ID, {
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
-      expectedState: 'failed', action: 'retry', agent: 'codex',
-      evidence: 'Remote comment listing showed the operation marker is absent.', remoteState: 'absent', replaySafe: true
-    }, { agent: 'codex', cwd: f.repoRoot });
-    const journal = readPlatformOperationJournal(TASK_ID, f.repoRoot);
-    assert.ok(resolved.status === 'blocked' || resolved.status === 'failed');
-    assert.ok(['unknown', 'failed'].includes(journal.operations.find((operation) => operation.id === failed.id)?.state ?? ''));
-    assert.equal(journal.operations.find((operation) => operation.id === failed.id)?.attempts, 1);
-    assert.equal(journal.operations.find((operation) => operation.id === later.id)?.state, 'queued');
-    assert.equal(journal.operations.find((operation) => operation.id === later.id)?.attempts, 0);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('ordinary recovery keeps a persisted retry ahead of older-timestamp queued writes', async () => {
-  const f = fixture();
-  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
-  try {
-    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
-      platform: {
-        type: 'trae',
-        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
-      }
-    }));
-    const failed = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: '1'.repeat(64),
-      dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
-    });
-    const later = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main', expectedDigest: '2'.repeat(64),
-      pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' }, dependency: 'required', state: 'queued'
-    });
-    const journalPath = path.join(f.taskDir, '.platform-operations.json');
-    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<{ id: string; updatedAt: string }> };
-    journal.operations.find((operation) => operation.id === failed.id)!.updatedAt = '2026-01-01T00:00:00.000Z';
-    journal.operations.find((operation) => operation.id === later.id)!.updatedAt = '2026-01-01T00:00:01.000Z';
-    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
-
-    resolveFailedPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
-      expectedState: 'failed', action: 'retry', agent: 'codex',
-      evidence: 'Remote comment readback showed the operation marker is absent.', remoteState: 'absent', replaySafe: true
-    });
-    const recovered = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
-
-    assert.ok(recovered.status === 'blocked' || recovered.status === 'failed');
-    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((operation) => operation.id === later.id)?.state, 'queued');
-    const calls = fs.existsSync(callsPath) ? fs.readFileSync(callsPath, 'utf8').split(/\r?\n/u).filter(Boolean) : [];
-    assert.equal(calls.some((call) => call.startsWith('changeRequests.')), false);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('resolution result reports its persisted state change when the later queue is empty', async () => {
-  const f = fixture();
-  try {
-    const failed = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: '3'.repeat(64),
-      dependency: 'deferred', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
-    });
-    const resolved = await resolvePlatformOperation(TASK_ID, {
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
-      expectedState: 'failed', action: 'confirm-applied', agent: 'codex',
-      evidence: 'Remote comment readback matched the expected marker and digest.', remoteState: 'applied'
-    }, { agent: 'codex', cwd: f.repoRoot });
-    assert.equal(resolved.status, 'applied');
-    assert.equal(resolved.changed, true);
-    assert.deepEqual(resolved.recovered, [failed.id]);
-    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations[0]?.state, 'succeeded');
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('a dependency-scoped recovery cannot bypass an unresolved retry in another dependency', async () => {
-  const f = fixture();
-  try {
-    const blocker = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: '4'.repeat(64),
-      dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
-    });
-    const later = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'code.md', expectedDigest: '5'.repeat(64),
-      dependency: 'deferred', state: 'queued'
-    });
-    resolveFailedPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: blocker.id, expectedDigest: blocker.expectedDigest,
-      expectedState: 'failed', action: 'retry', agent: 'codex',
-      evidence: 'Remote comment readback showed the operation marker is absent.', remoteState: 'absent', replaySafe: true
-    });
-    const recovered = await recoverPlatformOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
-    assert.equal(recovered.status, 'blocked');
-    assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_RETRY_PENDING');
-    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((operation) => operation.id === later.id)?.state, 'queued');
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('a retry barrier survives comment replacement across ordinary and dependency-scoped recovery', async () => {
-  const f = fixture();
-  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
-  try {
-    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
-      platform: {
-        type: 'trae',
-        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
-      }
-    }));
-    const staleTarget = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
-    assert.ok(staleTarget);
-    const stale = recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...staleTarget, dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED' });
-    const later = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main', expectedDigest: '6'.repeat(64),
-      pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' }, dependency: 'deferred', state: 'queued'
-    });
-    const journalPath = path.join(f.taskDir, '.platform-operations.json');
-    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<{ id: string; updatedAt: string }> };
-    journal.operations.find((operation) => operation.id === stale.id)!.updatedAt = '2026-01-01T00:00:00.000Z';
-    journal.operations.find((operation) => operation.id === later.id)!.updatedAt = '2026-01-01T00:00:01.000Z';
-    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
-
-    fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
-    resolveFailedPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: stale.id, expectedDigest: stale.expectedDigest,
-      expectedState: 'failed', action: 'retry', agent: 'codex',
-      evidence: 'Remote comment listing showed the old projection marker is absent.', remoteState: 'absent', replaySafe: true
-    });
-    const first = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
-    const afterFirst = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations;
-    const replaced = afterFirst.find((operation) => operation.id !== stale.id && operation.id !== later.id);
-    assert.equal(afterFirst.find((operation) => operation.id === stale.id)?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
-    assert.equal(replaced?.state, 'failed');
-    assert.equal(replaced?.retryBarrierId, stale.id);
-    assert.equal(replaced?.resolutions, undefined);
-    assert.equal(afterFirst.find((operation) => operation.id === later.id)?.state, 'queued');
-    assert.ok(first.status === 'failed' || first.status === 'blocked');
-
-    const callCount = fs.existsSync(callsPath) ? fs.readFileSync(callsPath, 'utf8').split(/\r?\n/u).filter(Boolean).length : 0;
-    const second = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
-    const afterSecond = readPlatformOperationJournal(TASK_ID, f.repoRoot).operations;
-    assert.equal(second.status, 'blocked');
-    assert.equal(afterSecond.find((operation) => operation.id === later.id)?.state, 'queued');
-    const callsAfterSecond = fs.existsSync(callsPath) ? fs.readFileSync(callsPath, 'utf8').split(/\r?\n/u).filter(Boolean).length : 0;
-    assert.equal(callsAfterSecond, callCount);
-
-    const scoped = await recoverPlatformOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
-    assert.equal(scoped.status, 'blocked');
-    assert.equal(scoped.error?.code, 'PLATFORM_OPERATION_RETRY_PENDING');
-    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((operation) => operation.id === later.id)?.state, 'queued');
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('a retry replacement is durable before recovery waits for the provider result', async () => {
-  const f = fixture();
-  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
-  const journalPath = path.join(f.taskDir, '.platform-operations.json');
-  const crashPath = path.join(f.repoRoot, 'provider-wait-journal.json');
-  try {
-    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
-      platform: {
-        type: 'trae',
-        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: {
-          callsPath, recoveryVerifyHead: true, journalPath, captureJournalPath: crashPath
-        } } }
-      }
-    }));
-    const staleTarget = inspectPlatformCommentOperation(TASK_ID, { kind: 'task', agent: 'codex', cwd: f.repoRoot });
-    assert.ok(staleTarget);
-    const stale = recordPlatformOperation({ taskRef: TASK_ID, cwd: f.repoRoot, ...staleTarget, dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED' });
-    const later = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main', expectedDigest: '7'.repeat(64),
-      pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' }, dependency: 'deferred', state: 'queued'
-    });
-    fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
-    resolveFailedPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: stale.id, expectedDigest: stale.expectedDigest,
-      expectedState: 'failed', action: 'retry', agent: 'codex',
-      evidence: 'Remote comment listing showed the old projection marker is absent.', remoteState: 'absent', replaySafe: true
-    });
-
-    const recovered = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
-    assert.ok(recovered.status === 'failed' || recovered.status === 'blocked');
-
-    const waiting = JSON.parse(fs.readFileSync(crashPath, 'utf8')) as { operations: Array<{ id: string; state: string; lastCode: string | null; retryBarrierId?: string }> };
-    const waitingStale = waiting.operations.find((operation) => operation.id === stale.id);
-    const replacement = waiting.operations.find((operation) => operation.id !== stale.id && operation.id !== later.id);
-    assert.equal(waitingStale?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
-    assert.equal(replacement?.state, 'failed');
-    assert.equal(replacement?.retryBarrierId, stale.id);
-
-    const callCount = fs.readFileSync(callsPath, 'utf8').split(/\r?\n/u).filter(Boolean).length;
-    fs.copyFileSync(crashPath, journalPath);
-    const resumed = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
-    assert.equal(resumed.status, 'blocked');
-    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((operation) => operation.id === later.id)?.state, 'queued');
-    assert.equal(fs.readFileSync(callsPath, 'utf8').split(/\r?\n/u).filter(Boolean).length, callCount);
-  } finally {
-    fs.rmSync(f.repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('a failed result journal write leaves the replacement retry barrier recoverable', async () => {
-  const f = fixture();
-  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
-  const journalPath = path.join(f.taskDir, '.platform-operations.json');
-  const crashPath = path.join(f.repoRoot, 'provider-wait-journal.json');
-  try {
-    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
-      platform: {
-        type: 'trae',
-        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: {
-          callsPath, recoveryVerifyHead: true, journalPath, captureJournalPath: crashPath, breakJournalWrite: true
-        } } }
-      }
-    }));
-    fs.writeFileSync(f.taskFile, `---\nid: ${TASK_ID}\nplatform_issue_identity: '{"kind":"number","value":7}'\nstatus: active\n---\n\n# Original title\n`);
-    const stale = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'issue-metadata', target: '{"kind":"number","value":7}', expectedDigest: '9'.repeat(64),
-      issueMetadata: { requirements: false, issueType: false, fields: false, assignees: 'none' }, dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
-    });
-    const later = recordPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main', expectedDigest: '8'.repeat(64),
-      pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' }, dependency: 'deferred', state: 'queued'
-    });
-    fs.appendFileSync(f.taskFile, '\n## Description\nUpdated projection.\n');
-    resolveFailedPlatformOperation({
-      taskRef: TASK_ID, cwd: f.repoRoot, operationId: stale.id, expectedDigest: stale.expectedDigest,
-      expectedState: 'failed', action: 'retry', agent: 'codex',
-      evidence: 'Remote Issue readback showed this idempotent metadata update is absent.', remoteState: 'absent', replaySafe: true
-    });
-
-    const recovered = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
-    assert.ok(recovered.status === 'blocked' || recovered.status === 'failed', JSON.stringify(recovered));
-    assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_JOURNAL_INVALID', `${JSON.stringify(recovered)}\n${fs.readFileSync(callsPath, 'utf8')}`);
-
-    const waiting = JSON.parse(fs.readFileSync(crashPath, 'utf8')) as { operations: Array<{ id: string; state: string; lastCode: string | null; retryBarrierId?: string }> };
-    const waitingStale = waiting.operations.find((operation) => operation.id === stale.id);
-    const replacement = waiting.operations.find((operation) => operation.id !== stale.id && operation.id !== later.id);
-    assert.equal(waitingStale?.lastCode, 'PLATFORM_OPERATION_SUPERSEDED');
-    assert.equal(replacement?.state, 'failed');
-    assert.equal(replacement?.retryBarrierId, stale.id);
-
-    const callsPathContents = fs.readFileSync(callsPath, 'utf8');
-    fs.rmSync(journalPath, { recursive: true, force: true });
-    fs.copyFileSync(crashPath, journalPath);
-    const resumed = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
-    assert.equal(resumed.status, 'blocked');
-    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((operation) => operation.id === later.id)?.state, 'queued');
-    assert.equal(fs.readFileSync(callsPath, 'utf8'), callsPathContents);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
