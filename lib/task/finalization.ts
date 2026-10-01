@@ -795,9 +795,12 @@ function terminalResult(
   const blocked = [steps.backfill, steps.lifecycle, steps.taskComment, steps.verification, steps.summary].some((step) => step?.status === 'blocked');
   const warnings = openWarnings(receipt);
   const postLifecyclePending = receipt.lifecycle === 'done' && (pending.some((step) => step !== 'lifecycle') || receipt.warningProjection === 'pending');
-  const hardError = error?.code.startsWith('FINALIZATION_') || error?.code === 'TASK_FINALIZATION_RECEIPT_INVALID';
+  const terminalVerificationPending = receipt.lifecycle === 'done' && receipt.verification === 'pending';
+  const resultError = error ?? (terminalVerificationPending ? steps.verification?.error : null) ?? null;
+  const hardError = error?.code.startsWith('FINALIZATION_') || error?.code === 'TASK_FINALIZATION_RECEIPT_INVALID'
+    || terminalVerificationPending;
   return {
-    status: hardError ? (error?.retryable ? 'blocked' : 'failed') : pending.length === 0 ? 'completed' : postLifecyclePending ? 'completed' : blocked ? 'blocked' : 'failed',
+    status: hardError ? (resultError?.retryable ? 'blocked' : 'failed') : pending.length === 0 ? 'completed' : postLifecyclePending ? 'completed' : blocked ? 'blocked' : 'failed',
     changed,
     taskId,
     backfill: steps.backfill ?? null,
@@ -808,7 +811,7 @@ function terminalResult(
     completedSteps: completedSteps(receipt),
     pendingSteps: pending,
     result: hardError
-      ? (error?.retryable ? 'blocked' : 'failed')
+      ? (resultError?.retryable ? 'blocked' : 'failed')
       : postLifecyclePending
         ? 'completed_with_warnings'
         : pending.length === 0
@@ -817,7 +820,7 @@ function terminalResult(
             ? 'blocked'
             : 'failed',
     warnings,
-    error: hardError ? error : postLifecyclePending ? null : error
+    error: hardError ? resultError : postLifecyclePending ? null : resultError
   };
 }
 
@@ -850,7 +853,6 @@ async function prepareUnderLock(
   const commentSync = options.commentSync ?? syncPlatformComment;
   const issueSync = options.issueSync ?? syncPlatformIssue;
   const issueInspect = options.issueInspect ?? inspectPlatformIssue;
-  const verify = options.verify ?? verifyTaskEvent;
   const consumedCapabilities = new Set<string>();
   let receipt: TaskFinalizationReceipt;
   try {
@@ -1081,84 +1083,9 @@ async function prepareUnderLock(
     })
     : undefined;
 
-  let verification: TaskFinalizationStep | null = null;
-  if (receipt.verification !== 'pending') {
-    verification = { status: receipt.verification === 'skipped' ? 'skipped' : 'no-op', changed: false, error: null };
-  } else {
-    try {
-    receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-    const verificationState = resolveTaskRef(taskId, { repoRoot });
-    const verificationEvent = verificationState.ok && verificationState.state === 'completed'
-      ? 'complete-task.completed'
-      : 'complete-task.prepared';
-    const result = await verify(
-      { taskRef: taskId, event: verificationEvent },
-      { repoRoot }
-    );
-    verification = verificationStep(result);
-    if (result.status === 'pass') {
-      const resolvedTaskWarning = receipt.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
-      const warnings = applyVerificationWarnings(receipt, result);
-      receipt = updateReceipt(repoRoot, receipt, {
-        verification: 'done', taskComment: resolvedTaskWarning ? 'pending' : receipt.taskComment,
-        warningProjection: warnings.length > 0 ? 'pending' : 'done', warnings, lastError: null
-      });
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-      const finalComment = await syncPendingTaskComment({
-        repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync, consumedCapabilities
-      });
-      receipt = finalComment.receipt;
-      if (finalComment.step.status !== 'no-op') taskComment = finalComment.step;
-      changed = changed || finalComment.changed;
-      if (finalComment.error) {
-        return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification }, changed, finalComment.error);
-      }
-    } else {
-      const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
-      const warnings = applyVerificationWarnings(receipt, result);
-      receipt = updateReceipt(repoRoot, receipt, {
-        verification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: detail
-      });
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-      const warningComment = await syncPendingTaskComment({
-        repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync, consumedCapabilities
-      });
-      receipt = warningComment.receipt;
-      taskComment = warningComment.step;
-      changed = changed || warningComment.changed;
-      if (warningComment.error) {
-        return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification }, changed, warningComment.error);
-      }
-      return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification }, changed, detail);
-    }
-  } catch (error) {
-    const detail = errorOf(error, 'VERIFY_FAILED', true);
-    try {
-      const warnings = replaceWarning(receipt, warningFromError('verification', detail), 'open');
-      receipt = updateReceipt(repoRoot, receipt, {
-        verification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: detail
-      });
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-    } catch (writeError) {
-      const persistence = errorOf(writeError, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
-      const hardError: FinalizationError = {
-        code: 'FINALIZATION_RECEIPT_WRITE_FAILED',
-        message: `Unable to persist verification failure (${detail.code}: ${detail.message}): ${persistence.message}`,
-        retryable: true
-      };
-      return terminalResult(taskId, receipt, {
-        backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification: { status: 'blocked', changed: false, error: detail }
-      }, changed, hardError);
-    }
-    try {
-    const warningComment = await syncPendingTaskComment({ repoRoot, taskId, agent: request.agent, receipt, projection: currentProjection(), refreshProjection: currentProjection, commentSync, consumedCapabilities });
-      receipt = warningComment.receipt;
-      if (warningComment.step.status !== 'no-op') taskComment = warningComment.step;
-      changed = changed || warningComment.changed;
-    } catch { /* preserve the primary error */ }
-    return terminalResult(taskId, receipt, { backfill: backfillResult, lifecycle: lifecycleResult, taskComment, verification: { status: 'blocked', changed: false, error: detail } }, changed, detail);
-    }
-  }
+  const verification: TaskFinalizationStep = receipt.verification === 'done'
+    ? { status: 'no-op', changed: false, error: null }
+    : { status: 'skipped', changed: false, error: null };
 
   let summary = receipt.summary === 'pending'
     ? await syncPendingSummary({ repoRoot, taskId, agent: request.agent, receipt, commentSync })
@@ -1209,7 +1136,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
-    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', () => {
+    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', async () => {
       if (options.controlBinding && options.manifestPath) {
         try {
           const manifest = readSandboxControlManifest(options.manifestPath);
@@ -1256,7 +1183,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
       if (!receipt) return failed(resolved.taskId, {
         code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation receipt is unavailable', retryable: true
       });
-      if (receipt.lifecycle === 'done' && resolved.state === 'completed') {
+      if (receipt.lifecycle === 'done' && receipt.verification !== 'pending' && resolved.state === 'completed') {
         return terminalResult(resolved.taskId, receipt, { lifecycle: { status: 'no-op', changed: false, error: null } }, false);
       }
       if (options.controlBinding) {
@@ -1292,7 +1219,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
           }
         }
       }
-      if (receipt.taskComment === 'pending' || receipt.verification === 'pending' || receipt.summary === 'pending' || receipt.warningProjection === 'pending') {
+      if (receipt.taskComment === 'pending' || receipt.summary === 'pending' || receipt.warningProjection === 'pending') {
         return failed(resolved.taskId, {
           code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation has pending external steps', retryable: true
         }, { completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt) });
@@ -1303,6 +1230,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
         retryable: false
       });
+      receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
       const lifecycle = options.lifecycle ?? applyTaskLifecycle;
       const result = lifecycle(
         { taskRef: resolved.taskId, intent: 'complete', agent: request.agent },
@@ -1313,8 +1241,82 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });
         return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed, step.error);
       }
-      const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
-      return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed);
+
+      let verificationResult: TaskVerificationResult;
+      try {
+        verificationResult = await (options.verify ?? verifyTaskEvent)(
+          { taskRef: resolved.taskId, event: 'complete-task.completed' },
+          { repoRoot }
+        );
+      } catch (error) {
+        const detail = errorOf(error, 'VERIFY_FAILED', true);
+        const warnings = replaceWarning(receipt, warningFromError('verification', detail), 'open');
+        let updated: TaskFinalizationReceipt;
+        try {
+          updated = updateReceipt(repoRoot, receipt, {
+            lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
+            warnings, lastError: detail
+          });
+        } catch (persistCause) {
+          const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
+          persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
+          persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
+          return failed(resolved.taskId, persistError, {
+            changed: result.changed,
+            lifecycle: step,
+            verification: { status: 'blocked', changed: false, error: persistError },
+            completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+          });
+        }
+        const verification: TaskFinalizationStep = { status: detail.retryable ? 'blocked' : 'failed', changed: false, error: detail };
+        return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
+      }
+
+      const verification = verificationStep(verificationResult);
+      if (verificationResult.status === 'pass') {
+        const resolvedVerificationWarning = receipt.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
+        const warnings = applyVerificationWarnings(receipt, verificationResult);
+        const hasOpenWarnings = warnings.some((warning) => warning.status === 'open');
+        let updated: TaskFinalizationReceipt;
+        try {
+          updated = updateReceipt(repoRoot, receipt, {
+            lifecycle: 'done', verification: 'done',
+            taskComment: resolvedVerificationWarning ? 'pending' : receipt.taskComment,
+            warningProjection: hasOpenWarnings ? 'pending' : 'done', warnings, lastError: null
+          });
+        } catch (persistCause) {
+          const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
+          persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
+          return failed(resolved.taskId, persistError, {
+            changed: result.changed,
+            lifecycle: step,
+            verification,
+            completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+          });
+        }
+        return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed);
+      }
+
+      const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
+      const warnings = applyVerificationWarnings(receipt, verificationResult);
+      let updated: TaskFinalizationReceipt;
+      try {
+        updated = updateReceipt(repoRoot, receipt, {
+          lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
+          warnings, lastError: detail
+        });
+      } catch (persistCause) {
+        const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
+        persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
+        persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
+        return failed(resolved.taskId, persistError, {
+          changed: result.changed,
+          lifecycle: step,
+          verification: { status: 'blocked', changed: false, error: persistError },
+          completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
+        });
+      }
+      return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
     });
   } catch (error) {
     const detail = error instanceof TaskExecutionLockError

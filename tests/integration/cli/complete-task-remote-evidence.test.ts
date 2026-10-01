@@ -249,7 +249,7 @@ test("complete-task consumes a human exemption for merged identity failures befo
     assert.match(active.checks[0].message, /PRC-1/);
     assert.match(active.checks[0].message, /maintainer allowed reviewed and merged identities/);
     const rendered = renderTaskVerification({
-      status: "pass", changed: false, event: "complete-task.prepared", requestRef: taskId,
+      status: "pass", changed: false, event: "complete-task.completed", requestRef: taskId,
       taskId, taskDir: activeTask, taskState: "active", skill: "complete-task", mode: "gate", artifact: null, error: null,
       invocations: [{ status: "pass", exitCode: 0, payload: active }]
     });

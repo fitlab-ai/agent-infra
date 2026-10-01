@@ -49,7 +49,7 @@ test("complete-task renders an exemption covering multiple post-review commits",
     assert.equal(payload.gate, "pass");
     assert.match(payload.checks[0]!.message, /2 post-review commit\(s\) covered by a human-decided exemption/);
     const rendered = renderTaskVerification({
-      status: "pass", changed: false, event: "complete-task.prepared", requestRef: taskId,
+      status: "pass", changed: false, event: "complete-task.completed", requestRef: taskId,
       taskId, taskDir, taskState: "active", skill: "complete-task", mode: "gate", artifact: null, error: null,
       invocations: [{ status: "pass", exitCode: 0, payload }]
     });
