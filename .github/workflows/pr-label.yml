@@ -25,17 +25,11 @@ jobs:
         with:
           node-version: 22.9.0
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Build platform sync core
-        run: npm run build
-
       - name: Sync in-labels
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: node dist/bin/internal-cli.js platform-pr sync-in-labels --pr "$PR_NUMBER" --cwd "$GITHUB_WORKSPACE"
+        run: npm exec --yes --package="@fitlab-ai/agent-infra@latest" -- agent-infra-internal platform-pr sync-in-labels --pr "$PR_NUMBER" --cwd "$GITHUB_WORKSPACE"
 
       - name: Assign PR creator if unassigned
         env:

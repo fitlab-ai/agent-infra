@@ -8,15 +8,12 @@ const workflowTargets = [
   "templates/.github/workflows/pr-label.yml"
 ];
 
-test("pr-label workflow uses the checked-in core and the template package core", () => {
+test("pr-label workflows use the same stable published package", () => {
   const root = read(workflowTargets[0]!);
   const template = read(workflowTargets[1]!);
-  assert.match(root, /actions\/setup-node@v7/);
-  assert.match(root, /npm ci --ignore-scripts/);
-  assert.match(root, /npm run build/);
-  assert.match(root, /node dist\/bin\/internal-cli\.js platform-pr sync-in-labels --pr "\$PR_NUMBER"/);
-  assert.match(template, /npm exec --yes --package="@fitlab-ai\/agent-infra@\$AGENT_INFRA_VERSION" -- agent-infra-internal platform-pr sync-in-labels/);
-  assert.match(template, /AGENT_INFRA_VERSION: 0\.9\.13-alpha\.0/);
+
+  assert.equal(root, template, "repository workflow and distributed template should stay identical");
+  assert.match(root, /npm exec --yes --package="@fitlab-ai\/agent-infra@latest" -- agent-infra-internal platform-pr sync-in-labels/);
 });
 
 test("pr-label workflow reacts to PR open and synchronize events", () => {

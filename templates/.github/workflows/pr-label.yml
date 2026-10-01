@@ -29,8 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          AGENT_INFRA_VERSION: 0.9.13-alpha.0
-        run: npm exec --yes --package="@fitlab-ai/agent-infra@$AGENT_INFRA_VERSION" -- agent-infra-internal platform-pr sync-in-labels --pr "$PR_NUMBER" --cwd "$GITHUB_WORKSPACE"
+        run: npm exec --yes --package="@fitlab-ai/agent-infra@latest" -- agent-infra-internal platform-pr sync-in-labels --pr "$PR_NUMBER" --cwd "$GITHUB_WORKSPACE"
 
       - name: Assign PR creator if unassigned
         env:
