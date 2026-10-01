@@ -23,7 +23,7 @@ const EXPECTED_EVENTS = [
   'analyze.awaiting-input', 'analyze.completed', 'review-analysis.completed',
   'plan.completed', 'review-plan.completed', 'code.completed', 'review-code.completed',
   'manual-validation.completed', 'validation-run.completed', 'block-task.completed', 'cancel-task.completed',
-  'commit.completed', 'complete-task.preflight', 'complete-task.hard-preflight', 'complete-task.prepared', 'complete-task.completed',
+  'commit.completed', 'complete-task.preflight', 'complete-task.hard-preflight', 'complete-task.completed',
   'create-pr.completed', 'create-task.completed', 'import-codescan.completed',
   'import-dependabot.completed', 'import-issue.completed', 'watch-pr.completed',
   'review-pr.completed',
@@ -188,7 +188,6 @@ test('verification catalog is a closed mapping of all business events', async ()
     'commit.completed': ['commit', 'active', 'gate', undefined, undefined],
     'complete-task.preflight': ['complete-task', 'active', 'checks', undefined, ['required-pr-delivery']],
     'complete-task.hard-preflight': ['complete-task', 'active', 'checks', undefined, ['required-pr-delivery']],
-    'complete-task.prepared': ['complete-task', 'active', 'gate', undefined, undefined],
     'complete-task.completed': ['complete-task', 'completed', 'gate', undefined, undefined],
     'create-pr.completed': ['create-pr', 'active', 'gate', undefined, undefined],
     'create-task.completed': ['create-task', 'active', 'gate', undefined, undefined],
@@ -217,65 +216,6 @@ test('verification rejects workspace and artifact identity mismatches before inv
   const extraArtifact = await verifyTaskEvent({ taskRef: f.taskId, event: 'commit.completed', artifact: 'code.md' }, { repoRoot: f.root, engine: checkEngine });
   assert.equal(extraArtifact.error?.code, 'VERIFY_ARTIFACT_UNEXPECTED');
   assert.equal(calls, 0);
-});
-
-test('prepared completion verification evaluates the projected task without writing it to disk', async () => {
-  const f = fixture('active');
-  const original = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
-  const verifyPath = path.join(f.root, '.agents', 'skills', 'complete-task', 'config', 'verify.json');
-  fs.mkdirSync(path.dirname(verifyPath), { recursive: true });
-  fs.writeFileSync(verifyPath, JSON.stringify({ checks: {
-    'task-meta': { required_fields: ['id', 'status', 'completed_at'], expected_status: 'completed', require_completed_at: true },
-    'activity-log': { expected_action_pattern: '(Complete Task|Completed)' },
-    'completion-checklist': { require_all_checked: true }
-  } }));
-  const projection = [
-    '---', `id: ${f.taskId}`, 'type: bugfix', 'workflow: bug-fix', 'status: completed',
-    'created_at: 2026-01-01 00:00:00+00:00', 'updated_at: 2026-01-02 00:00:00+00:00',
-    'completed_at: 2026-01-02 00:00:00+00:00', 'agent_infra_version: v0.9.9',
-    'current_step: completed', 'assigned_to: codex', '---', '', '# Task', '',
-    '## Activity Log', '', '- 2026-01-02 00:00:00+00:00 — **Complete Task** by codex — completed', '',
-    '## Completion Checklist', '', '- [x] Complete task'
-  ].join('\n');
-  try {
-    const result = await verifyTaskEvent({ taskRef: f.taskId, event: 'complete-task.prepared' }, {
-      repoRoot: f.root, taskContentOverride: projection
-    });
-    assert.equal(result.status, 'pass');
-    const checks = result.invocations[0]?.payload.checks as Array<{ checkId?: string }>;
-    assert.deepEqual(checks.map((check) => check.checkId), [
-      'task-meta', 'activity-log', 'completion-checklist'
-    ]);
-    assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), original);
-  } finally {
-    fs.rmSync(f.root, { recursive: true, force: true });
-  }
-});
-
-test('task content overrides are rejected outside prepared completion and when task identity differs', async () => {
-  const active = fixture('active');
-  const override = `---\nid: ${active.taskId}\nstatus: completed\ncompleted_at: now\n---\n`;
-  const completed = fixture('completed');
-  let calls = 0;
-  const checkEngine = (input: Parameters<typeof verifyInProcess>[0]) => {
-    calls += 1;
-    return { gate: 'pass', checks: [], skill: input.skillName };
-  };
-  try {
-    const mismatch = await verifyTaskEvent({ taskRef: active.taskId, event: 'complete-task.prepared' }, {
-      repoRoot: active.root, taskContentOverride: override.replace(active.taskId, 'TASK-20260101-000002'), engine: checkEngine
-    });
-    assert.equal(mismatch.error?.code, 'VERIFY_TASK_CONTENT_OVERRIDE_INVALID');
-
-    const disallowed = await verifyTaskEvent({ taskRef: completed.taskId, event: 'complete-task.completed' }, {
-      repoRoot: completed.root, taskContentOverride: override, engine: checkEngine
-    });
-    assert.equal(disallowed.error?.code, 'VERIFY_TASK_CONTENT_OVERRIDE_NOT_ALLOWED');
-    assert.equal(calls, 0);
-  } finally {
-    fs.rmSync(active.root, { recursive: true, force: true });
-    fs.rmSync(completed.root, { recursive: true, force: true });
-  }
 });
 
 test('preflight stops on the first non-pass and preserves blocked exit semantics', async () => {
@@ -331,7 +271,7 @@ test('text output warns when a blocked platform check is normalized to pass', ()
 test('text output preserves human-decided post-review exemption notices on passing checks', () => {
   const message = 'Human-decided post-review exemption overrode PR_MERGE_IDENTITY_INVALID: PR merge identity does not match the reviewed head; PRC-1: maintainer allowed reviewed and merged identities';
   const text = renderTaskVerification({
-    status: 'pass', changed: false, event: 'complete-task.prepared', requestRef: 'TASK-20260101-000001',
+    status: 'pass', changed: false, event: 'complete-task.completed', requestRef: 'TASK-20260101-000001',
     taskId: 'TASK-20260101-000001', taskDir: '/tmp/task', taskState: 'active', skill: 'complete-task', mode: 'gate', artifact: null, error: null,
     invocations: [{
       status: 'pass', exitCode: 0,

@@ -206,7 +206,7 @@ test('host finalization waits for completion backfill before lifecycle and repea
     const replay = await applyTaskFinalization(request, { ...options(f.repoRoot, commentSync, async () => verification('pass')), backfill });
     assert.equal(first.result, 'completed');
     assert.equal(replay.result, 'completed');
-    assert.deepEqual(calls, ['backfill', 'task', 'summary']);
+    assert.deepEqual(calls, ['backfill', 'summary', 'task']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -344,8 +344,8 @@ test('final task comment uses the warning projection after summary recovery', as
     assert.equal(first.status, 'blocked');
     const second = await prepareTaskFinalization(request, options(f.repoRoot, commentSync, async () => verification('pass')));
     assert.equal(second.status, 'prepared');
-    assert.equal(taskProjections.length, 2);
-    assert.match(taskProjections[1]!, /NETWORK_TIMEOUT \| resolved/u);
+    assert.equal(taskProjections.length, 1);
+    assert.match(taskProjections[0]!, /NETWORK_TIMEOUT \| resolved/u);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -452,7 +452,7 @@ test('completed finalization fails closed when an artifact warning references a 
     assert.equal(replay.error?.code, 'ARTIFACT_TOPOLOGY_CONFLICT');
     assert.equal(replay.lifecycle, null);
     assert.equal(backfillCalls, 1);
-    assert.equal(verifyCalls, 2);
+    assert.equal(verifyCalls, 1);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -909,13 +909,8 @@ test('host finalization uses the canonical root and makes a successful replay a 
     verifyCalls += 1;
     verificationEvents.push(received.event);
     assert.equal(receivedOptions?.repoRoot, f.repoRoot);
-    if (received.event === 'complete-task.prepared') {
-      assert.match(receivedOptions?.taskContentOverride ?? '', /^status: completed$/m);
-      assert.match(receivedOptions?.taskContentOverride ?? '', /^completed_at:/m);
-    } else {
-      assert.equal(received.event, 'complete-task.completed');
-      assert.equal(receivedOptions?.taskContentOverride, undefined);
-    }
+    assert.equal(received.event, 'complete-task.completed');
+    assert.deepEqual(receivedOptions, { repoRoot: f.repoRoot });
     return verification('pass');
   };
   try {
@@ -924,8 +919,8 @@ test('host finalization uses the canonical root and makes a successful replay a 
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
     assert.equal(commentCalls, 1);
-    assert.equal(verifyCalls, 2);
-    assert.deepEqual(verificationEvents, ['complete-task.prepared', 'complete-task.completed']);
+    assert.equal(verifyCalls, 1);
+    assert.deepEqual(verificationEvents, ['complete-task.completed']);
     assert.equal(second.verification, null);
     assert.equal(second.taskComment, null);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
@@ -965,13 +960,9 @@ test('host finalization does not report completion when the committed task fails
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received, receivedOptions) => {
     verifyCalls += 1;
     verificationEvents.push(received.event);
-    if (received.event === 'complete-task.prepared') {
-      assert.ok(receivedOptions?.taskContentOverride);
-      return verification('pass');
-    }
     assert.equal(received.event, 'complete-task.completed');
-    assert.equal(receivedOptions?.taskContentOverride, undefined);
-    return verifyCalls === 2 ? verification('fail') : verification('pass');
+    assert.deepEqual(receivedOptions, { repoRoot: f.repoRoot });
+    return verifyCalls === 1 ? verification('fail') : verification('pass');
   };
   try {
     const failed = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
@@ -985,14 +976,16 @@ test('host finalization does not report completion when the committed task fails
     assert.equal(failedReceipt?.verification, 'pending');
     assert.equal(fs.existsSync(completedTaskDir), true);
 
+    const warningSynced = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recoveredReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    assert.equal(warningSynced.result, 'completed_with_warnings');
     assert.equal(recovered.result, 'completed');
     assert.equal(recoveredReceipt?.lifecycle, 'done');
     assert.equal(recoveredReceipt?.verification, 'done');
     assert.equal(recoveredReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), false);
     assert.deepEqual(verificationEvents, [
-      'complete-task.prepared', 'complete-task.completed', 'complete-task.completed'
+      'complete-task.completed', 'complete-task.completed'
     ]);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
@@ -1019,7 +1012,7 @@ test('host finalization runs the terminal gate against the completed task docume
     const result = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
     const completedTask = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
     assert.equal(result.status, 'completed');
-    assert.deepEqual(verificationEvents, ['complete-task.prepared', 'complete-task.completed']);
+    assert.deepEqual(verificationEvents, ['complete-task.completed']);
     assert.match(completedTask, /^status: completed$/m);
     assert.match(completedTask, /^completed_at:/m);
     assert.match(completedTask, /\*\*Complete Task\*\*/);
@@ -1065,8 +1058,8 @@ test('host finalization keeps a blocked terminal gate pending for a completed ta
   let verifyCalls = 0;
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received) => {
     verifyCalls += 1;
-    assert.equal(received.event, verifyCalls === 1 ? 'complete-task.prepared' : 'complete-task.completed');
-    return verification(verifyCalls === 2 ? 'blocked' : 'pass');
+    assert.equal(received.event, 'complete-task.completed');
+    return verification(verifyCalls === 1 ? 'blocked' : 'pass');
   };
   try {
     const result = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
@@ -1109,9 +1102,9 @@ test('host finalization seals a staged summary after core verification and retai
     const result = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(result.result, 'completed');
-    assert.deepEqual(kinds, ['task', 'summary']);
-    assert.deepEqual(timeline, ['verify', 'task', 'summary', 'verify']);
-    assert.equal(verifyCalls, 2);
+    assert.deepEqual(kinds, ['summary', 'task']);
+    assert.deepEqual(timeline, ['summary', 'task', 'verify']);
+    assert.equal(verifyCalls, 1);
     assert.equal(receipt?.summary, 'done');
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, '.delivery-summary.json')), true);
   } finally {
@@ -1138,8 +1131,8 @@ test('host finalization skips terminal verification and summary when no recovery
   try {
     assert.equal((await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
     assert.equal((await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify))).status, 'completed');
-    assert.equal(verifyCalls, 2);
-    assert.deepEqual(kinds, ['task', 'summary']);
+    assert.equal(verifyCalls, 1);
+    assert.deepEqual(kinds, ['summary', 'task']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1157,23 +1150,25 @@ test('host finalization records a terminal verification exception and recovers o
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received) => {
     verifyCalls += 1;
     verificationEvents.push(received.event);
-    if (verifyCalls === 2) throw new Error('verification input unavailable');
+    if (verifyCalls === 1) throw new Error('verification input unavailable');
     return verification('pass');
   };
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const failedReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    const warningSynced = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recoveredReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(first.result, 'blocked');
     assert.equal(first.error?.code, 'VERIFY_FAILED');
     assert.equal(failedReceipt?.verification, 'pending');
     assert.equal(failedReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.code === 'VERIFY_FAILED' && warning.status === 'open'), true);
+    assert.equal(warningSynced.result, 'completed_with_warnings');
     assert.equal(recovered.result, 'completed');
     assert.equal(recoveredReceipt?.verification, 'done');
     assert.equal(recoveredReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), false);
-    assert.equal(verifyCalls, 3);
-    assert.deepEqual(verificationEvents, ['complete-task.prepared', 'complete-task.completed', 'complete-task.completed']);
+    assert.equal(verifyCalls, 2);
+    assert.deepEqual(verificationEvents, ['complete-task.completed', 'complete-task.completed']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1208,9 +1203,7 @@ test('host finalization re-runs the terminal gate after interruption at the life
     assert.equal(recovered.result, 'completed');
     assert.equal(receipt?.lifecycle, 'done');
     assert.equal(receipt?.verification, 'done');
-    assert.deepEqual(verificationEvents, [
-      'complete-task.prepared', 'complete-task.completed'
-    ]);
+    assert.deepEqual(verificationEvents, ['complete-task.completed']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1221,8 +1214,8 @@ test('host finalization keeps pending terminal verification failed when retry ba
   let verifyCalls = 0;
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received) => {
     verifyCalls += 1;
-    assert.equal(received.event, verifyCalls === 1 ? 'complete-task.prepared' : 'complete-task.completed');
-    return verifyCalls === 2 ? verification('fail') : verification('pass');
+    assert.equal(received.event, 'complete-task.completed');
+    return verifyCalls === 1 ? verification('fail') : verification('pass');
   };
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
@@ -1238,7 +1231,7 @@ test('host finalization keeps pending terminal verification failed when retry ba
     assert.deepEqual(blocked.pendingSteps, ['task-comment', 'verification']);
     assert.equal(receipt?.lifecycle, 'done');
     assert.equal(receipt?.verification, 'pending');
-    assert.equal(verifyCalls, 2);
+    assert.equal(verifyCalls, 1);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1286,8 +1279,8 @@ test('host finalization blocks when a warning-state replayed verification failur
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
-    if (verifyCalls === 2) return verification('fail');
-    if (verifyCalls === 3) {
+    if (verifyCalls === 1) return verification('fail');
+    if (verifyCalls === 2) {
       fs.chmodSync(receiptDirectory, 0o500);
       const error = new Error('terminal verification unavailable');
       Object.assign(error, { code: 'VERIFY_UNAVAILABLE', retryable: true });
@@ -1300,6 +1293,7 @@ test('host finalization blocks when a warning-state replayed verification failur
     const blocked = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const blockedReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     fs.chmodSync(receiptDirectory, 0o700);
+    const warningSynced = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recoveredReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     assert.equal(first.result, 'failed');
@@ -1310,10 +1304,11 @@ test('host finalization blocks when a warning-state replayed verification failur
     assert.match(blocked.error?.message ?? '', /EACCES|permission denied/i);
     assert.equal(blockedReceipt?.verification, 'pending');
     assert.equal(blockedReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), true);
+    assert.equal(warningSynced.result, 'completed_with_warnings');
     assert.equal(recovered.result, 'completed');
     assert.equal(recoveredReceipt?.verification, 'done');
-    assert.equal(verifyCalls, 4);
-    assert.equal(comments.filter((kind) => kind === 'summary').length, 2);
+    assert.equal(verifyCalls, 3);
+    assert.ok(comments.includes('summary'));
   } finally {
     if (fs.existsSync(receiptDirectory)) fs.chmodSync(receiptDirectory, 0o700);
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
@@ -1375,7 +1370,7 @@ test('host finalization revalidates canonical steps when the receipt is absent',
     assert.equal(second.status, 'completed');
     assert.equal(second.lifecycle?.status, 'no-op');
     assert.equal(commentCalls, 2);
-    assert.equal(verifyCalls, 3);
+    assert.equal(verifyCalls, 2);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1403,13 +1398,11 @@ test('host finalization rejects a current receipt that omits warningProjection',
 test('host finalization returns actionable verification gate failures and retries them', async () => {
   const f = fixture();
   let commentCalls = 0;
-  const commentSnapshots: string[] = [];
   const timeline: string[] = [];
   let verifyCalls = 0;
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = async (_taskRef, received) => {
     commentCalls += 1;
     timeline.push(received.kind);
-    commentSnapshots.push(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md'), 'utf8'));
     return platformResult(commentCalls === 1 ? 'applied' : 'no-op');
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
@@ -1419,20 +1412,20 @@ test('host finalization returns actionable verification gate failures and retrie
   };
   try {
     const failed = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const warningSynced = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const replay = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(failed.status, 'failed');
     assert.equal(failed.result, 'failed');
     assert.equal(failed.warnings[0]?.code, 'CHECK_FAILED');
     assert.match(failed.warnings[0]?.message ?? '', /Fix complete-task issues/);
-    assert.deepEqual(failed.pendingSteps, ['lifecycle', 'verification', 'summary']);
+    assert.deepEqual(failed.pendingSteps, ['task-comment', 'verification']);
+    assert.equal(warningSynced.status, 'completed');
     assert.equal(recovered.status, 'completed');
     assert.equal(replay.status, 'completed');
-    assert.equal(verifyCalls, 3);
-    assert.equal(commentCalls, 2);
-    assert.deepEqual(timeline, ['verify', 'task', 'verify', 'task', 'verify']);
-    assert.match(commentSnapshots[0]!, /\| CHECK_FAILED \| open \|/);
-    assert.match(commentSnapshots[1]!, /\| CHECK_FAILED \| resolved \|/);
+    assert.equal(verifyCalls, 2);
+    assert.equal(commentCalls, 3);
+    assert.deepEqual(timeline, ['task', 'verify', 'task', 'verify', 'task']);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -1487,7 +1480,7 @@ test('host finalization retries only the pending terminal steps after a comment 
     assert.equal(first.pendingSteps.includes('task-comment'), true);
     assert.equal(second.status, 'completed');
     assert.equal(commentCalls, 3);
-    assert.equal(verifyCalls, 2);
+    assert.equal(verifyCalls, 1);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
     const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
     assert.match(completed, /\| NETWORK_RETRY \| resolved \|/);

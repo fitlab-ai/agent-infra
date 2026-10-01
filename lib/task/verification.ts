@@ -7,14 +7,13 @@ import { parseArtifactName } from './artifact-name.ts';
 import type { ArtifactFamily } from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import type { TaskWorkspaceState } from './resolve-ref.ts';
-import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 
 type VerificationEvent =
   | 'analyze.awaiting-input' | 'analyze.completed'
   | 'review-analysis.completed' | 'plan.completed' | 'review-plan.completed'
   | 'code.completed' | 'review-code.completed' | 'manual-validation.completed' | 'validation-run.completed'
   | 'block-task.completed' | 'cancel-task.completed' | 'commit.completed'
-  | 'complete-task.preflight' | 'complete-task.hard-preflight' | 'complete-task.prepared' | 'complete-task.completed'
+  | 'complete-task.preflight' | 'complete-task.hard-preflight' | 'complete-task.completed'
   | 'create-pr.completed' | 'create-task.completed'
   | 'import-codescan.completed' | 'import-dependabot.completed'
   | 'import-issue.completed' | 'watch-pr.completed'
@@ -48,7 +47,6 @@ type TaskVerificationResult = {
 };
 type VerificationOptions = {
   repoRoot?: string;
-  taskContentOverride?: string;
   engine?: (input: Parameters<typeof verifyInProcess>[0]) => Record<string, unknown> | Promise<Record<string, unknown>>;
 };
 
@@ -70,7 +68,6 @@ const VERIFICATION_CATALOG: Readonly<Record<VerificationEvent, VerificationSpec>
   'commit.completed': gate('commit', 'active'),
   'complete-task.preflight': { skill: 'complete-task', expectedState: 'active', mode: 'checks', checks: ['required-pr-delivery'] },
   'complete-task.hard-preflight': { skill: 'complete-task', expectedState: 'active', mode: 'checks', checks: ['required-pr-delivery'] },
-  'complete-task.prepared': gate('complete-task', 'active'),
   'complete-task.completed': gate('complete-task', 'completed'),
   'create-pr.completed': gate('create-pr', 'active'),
   'create-task.completed': gate('create-task', 'active'),
@@ -100,19 +97,6 @@ async function verifyTaskEvent(request: { taskRef: string; event: string; artifa
   if (resolved.state !== spec.expectedState) {
     return failure(request, 'VERIFY_TASK_STATE_MISMATCH', `event '${request.event}' requires workspace '${spec.expectedState}', received '${resolved.state}'`, identity);
   }
-  if (options.taskContentOverride !== undefined) {
-    if (request.event !== 'complete-task.prepared') {
-      return failure(request, 'VERIFY_TASK_CONTENT_OVERRIDE_NOT_ALLOWED', 'task content override is only supported for complete-task.prepared', identity);
-    }
-    try {
-      const metadata = parseTypedTaskFrontmatter(options.taskContentOverride);
-      if (metadata.id !== resolved.taskId || metadata.status !== 'completed' || !metadata.completed_at) {
-        return failure(request, 'VERIFY_TASK_CONTENT_OVERRIDE_INVALID', 'prepared completion content must preserve task identity and project completed metadata', identity);
-      }
-    } catch {
-      return failure(request, 'VERIFY_TASK_CONTENT_OVERRIDE_INVALID', 'prepared completion content has invalid task metadata', identity);
-    }
-  }
   if (spec.artifactFamily) {
     if (!request.artifact) return failure(request, 'VERIFY_ARTIFACT_REQUIRED', `event '${request.event}' requires an artifact`, identity);
     const parsed = parseArtifactName(request.artifact);
@@ -126,7 +110,7 @@ async function verifyTaskEvent(request: { taskRef: string; event: string; artifa
   const invocations: VerificationInvocation[] = [];
   const engine = options.engine ?? verifyInProcess;
   if (spec.mode === 'gate') {
-    const payload = await engine({ mode: 'gate', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [], repositoryRoot: resolved.repoRoot, ...(options.taskContentOverride !== undefined ? { taskContentOverride: options.taskContentOverride } : {}) });
+    const payload = await engine({ mode: 'gate', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [], repositoryRoot: resolved.repoRoot });
     const status = payload.gate as 'pass' | 'fail' | 'blocked';
     invocations.push({ status, exitCode: ({ pass: 0, fail: 1, blocked: 2 } as const)[status], payload });
   } else {
