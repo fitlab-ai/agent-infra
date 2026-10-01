@@ -47,6 +47,12 @@ function result(status: RecoveryResult['status'], recovered: string[], pending: 
   return { status, changed: recovered.length > 0, recovered, pending, error };
 }
 
+function hasUnresolvedRetry(operation: ReturnType<typeof readPlatformOperationJournal>['operations'][number]): boolean {
+  return operation.resolutions?.at(-1)?.action === 'retry'
+    && operation.state !== 'succeeded'
+    && !(operation.state === 'failed' && operation.lastCode === 'PLATFORM_OPERATION_SUPERSEDED');
+}
+
 function summaryPayload(taskDir: string, taskId: string): { body: string; sha256: string } | null {
   const file = path.join(taskDir, '.delivery-summary.json');
   if (!fs.existsSync(file)) return null;
@@ -285,12 +291,33 @@ async function recoverPlatformOperations(
     const value = error as { code?: string; message?: string };
     return result('failed', [], [], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_INVALID', message: value.message || String(error), retryable: false });
   }
-  const candidates = journal.operations.filter((operation) => operation.id !== options.excludeId
-    && (options.operationId === undefined || operation.id === options.operationId)
+  const recoverable = journal.operations.filter((operation) => operation.id !== options.excludeId
     && (operation.state === 'queued' || operation.state === 'pending' || operation.state === 'unknown'
-      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED')))
-    .filter((operation) => selection === 'all' || operation.dependency === selection)
-    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+      || (operation.state === 'failed' && operation.lastCode !== 'PLATFORM_OPERATION_SUPERSEDED')));
+  const retryBarriers = recoverable.filter(hasUnresolvedRetry);
+  const scoped = recoverable.filter((operation) => (selection === 'all' || operation.dependency === selection)
+    && (options.operationId === undefined || operation.id === options.operationId));
+  if (options.operationId === undefined && selection !== 'all'
+    && retryBarriers.some((operation) => operation.dependency !== selection)
+    && scoped.some((operation) => !hasUnresolvedRetry(operation))) {
+    const pending = [...retryBarriers.map((operation) => operation.id), ...scoped.map((operation) => operation.id)];
+    return result('blocked', [], [...new Set(pending)], {
+      code: 'PLATFORM_OPERATION_RETRY_PENDING',
+      message: 'A persisted retry remains unresolved; later operations stay queued until it is confirmed',
+      retryable: true
+    });
+  }
+  const retryOrder = new Map(retryBarriers.map((operation, index) => [operation.id, index]));
+  const candidates = scoped.sort((left, right) => {
+    const leftRetry = retryOrder.get(left.id);
+    const rightRetry = retryOrder.get(right.id);
+    if (leftRetry !== undefined || rightRetry !== undefined) {
+      if (leftRetry === undefined) return 1;
+      if (rightRetry === undefined) return -1;
+      return leftRetry - rightRetry;
+    }
+    return left.updatedAt.localeCompare(right.updatedAt);
+  });
   if (!candidates.length) return result('no-op', [], []);
   const limit = options.limit === undefined ? candidates.length : Math.max(1, options.limit);
   const recovered: string[] = [];
@@ -446,13 +473,30 @@ async function resolvePlatformOperation(
     const value = error as { code?: string; message?: string };
     return result('blocked', [], [input.operationId], { code: value.code || 'PLATFORM_OPERATION_RESOLUTION_FAILED', message: value.message || String(error), retryable: false });
   }
+  let targeted: RecoveryResult | null = null;
   if (input.action === 'retry') {
-    const targeted = await recoverPlatformOperations(resolved.taskId, operation.dependency, {
+    targeted = await recoverPlatformOperations(resolved.taskId, operation.dependency, {
       ...options, operationId: operation.id
     });
-    if (targeted.status !== 'applied' && targeted.status !== 'no-op') return targeted;
+    if (targeted.status !== 'applied' && targeted.status !== 'no-op') {
+      return { ...targeted, changed: true };
+    }
   }
-  return recoverPlatformOperations(resolved.taskId, 'all', { ...options, excludeId: operation.id });
+  const resumed = await recoverPlatformOperations(resolved.taskId, 'all', { ...options, excludeId: operation.id });
+  const recovered = [...new Set([
+    operation.id,
+    ...(targeted?.status === 'applied' || targeted?.status === 'no-op' ? targeted.recovered : []),
+    ...resumed.recovered
+  ])];
+  const completed = resumed.status === 'no-op' ? 'applied' : resumed.status;
+  return {
+    ...resumed,
+    status: completed,
+    changed: true,
+    recovered,
+    pending: [...new Set([...(targeted?.pending ?? []), ...resumed.pending])],
+    error: resumed.error ?? targeted?.error ?? null
+  };
 }
 
 export { fieldsMatchExpected, labelsMatchOwnedPrefix, recoverPlatformOperations, resolvePlatformOperation };

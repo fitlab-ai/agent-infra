@@ -250,3 +250,89 @@ test('retry resolves only its selected operation and leaves later writes queued 
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
 });
+
+test('ordinary recovery keeps a persisted retry ahead of older-timestamp queued writes', async () => {
+  const f = fixture();
+  const callsPath = path.join(f.repoRoot, 'provider-calls.txt');
+  try {
+    fs.writeFileSync(path.join(f.repoRoot, '.agents', '.airc.json'), JSON.stringify({
+      platform: {
+        type: 'trae',
+        providers: { trae: { source: path.resolve('tests/fixtures/platform-providers/in-label-provider.mjs'), config: { callsPath, recoveryVerifyHead: true } } }
+      }
+    }));
+    const failed = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: '1'.repeat(64),
+      dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
+    });
+    const later = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'pull-request', target: 'head:feature:base:main', expectedDigest: '2'.repeat(64),
+      pullRequest: { action: 'create', baseRef: 'main', headRef: 'feature' }, dependency: 'required', state: 'queued'
+    });
+    const journalPath = path.join(f.taskDir, '.platform-operations.json');
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { operations: Array<{ id: string; updatedAt: string }> };
+    journal.operations.find((operation) => operation.id === failed.id)!.updatedAt = '2026-01-01T00:00:00.000Z';
+    journal.operations.find((operation) => operation.id === later.id)!.updatedAt = '2026-01-01T00:00:01.000Z';
+    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+
+    resolveFailedPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
+      expectedState: 'failed', action: 'retry', agent: 'codex',
+      evidence: 'Remote comment readback showed the operation marker is absent.', remoteState: 'absent', replaySafe: true
+    });
+    const recovered = await recoverPlatformOperations(TASK_ID, 'all', { agent: 'codex', cwd: f.repoRoot });
+
+    assert.ok(recovered.status === 'blocked' || recovered.status === 'failed');
+    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((operation) => operation.id === later.id)?.state, 'queued');
+    const calls = fs.existsSync(callsPath) ? fs.readFileSync(callsPath, 'utf8').split(/\r?\n/u).filter(Boolean) : [];
+    assert.equal(calls.some((call) => call.startsWith('changeRequests.')), false);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolution result reports its persisted state change when the later queue is empty', async () => {
+  const f = fixture();
+  try {
+    const failed = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: '3'.repeat(64),
+      dependency: 'deferred', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
+    });
+    const resolved = await resolvePlatformOperation(TASK_ID, {
+      taskRef: TASK_ID, cwd: f.repoRoot, operationId: failed.id, expectedDigest: failed.expectedDigest,
+      expectedState: 'failed', action: 'confirm-applied', agent: 'codex',
+      evidence: 'Remote comment readback matched the expected marker and digest.', remoteState: 'applied'
+    }, { agent: 'codex', cwd: f.repoRoot });
+    assert.equal(resolved.status, 'applied');
+    assert.equal(resolved.changed, true);
+    assert.deepEqual(resolved.recovered, [failed.id]);
+    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations[0]?.state, 'succeeded');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('a dependency-scoped recovery cannot bypass an unresolved retry in another dependency', async () => {
+  const f = fixture();
+  try {
+    const blocker = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'task-comment', target: 'task', expectedDigest: '4'.repeat(64),
+      dependency: 'required', state: 'failed', lastCode: 'PLATFORM_REQUEST_FAILED'
+    });
+    const later = recordPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, kind: 'artifact-comment', target: 'code.md', expectedDigest: '5'.repeat(64),
+      dependency: 'deferred', state: 'queued'
+    });
+    resolveFailedPlatformOperation({
+      taskRef: TASK_ID, cwd: f.repoRoot, operationId: blocker.id, expectedDigest: blocker.expectedDigest,
+      expectedState: 'failed', action: 'retry', agent: 'codex',
+      evidence: 'Remote comment readback showed the operation marker is absent.', remoteState: 'absent', replaySafe: true
+    });
+    const recovered = await recoverPlatformOperations(TASK_ID, 'deferred', { agent: 'codex', cwd: f.repoRoot });
+    assert.equal(recovered.status, 'blocked');
+    assert.equal(recovered.error?.code, 'PLATFORM_OPERATION_RETRY_PENDING');
+    assert.equal(readPlatformOperationJournal(TASK_ID, f.repoRoot).operations.find((operation) => operation.id === later.id)?.state, 'queued');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
