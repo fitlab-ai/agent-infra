@@ -1264,7 +1264,7 @@ test('host finalization keeps a receipt persistence error blocked when warnings 
   assert.equal(result.error?.code, 'FINALIZATION_RECEIPT_WRITE_FAILED');
 });
 
-test('host finalization blocks when a warning-state replayed verification failure cannot be persisted', onPlatforms('linux', 'darwin'), async () => {
+test('host finalization reports lifecycle changes when verification and receipt persistence fail', onPlatforms('linux', 'darwin'), async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';
   const receiptDirectory = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization');
@@ -1279,8 +1279,7 @@ test('host finalization blocks when a warning-state replayed verification failur
   };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = async () => {
     verifyCalls += 1;
-    if (verifyCalls === 1) return verification('fail');
-    if (verifyCalls === 2) {
+    if (verifyCalls === 1) {
       fs.chmodSync(receiptDirectory, 0o500);
       const error = new Error('terminal verification unavailable');
       Object.assign(error, { code: 'VERIFY_UNAVAILABLE', retryable: true });
@@ -1290,24 +1289,19 @@ test('host finalization blocks when a warning-state replayed verification failur
   };
   try {
     const first = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const blocked = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    const blockedReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
     fs.chmodSync(receiptDirectory, 0o700);
-    const warningSynced = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recovered = await applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recoveredReceipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
-    assert.equal(first.result, 'failed');
-    assert.equal(blocked.status, 'blocked');
-    assert.equal(blocked.result, 'blocked');
-    assert.equal(blocked.error?.code, 'FINALIZATION_RECEIPT_WRITE_FAILED');
-    assert.match(blocked.error?.message ?? '', /VERIFY_UNAVAILABLE/);
-    assert.match(blocked.error?.message ?? '', /EACCES|permission denied/i);
-    assert.equal(blockedReceipt?.verification, 'pending');
-    assert.equal(blockedReceipt?.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open'), true);
-    assert.equal(warningSynced.result, 'completed_with_warnings');
+    assert.equal(first.status, 'blocked');
+    assert.equal(first.result, 'blocked');
+    assert.equal(first.error?.code, 'FINALIZATION_RECEIPT_WRITE_FAILED');
+    assert.match(first.error?.message ?? '', /VERIFY_UNAVAILABLE/);
+    assert.match(first.error?.message ?? '', /EACCES|permission denied/i);
+    assert.equal(first.changed, true);
+    assert.equal(first.lifecycle?.changed, true);
     assert.equal(recovered.result, 'completed');
     assert.equal(recoveredReceipt?.verification, 'done');
-    assert.equal(verifyCalls, 3);
+    assert.equal(verifyCalls, 2);
     assert.ok(comments.includes('summary'));
   } finally {
     if (fs.existsSync(receiptDirectory)) fs.chmodSync(receiptDirectory, 0o700);

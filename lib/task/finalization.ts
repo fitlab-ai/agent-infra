@@ -1262,6 +1262,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
           persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
           persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
           return failed(resolved.taskId, persistError, {
+            changed: result.changed,
             lifecycle: step,
             verification: { status: 'blocked', changed: false, error: persistError },
             completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
@@ -1287,6 +1288,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
           const persistError = errorOf(persistCause, 'FINALIZATION_RECEIPT_WRITE_FAILED', true);
           persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
           return failed(resolved.taskId, persistError, {
+            changed: result.changed,
             lifecycle: step,
             verification,
             completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
@@ -1308,6 +1310,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         persistError.code = 'FINALIZATION_RECEIPT_WRITE_FAILED';
         persistError.message = `${persistError.message}; verification also failed: ${detail.code}: ${detail.message}`;
         return failed(resolved.taskId, persistError, {
+          changed: result.changed,
           lifecycle: step,
           verification: { status: 'blocked', changed: false, error: persistError },
           completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt)
