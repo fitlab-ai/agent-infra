@@ -57,7 +57,7 @@ The script outputs JSON to stdout. Parse and record the report.
 - `registryAdded`: newly added file registry entries
 - `configUpdated`: whether `.agents/.airc.json` was updated
 
-If `managed.conflicts` is non-empty, output every conflict and stop immediately before Phase B. Do not overwrite a conflicting file or advance its `files.managedBaselines` entry.
+Treat `managed.conflicts` as per-file conflicts, not as a reason to abort the entire sync. The sync script skips each conflicting target and preserves its current file and `files.managedBaselines` entry; continue handling all non-conflicting managed/ejected files and config updates. Even when conflicts exist, continue to Phase B and process every item in `merged.pending`, then report all conflicts in Phase C. Never overwrite a conflicting file or advance its baseline in any phase.
 
 ## Phase B: Process merged files (AI intelligent merge)
 

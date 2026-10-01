@@ -486,11 +486,14 @@ test("guarded managed files use persisted three-way baselines", async () => {
 
     fs.writeFileSync(targetPath, "name: user-v2\n", "utf8");
     fs.writeFileSync(path.join(templateRoot, target), "name: official-v3\n", "utf8");
+    writeFile(templateRoot, ".agents/rules/sync-continuation.md", "safe managed update\n");
     const conflict = syncTemplates(projectRoot, templateRoot);
     assert.equal(fs.readFileSync(targetPath, "utf8"), "name: user-v2\n");
     assert.deepEqual(conflict.managed.conflicts.map(({ target: item, reason }) => ({ target: item, reason })), [
       { target, reason: "both-modified" }
     ]);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".agents/rules/sync-continuation.md"), "utf8"), "safe managed update\n");
+    assert.ok(conflict.managed.created.includes(".agents/rules/sync-continuation.md"));
     assert.equal(JSON.parse(fs.readFileSync(configPath, "utf8")).files.managedBaselines[target], baselineV2);
 
     const withoutBaseline = JSON.parse(fs.readFileSync(configPath, "utf8"));

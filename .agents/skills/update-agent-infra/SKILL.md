@@ -49,7 +49,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 - `registryAdded`：新增的文件注册条目
 - `configUpdated`：`.agents/.airc.json` 是否已更新
 
-如果 `managed.conflicts` 非空，输出全部冲突并立即停止，不进入阶段 B；禁止覆盖冲突文件或推进其 `files.managedBaselines`。
+`managed.conflicts` 是逐文件冲突，不是整轮同步的中止条件。同步脚本会跳过冲突目标，并保留该目标的当前文件和 `files.managedBaselines`；其它无冲突的 managed / ejected 文件及配置照常处理。即使冲突列表非空，也继续阶段 B 处理全部 `merged.pending`，最后在阶段 C 汇总报告所有冲突。任何阶段都不得覆盖冲突文件或推进该文件的基线。
 
 ## 阶段 B：处理 merged 文件（AI 智能合并）
 
