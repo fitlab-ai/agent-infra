@@ -1179,6 +1179,71 @@ test('host finalization records a terminal verification exception and recovers o
   }
 });
 
+test('host finalization re-runs the terminal gate after interruption at the lifecycle boundary', async () => {
+  const f = fixture();
+  const verificationEvents: string[] = [];
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received) => {
+    verificationEvents.push(received.event);
+    return verification('pass');
+  };
+  const receiptAtLifecycle: { value: TaskFinalizationReceipt | null } = { value: null };
+  const lifecycle: NonNullable<TaskFinalizationOptions['lifecycle']> = (received, lifecycleOptions) => {
+    const lifecycleInput = { ...lifecycleOptions, repoRoot: f.repoRoot };
+    if (lifecycleInput.prepareOnly) return applyTaskLifecycle(received, lifecycleInput);
+    receiptAtLifecycle.value = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    const applied = applyTaskLifecycle(received, lifecycleInput);
+    throw new Error(`simulated interruption after lifecycle ${applied.status}`);
+  };
+  try {
+    const interrupted = await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), verify),
+      lifecycle
+    });
+    assert.equal(interrupted.status, 'failed');
+    assert.equal(receiptAtLifecycle.value?.verification, 'pending');
+    assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
+
+    const recovered = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
+    const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    assert.equal(recovered.result, 'completed');
+    assert.equal(receipt?.lifecycle, 'done');
+    assert.equal(receipt?.verification, 'done');
+    assert.deepEqual(verificationEvents, [
+      'complete-task.prepared', 'complete-task.completed'
+    ]);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization keeps pending terminal verification failed when retry backfill throws', async () => {
+  const f = fixture();
+  let verifyCalls = 0;
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = async (received) => {
+    verifyCalls += 1;
+    assert.equal(received.event, verifyCalls === 1 ? 'complete-task.prepared' : 'complete-task.completed');
+    return verifyCalls === 2 ? verification('fail') : verification('pass');
+  };
+  try {
+    const first = await applyTaskFinalization(request, options(f.repoRoot, async () => platformResult('no-op'), verify));
+    const blocked = await applyTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), verify),
+      backfill: async () => { throw new Error('backfill network unavailable'); }
+    });
+    const receipt = readTaskFinalizationReceipt(f.repoRoot, TASK_ID);
+    assert.equal(first.result, 'failed');
+    assert.equal(blocked.status, 'blocked');
+    assert.equal(blocked.result, 'blocked');
+    assert.equal(blocked.error?.code, 'COMPLETION_BACKFILL_FAILED');
+    assert.deepEqual(blocked.pendingSteps, ['task-comment', 'verification']);
+    assert.equal(receipt?.lifecycle, 'done');
+    assert.equal(receipt?.verification, 'pending');
+    assert.equal(verifyCalls, 2);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization keeps a receipt persistence error blocked when warnings are pending', () => {
   const receipt: TaskFinalizationReceipt = {
     version: 4,

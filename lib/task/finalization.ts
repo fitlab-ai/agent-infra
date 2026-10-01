@@ -795,8 +795,7 @@ function terminalResult(
   const blocked = [steps.backfill, steps.lifecycle, steps.taskComment, steps.verification, steps.summary].some((step) => step?.status === 'blocked');
   const warnings = openWarnings(receipt);
   const postLifecyclePending = receipt.lifecycle === 'done' && (pending.some((step) => step !== 'lifecycle') || receipt.warningProjection === 'pending');
-  const terminalVerificationPending = receipt.lifecycle === 'done' && receipt.verification === 'pending'
-    && steps.verification !== undefined;
+  const terminalVerificationPending = receipt.lifecycle === 'done' && receipt.verification === 'pending';
   const resultError = error ?? (terminalVerificationPending ? steps.verification?.error : null) ?? null;
   const hardError = error?.code.startsWith('FINALIZATION_') || error?.code === 'TASK_FINALIZATION_RECEIPT_INVALID'
     || terminalVerificationPending;
@@ -1296,7 +1295,12 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
           }
         }
       }
-      if (receipt.taskComment === 'pending' || receipt.verification === 'pending' || receipt.summary === 'pending' || receipt.warningProjection === 'pending') {
+      const lifecycleProgress = receipt.verification === 'pending' && receipt.lifecycle !== 'done'
+        ? inspectTaskLifecycleProgress(repoRoot, resolved.taskId, request.agent)
+        : null;
+      const verificationNeedsPreparation = receipt.verification === 'pending' && receipt.lifecycle !== 'done'
+        && lifecycleProgress !== 'started-recoverable';
+      if (receipt.taskComment === 'pending' || verificationNeedsPreparation || receipt.summary === 'pending' || receipt.warningProjection === 'pending') {
         return failed(resolved.taskId, {
           code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation has pending external steps', retryable: true
         }, { completedSteps: completedSteps(receipt), pendingSteps: pendingSteps(receipt), warnings: openWarnings(receipt) });
@@ -1307,6 +1311,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         message: `cannot verify canonical short-id registry: ${registry.error.code}: ${registry.error.message}`,
         retryable: false
       });
+      receipt = updateReceipt(repoRoot, receipt, { verification: 'pending' });
       const lifecycle = options.lifecycle ?? applyTaskLifecycle;
       const result = lifecycle(
         { taskRef: resolved.taskId, intent: 'complete', agent: request.agent },
