@@ -150,7 +150,7 @@ agent-infra-internal git-workflow commit --input {checkpoint-input}
 
 This creates only a local checkpoint and does not contact a remote. The core writes a durable intent before committing and removes it after task-writer synchronization; do not emit `code.completed` if either checkpoint or task synchronization fails.
 
-After the checkpoint succeeds, when task.md has a `platform_issue_identity`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`. The task-bound `delivery_base_ref` is the only source for Issue `in:` evidence; record a warning and continue the local code stage if this sync fails. `complete-task` restores and verifies this evidence before archiving.
+After the checkpoint succeeds, when task.md has a `platform_issue_identity`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`. The task-bound `delivery_base_ref` is the only source for Issue `in:` evidence; record a warning and continue the local code stage if this sync fails. The PR stage computes and syncs the final `in:` labels.
 
 Then run the finalizer:
 
