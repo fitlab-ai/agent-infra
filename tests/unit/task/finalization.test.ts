@@ -292,7 +292,7 @@ test('finalization stops with the canonical task active when required Issue meta
   }
 });
 
-test('finalization requires the deferred Issue in-label evidence before completing', async () => {
+test('finalization leaves Issue in-labels to PR delivery while verifying other Issue metadata', async () => {
   const f = fixture();
   const taskFile = path.join(f.taskDir, 'task.md');
   fs.writeFileSync(taskFile, fs.readFileSync(taskFile, 'utf8').replace('status: active', 'delivery_base_ref: main\nstatus: active'));
@@ -300,8 +300,9 @@ test('finalization requires the deferred Issue in-label evidence before completi
     const prepared = await prepareTaskFinalization(request, {
       ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
       issueSync: async (_task, syncOptions) => {
-        assert.equal(syncOptions.inLabels, 'from-diff');
-        assert.equal(syncOptions.base, 'main');
+        assert.deepEqual(syncOptions, {
+          agent: 'codex', cwd: f.repoRoot, requirements: true, issueType: true, fields: true, dependency: 'required'
+        });
         return platformResult('no-op', {
           issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {}, labels: ['in: core'] },
           operations: [
@@ -314,7 +315,8 @@ test('finalization requires the deferred Issue in-label evidence before completi
         issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {}, labels: [] }
       } as any) as any
     });
-    assert.equal(prepared.error?.code, 'FINALIZATION_IN_LABELS_UNCONFIRMED');
+    assert.equal(prepared.status, 'prepared');
+    assert.equal(prepared.error, null);
     assert.match(fs.readFileSync(taskFile, 'utf8'), /^status: active$/m);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
