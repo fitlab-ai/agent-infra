@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import defaults from '../defaults.json' with { type: 'json' };
 import { normalizeAgentClients, serializeAgentClients } from './config.ts';
-import { normalizeCustomTUIs } from './custom-tuis.ts';
+import { normalizeCustomToolInvocations } from './custom-tool-invocations.ts';
 import { renderNextStepCommands } from './next-steps.ts';
 import { planAgentClientProjectAssets } from './project-assets.ts';
 import {
@@ -216,11 +216,11 @@ function planAgentClientReconciliation(input: Readonly<{
     delete (nextConfig.files as Record<string, unknown>).managedBaselines;
   }
 
-  const custom = normalizeCustomTUIs(input.projectRoot, input.config.customTUIs ?? []);
+  const custom = normalizeCustomToolInvocations(input.config);
   const nextSteps = renderNextStepCommands({
     projectName,
     state: desired,
-    customTUIs: custom.items,
+    customToolInvocations: custom.items,
     skillName: 'update-agent-infra'
   });
   const actionableSeed = seedOperations.some((operation) =>

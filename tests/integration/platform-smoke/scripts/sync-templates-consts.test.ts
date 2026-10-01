@@ -10,7 +10,6 @@ import defaults from "../../../../lib/defaults.json" with { type: "json" };
 import {
   createAgentClientManifest
 } from "../../../../lib/agent-clients/registry.ts";
-
 function readGeneratedManifest(target: string) {
   const generated = fs.readFileSync(filePath(target), "utf8");
   const match = generated.match(

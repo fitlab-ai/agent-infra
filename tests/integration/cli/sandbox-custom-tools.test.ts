@@ -202,6 +202,37 @@ test("loadConfig parses an id-keyed sandbox.tools definition and fills optional 
   }
 });
 
+test("loadConfig preserves custom tool invocation without a command directory", async () => {
+  const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tool-command-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    process.chdir(tmpDir);
+    writeAirc(tmpDir, {
+      project: "demo",
+      sandbox: {
+        tools: {
+          ids: ["my-tool"],
+          definitions: {
+            "my-tool": {
+              install: { type: "shell", cmd: SHELL_INSTALL_CMD },
+              invoke: "acme ${skillName} --project ${projectName}"
+            }
+          }
+        }
+      }
+    });
+
+    const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
+    assert.equal(config.customTools[0]?.invoke, "acme ${skillName} --project ${projectName}");
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("loadConfig reports invalid sandbox.tools ids and definitions with precise paths", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tools-invalid-shape-"));

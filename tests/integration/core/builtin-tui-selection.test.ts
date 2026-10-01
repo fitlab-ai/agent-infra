@@ -229,23 +229,26 @@ test("syncTemplates: Antigravity uses shared skills without client-owned project
   }
 });
 
-test("syncTemplates: disabled built-in TUI uses its managed cleanup and merge selection", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-custom-overlap-"));
+test("syncTemplates leaves user-owned command files outside managed paths untouched", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-custom-indep-"));
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, { agentClients: canonicalAgentClients(["claude-code"]) });
-    writeFile(templateRoot, ".codex/commands/test.en.md", "codex test\n");
-    writeFile(projectRoot, ".codex/hooks.json", "{}\n");
+    writeFile(
+      projectRoot,
+      ".acme/commands/analyze-task.cmd",
+      "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
+    );
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
     );
     const report = syncTemplates(projectRoot, templateRoot);
 
-    assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
-    assert.ok(report.managed.removed.includes(".codex/hooks.json"));
-    assert.ok(!mergedPendingTargets(report as SyncReport).includes(".codex/commands/test.md"));
+    assert.ok(fs.existsSync(path.join(projectRoot, ".acme/commands/analyze-task.cmd")));
+    // No .acme/* path should be in removed.
+    assert.ok(!report.managed.removed.some((p) => p.startsWith(".acme/")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

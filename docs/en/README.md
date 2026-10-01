@@ -13,7 +13,7 @@ In-depth documentation for agent-infra. For positioning, install, and quick star
 - [Feishu Bridge](./feishu-bridge.md) — configure the Feishu long-connection adapter and `/ping` verification
 - [Built-in AI Skills](./skills.md) — the full skill catalog by use case
 - [Custom Skills](./custom-skills.md) — create and sync project-specific skills
-- [Custom TUI Configuration](./custom-tui.md) — adapt agent-infra to non-built-in AI TUIs
+- [Custom Tool Invocations](./custom-tool-invocations.md) — configure custom-tool next-step commands
 - [Prebuilt Workflows](./workflows.md) — the gated delivery lifecycle and example flow
 - [Configuration Reference](./configuration.md) — `.agents/.airc.json`, external sources, version management
 - [File Management Strategies](./file-management.md) — managed / merged / ejected update strategies

@@ -231,6 +231,7 @@ export function parseCustomTool(
   if (!containerMount.startsWith('/')) {
     throw new Error(`${context}: field "containerMount" must be an absolute path`);
   }
+  const invoke = asOptionalNonEmptyString(entry.invoke, 'invoke', context);
 
   const tool: SandboxTool = {
     id,
@@ -241,6 +242,7 @@ export function parseCustomTool(
     versionCmd: asOptionalNonEmptyString(entry.versionCmd, 'versionCmd', context) ?? `which ${id}`,
     setupHint: asOptionalNonEmptyString(entry.setupHint, 'setupHint', context)
       ?? `Run \`${id}\` inside the container to set up.`,
+    ...(invoke === undefined ? {} : { invoke }),
     envVars: asStringRecord(entry.envVars, 'envVars', context),
     hostPreSeedFiles: parseHostPreSeedFiles(entry.hostPreSeedFiles, context),
     hostPreSeedDirs: parseHostPreSeedDirs(entry.hostPreSeedDirs, context),

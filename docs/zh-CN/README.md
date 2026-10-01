@@ -13,7 +13,7 @@ agent-infra 的深度文档。定位、安装和快速上手请见 [主 README](
 - [飞书桥接](./feishu-bridge.md) — 配置飞书长连接 adapter 并验证 `/ping`
 - [内置 AI Skills](./skills.md) — 按使用场景分组的完整 skill 清单
 - [自定义 Skills](./custom-skills.md) — 创建并同步项目专属 skill
-- [自定义 TUI 配置](./custom-tui.md) — 适配非内置的 AI TUI
+- [自定义工具调用](./custom-tool-invocations.md) — 配置自定义工具的下一步命令
 - [预置工作流](./workflows.md) — 分阶段交付链路与示例流程
 - [配置参考](./configuration.md) — `.agents/.airc.json`、外部源、版本管理
 - [文件管理策略](./file-management.md) — managed / merged / ejected 更新策略

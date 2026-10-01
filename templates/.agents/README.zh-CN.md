@@ -259,59 +259,11 @@ TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra
 ### 与其他配置字段的关系
 
 - `sandbox.tools.ids` 只列出 `agent-infra` 和自定义工具等非客户端工具；自定义定义放在 `sandbox.tools.definitions`。内建客户端的安装状态由 `agentClients[].installInSandbox` 表达。
-- `agentClients` 与 `customTUIs`（见下）相互独立。即使自定义 TUI 目录落在已取消的内建客户端路径前缀下，其命令文件也会被保留。
-
-## 自定义 TUI 配置
-
-当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTUIs` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义 TUI 目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
-
-| 字段 | 必填 | 含义 |
-|------|------|------|
-| `name` | 是 | 报告和下一步提示中展示的工具名称，例如 `<your-tui-name>`。 |
-| `dir` | 是 | 相对项目根目录的命令目录，例如 `.<your-tui>/commands`。路径必须位于项目根目录内。 |
-| `invoke` | 是 | 面向用户展示的命令模板，用于生成下一步提示。 |
-
-`invoke` 支持的占位符：
-
-| 占位符 | 替换为 | 示例 |
-|--------|--------|------|
-| `${skillName}` | skill 命令名，例如 `review-code` 或 `commit`。 | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
-| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/your-project:review-code` |
-
-不带命名空间的自定义 TUI：
-
-```json
-{
-  "customTUIs": [
-    {
-      "name": "<your-tui-name>",
-      "dir": ".<your-tui>/commands",
-      "invoke": "<your-cli> ${skillName}"
-    }
-  ]
-}
-```
-
-带命名空间的自定义 TUI：
-
-```json
-{
-  "project": "your-project",
-  "customTUIs": [
-    {
-      "name": "<your-tui-name>",
-      "dir": ".<your-tui>/commands",
-      "invoke": "/${projectName}:${skillName}"
-    }
-  ]
-}
-```
-
-`customTUIs` 每个条目对应一个自定义 TUI。若希望 `update-agent-infra` 为自定义 skill 生成命令文件，请在 `dir` 中保留至少一个引用内置 skill 路径的既有命令文件，例如 `.agents/skills/analyze-task/SKILL.md`；agent-infra 会以该文件作为格式参考。
+- 自定义工具的下一步命令通过 `sandbox.tools.definitions.<id>.invoke` 配置。完整示例见 [自定义工具调用说明](https://github.com/fitlab-ai/agent-infra/blob/main/docs/zh-CN/custom-tool-invocations.md)。
 
 ## 沙箱自定义工具（Sandbox Custom Tools）
 
-`customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 CLI 或工具（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.tools.definitions` 中按工具 ID 声明。内建 Agent Client 按 `agentClients[].installInSandbox` 安装；`agent-infra` 仍是 `sandbox.tools.ids` 中的非客户端条目，只提供沙箱内的 `ai` / `agent-infra` CLI。
+自定义沙箱工具通过 `.agents/.airc.json` 的 `sandbox.tools.definitions` 按工具 ID 声明。需要把非 npm 分发的 CLI 或工具（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像，或 live-mount 它的凭证目录时，可在对应定义中配置。内建 Agent Client 按 `agentClients[].installInSandbox` 安装；`agent-infra` 仍是 `sandbox.tools.ids` 中的非客户端条目，只提供沙箱内的 `ai` / `agent-infra` CLI。
 
 ### 必填字段
 

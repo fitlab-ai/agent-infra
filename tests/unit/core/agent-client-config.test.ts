@@ -85,14 +85,12 @@ test('schema is JSON-safe and expresses the canonical tuple order', () => {
     schema.properties.agentClients.items[0].required,
     ['id', 'enabled', 'installInSandbox']
   );
-  assert.deepEqual(
-    schema.properties.customTUIs.items.required,
-    ['name', 'dir', 'invoke']
+  assert.equal(schema.properties.sandbox.properties.tools.properties.ids.items.type, 'string');
+  assert.equal(
+    schema.properties.sandbox.properties.tools.properties.definitions
+      .additionalProperties.properties.invoke.type,
+    'string'
   );
-  assert.equal(schema.properties.customTUIs.items.additionalProperties, true);
-  assert.equal(schema.properties.customTUIs.items.properties.name.type, 'string');
-  assert.equal(schema.properties.customTUIs.items.properties.dir.type, 'string');
-  assert.equal(schema.properties.customTUIs.items.properties.invoke.type, 'string');
   assert.deepEqual(
     schema.definitions.agentClientCapabilityId.enum,
     AGENT_CLIENT_CAPABILITY_IDS
