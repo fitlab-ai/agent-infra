@@ -629,56 +629,54 @@ test('sandbox control removal resumes from carrier-finalizing without replaying 
   }
 });
 
-test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, and revision CAS', async () => {
+test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, and revision CAS', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-removal-journal-'));
   let manifest: ReturnType<typeof readSandboxControlManifest> | undefined;
-  try {
-    const branch = initializeRepository(root);
-    const generation = `removal-journal-generation-${process.pid}-${Date.now()}`;
-    const manifestPath = writeControlManifest(root, branch, generation);
-    manifest = readSandboxControlManifest(manifestPath);
-    await removeSandboxControlRoot(root, {
-      timeoutMs: 5_000,
-      inspectContainer: async () => ({ state: 'absent', id: 'container-id' }),
-      retainRemovalJournal: true,
-      removeContainer: async () => { throw new Error('unexpected container removal'); }
-    });
-
-    const prepared = readSandboxRemovalJournal(manifest);
-    assert.ok(prepared);
-    assert.equal(prepared.version, 2);
-    assert.equal(prepared.phase, 'carrier-removed');
-    assert.equal(prepared.revision, 5);
-    assert.equal(prepared.expectedOldJournalRevision, 4);
-    assert.equal(prepared.target.controlRoot, root);
-    assert.equal(prepared.target.removeBranch, false);
-    assert.equal(prepared.target.removeShare, false);
-    assert.throws(
-      () => claimSandboxRemovalJournal(prepared),
-      /SANDBOX_CONTROL_REMOVE_RETRY_IN_PROGRESS/
-    );
-
-    const claimed = claimSandboxRemovalJournal(prepared, { identityProbe: () => 'dead' });
-    assert.equal(claimed.revision, prepared.revision + 1);
-    assert.equal(claimed.expectedOldJournalRevision, prepared.revision);
-    const advanced = advanceSandboxRemovalJournalPhase(claimed, 'carrier-removed');
-    assert.equal(advanced.revision, claimed.revision);
-    assert.throws(
-      () => advanceSandboxRemovalJournalPhase(claimed, 'prepared'),
-      /SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID/
-    );
-    assert.throws(
-      () => advanceSandboxRemovalJournalPhase(prepared, 'carrier-removed'),
-      /SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH/
-    );
-    clearSandboxRemovalJournalRecord(advanced);
-    assert.equal(readSandboxRemovalJournal(manifest), null);
-  } finally {
+  t.after(() => {
     if (manifest) clearSandboxRemovalJournal(manifest);
     fs.rmSync(root, { recursive: true, force: true });
-  }
-});
+  });
+  const branch = initializeRepository(root);
+  const generation = `removal-journal-generation-${process.pid}-${Date.now()}`;
+  const manifestPath = writeControlManifest(root, branch, generation);
+  manifest = readSandboxControlManifest(manifestPath);
+  await removeSandboxControlRoot(root, {
+    timeoutMs: 5_000,
+    inspectContainer: async () => ({ state: 'absent', id: 'container-id' }),
+    retainRemovalJournal: true,
+    removeContainer: async () => { throw new Error('unexpected container removal'); }
+  });
 
+  const prepared = readSandboxRemovalJournal(manifest);
+  assert.ok(prepared);
+  assert.equal(prepared.version, 2);
+  assert.equal(prepared.phase, 'carrier-removed');
+  assert.equal(prepared.revision, 5);
+  assert.equal(prepared.expectedOldJournalRevision, 4);
+  assert.equal(prepared.target.controlRoot, root);
+  assert.equal(prepared.target.removeBranch, false);
+  assert.equal(prepared.target.removeShare, false);
+  assert.throws(
+    () => claimSandboxRemovalJournal(prepared),
+    /SANDBOX_CONTROL_REMOVE_RETRY_IN_PROGRESS/
+  );
+
+  const claimed = claimSandboxRemovalJournal(prepared, { identityProbe: () => 'dead' });
+  assert.equal(claimed.revision, prepared.revision + 1);
+  assert.equal(claimed.expectedOldJournalRevision, prepared.revision);
+  const advanced = advanceSandboxRemovalJournalPhase(claimed, 'carrier-removed');
+  assert.equal(advanced.revision, claimed.revision);
+  assert.throws(
+    () => advanceSandboxRemovalJournalPhase(claimed, 'prepared'),
+    /SANDBOX_CONTROL_REMOVAL_PHASE_TRANSITION_INVALID/
+  );
+  assert.throws(
+    () => advanceSandboxRemovalJournalPhase(prepared, 'carrier-removed'),
+    /SANDBOX_CONTROL_REMOVAL_JOURNAL_REVISION_MISMATCH/
+  );
+  clearSandboxRemovalJournalRecord(advanced);
+  assert.equal(readSandboxRemovalJournal(manifest), null);
+});
 test('sandbox control removal retries a transient unknown owner through its journal', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-owner-retry-'));
   let probes = 0;
