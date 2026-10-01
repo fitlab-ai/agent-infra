@@ -926,6 +926,58 @@ test('host finalization uses the canonical root and makes a successful replay a 
   }
 });
 
+test('completion finalization tolerates a missing Issue requirements anchor', async () => {
+  const f = fixture();
+  try {
+    const configured: TaskFinalizationOptions = {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+      issueSync: async () => platformResult('no-op', ({
+        issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {} },
+        operations: [
+          { name: 'requirements', status: 'skipped', reasonCode: 'NO_REQUIREMENTS_ANCHOR' },
+          { name: 'issue-type', status: 'no-op', reasonCode: null },
+          { name: 'fields', status: 'no-op', reasonCode: null }
+        ]
+      }) as any) as any
+    };
+    const result = await applyTaskFinalization(request, configured);
+    assert.equal(result.status, 'completed');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('completion finalization keeps Issue identity confirmation fail-closed after a missing anchor skip', async () => {
+  const f = fixture();
+  let lifecycleCalls = 0;
+  try {
+    const result = await prepareTaskFinalization(request, {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+      issueSync: async () => platformResult('no-op', ({
+        issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {} },
+        operations: [
+          { name: 'requirements', status: 'skipped', reasonCode: 'NO_REQUIREMENTS_ANCHOR' },
+          { name: 'issue-type', status: 'no-op', reasonCode: null },
+          { name: 'fields', status: 'no-op', reasonCode: null }
+        ]
+      }) as any) as any,
+      issueInspect: async () => platformResult('no-op', ({
+        issue: { identity: { kind: 'number', value: 43 }, body: 'Issue requirements', issueType: 'Task', fields: {} }
+      }) as any) as any,
+      lifecycle: ((...args: Parameters<typeof applyTaskLifecycle>) => {
+        lifecycleCalls += 1;
+        return applyTaskLifecycle(...args);
+      })
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'FINALIZATION_ISSUE_IDENTITY_UNCONFIRMED');
+    assert.equal(lifecycleCalls, 0);
+    assert.match(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), /^status: active$/m);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization seals a staged summary after core verification and retains its retry input', async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';
