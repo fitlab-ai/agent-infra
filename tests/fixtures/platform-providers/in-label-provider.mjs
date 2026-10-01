@@ -4,6 +4,15 @@ function recordCall(config, operation) {
   if (typeof config.callsPath === 'string') fs.appendFileSync(config.callsPath, `${operation}\n`);
 }
 
+function breakJournalWrite(config) {
+  if (typeof config.journalPath !== 'string' || config.breakJournalWrite !== true) return;
+  if (typeof config.captureJournalPath === 'string' && !fs.existsSync(config.captureJournalPath)) {
+    fs.copyFileSync(config.journalPath, config.captureJournalPath);
+  }
+  fs.unlinkSync(config.journalPath);
+  fs.mkdirSync(config.journalPath);
+}
+
 function receipt(id, changed = true) {
   return { ok: true, value: { remoteId: id, changed } };
 }
@@ -59,6 +68,7 @@ export default async function createPlatformProvider(input) {
   const config = input.config || {};
   let issueLabels = ['in: core', 'keep'];
   let pullRequestLabels = ['in: stale', 'type: feature'];
+  let issueInspectCount = 0;
   const context = {
     type: input.providerType,
     scope: { id: 'external/project', label: 'external/project' },
@@ -74,6 +84,10 @@ export default async function createPlatformProvider(input) {
     identity: { issue: config.identityKind || 'number', 'pull-request': config.identityKind || 'number' },
     context: {
       async resolve() {
+        if (typeof config.journalPath === 'string' && typeof config.captureJournalPath === 'string'
+          && !fs.existsSync(config.captureJournalPath)) {
+          fs.copyFileSync(config.journalPath, config.captureJournalPath);
+        }
         recordCall(config, 'context.resolve');
         return { ok: true, value: context };
       }
@@ -96,7 +110,10 @@ export default async function createPlatformProvider(input) {
       async inspect(request) {
         recordCall(config, 'issues.inspect');
         if (JSON.stringify(request.target) !== JSON.stringify(issueIdentity)) return wrongTarget('Issue inspect target identity was not preserved');
-        return { ok: true, value: issue(config, issueLabels) };
+        issueInspectCount += 1;
+        const value = issue(config, issueLabels);
+        if (config.breakJournalWrite === true && issueInspectCount === 3) breakJournalWrite(config);
+        return { ok: true, value };
       },
       async create() {
         recordCall(config, 'issues.create');

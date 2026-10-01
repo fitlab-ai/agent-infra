@@ -374,11 +374,18 @@ async function recoverPlatformOperations(
       }
       if (current.id !== operation.id) {
         targetRetryBarrierId = operation.retryBarrierId ?? (hasUnresolvedRetry(operation) ? operation.id : undefined);
+        targetOperation = { ...operation, expectedDigest: current.expectedDigest, issueMetadata: current.issueMetadata, id: current.id };
+        const currentAlreadySucceeded = journal.operations.some((item) => item.id === current.id && item.state === 'succeeded');
         try {
+          if (!currentAlreadySucceeded) {
+            recordPlatformOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
+              expectedDigest: targetOperation.expectedDigest, issueMetadata: targetOperation.issueMetadata, dependency: operation.dependency,
+              ...(targetRetryBarrierId ? { retryBarrierId: targetRetryBarrierId } : {}),
+              state: 'failed', lastCode: 'PLATFORM_OPERATION_REPLACEMENT_PENDING' });
+          }
           recordPlatformOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
             expectedDigest: operation.expectedDigest, issueMetadata: operation.issueMetadata, dependency: operation.dependency,
             state: 'failed', lastCode: 'PLATFORM_OPERATION_SUPERSEDED' });
-          targetOperation = { ...operation, expectedDigest: current.expectedDigest, issueMetadata: current.issueMetadata, id: current.id };
         } catch (error) {
           const value = error as { code?: string; message?: string };
           return result('blocked', recovered, [...pending, operation.id], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || String(error), retryable: true });
@@ -402,10 +409,17 @@ async function recoverPlatformOperations(
       }
       if (current.id !== operation.id) {
         targetRetryBarrierId = operation.retryBarrierId ?? (hasUnresolvedRetry(operation) ? operation.id : undefined);
+        targetOperation = { ...operation, expectedDigest: current.expectedDigest, id: current.id };
+        const currentAlreadySucceeded = journal.operations.some((item) => item.id === current.id && item.state === 'succeeded');
         try {
+          if (!currentAlreadySucceeded) {
+            recordPlatformOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
+              expectedDigest: targetOperation.expectedDigest, dependency: operation.dependency,
+              ...(targetRetryBarrierId ? { retryBarrierId: targetRetryBarrierId } : {}),
+              state: 'failed', lastCode: 'PLATFORM_OPERATION_REPLACEMENT_PENDING' });
+          }
           recordPlatformOperation({ taskRef: resolved.taskId, cwd: resolved.repoRoot, kind: operation.kind, target: operation.target,
             expectedDigest: operation.expectedDigest, dependency: operation.dependency, state: 'failed', lastCode: 'PLATFORM_OPERATION_SUPERSEDED' });
-          targetOperation = { ...operation, expectedDigest: current.expectedDigest, id: current.id };
         } catch (error) {
           const value = error as { code?: string; message?: string };
           return result('blocked', recovered, [...pending, operation.id], { code: value.code || 'PLATFORM_OPERATION_JOURNAL_WRITE_FAILED', message: value.message || String(error), retryable: true });
