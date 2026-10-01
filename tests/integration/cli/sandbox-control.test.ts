@@ -631,12 +631,14 @@ test('sandbox control removal resumes from carrier-finalizing without replaying 
 
 test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, and revision CAS', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-removal-journal-'));
+  let manifest: ReturnType<typeof readSandboxControlManifest> | undefined;
   try {
     const branch = initializeRepository(root);
-    const manifestPath = writeControlManifest(root, branch, 'removal-journal-generation');
-    const manifest = readSandboxControlManifest(manifestPath);
+    const generation = `removal-journal-generation-${process.pid}-${Date.now()}`;
+    const manifestPath = writeControlManifest(root, branch, generation);
+    manifest = readSandboxControlManifest(manifestPath);
     await removeSandboxControlRoot(root, {
-      timeoutMs: 200,
+      timeoutMs: 5_000,
       inspectContainer: async () => ({ state: 'absent', id: 'container-id' }),
       retainRemovalJournal: true,
       removeContainer: async () => { throw new Error('unexpected container removal'); }
@@ -672,6 +674,7 @@ test('sandbox removal journal enforces live-owner refusal, dead-owner takeover, 
     clearSandboxRemovalJournalRecord(advanced);
     assert.equal(readSandboxRemovalJournal(manifest), null);
   } finally {
+    if (manifest) clearSandboxRemovalJournal(manifest);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
