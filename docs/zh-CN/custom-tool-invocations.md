@@ -1,17 +1,17 @@
-# 自定义 TUI 下一步命令
+# 自定义工具下一步命令
 
-[← 返回 README](../../README.zh-CN.md) · [English](../en/custom-tui.md)
+[← 返回 README](../../README.zh-CN.md) · [English](../en/custom-tool-invocations.md)
 
-在 `.agents/.airc.json` 的 `sandbox.tools` 中登记自定义 CLI/TUI。将工具 ID 加入 `sandbox.tools.ids`，并在对应定义中配置 `invoke`。即使没有启用内建 Agent Client，下一步提示也会显示已选中的自定义工具。
+在 `.agents/.airc.json` 的 `sandbox.tools` 中登记自定义 CLI。将工具 ID 加入 `sandbox.tools.ids`，并在对应定义中配置 `invoke`。即使没有启用内建 Agent Client，下一步提示也会显示已选中的自定义工具。
 
 ```json
 {
   "sandbox": {
     "tools": {
-      "ids": ["agent-infra", "your-tui"],
+      "ids": ["agent-infra", "your-tool"],
       "definitions": {
-        "your-tui": {
-          "name": "Your TUI",
+        "your-tool": {
+          "name": "Your Tool",
           "install": { "type": "npm", "cmd": "<你的 CLI 包名>" },
           "invoke": "your-cli ${skillName}"
         }

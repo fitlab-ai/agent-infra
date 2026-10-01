@@ -5,7 +5,7 @@ import {
   AgentClientConfigError,
   normalizeAgentClients
 } from '../agent-clients/config.ts';
-import { normalizeCustomTUIs } from '../agent-clients/custom-tuis.ts';
+import { normalizeCustomToolInvocations } from '../agent-clients/custom-tool-invocations.ts';
 import { renderNextStepCommands } from '../agent-clients/next-steps.ts';
 import { getAgentClientModelSelection } from '../agent-clients/registry.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
@@ -148,11 +148,11 @@ function agentClient(args: string[] = []): void {
 
   try {
     const clients = normalizeAgentClients(config);
-    const custom = normalizeCustomTUIs(config);
+    const custom = normalizeCustomToolInvocations(config);
     const commands = renderNextStepCommands({
       projectName: String(config.project ?? ''),
       state: clients.state,
-      customTools: custom.items,
+      customToolInvocations: custom.items,
       skillName: parsed.skillName,
       ...(parsed.taskRef ? { taskRef: parsed.taskRef } : {}),
       ...(parsed.version ? { version: parsed.version } : {})

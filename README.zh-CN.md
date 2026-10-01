@@ -239,7 +239,7 @@ my-project/
 - [飞书桥接](./docs/zh-CN/feishu-bridge.md) — 配置飞书长连接 adapter、命令路由、权限和 TUI 选择
 - [内置 AI Skills](./docs/zh-CN/skills.md) — 按使用场景分组的完整 skill 清单
 - [自定义 Skills](./docs/zh-CN/custom-skills.md) — 创建并同步项目专属 skill
-- [自定义 TUI 配置](./docs/zh-CN/custom-tui.md) — 适配非内置的 AI TUI
+- [自定义工具调用](./docs/zh-CN/custom-tool-invocations.md) — 配置自定义工具的下一步命令
 - [预置工作流](./docs/zh-CN/workflows.md) — 分阶段交付链路与示例流程
 - [配置参考](./docs/zh-CN/configuration.md) — `.agents/.airc.json`、外部源、版本管理
 - [文件管理策略](./docs/zh-CN/file-management.md) — managed / merged / ejected 更新策略

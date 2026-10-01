@@ -2,7 +2,7 @@ import { listEnabledAgentClientAdapters } from './registry.ts';
 import { renderAgentClientInvocation } from './invocation.ts';
 import semver from 'semver';
 import { isTaskScopeSkill } from '../task/skill-scope.ts';
-import type { CustomTUI } from './custom-tuis.ts';
+import type { CustomToolInvocation } from './custom-tool-invocations.ts';
 import type { AgentClientId, AgentClientState } from './types.ts';
 
 type NextStepCommand = Readonly<{
@@ -15,7 +15,7 @@ type NextStepCommand = Readonly<{
 type RenderNextStepsInput = Readonly<{
   projectName: string;
   state: AgentClientState;
-  customTools: readonly CustomTUI[];
+  customToolInvocations: readonly CustomToolInvocation[];
   skillName: string;
   taskRef?: string;
   version?: string;
@@ -69,7 +69,7 @@ function renderNextStepCommands(
       )
     })
   );
-  const custom = input.customTools.map(
+  const custom = input.customToolInvocations.map(
     (tool): NextStepCommand => Object.freeze({
       source: 'custom',
       displayName: tool.name,

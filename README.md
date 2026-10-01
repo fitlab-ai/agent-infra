@@ -240,7 +240,7 @@ In-depth guides live under [`docs/en/`](./docs/en/README.md):
 - [Feishu Bridge](./docs/en/feishu-bridge.md) — configure the Feishu long-connection adapter, command routing, permissions, and TUI selection
 - [Built-in AI Skills](./docs/en/skills.md) — the full skill catalog by use case
 - [Custom Skills](./docs/en/custom-skills.md) — create and sync project-specific skills
-- [Custom TUI Configuration](./docs/en/custom-tui.md) — adapt agent-infra to non-built-in AI TUIs
+- [Custom Tool Invocations](./docs/en/custom-tool-invocations.md) — configure custom-tool next-step commands
 - [Prebuilt Workflows](./docs/en/workflows.md) — the gated delivery lifecycle and example flow
 - [Configuration Reference](./docs/en/configuration.md) — `.agents/.airc.json`, external sources, version management
 - [File Management Strategies](./docs/en/file-management.md) — managed / merged / ejected update strategies

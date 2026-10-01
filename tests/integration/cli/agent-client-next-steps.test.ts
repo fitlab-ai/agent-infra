@@ -118,7 +118,7 @@ test('agent-client next-steps reports custom diagnostics without hiding valid co
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '  - Codex: $commit\n  - Good: good commit\n');
-  assert.match(result.stderr, /INVALID_CUSTOM_TUI_PLACEHOLDER at sandbox\.tools\.definitions\.bad\.invoke/);
+  assert.match(result.stderr, /INVALID_CUSTOM_TOOL_INVOCATION_PLACEHOLDER at sandbox\.tools\.definitions\.bad\.invoke/);
 });
 
 test('agent-client next-steps includes selected custom tools when built-in clients are disabled', () => {

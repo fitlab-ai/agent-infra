@@ -1,21 +1,21 @@
-type CustomTUI = Readonly<{
+type CustomToolInvocation = Readonly<{
   name: string;
   invocation: string;
 }>;
 
-type CustomTUIDiagnosticCode =
-  | 'INVALID_CUSTOM_TUIS'
-  | 'INVALID_CUSTOM_TUI'
-  | 'INVALID_CUSTOM_TUI_PLACEHOLDER';
+type CustomToolInvocationDiagnosticCode =
+  | 'INVALID_CUSTOM_TOOL_CONFIG'
+  | 'INVALID_CUSTOM_TOOL_INVOCATION'
+  | 'INVALID_CUSTOM_TOOL_INVOCATION_PLACEHOLDER';
 
-type CustomTUIDiagnostic = Readonly<{
-  code: CustomTUIDiagnosticCode;
+type CustomToolInvocationDiagnostic = Readonly<{
+  code: CustomToolInvocationDiagnosticCode;
   path: string;
 }>;
 
-type NormalizeCustomTUIsResult = Readonly<{
-  items: readonly CustomTUI[];
-  diagnostics: readonly CustomTUIDiagnostic[];
+type NormalizeCustomToolInvocationsResult = Readonly<{
+  items: readonly CustomToolInvocation[];
+  diagnostics: readonly CustomToolInvocationDiagnostic[];
 }>;
 
 const ALLOWED_PLACEHOLDERS = Object.freeze(['skillName', 'projectName']);
@@ -44,9 +44,9 @@ function hasValidPlaceholders(invocation: string): boolean {
       .includes('${');
 }
 
-function normalizeCustomTUIs(config: unknown): NormalizeCustomTUIsResult {
-  const items: CustomTUI[] = [];
-  const diagnostics: CustomTUIDiagnostic[] = [];
+function normalizeCustomToolInvocations(config: unknown): NormalizeCustomToolInvocationsResult {
+  const items: CustomToolInvocation[] = [];
+  const diagnostics: CustomToolInvocationDiagnostic[] = [];
 
   const root = isRecord(config) ? config : {};
   const sandbox = isRecord(root.sandbox) ? root.sandbox : {};
@@ -59,7 +59,7 @@ function normalizeCustomTUIs(config: unknown): NormalizeCustomTUIsResult {
       items: Object.freeze([]),
       diagnostics: Object.freeze([
         Object.freeze({
-          code: 'INVALID_CUSTOM_TUIS' as const,
+          code: 'INVALID_CUSTOM_TOOL_CONFIG' as const,
           path: 'sandbox.tools.ids'
         })
       ])
@@ -71,7 +71,7 @@ function normalizeCustomTUIs(config: unknown): NormalizeCustomTUIsResult {
       items: Object.freeze([]),
       diagnostics: Object.freeze([
         Object.freeze({
-          code: 'INVALID_CUSTOM_TUIS' as const,
+          code: 'INVALID_CUSTOM_TOOL_CONFIG' as const,
           path: 'sandbox.tools.definitions'
         })
       ])
@@ -81,7 +81,7 @@ function normalizeCustomTUIs(config: unknown): NormalizeCustomTUIsResult {
   for (const [index, id] of selectedIds.entries()) {
     if (typeof id !== 'string') {
       diagnostics.push({
-        code: 'INVALID_CUSTOM_TUI',
+        code: 'INVALID_CUSTOM_TOOL_INVOCATION',
         path: `sandbox.tools.ids[${index}]`
       });
       continue;
@@ -92,16 +92,16 @@ function normalizeCustomTUIs(config: unknown): NormalizeCustomTUIsResult {
     const base = `sandbox.tools.definitions.${id}`;
     const name = candidate.name === undefined ? id : candidate.name;
     if (!isNonEmptySingleLine(name)) {
-      diagnostics.push({ code: 'INVALID_CUSTOM_TUI', path: `${base}.name` });
+      diagnostics.push({ code: 'INVALID_CUSTOM_TOOL_INVOCATION', path: `${base}.name` });
       continue;
     }
     if (!isNonEmptySingleLine(candidate.invoke)) {
-      diagnostics.push({ code: 'INVALID_CUSTOM_TUI', path: `${base}.invoke` });
+      diagnostics.push({ code: 'INVALID_CUSTOM_TOOL_INVOCATION', path: `${base}.invoke` });
       continue;
     }
     if (!hasValidPlaceholders(candidate.invoke)) {
       diagnostics.push({
-        code: 'INVALID_CUSTOM_TUI_PLACEHOLDER',
+        code: 'INVALID_CUSTOM_TOOL_INVOCATION_PLACEHOLDER',
         path: `${base}.invoke`
       });
       continue;
@@ -120,10 +120,10 @@ function normalizeCustomTUIs(config: unknown): NormalizeCustomTUIsResult {
   });
 }
 
-export { normalizeCustomTUIs };
+export { normalizeCustomToolInvocations };
 export type {
-  CustomTUI,
-  CustomTUIDiagnostic,
-  CustomTUIDiagnosticCode,
-  NormalizeCustomTUIsResult
+  CustomToolInvocation,
+  CustomToolInvocationDiagnostic,
+  CustomToolInvocationDiagnosticCode,
+  NormalizeCustomToolInvocationsResult
 };

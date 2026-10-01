@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
-  normalizeCustomTUIs
-} from '../../../lib/agent-clients/custom-tuis.ts';
+import { normalizeCustomToolInvocations } from '../../../lib/agent-clients/custom-tool-invocations.ts';
 import {
   renderNextStepCommands
 } from '../../../lib/agent-clients/next-steps.ts';
@@ -41,7 +39,7 @@ test('custom tool invocation normalization preserves selected order', () => {
     beta: { invoke: 'beta ${skillName}' }
   } } } };
   const before = structuredClone(input);
-  const result = normalizeCustomTUIs(input);
+  const result = normalizeCustomToolInvocations(input);
 
   assert.deepEqual(result, {
     items: [
@@ -63,13 +61,13 @@ test('custom tool invocation normalization preserves selected order', () => {
 });
 
 test('custom tool invocation normalization skips invalid entries with stable paths', () => {
-  assert.deepEqual(normalizeCustomTUIs(null), {
+  assert.deepEqual(normalizeCustomToolInvocations(null), {
     items: [],
     diagnostics: []
   });
 
   const ids = ['empty-name', 'missing-skill', 'unknown-placeholder', 'malformed-placeholder', 'newline-name', 'newline-invoke'];
-  const result = normalizeCustomTUIs({ sandbox: { tools: { ids, definitions: {
+  const result = normalizeCustomToolInvocations({ sandbox: { tools: { ids, definitions: {
     'empty-name': { name: '', invoke: 'x ${skillName}' },
     'missing-skill': { name: 'X', invoke: 'x' },
     'unknown-placeholder': { name: 'X', invoke: 'x ${unknown} ${skillName}' },
@@ -80,23 +78,23 @@ test('custom tool invocation normalization skips invalid entries with stable pat
 
   assert.deepEqual(result.items, []);
   assert.deepEqual(result.diagnostics, [
-    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.empty-name.name' },
-    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.missing-skill.invoke' },
-    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.unknown-placeholder.invoke' },
-    { code: 'INVALID_CUSTOM_TUI_PLACEHOLDER', path: 'sandbox.tools.definitions.malformed-placeholder.invoke' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.newline-name.name' },
-    { code: 'INVALID_CUSTOM_TUI', path: 'sandbox.tools.definitions.newline-invoke.invoke' }
+    { code: 'INVALID_CUSTOM_TOOL_INVOCATION', path: 'sandbox.tools.definitions.empty-name.name' },
+    { code: 'INVALID_CUSTOM_TOOL_INVOCATION_PLACEHOLDER', path: 'sandbox.tools.definitions.missing-skill.invoke' },
+    { code: 'INVALID_CUSTOM_TOOL_INVOCATION_PLACEHOLDER', path: 'sandbox.tools.definitions.unknown-placeholder.invoke' },
+    { code: 'INVALID_CUSTOM_TOOL_INVOCATION_PLACEHOLDER', path: 'sandbox.tools.definitions.malformed-placeholder.invoke' },
+    { code: 'INVALID_CUSTOM_TOOL_INVOCATION', path: 'sandbox.tools.definitions.newline-name.name' },
+    { code: 'INVALID_CUSTOM_TOOL_INVOCATION', path: 'sandbox.tools.definitions.newline-invoke.invoke' }
   ]);
 });
 
 test('next-step renderer uses Registry order, appends custom entries, and freezes output', () => {
-  const custom = normalizeCustomTUIs({ sandbox: { tools: { ids: ['acme'], definitions: {
+  const custom = normalizeCustomToolInvocations({ sandbox: { tools: { ids: ['acme'], definitions: {
     acme: { name: 'Acme', invoke: 'acme ${projectName}:${skillName}' }
   } } } }).items;
   const result = renderNextStepCommands({
     projectName: 'demo',
     state: stateFor(['opencode', 'codex']),
-    customTools: custom,
+    customToolInvocations: custom,
     skillName: 'review-code',
     taskRef: '16'
   });
@@ -125,7 +123,7 @@ test('next-step renderer uses Registry order, appends custom entries, and freeze
   assert.deepEqual(renderNextStepCommands({
     projectName: 'demo',
     state: stateFor([]),
-    customTools: [],
+    customToolInvocations: [],
     skillName: 'commit'
   }), []);
 });
@@ -134,7 +132,7 @@ test('next-step renderer preserves positional arguments for non-task versioned s
   const result = renderNextStepCommands({
     projectName: 'demo',
     state: stateFor(['codex']),
-    customTools: [],
+    customToolInvocations: [],
     skillName: 'post-release',
     taskRef: '16',
     version: '1.2.3-rc.1'
@@ -147,7 +145,7 @@ test('next-step renderer emits an explicit task flag for task-scoped skills', ()
   const result = renderNextStepCommands({
     projectName: 'demo',
     state: stateFor(['codex']),
-    customTools: [],
+    customToolInvocations: [],
     skillName: 'commit',
     taskRef: '16'
   });
@@ -159,7 +157,7 @@ test('next-step renderer validates names and task refs without evaluating invoca
   const base = {
     projectName: 'demo',
     state: stateFor(['claude-code']),
-    customTools: [],
+    customToolInvocations: [],
     skillName: 'review-plan'
   };
 
