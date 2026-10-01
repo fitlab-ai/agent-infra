@@ -291,8 +291,8 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
 
 // === Check Functions ===
 
-function checkTaskMeta({ taskDir, config, repositoryRoot }: any): any {
-  const task = loadTask(taskDir);
+function checkTaskMeta({ taskDir, config, repositoryRoot, taskContentOverride }: any): any {
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) {
     return failResult("task-meta", task.message);
   }
@@ -395,8 +395,8 @@ function checkTaskMeta({ taskDir, config, repositoryRoot }: any): any {
   );
 }
 
-async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): Promise<any> {
-  const task = loadTask(taskDir);
+async function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode, taskContentOverride }: any): Promise<any> {
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) return failResult('required-pr-delivery', task.message);
   let projectConfig: any = {};
   try {
@@ -602,7 +602,7 @@ function checkDecisionDetails({ taskDir, artifactFile }: any): any {
   return passResult("decision-details", `${path.basename(artifactPath)} has no duplicate decision detail ids`);
 }
 
-function checkReviewSummary({ taskDir, config, artifactFile }: any): any {
+function checkReviewSummary({ taskDir, config, artifactFile, taskContentOverride }: any): any {
   const stage = String(config.stage || "");
   if (!["analysis", "plan", "code"].includes(stage)) {
     return failResult("review-summary", `Invalid review stage '${stage}'`);
@@ -616,7 +616,7 @@ function checkReviewSummary({ taskDir, config, artifactFile }: any): any {
   if (!parsed.summary.counts) {
     return failResult("review-summary", "Review summary finding counts are not finalized");
   }
-  const task = loadTask(taskDir);
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) return failResult("review-summary", task.message);
   let rows;
   try {
@@ -641,8 +641,8 @@ function checkReviewSummary({ taskDir, config, artifactFile }: any): any {
   );
 }
 
-function checkImplementationInput({ taskDir, artifactFile }: any): any {
-  const task = loadTask(taskDir);
+function checkImplementationInput({ taskDir, artifactFile, taskContentOverride }: any): any {
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) return failResult("implementation-input", task.message);
   if (!artifactFile) return failResult("implementation-input", "Artifact file is required");
   const artifactPath = path.join(taskDir, artifactFile);
@@ -694,8 +694,8 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   return passResult("implementation-input", `${actionDecision} matches Activity Log, report, and task table`);
 }
 
-function checkActivityLog({ taskDir, config }: any): any {
-  const task = loadTask(taskDir);
+function checkActivityLog({ taskDir, config, taskContentOverride }: any): any {
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) {
     return failResult("activity-log", task.message);
   }
@@ -748,8 +748,8 @@ function checkActivityLog({ taskDir, config }: any): any {
   return passResult("activity-log", `Latest entry '${latestAction}' at ${latestTimestamp}`);
 }
 
-function checkCompletionChecklist({ taskDir, config }: any): any {
-  const task = loadTask(taskDir);
+function checkCompletionChecklist({ taskDir, config, taskContentOverride }: any): any {
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) {
     return failResult("completion-checklist", task.message);
   }
@@ -796,8 +796,8 @@ function resolveReviewSetting(config: any, key: any, fallback: any, repoRoot: st
   return fallback;
 }
 
-function checkReviewLedger({ taskDir, config, repositoryRoot }: any): any {
-  const task = loadTask(taskDir);
+function checkReviewLedger({ taskDir, config, repositoryRoot, taskContentOverride }: any): any {
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) {
     return failResult("review-ledger", task.message);
   }
@@ -852,7 +852,7 @@ function checkReviewLedger({ taskDir, config, repositoryRoot }: any): any {
   return passResult("review-ledger", `Disagreement ledger clean (${inScopeCount} in-scope entries terminal${scopeLabel})`);
 }
 
-async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<any> {
+async function checkManualValidation({ taskDir, repositoryRoot, taskContentOverride }: any): Promise<any> {
   // 1. Latest review-code artifact; none -> pass (no review, check not applicable).
   const review = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!review.ok) {
@@ -882,7 +882,7 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   // 5. The Activity Log must record the matching completion entry; the file name
   //    is derived with path.basename (resolveArtifactPath does not return fileName).
   const artifactName = path.basename(resolved.path);
-  const task = loadTask(taskDir);
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) return failResult("manual-validation", task.message);
   const completion = readManualValidationCompletion(taskDir, {
     taskId: task.metadata.id,
@@ -934,7 +934,7 @@ async function checkManualValidation({ taskDir, repositoryRoot }: any): Promise<
   return passResult("manual-validation", `Manual validation completed → ${artifactName} (committed receipt and post-write verification)`);
 }
 
-async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): Promise<any> {
+async function checkPostReviewCommit({ taskDir, config, repositoryRoot, taskContentOverride }: any): Promise<any> {
   const reviewArtifact = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!reviewArtifact.ok) {
     if (reviewArtifact.error) return failResult("post-review-commit", `Review-code artifact is unavailable: ${reviewArtifact.error}`);
@@ -948,7 +948,7 @@ async function checkPostReviewCommit({ taskDir, config, repositoryRoot }: any): 
     return blockedResult("post-review-commit", "git unavailable or task directory is not inside a git repository");
   }
 
-  const task = loadTask(taskDir);
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) return failResult("post-review-commit", task.message);
   const factRead = readPrDeliveryFact(task.metadata);
   if (factRead.status === 'invalid') return failResult("post-review-commit", factRead.error.message);
@@ -1128,7 +1128,7 @@ function resolvePostReviewExemption(content: string):
   }
 }
 
-function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
+function checkReviewFact({ taskDir, artifactFile, repositoryRoot, taskContentOverride }: any): any {
   const resolvedArtifact = resolveArtifactPath(
     taskDir,
     "review-code.md|review-code-r{N}.md",
@@ -1149,7 +1149,7 @@ function checkReviewFact({ taskDir, artifactFile, repositoryRoot }: any): any {
     );
   }
 
-  const task = loadTask(taskDir);
+  const task = loadTask(taskDir, taskContentOverride);
   if (!task.ok) {
     return failResult("review-fact", task.message);
   }
@@ -1226,13 +1226,13 @@ function gitCommitExists(gitRoot: any, sha: any): any {
 
 // === File & Config Loaders ===
 
-function loadTask(taskDir: any): any {
+function loadTask(taskDir: any, contentOverride?: string): any {
   const taskPath = path.join(taskDir, "task.md");
   if (!fs.existsSync(taskPath)) {
     return { ok: false, message: `Task file not found: ${taskPath}` };
   }
 
-  const content = fs.readFileSync(taskPath, "utf8");
+  const content = contentOverride ?? fs.readFileSync(taskPath, "utf8");
   let metadata;
   try {
     metadata = Object.fromEntries(Object.entries(parseTypedTaskFrontmatter(content)).map(([key, value]) => [key, value === null ? "" : String(value)]));
@@ -1398,7 +1398,7 @@ function isBlank(value: any): any {
   return value === undefined || value === null || String(value).trim() === "";
 }
 
-async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot }: any): Promise<any> {
+async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot, taskContentOverride }: any): Promise<any> {
   let repoRoot = repositoryRoot ? path.resolve(repositoryRoot) : defaultRepoRoot;
   if (!repositoryRoot) {
     let cursor = path.resolve(taskDir);
@@ -1417,6 +1417,7 @@ async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks:
         taskDir: path.resolve(taskDir),
         artifactFile,
         repositoryRoot: repoRoot,
+        taskContentOverride,
         config: checkConfig
       }, shared));
       checks.push(...(result.subchecks?.map(normalizeVerificationRecord) ?? [result]));
@@ -1434,6 +1435,7 @@ async function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks:
       taskDir: path.resolve(taskDir),
       artifactFile,
       repositoryRoot: repoRoot,
+      taskContentOverride,
       config
     }, shared));
   if (!result.subchecks?.length) return { skill: skillName, ...result };

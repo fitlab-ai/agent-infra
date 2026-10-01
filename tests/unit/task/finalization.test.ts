@@ -908,6 +908,8 @@ test('host finalization uses the canonical root and makes a successful replay a 
     verifyCalls += 1;
     assert.deepEqual(received, { taskRef: TASK_ID, event: 'complete-task.prepared' });
     assert.equal(receivedOptions?.repoRoot, f.repoRoot);
+    assert.match(receivedOptions?.taskContentOverride ?? '', /^status: completed$/m);
+    assert.match(receivedOptions?.taskContentOverride ?? '', /^completed_at:/m);
     return verification('pass');
   };
   try {

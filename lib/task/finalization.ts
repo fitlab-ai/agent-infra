@@ -1093,7 +1093,7 @@ async function prepareUnderLock(
       : 'complete-task.prepared';
     const result = await verify(
       { taskRef: taskId, event: verificationEvent },
-      { repoRoot }
+      { repoRoot, ...(verificationEvent === 'complete-task.prepared' && projection ? { taskContentOverride: projection.content } : {}) }
     );
     verification = verificationStep(result);
     if (result.status === 'pass') {
