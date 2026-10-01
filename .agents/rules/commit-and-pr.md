@@ -7,12 +7,12 @@
 - `scope`：模块名（可省略）
 - `subject` 使用英文祈使语气，保持简洁
 
-## 禁止自动提交
+## 提交执行边界
 
-- 绝对不要自动执行 `git commit` 或 `git add`
-- 仅在用户明确发起提交命令时才进入提交流程
-- 唯一例外：用户显式启动的 active `run-task` 可签发一次性 commit authorization；它等价于本轮提交授权，但不得放宽暂存、敏感文件、版权、测试、审查快照、HEAD/tree 或 push 门禁。
-- 完成代码修改后，提醒用户使用对应 TUI 的提交命令
+- 不直接执行 `git add` 或 `git commit`；所有自动提交都必须通过 `agent-infra-internal git-workflow commit` 共享 core，并遵守对应技能提供的 paths、HEAD/tree 和交付模式约束。
+- 提交由当前工作流定义。`code-task` 完成实现必须在测试和实现报告 preflight 通过后，通过共享 core 创建一个本地 checkpoint；该要求适用于直接调用和 `run-task` 编排，不需要额外的提交授权或用户确认。
+- `code-task` 的本地 checkpoint 不推送远端。其他技能只有在其流程明确要求时才可调用共享 core；独立 `commit` 技能仍须由用户显式调用，并遵循其 push delivery 流程。
+- 工作流没有要求提交时，不要自行创建提交；需要用户执行独立提交时，再提示对应 TUI 命令。
 
 ## PR 提交规则
 

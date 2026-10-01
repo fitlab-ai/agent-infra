@@ -28,9 +28,9 @@ Before generating the implementation report, read `.agents/rules/evidence-report
 - Before generating task or lifecycle Markdown that will be synchronized to an Issue, read `.agents/rules/sync-content-generation.md` and apply its producer-side constraints; the sync path does not parse or rewrite the body
 - Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”
 - Fix mode verifies each finding of the latest `review-code` one by one: fix it if it holds, or rebut it and record it under unresolved if it is unfounded/hallucinated; do not expand to issues the review did not list; manual-validation items are out of scope
-- Before a checkpoint, ledger write, or `code.completed`, the implementation report must pass `task-artifact ... preflight --family code`. Preflight only validates and seals a generation; `finalize-local` publishes the matching final digest later.
-- If implementation encounters a key design decision not covered by the plan, run `agent-infra-internal task-ledger {task-id} decision-next-id`, write the returned `HD-N` detail block per `.agents/rules/human-decision-context.md` and determine whether implementation is required, then run `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`. Do not scan ids, assemble ledger rows, ask mid-flow, or silently expand scope
-- Do not invoke the `commit` skill or push to a remote; after tests pass, call the shared commit core with `delivery: { mode: 'local' }` to create the local checkpoint. The durable intent must close only after the checkpoint and task state sync succeed; only then emit `code.completed`
+- After writing the implementation report, pass `task-artifact ... preflight --family code` before pending ledger writes, the checkpoint, later Issue syncs, or `code.completed`. Preflight validates and seals the generation without publishing formal/task/ledger/platform state; after the checkpoint, `finalize-local` revalidates the report and returns its digests for the `code.completed` event to record.
+- If implementation encounters a key design decision not covered by the plan, run `agent-infra-internal task-ledger {task-id} decision-next-id`, write the returned `HD-N` detail block per `.agents/rules/human-decision-context.md`, and determine whether implementation is required. Record `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}` as a pending ledger update and run it only after report preflight passes. Do not scan ids, assemble ledger rows, ask mid-flow, or silently expand scope.
+- Completing this skill requires a local checkpoint: after report preflight passes, call the shared commit core with `delivery: { mode: 'local' }`. Do not invoke the standalone `commit` skill, run raw `git add` / `git commit`, or push to a remote. The durable intent must close only after the checkpoint and task state sync succeed; only then emit `code.completed`.
 - Create a new code artifact for each round and never overwrite an older one
 - After executing this skill, you **must** immediately update task.md
 
@@ -116,10 +116,6 @@ Use the project test commands from the `test` skill and iterate until all requir
 
 When triaging a test failure or unexpected behavior, first read `.agents/rules/debugging-guide.md` and locate the root cause via its four-phase flow; do not blindly patch and retry.
 
-After tests pass, call the shared commit core with `agent-infra-internal git-workflow commit --input {checkpoint-input}`. Pass `delivery: { "mode": "local" }`, explicit paths, expected HEAD/tree, task ref, agent, and the code round. This creates only a local checkpoint and does not contact a remote. The core writes a durable intent before committing and removes it after task-writer synchronization; do not emit `code.completed` if either checkpoint or task synchronization fails.
-
-After the checkpoint succeeds, when task.md has a `platform_issue_identity`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`. The task-bound `delivery_base_ref` is the only source for Issue `in:` evidence; record a warning and continue the local code stage if this sync fails. `complete-task` restores and verifies this evidence before archiving.
-
 ### 9. Write the Code Report
 
 Before writing this round's `{code-artifact}`, create the controlled report skeleton:
@@ -136,7 +132,27 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 ### 10. Pre-completion Report Gate
 
-After writing the report and before publishing `code.completed`, read and follow `.agents/rules/local-artifact-repair.md` and run:
+After writing the report, read and follow `.agents/rules/local-artifact-repair.md`. Complete the preflight, pending ledger updates, local checkpoint, and finalizer in that order. If preflight fails, repair the same controlled candidate and rerun it; do not perform the later ledger updates, checkpoint, `code.completed`, or Issue sync in this gate. The milestone narrowing in step 3 remains an earlier prerequisite.
+
+Run preflight:
+
+```bash
+agent-infra-internal task-artifact {task-id} preflight --family code --artifact {code-artifact}
+```
+
+After preflight passes, apply pending ledger updates recorded during implementation, including `decision-upsert` and, in fix mode, `finding-respond`. Do not write these ledger updates before preflight passes.
+
+Then create the local checkpoint through the shared core. Pass `delivery: { "mode": "local" }`, explicit paths, expected HEAD/tree, task ref, agent, and code round:
+
+```bash
+agent-infra-internal git-workflow commit --input {checkpoint-input}
+```
+
+This creates only a local checkpoint and does not contact a remote. The core writes a durable intent before committing and removes it after task-writer synchronization; do not emit `code.completed` if either checkpoint or task synchronization fails.
+
+After the checkpoint succeeds, when task.md has a `platform_issue_identity`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`. The task-bound `delivery_base_ref` is the only source for Issue `in:` evidence; record a warning and continue the local code stage if this sync fails. `complete-task` restores and verifies this evidence before archiving.
+
+Then run the finalizer:
 
 ```bash
 finalizer=$(agent-infra-internal task-artifact {task-id} finalize-local --family code --artifact {code-artifact})
@@ -169,6 +185,6 @@ Present the verification summary per `.agents/rules/validation-output.md`, retai
 
 ### 13. Tell the User
 
-Use `reference/output-template.md` (or `reference/fix-mode.md` in fix mode) and render the selected next-step commands through the shared helper. Do not push, create a PR, or invoke the `commit` skill here.
+Use `reference/output-template.md` (or `reference/fix-mode.md` in fix mode) and render the selected next-step commands through the shared helper. The local checkpoint is required for this skill; do not invoke the standalone `commit` skill, push, or create a PR here.
 
 > Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the current task's short id `NN` (see that file for lookup and fallback), while other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form; (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).

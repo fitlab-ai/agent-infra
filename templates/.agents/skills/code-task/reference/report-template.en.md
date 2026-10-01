@@ -84,7 +84,7 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 
 ## Per-Finding Verification
 
-> Fix mode only; for an initial implementation write "(initial implementation this round, no review findings)". Read/Grep-verify every prior finding and submit its four-state response through `task-ledger finding-respond`; do not edit the task.md table manually. accepted/adjusted cite the fix `file:line`; refuted/cannot-judge cite counter-evidence or raw command output.
+> Fix mode only; for an initial implementation write "(initial implementation this round, no review findings)". Read/Grep-verify every prior finding, record its four-state response and evidence, then submit it through `task-ledger finding-respond` after the code report preflight passes; do not edit the task.md table manually. accepted/adjusted cite the fix `file:line`; refuted/cannot-judge cite counter-evidence or raw command output.
 
 | Finding | Disposition | Commensurate evidence |
 |------|----------|----------|

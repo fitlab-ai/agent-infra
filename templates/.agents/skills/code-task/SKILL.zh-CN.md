@@ -28,9 +28,9 @@ description: >
 - 生成会同步到 Issue 的任务或生命周期 Markdown 前，先读取 `.agents/rules/sync-content-generation.md` 并遵循其中的生成端约束；同步端不解析或改写正文
 - 实现前读取 `.agents/rules/compatibility-policy.md`；只实现方案明确批准的兼容预算，不以“稳妥”为由保留旧分支、旧结果契约或迁移 shim
 - 修复模式逐条核实最新 `review-code` 的发现：成立则修复，判定为不成立/幻觉则在报告中反驳并记入 unresolved；不擅自扩大到审查未列出的问题；manual-validation 项不在修复范围
-- 实现报告在 checkpoint、账本和 `code.completed` 前必须先通过 `task-artifact ... preflight --family code`；preflight 只验证并封存 generation，不发布 formal/task/ledger/platform 状态。随后 `finalize-local` 才发布同一次通过的 digest。
-- 实现中遇到方案未覆盖的关键设计决策时，先调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得 `HD-N`，按 `.agents/rules/human-decision-context.md` 写入实现报告的 `## 人工裁决待办` 详情块并判断是否需要实现，再调用 `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`；不得扫描编号、手写账本行、中途提问或擅自扩范围
-- 不调用 `commit` 技能，也不推送远端；测试通过后直接调用共享 commit core 的 `delivery: { mode: 'local' }` 创建本地 checkpoint。checkpoint 使用 durable intent，只有 checkpoint 与 task 状态同步成功后才发送 `code.completed`
+- 实现报告写完后，必须先通过 `task-artifact ... preflight --family code`，再写入待处理账本、创建 checkpoint、执行后续 Issue 同步或发布 `code.completed`。preflight 只验证并封存 generation，不发布 formal/task/ledger/platform 状态；checkpoint 后运行 `finalize-local` 重新验证并取得摘要，`code.completed` 事件登记该摘要。
+- 实现中遇到方案未覆盖的关键设计决策时，调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得 `HD-N`，按 `.agents/rules/human-decision-context.md` 将详情写入实现报告的 `## 人工裁决待办` 并判断是否需要实现；把 `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}` 留作待处理账本更新，在报告 preflight 通过后再执行。不得扫描编号、手写账本行、中途提问或擅自扩范围。
+- 完成本技能必须创建一个本地 checkpoint：实现报告 preflight 通过后直接调用共享 commit core，使用 `delivery: { mode: 'local' }`。不调用独立 `commit` 技能、不运行原始 `git add` / `git commit`，也不推送远端。checkpoint 使用 durable intent；只有 checkpoint 与 task 状态同步成功后才发送 `code.completed`
 - 每轮实现都创建新的实现产物，不覆盖旧文件
 - 执行本技能后，你**必须**立即更新 task.md
 
@@ -153,10 +153,6 @@ echo "$result"
 
 如果测试失败，先尝试修复并重新运行测试。只有在确认存在外部阻塞、环境缺失或需求不明确且超出任务范围时，才可以停止。
 
-测试通过后，先创建报告并运行 `task-artifact {task-id} preflight --family code --artifact {code-artifact}`；preflight 失败只允许在同一受控 candidate 中修复并完整重跑，且不得产生 checkpoint、ledger、completed 或平台副作用。preflight 通过后，才通过 `agent-infra-internal git-workflow commit --input {checkpoint-input}` 调用共享 commit core，输入 `delivery: { "mode": "local" }`、明确 paths、expected HEAD/tree、task ref、agent 和 code round。该调用只创建本地 checkpoint，不访问远端；core 会在 commit 前写入 durable intent，并在 task writer 成功后清理 intent。checkpoint 失败或 task 状态未闭合时，不得发送 `code.completed`。
-
-checkpoint 成功后，若任务存在 `platform_issue_identity`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`，由 task-bound `delivery_base_ref` 产生 Issue 的 `in:` target；同步失败时记录 warning，继续完成本地代码阶段。`complete-task` 在归档前补齐并核验该证据。
-
 排查测试失败或行为不符合预期时，先读取 `.agents/rules/debugging-guide.md`，按其四阶段流程定位根因，禁止盲目改代码重试。
 
 ### 9. 编写实现报告
@@ -175,7 +171,27 @@ agent-infra-internal task-artifact {task-id} init --family code --artifact {code
 
 ### 10. 报告完成前门禁
 
-报告写入后、发布 `code.completed` 前，读取并遵循 `.agents/rules/local-artifact-repair.md`，执行：
+报告写入后，先读取并遵循 `.agents/rules/local-artifact-repair.md`，依次完成 preflight、待处理账本更新、本地 checkpoint 和 finalizer。preflight 失败只允许在同一受控 candidate 中修复并完整重跑；preflight 未通过时不得执行本门禁后续的账本更新、checkpoint、`code.completed` 或 Issue 同步。步骤 3 的里程碑收窄仍按其前置要求执行。
+
+执行 preflight：
+
+```bash
+agent-infra-internal task-artifact {task-id} preflight --family code --artifact {code-artifact}
+```
+
+preflight 通过后，先完成实现过程中记录的待处理账本更新，包括人工裁决 `decision-upsert` 和修复模式 `finding-respond`；不得在 preflight 通过前写入这些账本更新。
+
+然后通过以下调用共享 commit core 创建本地 checkpoint，输入 `delivery: { "mode": "local" }`、明确 paths、expected HEAD/tree、task ref、agent 和 code round：
+
+```bash
+agent-infra-internal git-workflow commit --input {checkpoint-input}
+```
+
+该调用只创建本地 checkpoint，不访问远端。core 会在 commit 前写入 durable intent，并在 task writer 成功后清理 intent。checkpoint 失败或 task 状态未闭合时，不得发送 `code.completed`。
+
+checkpoint 成功后，若任务存在 `platform_issue_identity`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {delivery-base-ref}`，由 task-bound `delivery_base_ref` 产生 Issue 的 `in:` target；同步失败时记录 warning，继续完成本地代码阶段。`complete-task` 在归档前补齐并核验该证据。
+
+随后执行 finalizer：
 
 ```bash
 finalizer=$(agent-infra-internal task-artifact {task-id} finalize-local --family code --artifact {code-artifact})
@@ -232,12 +248,13 @@ agent-infra-internal task-verify {task-id} code.completed --artifact {code-artif
 - [ ] 已完成批准范围内的代码实现
 - [ ] 已创建 `{code-artifact}`
 - [ ] 所有必需测试通过
+- [ ] 已通过共享 commit core 创建本地 checkpoint
 - [ ] 已更新 task.md 并追加 Activity Log
 - [ ] 已通过统一 helper 渲染已选场景的下一步命令
 
 ## 停止
 
-完成检查清单后立即停止。不要在本技能中推送远端、创建 PR 或调用 `commit` 技能。
+完成检查清单后立即停止。本技能必须创建本地 checkpoint；不要在本技能中调用独立 `commit` 技能、推送远端或创建 PR。
 
 ## 注意事项
 

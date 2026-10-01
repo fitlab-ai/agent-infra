@@ -4,7 +4,7 @@ Read this file before changing code during fix mode.
 
 ## Plan the Fixes
 
-**Verify each finding first (mandatory before editing)**: for every finding in `{review-artifact}`, Read/Grep the cited `file:line` and corresponding `git diff`, then choose one of the four states in `.agents/rules/review-handshake.md`. Submit it through `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {code-round} --status {state} --evidence {evidence}` (every state needs commensurate evidence; "accept" is not a zero-cost default):
+**Verify each finding first (mandatory before editing)**: for every finding in `{review-artifact}`, Read/Grep the cited `file:line` and corresponding `git diff`, then choose one of the four states in `.agents/rules/review-handshake.md`. Record the response and evidence, then submit it through `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {code-round} --status {state} --evidence {evidence}` after the code report preflight passes (every state needs commensurate evidence; "accept" is not a zero-cost default):
 - `accepted` → include it in the classification and fixes below; evidence cites the fix `file:line`
 - `adjusted` → use an alternative fix, with rationale; awaits review-code confirmation
 - `refuted` → verification judged it unfounded / a wrong `file:line` / hallucinated → do not change code; give a counter-argument in the report's `## Per-Finding Verification` section; awaits review-code confirmation
@@ -49,15 +49,11 @@ After completing the repair round, run the **smoke subset** to verify the comple
 
 Before writing the code report, run the project's **core subset** as final verification and confirm that all required tests still pass. If the project does not have layered scripts, fall back to the full project test command.
 
-## Choose the Next-Step Branch
+## Choose the Next Step
 
-Decision rules:
-1. always recommend re-review as the default next step, regardless of the severity of fixed issues
-2. direct commit may be selected only when all issues are resolved and the changes are clearly low risk
-3. do not select direct commit while any `Blocker` or `Major` remains unresolved
-4. render only the selected branch and invoke the helper exactly once
+After `code-task` creates the local checkpoint, the next step is always re-review. Do not route to the standalone `commit` skill because the checkpoint already exists.
 
-For the default branch, populate `{next-step-commands}` by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`:
+Populate `{next-step-commands}` by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`:
 
 ```text
 Task {task-id} fix completed.
@@ -75,17 +71,10 @@ Next step - review again:
 {next-step-commands}
 ```
 
-Only when the direct-commit branch satisfies the rules above and is selected, populate `{next-step-commands}` by running `agent-infra-internal agent-client next-steps --skill commit`, then replace the ending with:
-
-```text
-Next step - commit directly:
-{next-step-commands}
-```
-
 ## Notes
 
 1. **Prerequisite**: a code review artifact must exist (`review-code.md` or `review-code-r{N}.md`)
-2. **No auto-commit**: do not run `git commit`
+2. **Checkpoint**: fix mode must create the local checkpoint through the shared commit core after report preflight and pending ledger updates; do not run `git add` / `git commit` directly
 3. **Scope discipline**: verify each reviewed issue one by one — fix it if it holds, rebut it if it does not; do not expand to issues the review did not list
 4. **Disagreement handling**: record any disagreement in the report
 5. **Re-review**: recommend `review-code` as the default next step after fix mode

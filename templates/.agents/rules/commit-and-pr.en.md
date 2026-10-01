@@ -7,12 +7,12 @@
 - `scope`: module name (optional)
 - Write the `subject` in concise imperative English
 
-## No Automatic Commits
+## Commit Execution Boundary
 
-- Never run `git commit` or `git add` automatically
-- Enter the commit workflow only when the user explicitly requests a commit
-- The only exception is a one-use commit authorization issued by an active `run-task` explicitly started by the user. It authorizes this commit round but does not relax staging, sensitive-file, copyright, test, review-snapshot, HEAD/tree, or push gates.
-- After finishing code changes, remind the user to use the appropriate TUI commit command
+- Do not run `git add` or `git commit` directly. All automatic commits must use the shared `agent-infra-internal git-workflow commit` core and follow the paths, HEAD/tree, and delivery-mode constraints of the applicable skill.
+- The active workflow defines whether a commit is required. Completing `code-task` requires a local checkpoint through the shared core after tests and report preflight pass. This applies to direct calls and `run-task` orchestration; no extra commit authorization or user confirmation is required.
+- A `code-task` checkpoint never pushes to a remote. Other skills may call the shared core only when their workflow explicitly requires it. The standalone `commit` skill still requires an explicit user invocation and follows its push-delivery flow.
+- Do not create a commit when the workflow does not require one. When a separate user commit is needed, remind the user to use the appropriate TUI command.
 
 ## PR Rules
 

@@ -4,7 +4,7 @@
 
 ## 规划修复
 
-**先逐条核实（动手前必做）**：对 `{review-artifact}` 的每一条发现，先 Read/Grep 其引用的 `file:line` 与对应 `git diff`，确认问题真实存在，再按 `.agents/rules/review-handshake.md` 的四态处置；完成相称证据后逐条调用 `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {code-round} --status {四态} --evidence {相称证据}`（"接受"不是零成本默认）：
+**先逐条核实（动手前必做）**：对 `{review-artifact}` 的每一条发现，先 Read/Grep 其引用的 `file:line` 与对应 `git diff`，确认问题真实存在，再按 `.agents/rules/review-handshake.md` 的四态处置；记录每条待写入的响应及相称证据，等 code 报告 preflight 通过后，再逐条调用 `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {code-round} --status {四态} --evidence {相称证据}`（“接受”不是零成本默认）：
 - `accepted` → 纳入下方分类与修复，证据指向修复点 `file:line`
 - `adjusted` → 采用替代修法，附理由，待 review-code 复核确认
 - `refuted` → 核实判定不成立 / 基于错误 `file:line` / 幻觉 → 不改代码，在报告 `## 对审查发现的逐条核实` 给出反证，待 review-code 复核确认
@@ -49,15 +49,11 @@ manual-validation 项不在修复范围。处理规则：
 
 写 code 报告前，运行项目测试的 **core 子集**做最终验证，确保所有必需测试仍然通过。如果项目没有分层 script，回退到完整项目测试命令。
 
-## 选择下一步分支
+## 选择下一步
 
-判断规则：
-1. 始终将重新审查作为默认推荐的下一步，无论本轮修复了哪个级别的问题
-2. 直接提交仅可作为已选分支，且仅在所有问题均已解决且改动明显低风险时
-3. 如果仍有任何 `Blocker` 或 `Major` 未解决，不要选择直接提交
-4. 只渲染已选分支，且只调用一次 helper
+修复完成并由 `code-task` 创建本地 checkpoint 后，下一步统一为重新审查；不得把独立 `commit` 技能作为下一步，因为 checkpoint 已由 `code-task` 创建。
 
-默认分支使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成 `{next-step-commands}`：
+使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成 `{next-step-commands}`：
 
 ```text
 任务 {task-id} 修复完成。
@@ -75,17 +71,10 @@ manual-validation 项不在修复范围。处理规则：
 {next-step-commands}
 ```
 
-仅当直接提交分支满足上述条件并被选中时，改用 `agent-infra-internal agent-client next-steps --skill commit` 生成 `{next-step-commands}`，并将末尾替换为：
-
-```text
-下一步 - 直接提交：
-{next-step-commands}
-```
-
 ## 注意事项
 
 1. **前置条件**：必须存在代码审查产物（`review-code.md` 或 `review-code-r{N}.md`）
-2. **禁止自动提交**：不要执行 `git commit`
+2. **checkpoint**：修复阶段仍须由 `code-task` 在报告 preflight 和待处理账本更新后，通过共享 commit core 创建本地 checkpoint；不要直接执行 `git add` / `git commit`
 3. **范围约束**：逐条核实审查列出的问题，成立则修复、不成立则反驳；不扩大到审查未列出的问题
 4. **分歧处理**：如果不同意审查意见，要在报告里明确记录
 5. **重新审查**：修复后默认推荐执行 `review-code`

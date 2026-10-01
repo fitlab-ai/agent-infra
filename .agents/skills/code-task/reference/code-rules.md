@@ -47,7 +47,7 @@
 ## 注意事项
 
 1. **前置条件**：必须存在核心按所选路径返回的 analysis 或 plan 生命周期输入
-2. **禁止自动提交**：不要执行 `git commit` 或 `git add`
+2. **本地 checkpoint**：实现报告 preflight 通过后，必须由 `code-task` 通过共享 commit core 创建本地 checkpoint；不要直接执行 `git commit` 或 `git add`
 3. **测试质量**：新增测试必须验证有意义的业务逻辑
 4. **代码质量**：遵循项目编码规范
 5. **方案偏离**：任何偏离都要记录到实现报告中

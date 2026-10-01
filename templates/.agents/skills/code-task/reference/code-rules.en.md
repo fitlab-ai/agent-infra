@@ -47,7 +47,7 @@ Two-way failure handling:
 ## Notes
 
 1. **Prerequisite**: the analysis or plan lifecycle input selected by core must exist
-2. **No auto-commit**: do not run `git commit` or `git add`
+2. **Local checkpoint**: after report preflight passes, `code-task` must create a local checkpoint through the shared commit core; do not run `git commit` or `git add` directly
 3. **Test quality**: new tests must validate meaningful business logic
 4. **Code quality**: follow project coding conventions
 5. **Plan deviation**: record any deviation in the code report
