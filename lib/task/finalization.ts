@@ -795,9 +795,13 @@ function terminalResult(
   const blocked = [steps.backfill, steps.lifecycle, steps.taskComment, steps.verification, steps.summary].some((step) => step?.status === 'blocked');
   const warnings = openWarnings(receipt);
   const postLifecyclePending = receipt.lifecycle === 'done' && (pending.some((step) => step !== 'lifecycle') || receipt.warningProjection === 'pending');
-  const hardError = error?.code.startsWith('FINALIZATION_') || error?.code === 'TASK_FINALIZATION_RECEIPT_INVALID';
+  const terminalVerificationPending = receipt.lifecycle === 'done' && receipt.verification === 'pending'
+    && steps.verification !== undefined;
+  const resultError = error ?? (terminalVerificationPending ? steps.verification?.error : null) ?? null;
+  const hardError = error?.code.startsWith('FINALIZATION_') || error?.code === 'TASK_FINALIZATION_RECEIPT_INVALID'
+    || terminalVerificationPending;
   return {
-    status: hardError ? (error?.retryable ? 'blocked' : 'failed') : pending.length === 0 ? 'completed' : postLifecyclePending ? 'completed' : blocked ? 'blocked' : 'failed',
+    status: hardError ? (resultError?.retryable ? 'blocked' : 'failed') : pending.length === 0 ? 'completed' : postLifecyclePending ? 'completed' : blocked ? 'blocked' : 'failed',
     changed,
     taskId,
     backfill: steps.backfill ?? null,
@@ -808,7 +812,7 @@ function terminalResult(
     completedSteps: completedSteps(receipt),
     pendingSteps: pending,
     result: hardError
-      ? (error?.retryable ? 'blocked' : 'failed')
+      ? (resultError?.retryable ? 'blocked' : 'failed')
       : postLifecyclePending
         ? 'completed_with_warnings'
         : pending.length === 0
@@ -817,7 +821,7 @@ function terminalResult(
             ? 'blocked'
             : 'failed',
     warnings,
-    error: hardError ? error : postLifecyclePending ? null : error
+    error: hardError ? resultError : postLifecyclePending ? null : resultError
   };
 }
 
@@ -1209,7 +1213,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
   const resolved = resolveTaskRef(request.taskRef, { repoRoot });
   if (!resolved.ok) return failed(resolved.taskId, { code: resolved.code, message: resolved.message, retryable: false });
   try {
-    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', () => {
+    return await withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.commit', async () => {
       if (options.controlBinding && options.manifestPath) {
         try {
           const manifest = readSandboxControlManifest(options.manifestPath);
@@ -1256,7 +1260,7 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
       if (!receipt) return failed(resolved.taskId, {
         code: 'TASK_FINALIZATION_PREPARATION_REQUIRED', message: 'sandbox preparation receipt is unavailable', retryable: true
       });
-      if (receipt.lifecycle === 'done' && resolved.state === 'completed') {
+      if (receipt.lifecycle === 'done' && receipt.verification !== 'pending' && resolved.state === 'completed') {
         return terminalResult(resolved.taskId, receipt, { lifecycle: { status: 'no-op', changed: false, error: null } }, false);
       }
       if (options.controlBinding) {
@@ -1313,8 +1317,44 @@ async function commitPreparedTaskFinalization(request: TaskFinalizationRequest, 
         const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'pending', lastError: step.error });
         return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed, step.error);
       }
-      const updated = updateReceipt(repoRoot, receipt, { lifecycle: 'done', lastError: null });
-      return terminalResult(resolved.taskId, updated, { lifecycle: step }, result.changed);
+
+      let verificationResult: TaskVerificationResult;
+      try {
+        verificationResult = await (options.verify ?? verifyTaskEvent)(
+          { taskRef: resolved.taskId, event: 'complete-task.completed' },
+          { repoRoot }
+        );
+      } catch (error) {
+        const detail = errorOf(error, 'VERIFY_FAILED', true);
+        const warnings = replaceWarning(receipt, warningFromError('verification', detail), 'open');
+        const updated = updateReceipt(repoRoot, receipt, {
+          lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
+          warnings, lastError: detail
+        });
+        const verification: TaskFinalizationStep = { status: detail.retryable ? 'blocked' : 'failed', changed: false, error: detail };
+        return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
+      }
+
+      const verification = verificationStep(verificationResult);
+      if (verificationResult.status === 'pass') {
+        const resolvedVerificationWarning = receipt.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
+        const warnings = applyVerificationWarnings(receipt, verificationResult);
+        const hasOpenWarnings = warnings.some((warning) => warning.status === 'open');
+        const updated = updateReceipt(repoRoot, receipt, {
+          lifecycle: 'done', verification: 'done',
+          taskComment: resolvedVerificationWarning ? 'pending' : receipt.taskComment,
+          warningProjection: hasOpenWarnings ? 'pending' : 'done', warnings, lastError: null
+        });
+        return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed);
+      }
+
+      const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
+      const warnings = applyVerificationWarnings(receipt, verificationResult);
+      const updated = updateReceipt(repoRoot, receipt, {
+        lifecycle: 'done', verification: 'pending', taskComment: 'pending', warningProjection: 'pending',
+        warnings, lastError: detail
+      });
+      return terminalResult(resolved.taskId, updated, { lifecycle: step, verification }, result.changed, detail);
     });
   } catch (error) {
     const detail = error instanceof TaskExecutionLockError

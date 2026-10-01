@@ -219,6 +219,65 @@ test('verification rejects workspace and artifact identity mismatches before inv
   assert.equal(calls, 0);
 });
 
+test('prepared completion verification evaluates the projected task without writing it to disk', async () => {
+  const f = fixture('active');
+  const original = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8');
+  const verifyPath = path.join(f.root, '.agents', 'skills', 'complete-task', 'config', 'verify.json');
+  fs.mkdirSync(path.dirname(verifyPath), { recursive: true });
+  fs.writeFileSync(verifyPath, JSON.stringify({ checks: {
+    'task-meta': { required_fields: ['id', 'status', 'completed_at'], expected_status: 'completed', require_completed_at: true },
+    'activity-log': { expected_action_pattern: '(Complete Task|Completed)' },
+    'completion-checklist': { require_all_checked: true }
+  } }));
+  const projection = [
+    '---', `id: ${f.taskId}`, 'type: bugfix', 'workflow: bug-fix', 'status: completed',
+    'created_at: 2026-01-01 00:00:00+00:00', 'updated_at: 2026-01-02 00:00:00+00:00',
+    'completed_at: 2026-01-02 00:00:00+00:00', 'agent_infra_version: v0.9.9',
+    'current_step: completed', 'assigned_to: codex', '---', '', '# Task', '',
+    '## Activity Log', '', '- 2026-01-02 00:00:00+00:00 — **Complete Task** by codex — completed', '',
+    '## Completion Checklist', '', '- [x] Complete task'
+  ].join('\n');
+  try {
+    const result = await verifyTaskEvent({ taskRef: f.taskId, event: 'complete-task.prepared' }, {
+      repoRoot: f.root, taskContentOverride: projection
+    });
+    assert.equal(result.status, 'pass');
+    const checks = result.invocations[0]?.payload.checks as Array<{ checkId?: string }>;
+    assert.deepEqual(checks.map((check) => check.checkId), [
+      'task-meta', 'activity-log', 'completion-checklist'
+    ]);
+    assert.equal(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), original);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('task content overrides are rejected outside prepared completion and when task identity differs', async () => {
+  const active = fixture('active');
+  const override = `---\nid: ${active.taskId}\nstatus: completed\ncompleted_at: now\n---\n`;
+  const completed = fixture('completed');
+  let calls = 0;
+  const checkEngine = (input: Parameters<typeof verifyInProcess>[0]) => {
+    calls += 1;
+    return { gate: 'pass', checks: [], skill: input.skillName };
+  };
+  try {
+    const mismatch = await verifyTaskEvent({ taskRef: active.taskId, event: 'complete-task.prepared' }, {
+      repoRoot: active.root, taskContentOverride: override.replace(active.taskId, 'TASK-20260101-000002'), engine: checkEngine
+    });
+    assert.equal(mismatch.error?.code, 'VERIFY_TASK_CONTENT_OVERRIDE_INVALID');
+
+    const disallowed = await verifyTaskEvent({ taskRef: completed.taskId, event: 'complete-task.completed' }, {
+      repoRoot: completed.root, taskContentOverride: override, engine: checkEngine
+    });
+    assert.equal(disallowed.error?.code, 'VERIFY_TASK_CONTENT_OVERRIDE_NOT_ALLOWED');
+    assert.equal(calls, 0);
+  } finally {
+    fs.rmSync(active.root, { recursive: true, force: true });
+    fs.rmSync(completed.root, { recursive: true, force: true });
+  }
+});
+
 test('preflight stops on the first non-pass and preserves blocked exit semantics', async () => {
   const f = fixture();
   let calls = 0;
