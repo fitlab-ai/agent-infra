@@ -11,6 +11,7 @@ import {
   assertHasCanonicalPrSyncStructure,
   assertPayloadStatus,
   assertPointsToPrSyncRule,
+  attachArtifactCompletionFact,
   buildCompletedTaskContent,
   buildTaskContent,
   boundFactValue,
@@ -42,6 +43,7 @@ type ActivityLogCase = {
 
 function writeCodeFixture(taskDir: string, fixture = "valid-code.md") {
   write(path.join(taskDir, "code.md"), loadFixture(fixture));
+  attachArtifactCompletionFact(taskDir, "code");
 }
 
 function writeCreateTaskDocument(

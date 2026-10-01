@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { applyTaskEvent } from '../../../lib/task/events.ts';
+import { verifyTaskEvent } from '../../../lib/task/verification.ts';
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 import { parseArtifactName as parseQualificationArtifactName } from '../../../lib/task/artifact-name.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
@@ -482,6 +483,29 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.match(content, /current_step: technical-design/);
   assert.match(content, /`plan\.md`/);
   assert.deepEqual(parseArtifactReceipts(content).rows.filter((row) => row.output === 'plan.md').map((row) => row.input), ['analysis.md', 'review-analysis.md']);
+});
+
+test('task verification keeps a completed plan valid after a downstream activity entry', async () => {
+  const f = fixture();
+  try {
+    const configDir = path.join(f.root, '.agents', 'skills', 'plan-task', 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
+      skill: 'plan-task', checks: {
+        'activity-log': { expected_action_pattern: '((Plan Task|Technical Design) \\(Round \\d+\\)|Human Decision)' }
+      }
+    }));
+    assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']).status, 0);
+    fs.writeFileSync(path.join(f.dir, 'plan.md'), localArtifact('plan'));
+    const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md', ...completionDigestArgs(f.dir, 'plan.md', 'plan')]);
+    assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+    fs.appendFileSync(f.file, '- 2099-01-01 00:00:02+00:00 — **Code Task (Round 1)** by codex — Later downstream stage\n');
+
+    const verified = await verifyTaskEvent({ taskRef: f.id, event: 'plan.completed', artifact: 'plan.md' }, { repoRoot: f.root });
+    assert.equal(verified.status, 'pass', JSON.stringify(verified));
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test('task-event rejects a different lifecycle start while one execution is open', () => {

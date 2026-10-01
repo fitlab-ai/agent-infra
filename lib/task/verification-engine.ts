@@ -42,9 +42,11 @@ import { normalizeVerificationRecord } from './gate-policy.ts';
 import { manualValidationFinalSummaryProjectionMatches } from "./manual-validation-receipt.ts";
 import { readManualValidationCompletion } from "./manual-validation-completion.ts";
 import { sha256File } from "./artifact-receipts.ts";
+import { inspectArtifactDirectory } from "./artifact-lifecycle.ts";
+import { parseArtifactName } from "./artifact-name.ts";
 import { summaryCommentState } from "../platform/pr-summary.ts";
 import { taskIssueIdentity } from "../platform/task-identities.ts";
-import { hasArtifactCompletionFact, hasArtifactCompletionLog } from './completion-facts.ts';
+import { hasArtifactCompletionFact, hasArtifactCompletionLog, parseCompletionFacts } from './completion-facts.ts';
 import { inspectReviewIdentity } from './review-identity.ts';
 
 const TASK_ENUMS = {
@@ -694,7 +696,71 @@ function checkImplementationInput({ taskDir, artifactFile }: any): any {
   return passResult("implementation-input", `${actionDecision} matches Activity Log, report, and task table`);
 }
 
-function checkActivityLog({ taskDir, config }: any): any {
+const ARTIFACT_ACTIVITY_STAGES: Readonly<Record<string, { family: string; event: string }>> = {
+  "analyze-task": { family: "analysis", event: "analysis.completed" },
+  "plan-task": { family: "plan", event: "plan.completed" },
+  "review-analysis": { family: "review-analysis", event: "review-analysis.completed" },
+  "review-plan": { family: "review-plan", event: "review-plan.completed" },
+  "code-task": { family: "code", event: "code.completed" },
+  "review-code": { family: "review-code", event: "review-code.completed" }
+};
+
+function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string | undefined, skillName: string, config: any, task: any, entries: any[], latestAction: string): any {
+  const stage = ARTIFACT_ACTIVITY_STAGES[skillName];
+  if (!stage) return null;
+  const inventory = inspectArtifactDirectory(taskDir, stage.family as any);
+  if (inventory.status !== "ready" || !inventory.latest) {
+    return failResult("activity-log", `Current ${stage.family} artifact is unavailable: ${inventory.error?.message ?? "no artifact exists"}`);
+  }
+  const output = artifactFile || inventory.latest.name;
+  if (output !== inventory.latest.name) {
+    return failResult("activity-log", `Artifact '${output}' is not the current ${stage.family} artifact; rerun ${skillName} for '${inventory.latest.name}'`);
+  }
+  const identity = parseArtifactName(output);
+  if (!identity || identity.family !== stage.family) {
+    return failResult("activity-log", `Artifact '${output}' does not belong to ${stage.family}`);
+  }
+  if (!hasArtifactCompletionFact(task.content, path.join(taskDir, output), stage.event)) {
+    return failResult("activity-log", `Completion fact for '${output}' is missing or stale; rerun ${skillName} to record a current completion`);
+  }
+
+  const frontmatter = parseTypedTaskFrontmatter(task.content);
+  const fact = parseCompletionFacts(frontmatter.completion_facts).find((item) => item.event === stage.event && item.output === output);
+  if (!fact) return failResult("activity-log", `Completion fact for '${output}' is missing; rerun ${skillName}`);
+  if (!Array.isArray(fact.lifecycleInputs)) {
+    return failResult("activity-log", `Completion fact for '${output}' has no input snapshot; rerun ${skillName}`);
+  }
+  for (const input of fact.lifecycleInputs) {
+    if (!input || typeof input.name !== "string" || !/^[a-f0-9]{64}$/u.test(input.sha256)) {
+      return failResult("activity-log", `Completion fact for '${output}' has an invalid input snapshot; rerun ${skillName}`);
+    }
+    const inputIdentity = parseArtifactName(input.name);
+    if (!inputIdentity) return failResult("activity-log", `Completion fact for '${output}' has invalid input '${input.name}'; rerun ${skillName}`);
+    const inputInventory = inspectArtifactDirectory(taskDir, inputIdentity.family as any);
+    if (inputInventory.status !== "ready" || inputInventory.latest?.name !== input.name
+      || sha256File(path.join(taskDir, input.name)) !== input.sha256) {
+      return failResult("activity-log", `Input '${input.name}' changed or is no longer current; rerun ${skillName} to refresh '${output}'`);
+    }
+  }
+
+  const expectedAction = new RegExp(config.expected_action_pattern);
+  const roundAction = entries.find((entry) => {
+    if (!expectedAction.test(entry.step)) return false;
+    expectedAction.lastIndex = 0;
+    const actionRound = /\(Round (\d+)/.exec(entry.step)?.[1];
+    return actionRound === String(identity.round) && entry.note.includes(`→ ${output}`);
+  });
+  if (!roundAction) {
+    return failResult("activity-log", `No completed Activity Log row records '${output}' for ${skillName} Round ${identity.round}`);
+  }
+  if (skillName === "plan-task" && /^(?:Human Decision|Decision)\b/.test(latestAction)
+    && expectedAction.test(latestAction)) {
+    return passResult("activity-log", `Plan completion '${output}' is current; latest action '${latestAction}' is a human decision`);
+  }
+  return passResult("activity-log", `Current ${stage.family} completion '${output}' is valid for Round ${identity.round}`);
+}
+
+function checkActivityLog({ taskDir, config, skillName, artifactFile }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("activity-log", task.message);
@@ -728,6 +794,11 @@ function checkActivityLog({ taskDir, config }: any): any {
       doneActions.push(action);
     }
   }
+
+  const artifactLifecycleResult = checkArtifactLifecycleActivityLog(
+    taskDir, artifactFile, skillName, config, task, entries, latestAction
+  );
+  if (artifactLifecycleResult) return artifactLifecycleResult;
 
   if (config.expected_action_pattern && !new RegExp(config.expected_action_pattern).test(latestAction)) {
     const expected = new RegExp(config.expected_action_pattern);

@@ -10,6 +10,8 @@ import {
   verifyTaskEvent
 } from '../../../lib/task/verification.ts';
 import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
+import { canonicalSemanticDigest } from '../../../lib/task/artifact-operations.ts';
+import { sha256File } from '../../../lib/task/artifact-receipts.ts';
 import {
   activateDelegation,
   completeDelegationStage,
@@ -202,6 +204,146 @@ test('verification catalog is a closed mapping of all business events', async ()
   for (const event of EXPECTED_EVENTS) {
     const spec = VERIFICATION_CATALOG[event];
     assert.deepEqual([spec.skill, spec.expectedState, spec.mode, spec.artifactFamily, spec.checks], expected[event]);
+  }
+});
+
+test('artifact lifecycle activity checks accept a current stage record after a downstream action', async () => {
+  const stages = [
+    { skill: 'analyze-task', family: 'analysis', event: 'analysis.completed', action: 'Analyze Task', output: 'analysis.md', inputFamily: null, later: 'Plan Task (Round 1)' },
+    { skill: 'plan-task', family: 'plan', event: 'plan.completed', action: 'Plan Task', output: 'plan.md', inputFamily: 'analysis', later: 'Code Task (Round 1)' },
+    { skill: 'review-analysis', family: 'review-analysis', event: 'review-analysis.completed', action: 'Review Analysis', output: 'review-analysis.md', inputFamily: 'analysis', later: 'Plan Task (Round 1)' },
+    { skill: 'review-plan', family: 'review-plan', event: 'review-plan.completed', action: 'Review Plan', output: 'review-plan.md', inputFamily: 'plan', later: 'Code Task (Round 1)' },
+    { skill: 'code-task', family: 'code', event: 'code.completed', action: 'Code Task', output: 'code.md', inputFamily: 'plan', later: 'Review Code (Round 1)' },
+    { skill: 'review-code', family: 'review-code', event: 'review-code.completed', action: 'Review Code', output: 'review-code.md', inputFamily: 'code', later: 'Commit' }
+  ] as const;
+
+  for (const stage of stages) {
+    const f = fixture();
+    try {
+      const input = stage.inputFamily ? `${stage.inputFamily}.md` : null;
+      const inputPath = input ? path.join(f.taskDir, input) : null;
+      const outputPath = path.join(f.taskDir, stage.output);
+      if (inputPath) fs.writeFileSync(inputPath, `# ${stage.inputFamily}\n`);
+      fs.writeFileSync(outputPath, `# ${stage.family}\n`);
+      const lifecycleInputs = inputPath
+        ? [{ name: input!, sha256: sha256File(inputPath) }]
+        : [];
+      const fact = {
+        event: stage.event,
+        output: stage.output,
+        outputSha256: sha256File(outputPath),
+        semanticDigest: canonicalSemanticDigest(fs.readFileSync(outputPath, 'utf8')),
+        requestId: `${f.taskId}:${stage.family}`,
+        result: '{}',
+        lifecycleInputs
+      };
+      fs.writeFileSync(path.join(f.taskDir, 'task.md'), [
+        '---',
+        `id: ${f.taskId}`,
+        'status: active',
+        `completion_facts: '${JSON.stringify([fact])}'`,
+        '---',
+        '',
+        '## Activity Log',
+        '',
+        `- 2026-01-01 00:00:00+00:00 — **${stage.action} (Round 1)** by codex — Completed → ${stage.output}`,
+        `- 2026-01-01 00:00:01+00:00 — **${stage.later}** by codex — Later independent stage`
+      ].join('\n'));
+
+      const result = await verifyInProcess({
+        mode: 'checks', skillName: stage.skill, taskDir: f.taskDir,
+        artifactFile: stage.output, checks: ['activity-log'], repositoryRoot: process.cwd()
+      });
+      assert.equal(result.status, 'pass', `${stage.skill}: ${result.message}`);
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('artifact lifecycle activity checks reject stale inputs, missing facts, older rounds, and started-only rows', async () => {
+  const f = fixture();
+  const inputPath = path.join(f.taskDir, 'analysis.md');
+  const outputPath = path.join(f.taskDir, 'plan.md');
+  fs.writeFileSync(inputPath, '# Analysis\n');
+  fs.writeFileSync(outputPath, '# Plan\n');
+  const fact = {
+    event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(outputPath),
+    semanticDigest: canonicalSemanticDigest(fs.readFileSync(outputPath, 'utf8')),
+    requestId: `${f.taskId}:plan`, result: '{}',
+    lifecycleInputs: [{ name: 'analysis.md', sha256: sha256File(inputPath) }]
+  };
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const taskContent = (rows: string[], facts = [fact]) => [
+    '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify(facts)}'`, '---',
+    '', '## Activity Log', '', ...rows
+  ].join('\n');
+  const verify = async (artifactFile = 'plan.md') => verifyInProcess({
+    mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir,
+    artifactFile, checks: ['activity-log'], repositoryRoot: process.cwd()
+  });
+  try {
+    fs.writeFileSync(taskPath, taskContent([
+      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
+      '- 2026-01-01 00:00:01+00:00 — **Code Task (Round 1)** by codex — Later downstream stage'
+    ]));
+    fs.writeFileSync(inputPath, '# Analysis changed\n');
+    let result = await verify();
+    assert.equal(result.status, 'fail');
+    assert.match(result.message, /Input 'analysis\.md' changed/);
+
+    fs.writeFileSync(inputPath, '# Analysis\n');
+    fs.writeFileSync(taskPath, taskContent([
+      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md'
+    ], []));
+    result = await verify();
+    assert.equal(result.status, 'fail');
+    assert.match(result.message, /Completion fact for 'plan\.md' is missing/);
+
+    fs.writeFileSync(path.join(f.taskDir, 'plan-r2.md'), '# New Plan\n');
+    result = await verify('plan.md');
+    assert.equal(result.status, 'fail');
+    assert.match(result.message, /not the current plan artifact/);
+
+    fs.rmSync(path.join(f.taskDir, 'plan-r2.md'));
+    fs.writeFileSync(taskPath, taskContent([
+      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — Started'
+    ]));
+    result = await verify();
+    assert.equal(result.status, 'fail');
+    assert.match(result.message, /No completed Activity Log row records 'plan\.md'/);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('plan activity checks keep the latest human decision branch', async () => {
+  const f = fixture();
+  const analysisPath = path.join(f.taskDir, 'analysis.md');
+  const planPath = path.join(f.taskDir, 'plan.md');
+  fs.writeFileSync(analysisPath, '# Analysis\n');
+  fs.writeFileSync(planPath, '# Plan\n');
+  const fact = {
+    event: 'plan.completed', output: 'plan.md', outputSha256: sha256File(planPath),
+    semanticDigest: canonicalSemanticDigest(fs.readFileSync(planPath, 'utf8')),
+    requestId: `${f.taskId}:plan`, result: '{}',
+    lifecycleInputs: [{ name: 'analysis.md', sha256: sha256File(analysisPath) }]
+  };
+  fs.writeFileSync(path.join(f.taskDir, 'task.md'), [
+    '---', `id: ${f.taskId}`, 'status: active', `completion_facts: '${JSON.stringify([fact])}'`, '---',
+    '', '## Activity Log', '',
+    '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1)** by codex — Completed → plan.md',
+    '- 2026-01-01 00:00:01+00:00 — **Human Decision** by human — Accepted plan'
+  ].join('\n'));
+  try {
+    const result = await verifyInProcess({
+      mode: 'checks', skillName: 'plan-task', taskDir: f.taskDir,
+      artifactFile: 'plan.md', checks: ['activity-log'], repositoryRoot: process.cwd()
+    });
+    assert.equal(result.status, 'pass', result.message);
+    assert.match(result.message, /latest action 'Human Decision'/);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
 
