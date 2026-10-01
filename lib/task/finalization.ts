@@ -922,6 +922,7 @@ async function prepareUnderLock(
       const badOperation = issueOperations?.find((operation) =>
         ['requirements', 'issue-type', 'fields', ...(base ? ['labels:in'] : [])].includes(operation.name)
         && operation.status !== 'applied' && operation.status !== 'no-op'
+        && !(operation.name === 'requirements' && operation.status === 'skipped' && operation.reasonCode === 'NO_REQUIREMENTS_ANCHOR')
       );
       if ((synced.status !== 'applied' && synced.status !== 'no-op') || synced.error || badOperation) {
         const error = synced.error ?? {

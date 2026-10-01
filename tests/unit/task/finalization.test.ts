@@ -926,6 +926,27 @@ test('host finalization uses the canonical root and makes a successful replay a 
   }
 });
 
+test('completion finalization tolerates a missing Issue requirements anchor', async () => {
+  const f = fixture();
+  try {
+    const configured: TaskFinalizationOptions = {
+      ...options(f.repoRoot, async () => platformResult('no-op'), async () => verification('pass')),
+      issueSync: async () => platformResult('no-op', ({
+        issue: { identity: { kind: 'number', value: 42 }, body: 'Issue requirements', issueType: 'Task', fields: {} },
+        operations: [
+          { name: 'requirements', status: 'skipped', reasonCode: 'NO_REQUIREMENTS_ANCHOR' },
+          { name: 'issue-type', status: 'no-op', reasonCode: null },
+          { name: 'fields', status: 'no-op', reasonCode: null }
+        ]
+      }) as any) as any
+    };
+    const result = await applyTaskFinalization(request, configured);
+    assert.equal(result.status, 'completed');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization seals a staged summary after core verification and retains its retry input', async () => {
   const f = fixture();
   const staged = 'Delivered summary.\n';
