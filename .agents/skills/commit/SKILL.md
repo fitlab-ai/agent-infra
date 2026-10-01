@@ -96,7 +96,7 @@ agent-infra-internal task-verify {task-id} commit.completed --format text
 
 ## 6. 输出下一步
 
-渲染下一步前先读取 `.agents/rules/next-step-output.md`，并根据最新 task/PR 状态只调用一次统一 helper。push 失败时保持任务 active，只输出诊断；最终提交则按 `prFlow` 选择 `create-pr` 或 `complete-task`。
+渲染下一步前先读取 `.agents/rules/next-step-output.md`，并根据最新 task/PR 状态只调用一次统一 helper。push 失败时保持任务 active，只输出诊断；已有 verified 绑定 PR 时路由到 `watch-pr`；没有绑定 PR 时，按 `prFlow` 选择 `create-pr` 或 `complete-task`。
 
 ## 注意事项
 

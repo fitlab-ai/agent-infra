@@ -1502,7 +1502,7 @@ test("review output templates reserve cross-stage commands for an advanceable le
     }
   }
 
-  const approvedRoutes = ["create-pr", "watch-pr", "complete-task"];
+  const approvedRoutes = ["create-pr", "commit", "watch-pr", "complete-task"];
   for (const locale of [null, "en", "zh-CN"] as const) {
     const relativePath = locale
       ? `templates/.agents/skills/review-code/reference/output-templates.${locale}.md`
@@ -1510,12 +1510,30 @@ test("review output templates reserve cross-stage commands for an advanceable le
     const content = read(relativePath);
     for (const route of approvedRoutes) {
       const command = `agent-infra-internal agent-client next-steps --skill ${route} --task-ref {task-ref}`;
+      const expectedRoutes = 1;
       assert.equal(
         content.split(command).length - 1,
-        1,
-        `${relativePath} should expose one helper-driven ${route} route`
+        expectedRoutes,
+        `${relativePath} should expose the expected helper-driven ${route} routes`
       );
     }
+    const routeHeadings = [...content.matchAll(/^#### (?:场景|Branch) A([1-4])[:：][^\n]*$/gm)];
+    assert.deepEqual(
+      routeHeadings.map((match) => match[1]!),
+      ["1", "2", "3", "4"],
+      `${relativePath} should expose the four review outcomes with consecutive identifiers`
+    );
+    const expectedRouteByOutcome = new Map([["1", "create-pr"], ["2", "commit"], ["3", "watch-pr"], ["4", "complete-task"]]);
+    routeHeadings.forEach((heading, index) => {
+      const sectionEnd = routeHeadings[index + 1]?.index ?? content.length;
+      const section = content.slice(heading.index, sectionEnd);
+      const outcome = heading[1]!;
+      const route = expectedRouteByOutcome.get(outcome);
+      assert.ok(
+        route && section.includes(`agent-infra-internal agent-client next-steps --skill ${route} --task-ref {task-ref}`),
+        `${relativePath} should route outcome A${outcome} through its expected helper`
+      );
+    });
   }
 });
 
