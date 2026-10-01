@@ -307,7 +307,7 @@ test('artifact lifecycle activity checks reject stale inputs, missing facts, old
 
     fs.rmSync(path.join(f.taskDir, 'plan-r2.md'));
     fs.writeFileSync(taskPath, taskContent([
-      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — Started'
+      '- 2026-01-01 00:00:00+00:00 — **Plan Task (Round 1) [started]** by codex — Resuming → plan.md'
     ]));
     result = await verify();
     assert.equal(result.status, 'fail');

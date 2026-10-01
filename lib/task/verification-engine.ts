@@ -293,7 +293,7 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
 
 // === Check Functions ===
 
-function checkTaskMeta({ taskDir, config, repositoryRoot }: any): any {
+function checkTaskMeta({ taskDir, config, repositoryRoot, skillName, artifactFile }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("task-meta", task.message);
@@ -344,10 +344,27 @@ function checkTaskMeta({ taskDir, config, repositoryRoot }: any): any {
 
   const expectedStep = config.expected_step;
   if (expectedStep && metadata.current_step !== expectedStep) {
-    return failResult(
-      "task-meta",
-      `Expected current_step '${expectedStep}', got '${metadata.current_step || "(empty)"}'`
-    );
+    let validLifecycleArtifact = false;
+    if (currentTask) {
+      const activityConfig = loadVerificationConfig(repositoryRoot, skillName).checks?.["activity-log"];
+      const { section, invalidEntries } = inspectActivityLog(task.content);
+      if (activityConfig && section && invalidEntries.length === 0) {
+        let latestAction = "";
+        for (const entry of section.entries) {
+          if (!ACTIVITY_LOG_STARTED_RE.test(entry.step)) latestAction = entry.step;
+        }
+        validLifecycleArtifact = checkArtifactLifecycleActivityLog(
+          taskDir, artifactFile, skillName,
+          activityConfig, task, section.entries, latestAction
+        )?.status === "pass";
+      }
+    }
+    if (!validLifecycleArtifact) {
+      return failResult(
+        "task-meta",
+        `Expected current_step '${expectedStep}', got '${metadata.current_step || "(empty)"}'`
+      );
+    }
   }
 
   const expectedStatus = config.expected_status;
@@ -745,6 +762,7 @@ function checkArtifactLifecycleActivityLog(taskDir: string, artifactFile: string
 
   const expectedAction = new RegExp(config.expected_action_pattern);
   const roundAction = entries.find((entry) => {
+    if (ACTIVITY_LOG_STARTED_RE.test(entry.step)) return false;
     if (!expectedAction.test(entry.step)) return false;
     expectedAction.lastIndex = 0;
     const actionRound = /\(Round (\d+)/.exec(entry.step)?.[1];
