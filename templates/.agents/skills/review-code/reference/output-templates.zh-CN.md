@@ -42,7 +42,7 @@
 通过后不得按轮次路由。读取任务的 `prFlow` / verified `pr_delivery_fact`；存在 PR 时调用 `agent-infra-internal platform-checks inspect {task-id}`。只选择以下一个互斥出口：
 
 - 无 PR：`prFlow=disabled` 用场景 A3（完成）；PR flow 开启时用场景 A1（创建 PR）。
-- 已有 PR 但 PR head != `R`：场景 A1（创建或更新 PR）。
+- 已有 PR 但 PR head != `R`：场景 A1b（更新已有 PR）。
 - PR head = `R`，checks 为 `pending|failed|cancelled` 或平台暂不可用：场景 A2（监控），不得输出完成命令。
 - PR head = `R`，checks 为 `passed|no-required`：场景 A3（完成）。
 
@@ -61,6 +61,15 @@
 
 ```text
 下一步 - 创建 Pull Request：
+{next-step-commands}
+```
+
+#### 场景 A1b：更新已有 Pull Request
+
+使用 `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。`create-pr` 会交付当前分支，并复用已绑定的 PR。
+
+```text
+下一步 - 更新已有 Pull Request：
 {next-step-commands}
 ```
 

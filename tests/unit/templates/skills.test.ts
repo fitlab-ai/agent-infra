@@ -1510,11 +1510,19 @@ test("review output templates reserve cross-stage commands for an advanceable le
     const content = read(relativePath);
     for (const route of approvedRoutes) {
       const command = `agent-infra-internal agent-client next-steps --skill ${route} --task-ref {task-ref}`;
+      const expectedRoutes = route === "create-pr" ? 2 : 1;
       assert.equal(
         content.split(command).length - 1,
-        1,
-        `${relativePath} should expose one helper-driven ${route} route`
+        expectedRoutes,
+        `${relativePath} should expose the expected helper-driven ${route} routes`
       );
+      if (route === "create-pr") {
+        assert.equal(
+          (content.match(/^#### (?:场景|Branch) A1(?:b)?[:：]/gm) ?? []).length,
+          2,
+          `${relativePath} should keep separate create and existing-PR output branches`
+        );
+      }
     }
   }
 });

@@ -57,7 +57,7 @@ Milestone rule:
 
 - Extract `platform_issue_identity` from task.md when this work belongs to an active task
 - If `platform_issue_identity` exists, complete the prerequisite code-hosting platform detection steps first, then query the Issue via `.agents/rules/issue-pr-commands.md`
-- Before calling the PR creation command, check whether the current branch already has a PR. If it does, report the PR URL and state, then stop without repeating metadata sync or summary publication
+- Before calling `platform-pr create`, check whether the current branch already has a PR. The core reuses and binds a unique existing PR, then continues metadata sync, change reporting, and summary publication; it creates a PR only when none exists
 - Use HEREDOC to pass the PR body
 - Replace `{$IssueNumber}` in the template when present
 - End the PR body with `Generated with AI assistance`

@@ -57,7 +57,7 @@ Milestone 规则：
 
 - 当前工作属于 active task 时，从 task.md 提取 `platform_issue_identity`
 - 如果存在 `platform_issue_identity`，先完成代码托管平台检测，再通过 `.agents/rules/issue-pr-commands.md` 查询 Issue
-- 调用 PR 创建命令前，先检查当前分支是否已有 PR；若已有，报告 PR URL 和状态后停止，不重复执行元数据同步或 summary 发布
+- 调用 `platform-pr create` 前检查当前分支是否已有 PR；唯一 PR 会由 core 复用并绑定，然后继续完成元数据同步、变更报告和摘要发布；只有没有 PR 时才创建新的 PR
 - 使用 HEREDOC 传入 PR 正文
 - 模板中存在 `{$IssueNumber}` 时进行替换
 - PR 正文以 `Generated with AI assistance` 结尾
